@@ -56,3 +56,35 @@ describe("Data Channel — 檔案分塊與重組", () => {
     expect(onError).toHaveBeenCalled();
   });
 });
+
+describe("Data Channel — 資源上限（防 OOM/洩漏）", () => {
+  const beginMsg = (over: Record<string, unknown>) =>
+    JSON.stringify({ t: "file-begin", id: "x", name: "n", mime: "m", size: 10, chunks: 1, ...over });
+
+  it("宣告大小超過上限時拒絕、不建立 partial", () => {
+    const onError = vi.fn();
+    const onFile = vi.fn();
+    const rx = new DataChannelReceiver({ onError, onFile }, { maxFileSize: 1000 });
+    rx.receive(beginMsg({ size: 2000 }));
+    expect(onError).toHaveBeenCalled();
+    expect(onFile).not.toHaveBeenCalled();
+  });
+
+  it("實際資料超出宣告大小時中止", () => {
+    const onError = vi.fn();
+    const onFile = vi.fn();
+    const rx = new DataChannelReceiver({ onError, onFile });
+    rx.receive(JSON.stringify({ t: "file-begin", id: "y", name: "n", mime: "m", size: 3, chunks: 1 }));
+    rx.receive(JSON.stringify({ t: "file-chunk", id: "y", seq: 0, data: Buffer.from([1, 2, 3, 4, 5]).toString("base64") }));
+    expect(onError).toHaveBeenCalled();
+    expect(onFile).not.toHaveBeenCalled();
+  });
+
+  it("超過同時進行檔案數上限時拒絕新檔", () => {
+    const onError = vi.fn();
+    const rx = new DataChannelReceiver({ onError }, { maxConcurrentFiles: 1 });
+    rx.receive(JSON.stringify({ t: "file-begin", id: "a", name: "n", mime: "m", size: 10, chunks: 2 }));
+    rx.receive(JSON.stringify({ t: "file-begin", id: "b", name: "n", mime: "m", size: 10, chunks: 2 }));
+    expect(onError).toHaveBeenCalledWith(expect.stringContaining("上限"));
+  });
+});

@@ -1,5 +1,6 @@
 import { KIND, OFFLINE_TIMEOUT_MS } from "./constants.js";
 import type { PubkeyHex } from "./keys.js";
+import { LatestPerKey } from "./tracker.js";
 
 /** Nostr 訂閱 filter（NIP-01 子集，含 `#<tag>` 標籤 filter）。 */
 export interface Filter {
@@ -27,22 +28,18 @@ export type PresenceStatus = "online" | "offline";
  *   {@link OFFLINE_TIMEOUT_MS} 即為上線。
  */
 export class PresenceTracker {
-  private readonly lastSeenMs = new Map<PubkeyHex, number>();
+  private readonly seen = new LatestPerKey();
 
   observe(pubkey: PubkeyHex, createdAtSec: number): void {
-    const ms = createdAtSec * 1000;
-    const prev = this.lastSeenMs.get(pubkey);
-    if (prev === undefined || ms > prev) {
-      this.lastSeenMs.set(pubkey, ms);
-    }
+    this.seen.observe(pubkey, createdAtSec * 1000, undefined);
   }
 
   lastSeenAt(pubkey: PubkeyHex): number | undefined {
-    return this.lastSeenMs.get(pubkey);
+    return this.seen.at(pubkey);
   }
 
   statusOf(pubkey: PubkeyHex, nowMs: number): PresenceStatus {
-    const seen = this.lastSeenMs.get(pubkey);
+    const seen = this.seen.at(pubkey);
     if (seen === undefined) return "offline";
     return nowMs - seen <= OFFLINE_TIMEOUT_MS ? "online" : "offline";
   }

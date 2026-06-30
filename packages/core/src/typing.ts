@@ -2,6 +2,7 @@ import { KIND, TYPING_TIMEOUT_MS } from "./constants.js";
 import type { NostrEvent } from "./event.js";
 import type { PubkeyHex, SecretKey } from "./keys.js";
 import { finalizeEvent } from "./sign.js";
+import { LatestPerKey } from "./tracker.js";
 
 /** 建立一筆指向對話對象的「正在輸入中」事件（Kind 20001，Ephemeral）。 */
 export function createTyping(
@@ -25,16 +26,14 @@ export function createTyping(
  * 逾時自動清除（對方停止輸入即不再發送）。
  */
 export class TypingTracker {
-  private readonly lastSeenMs = new Map<PubkeyHex, number>();
+  private readonly seen = new LatestPerKey();
 
   observe(pubkey: PubkeyHex, createdAtSec: number): void {
-    const ms = createdAtSec * 1000;
-    const prev = this.lastSeenMs.get(pubkey);
-    if (prev === undefined || ms > prev) this.lastSeenMs.set(pubkey, ms);
+    this.seen.observe(pubkey, createdAtSec * 1000, undefined);
   }
 
   isTyping(pubkey: PubkeyHex, nowMs: number): boolean {
-    const seen = this.lastSeenMs.get(pubkey);
+    const seen = this.seen.at(pubkey);
     if (seen === undefined) return false;
     return nowMs - seen <= TYPING_TIMEOUT_MS;
   }

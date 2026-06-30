@@ -2,6 +2,7 @@ export * from "./constants.js";
 export * from "./keys.js";
 export * from "./event.js";
 export * from "./sign.js";
+export * from "./tracker.js";
 export * from "./heartbeat.js";
 export * from "./presence.js";
 export * from "./typing.js";

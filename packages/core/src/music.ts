@@ -2,6 +2,7 @@ import { KIND } from "./constants.js";
 import type { NostrEvent } from "./event.js";
 import type { PubkeyHex, SecretKey } from "./keys.js";
 import { finalizeEvent } from "./sign.js";
+import { LatestPerKey } from "./tracker.js";
 
 /**
  * 建立一筆「正在聆聽音樂」事件（Kind 20002，Ephemeral）。
@@ -28,26 +29,17 @@ export function readMusicStatus(event: NostrEvent): string {
   return event.content;
 }
 
-interface Entry {
-  status: string;
-  at: number;
-}
-
 /** 記錄各好友目前播放的音樂（取最新 created_at；空字串視為停止）。 */
 export class NowPlayingStore {
-  private readonly latest = new Map<PubkeyHex, Entry>();
+  private readonly latest = new LatestPerKey<string>();
 
   observe(pubkey: PubkeyHex, status: string, createdAtSec: number): void {
-    const prev = this.latest.get(pubkey);
-    if (prev === undefined || createdAtSec > prev.at) {
-      this.latest.set(pubkey, { status, at: createdAtSec });
-    }
+    this.latest.observe(pubkey, createdAtSec, status);
   }
 
   /** 目前播放的狀態字串；停止或未知時回 undefined。 */
   statusOf(pubkey: PubkeyHex): string | undefined {
-    const entry = this.latest.get(pubkey);
-    if (entry === undefined || entry.status === "") return undefined;
-    return entry.status;
+    const status = this.latest.value(pubkey);
+    return status === undefined || status === "" ? undefined : status;
   }
 }

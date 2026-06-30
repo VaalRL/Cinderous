@@ -18,32 +18,66 @@ export interface MessageStoreOptions {
 /**
  * 離線留言的持久化行為（NIP-40 過期、每收件人配額）。
  *
- * 此為傳輸/儲存無關的純邏輯，定義 relay 的留言語意；Worker 端之後以
- * D1 為後備實作相同行為。Ephemeral 事件不會進入此處（見 RelayCore）。
+ * 以收件人（`p` 標籤）為索引：NIP-17 私訊查詢一律帶 `#p`，因此常見路徑
+ * 只掃該收件人的留言而非全體（O(該收件人) 而非 O(全部)）。無 `p` 標籤的
+ * 事件與不帶 `#p` 的查詢走全掃備援。Worker 端接 D1 時應比照以
+ * `p_tag`/`expiration` 建索引。
  */
 export class MessageStore {
-  private events: NostrEvent[] = [];
+  /** 收件人 pubkey → 該收件人的留言。 */
+  private readonly byRecipient = new Map<string, NostrEvent[]>();
+  /** 無 `p` 標籤的事件。 */
+  private noRecipient: NostrEvent[] = [];
 
   constructor(private readonly opts: MessageStoreOptions = {}) {}
 
   /** 寫入一筆留言；若已過期則拒絕並回 false。 */
   put(event: NostrEvent, nowSec: number): boolean {
     if (this.isExpired(event, nowSec)) return false;
-    this.events.push(event);
-    this.enforceCap(event);
+    const recipients = this.recipientsOf(event);
+    if (recipients.length === 0) {
+      this.noRecipient.push(event);
+      return true;
+    }
+    for (const recipient of recipients) {
+      const bucket = this.byRecipient.get(recipient) ?? [];
+      bucket.push(event);
+      this.byRecipient.set(recipient, bucket);
+    }
+    this.enforceCap(recipients);
     return true;
   }
 
   /** 查詢符合 filter 且未過期的留言。 */
   query(filter: RelayFilter, nowSec: number): NostrEvent[] {
-    return this.events.filter(
-      (e) => !this.isExpired(e, nowSec) && matchFilter(filter, e),
-    );
+    const candidates = this.candidatesFor(filter);
+    return candidates.filter((e) => !this.isExpired(e, nowSec) && matchFilter(filter, e));
   }
 
   /** 清除所有已過期留言。 */
   prune(nowSec: number): void {
-    this.events = this.events.filter((e) => !this.isExpired(e, nowSec));
+    for (const [recipient, bucket] of this.byRecipient) {
+      const kept = bucket.filter((e) => !this.isExpired(e, nowSec));
+      if (kept.length > 0) this.byRecipient.set(recipient, kept);
+      else this.byRecipient.delete(recipient);
+    }
+    this.noRecipient = this.noRecipient.filter((e) => !this.isExpired(e, nowSec));
+  }
+
+  /** 依 filter 縮小候選集合：帶 `#p` 時僅取相關收件人桶，否則全掃。 */
+  private candidatesFor(filter: RelayFilter): NostrEvent[] {
+    const pValues = filter["#p"];
+    if (pValues && pValues.length > 0) {
+      return dedupById(pValues.flatMap((r) => this.byRecipient.get(r) ?? []));
+    }
+    return this.allEvents();
+  }
+
+  private allEvents(): NostrEvent[] {
+    const all: NostrEvent[] = [];
+    for (const bucket of this.byRecipient.values()) all.push(...bucket);
+    all.push(...this.noRecipient);
+    return dedupById(all);
   }
 
   private isExpired(event: NostrEvent, nowSec: number): boolean {
@@ -51,24 +85,33 @@ export class MessageStore {
     return exp !== undefined && exp <= nowSec;
   }
 
-  private recipientOf(event: NostrEvent): string | undefined {
-    return event.tags.find((t) => t[0] === "p")?.[1];
+  private recipientsOf(event: NostrEvent): string[] {
+    const out: string[] = [];
+    for (const tag of event.tags) {
+      if (tag[0] === "p" && tag[1] !== undefined) out.push(tag[1]);
+    }
+    return out;
   }
 
-  private enforceCap(event: NostrEvent): void {
+  private enforceCap(recipients: string[]): void {
     const cap = this.opts.maxPerRecipient;
     if (cap === undefined) return;
-    const recipient = this.recipientOf(event);
-    if (recipient === undefined) return;
-
-    const forRecipient = this.events.filter((e) => this.recipientOf(e) === recipient);
-    if (forRecipient.length <= cap) return;
-
-    const drop = new Set(
-      [...forRecipient]
-        .sort((a, b) => a.created_at - b.created_at)
-        .slice(0, forRecipient.length - cap),
-    );
-    this.events = this.events.filter((e) => !drop.has(e));
+    for (const recipient of recipients) {
+      const bucket = this.byRecipient.get(recipient);
+      if (!bucket || bucket.length <= cap) continue;
+      bucket.sort((a, b) => a.created_at - b.created_at);
+      bucket.splice(0, bucket.length - cap);
+    }
   }
+}
+
+function dedupById(events: NostrEvent[]): NostrEvent[] {
+  const seen = new Set<string>();
+  const out: NostrEvent[] = [];
+  for (const event of events) {
+    if (seen.has(event.id)) continue;
+    seen.add(event.id);
+    out.push(event);
+  }
+  return out;
 }

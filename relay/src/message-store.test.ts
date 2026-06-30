@@ -53,6 +53,19 @@ describe("MessageStore — 離線留言儲存與過期", () => {
     expect(store.query({ "#p": [recipient] }, 150)).toEqual([]);
   });
 
+  it("不帶 #p 的查詢仍可依 kind 取得（含無收件人事件的全掃備援）", () => {
+    const store = new MessageStore();
+    const withRecipient = giftWrap();
+    const noRecipient = finalizeEvent(
+      { kind: 1, created_at: 1, tags: [], content: "hi" },
+      generateSecretKey(),
+    );
+    store.put(withRecipient, 0);
+    store.put(noRecipient, 0);
+    expect(store.query({ kinds: [1] }, 0)).toEqual([noRecipient]);
+    expect(store.query({ kinds: [1059] }, 0)).toEqual([withRecipient]);
+  });
+
   it("超過每收件人上限時丟棄最舊", () => {
     const store = new MessageStore({ maxPerRecipient: 2 });
     const e1 = giftWrap({ created_at: 1 });

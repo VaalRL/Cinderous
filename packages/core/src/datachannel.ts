@@ -56,16 +56,46 @@ export interface DataChannelHandlers {
   onError?: (reason: string) => void;
 }
 
+/** 接收端的資源上限（防 OOM 與未完成檔案佔用記憶體）。 */
+export interface DataChannelLimits {
+  /** 單一檔案最大位元組數。預設 100 MiB。 */
+  maxFileSize?: number;
+  /** 單一檔案最大分塊數。預設 1,000,000。 */
+  maxChunks?: number;
+  /** 同時進行中的檔案數上限。預設 16。 */
+  maxConcurrentFiles?: number;
+}
+
+const DEFAULT_MAX_FILE_SIZE = 100 * 1024 * 1024;
+const DEFAULT_MAX_CHUNKS = 1_000_000;
+const DEFAULT_MAX_CONCURRENT = 16;
+
 interface Partial {
   meta: { name: string; mime: string; size: number; chunks: number };
   received: Map<number, Uint8Array>;
+  receivedBytes: number;
 }
 
 /** 接收資料通道訊息，處理 Nudge 與檔案分塊重組。 */
 export class DataChannelReceiver {
   private readonly partials = new Map<string, Partial>();
+  private readonly maxFileSize: number;
+  private readonly maxChunks: number;
+  private readonly maxConcurrent: number;
 
-  constructor(private readonly handlers: DataChannelHandlers = {}) {}
+  constructor(
+    private readonly handlers: DataChannelHandlers = {},
+    limits: DataChannelLimits = {},
+  ) {
+    this.maxFileSize = limits.maxFileSize ?? DEFAULT_MAX_FILE_SIZE;
+    this.maxChunks = limits.maxChunks ?? DEFAULT_MAX_CHUNKS;
+    this.maxConcurrent = limits.maxConcurrentFiles ?? DEFAULT_MAX_CONCURRENT;
+  }
+
+  /** 放棄一個進行中的檔案（如逾時）。 */
+  abort(id: string): void {
+    this.partials.delete(id);
+  }
 
   receive(raw: string): void {
     let msg: DataMessage;
@@ -81,9 +111,18 @@ export class DataChannelReceiver {
         this.handlers.onNudge?.();
         return;
       case "file-begin":
+        if (msg.size < 0 || msg.chunks < 0 || msg.size > this.maxFileSize || msg.chunks > this.maxChunks) {
+          this.handlers.onError?.(`檔案 ${msg.id} 超出上限（size=${msg.size}, chunks=${msg.chunks}）`);
+          return;
+        }
+        if (this.partials.size >= this.maxConcurrent && !this.partials.has(msg.id)) {
+          this.handlers.onError?.("同時進行中的檔案數已達上限");
+          return;
+        }
         this.partials.set(msg.id, {
           meta: { name: msg.name, mime: msg.mime, size: msg.size, chunks: msg.chunks },
           received: new Map(),
+          receivedBytes: 0,
         });
         if (msg.chunks === 0) this.complete(msg.id);
         return;
@@ -93,7 +132,14 @@ export class DataChannelReceiver {
           this.handlers.onError?.(`未知檔案分塊 id：${msg.id}`);
           return;
         }
-        partial.received.set(msg.seq, base64.decode(msg.data));
+        const bytes = base64.decode(msg.data);
+        if (!partial.received.has(msg.seq)) partial.receivedBytes += bytes.length;
+        if (partial.receivedBytes > partial.meta.size) {
+          this.partials.delete(msg.id);
+          this.handlers.onError?.(`檔案 ${msg.id} 實際資料超出宣告大小，已中止`);
+          return;
+        }
+        partial.received.set(msg.seq, bytes);
         if (partial.received.size === partial.meta.chunks) this.complete(msg.id);
         return;
       }
