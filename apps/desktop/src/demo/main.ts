@@ -1,0 +1,270 @@
+import {
+  createHeartbeat,
+  createMusicStatus,
+  createTyping,
+  finalizeEvent,
+  generateSecretKey,
+  getPublicKey,
+  KIND,
+  NowPlayingStore,
+  PresenceTracker,
+  RelayClient,
+  TypingTracker,
+  unwrapMessage,
+  wrapMessage,
+  type NostrEvent,
+  type PubkeyHex,
+  type SecretKey,
+} from "@nostr-buddy/core";
+import { MessageStore, RelayCore } from "@nostr-buddy/relay";
+
+const NUDGE_KIND = 20100;
+const DEMO_PRESENCE_TIMEOUT_MS = 5_000;
+const HEARTBEAT_EVERY_MS = 2_000;
+const nowSec = () => Math.floor(Date.now() / 1000);
+const short = (pk: PubkeyHex) => pk.slice(0, 8);
+
+// ── 記憶體中的 relay（真實 RelayCore + 離線留言儲存）──
+const core = new RelayCore({ store: new MessageStore(), now: nowSec });
+const clients = new Map<string, RelayClient>();
+function route(outbound: ReturnType<RelayCore["handle"]>): void {
+  for (const { to, message } of outbound) {
+    clients.get(to)?.receive(JSON.stringify(message));
+  }
+}
+
+interface PeerDom {
+  panel: HTMLElement;
+  dot: HTMLElement;
+  status: HTMLElement;
+  nowPlaying: HTMLElement;
+  log: HTMLElement;
+  typing: HTMLElement;
+  toggle: HTMLButtonElement;
+  input: HTMLInputElement;
+}
+
+class DemoPeer {
+  readonly pk: PubkeyHex;
+  private readonly client: RelayClient;
+  private readonly presence = new PresenceTracker();
+  private readonly typing = new TypingTracker();
+  private readonly music = new NowPlayingStore();
+  private readonly shownDm = new Set<string>();
+  private online = false;
+  private hbTimer: ReturnType<typeof setInterval> | undefined;
+  private lastTypingSentMs = 0;
+  friend!: DemoPeer;
+
+  constructor(
+    readonly name: string,
+    private readonly connId: string,
+    private readonly sk: SecretKey,
+    private readonly dom: PeerDom,
+  ) {
+    this.pk = getPublicKey(sk);
+    core.connect(connId);
+    this.client = new RelayClient(
+      { send: (data) => route(core.handle(connId, data)) },
+      { onEvent: (_sub, event) => this.onEvent(event) },
+    );
+    clients.set(connId, this.client);
+    this.wireControls();
+  }
+
+  /** 在 friend 指派完成後啟動（上線、訂閱、開始心跳）。 */
+  start(): void {
+    this.setOnline(true);
+  }
+
+  private get friendPk(): PubkeyHex {
+    return this.friend.pk;
+  }
+
+  private subscribeAll(): void {
+    this.client.subscribe("presence", [{ kinds: [KIND.HEARTBEAT], authors: [this.friendPk] }]);
+    this.client.subscribe("music", [{ kinds: [KIND.MUSIC], authors: [this.friendPk] }]);
+    this.client.subscribe("typing", [{ kinds: [KIND.TYPING], authors: [this.friendPk], "#p": [this.pk] }]);
+    this.client.subscribe("nudge", [{ kinds: [NUDGE_KIND], authors: [this.friendPk], "#p": [this.pk] }]);
+    this.client.subscribe("dm", [{ kinds: [KIND.OFFLINE_DM_GIFT_WRAP], "#p": [this.pk] }]);
+  }
+
+  private setOnline(value: boolean): void {
+    this.online = value;
+    if (value) {
+      this.subscribeAll();
+      this.client.publish(createHeartbeat(this.sk));
+      this.hbTimer = setInterval(() => this.client.publish(createHeartbeat(this.sk)), HEARTBEAT_EVERY_MS);
+      this.sys(`${this.name} 上線`);
+    } else {
+      if (this.hbTimer) clearInterval(this.hbTimer);
+      for (const sub of ["presence", "music", "typing", "nudge", "dm"]) this.client.unsubscribe(sub);
+      this.sys(`${this.name} 離線`);
+    }
+    this.dom.toggle.textContent = value ? "切換為離線" : "切換為上線";
+    this.dom.toggle.classList.toggle("off", !value);
+  }
+
+  private onEvent(event: NostrEvent): void {
+    switch (event.kind) {
+      case KIND.HEARTBEAT:
+        this.presence.observe(event.pubkey, event.created_at);
+        return;
+      case KIND.MUSIC:
+        this.music.observe(event.pubkey, event.content, event.created_at);
+        return;
+      case KIND.TYPING:
+        this.typing.observe(event.pubkey, event.created_at);
+        return;
+      case NUDGE_KIND:
+        this.shake();
+        return;
+      case KIND.OFFLINE_DM_GIFT_WRAP: {
+        if (this.shownDm.has(event.id)) return;
+        this.shownDm.add(event.id);
+        try {
+          const { sender, rumor } = unwrapMessage(event, this.sk);
+          this.addMsg(`${short(sender)}：${rumor.content}`, "in");
+        } catch {
+          this.sys("收到無法解開的訊息");
+        }
+        return;
+      }
+    }
+  }
+
+  private wireControls(): void {
+    this.dom.toggle.addEventListener("click", () => this.setOnline(!this.online));
+    this.dom.input.addEventListener("keydown", (e) => {
+      if ((e as KeyboardEvent).key === "Enter") this.sendDm();
+    });
+    this.dom.input.addEventListener("input", () => this.maybeSendTyping());
+  }
+
+  sendDm(): void {
+    const text = this.dom.input.value.trim();
+    if (!text) return;
+    this.client.publish(wrapMessage(text, this.sk, this.friendPk));
+    this.addMsg(`你：${text}`, "out");
+    this.dom.input.value = "";
+  }
+
+  private maybeSendTyping(): void {
+    const t = Date.now();
+    if (t - this.lastTypingSentMs < 1000) return;
+    this.lastTypingSentMs = t;
+    this.client.publish(createTyping(this.sk, this.friendPk));
+  }
+
+  setMusic(status: string): void {
+    this.client.publish(createMusicStatus(this.sk, status));
+    this.sys(status ? `你正在聽：${status}` : "你停止播放");
+  }
+
+  nudge(): void {
+    this.client.publish(
+      finalizeEvent({ kind: NUDGE_KIND, created_at: nowSec(), tags: [["p", this.friendPk]], content: "nudge" }, this.sk),
+    );
+    this.sys("你送出一個 Nudge");
+  }
+
+  private shake(): void {
+    this.dom.panel.classList.remove("nudging");
+    void this.dom.panel.offsetWidth;
+    this.dom.panel.classList.add("nudging");
+    this.sys("被戳了一下！");
+  }
+
+  private addMsg(text: string, kind: "in" | "out"): void {
+    const el = document.createElement("div");
+    el.className = `msg ${kind}`;
+    el.textContent = text;
+    this.dom.log.append(el);
+    this.dom.log.scrollTop = this.dom.log.scrollHeight;
+  }
+
+  private sys(text: string): void {
+    const el = document.createElement("div");
+    el.className = "msg sys";
+    el.textContent = text;
+    this.dom.log.append(el);
+    this.dom.log.scrollTop = this.dom.log.scrollHeight;
+  }
+
+  render(nowMs: number): void {
+    const seen = this.presence.lastSeenAt(this.friendPk);
+    const friendOnline = seen !== undefined && nowMs - seen <= DEMO_PRESENCE_TIMEOUT_MS;
+    this.dom.dot.classList.toggle("online", friendOnline);
+    this.dom.status.textContent = friendOnline ? "上線" : "離線";
+    const playing = friendOnline ? this.music.statusOf(this.friendPk) : undefined;
+    this.dom.nowPlaying.textContent = playing ? `♪ ${this.friend.name} 正在聽：${playing}` : "";
+    this.dom.typing.textContent =
+      friendOnline && this.typing.isTyping(this.friendPk, nowMs) ? `${this.friend.name} 正在輸入中…` : "";
+  }
+}
+
+// ── 建立 UI ──
+function buildPanel(name: string, pk: PubkeyHex): PeerDom {
+  const panel = document.createElement("div");
+  panel.className = "peer";
+  panel.innerHTML = `
+    <div class="peer__bar">${name}<small>${short(pk)}…</small></div>
+    <div class="peer__friend"><span class="dot"></span><span class="fname"></span><span class="friend__status">離線</span></div>
+    <div class="now-playing"></div>
+    <div class="log"></div>
+    <div class="typing"></div>
+    <div class="controls">
+      <button class="toggle">切換為離線</button>
+      <button class="ghost music">🎵 音樂</button>
+      <button class="ghost nudge">震動 Nudge</button>
+    </div>
+    <div class="controls">
+      <input placeholder="輸入訊息，Enter 送出" />
+      <button class="send">送出</button>
+    </div>`;
+  return {
+    panel,
+    dot: panel.querySelector(".dot")!,
+    status: panel.querySelector(".friend__status")!,
+    nowPlaying: panel.querySelector(".now-playing")!,
+    log: panel.querySelector(".log")!,
+    typing: panel.querySelector(".typing")!,
+    toggle: panel.querySelector(".toggle")!,
+    input: panel.querySelector("input")!,
+  };
+}
+
+const stage = document.getElementById("stage")!;
+const aliceSk = generateSecretKey();
+const bobSk = generateSecretKey();
+const aliceDom = buildPanel("Alice", getPublicKey(aliceSk));
+const bobDom = buildPanel("Bob", getPublicKey(bobSk));
+stage.append(aliceDom.panel, bobDom.panel);
+
+const alice = new DemoPeer("Alice", "alice", aliceSk, aliceDom);
+const bob = new DemoPeer("Bob", "bob", bobSk, bobDom);
+alice.friend = bob;
+bob.friend = alice;
+aliceDom.panel.querySelector(".fname")!.textContent = bob.name;
+bobDom.panel.querySelector(".fname")!.textContent = alice.name;
+alice.start();
+bob.start();
+
+// 綁定每個面板的按鈕到對應 peer
+for (const [peer, dom] of [
+  [alice, aliceDom],
+  [bob, bobDom],
+] as const) {
+  dom.panel.querySelector(".send")!.addEventListener("click", () => peer.sendDm());
+  dom.panel.querySelector(".nudge")!.addEventListener("click", () => peer.nudge());
+  dom.panel.querySelector(".music")!.addEventListener("click", () => {
+    const song = window.prompt("正在聽什麼？（留空表示停止）", "Daft Punk - Get Lucky");
+    if (song !== null) peer.setMusic(song);
+  });
+}
+
+setInterval(() => {
+  const t = Date.now();
+  alice.render(t);
+  bob.render(t);
+}, 500);
