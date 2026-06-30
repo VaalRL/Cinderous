@@ -18,3 +18,6 @@ export const HEARTBEAT_INTERVAL_MS = 30_000;
 
 /** 連續未收到心跳超過此時間（毫秒）即判定離線。 */
 export const OFFLINE_TIMEOUT_MS = 60_000;
+
+/** 收到「正在輸入中」後維持顯示的時間（毫秒），逾時即清除。 */
+export const TYPING_TIMEOUT_MS = 6_000;
