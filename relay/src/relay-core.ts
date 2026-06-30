@@ -1,5 +1,6 @@
 import { verifyEvent, type NostrEvent } from "@nostr-buddy/core";
 import { matchFilter } from "./filters.js";
+import type { MessageStore } from "./message-store.js";
 import {
   parseClientMessage,
   type RelayFilter,
@@ -22,10 +23,12 @@ export interface Outbound {
 
 export interface RelayCoreOptions {
   /**
-   * 持久化 sink（M2 接 D1）。Ephemeral 事件**絕不會**呼叫此函式，
+   * 離線留言持久層（M2）。Ephemeral 事件**絕不會**寫入此處，
    * 以保證上線狀態/心跳純記憶體轉發、不寫資料庫。
    */
-  persist?: (event: NostrEvent) => void;
+  store?: MessageStore;
+  /** 取得目前 unix 秒（用於 NIP-40 過期判定）；預設為系統時鐘。 */
+  now?: () => number;
 }
 
 /**
@@ -37,6 +40,10 @@ export class RelayCore {
   private readonly subs = new Map<string, Map<string, RelayFilter[]>>();
 
   constructor(private readonly opts: RelayCoreOptions = {}) {}
+
+  private now(): number {
+    return this.opts.now?.() ?? Math.floor(Date.now() / 1000);
+  }
 
   connect(connId: string): void {
     if (!this.subs.has(connId)) this.subs.set(connId, new Map());
@@ -54,8 +61,20 @@ export class RelayCore {
       case "REQ": {
         this.connect(connId);
         this.subs.get(connId)?.set(msg.subId, msg.filters);
-        // M1 無歷史事件儲存，直接回 EOSE。
-        return [{ to: connId, message: ["EOSE", msg.subId] }];
+        const out: Outbound[] = [];
+        if (this.opts.store) {
+          const nowSec = this.now();
+          const seen = new Set<string>();
+          for (const filter of msg.filters) {
+            for (const event of this.opts.store.query(filter, nowSec)) {
+              if (seen.has(event.id)) continue;
+              seen.add(event.id);
+              out.push({ to: connId, message: ["EVENT", msg.subId, event] });
+            }
+          }
+        }
+        out.push({ to: connId, message: ["EOSE", msg.subId] });
+        return out;
       }
       case "CLOSE": {
         this.subs.get(connId)?.delete(msg.subId);
@@ -71,9 +90,9 @@ export class RelayCore {
       return [{ to: connId, message: ["OK", event.id, false, "invalid: 簽章驗證失敗"] }];
     }
 
-    // Ephemeral 純轉發、不寫 D1；其餘交由持久層（M2）。
+    // Ephemeral 純轉發、不寫 D1；其餘寫入離線留言持久層（M2）。
     if (!isEphemeral(event.kind)) {
-      this.opts.persist?.(event);
+      this.opts.store?.put(event, this.now());
     }
 
     const out: Outbound[] = [{ to: connId, message: ["OK", event.id, true, ""] }];

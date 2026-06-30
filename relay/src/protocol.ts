@@ -1,6 +1,6 @@
 import type { NostrEvent } from "@nostr-buddy/core";
 
-/** Relay 端支援的訂閱 filter（NIP-01 子集）。 */
+/** Relay 端支援的訂閱 filter（NIP-01 子集，含 `#<tag>` 標籤 filter）。 */
 export interface RelayFilter {
   ids?: string[];
   authors?: string[];
@@ -8,6 +8,8 @@ export interface RelayFilter {
   since?: number;
   until?: number;
   limit?: number;
+  /** 標籤 filter，如 `#p`（收件人）、`#e`（引用事件）。 */
+  [tag: `#${string}`]: string[] | undefined;
 }
 
 export type ClientMessage =
