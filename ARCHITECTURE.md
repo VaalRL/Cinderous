@@ -88,12 +88,15 @@
 
 ## 7. 里程碑
 
-- **M0**：文件與專案骨架（本次初始化）。
-- **M1**：Nostr 中繼連線與心跳（含最小金鑰簽章、上線/離線狀態）— **預設先做**。
-- **M2**：離線文字留言（NIP-17/59 Gift Wrap、NIP-44 加密、NIP-40 過期）。
-- **M3**：WebRTC P2P 直連（SDP 信令、Nudge 震動、檔案傳輸）。
-- **M4**：多設備同步（QR Code + Happy Eyeballs）。
-- **M5**：經典體驗還原（音樂狀態、正在輸入中）與行動端。
+> 狀態圖例：✅ 核心邏輯完成且有測試覆蓋（`packages/core` / `relay`）；
+> ⏳ 執行期整合（真實 WebRTC / Tauri GUI / Rust 背景連線 / Cloudflare 部署）待具該環境時接線。
+
+- **M0**：文件與專案骨架、pnpm monorepo、ADR 機制。✅
+- **M1**：Nostr 中繼連線與心跳。✅ 核心（金鑰/事件/簽章/心跳/上線判定、relay 協定與 Ephemeral 扇出、TS RelayClient、端到端測試）；⏳ Rust 背景長連線(T9 退避邏輯已備)、OS 金鑰儲存、IPC、Worker 部署。
+- **M2**：離線文字留言（NIP-17/59 Gift Wrap、NIP-44 加密、NIP-40 過期）。✅ 核心（加密、Gift Wrap、relay 儲存/過期/`#p`、端到端測試）；⏳ Worker D1 綁定、收發 UI。
+- **M3**：WebRTC P2P 直連（SDP 信令、Nudge 震動、檔案傳輸）。✅ 核心（信令封裝與端到端交換、資料通道分塊、雙軌降級）；⏳ 真實 `RTCPeerConnection`/ICE/TURN。
+- **M4**：多設備同步（QR Code + Happy Eyeballs）。✅ 核心（配對載荷與 AES-GCM 同步包、競速、多設備收斂）；⏳ 真實 LAN/WAN 連線器與背景同步。
+- **M5**：經典體驗還原（音樂狀態、正在輸入中）與行動端。✅ 核心（Kind 20001/20002 事件與追蹤器）；⏳ 系統 API 取狀態、行動端。
 
 ## 8. 待決議（Open Questions）
 

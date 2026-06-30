@@ -1,10 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
   createHeartbeat,
+  createSignal,
   generateSecretKey,
   getPublicKey,
   PresenceTracker,
+  readSignal,
   RelayClient,
+  SDP_SIGNAL_KIND,
   type NostrEvent,
   type RelayClientHandlers,
   unwrapMessage,
@@ -81,5 +84,30 @@ describe("端到端：離線 Gift Wrap 留言", () => {
     const { sender, rumor } = unwrapMessage(got[0]!, bobSk);
     expect(sender).toBe(alicePk);
     expect(rumor.content).toBe("離線留言測試 🕊️");
+  });
+});
+
+describe("端到端：WebRTC SDP 信令經中繼交換", () => {
+  it("雙方上線時，Alice 的 offer 經 ephemeral 扇出抵達 Bob 並解出", () => {
+    const now = 1_700_000_000;
+    const net = makeNetwork(now);
+    const aliceSk = generateSecretKey();
+    const alicePk = getPublicKey(aliceSk);
+    const bobSk = generateSecretKey();
+    const bobPk = getPublicKey(bobSk);
+
+    // Bob 先訂閱自己的信令（ephemeral 不儲存，須先在線）
+    const got: NostrEvent[] = [];
+    const bob = net.connect("bob", { onEvent: (_sub, e) => got.push(e) });
+    bob.subscribe("signal", [{ kinds: [SDP_SIGNAL_KIND], "#p": [bobPk] }]);
+
+    // Alice 送出 offer 信令
+    const alice = net.connect("alice");
+    alice.publish(createSignal({ type: "offer", sdp: "v=0...offer" }, aliceSk, bobPk, { now }));
+
+    expect(got).toHaveLength(1);
+    const { sender, signal } = readSignal(got[0]!, bobSk);
+    expect(sender).toBe(alicePk);
+    expect(signal).toEqual({ type: "offer", sdp: "v=0...offer" });
   });
 });
