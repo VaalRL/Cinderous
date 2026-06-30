@@ -1,37 +1,94 @@
-import { useEffect, useMemo, useState } from "react";
-import { FriendList } from "./FriendList.js";
-import { PresenceStore, type Friend, type HeartbeatLike } from "./presence-store.js";
+import { useEffect, useRef, useState } from "react";
+import { BrowserChatBackend } from "./backend/browser-backend.js";
+import type { ChatMessage, Contact, Self, Status } from "./backend/types.js";
+import { ContactListWindow } from "./ui/ContactListWindow.js";
+import { ConversationWindow } from "./ui/ConversationWindow.js";
+import { SignIn } from "./ui/SignIn.js";
+import "./ui/msn.css";
 
-export interface AppProps {
-  /** 初始好友清單（之後由本機 SQLite 提供）。 */
-  friends?: Friend[];
-  /**
-   * 心跳事件來源。Tauri 後端透過 IPC 將 relay 收到的已驗證事件推送至前端
-   * （T11）；測試或瀏覽器預覽時可注入替身。回傳取消訂閱函式。
-   */
-  subscribeHeartbeats?: (onEvent: (e: HeartbeatLike) => void) => () => void;
-}
+const TYPING_VISIBLE_MS = 6_000;
 
-export function App({ friends = [], subscribeHeartbeats }: AppProps): JSX.Element {
-  const store = useMemo(() => new PresenceStore(friends), [friends]);
-  const [now, setNow] = useState(() => Date.now());
+export function App(): JSX.Element {
+  const [backend, setBackend] = useState<BrowserChatBackend | null>(null);
+  const [self, setSelf] = useState<Self | null>(null);
+  const [contacts, setContacts] = useState<Contact[]>([]);
+  const [convos, setConvos] = useState<Record<string, ChatMessage[]>>({});
+  const [typingAt, setTypingAt] = useState<Record<string, number>>({});
+  const [nudge, setNudge] = useState<Record<string, number>>({});
+  const [open, setOpen] = useState<string[]>([]);
+  const lastTyping = useRef<Record<string, number>>({});
 
   useEffect(() => {
-    const tick = setInterval(() => setNow(Date.now()), 1000);
-    const unsub = subscribeHeartbeats?.((e) => {
-      store.ingestEvent(e);
-      setNow(Date.now());
+    if (!backend) return;
+    backend.start({
+      onContacts: setContacts,
+      onMessage: (pk, msg) => {
+        setConvos((prev) => {
+          const cur = prev[pk] ?? [];
+          if (cur.some((m) => m.id === msg.id)) return prev;
+          return { ...prev, [pk]: [...cur, msg] };
+        });
+        setOpen((prev) => (prev.includes(pk) ? prev : [...prev, pk]));
+      },
+      onTyping: (pk) => setTypingAt((prev) => ({ ...prev, [pk]: Date.now() })),
+      onNudge: (pk) => {
+        setOpen((prev) => (prev.includes(pk) ? prev : [...prev, pk]));
+        setNudge((prev) => ({ ...prev, [pk]: (prev[pk] ?? 0) + 1 }));
+      },
     });
-    return () => {
-      clearInterval(tick);
-      unsub?.();
-    };
-  }, [store, subscribeHeartbeats]);
+    return () => backend.stop();
+  }, [backend]);
+
+  const signIn = (name: string) => {
+    const b = new BrowserChatBackend(name);
+    setSelf({ ...b.self });
+    setBackend(b);
+  };
+
+  if (!backend || !self) return <SignIn onSignIn={signIn} />;
+
+  const setStatus = (status: Status) => {
+    backend.setStatus(status, self.statusMessage);
+    setSelf((x) => (x ? { ...x, status } : x));
+  };
+  const setStatusMessage = (message: string) => {
+    backend.setStatus(self.status, message);
+    setSelf((x) => (x ? { ...x, statusMessage: message } : x));
+  };
+  const openChat = (pk: string) => setOpen((prev) => (prev.includes(pk) ? prev : [...prev, pk]));
 
   return (
-    <main className="app">
-      <h1>Nostr Buddy</h1>
-      <FriendList friends={store.view(now)} />
-    </main>
+    <div className="desktop">
+      <ContactListWindow
+        self={self}
+        contacts={contacts}
+        onOpen={openChat}
+        onStatus={setStatus}
+        onStatusMessage={setStatusMessage}
+      />
+      {open.map((pk) => {
+        const contact = contacts.find((c) => c.pubkey === pk);
+        if (!contact) return null;
+        return (
+          <ConversationWindow
+            key={pk}
+            self={self}
+            contact={contact}
+            messages={convos[pk] ?? []}
+            typing={(typingAt[pk] ?? 0) > Date.now() - TYPING_VISIBLE_MS}
+            nudgeSignal={nudge[pk] ?? 0}
+            onSend={(text) => backend.sendMessage(pk, text)}
+            onTyping={() => {
+              const now = Date.now();
+              if (now - (lastTyping.current[pk] ?? 0) < 1000) return;
+              lastTyping.current[pk] = now;
+              backend.sendTyping(pk);
+            }}
+            onNudge={() => backend.sendNudge(pk)}
+            onClose={() => setOpen((prev) => prev.filter((x) => x !== pk))}
+          />
+        );
+      })}
+    </div>
   );
 }

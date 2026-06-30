@@ -59,7 +59,7 @@ M1–M5 的**核心邏輯已實作並通過測試**（pnpm monorepo、TypeScript
 | M5 | 正在輸入中、音樂狀態 | ✅ 核心 |
 
 - **測試**：TS 96（core 69 / relay 23 / desktop 4）＋ Rust 4，含 relay↔client 端到端整合測試。
-- **可眼見**：`demo.html` 在瀏覽器即可看到上線狀態、即時/離線留言、輸入中、音樂、Nudge 跑通。
+- **可眼見**：桌面前端（`/`）是一套還原早期即時通體驗的客戶端（登入、聯絡人分組、對話視窗、表情、Nudge 震動、輸入中、音樂狀態）；另有端到端 `demo.html` 與真實 WebRTC `webrtc.html`。皆已用 Playwright 實機驗證。
 - **尚待執行期環境**（⏳）：真實 WebRTC（`RTCPeerConnection`/ICE/TURN）、Tauri GUI 與 Rust 背景連線、OS 金鑰儲存、Cloudflare Worker 部署。詳見 [`ARCHITECTURE.md`](./ARCHITECTURE.md) §7 與 [`docs/adr/`](./docs/adr)。
 
 ## 開發指令
@@ -74,7 +74,7 @@ pnpm -r typecheck       # 所有套件型別檢查
 
 | 任務 | 指令 |
 | --- | --- |
-| 瀏覽器 demo（端到端） | `pnpm --filter @nostr-buddy/desktop dev`，開啟 `/demo.html` |
+| 桌面前端（懷舊即時通風格） | `pnpm --filter @nostr-buddy/desktop dev`，開啟 `/`（另有端到端 demo `/demo.html`、真實 WebRTC `/webrtc.html`） |
 | 前端建置 | `pnpm --filter @nostr-buddy/desktop build` |
 | 共用核心測試 | `pnpm --filter @nostr-buddy/core test` |
 | 中繼站測試 | `pnpm --filter @nostr-buddy/relay test` |
