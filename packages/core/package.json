@@ -1,0 +1,28 @@
+{
+  "name": "@nostr-buddy/core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Nostr Buddy 共用核心：Nostr 事件、secp256k1 簽章、NIP-44 加密、型別與常數（SSOT）",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@noble/curves": "^1.6.0",
+    "@noble/hashes": "^1.5.0",
+    "@scure/base": "^1.1.9"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.8"
+  }
+}

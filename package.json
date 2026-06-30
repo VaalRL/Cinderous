@@ -1,0 +1,15 @@
+{
+  "name": "nostr-buddy",
+  "version": "0.0.0",
+  "private": true,
+  "description": "去中心化、無中央資料庫的即時通訊軟體（Nostr + WebRTC）",
+  "packageManager": "pnpm@10.33.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "pnpm -r test",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck"
+  }
+}
