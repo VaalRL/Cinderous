@@ -11,4 +11,6 @@ export * from "./signaling.js";
 export * from "./datachannel.js";
 export * from "./connection.js";
 export * from "./pairing.js";
+export * from "./happy-eyeballs.js";
+export * from "./sync.js";
 export * from "./relay-client.js";
