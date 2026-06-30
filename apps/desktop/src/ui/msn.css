@@ -46,6 +46,12 @@ body { margin: 0; background: #6f93c9; color: var(--ink); }
   width: 16px; height: 16px; border-radius: 3px; border: 1px solid #ffffff80;
   background: #ffffff30; color: #fff; font-size: 11px; line-height: 14px; text-align: center; cursor: pointer;
 }
+.langsw { display: flex; gap: 3px; }
+.langsw button {
+  background: #ffffff25; color: #fff; border: 1px solid #ffffff66; border-radius: 4px;
+  font-size: 11px; padding: 1px 7px; cursor: pointer; line-height: 16px;
+}
+.langsw button.on { background: #ffffffcc; color: var(--accent); font-weight: 700; }
 
 /* ── 登入 ── */
 .signin { margin: 8vh auto; width: 360px; }

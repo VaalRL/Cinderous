@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useI18n } from "../i18n.js";
 import type { ChatMessage, Contact, Self } from "../backend/types.js";
 import { avatarColor, emoticonize, EMOTICONS, initial } from "./util.js";
 
@@ -16,6 +17,7 @@ export interface ConversationProps {
 }
 
 export function ConversationWindow(props: ConversationProps): JSX.Element {
+  const { t } = useI18n();
   const { self, contact, messages } = props;
   const [text, setText] = useState("");
   const [showEmo, setShowEmo] = useState(false);
@@ -48,13 +50,13 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
       <div className="win__title">
         <span>{contact.name}</span>
         <span className="spacer" />
-        <span className="win__btn" onClick={props.onClose} role="button" aria-label="關閉">×</span>
+        <span className="win__btn" onClick={props.onClose} role="button" aria-label={t("convo_close")}>×</span>
       </div>
 
       <div className="convo__head">
         <b>{contact.name}</b>
         <div className="sub">
-          {contact.status === "offline" ? "目前離線——訊息將於對方上線時送達" : contact.statusMessage}
+          {contact.status === "offline" ? t("convo_offlineNotice") : contact.statusMessage}
           {contact.nowPlaying ? `　♪ ${contact.nowPlaying}` : ""}
         </div>
       </div>
@@ -77,11 +79,11 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
         </div>
       </div>
 
-      <div className="typing">{props.typing ? `${contact.name} 正在輸入訊息…` : ""}</div>
+      <div className="typing">{props.typing ? t("convo_typing", { name: contact.name }) : ""}</div>
 
       <div className="toolbar">
-        <button className="tool" title="表情" onClick={() => setShowEmo((v) => !v)}>🙂</button>
-        <button className="tool" title="震動對方視窗" onClick={props.onNudge}>震動</button>
+        <button className="tool" title={t("convo_emojiTitle")} onClick={() => setShowEmo((v) => !v)}>🙂</button>
+        <button className="tool" title={t("convo_nudgeTitle")} onClick={props.onNudge}>{t("convo_nudge")}</button>
       </div>
       {showEmo && (
         <div className="emopick">
@@ -93,9 +95,9 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
 
       <div className="composer">
         <textarea
-          aria-label="訊息輸入"
+          aria-label={t("convo_composerPlaceholder")}
           value={text}
-          placeholder="輸入訊息…（Enter 送出，Shift+Enter 換行）"
+          placeholder={t("convo_composerPlaceholder")}
           onChange={(e) => {
             setText(e.target.value);
             props.onTyping();
@@ -107,7 +109,7 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
             }
           }}
         />
-        <button className="composer__send" onClick={send}>送出</button>
+        <button className="composer__send" onClick={send}>{t("convo_send")}</button>
       </div>
     </div>
   );

@@ -13,6 +13,9 @@ importers:
       '@nostr-buddy/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@nostr-buddy/i18n':
+        specifier: workspace:*
+        version: link:../../packages/i18n
       react:
         specifier: ^18.3.1
         version: 18.3.1
@@ -63,6 +66,15 @@ importers:
       '@types/node':
         specifier: ^22.10.2
         version: 22.20.0
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@22.20.0)
+
+  packages/i18n:
+    devDependencies:
       typescript:
         specifier: ^5.6.3
         version: 5.9.3

@@ -1,11 +1,14 @@
+import type { MessageKey } from "@nostr-buddy/i18n";
+import { useI18n } from "../i18n.js";
 import type { Contact, Self, Status } from "../backend/types.js";
+import { LanguageSwitcher } from "./LanguageSwitcher.js";
 import { avatarColor, initial } from "./util.js";
 
-const STATUS_LABEL: Record<Status, string> = {
-  online: "線上",
-  away: "離開",
-  busy: "忙碌",
-  offline: "顯示為離線",
+const STATUS_KEY: Record<Status, MessageKey> = {
+  online: "status_online",
+  away: "status_away",
+  busy: "status_busy",
+  offline: "status_offline",
 };
 
 export interface ContactListProps {
@@ -17,6 +20,7 @@ export interface ContactListProps {
 }
 
 export function ContactListWindow(props: ContactListProps): JSX.Element {
+  const { t } = useI18n();
   const { self, contacts } = props;
   const online = contacts.filter((c) => c.status !== "offline");
   const offline = contacts.filter((c) => c.status === "offline");
@@ -24,10 +28,9 @@ export function ContactListWindow(props: ContactListProps): JSX.Element {
   return (
     <div className="win contacts">
       <div className="win__title">
-        <span>Nostr Buddy</span>
+        <span>{t("appName")}</span>
         <span className="spacer" />
-        <span className="win__btn">_</span>
-        <span className="win__btn">×</span>
+        <LanguageSwitcher />
       </div>
 
       <div className="me">
@@ -36,19 +39,19 @@ export function ContactListWindow(props: ContactListProps): JSX.Element {
           <div className="me__name">
             <span>{self.name}</span>
             <select
-              aria-label="狀態"
+              aria-label={t("status_label")}
               value={self.status}
               onChange={(e) => props.onStatus(e.target.value as Status)}
             >
               {(["online", "away", "busy", "offline"] as Status[]).map((s) => (
-                <option key={s} value={s}>{STATUS_LABEL[s]}</option>
+                <option key={s} value={s}>{t(STATUS_KEY[s])}</option>
               ))}
             </select>
           </div>
           <div className="me__msg">
             <input
-              aria-label="個人訊息"
-              placeholder="輸入個人訊息…"
+              aria-label={t("personalMessage_placeholder")}
+              placeholder={t("personalMessage_placeholder")}
               value={self.statusMessage}
               onChange={(e) => props.onStatusMessage(e.target.value)}
             />
@@ -57,20 +60,28 @@ export function ContactListWindow(props: ContactListProps): JSX.Element {
       </div>
 
       <div className="roster">
-        <div className="group">線上 ({online.length})</div>
+        <div className="group">{t("group_online", { count: online.length })}</div>
         {online.map((c) => (
-          <ContactRow key={c.pubkey} contact={c} onOpen={props.onOpen} />
+          <ContactRow key={c.pubkey} contact={c} onOpen={props.onOpen} hint={t("contact_openHint")} />
         ))}
-        <div className="group">離線 ({offline.length})</div>
+        <div className="group">{t("group_offline", { count: offline.length })}</div>
         {offline.map((c) => (
-          <ContactRow key={c.pubkey} contact={c} onOpen={props.onOpen} />
+          <ContactRow key={c.pubkey} contact={c} onOpen={props.onOpen} hint={t("contact_openHint")} />
         ))}
       </div>
     </div>
   );
 }
 
-function ContactRow({ contact, onOpen }: { contact: Contact; onOpen: (pk: string) => void }): JSX.Element {
+function ContactRow({
+  contact,
+  onOpen,
+  hint,
+}: {
+  contact: Contact;
+  onOpen: (pk: string) => void;
+  hint: string;
+}): JSX.Element {
   const secondary = contact.nowPlaying
     ? <span className="np">♪ {contact.nowPlaying}</span>
     : contact.statusMessage;
@@ -78,7 +89,7 @@ function ContactRow({ contact, onOpen }: { contact: Contact; onOpen: (pk: string
     <div
       className={`contact ${contact.status === "offline" ? "offline" : ""}`}
       onDoubleClick={() => onOpen(contact.pubkey)}
-      title="雙擊開啟對話"
+      title={hint}
     >
       <div className="avatar sm" style={{ background: avatarColor(contact.pubkey) }}>{initial(contact.name)}</div>
       <div className="contact__info">
