@@ -1,6 +1,11 @@
 import type { NostrEvent } from "@nostr-buddy/core";
 
-/** Relay 端支援的訂閱 filter（NIP-01 子集，含 `#<tag>` 標籤 filter）。 */
+/**
+ * Relay 端支援的訂閱 filter（NIP-01 子集，含 `#<tag>` 標籤 filter）。
+ *
+ * 契約同步：與 core 端的 `Filter`（`packages/core/src/presence.ts`）形狀相同，
+ * 修改欄位時兩處須同步更新。
+ */
 export interface RelayFilter {
   ids?: string[];
   authors?: string[];

@@ -2,7 +2,12 @@ import { KIND, OFFLINE_TIMEOUT_MS } from "./constants.js";
 import type { PubkeyHex } from "./keys.js";
 import { LatestPerKey } from "./tracker.js";
 
-/** Nostr 訂閱 filter（NIP-01 子集，含 `#<tag>` 標籤 filter）。 */
+/**
+ * Nostr 訂閱 filter（NIP-01 子集，含 `#<tag>` 標籤 filter）。
+ *
+ * 契約同步：此型別與 relay 端的 `RelayFilter`（`relay/src/protocol.ts`）
+ * 形狀相同（core 不可依賴 relay 故分別定義）。修改欄位時兩處須同步更新。
+ */
 export interface Filter {
   ids?: string[];
   kinds?: number[];
