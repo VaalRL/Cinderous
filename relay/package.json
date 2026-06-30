@@ -1,0 +1,21 @@
+{
+  "name": "@nostr-buddy/relay",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Nostr Buddy 中繼站：自建最小 Cloudflare Worker relay（Ephemeral 純轉發）",
+  "main": "./src/worker.ts",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@nostr-buddy/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241218.0",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.8"
+  }
+}
