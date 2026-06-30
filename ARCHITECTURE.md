@@ -100,7 +100,7 @@
 - 中繼站採自建 Worker relay 還是相容既有 Nostr relay 實作？
 - `packages/core` 的加密原語選型（Web Crypto vs Rust 端 `ring`/`ed25519-dalek`）與跨平台一致性策略。
 - monorepo 工具（pnpm workspace / turborepo）與行動端共用程度。
-- Ephemeral 心跳的 Worker 請求容量估算（免費層 ~10 萬請求/日）與批次/合併策略，須於 M1 前定案（另立 ADR）。
+- ~~Ephemeral 心跳的 Worker 請求容量估算與批次/合併策略~~（已由 `docs/adr/0006` 定案：30s 心跳 + jitter，免費天花板約數十並行使用者，列出擴充旋鈕）。
 - 是否導入棘輪（Double Ratchet）以取得前向保密／後妥協安全，或維持 Nostr 靜態金鑰模型（另立 ADR）。
 - 多設備持續同步的衝突解法（LWW vs CRDT）定案。
 
