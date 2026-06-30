@@ -5,5 +5,7 @@ export * from "./sign.js";
 export * from "./heartbeat.js";
 export * from "./presence.js";
 export * from "./nip44.js";
+export * from "./nip59.js";
 export * from "./giftwrap.js";
+export * from "./signaling.js";
 export * from "./relay-client.js";
