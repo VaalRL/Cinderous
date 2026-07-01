@@ -37,11 +37,18 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
   const [text, setText] = useState("");
   const [showEmo, setShowEmo] = useState(false);
   const [showStickers, setShowStickers] = useState(false);
+  const [showAlbum, setShowAlbum] = useState(false);
+  const [lightbox, setLightbox] = useState<string | null>(null);
   const [ttl, setTtl] = useState(0);
   const [dragging, setDragging] = useState(false);
   const logRef = useRef<HTMLDivElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // 相簿：本對話中收發過、可顯示的圖片。
+  const images = messages
+    .filter((m) => m.file?.mime.startsWith("image/") && m.file.url)
+    .map((m) => ({ id: m.id, name: m.file!.name, url: m.file!.url! }));
 
   const dropFiles = (files: FileList | null) => {
     if (!files || !props.onSendFile) return;
@@ -149,6 +156,7 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
               expired={props.expired?.has(m.id) ?? false}
               onReact={props.onReact}
               onUnsend={props.onUnsend}
+              onView={setLightbox}
             />
           ))}
         </div>
@@ -172,6 +180,14 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
           🧸
         </button>
         <button className="tool" title={t("convo_nudgeTitle")} onClick={props.onNudge}>{t("convo_nudge")}</button>
+        <button
+          className="tool"
+          title={t("album_open")}
+          data-testid="album-btn"
+          onClick={() => setShowAlbum(true)}
+        >
+          🖼️{images.length > 0 ? <span className="tool__count">{images.length}</span> : null}
+        </button>
         {props.onSendFile ? (
           <>
             <button className="tool" title={t("file_attach")} onClick={() => fileRef.current?.click()}>📎</button>
@@ -258,6 +274,35 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
         />
         <button className="composer__send" onClick={send}>{t("convo_send")}</button>
       </div>
+
+      {showAlbum && (
+        <div className="modal" role="dialog" aria-modal="true" aria-label={t("album_open")} onClick={() => setShowAlbum(false)}>
+          <div className="modal__box win album" onClick={(e) => e.stopPropagation()}>
+            <div className="win__title">
+              <span>{t("album_title", { count: images.length })}</span>
+              <span className="spacer" />
+              <span className="win__btn" role="button" aria-label={t("convo_close")} onClick={() => setShowAlbum(false)}>×</span>
+            </div>
+            <div className="album__body" data-testid="album">
+              {images.length === 0 ? (
+                <div className="album__empty">{t("album_empty")}</div>
+              ) : (
+                images.map((img) => (
+                  <button key={img.id} className="album__item" onClick={() => setLightbox(img.url)}>
+                    <img src={img.url} alt={img.name || t("image_alt")} />
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {lightbox && (
+        <div className="lightbox" role="dialog" aria-modal="true" onClick={() => setLightbox(null)}>
+          <img src={lightbox} alt={t("image_alt")} />
+        </div>
+      )}
     </div>
   );
 }
@@ -270,6 +315,7 @@ function MessageLine({
   expired,
   onReact,
   onUnsend,
+  onView,
 }: {
   message: ChatMessage;
   who: string;
@@ -278,6 +324,7 @@ function MessageLine({
   expired: boolean;
   onReact?: ((messageId: string, emoji: string) => void) | undefined;
   onUnsend?: ((messageId: string) => void) | undefined;
+  onView?: ((url: string) => void) | undefined;
 }): JSX.Element {
   const { t } = useI18n();
   const [picking, setPicking] = useState(false);
@@ -300,7 +347,7 @@ function MessageLine({
   }
 
   if (message.file) {
-    return <FileLine message={message} who={who} />;
+    return <FileLine message={message} who={who} onView={onView} />;
   }
 
   return (
@@ -355,19 +402,32 @@ function formatBytes(n: number): string {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function FileLine({ message, who }: { message: ChatMessage; who: string }): JSX.Element {
+function FileLine({
+  message,
+  who,
+  onView,
+}: {
+  message: ChatMessage;
+  who: string;
+  onView?: ((url: string) => void) | undefined;
+}): JSX.Element {
   const { t } = useI18n();
   const file = message.file!;
   const pct = file.size > 0 ? Math.min(100, Math.round((file.sent / file.size) * 100)) : 100;
   // 送出端在傳輸完成前顯示進度；收件端一律已完成。
   const uploading = !file.incoming && file.sent < file.size;
   const isVoice = file.mime.startsWith("audio/");
+  const isImage = file.mime.startsWith("image/");
 
   return (
     <div className={`line ${message.outgoing ? "out" : "in"}`}>
       <span className="who">{who}</span>
       <span className="time">{new Date(message.at).toLocaleTimeString()}</span>
-      {isVoice && file.url ? (
+      {isImage && file.url ? (
+        <button className="imgthumb" data-testid="imgthumb" onClick={() => onView?.(file.url!)}>
+          <img src={file.url} alt={file.name || t("image_alt")} />
+        </button>
+      ) : isVoice && file.url ? (
         <span className="voice" data-testid="voice">
           <audio controls src={file.url} aria-label={t("voice_alt")} />
         </span>

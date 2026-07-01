@@ -178,6 +178,18 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
 @keyframes recpulse { 0%,100% { opacity: 1; } 50% { opacity: .3; } }
 .voice { display: block; margin-top: 2px; }
 .voice audio { height: 32px; max-width: 220px; }
+
+/* 圖片與相簿 */
+.tool__count { font-size: 9px; background: var(--accent); color: #fff; border-radius: 7px; padding: 0 4px; margin-left: 2px; vertical-align: top; }
+.imgthumb { display: block; margin-top: 2px; padding: 0; border: 1px solid var(--border); border-radius: 8px; background: none; cursor: pointer; overflow: hidden; max-width: 180px; }
+.imgthumb img { display: block; max-width: 180px; max-height: 180px; }
+.album { width: 340px; max-width: calc(100vw - 24px); }
+.album__body { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px; max-height: 60vh; overflow-y: auto; }
+.album__item { width: 96px; height: 96px; padding: 0; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; background: var(--surface2); cursor: pointer; }
+.album__item img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.album__empty { color: var(--muted); font-size: 12px; padding: 20px; text-align: center; width: 100%; }
+.lightbox { position: fixed; inset: 0; z-index: 60; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,.75); cursor: zoom-out; }
+.lightbox img { max-width: 92vw; max-height: 92vh; box-shadow: 0 8px 40px rgba(0,0,0,.5); }
 .me__np { display: flex; align-items: center; gap: 4px; margin-top: 3px; }
 .me__np-ic { color: #9a6cd4; font-size: 12px; }
 .me__np input { flex: 1; min-width: 0; }

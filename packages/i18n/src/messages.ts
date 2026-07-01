@@ -85,6 +85,10 @@ export interface Messages {
   voice_stop: string;
   voice_recording: string;
   voice_alt: string;
+  album_open: string;
+  album_title: string;
+  album_empty: string;
+  image_alt: string;
 }
 
 const zhHant: Messages = {
@@ -160,6 +164,10 @@ const zhHant: Messages = {
   voice_stop: "停止並傳送",
   voice_recording: "錄音中…點擊停止並傳送",
   voice_alt: "語音訊息",
+  album_open: "相簿",
+  album_title: "相簿（{count}）",
+  album_empty: "尚無圖片",
+  image_alt: "圖片",
 };
 
 const en: Messages = {
@@ -235,6 +243,10 @@ const en: Messages = {
   voice_stop: "Stop & send",
   voice_recording: "Recording… click to stop & send",
   voice_alt: "Voice message",
+  album_open: "Album",
+  album_title: "Album ({count})",
+  album_empty: "No images yet",
+  image_alt: "Image",
 };
 
 export const catalog: Record<Locale, Messages> = { "zh-Hant": zhHant, en };
