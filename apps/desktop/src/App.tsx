@@ -259,12 +259,14 @@ export function App(): JSX.Element {
     const bytes = new Uint8Array(await f.arrayBuffer());
     const mime = f.type || "application/octet-stream";
     const id = activeBackend.sendFile(pk, { name: f.name, mime, bytes });
+    // 本機保留 blob URL：送出端也能重播/下載（語音訊息尤其需要）
+    const url = URL.createObjectURL(f);
     const msg: ChatMessage = {
       id: uid("of"),
       outgoing: true,
       text: "",
       at: Date.now(),
-      file: { id, name: f.name, mime, size: bytes.length, sent: 0, incoming: false },
+      file: { id, name: f.name, mime, size: bytes.length, sent: 0, incoming: false, url },
     };
     setConvos((prev) => ({ ...prev, [pk]: [...(prev[pk] ?? []), msg] }));
     setOpen((prev) => (prev.includes(pk) ? prev : [...prev, pk]));

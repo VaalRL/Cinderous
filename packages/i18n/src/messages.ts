@@ -81,6 +81,10 @@ export interface Messages {
   file_error: string;
   sticker_title: string;
   sticker_alt: string;
+  voice_record: string;
+  voice_stop: string;
+  voice_recording: string;
+  voice_alt: string;
 }
 
 const zhHant: Messages = {
@@ -152,6 +156,10 @@ const zhHant: Messages = {
   file_error: "檔案傳輸失敗",
   sticker_title: "貼圖",
   sticker_alt: "貼圖",
+  voice_record: "錄語音訊息",
+  voice_stop: "停止並傳送",
+  voice_recording: "錄音中…點擊停止並傳送",
+  voice_alt: "語音訊息",
 };
 
 const en: Messages = {
@@ -223,6 +231,10 @@ const en: Messages = {
   file_error: "File transfer failed",
   sticker_title: "Stickers",
   sticker_alt: "sticker",
+  voice_record: "Record voice message",
+  voice_stop: "Stop & send",
+  voice_recording: "Recording… click to stop & send",
+  voice_alt: "Voice message",
 };
 
 export const catalog: Record<Locale, Messages> = { "zh-Hant": zhHant, en };

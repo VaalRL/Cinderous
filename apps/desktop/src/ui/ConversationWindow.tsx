@@ -48,6 +48,43 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
     for (const f of Array.from(files)) props.onSendFile(f);
   };
 
+  const [recording, setRecording] = useState(false);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+
+  const startRecording = async () => {
+    if (!props.onSendFile || !navigator.mediaDevices?.getUserMedia) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      chunksRef.current = [];
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunksRef.current.push(e.data);
+      };
+      recorder.onstop = () => {
+        stream.getTracks().forEach((tr) => tr.stop());
+        const type = recorder.mimeType || "audio/webm";
+        const blob = new Blob(chunksRef.current, { type });
+        if (blob.size > 0) {
+          props.onSendFile?.(new File([blob], "voice-message.webm", { type }));
+        }
+      };
+      recorder.start();
+      recorderRef.current = recorder;
+      setRecording(true);
+    } catch {
+      /* 無麥克風或被拒：略過 */
+    }
+  };
+
+  const stopRecording = () => {
+    recorderRef.current?.stop();
+    recorderRef.current = null;
+    setRecording(false);
+  };
+
+  const toggleRecording = () => (recording ? stopRecording() : void startRecording());
+
   useEffect(() => {
     const el = logRef.current;
     if (el) el.scrollTop = el.scrollHeight;
@@ -148,6 +185,14 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
                 e.target.value = "";
               }}
             />
+            <button
+              className={`tool ${recording ? "tool--recording" : ""}`}
+              title={recording ? t("voice_stop") : t("voice_record")}
+              aria-pressed={recording}
+              onClick={toggleRecording}
+            >
+              {recording ? "⏹" : "🎤"}
+            </button>
           </>
         ) : null}
         <select
@@ -167,6 +212,11 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
           {EMOTICONS.map((e) => (
             <span key={e} role="button" onClick={() => setText((t) => t + e)}>{e}</span>
           ))}
+        </div>
+      )}
+      {recording && (
+        <div className="recbar" role="status">
+          <span className="recdot" /> {t("voice_recording")}
         </div>
       )}
       {showStickers && (
@@ -309,25 +359,34 @@ function FileLine({ message, who }: { message: ChatMessage; who: string }): JSX.
   const { t } = useI18n();
   const file = message.file!;
   const pct = file.size > 0 ? Math.min(100, Math.round((file.sent / file.size) * 100)) : 100;
-  const done = file.url !== undefined || (!file.incoming && file.sent >= file.size);
+  // 送出端在傳輸完成前顯示進度；收件端一律已完成。
+  const uploading = !file.incoming && file.sent < file.size;
+  const isVoice = file.mime.startsWith("audio/");
+
   return (
     <div className={`line ${message.outgoing ? "out" : "in"}`}>
       <span className="who">{who}</span>
       <span className="time">{new Date(message.at).toLocaleTimeString()}</span>
-      <div className="filecard" data-testid="filecard">
-        <span className="filecard__ic">📄</span>
-        <div className="filecard__info">
-          <div className="filecard__name">{file.name}</div>
-          <div className="filecard__meta">{formatBytes(file.size)}</div>
-          {!done ? (
-            <div className="filecard__bar" aria-label={t("file_sending")}>
-              <span style={{ width: `${pct}%` }} />
-            </div>
-          ) : file.url ? (
-            <a className="filecard__dl" href={file.url} download={file.name}>⬇ {t("file_download")}</a>
-          ) : null}
+      {isVoice && file.url ? (
+        <span className="voice" data-testid="voice">
+          <audio controls src={file.url} aria-label={t("voice_alt")} />
+        </span>
+      ) : (
+        <div className="filecard" data-testid="filecard">
+          <span className="filecard__ic">{isVoice ? "🎤" : "📄"}</span>
+          <div className="filecard__info">
+            <div className="filecard__name">{isVoice ? t("voice_alt") : file.name}</div>
+            <div className="filecard__meta">{formatBytes(file.size)}</div>
+            {uploading ? (
+              <div className="filecard__bar" aria-label={t("file_sending")}>
+                <span style={{ width: `${pct}%` }} />
+              </div>
+            ) : file.url ? (
+              <a className="filecard__dl" href={file.url} download={file.name}>⬇ {t("file_download")}</a>
+            ) : null}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

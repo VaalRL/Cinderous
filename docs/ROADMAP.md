@@ -93,7 +93,8 @@
 | M6 | 訊息回應 Reaction | ✅ **完成**：NIP-25(kind 7) 指向訊息，Gift Wrap 包封；桌面 UI + 持久化，經真實 relay 驗證（ADR-0011） | 🌐 |
 | M6 | 收回訊息 Unsend | ✅ **完成**：NIP-09(kind 5) 指向訊息，Gift Wrap 包封；收件端顯示「訊息已收回」＋持久化，經真實 relay 驗證（ADR-0012） | 🌐 |
 | M6 | 限時訊息 | ✅ **完成**：rumor 內帶較短 NIP-40 過期（外層 wrap 同步縮短）；桌面可選限時（1 分/1 時/1 天），到期顯示「訊息已到期」，經真實 relay 驗證（ADR-0013） | 🌐 |
-| M7 | 語音訊息 / 相簿 | 複用 WebRTC 檔案分塊 + 本機媒體庫 | 🌐 核心 / 🖥️📱 UI |
+| M7 | 語音訊息 | ✅ **完成**：`MediaRecorder` 錄音 → 複用 A4 的 WebRTC P2P 檔案通道傳送（audio/* mime）；兩端渲染 `<audio>` 播放器。經真實 relay + 真實 WebRTC 驗證（ADR-0022） | 🌐 |
+| M7 | 相簿 | 聚合收到的圖片為相簿檢視（複用檔案傳輸；本機媒體庫） | 🌐 核心 / 🖥️📱 UI |
 | M7 | 貼圖 Sticker | ✅ **完成**：`nb-sticker:v1:pack/id` 走既有加密訊息通道，客戶端渲染內建原創 SVG 貼圖包（`buddy` 6 款）；選擇器 + 渲染，經真實 relay 驗證（ADR-0021）。持久化/回應/收回/限時自然沿用 | 🌐 |
 | M8 | 語音/視訊通話 | WebRTC media track；通話信令複用 SDP 信令通道 | 🌐 信令 / 需真實 media |
 | M9 | QR 加好友 | `npub` 交換 + 同意（見 Phase A3） | 🌐 |
