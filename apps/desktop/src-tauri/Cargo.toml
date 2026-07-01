@@ -26,6 +26,10 @@ tauri-app = ["dep:tauri", "dep:tokio", "dep:tauri-build"]
 # 背景 WebSocket 連線執行期（tokio + tungstenite）。可獨立於 GUI 建置/測試，
 # 但拉入 async I/O 相依，故預設關閉以維持精簡的 `cargo test`。
 net = ["dep:tokio", "dep:tokio-tungstenite", "dep:futures-util"]
+# 原生持久化（bundled SQLite，供開發/測試）。以 `PRAGMA key` 支援加密；正式版
+# 改用 `sqlcipher` feature（整庫 SQLCipher 加密）。兩者互斥，勿同時啟用。
+persistence = ["dep:rusqlite", "rusqlite/bundled"]
+sqlcipher = ["dep:rusqlite", "rusqlite/bundled-sqlcipher-vendored-openssl"]
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
@@ -34,6 +38,7 @@ tauri = { version = "2", optional = true }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net"], optional = true }
 tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"], optional = true }
 futures-util = { version = "0.3", optional = true }
+rusqlite = { version = "0.32", optional = true }
 
 [build-dependencies]
 tauri-build = { version = "2", optional = true }

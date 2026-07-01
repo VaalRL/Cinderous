@@ -8,6 +8,8 @@ pub mod ipc;
 pub mod net;
 pub mod reconnect;
 pub mod session;
+#[cfg(any(feature = "persistence", feature = "sqlcipher"))]
+pub mod storage;
 
 pub use reconnect::{Backoff, ConnectionState};
 pub use session::{Action, Session};

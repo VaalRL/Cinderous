@@ -48,7 +48,7 @@
 | B1 | Tauri 二進位 | 🔧 **殼已建**：`src-tauri` 的 `main.rs`、`tauri.conf.json`（`frontendDist=../dist`）、`build.rs`、capabilities、圖示；feature-gate `tauri-app` 讓預設 `cargo test` 不需 Tauri 工具鏈。實際 `tauri build`／視窗行為需 Tauri 環境驗證（ADR-0018）。 |
 | B2 | IPC 契約 / `TauriChatBackend` | 🔧 **契約已定**：`ipc.rs` 的 serde DTO 與前端 `types.ts` 對齊並測試；近期 webview 直接跑既有前端（UI 不改）。原生服務接管時再補 `TauriChatBackend`。 |
 | B3 | Rust 背景長連線 | ✅ **核心+執行期完成**：`session::Session` 政策驅動器（訂閱集、離線佇列、退避、重連即重送訂閱，7 單元測試）＋ `net::run`（tokio + tokio-tungstenite，`net` feature）。以本機 WS 伺服器即時整合測試驗證「連上→送訂閱→收事件→外送」。視窗關閉仍在線（連線由背景 task 持有）。GUI 整合待 Tauri 環境（ADR-0019）。 |
-| B4 | 原生持久化 | `rusqlite` + SQLCipher 落地加密資料庫；A2 的資料層換成 SQLite。 |
+| B4 | 原生持久化 | ✅ **完成**：`storage::Store`（rusqlite）schema 對齊前端 `AppStorage`（身分/聯絡人/訊息/回應/收回/封鎖），`PRAGMA key` 支援 SQLCipher。`persistence`（bundled SQLite）9 測試；`sqlcipher`（bundled-sqlcipher + vendored OpenSSL）實際加密驗證，含「錯誤金鑰無法開啟」。GUI 接線待 Tauri 環境（ADR-0020）。 |
 | B5 | OS 金鑰儲存 | `keyring`（Keychain/DPAPI/libsecret）存私鑰。 |
 | B6 | 打包/更新 | 簽章、自動更新、系統匣/通知。 |
 

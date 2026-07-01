@@ -48,6 +48,16 @@ pnpm --filter @nostr-buddy/desktop exec tauri build  # 打包各平台安裝檔
   cargo test --features net    # 含 net::run 即時整合測試（連上→訂閱→收事件）
   ```
 
-- ⏳ **B3 GUI 接線 / B4–B6**：把 `net` 執行期經 `#[tauri::command]`/`emit` 橋到
-  webview、前端切 `TauriChatBackend`；SQLCipher 持久化、OS 金鑰庫（keyring）、
-  打包/更新——於 Tauri 環境接續。
+- ✅ **B4 原生持久化**：`storage::Store`（rusqlite）schema 對齊前端 `AppStorage`；
+  `PRAGMA key` 支援 SQLCipher。
+
+  ```bash
+  cargo test --features persistence   # bundled SQLite（明碼，快速）
+  cargo test --features sqlcipher     # 實際 SQLCipher 加密（含錯誤金鑰無法開啟）
+  ```
+
+  `persistence` 與 `sqlcipher` 互斥（rusqlite 後端二擇一）；正式版用 `sqlcipher`。
+
+- ⏳ **GUI 接線 / B5–B6**：把 `net`/`storage` 經 `#[tauri::command]`/`emit` 橋到
+  webview、前端切 `TauriChatBackend`；OS 金鑰庫（keyring）託管主金鑰、打包/更新
+  ——於 Tauri 環境接續。
