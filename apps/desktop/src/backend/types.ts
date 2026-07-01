@@ -3,6 +3,9 @@ import type { PubkeyHex } from "@nostr-buddy/core";
 /** 使用者可見狀態（避開商標，以中文呈現於 UI）。 */
 export type Status = "online" | "away" | "busy" | "offline";
 
+/** 與中繼站的連線狀態（供顯示連線/重連中）。 */
+export type ConnectionState = "connecting" | "online" | "offline";
+
 export interface Contact {
   pubkey: PubkeyHex;
   name: string;
@@ -52,6 +55,8 @@ export interface ChatBackendEvents {
   onUnsend?(messageId: string): void;
   /** 封鎖名單有更新。 */
   onBlocked?(blocked: BlockedContact[]): void;
+  /** 與中繼站的連線狀態改變。 */
+  onConnection?(state: ConnectionState): void;
 }
 
 /**

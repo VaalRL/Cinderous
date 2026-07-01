@@ -1,7 +1,7 @@
 import type { MessageKey } from "@nostr-buddy/i18n";
 import { useState } from "react";
 import { useI18n } from "../i18n.js";
-import type { BlockedContact, Contact, Self, Status } from "../backend/types.js";
+import type { BlockedContact, ConnectionState, Contact, Self, Status } from "../backend/types.js";
 import { TitleControls } from "./TitleControls.js";
 import { avatarColor, initial } from "./util.js";
 
@@ -36,6 +36,8 @@ export interface ContactListProps {
   onNowPlaying?: (text: string) => void;
   /** 每位聯絡人的未讀訊息數。 */
   unread?: Record<string, number>;
+  /** 與中繼站的連線狀態（非 online 時顯示提示）。 */
+  connection?: ConnectionState;
 }
 
 export function ContactListWindow(props: ContactListProps): JSX.Element {
@@ -62,6 +64,12 @@ export function ContactListWindow(props: ContactListProps): JSX.Element {
         ) : null}
         <TitleControls />
       </div>
+
+      {props.connection && props.connection !== "online" ? (
+        <div className={`connbar connbar--${props.connection}`} role="status">
+          {props.connection === "connecting" ? t("conn_connecting") : t("conn_offline")}
+        </div>
+      ) : null}
 
       <div className="me">
         <div className="avatar" style={{ background: avatarColor(self.pubkey) }}>{initial(self.name)}</div>

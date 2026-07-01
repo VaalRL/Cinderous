@@ -72,6 +72,8 @@ export interface Messages {
   settings_notificationsHint: string;
   settings_close: string;
   unread_title: string;
+  conn_connecting: string;
+  conn_offline: string;
 }
 
 const zhHant: Messages = {
@@ -134,6 +136,8 @@ const zhHant: Messages = {
   settings_notificationsHint: "視窗未聚焦時，有新訊息就通知。",
   settings_close: "關閉",
   unread_title: "{count} 則未讀",
+  conn_connecting: "連線中…",
+  conn_offline: "已斷線，重連中…",
 };
 
 const en: Messages = {
@@ -196,6 +200,8 @@ const en: Messages = {
   settings_notificationsHint: "Notify on new messages when the window isn't focused.",
   settings_close: "Close",
   unread_title: "{count} unread",
+  conn_connecting: "Connecting…",
+  conn_offline: "Disconnected — reconnecting…",
 };
 
 export const catalog: Record<Locale, Messages> = { "zh-Hant": zhHant, en };

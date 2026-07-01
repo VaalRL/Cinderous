@@ -26,7 +26,14 @@ import {
   type SecretKey,
 } from "@nostr-buddy/core";
 import type { AppStorage } from "../storage/types.js";
-import type { ChatBackend, ChatBackendEvents, Contact, Self, Status } from "./types.js";
+import type {
+  ChatBackend,
+  ChatBackendEvents,
+  ConnectionState,
+  Contact,
+  Self,
+  Status,
+} from "./types.js";
 
 const NUDGE_KIND = 20100;
 const HEARTBEAT_MS = 15_000;
@@ -57,27 +64,60 @@ function decodeStatus(content: string): StatusPayload {
 
 const shortNpub = (npub: string) => `${npub.slice(0, 12)}…`;
 
-/** 建立一個已接好收發的 RelayClient（真實 WebSocket 或測試替身）。 */
-export type RelayConnector = (handlers: RelayClientHandlers) => RelayClient;
+/**
+ * 建立一個已接好收發的 RelayClient（真實 WebSocket 或測試替身）。
+ * `onStatus` 可選：回報連線狀態變化（連線中/上線/離線）。
+ */
+export type RelayConnector = (
+  handlers: RelayClientHandlers,
+  onStatus?: (state: ConnectionState) => void,
+) => RelayClient;
 
-/** 以真實 WebSocket 連上 relay 的連接器。 */
+const RECONNECT_MAX_MS = 15_000;
+
+/** 以真實 WebSocket 連上 relay 的連接器，含指數退避自動重連與狀態回報。 */
 export function webSocketConnector(url: string): RelayConnector {
-  return (handlers) => {
-    const ws = new WebSocket(url);
-    const pending: string[] = [];
+  return (handlers, onStatus) => {
+    let ws: WebSocket;
     let open = false;
-    ws.addEventListener("open", () => {
-      open = true;
-      for (const m of pending) ws.send(m);
-      pending.length = 0;
-    });
+    let attempt = 0;
+    let pending: string[] = [];
+
     const client = new RelayClient(
       { send: (data) => (open ? ws.send(data) : pending.push(data)) },
       handlers,
     );
-    ws.addEventListener("message", (e: MessageEvent) => {
-      client.receive(typeof e.data === "string" ? e.data : "");
-    });
+
+    const connect = () => {
+      onStatus?.("connecting");
+      ws = new WebSocket(url);
+      ws.addEventListener("open", () => {
+        open = true;
+        attempt = 0;
+        onStatus?.("online");
+        for (const m of pending) ws.send(m);
+        pending = [];
+      });
+      ws.addEventListener("message", (e: MessageEvent) => {
+        client.receive(typeof e.data === "string" ? e.data : "");
+      });
+      ws.addEventListener("close", () => {
+        open = false;
+        onStatus?.("offline");
+        const delay = Math.min(1000 * 2 ** attempt, RECONNECT_MAX_MS);
+        attempt += 1;
+        setTimeout(connect, delay);
+      });
+      ws.addEventListener("error", () => {
+        try {
+          ws.close();
+        } catch {
+          /* 忽略 */
+        }
+      });
+    };
+
+    connect();
     return client;
   };
 }
@@ -123,7 +163,10 @@ export class RelayChatBackend implements ChatBackend {
     this.selfNsec = identity.nsec;
     this.contacts = storage.loadContacts();
     this.blocked = storage.loadBlocked();
-    this.client = connector({ onEvent: (_sub, event) => this.onEvent(event) });
+    this.client = connector(
+      { onEvent: (_sub, event) => this.onEvent(event) },
+      (state) => this.onConnection(state),
+    );
   }
 
   start(handlers: ChatBackendEvents): void {
@@ -281,6 +324,15 @@ export class RelayChatBackend implements ChatBackend {
 
   private emitBlocked(): void {
     this.handlers?.onBlocked?.(this.blocked.map((b) => ({ pubkey: b.pubkey, name: b.name })));
+  }
+
+  private onConnection(state: ConnectionState): void {
+    this.handlers?.onConnection?.(state);
+    // 重連成功後重新訂閱並發送心跳（RelayClient 不會自動重送訂閱）
+    if (state === "online" && this.handlers) {
+      this.resubscribe();
+      this.beat();
+    }
   }
 
   private emitContacts(): void {

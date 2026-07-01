@@ -1,7 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import { BrowserChatBackend } from "./backend/browser-backend.js";
 import { RelayChatBackend, webSocketConnector } from "./backend/relay-backend.js";
-import type { BlockedContact, ChatBackend, ChatMessage, Contact, Self, Status } from "./backend/types.js";
+import type {
+  BlockedContact,
+  ChatBackend,
+  ChatMessage,
+  ConnectionState,
+  Contact,
+  Self,
+  Status,
+} from "./backend/types.js";
 import { LocalStorage } from "./storage/local.js";
 import { ContactListWindow } from "./ui/ContactListWindow.js";
 import { ConversationWindow } from "./ui/ConversationWindow.js";
@@ -25,6 +33,7 @@ export function App(): JSX.Element {
   const [expired, setExpired] = useState<Set<string>>(new Set());
   const [blocked, setBlocked] = useState<BlockedContact[]>([]);
   const [unread, setUnread] = useState<Record<string, number>>({});
+  const [conn, setConn] = useState<ConnectionState>("online");
   const [open, setOpen] = useState<string[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [notify, setNotify] = useState<boolean>(() => {
@@ -46,6 +55,7 @@ export function App(): JSX.Element {
       const relayUrl = localStorage.getItem(RELAY_URL_KEY);
       if (identity && relayUrl) {
         const b = new RelayChatBackend(storage, webSocketConnector(relayUrl), identity.name);
+        setConn("connecting");
         setSelf({ ...b.self });
         setBackend(b);
       }
@@ -96,6 +106,7 @@ export function App(): JSX.Element {
           return next;
         }),
       onBlocked: setBlocked,
+      onConnection: setConn,
     });
     return () => backend.stop();
   }, [backend]);
@@ -135,8 +146,10 @@ export function App(): JSX.Element {
     if (relayUrl) {
       localStorage.setItem(RELAY_URL_KEY, relayUrl);
       b = new RelayChatBackend(new LocalStorage(), webSocketConnector(relayUrl), name);
+      setConn("connecting");
     } else {
       b = new BrowserChatBackend(name);
+      setConn("online");
     }
     setSelf({ ...b.self });
     setBackend(b);
@@ -229,6 +242,7 @@ export function App(): JSX.Element {
         onOpenSettings={() => setSettingsOpen(true)}
         onNowPlaying={(text) => activeBackend.setNowPlaying(text)}
         unread={unread}
+        connection={conn}
         {...addContactProps}
         {...manageProps}
       />

@@ -145,6 +145,9 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
 .contact.blocked .contact__name { opacity: 0.6; }
 .contact.blocked .contact__act { display: inline-flex; }
 .unread-badge { flex: none; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: #e0483d; color: #fff; font-size: 10px; font-weight: 700; line-height: 16px; text-align: center; }
+.connbar { padding: 4px 10px; font-size: 11px; text-align: center; color: #fff; }
+.connbar--connecting { background: #d9932b; }
+.connbar--offline { background: #c0392b; }
 .me__np { display: flex; align-items: center; gap: 4px; margin-top: 3px; }
 .me__np-ic { color: #9a6cd4; font-size: 12px; }
 .me__np input { flex: 1; min-width: 0; }
