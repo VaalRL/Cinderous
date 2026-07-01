@@ -16,8 +16,14 @@ export interface UnwrappedMessage {
 export interface WrapOptions {
   /** 訊息實際時間（unix 秒）；省略時為現在。 */
   now?: number;
-  /** NIP-40 過期時間（unix 秒）；省略時為 now + 7 天。 */
+  /** 外層 Gift Wrap 的 NIP-40 過期時間（unix 秒）；省略時為 now + 7 天。 */
   expiration?: number;
+  /**
+   * 限時訊息（閱後即焚）到期時間（unix 秒）。設定後會把 NIP-40 `expiration`
+   * tag 寫進 **rumor 內層**（供收件端解密後得知何時隱藏），並將外層 wrap 過期
+   * 縮短為同一時間以利中繼清除。
+   */
+  disappearAt?: number;
 }
 
 /**
@@ -31,19 +37,29 @@ export function wrapMessage(
   opts: WrapOptions = {},
 ): NostrEvent {
   const nowSec = opts.now ?? Math.floor(Date.now() / 1000);
-  const expiration = opts.expiration ?? nowSec + DEFAULT_TTL_SECONDS;
+  const outerExpiration = opts.expiration ?? opts.disappearAt ?? nowSec + DEFAULT_TTL_SECONDS;
+  const rumorTags: string[][] =
+    opts.disappearAt !== undefined ? [["expiration", String(opts.disappearAt)]] : [];
   return sealAndWrap(
-    { kind: KIND_CHAT, created_at: nowSec, tags: [], content },
+    { kind: KIND_CHAT, created_at: nowSec, tags: rumorTags, content },
     senderSk,
     recipientPk,
     {
       kind: KIND.OFFLINE_DM_GIFT_WRAP,
       tags: [
         ["p", recipientPk],
-        ["expiration", String(expiration)],
+        ["expiration", String(outerExpiration)],
       ],
     },
   );
+}
+
+/** 讀出限時訊息 rumor 內的到期時間（NIP-40 `expiration`，unix 秒）；無則回傳 undefined。 */
+export function messageExpiry(rumor: Rumor): number | undefined {
+  const raw = rumor.tags.find((t) => t[0] === "expiration")?.[1];
+  if (raw === undefined) return undefined;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : undefined;
 }
 
 /** 解開離線留言並驗證寄件人真實性。 */

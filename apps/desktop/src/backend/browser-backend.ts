@@ -6,6 +6,7 @@ import {
   generateSecretKey,
   getPublicKey,
   KIND,
+  messageExpiry,
   NowPlayingStore,
   PresenceTracker,
   unwrapMessage,
@@ -181,7 +182,14 @@ export class BrowserChatBackend implements ChatBackend {
     this.seenMsg.add(event.id);
     try {
       const { sender, rumor } = unwrapMessage(event, this.selfSk);
-      const msg: ChatMessage = { id: event.id, outgoing: false, text: rumor.content, at: Date.now() };
+      const expirySec = messageExpiry(rumor);
+      const msg: ChatMessage = {
+        id: event.id,
+        outgoing: false,
+        text: rumor.content,
+        at: Date.now(),
+        ...(expirySec !== undefined ? { expiresAt: expirySec * 1000 } : {}),
+      };
       this.handlers?.onMessage(sender, msg);
     } catch {
       /* 無法解開則忽略 */
@@ -251,10 +259,12 @@ export class BrowserChatBackend implements ChatBackend {
     this.client.publish(createMusicStatus(this.selfSk, text));
   }
 
-  sendMessage(to: PubkeyHex, text: string): void {
-    const evt = wrapMessage(text, this.selfSk, to);
+  sendMessage(to: PubkeyHex, text: string, ttlSeconds?: number): void {
+    const disappearAt = ttlSeconds ? nowSec() + ttlSeconds : undefined;
+    const evt = wrapMessage(text, this.selfSk, to, disappearAt !== undefined ? { disappearAt } : {});
     this.client.publish(evt);
-    this.handlers?.onMessage(to, { id: evt.id, outgoing: true, text, at: Date.now() });
+    const extra = disappearAt !== undefined ? { expiresAt: disappearAt * 1000 } : {};
+    this.handlers?.onMessage(to, { id: evt.id, outgoing: true, text, at: Date.now(), ...extra });
   }
 
   sendReaction(_to: PubkeyHex, messageId: string, emoji: string): void {

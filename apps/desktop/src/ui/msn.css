@@ -169,6 +169,9 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
 .line:hover .unsend__btn { opacity: 1; }
 .unsend__btn:hover { color: var(--accent); }
 .line.unsent .text { color: var(--muted); font-style: italic; }
+.line.expired .text { color: var(--muted); font-style: italic; }
+.timer-badge { margin-left: 4px; font-size: 10px; opacity: .7; }
+.tool--timer { font-size: 11px; }
 .line .text code { background: var(--code-bg); padding: 1px 4px; border-radius: 3px; font-family: "Consolas", monospace; font-size: 12px; }
 .line .text a { color: var(--accent); }
 .line.sys { color: var(--muted); font-size: 11px; text-align: center; }

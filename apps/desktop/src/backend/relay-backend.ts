@@ -7,6 +7,7 @@ import {
   generateSecretKey,
   getPublicKey,
   KIND,
+  messageExpiry,
   npubDecode,
   npubEncode,
   nsecDecode,
@@ -132,7 +133,13 @@ export class RelayChatBackend implements ChatBackend {
     for (const c of this.contacts) {
       for (const m of this.storage.loadMessages(c.pubkey)) {
         this.seenMsg.add(m.id);
-        handlers.onMessage(c.pubkey, { id: m.id, outgoing: m.outgoing, text: m.text, at: m.at });
+        handlers.onMessage(c.pubkey, {
+          id: m.id,
+          outgoing: m.outgoing,
+          text: m.text,
+          at: m.at,
+          ...(m.expiresAt !== undefined ? { expiresAt: m.expiresAt } : {}),
+        });
       }
     }
     // 回放持久化的回應（並標記已見，避免 relay 重送時重複處理）
@@ -211,9 +218,12 @@ export class RelayChatBackend implements ChatBackend {
       return;
     }
 
-    const message = { id: event.id, contact: sender, outgoing: false, text: rumor.content, at: Date.now() };
+    const expirySec = messageExpiry(rumor);
+    const expiresAt = expirySec !== undefined ? expirySec * 1000 : undefined;
+    const extra = expiresAt !== undefined ? { expiresAt } : {};
+    const message = { id: event.id, contact: sender, outgoing: false, text: rumor.content, at: Date.now(), ...extra };
     this.storage.appendMessage(message);
-    this.handlers?.onMessage(sender, { id: message.id, outgoing: false, text: rumor.content, at: message.at });
+    this.handlers?.onMessage(sender, { id: message.id, outgoing: false, text: rumor.content, at: message.at, ...extra });
   }
 
   private ensureContact(pubkey: PubkeyHex): void {
@@ -262,13 +272,15 @@ export class RelayChatBackend implements ChatBackend {
     this.client.publish(createMusicStatus(this.sk, text));
   }
 
-  sendMessage(to: PubkeyHex, text: string): void {
-    const evt = wrapMessage(text, this.sk, to);
+  sendMessage(to: PubkeyHex, text: string, ttlSeconds?: number): void {
+    const disappearAt = ttlSeconds ? nowSec() + ttlSeconds : undefined;
+    const evt = wrapMessage(text, this.sk, to, disappearAt !== undefined ? { disappearAt } : {});
     this.client.publish(evt);
-    const message = { id: evt.id, contact: to, outgoing: true, text, at: Date.now() };
+    const extra = disappearAt !== undefined ? { expiresAt: disappearAt * 1000 } : {};
+    const message = { id: evt.id, contact: to, outgoing: true, text, at: Date.now(), ...extra };
     this.seenMsg.add(evt.id);
     this.storage.appendMessage(message);
-    this.handlers?.onMessage(to, { id: evt.id, outgoing: true, text, at: message.at });
+    this.handlers?.onMessage(to, { id: evt.id, outgoing: true, text, at: message.at, ...extra });
   }
 
   sendReaction(to: PubkeyHex, messageId: string, emoji: string): void {

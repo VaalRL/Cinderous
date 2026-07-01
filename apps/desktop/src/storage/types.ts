@@ -17,6 +17,8 @@ export interface StoredMessage {
   outgoing: boolean;
   text: string;
   at: number;
+  /** 限時訊息到期時間（毫秒）；一般訊息省略。 */
+  expiresAt?: number;
 }
 
 export interface StoredReaction {

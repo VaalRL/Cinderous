@@ -73,6 +73,29 @@ describe("RelayChatBackend（真實後端 + 持久化）", () => {
     b.stop();
   });
 
+  it("限時訊息：帶 ttl 送出，兩端訊息帶 expiresAt 且持久化", () => {
+    const net = createInMemoryRelayNetwork();
+    const storeA = new MemoryStorage();
+    const a = new RelayChatBackend(storeA, (h) => net.connect("a", h), "Alice");
+    const b = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("b", h), "Bob");
+    const bIncoming: ChatMessage[] = [];
+    a.start(noop);
+    b.start({ ...noop, onMessage: (_pk, m) => bIncoming.push(m) });
+
+    a.addContact(b.selfNpub);
+    const before = Date.now();
+    a.sendMessage(b.self.pubkey, "閱後即焚", 60);
+
+    // Bob 收到並帶到期時間（約 60 秒後）
+    const got = bIncoming.find((m) => m.text === "閱後即焚");
+    expect(got?.expiresAt).toBeDefined();
+    expect(got!.expiresAt!).toBeGreaterThanOrEqual(before + 60_000 - 2_000);
+    // Alice 端持久化亦帶 expiresAt
+    expect(storeA.loadMessages(b.self.pubkey)[0]?.expiresAt).toBeDefined();
+    a.stop();
+    b.stop();
+  });
+
   it("身分持久化：以同一儲存重建後端 → npub 不變、歷史保留", () => {
     const net = createInMemoryRelayNetwork();
     const store = new MemoryStorage();

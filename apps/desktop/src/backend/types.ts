@@ -27,6 +27,8 @@ export interface ChatMessage {
   text: string;
   /** 毫秒時間戳。 */
   at: number;
+  /** 限時訊息到期時間（毫秒）；一般訊息省略。 */
+  expiresAt?: number;
 }
 
 export interface ChatBackendEvents {
@@ -53,7 +55,8 @@ export interface ChatBackend {
   start(handlers: ChatBackendEvents): void;
   setStatus(status: Status, message?: string): void;
   setNowPlaying(text: string): void;
-  sendMessage(to: PubkeyHex, text: string): void;
+  /** 送出訊息；`ttlSeconds` 設定時為限時訊息（閱後即焚，NIP-40 短期過期）。 */
+  sendMessage(to: PubkeyHex, text: string, ttlSeconds?: number): void;
   sendTyping(to: PubkeyHex): void;
   sendNudge(to: PubkeyHex): void;
   /** 對某訊息送出 emoji 回應（NIP-25）。 */

@@ -16,7 +16,9 @@ export interface ConversationProps {
   reactions?: Record<string, string[]>;
   /** 已收回（NIP-09）的訊息 id 集合。 */
   unsent?: Set<string>;
-  onSend: (text: string) => void;
+  /** 已到期（限時訊息）的訊息 id 集合。 */
+  expired?: Set<string>;
+  onSend: (text: string, ttlSeconds?: number) => void;
   onTyping: () => void;
   onNudge: () => void;
   /** 對某訊息送出 emoji 回應（未提供則不顯示回應功能）。 */
@@ -31,6 +33,7 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
   const { self, contact, messages } = props;
   const [text, setText] = useState("");
   const [showEmo, setShowEmo] = useState(false);
+  const [ttl, setTtl] = useState(0);
   const logRef = useRef<HTMLDivElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -51,7 +54,7 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
   const send = () => {
     const t = text.trim();
     if (!t) return;
-    props.onSend(t);
+    props.onSend(t, ttl > 0 ? ttl : undefined);
     setText("");
   };
 
@@ -80,6 +83,7 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
               who={m.outgoing ? self.name : contact.name}
               reactions={props.reactions?.[m.id] ?? []}
               unsent={props.unsent?.has(m.id) ?? false}
+              expired={props.expired?.has(m.id) ?? false}
               onReact={props.onReact}
               onUnsend={props.onUnsend}
             />
@@ -98,6 +102,17 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
       <div className="toolbar">
         <button className="tool" title={t("convo_emojiTitle")} onClick={() => setShowEmo((v) => !v)}>🙂</button>
         <button className="tool" title={t("convo_nudgeTitle")} onClick={props.onNudge}>{t("convo_nudge")}</button>
+        <select
+          className="tool tool--timer"
+          title={t("convo_timerTitle")}
+          value={ttl}
+          onChange={(e) => setTtl(Number(e.target.value))}
+        >
+          <option value={0}>⏱ {t("convo_timerOff")}</option>
+          <option value={60}>⏱ {t("convo_timer1m")}</option>
+          <option value={3600}>⏱ {t("convo_timer1h")}</option>
+          <option value={86400}>⏱ {t("convo_timer1d")}</option>
+        </select>
       </div>
       {showEmo && (
         <div className="emopick">
@@ -134,6 +149,7 @@ function MessageLine({
   who,
   reactions,
   unsent,
+  expired,
   onReact,
   onUnsend,
 }: {
@@ -141,6 +157,7 @@ function MessageLine({
   who: string;
   reactions: string[];
   unsent: boolean;
+  expired: boolean;
   onReact?: ((messageId: string, emoji: string) => void) | undefined;
   onUnsend?: ((messageId: string) => void) | undefined;
 }): JSX.Element {
@@ -151,12 +168,13 @@ function MessageLine({
     setPicking(false);
   };
 
-  if (unsent) {
+  if (unsent || expired) {
+    const cls = unsent ? "unsent" : "expired";
     return (
-      <div className={`line ${message.outgoing ? "out" : "in"} unsent`}>
+      <div className={`line ${message.outgoing ? "out" : "in"} ${cls}`}>
         <span className="who">{who}</span>
         <span className="time">{new Date(message.at).toLocaleTimeString()}</span>
-        <span className="text unsent__text">{t("convo_unsent")}</span>
+        <span className={`text ${cls}__text`}>{t(unsent ? "convo_unsent" : "convo_expired")}</span>
       </div>
     );
   }
@@ -165,6 +183,9 @@ function MessageLine({
     <div className={`line ${message.outgoing ? "out" : "in"}`}>
       <span className="who">{who}</span>
       <span className="time">{new Date(message.at).toLocaleTimeString()}</span>
+      {message.expiresAt !== undefined ? (
+        <span className="timer-badge" title={t("convo_timerTitle")}>⏱</span>
+      ) : null}
       {onReact ? (
         <span className="react">
           <button className="react__btn" title={t("convo_react")} onClick={() => setPicking((v) => !v)}>＋</button>

@@ -20,6 +20,7 @@ export function App(): JSX.Element {
   const [nudge, setNudge] = useState<Record<string, number>>({});
   const [reactions, setReactions] = useState<Record<string, string[]>>({});
   const [unsent, setUnsent] = useState<Set<string>>(new Set());
+  const [expired, setExpired] = useState<Set<string>>(new Set());
   const [open, setOpen] = useState<string[]>([]);
   const lastTyping = useRef<Record<string, number>>({});
 
@@ -72,6 +73,27 @@ export function App(): JSX.Element {
     });
     return () => backend.stop();
   }, [backend]);
+
+  // 限時訊息：定期掃描到期訊息，到期即標記（UI 顯示「訊息已到期」）
+  useEffect(() => {
+    const tick = () => {
+      const now = Date.now();
+      setExpired((prev) => {
+        let next: Set<string> | null = null;
+        for (const msgs of Object.values(convos)) {
+          for (const m of msgs) {
+            if (m.expiresAt !== undefined && m.expiresAt <= now && !prev.has(m.id)) {
+              (next ??= new Set(prev)).add(m.id);
+            }
+          }
+        }
+        return next ?? prev;
+      });
+    };
+    tick();
+    const timer = setInterval(tick, 1000);
+    return () => clearInterval(timer);
+  }, [convos]);
 
   const signIn = (name: string, relayUrl: string) => {
     let b: ChatBackend;
@@ -129,11 +151,12 @@ export function App(): JSX.Element {
             messages={convos[pk] ?? []}
             reactions={reactions}
             unsent={unsent}
+            expired={expired}
             typing={(typingAt[pk] ?? 0) > Date.now() - TYPING_VISIBLE_MS}
             nudgeSignal={nudge[pk] ?? 0}
             {...reactProps}
             {...unsendProps}
-            onSend={(text) => activeBackend.sendMessage(pk, text)}
+            onSend={(text, ttlSeconds) => activeBackend.sendMessage(pk, text, ttlSeconds)}
             onTyping={() => {
               const now = Date.now();
               if (now - (lastTyping.current[pk] ?? 0) < 1000) return;

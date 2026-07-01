@@ -4,7 +4,7 @@ import { getEventHash } from "./event.js";
 import { generateSecretKey, getPublicKey } from "./keys.js";
 import { encryptDM } from "./nip44.js";
 import { finalizeEvent } from "./sign.js";
-import { unwrapMessage, wrapMessage } from "./giftwrap.js";
+import { messageExpiry, unwrapMessage, wrapMessage } from "./giftwrap.js";
 
 const aliceSk = generateSecretKey();
 const alicePk = getPublicKey(aliceSk);
@@ -36,6 +36,22 @@ describe("NIP-17/59 Gift Wrap 離線私訊", () => {
   it("可自訂過期時間", () => {
     const wrap = wrapMessage("hi", aliceSk, bobPk, { now: 1000, expiration: 1234 });
     expect(wrap.tags.find((t) => t[0] === "expiration")?.[1]).toBe("1234");
+  });
+
+  it("限時訊息：rumor 內帶到期 tag，外層 wrap 過期同時縮短", () => {
+    const now = 1_700_000_000;
+    const disappearAt = now + 60;
+    const wrap = wrapMessage("閱後即焚", aliceSk, bobPk, { now, disappearAt });
+    // 外層 wrap 過期縮短為到期時間（利於中繼清除）
+    expect(Number(wrap.tags.find((t) => t[0] === "expiration")?.[1])).toBe(disappearAt);
+    // 收件端解密後可從 rumor 讀出到期時間
+    const { rumor } = unwrapMessage(wrap, bobSk);
+    expect(messageExpiry(rumor)).toBe(disappearAt);
+  });
+
+  it("一般訊息 rumor 不帶到期 tag（messageExpiry 為 undefined）", () => {
+    const { rumor } = unwrapMessage(wrapMessage("hi", aliceSk, bobPk), bobSk);
+    expect(messageExpiry(rumor)).toBeUndefined();
   });
 
   it("第三者無法解開", () => {
