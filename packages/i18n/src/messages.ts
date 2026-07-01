@@ -40,6 +40,9 @@ export interface Messages {
   convo_composerPlaceholder: string;
   convo_send: string;
   convo_close: string;
+  convo_react: string;
+  convo_unsend: string;
+  convo_unsent: string;
   lang_label: string;
   theme_toggle: string;
 }
@@ -72,6 +75,9 @@ const zhHant: Messages = {
   convo_composerPlaceholder: "輸入訊息…（Enter 送出，Shift+Enter 換行）",
   convo_send: "送出",
   convo_close: "關閉",
+  convo_react: "回應",
+  convo_unsend: "收回",
+  convo_unsent: "訊息已收回",
   lang_label: "語言",
   theme_toggle: "深色 / 淺色模式",
 };
@@ -104,6 +110,9 @@ const en: Messages = {
   convo_composerPlaceholder: "Type a message… (Enter to send, Shift+Enter for newline)",
   convo_send: "Send",
   convo_close: "Close",
+  convo_react: "React",
+  convo_unsend: "Unsend",
+  convo_unsent: "Message unsent",
   lang_label: "Language",
   theme_toggle: "Toggle dark mode",
 };

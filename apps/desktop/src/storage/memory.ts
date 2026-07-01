@@ -12,6 +12,7 @@ export class MemoryStorage implements AppStorage {
   private contacts: StoredContact[] = [];
   private readonly messages = new Map<string, StoredMessage[]>();
   private reactions: StoredReaction[] = [];
+  private readonly deleted = new Set<string>();
 
   loadIdentity(): StoredIdentity | null {
     return this.identity;
@@ -41,5 +42,11 @@ export class MemoryStorage implements AppStorage {
   addReaction(reaction: StoredReaction): void {
     if (this.reactions.some((r) => r.id === reaction.id)) return;
     this.reactions.push(reaction);
+  }
+  markDeleted(messageId: string): void {
+    this.deleted.add(messageId);
+  }
+  loadDeleted(): string[] {
+    return [...this.deleted];
   }
 }

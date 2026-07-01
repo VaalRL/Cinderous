@@ -40,4 +40,8 @@ export interface AppStorage {
   appendMessage(message: StoredMessage): void;
   loadReactions(): StoredReaction[];
   addReaction(reaction: StoredReaction): void;
+  /** 標記某訊息為已收回（NIP-09）。 */
+  markDeleted(messageId: string): void;
+  /** 已收回的訊息 id 集合。 */
+  loadDeleted(): string[];
 }

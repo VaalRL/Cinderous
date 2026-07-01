@@ -262,6 +262,11 @@ export class BrowserChatBackend implements ChatBackend {
     this.handlers?.onReaction?.(messageId, emoji, true);
   }
 
+  unsendMessage(_to: PubkeyHex, messageId: string): void {
+    // 示範模式：本機回顯收回
+    this.handlers?.onUnsend?.(messageId);
+  }
+
   sendTyping(to: PubkeyHex): void {
     this.client.publish(createTyping(this.selfSk, to));
   }

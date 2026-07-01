@@ -2,6 +2,7 @@ import {
   createHeartbeat,
   createMusicStatus,
   createTyping,
+  deletionTarget,
   finalizeEvent,
   generateSecretKey,
   getPublicKey,
@@ -15,6 +16,7 @@ import {
   reactionTarget,
   RelayClient,
   unwrapMessage,
+  wrapDeletion,
   wrapMessage,
   wrapReaction,
   type NostrEvent,
@@ -138,6 +140,10 @@ export class RelayChatBackend implements ChatBackend {
       this.seenMsg.add(r.id);
       handlers.onReaction?.(r.messageId, r.emoji, r.mine);
     }
+    // 回放已收回的訊息
+    for (const id of this.storage.loadDeleted()) {
+      handlers.onUnsend?.(id);
+    }
   }
 
   private resubscribe(): void {
@@ -194,6 +200,14 @@ export class RelayChatBackend implements ChatBackend {
       if (!target) return;
       this.storage.addReaction({ id: event.id, messageId: target, emoji: rumor.content, mine: false });
       this.handlers?.onReaction?.(target, rumor.content, false);
+      return;
+    }
+
+    if (rumor.kind === KIND.DELETE) {
+      const target = deletionTarget(rumor);
+      if (!target) return;
+      this.storage.markDeleted(target);
+      this.handlers?.onUnsend?.(target);
       return;
     }
 
@@ -263,6 +277,14 @@ export class RelayChatBackend implements ChatBackend {
     this.seenMsg.add(evt.id);
     this.storage.addReaction({ id: evt.id, messageId, emoji, mine: true });
     this.handlers?.onReaction?.(messageId, emoji, true);
+  }
+
+  unsendMessage(to: PubkeyHex, messageId: string): void {
+    const evt = wrapDeletion(this.sk, to, messageId);
+    this.client.publish(evt);
+    this.seenMsg.add(evt.id);
+    this.storage.markDeleted(messageId);
+    this.handlers?.onUnsend?.(messageId);
   }
 
   sendTyping(to: PubkeyHex): void {

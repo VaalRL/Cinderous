@@ -40,6 +40,8 @@ export interface ChatBackendEvents {
   onNudge(contact: PubkeyHex): void;
   /** 某訊息收到 emoji 回應（`mine` 表示是否為自己送出）。 */
   onReaction?(messageId: string, emoji: string, mine: boolean): void;
+  /** 某訊息被收回（NIP-09），應顯示為「已收回」。 */
+  onUnsend?(messageId: string): void;
 }
 
 /**
@@ -56,6 +58,8 @@ export interface ChatBackend {
   sendNudge(to: PubkeyHex): void;
   /** 對某訊息送出 emoji 回應（NIP-25）。 */
   sendReaction?(to: PubkeyHex, messageId: string, emoji: string): void;
+  /** 收回（刪除）自己送出的某訊息（NIP-09）。 */
+  unsendMessage?(to: PubkeyHex, messageId: string): void;
   /** 以 NIP-19 `npub` 新增聯絡人（僅真實 relay 後端支援）。 */
   addContact?(npub: string): void;
   /** 自己的 `npub`（供分享/加好友；僅真實 relay 後端提供）。 */

@@ -10,6 +10,7 @@ const K_IDENTITY = "nb.identity";
 const K_CONTACTS = "nb.contacts";
 const K_MSG_PREFIX = "nb.msgs.";
 const K_REACTIONS = "nb.reactions";
+const K_DELETED = "nb.deleted";
 
 function read<T>(key: string, fallback: T): T {
   try {
@@ -65,5 +66,14 @@ export class LocalStorage implements AppStorage {
     if (list.some((r) => r.id === reaction.id)) return;
     list.push(reaction);
     write(K_REACTIONS, list);
+  }
+  markDeleted(messageId: string): void {
+    const list = this.loadDeleted();
+    if (list.includes(messageId)) return;
+    list.push(messageId);
+    write(K_DELETED, list);
+  }
+  loadDeleted(): string[] {
+    return read<string[]>(K_DELETED, []);
   }
 }

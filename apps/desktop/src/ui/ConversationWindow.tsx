@@ -14,11 +14,15 @@ export interface ConversationProps {
   nudgeSignal: number;
   /** messageId → 該訊息的回應 emoji 清單。 */
   reactions?: Record<string, string[]>;
+  /** 已收回（NIP-09）的訊息 id 集合。 */
+  unsent?: Set<string>;
   onSend: (text: string) => void;
   onTyping: () => void;
   onNudge: () => void;
   /** 對某訊息送出 emoji 回應（未提供則不顯示回應功能）。 */
   onReact?: (messageId: string, emoji: string) => void;
+  /** 收回自己送出的某訊息（未提供則不顯示收回功能）。 */
+  onUnsend?: (messageId: string) => void;
   onClose: () => void;
 }
 
@@ -75,7 +79,9 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
               message={m}
               who={m.outgoing ? self.name : contact.name}
               reactions={props.reactions?.[m.id] ?? []}
+              unsent={props.unsent?.has(m.id) ?? false}
               onReact={props.onReact}
+              onUnsend={props.onUnsend}
             />
           ))}
         </div>
@@ -127,25 +133,41 @@ function MessageLine({
   message,
   who,
   reactions,
+  unsent,
   onReact,
+  onUnsend,
 }: {
   message: ChatMessage;
   who: string;
   reactions: string[];
+  unsent: boolean;
   onReact?: ((messageId: string, emoji: string) => void) | undefined;
+  onUnsend?: ((messageId: string) => void) | undefined;
 }): JSX.Element {
+  const { t } = useI18n();
   const [picking, setPicking] = useState(false);
   const react = (emoji: string) => {
     onReact?.(message.id, emoji);
     setPicking(false);
   };
+
+  if (unsent) {
+    return (
+      <div className={`line ${message.outgoing ? "out" : "in"} unsent`}>
+        <span className="who">{who}</span>
+        <span className="time">{new Date(message.at).toLocaleTimeString()}</span>
+        <span className="text unsent__text">{t("convo_unsent")}</span>
+      </div>
+    );
+  }
+
   return (
     <div className={`line ${message.outgoing ? "out" : "in"}`}>
       <span className="who">{who}</span>
       <span className="time">{new Date(message.at).toLocaleTimeString()}</span>
       {onReact ? (
         <span className="react">
-          <button className="react__btn" title="回應" onClick={() => setPicking((v) => !v)}>＋</button>
+          <button className="react__btn" title={t("convo_react")} onClick={() => setPicking((v) => !v)}>＋</button>
           {picking ? (
             <span className="react__pick">
               {REACTION_EMOJIS.map((e) => (
@@ -154,6 +176,15 @@ function MessageLine({
             </span>
           ) : null}
         </span>
+      ) : null}
+      {message.outgoing && onUnsend ? (
+        <button
+          className="unsend__btn"
+          title={t("convo_unsend")}
+          onClick={() => onUnsend(message.id)}
+        >
+          {t("convo_unsend")}
+        </button>
       ) : null}
       <span className="text">{renderMarkdown(emoticonize(message.text))}</span>
       {reactions.length > 0 ? (

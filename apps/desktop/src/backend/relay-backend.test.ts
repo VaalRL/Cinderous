@@ -52,6 +52,27 @@ describe("RelayChatBackend（真實後端 + 持久化）", () => {
     b.stop();
   });
 
+  it("收回：Alice 收回訊息，Bob 收到 onUnsend 並持久化", () => {
+    const net = createInMemoryRelayNetwork();
+    const storeB = new MemoryStorage();
+    const a = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("a", h), "Alice");
+    const b = new RelayChatBackend(storeB, (h) => net.connect("b", h), "Bob");
+    const bIncoming: ChatMessage[] = [];
+    const bUnsent: string[] = [];
+    a.start(noop);
+    b.start({ ...noop, onMessage: (_pk, m) => bIncoming.push(m), onUnsend: (mid) => bUnsent.push(mid) });
+
+    a.addContact(b.selfNpub);
+    a.sendMessage(b.self.pubkey, "誤傳");
+    const mid = bIncoming[0]!.id;
+    a.unsendMessage(b.self.pubkey, mid);
+
+    expect(bUnsent).toContain(mid);
+    expect(storeB.loadDeleted()).toContain(mid);
+    a.stop();
+    b.stop();
+  });
+
   it("身分持久化：以同一儲存重建後端 → npub 不變、歷史保留", () => {
     const net = createInMemoryRelayNetwork();
     const store = new MemoryStorage();

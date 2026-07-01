@@ -72,7 +72,7 @@
 | 震動（Nudge） | — | — | WebRTC Data Channel；P2P 不可用時降級走中繼 |
 | 檔案傳輸 | — | — | WebRTC Data Channel，不受 JSON 大小限制；對稱 NAT 經 TURN 保底 |
 | 訊息回應（Reaction，✅ M6） | 1059（內含 kind 7） | 依訊息 | NIP-25 emoji 回應，`e` tag 指向目標訊息，Gift Wrap 隱藏雙方（已實作，見 ADR-0011） |
-| 收回訊息（Unsend，規劃 M6） | 1059（內含 kind 5） | 短期 | NIP-09 刪除，`e` tag 指向目標；收件端移除該訊息 |
+| 收回訊息（Unsend，✅ M6） | 1059（內含 kind 5） | 短期 | NIP-09 刪除，`e` tag 指向目標；收件端顯示「訊息已收回」（已實作，見 ADR-0012） |
 | 限時訊息（Disappearing，規劃 M6） | 1059（+較短 NIP-40） | D1 至過期 | 送訊即帶較短過期；客戶端讀後或到期即刪 |
 | 語音訊息／貼圖（規劃 M7） | WebRTC / 1059 | P2P 優先 | 錄音與媒體複用檔案分塊傳輸；貼圖以 `pack/id` 參照客戶端渲染 |
 | 通話信令（規劃 M8） | 21000-21999（NIP-59 包封） | 否（Ephemeral） | 通話 offer/answer/candidate/hangup，複用 SDP 信令；媒體走 WebRTC track |

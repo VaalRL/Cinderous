@@ -26,3 +26,4 @@
 | [0009](./0009-multidevice-sync.md) | 多設備同步：QR 配對、競速與收斂語意（M4） | 已接受 |
 | [0010](./0010-line-inspired-feature-roadmap.md) | 借鏡 LINE 的功能路線圖與範疇界線（M6–M9） | 已接受 |
 | [0011](./0011-message-reactions.md) | 訊息回應（Reactions，M6） | 已接受 |
+| [0012](./0012-message-unsend.md) | 收回訊息（Unsend，M6） | 已接受 |
