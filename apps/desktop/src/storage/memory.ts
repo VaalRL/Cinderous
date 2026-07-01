@@ -13,6 +13,7 @@ export class MemoryStorage implements AppStorage {
   private readonly messages = new Map<string, StoredMessage[]>();
   private reactions: StoredReaction[] = [];
   private readonly deleted = new Set<string>();
+  private blocked: StoredContact[] = [];
 
   loadIdentity(): StoredIdentity | null {
     return this.identity;
@@ -26,6 +27,20 @@ export class MemoryStorage implements AppStorage {
   addContact(contact: StoredContact): void {
     if (this.contacts.some((c) => c.pubkey === contact.pubkey)) return;
     this.contacts.push(contact);
+  }
+  removeContact(pubkey: string): void {
+    this.contacts = this.contacts.filter((c) => c.pubkey !== pubkey);
+    this.messages.delete(pubkey);
+  }
+  blockContact(contact: StoredContact): void {
+    this.removeContact(contact.pubkey);
+    if (!this.blocked.some((b) => b.pubkey === contact.pubkey)) this.blocked.push(contact);
+  }
+  unblockContact(pubkey: string): void {
+    this.blocked = this.blocked.filter((b) => b.pubkey !== pubkey);
+  }
+  loadBlocked(): StoredContact[] {
+    return [...this.blocked];
   }
   loadMessages(contactPubkey: string): StoredMessage[] {
     return [...(this.messages.get(contactPubkey) ?? [])];

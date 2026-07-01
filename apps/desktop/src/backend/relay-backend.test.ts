@@ -96,6 +96,47 @@ describe("RelayChatBackend（真實後端 + 持久化）", () => {
     b.stop();
   });
 
+  it("封鎖：被封鎖者的訊息不再送達，且進入封鎖名單", () => {
+    const net = createInMemoryRelayNetwork();
+    const storeA = new MemoryStorage();
+    const a = new RelayChatBackend(storeA, (h) => net.connect("a", h), "Alice");
+    const b = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("b", h), "Bob");
+    const aIncoming: ChatMessage[] = [];
+    const aBlocked: string[] = [];
+    a.start({ ...noop, onMessage: (_pk, m) => aIncoming.push(m), onBlocked: (list) => (aBlocked.length = 0, aBlocked.push(...list.map((x) => x.pubkey))) });
+    b.start(noop);
+
+    a.blockContact(b.self.pubkey);
+    b.sendMessage(a.self.pubkey, "你看得到嗎");
+
+    expect(aIncoming.find((m) => m.text === "你看得到嗎")).toBeUndefined();
+    expect(aBlocked).toContain(b.self.pubkey);
+    expect(storeA.loadContacts().some((c) => c.pubkey === b.self.pubkey)).toBe(false);
+
+    a.unblockContact(b.self.pubkey);
+    expect(aBlocked).not.toContain(b.self.pubkey);
+    a.stop();
+    b.stop();
+  });
+
+  it("刪除聯絡人：清單移除、對話清空", () => {
+    const net = createInMemoryRelayNetwork();
+    const storeA = new MemoryStorage();
+    const a = new RelayChatBackend(storeA, (h) => net.connect("a", h), "Alice");
+    const b = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("b", h), "Bob");
+    a.start(noop);
+    b.start(noop);
+    a.addContact(b.selfNpub);
+    a.sendMessage(b.self.pubkey, "hi");
+    expect(storeA.loadMessages(b.self.pubkey).length).toBe(1);
+
+    a.removeContact(b.self.pubkey);
+    expect(storeA.loadContacts().some((c) => c.pubkey === b.self.pubkey)).toBe(false);
+    expect(storeA.loadMessages(b.self.pubkey)).toEqual([]);
+    a.stop();
+    b.stop();
+  });
+
   it("身分持久化：以同一儲存重建後端 → npub 不變、歷史保留", () => {
     const net = createInMemoryRelayNetwork();
     const store = new MemoryStorage();

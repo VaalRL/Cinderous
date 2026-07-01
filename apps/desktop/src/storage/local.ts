@@ -11,6 +11,7 @@ const K_CONTACTS = "nb.contacts";
 const K_MSG_PREFIX = "nb.msgs.";
 const K_REACTIONS = "nb.reactions";
 const K_DELETED = "nb.deleted";
+const K_BLOCKED = "nb.blocked";
 
 function read<T>(key: string, fallback: T): T {
   try {
@@ -48,6 +49,27 @@ export class LocalStorage implements AppStorage {
     if (contacts.some((c) => c.pubkey === contact.pubkey)) return;
     contacts.push(contact);
     write(K_CONTACTS, contacts);
+  }
+  removeContact(pubkey: string): void {
+    write(K_CONTACTS, this.loadContacts().filter((c) => c.pubkey !== pubkey));
+    try {
+      localStorage.removeItem(K_MSG_PREFIX + pubkey);
+    } catch {
+      /* 忽略 */
+    }
+  }
+  blockContact(contact: StoredContact): void {
+    this.removeContact(contact.pubkey);
+    const blocked = this.loadBlocked();
+    if (blocked.some((b) => b.pubkey === contact.pubkey)) return;
+    blocked.push(contact);
+    write(K_BLOCKED, blocked);
+  }
+  unblockContact(pubkey: string): void {
+    write(K_BLOCKED, this.loadBlocked().filter((b) => b.pubkey !== pubkey));
+  }
+  loadBlocked(): StoredContact[] {
+    return read<StoredContact[]>(K_BLOCKED, []);
   }
   loadMessages(contactPubkey: string): StoredMessage[] {
     return read<StoredMessage[]>(K_MSG_PREFIX + contactPubkey, []);

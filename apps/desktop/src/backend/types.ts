@@ -20,6 +20,12 @@ export interface Self {
   statusMessage: string;
 }
 
+/** 已封鎖的身分（供設定/聯絡人視窗顯示與解除封鎖）。 */
+export interface BlockedContact {
+  pubkey: PubkeyHex;
+  name: string;
+}
+
 export interface ChatMessage {
   id: string;
   /** 是否為自己送出。 */
@@ -44,6 +50,8 @@ export interface ChatBackendEvents {
   onReaction?(messageId: string, emoji: string, mine: boolean): void;
   /** 某訊息被收回（NIP-09），應顯示為「已收回」。 */
   onUnsend?(messageId: string): void;
+  /** 封鎖名單有更新。 */
+  onBlocked?(blocked: BlockedContact[]): void;
 }
 
 /**
@@ -65,6 +73,12 @@ export interface ChatBackend {
   unsendMessage?(to: PubkeyHex, messageId: string): void;
   /** 以 NIP-19 `npub` 新增聯絡人（僅真實 relay 後端支援）。 */
   addContact?(npub: string): void;
+  /** 移除聯絡人並清除對話。 */
+  removeContact?(pubkey: PubkeyHex): void;
+  /** 封鎖某聯絡人（移出清單、忽略其後續訊息）。 */
+  blockContact?(pubkey: PubkeyHex): void;
+  /** 解除封鎖。 */
+  unblockContact?(pubkey: PubkeyHex): void;
   /** 自己的 `npub`（供分享/加好友；僅真實 relay 後端提供）。 */
   readonly selfNpub?: string;
   stop(): void;

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { BrowserChatBackend } from "./backend/browser-backend.js";
 import { RelayChatBackend, webSocketConnector } from "./backend/relay-backend.js";
-import type { ChatBackend, ChatMessage, Contact, Self, Status } from "./backend/types.js";
+import type { BlockedContact, ChatBackend, ChatMessage, Contact, Self, Status } from "./backend/types.js";
 import { LocalStorage } from "./storage/local.js";
 import { ContactListWindow } from "./ui/ContactListWindow.js";
 import { ConversationWindow } from "./ui/ConversationWindow.js";
@@ -21,6 +21,7 @@ export function App(): JSX.Element {
   const [reactions, setReactions] = useState<Record<string, string[]>>({});
   const [unsent, setUnsent] = useState<Set<string>>(new Set());
   const [expired, setExpired] = useState<Set<string>>(new Set());
+  const [blocked, setBlocked] = useState<BlockedContact[]>([]);
   const [open, setOpen] = useState<string[]>([]);
   const lastTyping = useRef<Record<string, number>>({});
 
@@ -70,6 +71,7 @@ export function App(): JSX.Element {
           next.add(messageId);
           return next;
         }),
+      onBlocked: setBlocked,
     });
     return () => backend.stop();
   }, [backend]);
@@ -120,9 +122,36 @@ export function App(): JSX.Element {
   };
   const openChat = (pk: string) => setOpen((prev) => (prev.includes(pk) ? prev : [...prev, pk]));
 
+  // 刪除/封鎖後：關閉其對話視窗並清掉本地對話快取
+  const forget = (pk: string) => {
+    setOpen((prev) => prev.filter((x) => x !== pk));
+    setConvos((prev) => {
+      if (!(pk in prev)) return prev;
+      const next = { ...prev };
+      delete next[pk];
+      return next;
+    });
+  };
+  const removeContact = (pk: string) => {
+    activeBackend.removeContact?.(pk);
+    forget(pk);
+  };
+  const blockContact = (pk: string) => {
+    activeBackend.blockContact?.(pk);
+    forget(pk);
+  };
+
   const addContactProps = activeBackend.addContact
     ? { onAddContact: activeBackend.addContact.bind(activeBackend), selfNpub: activeBackend.selfNpub ?? "" }
     : {};
+  const manageProps = {
+    ...(activeBackend.removeContact ? { onRemoveContact: removeContact } : {}),
+    ...(activeBackend.blockContact ? { onBlockContact: blockContact } : {}),
+    ...(activeBackend.unblockContact
+      ? { onUnblockContact: (pk: string) => activeBackend.unblockContact!(pk) }
+      : {}),
+    blocked,
+  };
 
   return (
     <div className="desktop">
@@ -133,6 +162,7 @@ export function App(): JSX.Element {
         onStatus={setStatus}
         onStatusMessage={setStatusMessage}
         {...addContactProps}
+        {...manageProps}
       />
       {open.map((pk) => {
         const contact = contacts.find((c) => c.pubkey === pk);

@@ -23,6 +23,12 @@ export interface Messages {
   contact_myId: string;
   contact_addPlaceholder: string;
   contact_add: string;
+  contact_remove: string;
+  contact_block: string;
+  contact_unblock: string;
+  contact_removeConfirm: string;
+  contact_blockConfirm: string;
+  group_blocked: string;
   status_online: string;
   status_away: string;
   status_busy: string;
@@ -64,6 +70,12 @@ const zhHant: Messages = {
   contact_myId: "我的 ID",
   contact_addPlaceholder: "貼上好友的 npub…",
   contact_add: "加好友",
+  contact_remove: "刪除",
+  contact_block: "封鎖",
+  contact_unblock: "解除封鎖",
+  contact_removeConfirm: "確定要刪除 {name} 並清除對話紀錄嗎？",
+  contact_blockConfirm: "確定要封鎖 {name}？將移出清單並忽略其後續訊息。",
+  group_blocked: "已封鎖 ({count})",
   status_online: "線上",
   status_away: "離開",
   status_busy: "忙碌",
@@ -105,6 +117,12 @@ const en: Messages = {
   contact_myId: "My ID",
   contact_addPlaceholder: "Paste a buddy's npub…",
   contact_add: "Add",
+  contact_remove: "Delete",
+  contact_block: "Block",
+  contact_unblock: "Unblock",
+  contact_removeConfirm: "Delete {name} and clear the conversation history?",
+  contact_blockConfirm: "Block {name}? They'll be removed and their future messages ignored.",
+  group_blocked: "Blocked ({count})",
   status_online: "Online",
   status_away: "Away",
   status_busy: "Busy",

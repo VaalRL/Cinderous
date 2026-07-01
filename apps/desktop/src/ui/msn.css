@@ -138,6 +138,12 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
 .contact__msg { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .contact__msg .np { color: #9a6cd4; }
 .contact.offline .contact__name, .contact.offline .avatar { opacity: 0.5; }
+.contact__acts { display: none; gap: 2px; flex: none; }
+.contact:hover .contact__acts { display: inline-flex; }
+.contact__act { border: 1px solid var(--border); background: var(--field); border-radius: 6px; font-size: 11px; line-height: 1; padding: 2px 4px; cursor: pointer; }
+.contact__act:hover { background: var(--hover); }
+.contact.blocked .contact__name { opacity: 0.6; }
+.contact.blocked .contact__act { display: inline-flex; }
 
 .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
 .dot.online { background: #36c46b; box-shadow: 0 0 5px #36c46b; }

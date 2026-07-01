@@ -28,3 +28,4 @@
 | [0011](./0011-message-reactions.md) | 訊息回應（Reactions，M6） | 已接受 |
 | [0012](./0012-message-unsend.md) | 收回訊息（Unsend，M6） | 已接受 |
 | [0013](./0013-disappearing-messages.md) | 限時訊息（Disappearing，M6） | 已接受 |
+| [0014](./0014-contact-management.md) | 聯絡人管理：刪除與封鎖（Phase A3） | 已接受 |

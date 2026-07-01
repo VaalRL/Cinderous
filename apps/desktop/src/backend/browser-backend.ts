@@ -95,6 +95,8 @@ export class BrowserChatBackend implements ChatBackend {
   private readonly music = new NowPlayingStore();
   private readonly statuses = new Map<PubkeyHex, StatusPayload>();
   private readonly roster: Peer[] = [];
+  private readonly blocked: { pubkey: PubkeyHex; name: string }[] = [];
+  private readonly hidden = new Set<PubkeyHex>();
   private readonly defaults = new Map<PubkeyHex, { status: Status; message: string }>();
   private readonly seenMsg = new Set<string>();
   private handlers: ChatBackendEvents | null = null;
@@ -182,6 +184,7 @@ export class BrowserChatBackend implements ChatBackend {
     this.seenMsg.add(event.id);
     try {
       const { sender, rumor } = unwrapMessage(event, this.selfSk);
+      if (this.blocked.some((b) => b.pubkey === sender)) return;
       const expirySec = messageExpiry(rumor);
       const msg: ChatMessage = {
         id: event.id,
@@ -233,7 +236,9 @@ export class BrowserChatBackend implements ChatBackend {
   private emitContacts(): void {
     if (!this.handlers) return;
     const now = Date.now();
-    const contacts: Contact[] = this.roster.map((peer) => {
+    const contacts: Contact[] = this.roster
+      .filter((peer) => !this.hidden.has(peer.pk))
+      .map((peer) => {
       const seen = this.presence.lastSeenAt(peer.pk);
       const online = seen !== undefined && now - seen <= PRESENCE_TIMEOUT_MS;
       const payload = this.statuses.get(peer.pk);
@@ -275,6 +280,33 @@ export class BrowserChatBackend implements ChatBackend {
   unsendMessage(_to: PubkeyHex, messageId: string): void {
     // 示範模式：本機回顯收回
     this.handlers?.onUnsend?.(messageId);
+  }
+
+  removeContact(pubkey: PubkeyHex): void {
+    this.hidden.add(pubkey);
+    this.emitContacts();
+  }
+
+  blockContact(pubkey: PubkeyHex): void {
+    const peer = this.roster.find((p) => p.pk === pubkey);
+    if (peer && !this.blocked.some((b) => b.pubkey === pubkey)) {
+      this.blocked.push({ pubkey, name: peer.name });
+    }
+    this.hidden.add(pubkey);
+    this.emitContacts();
+    this.emitBlocked();
+  }
+
+  unblockContact(pubkey: PubkeyHex): void {
+    const i = this.blocked.findIndex((b) => b.pubkey === pubkey);
+    if (i >= 0) this.blocked.splice(i, 1);
+    this.hidden.delete(pubkey);
+    this.emitContacts();
+    this.emitBlocked();
+  }
+
+  private emitBlocked(): void {
+    this.handlers?.onBlocked?.(this.blocked.map((b) => ({ pubkey: b.pubkey, name: b.name })));
   }
 
   sendTyping(to: PubkeyHex): void {

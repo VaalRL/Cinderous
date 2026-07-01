@@ -38,6 +38,14 @@ export interface AppStorage {
   saveIdentity(identity: StoredIdentity): void;
   loadContacts(): StoredContact[];
   addContact(contact: StoredContact): void;
+  /** 移除聯絡人並清除其對話訊息。 */
+  removeContact(pubkey: string): void;
+  /** 封鎖某身分（會一併移出聯絡人），並記入封鎖名單。 */
+  blockContact(contact: StoredContact): void;
+  /** 解除封鎖（僅移出封鎖名單；如需再次往來須重新加好友）。 */
+  unblockContact(pubkey: string): void;
+  /** 已封鎖的身分清單。 */
+  loadBlocked(): StoredContact[];
   loadMessages(contactPubkey: string): StoredMessage[];
   appendMessage(message: StoredMessage): void;
   loadReactions(): StoredReaction[];

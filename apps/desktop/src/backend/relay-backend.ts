@@ -96,6 +96,7 @@ export class RelayChatBackend implements ChatBackend {
   private readonly statuses = new Map<PubkeyHex, StatusPayload>();
   private readonly seenMsg = new Set<string>();
   private contacts: { pubkey: PubkeyHex; name: string }[];
+  private blocked: { pubkey: PubkeyHex; name: string }[];
   private handlers: ChatBackendEvents | null = null;
   private heartbeatTimer: ReturnType<typeof setInterval> | undefined;
   private renderTimer: ReturnType<typeof setInterval> | undefined;
@@ -119,6 +120,7 @@ export class RelayChatBackend implements ChatBackend {
     this.self = { pubkey, name: identity.name, status: "online", statusMessage: "" };
     this.selfNpub = npubEncode(pubkey);
     this.contacts = storage.loadContacts();
+    this.blocked = storage.loadBlocked();
     this.client = connector({ onEvent: (_sub, event) => this.onEvent(event) });
   }
 
@@ -151,6 +153,7 @@ export class RelayChatBackend implements ChatBackend {
     for (const id of this.storage.loadDeleted()) {
       handlers.onUnsend?.(id);
     }
+    this.emitBlocked();
   }
 
   private resubscribe(): void {
@@ -200,6 +203,7 @@ export class RelayChatBackend implements ChatBackend {
       return;
     }
     const { sender, rumor } = opened;
+    if (this.isBlocked(sender)) return;
     this.ensureContact(sender);
 
     if (rumor.kind === KIND.REACTION) {
@@ -226,7 +230,12 @@ export class RelayChatBackend implements ChatBackend {
     this.handlers?.onMessage(sender, { id: message.id, outgoing: false, text: rumor.content, at: message.at, ...extra });
   }
 
+  private isBlocked(pubkey: PubkeyHex): boolean {
+    return this.blocked.some((b) => b.pubkey === pubkey);
+  }
+
   private ensureContact(pubkey: PubkeyHex): void {
+    if (this.isBlocked(pubkey)) return;
     if (this.contacts.some((c) => c.pubkey === pubkey)) return;
     const contact = { pubkey, name: shortNpub(npubEncode(pubkey)) };
     this.storage.addContact(contact);
@@ -237,11 +246,39 @@ export class RelayChatBackend implements ChatBackend {
 
   addContact(npub: string): void {
     const pubkey = npubDecode(npub.trim());
-    if (this.contacts.some((c) => c.pubkey === pubkey)) return;
+    if (this.isBlocked(pubkey) || this.contacts.some((c) => c.pubkey === pubkey)) return;
     this.storage.addContact({ pubkey, name: shortNpub(npub.trim()) });
     this.contacts = this.storage.loadContacts();
     this.resubscribe();
     this.emitContacts();
+  }
+
+  removeContact(pubkey: PubkeyHex): void {
+    this.storage.removeContact(pubkey);
+    this.contacts = this.storage.loadContacts();
+    this.resubscribe();
+    this.emitContacts();
+  }
+
+  blockContact(pubkey: PubkeyHex): void {
+    const existing = this.contacts.find((c) => c.pubkey === pubkey);
+    const name = existing?.name ?? shortNpub(npubEncode(pubkey));
+    this.storage.blockContact({ pubkey, name });
+    this.blocked = this.storage.loadBlocked();
+    this.contacts = this.storage.loadContacts();
+    this.resubscribe();
+    this.emitContacts();
+    this.emitBlocked();
+  }
+
+  unblockContact(pubkey: PubkeyHex): void {
+    this.storage.unblockContact(pubkey);
+    this.blocked = this.storage.loadBlocked();
+    this.emitBlocked();
+  }
+
+  private emitBlocked(): void {
+    this.handlers?.onBlocked?.(this.blocked.map((b) => ({ pubkey: b.pubkey, name: b.name })));
   }
 
   private emitContacts(): void {

@@ -26,4 +26,23 @@ describe("MemoryStorage", () => {
     expect(s.loadMessages("aa").map((m) => m.id)).toEqual(["m1", "m2"]);
     expect(s.loadMessages("bb").map((m) => m.id)).toEqual(["m3"]);
   });
+
+  it("刪除聯絡人會一併清除其對話", () => {
+    const s = new MemoryStorage();
+    s.addContact({ pubkey: "aa", name: "A" });
+    s.appendMessage({ id: "m1", contact: "aa", outgoing: true, text: "hi", at: 1 });
+    s.removeContact("aa");
+    expect(s.loadContacts()).toEqual([]);
+    expect(s.loadMessages("aa")).toEqual([]);
+  });
+
+  it("封鎖：移出聯絡人、記入封鎖名單、可解除", () => {
+    const s = new MemoryStorage();
+    s.addContact({ pubkey: "aa", name: "A" });
+    s.blockContact({ pubkey: "aa", name: "A" });
+    expect(s.loadContacts()).toEqual([]);
+    expect(s.loadBlocked().map((b) => b.pubkey)).toEqual(["aa"]);
+    s.unblockContact("aa");
+    expect(s.loadBlocked()).toEqual([]);
+  });
 });

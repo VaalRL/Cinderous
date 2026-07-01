@@ -1,7 +1,7 @@
 import type { MessageKey } from "@nostr-buddy/i18n";
 import { useState } from "react";
 import { useI18n } from "../i18n.js";
-import type { Contact, Self, Status } from "../backend/types.js";
+import type { BlockedContact, Contact, Self, Status } from "../backend/types.js";
 import { TitleControls } from "./TitleControls.js";
 import { avatarColor, initial } from "./util.js";
 
@@ -22,6 +22,14 @@ export interface ContactListProps {
   selfNpub?: string;
   /** 以 npub 加好友（真實 relay 模式才有）。 */
   onAddContact?: (npub: string) => void;
+  /** 刪除聯絡人並清除對話。 */
+  onRemoveContact?: (pubkey: string) => void;
+  /** 封鎖聯絡人。 */
+  onBlockContact?: (pubkey: string) => void;
+  /** 解除封鎖。 */
+  onUnblockContact?: (pubkey: string) => void;
+  /** 已封鎖名單。 */
+  blocked?: BlockedContact[];
 }
 
 export function ContactListWindow(props: ContactListProps): JSX.Element {
@@ -77,12 +85,44 @@ export function ContactListWindow(props: ContactListProps): JSX.Element {
       <div className="roster">
         <div className="group">{t("group_online", { count: online.length })}</div>
         {online.map((c) => (
-          <ContactRow key={c.pubkey} contact={c} onOpen={props.onOpen} hint={t("contact_openHint")} />
+          <ContactRow
+            key={c.pubkey}
+            contact={c}
+            onOpen={props.onOpen}
+            hint={t("contact_openHint")}
+            {...(props.onRemoveContact ? { onRemove: props.onRemoveContact } : {})}
+            {...(props.onBlockContact ? { onBlock: props.onBlockContact } : {})}
+          />
         ))}
         <div className="group">{t("group_offline", { count: offline.length })}</div>
         {offline.map((c) => (
-          <ContactRow key={c.pubkey} contact={c} onOpen={props.onOpen} hint={t("contact_openHint")} />
+          <ContactRow
+            key={c.pubkey}
+            contact={c}
+            onOpen={props.onOpen}
+            hint={t("contact_openHint")}
+            {...(props.onRemoveContact ? { onRemove: props.onRemoveContact } : {})}
+            {...(props.onBlockContact ? { onBlock: props.onBlockContact } : {})}
+          />
         ))}
+        {props.blocked && props.blocked.length > 0 ? (
+          <>
+            <div className="group">{t("group_blocked", { count: props.blocked.length })}</div>
+            {props.blocked.map((b) => (
+              <div className="contact blocked" key={b.pubkey}>
+                <div className="avatar sm" style={{ background: avatarColor(b.pubkey) }}>{initial(b.name)}</div>
+                <div className="contact__info">
+                  <div className="contact__name">{b.name}</div>
+                </div>
+                {props.onUnblockContact ? (
+                  <button className="contact__act" onClick={() => props.onUnblockContact?.(b.pubkey)}>
+                    {t("contact_unblock")}
+                  </button>
+                ) : null}
+              </div>
+            ))}
+          </>
+        ) : null}
       </div>
     </div>
   );
@@ -135,14 +175,25 @@ function ContactRow({
   contact,
   onOpen,
   hint,
+  onRemove,
+  onBlock,
 }: {
   contact: Contact;
   onOpen: (pk: string) => void;
   hint: string;
+  onRemove?: ((pubkey: string) => void) | undefined;
+  onBlock?: ((pubkey: string) => void) | undefined;
 }): JSX.Element {
+  const { t } = useI18n();
   const secondary = contact.nowPlaying
     ? <span className="np">♪ {contact.nowPlaying}</span>
     : contact.statusMessage;
+  const remove = () => {
+    if (window.confirm(t("contact_removeConfirm", { name: contact.name }))) onRemove?.(contact.pubkey);
+  };
+  const block = () => {
+    if (window.confirm(t("contact_blockConfirm", { name: contact.name }))) onBlock?.(contact.pubkey);
+  };
   return (
     <div
       className={`contact ${contact.status === "offline" ? "offline" : ""}`}
@@ -154,6 +205,14 @@ function ContactRow({
         <div className="contact__name">{contact.name}</div>
         <div className="contact__msg">{secondary}</div>
       </div>
+      <span className="contact__acts">
+        {onBlock ? (
+          <button className="contact__act" title={t("contact_block")} onClick={block}>🚫</button>
+        ) : null}
+        {onRemove ? (
+          <button className="contact__act" title={t("contact_remove")} onClick={remove}>🗑</button>
+        ) : null}
+      </span>
       <span className={`dot ${contact.status}`} />
     </div>
   );
