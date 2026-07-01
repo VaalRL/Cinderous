@@ -30,6 +30,12 @@ export interface ContactListProps {
   onUnblockContact?: (pubkey: string) => void;
   /** 已封鎖名單。 */
   blocked?: BlockedContact[];
+  /** 開啟設定面板。 */
+  onOpenSettings?: () => void;
+  /** 設定自己的音樂狀態（分享正在聽的音樂）。 */
+  onNowPlaying?: (text: string) => void;
+  /** 每位聯絡人的未讀訊息數。 */
+  unread?: Record<string, number>;
 }
 
 export function ContactListWindow(props: ContactListProps): JSX.Element {
@@ -43,6 +49,17 @@ export function ContactListWindow(props: ContactListProps): JSX.Element {
       <div className="win__title">
         <span>{t("appName")}</span>
         <span className="spacer" />
+        {props.onOpenSettings ? (
+          <button
+            type="button"
+            className="themebtn"
+            aria-label={t("settings_open")}
+            title={t("settings_open")}
+            onClick={props.onOpenSettings}
+          >
+            ⚙️
+          </button>
+        ) : null}
         <TitleControls />
       </div>
 
@@ -69,6 +86,19 @@ export function ContactListWindow(props: ContactListProps): JSX.Element {
               onChange={(e) => props.onStatusMessage(e.target.value)}
             />
           </div>
+          {props.onNowPlaying ? (
+            <div className="me__np">
+              <span className="me__np-ic">♪</span>
+              <input
+                aria-label={t("nowPlaying_placeholder")}
+                placeholder={t("nowPlaying_placeholder")}
+                onBlur={(e) => props.onNowPlaying?.(e.target.value.trim())}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                }}
+              />
+            </div>
+          ) : null}
         </div>
       </div>
 
@@ -90,6 +120,7 @@ export function ContactListWindow(props: ContactListProps): JSX.Element {
             contact={c}
             onOpen={props.onOpen}
             hint={t("contact_openHint")}
+            unread={props.unread?.[c.pubkey] ?? 0}
             {...(props.onRemoveContact ? { onRemove: props.onRemoveContact } : {})}
             {...(props.onBlockContact ? { onBlock: props.onBlockContact } : {})}
           />
@@ -101,6 +132,7 @@ export function ContactListWindow(props: ContactListProps): JSX.Element {
             contact={c}
             onOpen={props.onOpen}
             hint={t("contact_openHint")}
+            unread={props.unread?.[c.pubkey] ?? 0}
             {...(props.onRemoveContact ? { onRemove: props.onRemoveContact } : {})}
             {...(props.onBlockContact ? { onBlock: props.onBlockContact } : {})}
           />
@@ -175,12 +207,14 @@ function ContactRow({
   contact,
   onOpen,
   hint,
+  unread,
   onRemove,
   onBlock,
 }: {
   contact: Contact;
   onOpen: (pk: string) => void;
   hint: string;
+  unread: number;
   onRemove?: ((pubkey: string) => void) | undefined;
   onBlock?: ((pubkey: string) => void) | undefined;
 }): JSX.Element {
@@ -205,6 +239,9 @@ function ContactRow({
         <div className="contact__name">{contact.name}</div>
         <div className="contact__msg">{secondary}</div>
       </div>
+      {unread > 0 ? (
+        <span className="unread-badge" title={t("unread_title", { count: unread })}>{unread}</span>
+      ) : null}
       <span className="contact__acts">
         {onBlock ? (
           <button className="contact__act" title={t("contact_block")} onClick={block}>🚫</button>

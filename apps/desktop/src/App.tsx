@@ -5,11 +5,13 @@ import type { BlockedContact, ChatBackend, ChatMessage, Contact, Self, Status } 
 import { LocalStorage } from "./storage/local.js";
 import { ContactListWindow } from "./ui/ContactListWindow.js";
 import { ConversationWindow } from "./ui/ConversationWindow.js";
+import { SettingsPanel } from "./ui/SettingsPanel.js";
 import { SignIn } from "./ui/SignIn.js";
 import "./ui/msn.css";
 
 const TYPING_VISIBLE_MS = 6_000;
 const RELAY_URL_KEY = "nb.relayUrl";
+const NOTIFY_KEY = "nb.notify";
 
 export function App(): JSX.Element {
   const [backend, setBackend] = useState<ChatBackend | null>(null);
@@ -22,8 +24,19 @@ export function App(): JSX.Element {
   const [unsent, setUnsent] = useState<Set<string>>(new Set());
   const [expired, setExpired] = useState<Set<string>>(new Set());
   const [blocked, setBlocked] = useState<BlockedContact[]>([]);
+  const [unread, setUnread] = useState<Record<string, number>>({});
   const [open, setOpen] = useState<string[]>([]);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [notify, setNotify] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(NOTIFY_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
   const lastTyping = useRef<Record<string, number>>({});
+  const notifyRef = useRef(notify);
+  notifyRef.current = notify;
 
   // 自動登入：已有持久身分 + relay 網址 → 直接重連（A2 持久化）
   useEffect(() => {
@@ -52,6 +65,17 @@ export function App(): JSX.Element {
           return { ...prev, [pk]: [...cur, msg] };
         });
         setOpen((prev) => (prev.includes(pk) ? prev : [...prev, pk]));
+        // 未讀徽章與桌面通知：僅在收到他人訊息、且視窗未聚焦時
+        if (!msg.outgoing && typeof document !== "undefined" && document.hidden) {
+          setUnread((u) => ({ ...u, [pk]: (u[pk] ?? 0) + 1 }));
+          if (notifyRef.current && typeof Notification !== "undefined" && Notification.permission === "granted") {
+            try {
+              new Notification("Nostr Buddy", { body: msg.text });
+            } catch {
+              /* 忽略通知失敗 */
+            }
+          }
+        }
       },
       onTyping: (pk) => setTypingAt((prev) => ({ ...prev, [pk]: Date.now() })),
       onNudge: (pk) => {
@@ -97,6 +121,15 @@ export function App(): JSX.Element {
     return () => clearInterval(timer);
   }, [convos]);
 
+  // 視窗重新聚焦時清除所有未讀徽章
+  useEffect(() => {
+    const onVisible = () => {
+      if (!document.hidden) setUnread({});
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, []);
+
   const signIn = (name: string, relayUrl: string) => {
     let b: ChatBackend;
     if (relayUrl) {
@@ -120,7 +153,39 @@ export function App(): JSX.Element {
     activeBackend.setStatus(self.status, message);
     setSelf((x) => (x ? { ...x, statusMessage: message } : x));
   };
-  const openChat = (pk: string) => setOpen((prev) => (prev.includes(pk) ? prev : [...prev, pk]));
+  const openChat = (pk: string) => {
+    setOpen((prev) => (prev.includes(pk) ? prev : [...prev, pk]));
+    setUnread((u) => (u[pk] ? { ...u, [pk]: 0 } : u));
+  };
+
+  const toggleNotifications = () => {
+    if (notify) {
+      setNotify(false);
+      try {
+        localStorage.setItem(NOTIFY_KEY, "0");
+      } catch {
+        /* 忽略 */
+      }
+      return;
+    }
+    const enable = () => {
+      setNotify(true);
+      try {
+        localStorage.setItem(NOTIFY_KEY, "1");
+      } catch {
+        /* 忽略 */
+      }
+    };
+    if (typeof Notification === "undefined") {
+      enable();
+    } else if (Notification.permission === "granted") {
+      enable();
+    } else {
+      void Notification.requestPermission().then((p) => {
+        if (p === "granted") enable();
+      });
+    }
+  };
 
   // 刪除/封鎖後：關閉其對話視窗並清掉本地對話快取
   const forget = (pk: string) => {
@@ -161,9 +226,27 @@ export function App(): JSX.Element {
         onOpen={openChat}
         onStatus={setStatus}
         onStatusMessage={setStatusMessage}
+        onOpenSettings={() => setSettingsOpen(true)}
+        onNowPlaying={(text) => activeBackend.setNowPlaying(text)}
+        unread={unread}
         {...addContactProps}
         {...manageProps}
       />
+      {settingsOpen ? (
+        <SettingsPanel
+          relayUrl={(() => {
+            try {
+              return localStorage.getItem(RELAY_URL_KEY) ?? "";
+            } catch {
+              return "";
+            }
+          })()}
+          {...(activeBackend.selfNsec ? { selfNsec: activeBackend.selfNsec } : {})}
+          notifications={notify}
+          onToggleNotifications={toggleNotifications}
+          onClose={() => setSettingsOpen(false)}
+        />
+      ) : null}
       {open.map((pk) => {
         const contact = contacts.find((c) => c.pubkey === pk);
         if (!contact) return null;

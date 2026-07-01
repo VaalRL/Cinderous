@@ -81,5 +81,7 @@ export interface ChatBackend {
   unblockContact?(pubkey: PubkeyHex): void;
   /** 自己的 `npub`（供分享/加好友；僅真實 relay 後端提供）。 */
   readonly selfNpub?: string;
+  /** 自己的 `nsec` 私鑰（僅供本機身分備份；絕不外流；僅真實 relay 後端提供）。 */
+  readonly selfNsec?: string;
   stop(): void;
 }

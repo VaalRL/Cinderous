@@ -57,6 +57,21 @@ export interface Messages {
   convo_expired: string;
   lang_label: string;
   theme_toggle: string;
+  nowPlaying_placeholder: string;
+  settings_open: string;
+  settings_title: string;
+  settings_relayUrl: string;
+  settings_relayDemo: string;
+  settings_identityBackup: string;
+  settings_identityWarning: string;
+  settings_revealKey: string;
+  settings_hideKey: string;
+  settings_copyKey: string;
+  settings_copied: string;
+  settings_notifications: string;
+  settings_notificationsHint: string;
+  settings_close: string;
+  unread_title: string;
 }
 
 const zhHant: Messages = {
@@ -104,6 +119,21 @@ const zhHant: Messages = {
   convo_expired: "訊息已到期",
   lang_label: "語言",
   theme_toggle: "深色 / 淺色模式",
+  nowPlaying_placeholder: "正在聽…（分享音樂狀態）",
+  settings_open: "設定",
+  settings_title: "設定",
+  settings_relayUrl: "中繼站",
+  settings_relayDemo: "示範模式（記憶體中繼）",
+  settings_identityBackup: "身分備份",
+  settings_identityWarning: "這是你的私鑰（nsec），等同你的帳號本身。任何人拿到都能冒充你——切勿外流或貼給他人。請離線妥善保存。",
+  settings_revealKey: "顯示私鑰（nsec）",
+  settings_hideKey: "隱藏私鑰",
+  settings_copyKey: "複製",
+  settings_copied: "已複製",
+  settings_notifications: "桌面通知",
+  settings_notificationsHint: "視窗未聚焦時，有新訊息就通知。",
+  settings_close: "關閉",
+  unread_title: "{count} 則未讀",
 };
 
 const en: Messages = {
@@ -151,6 +181,21 @@ const en: Messages = {
   convo_expired: "Message expired",
   lang_label: "Language",
   theme_toggle: "Toggle dark mode",
+  nowPlaying_placeholder: "Now playing… (share your music)",
+  settings_open: "Settings",
+  settings_title: "Settings",
+  settings_relayUrl: "Relay",
+  settings_relayDemo: "Demo mode (in-memory relay)",
+  settings_identityBackup: "Identity backup",
+  settings_identityWarning: "This is your secret key (nsec) — it IS your account. Anyone who gets it can impersonate you. Never share or paste it anywhere; keep it safe offline.",
+  settings_revealKey: "Reveal secret key (nsec)",
+  settings_hideKey: "Hide secret key",
+  settings_copyKey: "Copy",
+  settings_copied: "Copied",
+  settings_notifications: "Desktop notifications",
+  settings_notificationsHint: "Notify on new messages when the window isn't focused.",
+  settings_close: "Close",
+  unread_title: "{count} unread",
 };
 
 export const catalog: Record<Locale, Messages> = { "zh-Hant": zhHant, en };

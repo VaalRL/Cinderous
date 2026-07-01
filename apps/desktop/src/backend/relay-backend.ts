@@ -89,6 +89,7 @@ export function webSocketConnector(url: string): RelayConnector {
 export class RelayChatBackend implements ChatBackend {
   readonly self: Self;
   readonly selfNpub: string;
+  readonly selfNsec: string;
   private readonly sk: SecretKey;
   private readonly client: RelayClient;
   private readonly presence = new PresenceTracker();
@@ -119,6 +120,7 @@ export class RelayChatBackend implements ChatBackend {
     const pubkey = getPublicKey(this.sk);
     this.self = { pubkey, name: identity.name, status: "online", statusMessage: "" };
     this.selfNpub = npubEncode(pubkey);
+    this.selfNsec = identity.nsec;
     this.contacts = storage.loadContacts();
     this.blocked = storage.loadBlocked();
     this.client = connector({ onEvent: (_sub, event) => this.onEvent(event) });

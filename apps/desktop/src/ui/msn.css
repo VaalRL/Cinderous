@@ -144,6 +144,21 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
 .contact__act:hover { background: var(--hover); }
 .contact.blocked .contact__name { opacity: 0.6; }
 .contact.blocked .contact__act { display: inline-flex; }
+.unread-badge { flex: none; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: #e0483d; color: #fff; font-size: 10px; font-weight: 700; line-height: 16px; text-align: center; }
+.me__np { display: flex; align-items: center; gap: 4px; margin-top: 3px; }
+.me__np-ic { color: #9a6cd4; font-size: 12px; }
+.me__np input { flex: 1; min-width: 0; }
+
+/* 設定面板 */
+.modal { position: fixed; inset: 0; background: rgba(0,0,0,.35); display: flex; align-items: center; justify-content: center; z-index: 50; }
+.modal__box { width: 320px; max-width: calc(100vw - 24px); }
+.settings__body { padding: 10px 12px; display: flex; flex-direction: column; gap: 12px; }
+.settings__sec h4 { margin: 0 0 4px; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
+.settings__relay { font-size: 12px; word-break: break-all; }
+.settings__warn { font-size: 11px; color: #c0392b; margin: 0 0 6px; line-height: 1.4; }
+.settings__key code { display: block; font-size: 11px; word-break: break-all; background: var(--code-bg); padding: 6px; border-radius: 4px; }
+.settings__keyrow { display: flex; gap: 6px; margin-top: 6px; }
+.settings__toggle { display: flex; gap: 6px; align-items: flex-start; font-size: 12px; }
 
 .dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
 .dot.online { background: #36c46b; box-shadow: 0 0 5px #36c46b; }
