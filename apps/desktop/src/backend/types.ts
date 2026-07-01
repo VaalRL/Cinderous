@@ -52,5 +52,9 @@ export interface ChatBackend {
   sendMessage(to: PubkeyHex, text: string): void;
   sendTyping(to: PubkeyHex): void;
   sendNudge(to: PubkeyHex): void;
+  /** 以 NIP-19 `npub` 新增聯絡人（僅真實 relay 後端支援）。 */
+  addContact?(npub: string): void;
+  /** 自己的 `npub`（供分享/加好友；僅真實 relay 後端提供）。 */
+  readonly selfNpub?: string;
   stop(): void;
 }

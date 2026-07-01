@@ -18,7 +18,11 @@ export interface Messages {
   signIn_hint: string;
   signIn_hint2: string;
   signIn_displayName: string;
+  signIn_relayUrl: string;
   signIn_button: string;
+  contact_myId: string;
+  contact_addPlaceholder: string;
+  contact_add: string;
   status_online: string;
   status_away: string;
   status_busy: string;
@@ -46,7 +50,11 @@ const zhHant: Messages = {
   signIn_hint: "去中心化、端到端加密的即時通。輸入顯示名稱即可開始（你的身分是本機生成的 secp256k1 金鑰）。",
   signIn_hint2: "本示範會在記憶體中模擬中繼站與幾位好友，方便你體驗。",
   signIn_displayName: "顯示名稱",
+  signIn_relayUrl: "中繼站網址（留空使用示範模式）",
   signIn_button: "登入",
+  contact_myId: "我的 ID",
+  contact_addPlaceholder: "貼上好友的 npub…",
+  contact_add: "加好友",
   status_online: "線上",
   status_away: "離開",
   status_busy: "忙碌",
@@ -74,7 +82,11 @@ const en: Messages = {
   signIn_hint: "A decentralized, end-to-end encrypted messenger. Just enter a display name to start (your identity is a secp256k1 key generated on this device).",
   signIn_hint2: "This demo simulates a relay and a few buddies in memory so you can try it out.",
   signIn_displayName: "Display name",
+  signIn_relayUrl: "Relay URL (leave blank for demo mode)",
   signIn_button: "Sign in",
+  contact_myId: "My ID",
+  contact_addPlaceholder: "Paste a buddy's npub…",
+  contact_add: "Add",
   status_online: "Online",
   status_away: "Away",
   status_busy: "Busy",

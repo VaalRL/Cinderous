@@ -1,4 +1,5 @@
 import type { MessageKey } from "@nostr-buddy/i18n";
+import { useState } from "react";
 import { useI18n } from "../i18n.js";
 import type { Contact, Self, Status } from "../backend/types.js";
 import { TitleControls } from "./TitleControls.js";
@@ -17,6 +18,10 @@ export interface ContactListProps {
   onOpen: (pubkey: string) => void;
   onStatus: (status: Status) => void;
   onStatusMessage: (message: string) => void;
+  /** 自己的 npub（真實 relay 模式才有），供分享。 */
+  selfNpub?: string;
+  /** 以 npub 加好友（真實 relay 模式才有）。 */
+  onAddContact?: (npub: string) => void;
 }
 
 export function ContactListWindow(props: ContactListProps): JSX.Element {
@@ -59,6 +64,16 @@ export function ContactListWindow(props: ContactListProps): JSX.Element {
         </div>
       </div>
 
+      {props.onAddContact ? (
+        <AddContact
+          selfNpub={props.selfNpub ?? ""}
+          onAdd={props.onAddContact}
+          myIdLabel={t("contact_myId")}
+          placeholder={t("contact_addPlaceholder")}
+          addLabel={t("contact_add")}
+        />
+      ) : null}
+
       <div className="roster">
         <div className="group">{t("group_online", { count: online.length })}</div>
         {online.map((c) => (
@@ -68,6 +83,49 @@ export function ContactListWindow(props: ContactListProps): JSX.Element {
         {offline.map((c) => (
           <ContactRow key={c.pubkey} contact={c} onOpen={props.onOpen} hint={t("contact_openHint")} />
         ))}
+      </div>
+    </div>
+  );
+}
+
+function AddContact({
+  selfNpub,
+  onAdd,
+  myIdLabel,
+  placeholder,
+  addLabel,
+}: {
+  selfNpub: string;
+  onAdd: (npub: string) => void;
+  myIdLabel: string;
+  placeholder: string;
+  addLabel: string;
+}): JSX.Element {
+  const [value, setValue] = useState("");
+  const add = () => {
+    const v = value.trim();
+    if (!v) return;
+    try {
+      onAdd(v);
+      setValue("");
+    } catch {
+      /* 非法 npub：保留輸入 */
+    }
+  };
+  return (
+    <div className="addbar">
+      <div className="myid" title={selfNpub}>
+        <b>{myIdLabel}:</b> <span className="myid__val" data-testid="my-npub">{selfNpub}</span>
+      </div>
+      <div className="addbar__row">
+        <input
+          aria-label={placeholder}
+          placeholder={placeholder}
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && add()}
+        />
+        <button onClick={add}>{addLabel}</button>
       </div>
     </div>
   );

@@ -2,12 +2,21 @@ import { useState } from "react";
 import { useI18n } from "../i18n.js";
 import { TitleControls } from "./TitleControls.js";
 
-export function SignIn({ onSignIn }: { onSignIn: (name: string) => void }): JSX.Element {
+function initialRelay(): string {
+  try {
+    return new URLSearchParams(window.location.search).get("relay") ?? "";
+  } catch {
+    return "";
+  }
+}
+
+export function SignIn({ onSignIn }: { onSignIn: (name: string, relayUrl: string) => void }): JSX.Element {
   const { t } = useI18n();
   const [name, setName] = useState("");
+  const [relay, setRelay] = useState(initialRelay);
   const submit = () => {
     const n = name.trim();
-    if (n) onSignIn(n);
+    if (n) onSignIn(n, relay.trim());
   };
   return (
     <div className="desktop" style={{ justifyContent: "center" }}>
@@ -27,6 +36,13 @@ export function SignIn({ onSignIn }: { onSignIn: (name: string) => void }): JSX.
             onChange={(e) => setName(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && submit()}
             placeholder={t("signIn_displayName")}
+          />
+          <input
+            aria-label={t("signIn_relayUrl")}
+            value={relay}
+            onChange={(e) => setRelay(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && submit()}
+            placeholder={t("signIn_relayUrl")}
           />
           <button onClick={submit}>{t("signIn_button")}</button>
           <p className="hint">{t("signIn_hint2")}</p>

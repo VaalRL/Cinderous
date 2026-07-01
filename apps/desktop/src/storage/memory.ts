@@ -1,0 +1,31 @@
+import type { AppStorage, StoredContact, StoredIdentity, StoredMessage } from "./types.js";
+
+/** 記憶體儲存（測試用；不持久）。 */
+export class MemoryStorage implements AppStorage {
+  private identity: StoredIdentity | null = null;
+  private contacts: StoredContact[] = [];
+  private readonly messages = new Map<string, StoredMessage[]>();
+
+  loadIdentity(): StoredIdentity | null {
+    return this.identity;
+  }
+  saveIdentity(identity: StoredIdentity): void {
+    this.identity = identity;
+  }
+  loadContacts(): StoredContact[] {
+    return [...this.contacts];
+  }
+  addContact(contact: StoredContact): void {
+    if (this.contacts.some((c) => c.pubkey === contact.pubkey)) return;
+    this.contacts.push(contact);
+  }
+  loadMessages(contactPubkey: string): StoredMessage[] {
+    return [...(this.messages.get(contactPubkey) ?? [])];
+  }
+  appendMessage(message: StoredMessage): void {
+    const list = this.messages.get(message.contact) ?? [];
+    if (list.some((m) => m.id === message.id)) return;
+    list.push(message);
+    this.messages.set(message.contact, list);
+  }
+}

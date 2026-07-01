@@ -79,6 +79,7 @@ pnpm -r typecheck       # 所有套件型別檢查
 | 前端建置 | `pnpm --filter @nostr-buddy/desktop build` |
 | 共用核心測試 | `pnpm --filter @nostr-buddy/core test` |
 | 中繼站測試 | `pnpm --filter @nostr-buddy/relay test` |
+| 本機真實 relay（開發用） | `pnpm --filter @nostr-buddy/relay build:dev && pnpm --filter @nostr-buddy/relay dev`（起 `ws://localhost:8787`；前端開 `/?relay=ws://localhost:8787` 即連真實 relay） |
 | Rust 測試 | `cargo test`（於 `apps/desktop/src-tauri/`） |
 | 桌面端開發（需 Tauri 工具鏈） | `pnpm --filter @nostr-buddy/desktop tauri dev` |
 | 中繼站本地開發 / 部署（需 wrangler） | `wrangler dev` / `wrangler deploy`（於 `relay/`） |

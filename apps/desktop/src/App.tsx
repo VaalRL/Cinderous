@@ -1,15 +1,18 @@
 import { useEffect, useRef, useState } from "react";
 import { BrowserChatBackend } from "./backend/browser-backend.js";
-import type { ChatMessage, Contact, Self, Status } from "./backend/types.js";
+import { RelayChatBackend, webSocketConnector } from "./backend/relay-backend.js";
+import type { ChatBackend, ChatMessage, Contact, Self, Status } from "./backend/types.js";
+import { LocalStorage } from "./storage/local.js";
 import { ContactListWindow } from "./ui/ContactListWindow.js";
 import { ConversationWindow } from "./ui/ConversationWindow.js";
 import { SignIn } from "./ui/SignIn.js";
 import "./ui/msn.css";
 
 const TYPING_VISIBLE_MS = 6_000;
+const RELAY_URL_KEY = "nb.relayUrl";
 
 export function App(): JSX.Element {
-  const [backend, setBackend] = useState<BrowserChatBackend | null>(null);
+  const [backend, setBackend] = useState<ChatBackend | null>(null);
   const [self, setSelf] = useState<Self | null>(null);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [convos, setConvos] = useState<Record<string, ChatMessage[]>>({});
@@ -17,6 +20,22 @@ export function App(): JSX.Element {
   const [nudge, setNudge] = useState<Record<string, number>>({});
   const [open, setOpen] = useState<string[]>([]);
   const lastTyping = useRef<Record<string, number>>({});
+
+  // 自動登入：已有持久身分 + relay 網址 → 直接重連（A2 持久化）
+  useEffect(() => {
+    try {
+      const storage = new LocalStorage();
+      const identity = storage.loadIdentity();
+      const relayUrl = localStorage.getItem(RELAY_URL_KEY);
+      if (identity && relayUrl) {
+        const b = new RelayChatBackend(storage, webSocketConnector(relayUrl), identity.name);
+        setSelf({ ...b.self });
+        setBackend(b);
+      }
+    } catch {
+      /* 忽略 */
+    }
+  }, []);
 
   useEffect(() => {
     if (!backend) return;
@@ -39,23 +58,34 @@ export function App(): JSX.Element {
     return () => backend.stop();
   }, [backend]);
 
-  const signIn = (name: string) => {
-    const b = new BrowserChatBackend(name);
+  const signIn = (name: string, relayUrl: string) => {
+    let b: ChatBackend;
+    if (relayUrl) {
+      localStorage.setItem(RELAY_URL_KEY, relayUrl);
+      b = new RelayChatBackend(new LocalStorage(), webSocketConnector(relayUrl), name);
+    } else {
+      b = new BrowserChatBackend(name);
+    }
     setSelf({ ...b.self });
     setBackend(b);
   };
 
   if (!backend || !self) return <SignIn onSignIn={signIn} />;
 
+  const activeBackend = backend;
   const setStatus = (status: Status) => {
-    backend.setStatus(status, self.statusMessage);
+    activeBackend.setStatus(status, self.statusMessage);
     setSelf((x) => (x ? { ...x, status } : x));
   };
   const setStatusMessage = (message: string) => {
-    backend.setStatus(self.status, message);
+    activeBackend.setStatus(self.status, message);
     setSelf((x) => (x ? { ...x, statusMessage: message } : x));
   };
   const openChat = (pk: string) => setOpen((prev) => (prev.includes(pk) ? prev : [...prev, pk]));
+
+  const addContactProps = activeBackend.addContact
+    ? { onAddContact: activeBackend.addContact.bind(activeBackend), selfNpub: activeBackend.selfNpub ?? "" }
+    : {};
 
   return (
     <div className="desktop">
@@ -65,6 +95,7 @@ export function App(): JSX.Element {
         onOpen={openChat}
         onStatus={setStatus}
         onStatusMessage={setStatusMessage}
+        {...addContactProps}
       />
       {open.map((pk) => {
         const contact = contacts.find((c) => c.pubkey === pk);
@@ -77,14 +108,14 @@ export function App(): JSX.Element {
             messages={convos[pk] ?? []}
             typing={(typingAt[pk] ?? 0) > Date.now() - TYPING_VISIBLE_MS}
             nudgeSignal={nudge[pk] ?? 0}
-            onSend={(text) => backend.sendMessage(pk, text)}
+            onSend={(text) => activeBackend.sendMessage(pk, text)}
             onTyping={() => {
               const now = Date.now();
               if (now - (lastTyping.current[pk] ?? 0) < 1000) return;
               lastTyping.current[pk] = now;
-              backend.sendTyping(pk);
+              activeBackend.sendTyping(pk);
             }}
-            onNudge={() => backend.sendNudge(pk)}
+            onNudge={() => activeBackend.sendNudge(pk)}
             onClose={() => setOpen((prev) => prev.filter((x) => x !== pk))}
           />
         );

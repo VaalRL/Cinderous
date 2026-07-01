@@ -26,8 +26,8 @@
 
 | # | 任務 | 環境 | 說明 / 驗證 |
 | --- | --- | --- | --- |
-| A1 | 前端接真實 relay | 🌐 | App 從 `BrowserChatBackend` 抽出 `RelayChatBackend`，用既有 `relay-source.ts`(WebSocket+RelayClient) 連真 relay；兩個瀏覽器分頁對話。驗證：Playwright 開兩分頁互傳。 |
-| A2 | 本機持久化（前端層） | 🌐 | 身分金鑰、聯絡人、對話存 IndexedDB（Tauri 時改 SQLite/SQLCipher）；重整不失資料、身分不再每次重生。 |
+| A1 | 前端接真實 relay | 🌐 | ✅ **完成**：`RelayChatBackend` + `webSocketConnector` 連真 relay；`relay/src/dev-server.ts` 本機真實 WebSocket relay；以 npub 加好友。Playwright 兩 context 經真實 relay 對話已驗證。 |
+| A2 | 本機持久化（前端層） | 🌐 | ✅ **完成**：`AppStorage`(localStorage) 存身分/聯絡人/訊息；重整自動登入、身分不再每次重生、歷史保留。Playwright 重整驗證通過。（Tauri 版再換 SQLite/SQLCipher。） |
 | A3 | 聯絡人管理 UI | 🌐 | 新增/刪除、封鎖；**QR 加好友**（`npub` 交換 + 雙向同意，對應 M9 前半 + PRD §10）。 |
 | A4 | 檔案傳輸 UI | 🌐 | 接既有 `datachannel`：拖放/附件、傳送進度、接收下載。 |
 | A5 | 設定與狀態 UI | 🌐 | 設定頁（relay URL、身分備份警語、通知）、連線/重連中狀態、未讀徽章、自己的音樂狀態輸入口（backend 已有 `setNowPlaying`）。 |
