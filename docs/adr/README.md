@@ -41,3 +41,4 @@
 | [0024](./0024-qr-add-friend.md) | QR 加好友：npub QR 產生（M9） | 已接受 |
 | [0025](./0025-call-signaling.md) | 語音/視訊通話信令核心（M8） | 已接受 |
 | [0026](./0026-call-runtime-ui.md) | 通話執行期與 UI（M8） | 已接受 |
+| [0027](./0027-group-encryption.md) | 群組聊天加密方案（M9） | 已接受 |

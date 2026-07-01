@@ -144,7 +144,7 @@
   * WebRTC media track；通話信令（offer/answer/candidate/hangup）複用既有 SDP 信令通道（NIP-59 包封的 ephemeral）。**媒體全程 P2P、不經中繼。**
 * **M9 聯絡人與群組**
   * **QR 加好友：** 交換 `npub` + 雙向同意流程（延伸既有聯絡人同意機制，見 §10）。
-  * **群組聊天：** 需群組金鑰管理（MLS 或 sender-key），為較大工程，方案待專屬 ADR 定案。
+  * **群組聊天：** 加密方案已定案（見 ADR-0027）：v1 採 **Gift-Wrap 成對扇出 + 帶內群組狀態**（每則群訊對每位成員各發一個 NIP-17/59 Gift Wrap，rumor 帶 `groupId`；隱私優先、複用既有機制、移除成員免 rekey），限私密好友小群；**MLS（NIP-EE）延後**為未來升級（需 PCS/更大群時，與 1:1 棘輪一併評估）。
 
 ### 明確排除（與本專案精神衝突）
 
