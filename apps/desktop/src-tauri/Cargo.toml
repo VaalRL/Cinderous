@@ -5,9 +5,30 @@ edition = "2021"
 publish = false
 description = "Nostr Buddy 桌面原生橋（Rust）：relay 連線、重連、金鑰儲存、IPC"
 
-# 註：完整 Tauri 二進位（含 tauri / tokio / tungstenite / keyring 等相依）
-# 需在具備 Tauri 工具鏈與系統庫（webkit2gtk 等）的環境建置。此 crate 目前
-# 僅含與平台無關、可單元測試的連線邏輯；之後在 Tauri 環境再擴充 binary 與相依。
+# 這個 crate 同時是：
+#  1) 一個「與平台無關、可單元測試」的 lib（重連退避、IPC 資料契約）；
+#  2) 一個 Tauri 桌面二進位（`tauri-app` feature），包住 apps/desktop 前端。
+#
+# 預設（不開 feature）只編譯與測試 lib，不需 Tauri 工具鏈。完整二進位需在
+# 具 Tauri 工具鏈與系統庫（webkit2gtk 等）的環境以 `--features tauri-app` 建置。
 [lib]
 name = "nostr_buddy_desktop"
 path = "src/lib.rs"
+
+[[bin]]
+name = "nostr-buddy-desktop"
+path = "src/main.rs"
+required-features = ["tauri-app"]
+
+[features]
+# 完整 Tauri 桌面二進位（需 Tauri 工具鏈與 webkit2gtk 等系統庫）。
+tauri-app = ["dep:tauri", "dep:tokio", "dep:tauri-build"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2", optional = true }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"], optional = true }
+
+[build-dependencies]
+tauri-build = { version = "2", optional = true }

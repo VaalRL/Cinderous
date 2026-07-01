@@ -45,9 +45,9 @@
 
 | # | 任務 | 說明 |
 | --- | --- | --- |
-| B1 | Tauri 二進位 | `main.rs`、tauri 設定、視窗、打包（Win/mac/Linux）。 |
-| B2 | `TauriChatBackend`（IPC） | 以相同 `ChatBackend` 介面接 Tauri `invoke`/event，UI 不改。 |
-| B3 | Rust 背景長連線 | tokio + tungstenite 背景 WebSocket，套用既有 `reconnect::Backoff`；視窗關閉仍在線。 |
+| B1 | Tauri 二進位 | 🔧 **殼已建**：`src-tauri` 的 `main.rs`、`tauri.conf.json`（`frontendDist=../dist`）、`build.rs`、capabilities、圖示；feature-gate `tauri-app` 讓預設 `cargo test` 不需 Tauri 工具鏈。實際 `tauri build`／視窗行為需 Tauri 環境驗證（ADR-0018）。 |
+| B2 | IPC 契約 / `TauriChatBackend` | 🔧 **契約已定**：`ipc.rs` 的 serde DTO 與前端 `types.ts` 對齊並測試；近期 webview 直接跑既有前端（UI 不改）。原生服務接管時再補 `TauriChatBackend`。 |
+| B3 | Rust 背景長連線 | tokio + tungstenite 背景 WebSocket，套用既有 `reconnect::Backoff`；視窗關閉仍在線。（`reconnect` 退避邏輯已備並測試。） |
 | B4 | 原生持久化 | `rusqlite` + SQLCipher 落地加密資料庫；A2 的資料層換成 SQLite。 |
 | B5 | OS 金鑰儲存 | `keyring`（Keychain/DPAPI/libsecret）存私鑰。 |
 | B6 | 打包/更新 | 簽章、自動更新、系統匣/通知。 |
