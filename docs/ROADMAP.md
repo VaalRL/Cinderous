@@ -98,7 +98,7 @@
 | M7 | 貼圖 Sticker | ✅ **完成**：`nb-sticker:v1:pack/id` 走既有加密訊息通道，客戶端渲染內建原創 SVG 貼圖包（`buddy` 6 款）；選擇器 + 渲染，經真實 relay 驗證（ADR-0021）。持久化/回應/收回/限時自然沿用 | 🌐 |
 | M8 | 語音/視訊通話 | ✅ **完成**：信令核心 `call.ts`（狀態機 + kind 21002 加密傳輸，ADR-0025）+ 執行期 `WebRtcCall`（RTCPeerConnection + getUserMedia）+ 通話 UI（撥號/來電/通話中、靜音/掛斷、視訊畫面）。假音源 + 真實 relay + 真實 WebRTC E2E：發起→響鈴→接聽→雙向音訊→掛斷（ADR-0026）。⏳ TURN 保底、來電鈴聲 | 🌐 信令 / ✅ 假裝置 E2E |
 | M9 | QR 加好友 | ✅ **產生完成**：`qr.ts` 以 qrcode-generator 將 `npub` 編為 QR，聯絡人清單 `▦` 顯示 QR 模態框供好友掃描；加入沿用 `addContact`（A3）。E2E 以獨立解碼器 jsQR 驗證 QR 還原 npub（ADR-0024）。相機掃描屬行動端 Phase D | 🌐 產生 / 掃描待 📱 |
-| M9 | 群組聊天 | 📋 **加密方案已定案**（ADR-0027）：Gift-Wrap 成對扇出 + 帶內群組狀態（複用既有機制、隱私優先、移除免 rekey）；MLS 延後。待實作：core 的 `groupId`/`g` tag、控制訊息與扇出 | 🌐 |
+| M9 | 群組聊天 | ✅ **完成（ADR-0027 方案）**：`group.ts` 成對扇出（kind 14 + `g` tag）+ 控制訊息（建立/加入/移除/離開，kind 40）；後端建群/送訊/離開 + 持久化，UI 群組區、建群 modal、群組視窗（發送者標籤、離開）。3-context 真實 relay E2E：建群→扇出→兩成員收訊並正確歸屬發送者 | 🌐 |
 
 ---
 

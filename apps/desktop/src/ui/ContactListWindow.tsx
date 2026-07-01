@@ -1,7 +1,7 @@
 import type { MessageKey } from "@nostr-buddy/i18n";
 import { useState } from "react";
 import { useI18n } from "../i18n.js";
-import type { BlockedContact, ConnectionState, Contact, Self, Status } from "../backend/types.js";
+import type { BlockedContact, ConnectionState, Contact, Group, Self, Status } from "../backend/types.js";
 import { qrDataUri } from "../qr.js";
 import { TitleControls } from "./TitleControls.js";
 import { avatarColor, initial } from "./util.js";
@@ -39,6 +39,12 @@ export interface ContactListProps {
   unread?: Record<string, number>;
   /** 與中繼站的連線狀態（非 online 時顯示提示）。 */
   connection?: ConnectionState;
+  /** 群組清單（M9）。 */
+  groups?: Group[];
+  /** 建立群組（名稱 + 成員公鑰）。 */
+  onCreateGroup?: (name: string, memberPubkeys: string[]) => void;
+  /** 開啟群組對話。 */
+  onOpenGroup?: (groupId: string) => void;
 }
 
 export function ContactListWindow(props: ContactListProps): JSX.Element {
@@ -46,6 +52,8 @@ export function ContactListWindow(props: ContactListProps): JSX.Element {
   const { self, contacts } = props;
   const online = contacts.filter((c) => c.status !== "offline");
   const offline = contacts.filter((c) => c.status === "offline");
+  const [groupModal, setGroupModal] = useState(false);
+  const groups = props.groups ?? [];
 
   return (
     <div className="win contacts">
@@ -122,6 +130,31 @@ export function ContactListWindow(props: ContactListProps): JSX.Element {
       ) : null}
 
       <div className="roster">
+        {props.onCreateGroup ? (
+          <>
+            <div className="group group--groups">
+              <span>{t("group_section")}（{groups.length}）</span>
+              <button className="group__add" data-testid="create-group" onClick={() => setGroupModal(true)}>
+                ＋ {t("group_create")}
+              </button>
+            </div>
+            {groups.map((g) => (
+              <div
+                className="contact group-row"
+                key={g.id}
+                data-testid="group-row"
+                onDoubleClick={() => props.onOpenGroup?.(g.id)}
+                title={t("contact_openHint")}
+              >
+                <div className="avatar sm" style={{ background: avatarColor(g.id) }}>#</div>
+                <div className="contact__info">
+                  <div className="contact__name">{g.name}</div>
+                  <div className="contact__msg">{t("group_membersCount", { count: g.members.length })}</div>
+                </div>
+              </div>
+            ))}
+          </>
+        ) : null}
         <div className="group">{t("group_online", { count: online.length })}</div>
         {online.map((c) => (
           <ContactRow
@@ -164,6 +197,73 @@ export function ContactListWindow(props: ContactListProps): JSX.Element {
             ))}
           </>
         ) : null}
+      </div>
+      {groupModal && props.onCreateGroup ? (
+        <GroupModal
+          contacts={contacts}
+          onCancel={() => setGroupModal(false)}
+          onCreate={(name, members) => {
+            props.onCreateGroup?.(name, members);
+            setGroupModal(false);
+          }}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function GroupModal({
+  contacts,
+  onCreate,
+  onCancel,
+}: {
+  contacts: Contact[];
+  onCreate: (name: string, memberPubkeys: string[]) => void;
+  onCancel: () => void;
+}): JSX.Element {
+  const { t } = useI18n();
+  const [name, setName] = useState("");
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const toggle = (pk: string) =>
+    setPicked((prev) => {
+      const next = new Set(prev);
+      if (next.has(pk)) next.delete(pk);
+      else next.add(pk);
+      return next;
+    });
+  const create = () => {
+    if (picked.size === 0) return;
+    onCreate(name.trim() || t("group_section"), [...picked]);
+  };
+  return (
+    <div className="modal" role="dialog" aria-modal="true" aria-label={t("group_create")} onClick={onCancel}>
+      <div className="modal__box win" onClick={(e) => e.stopPropagation()}>
+        <div className="win__title">
+          <span>{t("group_create")}</span>
+          <span className="spacer" />
+          <span className="win__btn" role="button" aria-label={t("convo_close")} onClick={onCancel}>×</span>
+        </div>
+        <div className="groupmodal">
+          <input
+            className="groupmodal__name"
+            aria-label={t("group_name")}
+            placeholder={t("group_name")}
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+          <div className="groupmodal__label">{t("group_members")}</div>
+          <div className="groupmodal__list">
+            {contacts.map((c) => (
+              <label key={c.pubkey} className="groupmodal__item">
+                <input type="checkbox" checked={picked.has(c.pubkey)} onChange={() => toggle(c.pubkey)} />
+                <span>{c.name}</span>
+              </label>
+            ))}
+          </div>
+          <button className="groupmodal__create" data-testid="group-confirm" disabled={picked.size === 0} onClick={create}>
+            {t("group_confirm")}
+          </button>
+        </div>
       </div>
     </div>
   );

@@ -1,10 +1,12 @@
 import {
+  applyGroupControl,
   CALL_SIGNAL_KIND,
   createHeartbeat,
   createMusicStatus,
   createTyping,
   deletionTarget,
   finalizeEvent,
+  groupTarget,
   generateSecretKey,
   getPublicKey,
   KIND,
@@ -12,21 +14,28 @@ import {
   npubDecode,
   npubEncode,
   nsecDecode,
+  newGroupId,
   nsecEncode,
   NowPlayingStore,
+  parseGroupControl,
   PresenceTracker,
   reactionTarget,
   RelayClient,
   SDP_SIGNAL_KIND,
   unwrapMessage,
   wrapDeletion,
+  wrapGroupControl,
+  wrapGroupMessage,
   wrapMessage,
   wrapReaction,
   type CallMedia,
+  type Group,
+  type GroupControl,
   type NostrEvent,
   type OutgoingFile,
   type PubkeyHex,
   type RelayClientHandlers,
+  type Rumor,
   type SecretKey,
 } from "@nostr-buddy/core";
 import { WebRtcCall } from "./webrtc-call.js";
@@ -144,6 +153,7 @@ export class RelayChatBackend implements ChatBackend {
   private readonly seenMsg = new Set<string>();
   private contacts: { pubkey: PubkeyHex; name: string }[];
   private blocked: { pubkey: PubkeyHex; name: string }[];
+  private groups: Group[];
   private readonly transfer: WebRtcTransfer;
   private readonly call: WebRtcCall;
   private handlers: ChatBackendEvents | null = null;
@@ -171,6 +181,7 @@ export class RelayChatBackend implements ChatBackend {
     this.selfNsec = identity.nsec;
     this.contacts = storage.loadContacts();
     this.blocked = storage.loadBlocked();
+    this.groups = storage.loadGroups();
     this.client = connector(
       { onEvent: (_sub, event) => this.onEvent(event) },
       (state) => this.onConnection(state),
@@ -222,6 +233,21 @@ export class RelayChatBackend implements ChatBackend {
     // 回放已收回的訊息
     for (const id of this.storage.loadDeleted()) {
       handlers.onUnsend?.(id);
+    }
+    // 回放群組與其歷史訊息
+    this.emitGroups();
+    for (const g of this.groups) {
+      for (const m of this.storage.loadMessages(g.id)) {
+        this.seenMsg.add(m.id);
+        handlers.onMessage(g.id, {
+          id: m.id,
+          outgoing: m.outgoing,
+          text: m.text,
+          at: m.at,
+          ...(m.sender !== undefined ? { sender: m.sender } : {}),
+          ...(m.expiresAt !== undefined ? { expiresAt: m.expiresAt } : {}),
+        });
+      }
     }
     this.emitBlocked();
   }
@@ -282,6 +308,13 @@ export class RelayChatBackend implements ChatBackend {
     }
     const { sender, rumor } = opened;
     if (this.isBlocked(sender)) return;
+
+    const groupId = groupTarget(rumor);
+    if (groupId) {
+      this.receiveGroup(event.id, sender, rumor, groupId);
+      return;
+    }
+
     this.ensureContact(sender);
 
     if (rumor.kind === KIND.REACTION) {
@@ -306,6 +339,46 @@ export class RelayChatBackend implements ChatBackend {
     const message = { id: event.id, contact: sender, outgoing: false, text: rumor.content, at: Date.now(), ...extra };
     this.storage.appendMessage(message);
     this.handlers?.onMessage(sender, { id: message.id, outgoing: false, text: rumor.content, at: message.at, ...extra });
+  }
+
+  /** 處理帶 `g` tag 的群組訊息/控制。 */
+  private receiveGroup(eventId: string, sender: PubkeyHex, rumor: Rumor, groupId: string): void {
+    if (rumor.kind === KIND.GROUP_CONTROL) {
+      const control = parseGroupControl(rumor);
+      if (control) this.applyControl(sender, control);
+      return;
+    }
+    if (rumor.kind !== KIND.CHAT) return;
+    if (this.isBlocked(sender)) return;
+    if (!this.groups.some((g) => g.id === groupId)) return; // 未知群組（尚未被加入）
+    const expirySec = messageExpiry(rumor);
+    const expiresAt = expirySec !== undefined ? expirySec * 1000 : undefined;
+    const extra = { sender, ...(expiresAt !== undefined ? { expiresAt } : {}) };
+    const message = { id: eventId, contact: groupId, outgoing: false, text: rumor.content, at: Date.now(), ...extra };
+    this.storage.appendMessage(message);
+    this.handlers?.onMessage(groupId, { id: eventId, outgoing: false, text: rumor.content, at: message.at, ...extra });
+  }
+
+  private applyControl(from: PubkeyHex, control: GroupControl): void {
+    if (control.type === "group-create") {
+      if (this.groups.some((g) => g.id === control.id)) return;
+      this.storage.saveGroup({ id: control.id, name: control.name, admin: control.admin, members: control.members });
+      this.groups = this.storage.loadGroups();
+      for (const m of control.members) if (m !== this.self.pubkey) this.ensureContact(m);
+      this.emitGroups();
+      return;
+    }
+    const g = this.groups.find((gr) => gr.id === control.id);
+    if (!g) return;
+    const updated = applyGroupControl(g, control, from);
+    if (!updated.members.includes(this.self.pubkey)) this.storage.removeGroup(g.id);
+    else this.storage.saveGroup(updated);
+    this.groups = this.storage.loadGroups();
+    this.emitGroups();
+  }
+
+  private emitGroups(): void {
+    this.handlers?.onGroups?.(this.groups.map((g) => ({ ...g, members: [...g.members] })));
   }
 
   private isBlocked(pubkey: PubkeyHex): boolean {
@@ -425,6 +498,48 @@ export class RelayChatBackend implements ChatBackend {
 
   sendFile(to: PubkeyHex, file: OutgoingFile): string {
     return this.transfer.sendFile(to, file);
+  }
+
+  createGroup(name: string, memberPubkeys: PubkeyHex[]): void {
+    const members = [this.self.pubkey, ...memberPubkeys.filter((p) => p !== this.self.pubkey)];
+    const group: Group = { id: newGroupId(), name: name.trim() || "群組", admin: this.self.pubkey, members };
+    this.storage.saveGroup(group);
+    this.groups = this.storage.loadGroups();
+    for (const m of members) if (m !== this.self.pubkey) this.ensureContact(m);
+    const control: GroupControl = {
+      type: "group-create",
+      id: group.id,
+      name: group.name,
+      admin: group.admin,
+      members,
+    };
+    const recipients = members.filter((m) => m !== this.self.pubkey);
+    for (const evt of wrapGroupControl(control, this.sk, recipients)) this.client.publish(evt);
+    this.emitGroups();
+  }
+
+  sendGroupMessage(groupId: string, text: string): void {
+    const group = this.groups.find((g) => g.id === groupId);
+    if (!group) return;
+    const evts = wrapGroupMessage(text, this.sk, this.self.pubkey, group);
+    for (const evt of evts) this.client.publish(evt);
+    const id = evts[0]?.id ?? `g-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    this.seenMsg.add(id);
+    const message = { id, contact: groupId, outgoing: true, text, at: Date.now(), sender: this.self.pubkey };
+    this.storage.appendMessage(message);
+    this.handlers?.onMessage(groupId, { id, outgoing: true, text, at: message.at, sender: this.self.pubkey });
+  }
+
+  leaveGroup(groupId: string): void {
+    const group = this.groups.find((g) => g.id === groupId);
+    if (!group) return;
+    const recipients = group.members.filter((m) => m !== this.self.pubkey);
+    for (const evt of wrapGroupControl({ type: "group-leave", id: groupId }, this.sk, recipients)) {
+      this.client.publish(evt);
+    }
+    this.storage.removeGroup(groupId);
+    this.groups = this.storage.loadGroups();
+    this.emitGroups();
   }
 
   startCall(to: PubkeyHex, media: CallMedia): void {

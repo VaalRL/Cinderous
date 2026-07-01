@@ -52,6 +52,40 @@ describe("RelayChatBackend（真實後端 + 持久化）", () => {
     b.stop();
   });
 
+  it("群組（M9）：Alice 建群 + 送群訊，Bob 與 Carol 皆收到並帶 sender", () => {
+    const net = createInMemoryRelayNetwork();
+    const storeB = new MemoryStorage();
+    const a = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("a", h), "Alice");
+    const b = new RelayChatBackend(storeB, (h) => net.connect("b", h), "Bob");
+    const c = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("c", h), "Carol");
+
+    const bGroups: string[] = [];
+    const cGroups: string[] = [];
+    const bMsgs: { pk: string; m: ChatMessage }[] = [];
+    const cMsgs: { pk: string; m: ChatMessage }[] = [];
+    a.start(noop);
+    b.start({ ...noop, onGroups: (gs) => bGroups.push(...gs.map((g) => g.id)), onMessage: (pk, m) => bMsgs.push({ pk, m }) });
+    c.start({ ...noop, onGroups: (gs) => cGroups.push(...gs.map((g) => g.id)), onMessage: (pk, m) => cMsgs.push({ pk, m }) });
+
+    a.createGroup("好友", [b.self.pubkey, c.self.pubkey]);
+    // Bob、Carol 收到 group-create
+    expect(bGroups.length).toBeGreaterThan(0);
+    expect(cGroups.length).toBeGreaterThan(0);
+    const gid = bGroups[0]!;
+
+    a.sendGroupMessage(gid, "嗨大家");
+    const bGot = bMsgs.find((x) => x.pk === gid && x.m.text === "嗨大家");
+    const cGot = cMsgs.find((x) => x.pk === gid && x.m.text === "嗨大家");
+    expect(bGot?.m.sender).toBe(a.self.pubkey);
+    expect(cGot?.m.sender).toBe(a.self.pubkey);
+    // Bob 端持久化群訊於 groupId 之下
+    expect(storeB.loadMessages(gid).map((m) => m.text)).toContain("嗨大家");
+
+    a.stop();
+    b.stop();
+    c.stop();
+  });
+
   it("收回：Alice 收回訊息，Bob 收到 onUnsend 並持久化", () => {
     const net = createInMemoryRelayNetwork();
     const storeB = new MemoryStorage();

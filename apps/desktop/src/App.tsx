@@ -8,6 +8,7 @@ import type {
   ChatMessage,
   ConnectionState,
   Contact,
+  Group,
   Self,
   Status,
 } from "./backend/types.js";
@@ -39,6 +40,7 @@ export function App(): JSX.Element {
   const [blocked, setBlocked] = useState<BlockedContact[]>([]);
   const [unread, setUnread] = useState<Record<string, number>>({});
   const [conn, setConn] = useState<ConnectionState>("online");
+  const [groups, setGroups] = useState<Group[]>([]);
   const [callPeer, setCallPeer] = useState<PubkeyHex | null>(null);
   const [callState, setCallState] = useState<CallState>("idle");
   const [callMedia, setCallMedia] = useState<CallMedia | null>(null);
@@ -163,6 +165,7 @@ export function App(): JSX.Element {
       },
       onCallLocalStream: setLocalStream,
       onCallRemoteStream: setRemoteStream,
+      onGroups: setGroups,
     });
     return () => backend.stop();
   }, [backend]);
@@ -304,6 +307,13 @@ export function App(): JSX.Element {
       : {}),
     blocked,
   };
+  const groupProps = activeBackend.createGroup
+    ? {
+        groups,
+        onCreateGroup: (name: string, members: string[]) => activeBackend.createGroup!(name, members),
+        onOpenGroup: openChat,
+      }
+    : {};
 
   return (
     <div className="desktop">
@@ -319,6 +329,7 @@ export function App(): JSX.Element {
         connection={conn}
         {...addContactProps}
         {...manageProps}
+        {...groupProps}
       />
       {settingsOpen ? (
         <SettingsPanel
@@ -336,6 +347,41 @@ export function App(): JSX.Element {
         />
       ) : null}
       {open.map((pk) => {
+        const group = groups.find((g) => g.id === pk);
+        if (group) {
+          const groupContact: Contact = {
+            pubkey: group.id,
+            name: group.name,
+            status: "online",
+            statusMessage: `${group.members.length}`,
+            nowPlaying: "",
+          };
+          const senderName = (pubkey: string): string =>
+            pubkey === self.pubkey ? self.name : contacts.find((c) => c.pubkey === pubkey)?.name ?? `${pubkey.slice(0, 8)}…`;
+          return (
+            <ConversationWindow
+              key={pk}
+              self={self}
+              contact={groupContact}
+              messages={convos[pk] ?? []}
+              typing={false}
+              nudgeSignal={0}
+              senderName={senderName}
+              onSend={(text) => activeBackend.sendGroupMessage?.(pk, text)}
+              onTyping={() => {}}
+              onNudge={() => {}}
+              {...(activeBackend.leaveGroup
+                ? {
+                    onLeaveGroup: () => {
+                      activeBackend.leaveGroup!(pk);
+                      setOpen((prev) => prev.filter((x) => x !== pk));
+                    },
+                  }
+                : {})}
+              onClose={() => setOpen((prev) => prev.filter((x) => x !== pk))}
+            />
+          );
+        }
         const contact = contacts.find((c) => c.pubkey === pk);
         if (!contact) return null;
         const reactProps = activeBackend.sendReaction

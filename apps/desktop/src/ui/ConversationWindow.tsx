@@ -31,6 +31,10 @@ export interface ConversationProps {
   onSendFile?: (file: File) => void;
   /** 發起語音/視訊通話（未提供則不顯示通話按鈕）。 */
   onStartCall?: (media: CallMedia) => void;
+  /** 群組模式：以發送者公鑰解析顯示暱稱（提供即為群組視窗）。 */
+  senderName?: (pubkey: string) => string;
+  /** 離開群組（群組視窗才提供）。 */
+  onLeaveGroup?: () => void;
   onClose: () => void;
 }
 
@@ -143,6 +147,17 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
             </span>
           </>
         ) : null}
+        {props.onLeaveGroup ? (
+          <span
+            className="win__btn"
+            role="button"
+            title={t("group_leave")}
+            data-testid="leave-group"
+            onClick={props.onLeaveGroup}
+          >
+            ⎋
+          </span>
+        ) : null}
         <span className="win__btn" onClick={props.onClose} role="button" aria-label={t("convo_close")}>×</span>
       </div>
 
@@ -175,7 +190,13 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
             <MessageLine
               key={m.id}
               message={m}
-              who={m.outgoing ? self.name : contact.name}
+              who={
+                m.outgoing
+                  ? self.name
+                  : m.sender && props.senderName
+                    ? props.senderName(m.sender)
+                    : contact.name
+              }
               reactions={props.reactions?.[m.id] ?? []}
               unsent={props.unsent?.has(m.id) ?? false}
               expired={props.expired?.has(m.id) ?? false}

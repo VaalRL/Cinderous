@@ -6,6 +6,8 @@ export const KIND = {
   REACTION: 7,
   /** NIP-17 聊天訊息（rumor kind）。 */
   CHAT: 14,
+  /** 群組控制訊息（建立/加入/移除/離開；app 內部 rumor kind，經 Gift Wrap）。 */
+  GROUP_CONTROL: 40,
   /** 離線留言：NIP-17/59 Gift Wrap。 */
   OFFLINE_DM_GIFT_WRAP: 1059,
   /** 好友上線/離線心跳（Ephemeral）。 */

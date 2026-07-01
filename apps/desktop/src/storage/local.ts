@@ -1,6 +1,7 @@
 import type {
   AppStorage,
   StoredContact,
+  StoredGroup,
   StoredIdentity,
   StoredMessage,
   StoredReaction,
@@ -12,6 +13,7 @@ const K_MSG_PREFIX = "nb.msgs.";
 const K_REACTIONS = "nb.reactions";
 const K_DELETED = "nb.deleted";
 const K_BLOCKED = "nb.blocked";
+const K_GROUPS = "nb.groups";
 
 function read<T>(key: string, fallback: T): T {
   try {
@@ -97,5 +99,21 @@ export class LocalStorage implements AppStorage {
   }
   loadDeleted(): string[] {
     return read<string[]>(K_DELETED, []);
+  }
+  loadGroups(): StoredGroup[] {
+    return read<StoredGroup[]>(K_GROUPS, []);
+  }
+  saveGroup(group: StoredGroup): void {
+    const list = this.loadGroups().filter((g) => g.id !== group.id);
+    list.push(group);
+    write(K_GROUPS, list);
+  }
+  removeGroup(id: string): void {
+    write(K_GROUPS, this.loadGroups().filter((g) => g.id !== id));
+    try {
+      localStorage.removeItem(K_MSG_PREFIX + id);
+    } catch {
+      /* 忽略 */
+    }
   }
 }

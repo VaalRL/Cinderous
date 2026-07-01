@@ -213,6 +213,19 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
 .callbtn:hover { background: var(--hover); }
 .callbtn--accept { background: #3fae5a; color: #fff; border-color: #3fae5a; }
 .callbtn--hangup { background: #e0483d; color: #fff; border-color: #e0483d; }
+
+/* 群組 */
+.group--groups { display: flex; align-items: center; justify-content: space-between; }
+.group__add { font-size: 10px; border: 1px solid var(--border); background: var(--field); color: var(--accent); border-radius: 5px; cursor: pointer; padding: 1px 5px; }
+.group__add:hover { background: var(--hover); }
+.group-row .avatar { font-weight: bold; }
+.groupmodal { padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.groupmodal__name { padding: 6px 8px; border: 1px solid var(--border); border-radius: 5px; background: var(--field); }
+.groupmodal__label { font-size: 11px; color: var(--muted); }
+.groupmodal__list { max-height: 200px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; border: 1px solid var(--border); border-radius: 5px; padding: 6px; }
+.groupmodal__item { display: flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; padding: 2px; }
+.groupmodal__create { padding: 7px; border: 1px solid #3fae5a; border-radius: 5px; background: #3fae5a; color: #fff; cursor: pointer; }
+.groupmodal__create:disabled { opacity: .5; cursor: not-allowed; }
 .me__np { display: flex; align-items: center; gap: 4px; margin-top: 3px; }
 .me__np-ic { color: #9a6cd4; font-size: 12px; }
 .me__np input { flex: 1; min-width: 0; }

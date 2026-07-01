@@ -75,6 +75,7 @@
 | 收回訊息（Unsend，✅ M6） | 1059（內含 kind 5） | 短期 | NIP-09 刪除，`e` tag 指向目標；收件端顯示「訊息已收回」（已實作，見 ADR-0012） |
 | 限時訊息（Disappearing，✅ M6） | 1059（rumor 內帶較短 NIP-40） | D1 至過期 | 送訊即帶較短過期：rumor 內層 `expiration` 供收件端到期隱藏，外層 wrap 同步縮短以利中繼清除；客戶端到期顯示「訊息已到期」（已實作，見 ADR-0013） |
 | 語音訊息／貼圖（規劃 M7） | WebRTC / 1059 | P2P 優先 | 錄音與媒體複用檔案分塊傳輸；貼圖以 `pack/id` 參照客戶端渲染 |
+| 群組聊天（✅ M9） | 1059（內含 kind 14 + `g` tag；控制為 kind 40） | 短期 | Gift-Wrap 成對扇出：群訊對每位成員各發一個 Gift Wrap（`g` tag = groupId）；控制訊息 create/add/remove/leave。對中繼完全不暴露群組/成員；移除即扇出略過、免 rekey（`group.ts`，ADR-0027） |
 | 語音/視訊通話（✅ M8） | 21002（NIP-59 包封） | 否（Ephemeral） | 通話控制 invite/accept/reject/hangup/candidate（`call.ts` 狀態機 + `WebRtcCall` 執行期）；媒體全程 P2P WebRTC track（DTLS）。假音源 + 真實 relay/WebRTC E2E 驗證（ADR-0025/0026） |
 | 加好友請求（規劃 M9） | 1059（內含請求 rumor） | D1（NIP-40） | QR/npub 交換後送出，對方核准前不建立聯絡（隱私同意） |
 | 群組訊息（規劃 M9） | 待定（群組加密） | — | 需群組金鑰管理（MLS/sender-key），另立 ADR |
@@ -110,7 +111,7 @@
 - **M6**：訊息互動——訊息回應（NIP-25）、收回訊息（NIP-09）、限時訊息（NIP-40 較短過期）。📋
 - **M7**：富媒體——語音訊息、圖片/媒體相簿（複用檔案傳輸 + 本機媒體庫）、貼圖包。📋
 - **M8**：語音/視訊通話——WebRTC media track（P2P）、通話控制信令（kind 21002）、通話 UI。✅（假音源 + 真實 relay/WebRTC E2E）；⏳ TURN 保底、來電鈴聲。
-- **M9**：聯絡人與群組——QR 加好友（`npub` 交換 + 同意流程）、群組聊天（群組加密待 ADR）。📋
+- **M9**：聯絡人與群組——QR 加好友（`npub` 交換，✅ 產生）、群組聊天（✅ Gift-Wrap 成對扇出，ADR-0027；3-context 真實 relay E2E）。
 
 ## 8. 待決議（Open Questions）
 
@@ -120,7 +121,7 @@
 - ~~Ephemeral 心跳的 Worker 請求容量估算與批次/合併策略~~（已由 `docs/adr/0006` 定案：30s 心跳 + jitter，免費天花板約數十並行使用者，列出擴充旋鈕）。
 - 是否導入棘輪（Double Ratchet）以取得前向保密／後妥協安全，或維持 Nostr 靜態金鑰模型（另立 ADR）。
 - 多設備持續同步的衝突解法（LWW vs CRDT）定案。
-- 群組聊天（M9）的群組加密方案（MLS vs sender-key）與多設備下的群組金鑰管理（另立 ADR）。
+- 群組聊天（M9）的群組加密方案已定案（ADR-0027：Gift-Wrap 成對扇出；MLS 延後）；顯示名稱傳遞（kind 0）與大群升級為後續。
 - 語音訊息（M7）離線傳遞受中繼大小限制時的退回策略。
 
 > 已定案決策見 `docs/adr/`（例如 `0002` 隱私元資料與協定基線、`0010` LINE 借鏡功能路線圖）。

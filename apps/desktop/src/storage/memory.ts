@@ -1,6 +1,7 @@
 import type {
   AppStorage,
   StoredContact,
+  StoredGroup,
   StoredIdentity,
   StoredMessage,
   StoredReaction,
@@ -14,6 +15,7 @@ export class MemoryStorage implements AppStorage {
   private reactions: StoredReaction[] = [];
   private readonly deleted = new Set<string>();
   private blocked: StoredContact[] = [];
+  private groups: StoredGroup[] = [];
 
   loadIdentity(): StoredIdentity | null {
     return this.identity;
@@ -63,5 +65,17 @@ export class MemoryStorage implements AppStorage {
   }
   loadDeleted(): string[] {
     return [...this.deleted];
+  }
+  loadGroups(): StoredGroup[] {
+    return this.groups.map((g) => ({ ...g, members: [...g.members] }));
+  }
+  saveGroup(group: StoredGroup): void {
+    const i = this.groups.findIndex((g) => g.id === group.id);
+    if (i >= 0) this.groups[i] = group;
+    else this.groups.push(group);
+  }
+  removeGroup(id: string): void {
+    this.groups = this.groups.filter((g) => g.id !== id);
+    this.messages.delete(id);
   }
 }

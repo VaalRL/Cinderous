@@ -104,6 +104,13 @@ export interface Messages {
   call_hangup: string;
   call_mute: string;
   call_unmute: string;
+  group_create: string;
+  group_name: string;
+  group_members: string;
+  group_confirm: string;
+  group_section: string;
+  group_membersCount: string;
+  group_leave: string;
 }
 
 const zhHant: Messages = {
@@ -198,6 +205,13 @@ const zhHant: Messages = {
   call_hangup: "掛斷",
   call_mute: "靜音",
   call_unmute: "取消靜音",
+  group_create: "建立群組",
+  group_name: "群組名稱",
+  group_members: "選擇成員",
+  group_confirm: "建立",
+  group_section: "群組",
+  group_membersCount: "{count} 位成員",
+  group_leave: "離開群組",
 };
 
 const en: Messages = {
@@ -292,6 +306,13 @@ const en: Messages = {
   call_hangup: "Hang up",
   call_mute: "Mute",
   call_unmute: "Unmute",
+  group_create: "New group",
+  group_name: "Group name",
+  group_members: "Select members",
+  group_confirm: "Create",
+  group_section: "Groups",
+  group_membersCount: "{count} members",
+  group_leave: "Leave group",
 };
 
 export const catalog: Record<Locale, Messages> = { "zh-Hant": zhHant, en };

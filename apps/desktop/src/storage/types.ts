@@ -19,6 +19,15 @@ export interface StoredMessage {
   at: number;
   /** 限時訊息到期時間（毫秒）；一般訊息省略。 */
   expiresAt?: number;
+  /** 群訊發送者公鑰（群組訊息才有；1:1 省略）。 */
+  sender?: string;
+}
+
+export interface StoredGroup {
+  id: string;
+  name: string;
+  admin: string;
+  members: string[];
 }
 
 export interface StoredReaction {
@@ -54,4 +63,10 @@ export interface AppStorage {
   markDeleted(messageId: string): void;
   /** 已收回的訊息 id 集合。 */
   loadDeleted(): string[];
+  /** 群組清單（M9）。 */
+  loadGroups(): StoredGroup[];
+  /** 新增或更新群組（以 id 為鍵）。 */
+  saveGroup(group: StoredGroup): void;
+  /** 移除群組（離開/解散）。 */
+  removeGroup(id: string): void;
 }
