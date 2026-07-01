@@ -41,5 +41,13 @@ pnpm --filter @nostr-buddy/desktop exec tauri build  # 打包各平台安裝檔
 - ✅ **B1 殼**：視窗、設定、圖示、build script、能力（capabilities）。
 - ✅ **B2 契約**：`ipc.rs` 的 DTO（`SelfDto`/`ContactDto`/`MessageDto`/`BridgeEvent` …）
   與前端 `types.ts` 對齊，serde `camelCase`，已單元測試。
-- ⏳ **B3–B6**：Rust 背景長連線（tokio + tungstenite，套用 `reconnect::Backoff`）、
-  SQLCipher 持久化、OS 金鑰庫（keyring）、打包/更新——於 Tauri 環境接續。
+- ✅ **B3 背景長連線**：`session`（政策驅動器，7 單元測試）＋ `net`（tokio +
+  tokio-tungstenite 執行期，`net` feature）。以本機 WS 伺服器即時整合測試：
+
+  ```bash
+  cargo test --features net    # 含 net::run 即時整合測試（連上→訂閱→收事件）
+  ```
+
+- ⏳ **B3 GUI 接線 / B4–B6**：把 `net` 執行期經 `#[tauri::command]`/`emit` 橋到
+  webview、前端切 `TauriChatBackend`；SQLCipher 持久化、OS 金鑰庫（keyring）、
+  打包/更新——於 Tauri 環境接續。
