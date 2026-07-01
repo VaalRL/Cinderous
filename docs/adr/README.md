@@ -35,3 +35,4 @@
 | [0018](./0018-tauri-desktop-shell.md) | Tauri 桌面殼與 IPC 契約（Phase B1/B2） | 已接受 |
 | [0019](./0019-background-relay-connection.md) | 背景長連線：政策驅動器 + I/O 執行期（Phase B3） | 已接受 |
 | [0020](./0020-native-persistence-sqlite-sqlcipher.md) | 原生持久化：SQLite / SQLCipher（Phase B4） | 已接受 |
+| [0021](./0021-stickers.md) | 貼圖（Stickers，M7） | 已接受 |

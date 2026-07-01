@@ -162,6 +162,14 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
 .filecard__bar span { display: block; height: 100%; background: var(--accent); transition: width .12s linear; }
 .filecard__dl { font-size: 11px; color: var(--accent); text-decoration: none; }
 .filecard__dl:hover { text-decoration: underline; }
+
+/* 貼圖 */
+.stickerpick { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px 8px; background: var(--panel); border-top: 1px solid var(--border); }
+.stickerpick__item { width: 48px; height: 48px; padding: 3px; border: 1px solid transparent; border-radius: 8px; background: var(--field); cursor: pointer; }
+.stickerpick__item:hover { border-color: var(--accent); background: var(--hover); }
+.stickerpick__item img { width: 100%; height: 100%; display: block; }
+.sticker { display: block; margin-top: 2px; }
+.sticker img { width: 96px; height: 96px; }
 .me__np { display: flex; align-items: center; gap: 4px; margin-top: 3px; }
 .me__np-ic { color: #9a6cd4; font-size: 12px; }
 .me__np input { flex: 1; min-width: 0; }

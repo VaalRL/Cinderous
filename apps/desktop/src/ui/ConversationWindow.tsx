@@ -2,6 +2,7 @@ import { REACTION_EMOJIS } from "@nostr-buddy/core";
 import { useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n.js";
 import type { ChatMessage, Contact, Self } from "../backend/types.js";
+import { formatSticker, parseSticker, STICKER_PACKS, stickerSvg, svgToDataUri } from "../stickers.js";
 import { renderMarkdown } from "./markdown.js";
 import { avatarColor, emoticonize, EMOTICONS, initial } from "./util.js";
 
@@ -35,6 +36,7 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
   const { self, contact, messages } = props;
   const [text, setText] = useState("");
   const [showEmo, setShowEmo] = useState(false);
+  const [showStickers, setShowStickers] = useState(false);
   const [ttl, setTtl] = useState(0);
   const [dragging, setDragging] = useState(false);
   const logRef = useRef<HTMLDivElement>(null);
@@ -125,6 +127,13 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
 
       <div className="toolbar">
         <button className="tool" title={t("convo_emojiTitle")} onClick={() => setShowEmo((v) => !v)}>🙂</button>
+        <button
+          className="tool"
+          title={t("sticker_title")}
+          onClick={() => setShowStickers((v) => !v)}
+        >
+          🧸
+        </button>
         <button className="tool" title={t("convo_nudgeTitle")} onClick={props.onNudge}>{t("convo_nudge")}</button>
         {props.onSendFile ? (
           <>
@@ -158,6 +167,26 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
           {EMOTICONS.map((e) => (
             <span key={e} role="button" onClick={() => setText((t) => t + e)}>{e}</span>
           ))}
+        </div>
+      )}
+      {showStickers && (
+        <div className="stickerpick" data-testid="stickerpick">
+          {Object.entries(STICKER_PACKS).map(([pack, items]) =>
+            Object.entries(items).map(([id, s]) => (
+              <button
+                key={`${pack}/${id}`}
+                className="stickerpick__item"
+                title={s.label}
+                aria-label={s.label}
+                onClick={() => {
+                  props.onSend(formatSticker(pack, id));
+                  setShowStickers(false);
+                }}
+              >
+                <img src={svgToDataUri(s.svg)} alt={s.label} />
+              </button>
+            )),
+          )}
         </div>
       )}
 
@@ -206,6 +235,8 @@ function MessageLine({
     onReact?.(message.id, emoji);
     setPicking(false);
   };
+  const ref = parseSticker(message.text);
+  const sticker = ref ? stickerSvg(ref.pack, ref.id) : undefined;
 
   if (unsent || expired) {
     const cls = unsent ? "unsent" : "expired";
@@ -250,7 +281,13 @@ function MessageLine({
           {t("convo_unsend")}
         </button>
       ) : null}
-      <span className="text">{renderMarkdown(emoticonize(message.text))}</span>
+      {sticker ? (
+        <span className="sticker">
+          <img src={svgToDataUri(sticker)} alt={t("sticker_alt")} data-testid="sticker-img" />
+        </span>
+      ) : (
+        <span className="text">{renderMarkdown(emoticonize(message.text))}</span>
+      )}
       {reactions.length > 0 ? (
         <span className="reactions">
           {reactions.map((e) => (

@@ -79,6 +79,8 @@ export interface Messages {
   file_sending: string;
   file_dropHint: string;
   file_error: string;
+  sticker_title: string;
+  sticker_alt: string;
 }
 
 const zhHant: Messages = {
@@ -148,6 +150,8 @@ const zhHant: Messages = {
   file_sending: "傳送中…",
   file_dropHint: "放開以傳送檔案",
   file_error: "檔案傳輸失敗",
+  sticker_title: "貼圖",
+  sticker_alt: "貼圖",
 };
 
 const en: Messages = {
@@ -217,6 +221,8 @@ const en: Messages = {
   file_sending: "Sending…",
   file_dropHint: "Drop to send",
   file_error: "File transfer failed",
+  sticker_title: "Stickers",
+  sticker_alt: "sticker",
 };
 
 export const catalog: Record<Locale, Messages> = { "zh-Hant": zhHant, en };
