@@ -89,6 +89,10 @@ export interface Messages {
   album_title: string;
   album_empty: string;
   image_alt: string;
+  qr_show: string;
+  qr_title: string;
+  qr_hint: string;
+  qr_alt: string;
 }
 
 const zhHant: Messages = {
@@ -168,6 +172,10 @@ const zhHant: Messages = {
   album_title: "相簿（{count}）",
   album_empty: "尚無圖片",
   image_alt: "圖片",
+  qr_show: "顯示 QR",
+  qr_title: "我的 QR",
+  qr_hint: "請好友掃描以加你為好友",
+  qr_alt: "我的 npub QR 碼",
 };
 
 const en: Messages = {
@@ -247,6 +255,10 @@ const en: Messages = {
   album_title: "Album ({count})",
   album_empty: "No images yet",
   image_alt: "Image",
+  qr_show: "Show QR",
+  qr_title: "My QR",
+  qr_hint: "Have a friend scan this to add you",
+  qr_alt: "My npub QR code",
 };
 
 export const catalog: Record<Locale, Messages> = { "zh-Hant": zhHant, en };

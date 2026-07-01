@@ -2,6 +2,7 @@ import type { MessageKey } from "@nostr-buddy/i18n";
 import { useState } from "react";
 import { useI18n } from "../i18n.js";
 import type { BlockedContact, ConnectionState, Contact, Self, Status } from "../backend/types.js";
+import { qrDataUri } from "../qr.js";
 import { TitleControls } from "./TitleControls.js";
 import { avatarColor, initial } from "./util.js";
 
@@ -181,7 +182,9 @@ function AddContact({
   placeholder: string;
   addLabel: string;
 }): JSX.Element {
+  const { t } = useI18n();
   const [value, setValue] = useState("");
+  const [showQr, setShowQr] = useState(false);
   const add = () => {
     const v = value.trim();
     if (!v) return;
@@ -196,7 +199,28 @@ function AddContact({
     <div className="addbar">
       <div className="myid" title={selfNpub}>
         <b>{myIdLabel}:</b> <span className="myid__val" data-testid="my-npub">{selfNpub}</span>
+        {selfNpub ? (
+          <button className="myid__qr" title={t("qr_show")} data-testid="qr-show" onClick={() => setShowQr(true)}>
+            ▦
+          </button>
+        ) : null}
       </div>
+      {showQr && selfNpub ? (
+        <div className="modal" role="dialog" aria-modal="true" aria-label={t("qr_title")} onClick={() => setShowQr(false)}>
+          <div className="modal__box win qrcard" onClick={(e) => e.stopPropagation()}>
+            <div className="win__title">
+              <span>{t("qr_title")}</span>
+              <span className="spacer" />
+              <span className="win__btn" role="button" aria-label="×" onClick={() => setShowQr(false)}>×</span>
+            </div>
+            <div className="qrcard__body">
+              <img className="qrcard__img" data-testid="qr-img" src={qrDataUri(selfNpub, { cell: 5 })} alt={t("qr_alt")} />
+              <div className="qrcard__hint">{t("qr_hint")}</div>
+              <code className="qrcard__npub">{selfNpub}</code>
+            </div>
+          </div>
+        </div>
+      ) : null}
       <div className="addbar__row">
         <input
           aria-label={placeholder}

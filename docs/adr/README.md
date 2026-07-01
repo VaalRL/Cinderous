@@ -38,3 +38,4 @@
 | [0021](./0021-stickers.md) | 貼圖（Stickers，M7） | 已接受 |
 | [0022](./0022-voice-messages.md) | 語音訊息（Voice Messages，M7） | 已接受 |
 | [0023](./0023-media-album.md) | 媒體相簿（Album，M7） | 已接受 |
+| [0024](./0024-qr-add-friend.md) | QR 加好友：npub QR 產生（M9） | 已接受 |
