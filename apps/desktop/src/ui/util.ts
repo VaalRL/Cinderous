@@ -10,25 +10,5 @@ export function initial(name: string): string {
   return [...name][0] ?? "?";
 }
 
-const EMO: Array<[RegExp, string]> = [
-  [/:\)|:-\)/g, "🙂"],
-  [/:D|:-D/g, "😃"],
-  [/:\(|:-\(/g, "🙁"],
-  [/;\)|;-\)/g, "😉"],
-  [/:P|:-P/gi, "😛"],
-  [/<3/g, "❤️"],
-  [/\(Y\)/gi, "👍"],
-  [/\(N\)/gi, "👎"],
-  [/:O|:-O/gi, "😮"],
-  [/\(L\)/gi, "💗"],
-];
-
-/** 把經典文字表情碼轉成 emoji。 */
-export function emoticonize(text: string): string {
-  let out = text;
-  for (const [re, e] of EMO) out = out.replace(re, e);
-  return out;
-}
-
 /** 表情選擇器用的 emoji 清單。 */
 export const EMOTICONS = ["🙂", "😃", "😉", "😛", "😮", "😢", "😎", "👍", "❤️", "🎵", "🎉", "🐱"];

@@ -26,7 +26,11 @@ export const EMOTICONS: ReadonlyArray<readonly [string, string]> = [
   ["8)", "😎"],
   [":|", "😐"],
   ["(y)", "👍"],
+  ["(Y)", "👍"],
   ["(n)", "👎"],
+  ["(N)", "👎"],
+  ["(l)", "💗"],
+  ["(L)", "💗"],
   ["XD", "😆"],
   ["xD", "😆"],
 ];
