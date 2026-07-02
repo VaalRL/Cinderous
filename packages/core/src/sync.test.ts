@@ -47,3 +47,31 @@ describe("多設備增量同步對帳", () => {
     expect(d1.get("block")).toBe("bob");
   });
 });
+
+describe("多設備同步上限（A5：防撐爆記憶體）", () => {
+  it("訊息 id 超過上限時逐出最舊、保留最新", () => {
+    const d = new DeviceSyncState({ maxMessages: 3 });
+    d.apply({ messages: [msg("a"), msg("b"), msg("c"), msg("d"), msg("e")] });
+    expect(d.messageIds()).toEqual(["c", "d", "e"]); // a、b 被逐出
+    // 被逐出的舊 id 再現會被視為新（去重窗口已滑動）——記憶體有界的取捨
+    d.apply({ messages: [msg("a")] });
+    expect(d.messageIds()).toEqual(["d", "e", "a"]);
+  });
+
+  it("可變狀態鍵數超過上限時逐出最舊更新者", () => {
+    const d = new DeviceSyncState({ maxStateKeys: 2 });
+    d.apply({ state: { k1: { value: "1", updatedAt: 10 } } });
+    d.apply({ state: { k2: { value: "2", updatedAt: 20 } } });
+    d.apply({ state: { k3: { value: "3", updatedAt: 30 } } }); // 逐出 k1（updatedAt 最舊）
+    expect(d.get("k1")).toBeUndefined();
+    expect(d.get("k2")).toBe("2");
+    expect(d.get("k3")).toBe("3");
+  });
+
+  it("既有鍵的更新不觸發逐出（不算新增）", () => {
+    const d = new DeviceSyncState({ maxStateKeys: 1 });
+    d.apply({ state: { k1: { value: "a", updatedAt: 1 } } });
+    d.apply({ state: { k1: { value: "b", updatedAt: 2 } } });
+    expect(d.get("k1")).toBe("b");
+  });
+});
