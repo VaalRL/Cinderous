@@ -42,3 +42,4 @@
 | [0025](./0025-call-signaling.md) | 語音/視訊通話信令核心（M8） | 已接受 |
 | [0026](./0026-call-runtime-ui.md) | 通話執行期與 UI（M8） | 已接受 |
 | [0027](./0027-group-encryption.md) | 群組聊天加密方案（M9） | 已接受 |
+| [0028](./0028-forward-secrecy.md) | 前向保密：維持靜態金鑰、FS/PCS 交由未來 MLS（F2） | 已接受 |
