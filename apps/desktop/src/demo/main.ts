@@ -1,12 +1,12 @@
 import {
   createHeartbeat,
-  createMusicStatus,
   createTyping,
+  decodePresence,
+  encodePresence,
   finalizeEvent,
   generateSecretKey,
   getPublicKey,
   KIND,
-  NowPlayingStore,
   PresenceTracker,
   TypingTracker,
   unwrapMessage,
@@ -43,7 +43,8 @@ class DemoPeer {
   private readonly client: RelayClient;
   private readonly presence = new PresenceTracker();
   private readonly typing = new TypingTracker();
-  private readonly music = new NowPlayingStore();
+  private nowPlaying = ""; // 自己正在聽（併入心跳）
+  private remoteNp = ""; // 好友正在聽（由心跳解出）
   private readonly shownDm = new Set<string>();
   private online = false;
   private hbTimer: ReturnType<typeof setInterval> | undefined;
@@ -71,8 +72,8 @@ class DemoPeer {
   }
 
   private subscribeAll(): void {
+    // F5：music 併入 presence 心跳，不再單獨訂閱。
     this.client.subscribe("presence", [{ kinds: [KIND.HEARTBEAT], authors: [this.friendPk] }]);
-    this.client.subscribe("music", [{ kinds: [KIND.MUSIC], authors: [this.friendPk] }]);
     this.client.subscribe("typing", [{ kinds: [KIND.TYPING], authors: [this.friendPk], "#p": [this.pk] }]);
     this.client.subscribe("nudge", [{ kinds: [NUDGE_KIND], authors: [this.friendPk], "#p": [this.pk] }]);
     this.client.subscribe("dm", [{ kinds: [KIND.OFFLINE_DM_GIFT_WRAP], "#p": [this.pk] }]);
@@ -82,25 +83,30 @@ class DemoPeer {
     this.online = value;
     if (value) {
       this.subscribeAll();
-      this.client.publish(createHeartbeat(this.sk));
-      this.hbTimer = setInterval(() => this.client.publish(createHeartbeat(this.sk)), HEARTBEAT_EVERY_MS);
+      this.beat();
+      this.hbTimer = setInterval(() => this.beat(), HEARTBEAT_EVERY_MS);
       this.sys(`${this.name} 上線`);
     } else {
       if (this.hbTimer) clearInterval(this.hbTimer);
-      for (const sub of ["presence", "music", "typing", "nudge", "dm"]) this.client.unsubscribe(sub);
+      for (const sub of ["presence", "typing", "nudge", "dm"]) this.client.unsubscribe(sub);
       this.sys(`${this.name} 離線`);
     }
     this.dom.toggle.textContent = value ? "切換為離線" : "切換為上線";
     this.dom.toggle.classList.toggle("off", !value);
   }
 
+  /** 發送彙整心跳（含 now-playing）。 */
+  private beat(): void {
+    this.client.publish(
+      createHeartbeat(this.sk, { status: encodePresence({ s: "online", m: "", np: this.nowPlaying }) }),
+    );
+  }
+
   private onEvent(event: NostrEvent): void {
     switch (event.kind) {
       case KIND.HEARTBEAT:
         this.presence.observe(event.pubkey, event.created_at);
-        return;
-      case KIND.MUSIC:
-        this.music.observe(event.pubkey, event.content, event.created_at);
+        this.remoteNp = decodePresence(event.content).np; // 好友的音樂併在心跳中
         return;
       case KIND.TYPING:
         this.typing.observe(event.pubkey, event.created_at);
@@ -146,7 +152,8 @@ class DemoPeer {
   }
 
   setMusic(status: string): void {
-    this.client.publish(createMusicStatus(this.sk, status));
+    this.nowPlaying = status;
+    if (this.online) this.beat(); // 立即以彙整心跳廣播
     this.sys(status ? `你正在聽：${status}` : "你停止播放");
   }
 
@@ -185,7 +192,7 @@ class DemoPeer {
     const friendOnline = seen !== undefined && nowMs - seen <= DEMO_PRESENCE_TIMEOUT_MS;
     this.dom.dot.classList.toggle("online", friendOnline);
     this.dom.status.textContent = friendOnline ? "上線" : "離線";
-    const playing = friendOnline ? this.music.statusOf(this.friendPk) : undefined;
+    const playing = friendOnline ? this.remoteNp : "";
     this.dom.nowPlaying.textContent = playing ? `♪ ${this.friend.name} 正在聽：${playing}` : "";
     this.dom.typing.textContent =
       friendOnline && this.typing.isTyping(this.friendPk, nowMs) ? `${this.friend.name} 正在輸入中…` : "";

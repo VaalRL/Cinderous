@@ -76,6 +76,7 @@ export class BrowserChatBackend implements ChatBackend {
   private readonly presence = new PresenceTracker();
   private readonly statuses = new Map<PubkeyHex, PresencePayload>();
   private nowPlaying = "";
+  private lastContactsSig = "";
   private readonly roster: Peer[] = [];
   private readonly blocked: { pubkey: PubkeyHex; name: string }[] = [];
   private readonly hidden = new Set<PubkeyHex>();
@@ -235,6 +236,9 @@ export class BrowserChatBackend implements ChatBackend {
         nowPlaying: (online ? payload?.np : undefined) ?? "",
       };
     });
+    const sig = JSON.stringify(contacts);
+    if (sig === this.lastContactsSig) return;
+    this.lastContactsSig = sig;
     this.handlers.onContacts(contacts);
   }
 

@@ -131,6 +131,7 @@ export class RelayChatBackend implements ChatBackend {
   private readonly presence = new PresenceTracker();
   private readonly statuses = new Map<PubkeyHex, PresencePayload>();
   private nowPlaying = "";
+  private lastContactsSig = "";
   private readonly seenMsg = new Set<string>();
   private contacts: { pubkey: PubkeyHex; name: string }[];
   private blocked: { pubkey: PubkeyHex; name: string }[];
@@ -409,6 +410,7 @@ export class RelayChatBackend implements ChatBackend {
 
   removeContact(pubkey: PubkeyHex): void {
     this.storage.removeContact(pubkey);
+    this.statuses.delete(pubkey); // 釋放狀態快取，避免殘留
     this.contacts = this.storage.loadContacts();
     this.resubscribe();
     this.emitContacts();
@@ -418,6 +420,7 @@ export class RelayChatBackend implements ChatBackend {
     const existing = this.contacts.find((c) => c.pubkey === pubkey);
     const name = existing?.name ?? shortNpub(npubEncode(pubkey));
     this.storage.blockContact({ pubkey, name });
+    this.statuses.delete(pubkey);
     this.blocked = this.storage.loadBlocked();
     this.contacts = this.storage.loadContacts();
     this.resubscribe();
@@ -459,6 +462,10 @@ export class RelayChatBackend implements ChatBackend {
         nowPlaying: (online ? payload?.np : undefined) ?? "",
       };
     });
+    // 只在實際內容變動時才通知（避免每秒無謂的 React 重渲染）。
+    const sig = JSON.stringify(contacts);
+    if (sig === this.lastContactsSig) return;
+    this.lastContactsSig = sig;
     this.handlers.onContacts(contacts);
   }
 
