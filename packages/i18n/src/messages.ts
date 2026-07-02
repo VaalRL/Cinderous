@@ -94,6 +94,17 @@ export interface Messages {
   sticker_owned: string;
   sticker_invalid: string;
   sticker_importFail: string;
+  editor_title: string;
+  editor_new: string;
+  editor_fromBase: string;
+  editor_label: string;
+  editor_color: string;
+  editor_width: string;
+  editor_undo: string;
+  editor_redo: string;
+  editor_clear: string;
+  editor_save: string;
+  editor_cancel: string;
   voice_record: string;
   voice_stop: string;
   voice_recording: string;
@@ -208,6 +219,17 @@ const zhHant: Messages = {
   sticker_owned: "已收藏",
   sticker_invalid: "（無效貼圖）",
   sticker_importFail: "無法加入貼圖：{reason}",
+  editor_title: "貼圖編輯器",
+  editor_new: "繪製新貼圖",
+  editor_fromBase: "以此貼圖為底繪製",
+  editor_label: "貼圖名稱",
+  editor_color: "顏色",
+  editor_width: "筆刷粗細",
+  editor_undo: "復原",
+  editor_redo: "重做",
+  editor_clear: "清空",
+  editor_save: "儲存到自製貼圖",
+  editor_cancel: "取消",
   voice_record: "錄語音訊息",
   voice_stop: "停止並傳送",
   voice_recording: "錄音中…點擊停止並傳送",
@@ -322,6 +344,17 @@ const en: Messages = {
   sticker_owned: "Saved",
   sticker_invalid: "(invalid sticker)",
   sticker_importFail: "Could not add sticker: {reason}",
+  editor_title: "Sticker editor",
+  editor_new: "Draw a new sticker",
+  editor_fromBase: "Draw on this sticker",
+  editor_label: "Sticker name",
+  editor_color: "Color",
+  editor_width: "Brush size",
+  editor_undo: "Undo",
+  editor_redo: "Redo",
+  editor_clear: "Clear",
+  editor_save: "Save to my stickers",
+  editor_cancel: "Cancel",
   voice_record: "Record voice message",
   voice_stop: "Stop & send",
   voice_recording: "Recording… click to stop & send",

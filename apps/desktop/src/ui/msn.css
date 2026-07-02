@@ -223,6 +223,32 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
 .stickerpick__empty { color: var(--muted); font-size: 12px; padding: 14px 4px; }
 .sticker__own { padding: 0; border: none; background: transparent; cursor: pointer; display: block; }
 .sticker__own:hover img { filter: drop-shadow(0 0 4px var(--accent)); }
+.stickerpick__act--left { right: auto; left: -4px; }
+
+/* 貼圖編輯器（ADR-0033） */
+.stickered { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: flex; align-items: center; justify-content: center; z-index: 55; }
+.stickered__panel { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 10px; width: 300px; box-shadow: 0 10px 30px rgba(0,0,0,.35); }
+.stickered__head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; color: var(--ink); }
+.stickered__close { border: none; background: transparent; color: var(--muted); font-size: 14px; cursor: pointer; }
+.stickered__close:hover { color: var(--accent); }
+.stickered__canvaswrap { position: relative; width: 256px; height: 256px; margin: 0 auto; border: 1px dashed var(--border); border-radius: 8px; background: #fff; overflow: hidden; }
+.stickered__base { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.stickered__canvas { position: absolute; inset: 0; width: 100%; height: 100%; cursor: crosshair; touch-action: none; }
+.stickered__tools { display: flex; align-items: center; gap: 8px; margin: 8px 0; flex-wrap: wrap; }
+.stickered__palette { display: flex; gap: 4px; }
+.stickered__swatch { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--border); cursor: pointer; padding: 0; }
+.stickered__swatch.on { border-color: var(--accent); }
+.stickered__widths { display: flex; gap: 4px; }
+.stickered__widthbtn { width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--border); border-radius: 6px; background: transparent; cursor: pointer; padding: 0; }
+.stickered__widthbtn.on { border-color: var(--accent); }
+.stickered__widthbtn i { display: block; border-radius: 50%; background: var(--ink); }
+.stickered__ops { display: flex; gap: 4px; margin-left: auto; }
+.stickered__ops button { border: 1px solid var(--border); border-radius: 6px; background: transparent; color: var(--ink); cursor: pointer; padding: 2px 7px; }
+.stickered__ops button:disabled { opacity: .4; cursor: default; }
+.stickered__foot { display: flex; gap: 8px; }
+.stickered__foot input { flex: 1; min-width: 0; border: 1px solid var(--border); border-radius: 6px; background: var(--field); color: var(--ink); padding: 5px 8px; }
+.stickered__save { border: none; border-radius: 6px; background: var(--accent); color: #fff; padding: 6px 12px; cursor: pointer; }
+.stickered__save:disabled { opacity: .5; cursor: default; }
 .sticker { display: block; margin-top: 2px; }
 .sticker img { width: 96px; height: 96px; }
 

@@ -33,6 +33,7 @@ import {
   toggleFavorite,
   type StickerRef,
 } from "./sticker-prefs.js";
+import { StickerEditor } from "./StickerEditor.js";
 import { validateStickerSvg, wrapRasterAsSvg } from "./sticker-svg.js";
 import { renderMarkdown } from "./markdown.js";
 import { applyEmoticons } from "./emoticons.js";
@@ -80,6 +81,8 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
   const [favorites, setFavorites] = useState<StickerRef[]>([]);
   const [library, setLibrary] = useState<CustomSticker[]>(() => loadLibrary());
   const stickerFileRef = useRef<HTMLInputElement>(null);
+  /** 貼圖編輯器（ADR-0033）：null=關閉；base 為底圖（空白畫布時省略）。 */
+  const [editor, setEditor] = useState<{ base?: string; label?: string } | null>(null);
   const [showAlbum, setShowAlbum] = useState(false);
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [ttl, setTtl] = useState(0);
@@ -466,6 +469,16 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
                   >
                     ＋
                   </button>
+                  <button
+                    type="button"
+                    className="stickerpick__item stickerpick__import"
+                    title={t("editor_new")}
+                    aria-label={t("editor_new")}
+                    data-testid="editor-open"
+                    onClick={() => setEditor({})}
+                  >
+                    🖌
+                  </button>
                   <input
                     ref={stickerFileRef}
                     type="file"
@@ -512,19 +525,30 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
                         {fav ? "★" : "☆"}
                       </button>
                       {custom ? (
-                        <button
-                          type="button"
-                          className="stickerpick__act"
-                          aria-label={t("sticker_delete")}
-                          title={t("sticker_delete")}
-                          onClick={() => {
-                            if (window.confirm(t("sticker_deleteConfirm", { name: s.label }))) {
-                              deleteCustom(ref.id);
-                            }
-                          }}
-                        >
-                          ✕
-                        </button>
+                        <>
+                          <button
+                            type="button"
+                            className="stickerpick__act"
+                            aria-label={t("sticker_delete")}
+                            title={t("sticker_delete")}
+                            onClick={() => {
+                              if (window.confirm(t("sticker_deleteConfirm", { name: s.label }))) {
+                                deleteCustom(ref.id);
+                              }
+                            }}
+                          >
+                            ✕
+                          </button>
+                          <button
+                            type="button"
+                            className="stickerpick__act stickerpick__act--left"
+                            aria-label={t("editor_fromBase")}
+                            title={t("editor_fromBase")}
+                            onClick={() => setEditor({ base: s.svg, label: s.label })}
+                          >
+                            🖉
+                          </button>
+                        </>
                       ) : (
                         <button
                           type="button"
@@ -591,6 +615,15 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
         <div className="lightbox" role="dialog" aria-modal="true" onClick={() => setLightbox(null)}>
           <img src={lightbox} alt={t("image_alt")} />
         </div>
+      )}
+
+      {editor && (
+        <StickerEditor
+          base={editor.base}
+          initialLabel={editor.label}
+          onSave={acquireSticker}
+          onClose={() => setEditor(null)}
+        />
       )}
     </div>
   );
