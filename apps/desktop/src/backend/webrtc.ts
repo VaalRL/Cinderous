@@ -3,6 +3,7 @@ import {
   createSignal,
   DataChannelReceiver,
   encodeFile,
+  encodeTyping,
   readSignal,
   type IceCandidateData,
   type NostrEvent,
@@ -24,6 +25,8 @@ export interface TransferHandlers {
   onOutgoingProgress: (peer: PubkeyHex, id: string, sent: number, size: number) => void;
   /** 收到完整檔案。 */
   onIncoming: (peer: PubkeyHex, file: ReceivedFile) => void;
+  /** 經 P2P 通道收到「正在輸入中」（F5 卸載）。 */
+  onTyping?: (peer: PubkeyHex) => void;
   /** 錯誤（傳輸失敗、對方不可達等）。 */
   onError: (peer: PubkeyHex, reason: string) => void;
 }
@@ -63,6 +66,24 @@ export class WebRtcTransfer {
     private readonly handlers: TransferHandlers,
     private readonly rtcConfig?: RTCConfiguration,
   ) {}
+
+  /** 主動建立與對方的 P2P 通道（開啟對話時呼叫，讓後續狀態/輸入中可走 P2P）。 */
+  connect(peerPk: PubkeyHex): void {
+    const peer = this.ensurePeer(peerPk);
+    if (!peer.started && !(peer.dc && peer.dc.readyState === "open")) {
+      void this.startOffer(peerPk, peer);
+    }
+  }
+
+  /** 若與對方的 P2P 通道已開，經其送出「正在輸入中」並回傳 true（卸載中繼）；否則 false。 */
+  sendTyping(peerPk: PubkeyHex): boolean {
+    const peer = this.peers.get(peerPk);
+    if (peer?.dc && peer.dc.readyState === "open") {
+      peer.dc.send(encodeTyping());
+      return true;
+    }
+    return false;
+  }
 
   /** 傳送一個檔案給對方，回傳此傳輸的 id（供 UI 追蹤進度）。 */
   sendFile(peerPk: PubkeyHex, file: OutgoingFile): string {
@@ -123,6 +144,7 @@ export class WebRtcTransfer {
       pc,
       rx: new DataChannelReceiver({
         onFile: (file) => this.handlers.onIncoming(peerPk, file),
+        onTyping: () => this.handlers.onTyping?.(peerPk),
         onError: (reason) => this.handlers.onError(peerPk, reason),
       }),
       hasRemote: false,

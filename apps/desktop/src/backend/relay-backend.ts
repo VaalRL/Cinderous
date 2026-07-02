@@ -175,6 +175,9 @@ export class RelayChatBackend implements ChatBackend {
         this.ensureContact(peer);
         this.handlers?.onFileReceived?.(peer, file);
       },
+      onTyping: (peer) => {
+        if (!this.isBlocked(peer)) this.handlers?.onTyping(peer);
+      },
       onError: (peer, reason) => this.handlers?.onFileError?.(peer, reason),
     });
     this.call = new WebRtcCall(this.sk, {
@@ -547,7 +550,15 @@ export class RelayChatBackend implements ChatBackend {
   }
 
   sendTyping(to: PubkeyHex): void {
+    // F5 卸載：P2P 通道已開時走 Data Channel，否則退回中繼。
+    if (this.transfer.sendTyping(to)) return;
     this.client.publish(createTyping(this.sk, to));
+  }
+
+  /** 開啟對話時主動建立 P2P 通道（讓後續輸入中等狀態可卸載中繼）。 */
+  connectPeer(to: PubkeyHex): void {
+    if (this.isBlocked(to)) return;
+    this.transfer.connect(to);
   }
 
   sendNudge(to: PubkeyHex): void {

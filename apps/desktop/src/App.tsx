@@ -228,6 +228,8 @@ export function App(): JSX.Element {
   const openChat = (pk: string) => {
     setOpen((prev) => (prev.includes(pk) ? prev : [...prev, pk]));
     setUnread((u) => (u[pk] ? { ...u, [pk]: 0 } : u));
+    // F5：對非群組聯絡人主動建立 P2P 通道，讓輸入中等狀態卸載中繼。
+    if (!groups.some((g) => g.id === pk)) activeBackend.connectPeer?.(pk);
   };
 
   const toggleNotifications = () => {

@@ -114,6 +114,8 @@ export interface ChatBackend {
   unsendMessage?(to: PubkeyHex, messageId: string): void;
   /** 以 WebRTC P2P 傳送檔案（不經中繼），回傳追蹤用的傳輸 id。 */
   sendFile?(to: PubkeyHex, file: OutgoingFile): string;
+  /** 開啟對話時主動建立 P2P 通道（F5：讓輸入中等狀態卸載中繼）。 */
+  connectPeer?(to: PubkeyHex): void;
   /** 建立群組（M9）：`memberPubkeys` 為其他成員的公鑰（既有聯絡人）。 */
   createGroup?(name: string, memberPubkeys: PubkeyHex[]): void;
   /** 對群組送出訊息（扇出給所有成員）。 */

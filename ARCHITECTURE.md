@@ -67,7 +67,7 @@
 | 離線文字留言 | 1059（Gift Wrap，內含 13/14） | D1（NIP-40，7 天過期） | NIP-44 加密 + Gift Wrap 隱藏雙方後存中繼，對方上線拉取解密 |
 | 好友上線/離線 | 20000 | 否（Ephemeral） | 每 30 秒心跳；斷線 60 秒判離線；僅向雙向同意聯絡人訂閱 |
 | 正在聆聽音樂（✅ F5 合併） | 併入 20000 心跳 | 否（Ephemeral） | now-playing（`np`）彙整進心跳負載 `{s,m,np}`，不再單獨用 kind 20002；減少事件與訂閱數（`encodePresence`/`decodePresence`，見 ADR-0006 補述） |
-| 正在輸入中 | 20001 | 否（Ephemeral） | 對話視窗觸發，中繼轉發 |
+| 正在輸入中（✅ F5 卸載） | 20001 或 P2P DataChannel | 否（Ephemeral） | 對話視窗觸發；**P2P 通道已開時走 Data Channel 卸載中繼**，否則走 kind 20001 中繼轉發（ADR-0006 F5） |
 | WebRTC SDP 交換 | 21000-21999（NIP-59 包封） | 否（Ephemeral） | 信令交換，純記憶體轉發，避免洩漏「誰呼叫誰」 |
 | 震動（Nudge） | — | — | WebRTC Data Channel；P2P 不可用時降級走中繼 |
 | 檔案傳輸（✅ A4；F3/C4 二進位） | — | — | WebRTC Data Channel，不受 JSON 大小限制；對稱 NAT 經 TURN 保底。桌面前端已接（`WebRtcTransfer`：附件/拖放、進度、下載），信令走 kind 21000（ADR-0017）。分塊改**二進位框架**（去 base64 ~33%，ADR-0029） |

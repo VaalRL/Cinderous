@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { DataChannelReceiver, decodeFileChunk, encodeFile, encodeFileChunk, encodeNudge } from "./datachannel.js";
+import { DataChannelReceiver, decodeFileChunk, encodeFile, encodeFileChunk, encodeNudge, encodeTyping } from "./datachannel.js";
 
 function bytes(...n: number[]): Uint8Array {
   return new Uint8Array(n);
@@ -12,6 +12,15 @@ describe("Data Channel — Nudge", () => {
     const rx = new DataChannelReceiver({ onNudge });
     rx.receive(encodeNudge());
     expect(onNudge).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("Data Channel — 輸入中（F5 卸載）", () => {
+  it("編碼並接收 typing", () => {
+    const onTyping = vi.fn();
+    const rx = new DataChannelReceiver({ onTyping });
+    rx.receive(encodeTyping());
+    expect(onTyping).toHaveBeenCalledTimes(1);
   });
 });
 

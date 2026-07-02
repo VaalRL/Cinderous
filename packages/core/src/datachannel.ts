@@ -6,6 +6,7 @@ import { utf8ToBytes } from "@noble/hashes/utils";
  */
 export type DataMessage =
   | { t: "nudge" }
+  | { t: "typing" }
   | { t: "file-begin"; id: string; name: string; mime: string; size: number; chunks: number };
 
 /** 資料通道可能收到的原始資料（控制為字串、檔案分塊為二進位）。 */
@@ -67,6 +68,11 @@ export function encodeNudge(): string {
   return JSON.stringify({ t: "nudge" } satisfies DataMessage);
 }
 
+/** 編碼一則「正在輸入中」訊息（F5：P2P 通道可用時卸載中繼）。 */
+export function encodeTyping(): string {
+  return JSON.stringify({ t: "typing" } satisfies DataMessage);
+}
+
 /**
  * 將檔案編碼為一連串資料通道訊息：一則 `file-begin` 後接 N 則 `file-chunk`。
  * 不受中繼站 JSON 大小限制，速度僅受雙方頻寬影響。
@@ -96,6 +102,7 @@ export function encodeFile(
 
 export interface DataChannelHandlers {
   onNudge?: () => void;
+  onTyping?: () => void;
   onFile?: (file: ReceivedFile) => void;
   onError?: (reason: string) => void;
 }
@@ -159,6 +166,9 @@ export class DataChannelReceiver {
     switch (msg.t) {
       case "nudge":
         this.handlers.onNudge?.();
+        return;
+      case "typing":
+        this.handlers.onTyping?.();
         return;
       case "file-begin":
         if (msg.size < 0 || msg.chunks < 0 || msg.size > this.maxFileSize || msg.chunks > this.maxChunks) {
