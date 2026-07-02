@@ -77,12 +77,28 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
 /* 標題列控制（主題 + 語言） */
 .titlectl { display: flex; align-items: center; gap: 6px; }
 .themebtn { background: #ffffff25; border: 1px solid #ffffff66; border-radius: 4px; cursor: pointer; font-size: 12px; line-height: 16px; padding: 1px 5px; }
-.langsw { display: flex; gap: 3px; }
-.langsw button {
+.langsw { position: relative; display: inline-flex; }
+.langsw__trigger {
+  display: inline-flex; align-items: center; gap: 4px;
   background: #ffffff25; color: #fff; border: 1px solid #ffffff66; border-radius: 4px;
   font-size: 11px; padding: 1px 7px; cursor: pointer; line-height: 16px;
 }
-.langsw button.on { background: #ffffffcc; color: var(--accent); font-weight: 700; }
+.langsw__trigger:hover { background: #ffffff40; }
+.langsw__trigger:focus-visible { outline: 2px solid #fff; outline-offset: 1px; }
+.langsw__menu {
+  position: absolute; top: calc(100% + 4px); right: 0; z-index: 20; min-width: 96px;
+  margin: 0; padding: 4px; list-style: none;
+  background: var(--panel); color: var(--ink);
+  border: 1px solid var(--border); border-radius: 6px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, .22);
+}
+.langsw__menu:focus-visible { outline: none; }
+.langsw__opt {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 5px 9px; border-radius: 4px; font-size: 12px; cursor: pointer; white-space: nowrap;
+}
+.langsw__opt.active { background: var(--accent); color: #fff; }
+.langsw__opt.on::after { content: "✓"; margin-left: 10px; font-weight: 700; }
 
 /* ── 登入 ── */
 .signin { margin: 8vh auto; width: 360px; }

@@ -1,5 +1,6 @@
-import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { asLocale, createT, detectLocale, type Locale, type TFunction } from "@nostr-buddy/i18n";
+import { syncDocumentLang } from "./ui/document-lang.js";
 
 const STORAGE_KEY = "nb.locale";
 
@@ -31,6 +32,9 @@ export function I18nProvider({ children }: { children: ReactNode }): JSX.Element
     }
     setLocaleState(next);
   };
+  useEffect(() => {
+    syncDocumentLang(locale);
+  }, [locale]);
   const value = useMemo<I18nContextValue>(() => ({ locale, t: createT(locale), setLocale }), [locale]);
   return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;
 }
