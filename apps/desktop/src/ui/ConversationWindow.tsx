@@ -35,6 +35,17 @@ import {
 } from "./sticker-prefs.js";
 import { StickerEditor } from "./StickerEditor.js";
 import { validateStickerSvg, wrapRasterAsSvg } from "./sticker-svg.js";
+import {
+  loadTriggers,
+  matchTriggers,
+  normalizeTrigger,
+  removeTriggersFor,
+  saveTriggers,
+  setTrigger,
+  triggersFor,
+  type TriggerEntry,
+  type TriggerMatch,
+} from "./sticker-triggers.js";
 import { renderMarkdown } from "./markdown.js";
 import { applyEmoticons } from "./emoticons.js";
 import { avatarColor, EMOTICONS, initial } from "./util.js";
@@ -83,6 +94,10 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
   const stickerFileRef = useRef<HTMLInputElement>(null);
   /** 貼圖編輯器（ADR-0033）：null=關閉；base 為底圖（空白畫布時省略）。 */
   const [editor, setEditor] = useState<{ base?: string; label?: string } | null>(null);
+  /** 文字觸發貼圖（ADR-0037）。 */
+  const [triggers, setTriggers] = useState<TriggerEntry[]>(() => loadTriggers());
+  const [trigSel, setTrigSel] = useState(0);
+  const [trigDismissed, setTrigDismissed] = useState(false);
   const [showAlbum, setShowAlbum] = useState(false);
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [ttl, setTtl] = useState(0);
@@ -138,6 +153,41 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
   // 統一解析：內建包或自製庫（供最近/最愛分頁）。
   const resolveAny = (ref: StickerRef): { label: string; svg: string } | undefined =>
     ref.pack === CUSTOM_PACK ? findSticker(library, ref.id) : resolveSticker(ref.pack, ref.id);
+
+  // 文字觸發貼圖（ADR-0037）：尾端比對、Tab/點擊送出、⌨ 設定。
+  const trigMatches: TriggerMatch[] = trigDismissed
+    ? []
+    : matchTriggers(text, triggers).filter((m) => resolveAny(m.entry.ref) !== undefined);
+  const trigActive = Math.min(trigSel, Math.max(trigMatches.length - 1, 0));
+  const acceptTrigger = (m: TriggerMatch): void => {
+    setText(text.slice(0, text.length - m.matchedLen));
+    setTrigSel(0);
+    const ref = m.entry.ref;
+    if (ref.pack === CUSTOM_PACK) {
+      const st = findSticker(library, ref.id);
+      if (st) sendCustomSticker(st);
+    } else {
+      sendSticker(ref.pack, ref.id);
+    }
+  };
+  const promptTriggers = (ref: StickerRef, label: string): void => {
+    const current = triggersFor(triggers, ref).join(" ");
+    const input = window.prompt(t("trigger_prompt", { name: label }), current);
+    if (input === null) return;
+    let list = removeTriggersFor(triggers, ref);
+    const skipped: string[] = [];
+    for (const raw of input.split(/[\s,，、]+/).filter(Boolean)) {
+      const norm = normalizeTrigger(raw);
+      const occupied = norm ? list.find((e) => e.trigger === norm) : undefined;
+      if (occupied && !window.confirm(t("trigger_conflict", { trigger: occupied.trigger }))) continue;
+      const r = setTrigger(list, raw, ref);
+      if (r.ok) list = r.list;
+      else skipped.push(raw);
+    }
+    if (skipped.length > 0) window.alert(t("trigger_skipped", { list: skipped.join(", ") }));
+    setTriggers(list);
+    saveTriggers(list);
+  };
 
   // 匯入：SVG 檔直接驗證；點陣圖經 canvas 縮圖重編碼後包成 SVG（ADR-0032）。
   const importStickerFile = async (f: File): Promise<void> => {
@@ -516,6 +566,15 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
                       </button>
                       <button
                         type="button"
+                        className="stickerpick__act stickerpick__act--topleft"
+                        aria-label={t("trigger_set")}
+                        title={t("trigger_set")}
+                        onClick={() => promptTriggers(ref, s.label)}
+                      >
+                        ⌨
+                      </button>
+                      <button
+                        type="button"
                         className={`stickerpick__fav${fav ? " on" : ""}`}
                         aria-label={t("sticker_favToggle")}
                         aria-pressed={fav}
@@ -569,6 +628,27 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
         );
       })()}
 
+      {trigMatches.length > 0 ? (
+        <div className="trigbar" data-testid="trigger-bar">
+          {trigMatches.map((m, i) => {
+            const st = resolveAny(m.entry.ref)!;
+            return (
+              <button
+                key={m.entry.trigger}
+                type="button"
+                className={`trigbar__item${i === trigActive ? " on" : ""}`}
+                title={m.entry.trigger}
+                onClick={() => acceptTrigger(m)}
+              >
+                <img src={svgToDataUri(st.svg)} alt={st.label} />
+                <span>{m.entry.trigger}</span>
+              </button>
+            );
+          })}
+          <span className="trigbar__hint">{t("trigger_hint")}</span>
+        </div>
+      ) : null}
+
       <div className="composer">
         <textarea
           aria-label={t("convo_composerPlaceholder")}
@@ -576,9 +656,28 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
           placeholder={t("convo_composerPlaceholder")}
           onChange={(e) => {
             setText(e.target.value);
+            setTrigSel(0);
+            setTrigDismissed(false);
             props.onTyping();
           }}
           onKeyDown={(e) => {
+            if (trigMatches.length > 0) {
+              if (e.key === "Tab") {
+                e.preventDefault();
+                acceptTrigger(trigMatches[trigActive]!);
+                return;
+              }
+              if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+                e.preventDefault();
+                const delta = e.key === "ArrowDown" ? 1 : -1;
+                setTrigSel((trigActive + delta + trigMatches.length) % trigMatches.length);
+                return;
+              }
+              if (e.key === "Escape") {
+                setTrigDismissed(true);
+                return;
+              }
+            }
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();
               send();

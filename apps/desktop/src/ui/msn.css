@@ -224,6 +224,14 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
 .sticker__own { padding: 0; border: none; background: transparent; cursor: pointer; display: block; }
 .sticker__own:hover img { filter: drop-shadow(0 0 4px var(--accent)); }
 .stickerpick__act--left { right: auto; left: -4px; }
+.stickerpick__act--topleft { right: auto; left: -4px; top: -4px; bottom: auto; }
+
+/* 文字觸發貼圖建議列（ADR-0037） */
+.trigbar { display: flex; align-items: center; gap: 6px; padding: 4px 8px; background: var(--surface2); border-top: 1px solid var(--border); overflow-x: auto; }
+.trigbar__item { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); color: var(--ink); font-size: 11px; padding: 2px 6px; cursor: pointer; flex: none; }
+.trigbar__item img { width: 24px; height: 24px; }
+.trigbar__item.on, .trigbar__item:hover { border-color: var(--accent); background: var(--hover); }
+.trigbar__hint { color: var(--muted); font-size: 10px; margin-left: auto; flex: none; }
 .settings__relays { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .settings__relayrow { font-size: 12px; }
 .settings__relayrow code { word-break: break-all; }

@@ -114,6 +114,11 @@ export interface Messages {
   editor_clear: string;
   editor_save: string;
   editor_cancel: string;
+  trigger_set: string;
+  trigger_prompt: string;
+  trigger_conflict: string;
+  trigger_skipped: string;
+  trigger_hint: string;
   voice_record: string;
   voice_stop: string;
   voice_recording: string;
@@ -248,6 +253,11 @@ const zhHant: Messages = {
   editor_clear: "清空",
   editor_save: "儲存到自製貼圖",
   editor_cancel: "取消",
+  trigger_set: "設定觸發文字",
+  trigger_prompt: "「{name}」的觸發文字（可多個，以空白分隔；清空移除）：",
+  trigger_conflict: "「{trigger}」已對應其他貼圖，改為對應此貼圖？",
+  trigger_skipped: "已略過無效觸發文字：{list}",
+  trigger_hint: "Tab 送出・↑↓ 選擇・Esc 關閉",
   voice_record: "錄語音訊息",
   voice_stop: "停止並傳送",
   voice_recording: "錄音中…點擊停止並傳送",
@@ -382,6 +392,11 @@ const en: Messages = {
   editor_clear: "Clear",
   editor_save: "Save to my stickers",
   editor_cancel: "Cancel",
+  trigger_set: "Set trigger text",
+  trigger_prompt: "Trigger text for \"{name}\" (multiple allowed, space-separated; empty to remove):",
+  trigger_conflict: "\"{trigger}\" is mapped to another sticker. Remap it to this one?",
+  trigger_skipped: "Skipped invalid triggers: {list}",
+  trigger_hint: "Tab to send · ↑↓ select · Esc dismiss",
   voice_record: "Record voice message",
   voice_stop: "Stop & send",
   voice_recording: "Recording… click to stop & send",
