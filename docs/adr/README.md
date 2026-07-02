@@ -52,3 +52,4 @@
 | [0035](./0035-relay-hint-learning.md) | Relay hint 自動學習：帶內加密 hint（否決 NIP-65） | 已接受 |
 | [0036](./0036-relay-hint-staleness.md) | Hint 陳舊偵測與離線回退；群訊 rumor 帶 hint | 已接受 |
 | [0037](./0037-sticker-text-triggers.md) | 文字觸發貼圖：composer 尾端比對 + 建議列（Tab 送出） | 已接受 |
+| [0038](./0038-url-hygiene.md) | 網址衛生：貼上清除追蹤參數 + 本地啟發式高風險警告 | 已接受 |

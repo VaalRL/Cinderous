@@ -244,6 +244,13 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
 .trigpanel__label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
 .trigpanel__row button { border: 1px solid var(--border); border-radius: 4px; background: var(--field); color: var(--ink); font-size: 11px; padding: 1px 6px; cursor: pointer; flex: none; }
 .trigpanel__row button:hover { border-color: var(--accent); color: var(--accent); }
+
+/* 高風險連結（ADR-0038） */
+.risklink { text-decoration-style: dotted; }
+.risklink__badge { margin-right: 2px; font-size: 11px; }
+.risklink--caution .risklink__badge { color: #c47f17; }
+.risklink--danger { color: #b3261e; }
+.risklink--danger .risklink__badge { color: #b3261e; }
 .settings__relays { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .settings__relayrow { font-size: 12px; }
 .settings__relayrow code { word-break: break-all; }

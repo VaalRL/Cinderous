@@ -50,6 +50,7 @@ import {
   type TriggerEntry,
   type TriggerMatch,
 } from "./sticker-triggers.js";
+import { cleanText } from "./url-hygiene.js";
 import { renderMarkdown } from "./markdown.js";
 import { applyEmoticons } from "./emoticons.js";
 import { avatarColor, EMOTICONS, initial } from "./util.js";
@@ -692,6 +693,22 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
           placeholder={t("convo_composerPlaceholder")}
           onChange={(e) => {
             setText(e.target.value);
+            setTrigSel(0);
+            setTrigDismissed(false);
+            props.onTyping();
+          }}
+          onPaste={(e) => {
+            // 貼上時清除網址追蹤參數（ADR-0038）；無可清除時走原生貼上。
+            const pasted = e.clipboardData.getData("text/plain");
+            const { text: cleanedPaste, cleaned } = cleanText(pasted);
+            if (cleaned === 0) return;
+            e.preventDefault();
+            const el = e.currentTarget;
+            const start = el.selectionStart ?? text.length;
+            const end = el.selectionEnd ?? text.length;
+            setText(text.slice(0, start) + cleanedPaste + text.slice(end));
+            const caret = start + cleanedPaste.length;
+            requestAnimationFrame(() => el.setSelectionRange(caret, caret));
             setTrigSel(0);
             setTrigDismissed(false);
             props.onTyping();

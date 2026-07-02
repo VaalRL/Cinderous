@@ -125,6 +125,15 @@ export interface Messages {
   trigger_renamePrompt: string;
   trigger_delete: string;
   trigger_deleted: string;
+  urlrisk_confirm: string;
+  urlrisk_textMismatch: string;
+  urlrisk_userinfo: string;
+  urlrisk_punycode: string;
+  urlrisk_ipHost: string;
+  urlrisk_oddPort: string;
+  urlrisk_http: string;
+  urlrisk_shortener: string;
+  urlrisk_unparsable: string;
   voice_record: string;
   voice_stop: string;
   voice_recording: string;
@@ -270,6 +279,15 @@ const zhHant: Messages = {
   trigger_renamePrompt: "新的觸發文字：",
   trigger_delete: "刪除觸發文字",
   trigger_deleted: "貼圖已刪除",
+  urlrisk_confirm: "此連結有風險，仍要開啟嗎？\n{url}",
+  urlrisk_textMismatch: "顯示文字偽裝成另一個網址",
+  urlrisk_userinfo: "網址帶有 @ 混淆（實際網域在 @ 之後）",
+  urlrisk_punycode: "國際化網域（可能為同形字仿冒）",
+  urlrisk_ipHost: "直接連往 IP 位址",
+  urlrisk_oddPort: "非常規連接埠",
+  urlrisk_http: "未加密（http）",
+  urlrisk_shortener: "短網址，無法預覽真正目的地",
+  urlrisk_unparsable: "網址格式異常",
   voice_record: "錄語音訊息",
   voice_stop: "停止並傳送",
   voice_recording: "錄音中…點擊停止並傳送",
@@ -415,6 +433,15 @@ const en: Messages = {
   trigger_renamePrompt: "New trigger text:",
   trigger_delete: "Delete trigger",
   trigger_deleted: "sticker deleted",
+  urlrisk_confirm: "This link looks risky. Open anyway?\n{url}",
+  urlrisk_textMismatch: "Link text impersonates a different address",
+  urlrisk_userinfo: "URL contains @ trick (real domain comes after @)",
+  urlrisk_punycode: "Internationalized domain (possible lookalike)",
+  urlrisk_ipHost: "Points directly to an IP address",
+  urlrisk_oddPort: "Unusual port",
+  urlrisk_http: "Unencrypted (http)",
+  urlrisk_shortener: "URL shortener — destination hidden",
+  urlrisk_unparsable: "Malformed URL",
   voice_record: "Record voice message",
   voice_stop: "Stop & send",
   voice_recording: "Recording… click to stop & send",

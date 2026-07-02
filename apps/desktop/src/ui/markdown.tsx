@@ -1,4 +1,6 @@
 import { Fragment, type ReactNode } from "react";
+import { useI18n } from "../i18n.js";
+import { assessUrl, type UrlRisk, type UrlRiskReason } from "./url-hygiene.js";
 
 interface Rule {
   name: "code" | "link" | "bold" | "strike" | "italic";
@@ -14,6 +16,38 @@ const RULES: Rule[] = [
   { name: "italic", re: /\*(.+?)\*/ },
   { name: "italic", re: /_(.+?)_/ },
 ];
+
+/** 高風險連結（ADR-0038）：⚠ 徽章 + 點擊確認（列出理由）後才開啟。 */
+function RiskyLink({ href, risk, children }: { href: string; risk: UrlRisk; children: ReactNode }): JSX.Element {
+  const { t } = useI18n();
+  const reasonText = (r: UrlRiskReason): string =>
+    ({
+      "text-mismatch": t("urlrisk_textMismatch"),
+      userinfo: t("urlrisk_userinfo"),
+      punycode: t("urlrisk_punycode"),
+      "ip-host": t("urlrisk_ipHost"),
+      "odd-port": t("urlrisk_oddPort"),
+      http: t("urlrisk_http"),
+      shortener: t("urlrisk_shortener"),
+      unparsable: t("urlrisk_unparsable"),
+    })[r];
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noopener noreferrer"
+      className={`risklink risklink--${risk.level}`}
+      data-testid="risk-link"
+      onClick={(e) => {
+        const msg = `${t("urlrisk_confirm", { url: href })}\n\n・${risk.reasons.map(reasonText).join("\n・")}`;
+        if (!window.confirm(msg)) e.preventDefault();
+      }}
+    >
+      <span className="risklink__badge" title={risk.reasons.map(reasonText).join("；")}>⚠</span>
+      {children}
+    </a>
+  );
+}
 
 /** 將單行文字解析為帶有行內格式的 React 節點（信任邊界安全：不注入 HTML）。 */
 function parseInline(text: string, keyBase: string): ReactNode[] {
@@ -42,13 +76,23 @@ function parseInline(text: string, keyBase: string): ReactNode[] {
       case "code":
         nodes.push(<code key={key}>{inner}</code>);
         break;
-      case "link":
+      case "link": {
+        const href = best.match[2]!;
+        // 高風險評估（ADR-0038）：連結顯示文字用於偵測「文字偽裝」。
+        const risk = assessUrl(href, inner);
         nodes.push(
-          <a key={key} href={best.match[2]} target="_blank" rel="noopener noreferrer">
-            {parseInline(inner, key)}
-          </a>,
+          risk.level === "ok" ? (
+            <a key={key} href={href} target="_blank" rel="noopener noreferrer">
+              {parseInline(inner, key)}
+            </a>
+          ) : (
+            <RiskyLink key={key} href={href} risk={risk}>
+              {parseInline(inner, key)}
+            </RiskyLink>
+          ),
         );
         break;
+      }
       case "bold":
         nodes.push(<strong key={key}>{parseInline(inner, key)}</strong>);
         break;
