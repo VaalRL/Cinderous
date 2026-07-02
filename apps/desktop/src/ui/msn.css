@@ -190,10 +190,28 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
 .filecard__dl:hover { text-decoration: underline; }
 
 /* 貼圖 */
-.stickerpick { display: flex; flex-wrap: wrap; gap: 4px; padding: 6px 8px; background: var(--panel); border-top: 1px solid var(--border); }
-.stickerpick__item { width: 48px; height: 48px; padding: 3px; border: 1px solid transparent; border-radius: 8px; background: var(--field); cursor: pointer; }
+.stickerpick { padding: 6px 8px; background: var(--panel); border-top: 1px solid var(--border); }
+.stickerpick__tabs { display: flex; gap: 4px; padding-bottom: 6px; border-bottom: 1px solid var(--border); margin-bottom: 6px; overflow-x: auto; }
+.stickerpick__tab {
+  flex: none; width: 34px; height: 34px; padding: 3px; border: 1px solid transparent; border-radius: 6px;
+  background: var(--field); cursor: pointer; font-size: 16px; line-height: 1; display: grid; place-items: center; color: var(--ink);
+}
+.stickerpick__tab:hover { background: var(--hover); }
+.stickerpick__tab.on { border-color: var(--accent); background: var(--hover); }
+.stickerpick__tab img { width: 100%; height: 100%; display: block; }
+.stickerpick__grid { display: flex; flex-wrap: wrap; gap: 4px; min-height: 54px; }
+.stickerpick__cell { position: relative; width: 48px; height: 48px; }
+.stickerpick__item { width: 100%; height: 100%; padding: 3px; border: 1px solid transparent; border-radius: 8px; background: var(--field); cursor: pointer; }
 .stickerpick__item:hover { border-color: var(--accent); background: var(--hover); }
 .stickerpick__item img { width: 100%; height: 100%; display: block; }
+.stickerpick__fav {
+  position: absolute; top: -4px; right: -4px; width: 18px; height: 18px; padding: 0; border: none; border-radius: 50%;
+  background: var(--panel); color: #bbb; font-size: 12px; line-height: 18px; cursor: pointer; box-shadow: 0 1px 3px rgba(0,0,0,.25);
+  opacity: 0; transition: opacity .12s;
+}
+.stickerpick__cell:hover .stickerpick__fav, .stickerpick__fav.on { opacity: 1; }
+.stickerpick__fav.on { color: #f5c518; }
+.stickerpick__empty { color: var(--muted); font-size: 12px; padding: 14px 4px; }
 .sticker { display: block; margin-top: 2px; }
 .sticker img { width: 96px; height: 96px; }
 

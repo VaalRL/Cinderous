@@ -81,7 +81,79 @@ export const STICKER_PACKS: Record<string, Record<string, { label: string; svg: 
       ),
     },
   },
+  mood: {
+    laugh: {
+      label: "大笑",
+      svg: svg(
+        '<circle cx="50" cy="50" r="38" fill="#ffd84d"/>' +
+          '<path d="M34 42 Q40 36 46 42 M54 42 Q60 36 66 42" stroke="#333" stroke-width="3" fill="none" stroke-linecap="round"/>' +
+          '<path d="M34 60 Q50 78 66 60 Z" fill="#8a3b3b"/>',
+      ),
+    },
+    love: {
+      label: "喜歡",
+      svg: svg(
+        '<circle cx="50" cy="50" r="38" fill="#ffd84d"/>' +
+          '<path d="M32 42 c4 -6 12 -6 8 2 c-2 4 -8 6 -8 6 c0 0 -6 -2 -8 -6 c-4 -8 4 -8 8 -2 Z" fill="#e8567a"/>' +
+          '<path d="M60 42 c4 -6 12 -6 8 2 c-2 4 -8 6 -8 6 c0 0 -6 -2 -8 -6 c-4 -8 4 -8 8 -2 Z" fill="#e8567a"/>' +
+          '<path d="M38 62 Q50 72 62 62" stroke="#333" stroke-width="3" fill="none" stroke-linecap="round"/>',
+      ),
+    },
+    angry: {
+      label: "生氣",
+      svg: svg(
+        '<circle cx="50" cy="50" r="38" fill="#ef7a6d"/>' +
+          '<path d="M32 40 L46 46 M68 40 L54 46" stroke="#333" stroke-width="3" stroke-linecap="round"/>' +
+          '<circle cx="40" cy="52" r="4" fill="#333"/><circle cx="60" cy="52" r="4" fill="#333"/>' +
+          '<path d="M38 68 Q50 60 62 68" stroke="#333" stroke-width="3" fill="none" stroke-linecap="round"/>',
+      ),
+    },
+    ok: {
+      label: "OK",
+      svg: svg(
+        '<circle cx="50" cy="50" r="38" fill="#7fd07f"/>' +
+          '<path d="M32 52 L44 64 L70 36" stroke="#fff" stroke-width="8" fill="none" stroke-linecap="round" stroke-linejoin="round"/>',
+      ),
+    },
+    question: {
+      label: "疑問",
+      svg: svg(
+        '<circle cx="50" cy="50" r="38" fill="#8fb8e8"/>' +
+          '<path d="M40 40 Q40 30 50 30 Q62 30 62 42 Q62 50 52 54 L52 60" stroke="#fff" stroke-width="7" fill="none" stroke-linecap="round"/>' +
+          '<circle cx="52" cy="70" r="4.5" fill="#fff"/>',
+      ),
+    },
+    thumbsup: {
+      label: "讚",
+      svg: svg(
+        '<circle cx="50" cy="50" r="38" fill="#ffd84d"/>' +
+          '<path d="M42 48 L42 70 L60 70 Q66 70 67 64 L70 54 Q71 48 64 48 L54 48 L57 38 Q58 30 50 32 Q46 33 46 40 L42 48 Z" fill="#fff" stroke="#c99a1f" stroke-width="2" stroke-linejoin="round"/>' +
+          '<rect x="34" y="48" width="8" height="22" rx="2" fill="#fff" stroke="#c99a1f" stroke-width="2"/>',
+      ),
+    },
+  },
 };
+
+/** 貼圖包的顯示資訊；order 決定分頁排列，cover 作為分頁圖示。 */
+export interface StickerPackMeta {
+  title: string;
+  cover: string;
+}
+
+export const STICKER_PACK_META: Record<string, StickerPackMeta> = {
+  buddy: { title: "夥伴", cover: "cat" },
+  mood: { title: "心情", cover: "laugh" },
+};
+
+/** 貼圖包顯示順序（僅列出有 metadata 者，過濾未知包）。 */
+export const STICKER_PACK_ORDER: string[] = Object.keys(STICKER_PACK_META).filter(
+  (p) => p in STICKER_PACKS,
+);
+
+/** 解析貼圖參照為其資料；找不到（包或 id 已不存在）回傳 undefined。 */
+export function resolveSticker(pack: string, id: string): { label: string; svg: string } | undefined {
+  return STICKER_PACKS[pack]?.[id];
+}
 
 /** 取得貼圖的 SVG（找不到回傳 undefined）。 */
 export function stickerSvg(pack: string, id: string): string | undefined {

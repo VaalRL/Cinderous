@@ -3,9 +3,28 @@ import { useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n.js";
 import type { CallMedia } from "@nostr-buddy/core";
 import type { ChatMessage, Contact, Self } from "../backend/types.js";
-import { formatSticker, parseSticker, STICKER_PACKS, stickerSvg, svgToDataUri } from "../stickers.js";
+import {
+  formatSticker,
+  parseSticker,
+  resolveSticker,
+  STICKER_PACK_META,
+  STICKER_PACK_ORDER,
+  STICKER_PACKS,
+  stickerSvg,
+  svgToDataUri,
+} from "../stickers.js";
+import {
+  isFavorite,
+  loadFavorites,
+  loadRecent,
+  recordRecent,
+  saveFavorites,
+  toggleFavorite,
+  type StickerRef,
+} from "./sticker-prefs.js";
 import { renderMarkdown } from "./markdown.js";
-import { avatarColor, emoticonize, EMOTICONS, initial } from "./util.js";
+import { applyEmoticons } from "./emoticons.js";
+import { avatarColor, EMOTICONS, initial } from "./util.js";
 
 export interface ConversationProps {
   self: Self;
@@ -44,6 +63,9 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
   const [text, setText] = useState("");
   const [showEmo, setShowEmo] = useState(false);
   const [showStickers, setShowStickers] = useState(false);
+  const [stickerTab, setStickerTab] = useState<string>(STICKER_PACK_ORDER[0] ?? "");
+  const [recent, setRecent] = useState<StickerRef[]>([]);
+  const [favorites, setFavorites] = useState<StickerRef[]>([]);
   const [showAlbum, setShowAlbum] = useState(false);
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [ttl, setTtl] = useState(0);
@@ -56,6 +78,24 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
   const images = messages
     .filter((m) => m.file?.mime.startsWith("image/") && m.file.url)
     .map((m) => ({ id: m.id, name: m.file!.name, url: m.file!.url! }));
+
+  // 貼圖偏好：開啟選擇器時載入「最近／最愛」。
+  useEffect(() => {
+    if (!showStickers) return;
+    setRecent(loadRecent());
+    setFavorites(loadFavorites());
+  }, [showStickers]);
+
+  const sendSticker = (pack: string, id: string): void => {
+    props.onSend(formatSticker(pack, id));
+    setRecent(recordRecent({ pack, id }));
+    setShowStickers(false);
+  };
+  const flipFavorite = (ref: StickerRef): void => {
+    const next = toggleFavorite(favorites, ref);
+    setFavorites(next);
+    saveFavorites(next);
+  };
 
   const dropFiles = (files: FileList | null) => {
     if (!files || !props.onSendFile) return;
@@ -281,26 +321,94 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
           <span className="recdot" /> {t("voice_recording")}
         </div>
       )}
-      {showStickers && (
-        <div className="stickerpick" data-testid="stickerpick">
-          {Object.entries(STICKER_PACKS).map(([pack, items]) =>
-            Object.entries(items).map(([id, s]) => (
+      {showStickers && (() => {
+        const currentRefs: StickerRef[] =
+          stickerTab === "__recent"
+            ? recent
+            : stickerTab === "__fav"
+              ? favorites
+              : Object.keys(STICKER_PACKS[stickerTab] ?? {}).map((id) => ({ pack: stickerTab, id }));
+        const visible = currentRefs.filter((r) => resolveSticker(r.pack, r.id) !== undefined);
+        return (
+          <div className="stickerpick" data-testid="stickerpick">
+            <div className="stickerpick__tabs" role="tablist" aria-label={t("sticker_title")}>
               <button
-                key={`${pack}/${id}`}
-                className="stickerpick__item"
-                title={s.label}
-                aria-label={s.label}
-                onClick={() => {
-                  props.onSend(formatSticker(pack, id));
-                  setShowStickers(false);
-                }}
+                type="button"
+                role="tab"
+                aria-selected={stickerTab === "__recent"}
+                className={`stickerpick__tab${stickerTab === "__recent" ? " on" : ""}`}
+                title={t("sticker_recent")}
+                aria-label={t("sticker_recent")}
+                onClick={() => setStickerTab("__recent")}
               >
-                <img src={svgToDataUri(s.svg)} alt={s.label} />
+                🕘
               </button>
-            )),
-          )}
-        </div>
-      )}
+              <button
+                type="button"
+                role="tab"
+                aria-selected={stickerTab === "__fav"}
+                className={`stickerpick__tab${stickerTab === "__fav" ? " on" : ""}`}
+                title={t("sticker_favorites")}
+                aria-label={t("sticker_favorites")}
+                onClick={() => setStickerTab("__fav")}
+              >
+                ⭐
+              </button>
+              {STICKER_PACK_ORDER.map((pack) => {
+                const meta = STICKER_PACK_META[pack]!;
+                const coverSvg = stickerSvg(pack, meta.cover);
+                return (
+                  <button
+                    type="button"
+                    role="tab"
+                    key={pack}
+                    aria-selected={stickerTab === pack}
+                    className={`stickerpick__tab${stickerTab === pack ? " on" : ""}`}
+                    title={meta.title}
+                    aria-label={meta.title}
+                    onClick={() => setStickerTab(pack)}
+                  >
+                    {coverSvg ? <img src={svgToDataUri(coverSvg)} alt="" /> : meta.title}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="stickerpick__grid">
+              {visible.length === 0 ? (
+                <div className="stickerpick__empty">{t("sticker_empty")}</div>
+              ) : (
+                visible.map((ref) => {
+                  const s = resolveSticker(ref.pack, ref.id)!;
+                  const fav = isFavorite(favorites, ref);
+                  return (
+                    <div className="stickerpick__cell" key={`${ref.pack}/${ref.id}`}>
+                      <button
+                        type="button"
+                        className="stickerpick__item"
+                        title={s.label}
+                        aria-label={s.label}
+                        onClick={() => sendSticker(ref.pack, ref.id)}
+                      >
+                        <img src={svgToDataUri(s.svg)} alt={s.label} />
+                      </button>
+                      <button
+                        type="button"
+                        className={`stickerpick__fav${fav ? " on" : ""}`}
+                        aria-label={t("sticker_favToggle")}
+                        aria-pressed={fav}
+                        title={t("sticker_favToggle")}
+                        onClick={() => flipFavorite(ref)}
+                      >
+                        {fav ? "★" : "☆"}
+                      </button>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        );
+      })()}
 
       <div className="composer">
         <textarea
@@ -429,7 +537,7 @@ function MessageLine({
           <img src={svgToDataUri(sticker)} alt={t("sticker_alt")} data-testid="sticker-img" />
         </span>
       ) : (
-        <span className="text">{renderMarkdown(emoticonize(message.text))}</span>
+        <span className="text">{renderMarkdown(applyEmoticons(message.text))}</span>
       )}
       {reactions.length > 0 ? (
         <span className="reactions">
