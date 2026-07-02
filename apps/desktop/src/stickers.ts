@@ -27,6 +27,21 @@ export function parseSticker(content: string): { pack: string; id: string } | nu
 const svg = (body: string): string =>
   `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">${body}</svg>`;
 
+/**
+ * 動態貼圖：CSS keyframes 內嵌於 SVG（`<img>` 中可播放，JS 被停用故安全）。
+ * `.a` 元素以 fill-box 為變換原點；`prefers-reduced-motion` 時停用動畫（無障礙）。
+ * 見 docs/adr/0031。
+ */
+const anim = (keyframes: string, body: string): string =>
+  svg(
+    "<style>" +
+      ".a{transform-box:fill-box;transform-origin:center}" +
+      keyframes +
+      "@media(prefers-reduced-motion:reduce){.a{animation:none!important}}" +
+      "</style>" +
+      body,
+  );
+
 /** 內建貼圖包：pack → id → { 標籤, SVG }。皆為原創簡易圖案。 */
 export const STICKER_PACKS: Record<string, Record<string, { label: string; svg: string }>> = {
   buddy: {
@@ -132,6 +147,41 @@ export const STICKER_PACKS: Record<string, Record<string, { label: string; svg: 
       ),
     },
   },
+  motion: {
+    wave: {
+      label: "揮手",
+      svg: anim(
+        "@keyframes wv{0%,100%{transform:rotate(-16deg)}50%{transform:rotate(16deg)}}.a{animation:wv 1s ease-in-out infinite}",
+        '<g class="a">' +
+          '<rect x="40" y="34" width="26" height="42" rx="13" fill="#f7c873"/>' +
+          '<rect x="32" y="42" width="10" height="22" rx="5" fill="#f7c873"/>' +
+          '<path d="M46 36 v-8 M53 34 v-10 M60 36 v-8" stroke="#e0a94f" stroke-width="4" stroke-linecap="round"/>' +
+          "</g>",
+      ),
+    },
+    bounce: {
+      label: "彈跳",
+      svg: anim(
+        "@keyframes bnc{0%,100%{transform:translateY(-24px)}50%{transform:translateY(6px)}}.a{animation:bnc .8s ease-in-out infinite}",
+        '<ellipse cx="50" cy="84" rx="18" ry="4" fill="#00000022"/>' +
+          '<circle class="a" cx="50" cy="52" r="18" fill="#5fb0e8"/>',
+      ),
+    },
+    spin: {
+      label: "轉星",
+      svg: anim(
+        "@keyframes spn{to{transform:rotate(360deg)}}.a{animation:spn 3s linear infinite}",
+        '<path class="a" d="M50 12 L61 40 L92 42 L67 61 L76 91 L50 73 L24 91 L33 61 L8 42 L39 40 Z" fill="#f5c518"/>',
+      ),
+    },
+    beat: {
+      label: "心跳",
+      svg: anim(
+        "@keyframes bt{0%,100%{transform:scale(1)}25%{transform:scale(1.18)}50%{transform:scale(1)}}.a{animation:bt 1s ease-in-out infinite}",
+        '<path class="a" d="M50 82 C10 54 22 22 50 40 C78 22 90 54 50 82 Z" fill="#e8567a"/>',
+      ),
+    },
+  },
 };
 
 /** 貼圖包的顯示資訊；order 決定分頁排列，cover 作為分頁圖示。 */
@@ -143,6 +193,7 @@ export interface StickerPackMeta {
 export const STICKER_PACK_META: Record<string, StickerPackMeta> = {
   buddy: { title: "夥伴", cover: "cat" },
   mood: { title: "心情", cover: "laugh" },
+  motion: { title: "動態", cover: "wave" },
 };
 
 /** 貼圖包顯示順序（僅列出有 metadata 者，過濾未知包）。 */
