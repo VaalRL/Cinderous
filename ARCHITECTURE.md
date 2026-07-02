@@ -12,6 +12,7 @@
 - **元資料隱藏**：私訊以 NIP-17/59 Gift Wrap 包封收發雙方，中繼站無法重建社交圖譜（詳見 PRD §6–§7 與 `docs/adr/0002`）。
 - **靜態落地加密**：私鑰與本機 SQLite 不以明文落地（OS 安全儲存 + 資料庫加密），以對抗設備竊取。
 - **雙軌動態切換**：能 P2P 直連就走 WebRTC；不能直連或對方離線時退回 Nostr 中繼；P2P 失敗以 TURN／經中繼降級保底。
+- **跨中繼互通（ADR-0034）**：relay 之間不聯邦；客戶端維護 relay pool——addressed 事件（帶 `p` tag）發往**收件人的 relay**（好友 relay hint，`npub…@wss://…`）、心跳發往 pool 全部、收件箱訂閱掛在 pool 每座 relay，事件以 id 去重。任何標準 Nostr relay 皆可互通。
 
 ## 2. 雙軌混合網路
 

@@ -48,3 +48,4 @@
 | [0031](./0031-animated-stickers.md) | 動態貼圖：宣告式 SVG 動畫（CSS keyframes） | 已接受 |
 | [0032](./0032-custom-stickers.md) | 自製貼圖：內容隨訊息、SVG 統一表示、點擊即擁有 | 已接受 |
 | [0033](./0033-sticker-editor.md) | 貼圖編輯器：筆劃模型序列化為 SVG path（桌面優先） | 已接受 |
+| [0034](./0034-multi-relay-routing.md) | 跨中繼通訊：客戶端 Relay Pool 與收件人路由 | 已接受 |

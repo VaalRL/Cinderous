@@ -9,6 +9,8 @@ export interface StoredIdentity {
 export interface StoredContact {
   pubkey: string;
   name: string;
+  /** 對方的 relay hint（ADR-0034 多中繼路由）；無 hint 時走自己的 home relay。 */
+  relayUrl?: string;
 }
 
 export interface StoredMessage {

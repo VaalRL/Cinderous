@@ -130,8 +130,8 @@ export interface ChatBackend {
   rejectCall?(): void;
   /** 掛斷目前通話。 */
   hangupCall?(): void;
-  /** 以 NIP-19 `npub` 新增聯絡人（僅真實 relay 後端支援）。 */
-  addContact?(npub: string): void;
+  /** 以 NIP-19 `npub`（可附 `@wss://…` relay hint，ADR-0034）新增聯絡人（僅真實 relay 後端支援）。 */
+  addContact?(npub: string, relayUrl?: string): void;
   /** 移除聯絡人並清除對話。 */
   removeContact?(pubkey: PubkeyHex): void;
   /** 封鎖某聯絡人（移出清單、忽略其後續訊息）。 */
@@ -140,6 +140,8 @@ export interface ChatBackend {
   unblockContact?(pubkey: PubkeyHex): void;
   /** 自己的 `npub`（供分享/加好友；僅真實 relay 後端提供）。 */
   readonly selfNpub?: string;
+  /** 分享用字串 `npub…@wss://…`（帶 relay hint；無 home relay 時同 npub）。 */
+  readonly selfShareUri?: string;
   /** 自己的 `nsec` 私鑰（僅供本機身分備份；絕不外流；僅真實 relay 後端提供）。 */
   readonly selfNsec?: string;
   stop(): void;

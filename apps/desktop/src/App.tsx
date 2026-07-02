@@ -70,7 +70,10 @@ export function App(): JSX.Element {
       const identity = storage.loadIdentity();
       const relayUrl = localStorage.getItem(RELAY_URL_KEY);
       if (identity && relayUrl) {
-        const b = new RelayChatBackend(storage, webSocketConnector(relayUrl), identity.name);
+        const b = new RelayChatBackend(storage, webSocketConnector(relayUrl), identity.name, {
+          relayUrl,
+          connectorFor: webSocketConnector,
+        });
         setConn("connecting");
         setSelf({ ...b.self });
         setBackend(b);
@@ -231,7 +234,10 @@ export function App(): JSX.Element {
     let b: ChatBackend;
     if (relayUrl) {
       localStorage.setItem(RELAY_URL_KEY, relayUrl);
-      b = new RelayChatBackend(new LocalStorage(), webSocketConnector(relayUrl), name);
+      b = new RelayChatBackend(new LocalStorage(), webSocketConnector(relayUrl), name, {
+        relayUrl,
+        connectorFor: webSocketConnector,
+      });
       setConn("connecting");
     } else {
       b = new BrowserChatBackend(name);
@@ -328,7 +334,10 @@ export function App(): JSX.Element {
   };
 
   const addContactProps = activeBackend.addContact
-    ? { onAddContact: activeBackend.addContact.bind(activeBackend), selfNpub: activeBackend.selfNpub ?? "" }
+    ? {
+        onAddContact: activeBackend.addContact.bind(activeBackend),
+        selfNpub: activeBackend.selfShareUri ?? activeBackend.selfNpub ?? "",
+      }
     : {};
   const manageProps = {
     ...(activeBackend.removeContact ? { onRemoveContact: removeContact } : {}),

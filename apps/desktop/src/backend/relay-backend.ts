@@ -71,6 +71,12 @@ export type RelayConnector = (
 
 const RECONNECT_MAX_MS = 15_000;
 
+/** 正規化 relay URL（trim、去尾斜線）；非 ws(s) 或空值回傳 undefined。 */
+export function normalizeRelayUrl(url: string | undefined): string | undefined {
+  const u = url?.trim().replace(/\/+$/, "");
+  return u && /^wss?:\/\//i.test(u) ? u : undefined;
+}
+
 /** 以真實 WebSocket 連上 relay 的連接器，含指數退避自動重連與狀態回報。 */
 export function webSocketConnector(url: string): RelayConnector {
   return (handlers, onStatus) => {
@@ -122,18 +128,34 @@ export function webSocketConnector(url: string): RelayConnector {
  * 真實 relay 後端：身分與訊息本機持久化（{@link AppStorage}），
  * 經注入的連接器連上 relay 收發（NIP-17/59 Gift Wrap 私訊、心跳、輸入中、Nudge）。
  */
+/** 多中繼路由選項（ADR-0034）；未提供 `connectorFor` 時為單 relay 模式。 */
+export interface RelayPoolOptions {
+  /** 自己的 home relay URL（用於與聯絡人 hint 比對去重、組分享字串）。 */
+  relayUrl?: string;
+  /** 依 URL 建立外部 relay 連線的工廠。 */
+  connectorFor?: (url: string) => RelayConnector;
+}
+
 export class RelayChatBackend implements ChatBackend {
   readonly self: Self;
   readonly selfNpub: string;
   readonly selfNsec: string;
+  /** 分享用字串：`npub…@wss://…`（設定了 home relay 時），否則同 selfNpub。 */
+  readonly selfShareUri: string;
   private readonly sk: SecretKey;
   private readonly client: RelayClient;
+  private readonly homeUrl: string | undefined;
+  private readonly connectorFor: ((url: string) => RelayConnector) | undefined;
+  /** 外部 relay 連線（正規化 URL → client），惰性建立（ADR-0034）。 */
+  private readonly relayPool = new Map<string, RelayClient>();
+  /** 跨 relay 事件去重（同一事件可能經多個 relay 抵達）。 */
+  private readonly seenEvt = new Set<string>();
   private readonly presence = new PresenceTracker();
   private readonly statuses = new Map<PubkeyHex, PresencePayload>();
   private nowPlaying = "";
   private lastContactsSig = "";
   private readonly seenMsg = new Set<string>();
-  private contacts: { pubkey: PubkeyHex; name: string }[];
+  private contacts: { pubkey: PubkeyHex; name: string; relayUrl?: string }[];
   private blocked: { pubkey: PubkeyHex; name: string }[];
   private groups: Group[];
   private readonly transfer: WebRtcTransfer;
@@ -146,7 +168,10 @@ export class RelayChatBackend implements ChatBackend {
     private readonly storage: AppStorage,
     connector: RelayConnector,
     name?: string,
+    pool?: RelayPoolOptions,
   ) {
+    this.homeUrl = normalizeRelayUrl(pool?.relayUrl);
+    this.connectorFor = pool?.connectorFor;
     let identity = storage.loadIdentity();
     if (!identity) {
       const sk = generateSecretKey();
@@ -161,6 +186,7 @@ export class RelayChatBackend implements ChatBackend {
     this.self = { pubkey, name: identity.name, status: "online", statusMessage: "" };
     this.selfNpub = npubEncode(pubkey);
     this.selfNsec = identity.nsec;
+    this.selfShareUri = this.homeUrl ? `${this.selfNpub}@${this.homeUrl}` : this.selfNpub;
     this.contacts = storage.loadContacts();
     this.blocked = storage.loadBlocked();
     this.groups = storage.loadGroups();
@@ -169,7 +195,7 @@ export class RelayChatBackend implements ChatBackend {
       (state) => this.onConnection(state),
     );
     this.transfer = new WebRtcTransfer(this.sk, {
-      publishSignal: (evt) => this.client.publish(evt),
+      publishSignal: (evt) => this.publishAddressed(evt),
       onOutgoingProgress: (peer, id, sent, total) => this.handlers?.onFileProgress?.(peer, id, sent, total),
       onIncoming: (peer, file) => {
         if (this.isBlocked(peer)) return;
@@ -184,7 +210,7 @@ export class RelayChatBackend implements ChatBackend {
     this.call = new WebRtcCall(
       this.sk,
       {
-        publishCallSignal: (evt) => this.client.publish(evt),
+        publishCallSignal: (evt) => this.publishAddressed(evt),
         onState: (peer, state, media) => this.handlers?.onCallState?.(peer, state, media),
         onLocalStream: (stream) => this.handlers?.onCallLocalStream?.(stream),
         onRemoteStream: (stream) => this.handlers?.onCallRemoteStream?.(stream),
@@ -242,15 +268,67 @@ export class RelayChatBackend implements ChatBackend {
     this.emitBlocked();
   }
 
-  private resubscribe(): void {
-    const authors = this.contacts.map((c) => c.pubkey);
+  /** 聯絡人某 relay hint 是否屬於外部 relay（非 home）。 */
+  private foreignUrlOf(contact: { relayUrl?: string }): string | undefined {
+    const url = normalizeRelayUrl(contact.relayUrl);
+    return url && url !== this.homeUrl ? url : undefined;
+  }
+
+  /** 取得（必要時建立）外部 relay 連線；單 relay 模式回傳 undefined。 */
+  private poolClient(url: string): RelayClient | undefined {
+    if (!this.connectorFor) return undefined;
+    let client = this.relayPool.get(url);
+    if (!client) {
+      client = this.connectorFor(url)(
+        { onEvent: (_sub, event) => this.onEvent(event) },
+        // 外部 relay 重連後重掛該 relay 的訂閱；不驅動 UI 主連線指示（ADR-0034）。
+        (state) => {
+          if (state === "online") this.resubscribeRelay(url);
+        },
+      );
+      this.relayPool.set(url, client);
+    }
+    return client;
+  }
+
+  /** Addressed 事件（帶收件人 `p` tag）→ 收件人的 relay；無 hint 退回 home。 */
+  private publishAddressed(evt: NostrEvent): void {
+    const to = evt.tags.find((t) => t[0] === "p")?.[1];
+    const contact = to ? this.contacts.find((c) => c.pubkey === to) : undefined;
+    const url = contact ? this.foreignUrlOf(contact) : undefined;
+    const client = url ? this.poolClient(url) : undefined;
+    (client ?? this.client).publish(evt);
+  }
+
+  /** 對某個 relay 掛訂閱：完整收件箱 + 該 relay 上發心跳的聯絡人 presence。 */
+  private subscribeOn(client: RelayClient, url: string | undefined): void {
+    const authors = this.contacts
+      .filter((c) => (this.foreignUrlOf(c) ?? this.homeUrl) === url)
+      .map((c) => c.pubkey);
     // F5：presence 心跳已彙整音樂狀態（np），不再單獨訂閱 MUSIC。
-    this.client.subscribe("presence", [{ kinds: [KIND.HEARTBEAT], authors }]);
-    this.client.subscribe("typing", [{ kinds: [KIND.TYPING], authors, "#p": [this.self.pubkey] }]);
-    this.client.subscribe("nudge", [{ kinds: [NUDGE_KIND], authors, "#p": [this.self.pubkey] }]);
-    this.client.subscribe("dm", [{ kinds: [KIND.OFFLINE_DM_GIFT_WRAP], "#p": [this.self.pubkey] }]);
-    this.client.subscribe("sig", [{ kinds: [SDP_SIGNAL_KIND], "#p": [this.self.pubkey] }]);
-    this.client.subscribe("call", [{ kinds: [CALL_SIGNAL_KIND], "#p": [this.self.pubkey] }]);
+    client.subscribe("presence", [{ kinds: [KIND.HEARTBEAT], authors }]);
+    const all = this.contacts.map((c) => c.pubkey);
+    client.subscribe("typing", [{ kinds: [KIND.TYPING], authors: all, "#p": [this.self.pubkey] }]);
+    client.subscribe("nudge", [{ kinds: [NUDGE_KIND], authors: all, "#p": [this.self.pubkey] }]);
+    client.subscribe("dm", [{ kinds: [KIND.OFFLINE_DM_GIFT_WRAP], "#p": [this.self.pubkey] }]);
+    client.subscribe("sig", [{ kinds: [SDP_SIGNAL_KIND], "#p": [this.self.pubkey] }]);
+    client.subscribe("call", [{ kinds: [CALL_SIGNAL_KIND], "#p": [this.self.pubkey] }]);
+  }
+
+  private resubscribeRelay(url: string): void {
+    const client = this.relayPool.get(url);
+    if (client) this.subscribeOn(client, url);
+  }
+
+  private resubscribe(): void {
+    this.subscribeOn(this.client, this.homeUrl);
+    if (!this.connectorFor) return;
+    // 確保聯絡人 hint 中的外部 relay 都已連線並掛好訂閱。
+    for (const c of this.contacts) {
+      const url = this.foreignUrlOf(c);
+      if (url) this.poolClient(url);
+    }
+    for (const [url, client] of this.relayPool) this.subscribeOn(client, url);
   }
 
   private beat(): void {
@@ -260,7 +338,10 @@ export class RelayChatBackend implements ChatBackend {
       m: this.self.statusMessage,
       np: this.nowPlaying,
     };
-    this.client.publish(createHeartbeat(this.sk, { status: encodePresence(payload) }));
+    const evt = createHeartbeat(this.sk, { status: encodePresence(payload) });
+    // 心跳發到 pool 中所有 relay：對方未記錄我的 relay 也看得到我在線（ADR-0034）。
+    this.client.publish(evt);
+    for (const client of this.relayPool.values()) client.publish(evt);
   }
 
   /** 以抖動間隔自我重排下一次心跳（F5：分散中繼負載）。 */
@@ -271,7 +352,20 @@ export class RelayChatBackend implements ChatBackend {
     }, jitter(HEARTBEAT_MS));
   }
 
+  /** 跨 relay 事件去重：已見過回傳 true；容量超限折半清理（保留較新）。 */
+  private seenBefore(id: string): boolean {
+    if (this.seenEvt.has(id)) return true;
+    this.seenEvt.add(id);
+    if (this.seenEvt.size > 4096) {
+      const keep = [...this.seenEvt].slice(2048);
+      this.seenEvt.clear();
+      for (const k of keep) this.seenEvt.add(k);
+    }
+    return false;
+  }
+
   private onEvent(event: NostrEvent): void {
+    if (this.seenBefore(event.id)) return;
     switch (event.kind) {
       case KIND.HEARTBEAT:
         this.presence.observe(event.pubkey, event.created_at);
@@ -399,10 +493,17 @@ export class RelayChatBackend implements ChatBackend {
     this.emitContacts();
   }
 
-  addContact(npub: string): void {
-    const pubkey = npubDecode(npub.trim());
+  /** 以 `npub…` 或 `npub…@wss://…`（亦可空白分隔）新增聯絡人；hint 供多中繼路由。 */
+  addContact(input: string, relayUrl?: string): void {
+    const [rawNpub, inlineHint] = input.trim().split(/[@\s]+/, 2);
+    const pubkey = npubDecode((rawNpub ?? "").trim());
     if (this.isBlocked(pubkey) || this.contacts.some((c) => c.pubkey === pubkey)) return;
-    this.storage.addContact({ pubkey, name: shortNpub(npub.trim()) });
+    const hint = normalizeRelayUrl(relayUrl ?? inlineHint);
+    this.storage.addContact({
+      pubkey,
+      name: shortNpub((rawNpub ?? "").trim()),
+      ...(hint && hint !== this.homeUrl ? { relayUrl: hint } : {}),
+    });
     this.contacts = this.storage.loadContacts();
     this.resubscribe();
     this.emitContacts();
@@ -484,7 +585,7 @@ export class RelayChatBackend implements ChatBackend {
   sendMessage(to: PubkeyHex, text: string, ttlSeconds?: number): void {
     const disappearAt = ttlSeconds ? nowSec() + ttlSeconds : undefined;
     const evt = wrapMessage(text, this.sk, to, disappearAt !== undefined ? { disappearAt } : {});
-    this.client.publish(evt);
+    this.publishAddressed(evt);
     const extra = disappearAt !== undefined ? { expiresAt: disappearAt * 1000 } : {};
     const message = { id: evt.id, contact: to, outgoing: true, text, at: Date.now(), ...extra };
     this.seenMsg.add(evt.id);
@@ -494,7 +595,7 @@ export class RelayChatBackend implements ChatBackend {
 
   sendReaction(to: PubkeyHex, messageId: string, emoji: string): void {
     const evt = wrapReaction(emoji, this.sk, to, messageId);
-    this.client.publish(evt);
+    this.publishAddressed(evt);
     this.seenMsg.add(evt.id);
     this.storage.addReaction({ id: evt.id, messageId, emoji, mine: true });
     this.handlers?.onReaction?.(messageId, emoji, true);
@@ -502,7 +603,7 @@ export class RelayChatBackend implements ChatBackend {
 
   unsendMessage(to: PubkeyHex, messageId: string): void {
     const evt = wrapDeletion(this.sk, to, messageId);
-    this.client.publish(evt);
+    this.publishAddressed(evt);
     this.seenMsg.add(evt.id);
     this.storage.markDeleted(messageId);
     this.handlers?.onUnsend?.(messageId);
@@ -526,7 +627,7 @@ export class RelayChatBackend implements ChatBackend {
       members,
     };
     const recipients = members.filter((m) => m !== this.self.pubkey);
-    for (const evt of wrapGroupControl(control, this.sk, recipients)) this.client.publish(evt);
+    for (const evt of wrapGroupControl(control, this.sk, recipients)) this.publishAddressed(evt);
     this.emitGroups();
   }
 
@@ -534,7 +635,7 @@ export class RelayChatBackend implements ChatBackend {
     const group = this.groups.find((g) => g.id === groupId);
     if (!group) return;
     const evts = wrapGroupMessage(text, this.sk, this.self.pubkey, group);
-    for (const evt of evts) this.client.publish(evt);
+    for (const evt of evts) this.publishAddressed(evt);
     const id = evts[0]?.id ?? `g-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     this.seenMsg.add(id);
     const message = { id, contact: groupId, outgoing: true, text, at: Date.now(), sender: this.self.pubkey };
@@ -547,7 +648,7 @@ export class RelayChatBackend implements ChatBackend {
     if (!group) return;
     const recipients = group.members.filter((m) => m !== this.self.pubkey);
     for (const evt of wrapGroupControl({ type: "group-leave", id: groupId }, this.sk, recipients)) {
-      this.client.publish(evt);
+      this.publishAddressed(evt);
     }
     this.storage.removeGroup(groupId);
     this.groups = this.storage.loadGroups();
@@ -570,7 +671,7 @@ export class RelayChatBackend implements ChatBackend {
   sendTyping(to: PubkeyHex): void {
     // F5 卸載：P2P 通道已開時走 Data Channel，否則退回中繼。
     if (this.transfer.sendTyping(to)) return;
-    this.client.publish(createTyping(this.sk, to));
+    this.publishAddressed(createTyping(this.sk, to));
   }
 
   /** 開啟對話時主動建立 P2P 通道（讓後續輸入中等狀態可卸載中繼）。 */
@@ -580,7 +681,7 @@ export class RelayChatBackend implements ChatBackend {
   }
 
   sendNudge(to: PubkeyHex): void {
-    this.client.publish(
+    this.publishAddressed(
       finalizeEvent({ kind: NUDGE_KIND, created_at: nowSec(), tags: [["p", to]], content: "nudge" }, this.sk),
     );
   }
