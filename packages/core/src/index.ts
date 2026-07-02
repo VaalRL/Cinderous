@@ -6,6 +6,7 @@ export * from "./tracker.js";
 export * from "./ephemeral.js";
 export * from "./heartbeat.js";
 export * from "./presence.js";
+export * from "./presence-status.js";
 export * from "./typing.js";
 export * from "./music.js";
 export * from "./nip44.js";

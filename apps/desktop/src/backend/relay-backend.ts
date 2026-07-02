@@ -2,13 +2,15 @@ import {
   applyGroupControl,
   CALL_SIGNAL_KIND,
   createHeartbeat,
-  createMusicStatus,
   createTyping,
+  decodePresence,
   deletionTarget,
+  encodePresence,
   finalizeEvent,
   groupTarget,
   generateSecretKey,
   getPublicKey,
+  jitter,
   KIND,
   messageExpiry,
   npubDecode,
@@ -16,7 +18,6 @@ import {
   nsecDecode,
   newGroupId,
   nsecEncode,
-  NowPlayingStore,
   parseGroupControl,
   PresenceTracker,
   reactionTarget,
@@ -33,6 +34,8 @@ import {
   type GroupControl,
   type NostrEvent,
   type OutgoingFile,
+  type PresencePayload,
+  type PresenceState,
   type PubkeyHex,
   type RelayClientHandlers,
   type Rumor,
@@ -54,28 +57,6 @@ const NUDGE_KIND = 20100;
 const HEARTBEAT_MS = 15_000;
 const PRESENCE_TIMEOUT_MS = 45_000;
 const nowSec = () => Math.floor(Date.now() / 1000);
-
-interface StatusPayload {
-  s: Status;
-  m: string;
-}
-function encodeStatus(status: Status, message: string): string {
-  return JSON.stringify({ s: status, m: message } satisfies StatusPayload);
-}
-function decodeStatus(content: string): StatusPayload {
-  try {
-    const parsed: unknown = JSON.parse(content);
-    if (parsed && typeof parsed === "object" && "s" in parsed) {
-      const p = parsed as Record<string, unknown>;
-      if (p.s === "online" || p.s === "away" || p.s === "busy") {
-        return { s: p.s, m: typeof p.m === "string" ? p.m : "" };
-      }
-    }
-  } catch {
-    /* 視為純文字 */
-  }
-  return { s: "online", m: content };
-}
 
 const shortNpub = (npub: string) => `${npub.slice(0, 12)}…`;
 
@@ -148,8 +129,8 @@ export class RelayChatBackend implements ChatBackend {
   private readonly sk: SecretKey;
   private readonly client: RelayClient;
   private readonly presence = new PresenceTracker();
-  private readonly music = new NowPlayingStore();
-  private readonly statuses = new Map<PubkeyHex, StatusPayload>();
+  private readonly statuses = new Map<PubkeyHex, PresencePayload>();
+  private nowPlaying = "";
   private readonly seenMsg = new Set<string>();
   private contacts: { pubkey: PubkeyHex; name: string }[];
   private blocked: { pubkey: PubkeyHex; name: string }[];
@@ -157,7 +138,7 @@ export class RelayChatBackend implements ChatBackend {
   private readonly transfer: WebRtcTransfer;
   private readonly call: WebRtcCall;
   private handlers: ChatBackendEvents | null = null;
-  private heartbeatTimer: ReturnType<typeof setInterval> | undefined;
+  private heartbeatTimer: ReturnType<typeof setTimeout> | undefined;
   private renderTimer: ReturnType<typeof setInterval> | undefined;
 
   constructor(
@@ -209,7 +190,7 @@ export class RelayChatBackend implements ChatBackend {
     this.handlers = handlers;
     this.resubscribe();
     this.beat();
-    this.heartbeatTimer = setInterval(() => this.beat(), HEARTBEAT_MS);
+    this.scheduleBeat();
     this.renderTimer = setInterval(() => this.emitContacts(), 1000);
     this.emitContacts();
     // 回放本機持久化的歷史訊息
@@ -254,8 +235,8 @@ export class RelayChatBackend implements ChatBackend {
 
   private resubscribe(): void {
     const authors = this.contacts.map((c) => c.pubkey);
+    // F5：presence 心跳已彙整音樂狀態（np），不再單獨訂閱 MUSIC。
     this.client.subscribe("presence", [{ kinds: [KIND.HEARTBEAT], authors }]);
-    this.client.subscribe("music", [{ kinds: [KIND.MUSIC], authors }]);
     this.client.subscribe("typing", [{ kinds: [KIND.TYPING], authors, "#p": [this.self.pubkey] }]);
     this.client.subscribe("nudge", [{ kinds: [NUDGE_KIND], authors, "#p": [this.self.pubkey] }]);
     this.client.subscribe("dm", [{ kinds: [KIND.OFFLINE_DM_GIFT_WRAP], "#p": [this.self.pubkey] }]);
@@ -265,19 +246,27 @@ export class RelayChatBackend implements ChatBackend {
 
   private beat(): void {
     if (this.self.status === "offline") return;
-    this.client.publish(
-      createHeartbeat(this.sk, { status: encodeStatus(this.self.status, this.self.statusMessage) }),
-    );
+    const payload: PresencePayload = {
+      s: this.self.status as PresenceState,
+      m: this.self.statusMessage,
+      np: this.nowPlaying,
+    };
+    this.client.publish(createHeartbeat(this.sk, { status: encodePresence(payload) }));
+  }
+
+  /** 以抖動間隔自我重排下一次心跳（F5：分散中繼負載）。 */
+  private scheduleBeat(): void {
+    this.heartbeatTimer = setTimeout(() => {
+      this.beat();
+      this.scheduleBeat();
+    }, jitter(HEARTBEAT_MS));
   }
 
   private onEvent(event: NostrEvent): void {
     switch (event.kind) {
       case KIND.HEARTBEAT:
         this.presence.observe(event.pubkey, event.created_at);
-        this.statuses.set(event.pubkey, decodeStatus(event.content));
-        return;
-      case KIND.MUSIC:
-        this.music.observe(event.pubkey, event.content, event.created_at);
+        this.statuses.set(event.pubkey, decodePresence(event.content));
         return;
       case KIND.TYPING:
         this.handlers?.onTyping(event.pubkey);
@@ -453,7 +442,7 @@ export class RelayChatBackend implements ChatBackend {
         name: c.name,
         status: online ? payload?.s ?? "online" : "offline",
         statusMessage: (online ? payload?.m : undefined) ?? "",
-        nowPlaying: online ? this.music.statusOf(c.pubkey) ?? "" : "",
+        nowPlaying: (online ? payload?.np : undefined) ?? "",
       };
     });
     this.handlers.onContacts(contacts);
@@ -466,7 +455,9 @@ export class RelayChatBackend implements ChatBackend {
   }
 
   setNowPlaying(text: string): void {
-    this.client.publish(createMusicStatus(this.sk, text));
+    // F5：音樂狀態彙整進心跳，不再單獨發事件；更新後立即發一次心跳。
+    this.nowPlaying = text;
+    this.beat();
   }
 
   sendMessage(to: PubkeyHex, text: string, ttlSeconds?: number): void {
@@ -566,7 +557,7 @@ export class RelayChatBackend implements ChatBackend {
   }
 
   stop(): void {
-    if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
+    if (this.heartbeatTimer) clearTimeout(this.heartbeatTimer);
     if (this.renderTimer) clearInterval(this.renderTimer);
     this.transfer.close();
     this.call.close();

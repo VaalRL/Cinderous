@@ -1,17 +1,19 @@
 import {
   createHeartbeat,
-  createMusicStatus,
   createTyping,
+  decodePresence,
+  encodePresence,
   finalizeEvent,
   generateSecretKey,
   getPublicKey,
   KIND,
   messageExpiry,
-  NowPlayingStore,
   PresenceTracker,
   unwrapMessage,
   wrapMessage,
   type NostrEvent,
+  type PresencePayload,
+  type PresenceState,
   type PubkeyHex,
   type RelayClient,
   type SecretKey,
@@ -24,37 +26,17 @@ const HEARTBEAT_MS = 2_000;
 const PRESENCE_TIMEOUT_MS = 6_000;
 const nowSec = () => Math.floor(Date.now() / 1000);
 
-interface StatusPayload {
-  s: Status;
-  m: string;
-}
-
-function encodeStatus(status: Status, message: string): string {
-  return JSON.stringify({ s: status, m: message } satisfies StatusPayload);
-}
-
-function decodeStatus(content: string): StatusPayload {
-  try {
-    const parsed: unknown = JSON.parse(content);
-    if (parsed && typeof parsed === "object" && "s" in parsed) {
-      const p = parsed as Record<string, unknown>;
-      const s = p.s;
-      if (s === "online" || s === "away" || s === "busy") {
-        return { s, m: typeof p.m === "string" ? p.m : "" };
-      }
-    }
-  } catch {
-    /* 視為純文字狀態訊息 */
-  }
-  return { s: "online", m: content };
-}
-
 interface BotDef {
   name: string;
   statusMessage: string;
   status: Status;
   nowPlaying: string;
   reply: (text: string) => string;
+}
+
+/** 機器人的彙整心跳負載（狀態＋音樂）。 */
+function botPresence(def: BotDef): string {
+  return encodePresence({ s: def.status as PresenceState, m: def.statusMessage, np: def.nowPlaying });
 }
 
 const BOTS: BotDef[] = [
@@ -92,8 +74,8 @@ export class BrowserChatBackend implements ChatBackend {
   private readonly net = createInMemoryRelayNetwork({ store: new MessageStore(), now: nowSec });
   private readonly client: RelayClient;
   private readonly presence = new PresenceTracker();
-  private readonly music = new NowPlayingStore();
-  private readonly statuses = new Map<PubkeyHex, StatusPayload>();
+  private readonly statuses = new Map<PubkeyHex, PresencePayload>();
+  private nowPlaying = "";
   private readonly roster: Peer[] = [];
   private readonly blocked: { pubkey: PubkeyHex; name: string }[] = [];
   private readonly hidden = new Set<PubkeyHex>();
@@ -128,8 +110,8 @@ export class BrowserChatBackend implements ChatBackend {
     this.handlers = handlers;
     const botPks = this.bots.map((b) => b.peer.pk);
 
+    // F5：presence 心跳已彙整音樂（np），不再單獨訂閱/發送 MUSIC。
     this.client.subscribe("presence", [{ kinds: [KIND.HEARTBEAT], authors: botPks }]);
-    this.client.subscribe("music", [{ kinds: [KIND.MUSIC], authors: botPks }]);
     this.client.subscribe("typing", [{ kinds: [KIND.TYPING], authors: botPks, "#p": [this.self.pubkey] }]);
     this.client.subscribe("nudge", [{ kinds: [NUDGE_KIND], authors: botPks, "#p": [this.self.pubkey] }]);
     this.client.subscribe("dm", [{ kinds: [KIND.OFFLINE_DM_GIFT_WRAP], "#p": [this.self.pubkey] }]);
@@ -138,8 +120,7 @@ export class BrowserChatBackend implements ChatBackend {
     for (const { peer, def, client } of this.bots) {
       client.subscribe("dm", [{ kinds: [KIND.OFFLINE_DM_GIFT_WRAP], "#p": [peer.pk] }]);
       client.subscribe("nudge", [{ kinds: [NUDGE_KIND], authors: [this.self.pubkey], "#p": [peer.pk] }]);
-      client.publish(createHeartbeat(peer.sk, { status: encodeStatus(def.status, def.statusMessage) }));
-      if (def.nowPlaying) client.publish(createMusicStatus(peer.sk, def.nowPlaying));
+      client.publish(createHeartbeat(peer.sk, { status: botPresence(def) }));
     }
 
     this.beat();
@@ -151,10 +132,16 @@ export class BrowserChatBackend implements ChatBackend {
   private beat(): void {
     if (this.self.status === "offline") return; // 顯示為離線：停止心跳
     this.client.publish(
-      createHeartbeat(this.selfSk, { status: encodeStatus(this.self.status, this.self.statusMessage) }),
+      createHeartbeat(this.selfSk, {
+        status: encodePresence({
+          s: this.self.status as PresenceState,
+          m: this.self.statusMessage,
+          np: this.nowPlaying,
+        }),
+      }),
     );
     for (const { peer, def, client } of this.bots) {
-      client.publish(createHeartbeat(peer.sk, { status: encodeStatus(def.status, def.statusMessage) }));
+      client.publish(createHeartbeat(peer.sk, { status: botPresence(def) }));
     }
   }
 
@@ -162,10 +149,7 @@ export class BrowserChatBackend implements ChatBackend {
     switch (event.kind) {
       case KIND.HEARTBEAT:
         this.presence.observe(event.pubkey, event.created_at);
-        this.statuses.set(event.pubkey, decodeStatus(event.content));
-        return;
-      case KIND.MUSIC:
-        this.music.observe(event.pubkey, event.content, event.created_at);
+        this.statuses.set(event.pubkey, decodePresence(event.content));
         return;
       case KIND.TYPING:
         this.handlers?.onTyping(event.pubkey);
@@ -248,7 +232,7 @@ export class BrowserChatBackend implements ChatBackend {
         name: peer.name,
         status: online ? payload?.s ?? "online" : "offline",
         statusMessage: (online ? payload?.m : undefined) ?? fallback?.message ?? "",
-        nowPlaying: online ? this.music.statusOf(peer.pk) ?? "" : "",
+        nowPlaying: (online ? payload?.np : undefined) ?? "",
       };
     });
     this.handlers.onContacts(contacts);
@@ -261,7 +245,8 @@ export class BrowserChatBackend implements ChatBackend {
   }
 
   setNowPlaying(text: string): void {
-    this.client.publish(createMusicStatus(this.selfSk, text));
+    this.nowPlaying = text;
+    this.beat();
   }
 
   sendMessage(to: PubkeyHex, text: string, ttlSeconds?: number): void {
