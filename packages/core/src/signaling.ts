@@ -10,15 +10,25 @@ export interface OfferAnswerSignal {
   sdp: string;
 }
 
-export interface CandidateSignal {
-  type: "candidate";
+/** 單一 ICE candidate 的資料。 */
+export interface IceCandidateData {
   candidate: string;
   sdpMid?: string;
   sdpMLineIndex?: number;
 }
 
-/** WebRTC 信令內容（SDP offer/answer 或 ICE candidate）。 */
-export type Signal = OfferAnswerSignal | CandidateSignal;
+export interface CandidateSignal extends IceCandidateData {
+  type: "candidate";
+}
+
+/** 批次 ICE candidate（A6：把一陣爆發的候選合併成單一信令，減少中繼發佈數）。 */
+export interface CandidatesSignal {
+  type: "candidates";
+  candidates: IceCandidateData[];
+}
+
+/** WebRTC 信令內容（SDP offer/answer 或 ICE candidate，單一或批次）。 */
+export type Signal = OfferAnswerSignal | CandidateSignal | CandidatesSignal;
 
 export interface ReceivedSignal {
   /** 經身分驗證的寄件人公鑰。 */
@@ -65,10 +75,49 @@ export function parseSignal(content: string): Signal {
   }
   if (s.type === "candidate") {
     if (typeof s.candidate !== "string") throw new Error("信令缺少 candidate");
-    const out: CandidateSignal = { type: "candidate", candidate: s.candidate };
-    if (typeof s.sdpMid === "string") out.sdpMid = s.sdpMid;
-    if (typeof s.sdpMLineIndex === "number") out.sdpMLineIndex = s.sdpMLineIndex;
-    return out;
+    return { type: "candidate", ...parseIce(s) };
+  }
+  if (s.type === "candidates") {
+    if (!Array.isArray(s.candidates)) throw new Error("candidates 非陣列");
+    const list: IceCandidateData[] = [];
+    for (const raw of s.candidates) {
+      if (raw && typeof raw === "object" && typeof (raw as Record<string, unknown>).candidate === "string") {
+        list.push(parseIce(raw as Record<string, unknown>));
+      }
+    }
+    return { type: "candidates", candidates: list };
   }
   throw new Error(`未知信令類型：${String(s.type)}`);
+}
+
+/** 從物件抽出 ICE candidate 欄位（只保留有效的可選欄位）。 */
+function parseIce(s: Record<string, unknown>): IceCandidateData {
+  const out: IceCandidateData = { candidate: s.candidate as string };
+  if (typeof s.sdpMid === "string") out.sdpMid = s.sdpMid;
+  if (typeof s.sdpMLineIndex === "number") out.sdpMLineIndex = s.sdpMLineIndex;
+  return out;
+}
+
+/**
+ * ICE candidate 批次緩衝（A6）：短時間累積候選，`drain()` 一次取出為單一
+ * {@link CandidatesSignal}，讓執行期以一則信令送出多個候選，減少中繼發佈數。
+ */
+export class CandidateBatch {
+  private buf: IceCandidateData[] = [];
+
+  add(candidate: IceCandidateData): void {
+    this.buf.push(candidate);
+  }
+
+  get size(): number {
+    return this.buf.length;
+  }
+
+  /** 取出目前緩衝為批次信令並清空；空時回傳 null。 */
+  drain(): CandidatesSignal | null {
+    if (this.buf.length === 0) return null;
+    const candidates = this.buf;
+    this.buf = [];
+    return { type: "candidates", candidates };
+  }
 }

@@ -113,6 +113,14 @@ export async function runWebRtcScenario(): Promise<WebRtcResult> {
       const answer = await pc.createAnswer();
       await pc.setLocalDescription(answer);
       client.publish(createSignal({ type: "answer", sdp: answer.sdp ?? "" }, ownSk, peerPk));
+    } else if (signal.type === "candidates") {
+      for (const c of signal.candidates) {
+        await addOrQueueCandidate(pc, {
+          candidate: c.candidate,
+          sdpMid: c.sdpMid ?? null,
+          sdpMLineIndex: c.sdpMLineIndex ?? null,
+        });
+      }
     } else {
       await pc.setRemoteDescription({ type: "answer", sdp: signal.sdp });
       await flushCandidates(pc);

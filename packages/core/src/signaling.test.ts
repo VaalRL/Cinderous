@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
 import { generateSecretKey, getPublicKey } from "./keys.js";
 import { sealAndWrap } from "./nip59.js";
-import { createSignal, parseSignal, readSignal, SDP_SIGNAL_KIND, type Signal } from "./signaling.js";
+import {
+  CandidateBatch,
+  createSignal,
+  parseSignal,
+  readSignal,
+  SDP_SIGNAL_KIND,
+  type Signal,
+} from "./signaling.js";
 
 const aliceSk = generateSecretKey();
 const alicePk = getPublicKey(aliceSk);
@@ -59,6 +66,33 @@ describe("信令結構驗證（C5）", () => {
     expect(() => parseSignal(JSON.stringify({ type: "candidate" }))).toThrow();
     expect(() => parseSignal(JSON.stringify({ type: "bogus" }))).toThrow();
     expect(() => parseSignal("123")).toThrow();
+  });
+
+  it("批次 candidates 往返、過濾非法項", () => {
+    const sig: Signal = {
+      type: "candidates",
+      candidates: [
+        { candidate: "c1", sdpMid: "0", sdpMLineIndex: 0 },
+        { candidate: "c2" },
+      ],
+    };
+    const evt = createSignal(sig, aliceSk, bobPk);
+    expect(readSignal(evt, bobSk).signal).toEqual(sig);
+    // 非法項（缺 candidate）被過濾
+    const parsed = parseSignal(JSON.stringify({ type: "candidates", candidates: [{ candidate: "ok" }, { x: 1 }] }));
+    expect(parsed).toEqual({ type: "candidates", candidates: [{ candidate: "ok" }] });
+  });
+
+  it("CandidateBatch 累積後 drain 為單一批次、清空", () => {
+    const b = new CandidateBatch();
+    expect(b.drain()).toBeNull();
+    b.add({ candidate: "a" });
+    b.add({ candidate: "b", sdpMid: "0" });
+    expect(b.size).toBe(2);
+    const drained = b.drain();
+    expect(drained).toEqual({ type: "candidates", candidates: [{ candidate: "a" }, { candidate: "b", sdpMid: "0" }] });
+    expect(b.size).toBe(0);
+    expect(b.drain()).toBeNull();
   });
 
   it("readSignal 對結構非法的內層內容拋錯", () => {

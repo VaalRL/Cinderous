@@ -1,8 +1,10 @@
 import {
+  CandidateBatch,
   createSignal,
   DataChannelReceiver,
   encodeFile,
   readSignal,
+  type IceCandidateData,
   type NostrEvent,
   type OutgoingFile,
   type PubkeyHex,
@@ -10,6 +12,9 @@ import {
   type SecretKey,
   type Signal,
 } from "@nostr-buddy/core";
+
+/** ICE candidate 批次的去抖動視窗（毫秒）：把一陣爆發的候選合併成一則信令。 */
+const CANDIDATE_BATCH_MS = 60;
 
 /** WebRTC 檔案傳輸管理器對外的事件。 */
 export interface TransferHandlers {
@@ -37,6 +42,8 @@ interface PeerConn {
   pendingCandidates: RTCIceCandidateInit[];
   outbox: OutJob[];
   started: boolean;
+  candBatch: CandidateBatch;
+  candTimer: ReturnType<typeof setTimeout> | undefined;
 }
 
 const HIGH_WATER = 1 << 20; // 1 MiB：超過就暫緩送出，避免撐爆緩衝
@@ -85,9 +92,20 @@ export class WebRtcTransfer {
     void this.applySignal(sender, peer, signal);
   }
 
+  /** 沖出累積的 ICE candidate，以單一批次信令送出。 */
+  private flushCandidates(peerPk: PubkeyHex, peer: PeerConn): void {
+    if (peer.candTimer !== undefined) {
+      clearTimeout(peer.candTimer);
+      peer.candTimer = undefined;
+    }
+    const batch = peer.candBatch.drain();
+    if (batch) this.handlers.publishSignal(createSignal(batch, this.ownSk, peerPk));
+  }
+
   /** 關閉所有連線（後端 stop 時呼叫）。 */
   close(): void {
     for (const peer of this.peers.values()) {
+      if (peer.candTimer !== undefined) clearTimeout(peer.candTimer);
       try {
         peer.pc.close();
       } catch {
@@ -111,17 +129,25 @@ export class WebRtcTransfer {
       pendingCandidates: [],
       outbox: [],
       started: false,
+      candBatch: new CandidateBatch(),
+      candTimer: undefined,
     };
     pc.onicecandidate = (ev) => {
-      if (!ev.candidate) return;
       const c = ev.candidate;
-      const sig: Signal = {
-        type: "candidate",
+      if (!c) {
+        // null candidate = 蒐集完成，立即沖出剩餘批次
+        this.flushCandidates(peerPk, conn);
+        return;
+      }
+      conn.candBatch.add({
         candidate: c.candidate,
         ...(c.sdpMid != null ? { sdpMid: c.sdpMid } : {}),
         ...(c.sdpMLineIndex != null ? { sdpMLineIndex: c.sdpMLineIndex } : {}),
-      };
-      this.handlers.publishSignal(createSignal(sig, this.ownSk, peerPk));
+      });
+      // 去抖動：一陣爆發的候選合併成單一 candidates 信令送出（A6）。
+      if (conn.candTimer === undefined) {
+        conn.candTimer = setTimeout(() => this.flushCandidates(peerPk, conn), CANDIDATE_BATCH_MS);
+      }
     };
     pc.onconnectionstatechange = () => {
       if (pc.connectionState === "failed") this.handlers.onError(peerPk, "P2P 連線失敗");
@@ -154,16 +180,22 @@ export class WebRtcTransfer {
     if (dc.readyState === "open") this.flush(peerPk, peer);
   }
 
+  private async addIce(peer: PeerConn, c: IceCandidateData): Promise<void> {
+    const init: RTCIceCandidateInit = {
+      candidate: c.candidate,
+      sdpMid: c.sdpMid ?? null,
+      sdpMLineIndex: c.sdpMLineIndex ?? null,
+    };
+    if (peer.hasRemote) await peer.pc.addIceCandidate(init);
+    else peer.pendingCandidates.push(init);
+  }
+
   private async applySignal(peerPk: PubkeyHex, peer: PeerConn, signal: Signal): Promise<void> {
     try {
       if (signal.type === "candidate") {
-        const init: RTCIceCandidateInit = {
-          candidate: signal.candidate,
-          sdpMid: signal.sdpMid ?? null,
-          sdpMLineIndex: signal.sdpMLineIndex ?? null,
-        };
-        if (peer.hasRemote) await peer.pc.addIceCandidate(init);
-        else peer.pendingCandidates.push(init);
+        await this.addIce(peer, signal);
+      } else if (signal.type === "candidates") {
+        for (const c of signal.candidates) await this.addIce(peer, c);
       } else if (signal.type === "offer") {
         await peer.pc.setRemoteDescription({ type: "offer", sdp: signal.sdp });
         peer.hasRemote = true;
