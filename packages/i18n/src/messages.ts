@@ -119,6 +119,12 @@ export interface Messages {
   trigger_conflict: string;
   trigger_skipped: string;
   trigger_hint: string;
+  trigger_manage: string;
+  trigger_empty: string;
+  trigger_rename: string;
+  trigger_renamePrompt: string;
+  trigger_delete: string;
+  trigger_deleted: string;
   voice_record: string;
   voice_stop: string;
   voice_recording: string;
@@ -258,6 +264,12 @@ const zhHant: Messages = {
   trigger_conflict: "「{trigger}」已對應其他貼圖，改為對應此貼圖？",
   trigger_skipped: "已略過無效觸發文字：{list}",
   trigger_hint: "Tab 送出・↑↓ 選擇・Esc 關閉",
+  trigger_manage: "觸發文字總覽",
+  trigger_empty: "還沒有觸發文字——在貼圖上按 ⌨ 設定",
+  trigger_rename: "改名",
+  trigger_renamePrompt: "新的觸發文字：",
+  trigger_delete: "刪除觸發文字",
+  trigger_deleted: "貼圖已刪除",
   voice_record: "錄語音訊息",
   voice_stop: "停止並傳送",
   voice_recording: "錄音中…點擊停止並傳送",
@@ -397,6 +409,12 @@ const en: Messages = {
   trigger_conflict: "\"{trigger}\" is mapped to another sticker. Remap it to this one?",
   trigger_skipped: "Skipped invalid triggers: {list}",
   trigger_hint: "Tab to send · ↑↓ select · Esc dismiss",
+  trigger_manage: "Trigger overview",
+  trigger_empty: "No triggers yet — press ⌨ on a sticker to add one",
+  trigger_rename: "Rename",
+  trigger_renamePrompt: "New trigger text:",
+  trigger_delete: "Delete trigger",
+  trigger_deleted: "sticker deleted",
   voice_record: "Record voice message",
   voice_stop: "Stop & send",
   voice_recording: "Recording… click to stop & send",

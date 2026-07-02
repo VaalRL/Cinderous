@@ -1,5 +1,5 @@
 import { contentHash, REACTION_EMOJIS } from "@nostr-buddy/core";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "../i18n.js";
 import type { CallMedia } from "@nostr-buddy/core";
 import type { ChatMessage, Contact, Self } from "../backend/types.js";
@@ -36,12 +36,16 @@ import {
 import { StickerEditor } from "./StickerEditor.js";
 import { validateStickerSvg, wrapRasterAsSvg } from "./sticker-svg.js";
 import {
+  buildTriggerIndex,
   loadTriggers,
   matchTriggers,
   normalizeTrigger,
+  removeTrigger,
   removeTriggersFor,
+  renameTrigger,
   saveTriggers,
   setTrigger,
+  TRIGGERS_MAX,
   triggersFor,
   type TriggerEntry,
   type TriggerMatch,
@@ -98,6 +102,7 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
   const [triggers, setTriggers] = useState<TriggerEntry[]>(() => loadTriggers());
   const [trigSel, setTrigSel] = useState(0);
   const [trigDismissed, setTrigDismissed] = useState(false);
+  const [showTrigPanel, setShowTrigPanel] = useState(false);
   const [showAlbum, setShowAlbum] = useState(false);
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [ttl, setTtl] = useState(0);
@@ -154,10 +159,11 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
   const resolveAny = (ref: StickerRef): { label: string; svg: string } | undefined =>
     ref.pack === CUSTOM_PACK ? findSticker(library, ref.id) : resolveSticker(ref.pack, ref.id);
 
-  // 文字觸發貼圖（ADR-0037）：尾端比對、Tab/點擊送出、⌨ 設定。
+  // 文字觸發貼圖（ADR-0037）：尾端比對（字首索引）、Tab/點擊送出、⌨ 設定。
+  const trigIndex = useMemo(() => buildTriggerIndex(triggers), [triggers]);
   const trigMatches: TriggerMatch[] = trigDismissed
     ? []
-    : matchTriggers(text, triggers).filter((m) => resolveAny(m.entry.ref) !== undefined);
+    : matchTriggers(text, triggers, trigIndex).filter((m) => resolveAny(m.entry.ref) !== undefined);
   const trigActive = Math.min(trigSel, Math.max(trigMatches.length - 1, 0));
   const acceptTrigger = (m: TriggerMatch): void => {
     setText(text.slice(0, text.length - m.matchedLen));
@@ -187,6 +193,26 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
     if (skipped.length > 0) window.alert(t("trigger_skipped", { list: skipped.join(", ") }));
     setTriggers(list);
     saveTriggers(list);
+  };
+  // 觸發字總覽面板：改名 / 刪除（ADR-0037 後續）。
+  const renameOneTrigger = (oldTrigger: string): void => {
+    const input = window.prompt(t("trigger_renamePrompt"), oldTrigger);
+    if (input === null) return;
+    const norm = normalizeTrigger(input);
+    const occupied = norm && norm !== oldTrigger ? triggers.find((e) => e.trigger === norm) : undefined;
+    if (occupied && !window.confirm(t("trigger_conflict", { trigger: occupied.trigger }))) return;
+    const r = renameTrigger(triggers, oldTrigger, input);
+    if (!r.ok) {
+      window.alert(t("trigger_skipped", { list: input }));
+      return;
+    }
+    setTriggers(r.list);
+    saveTriggers(r.list);
+  };
+  const deleteOneTrigger = (trigger: string): void => {
+    const next = removeTrigger(triggers, trigger);
+    setTriggers(next);
+    saveTriggers(next);
   };
 
   // 匯入：SVG 檔直接驗證；點陣圖經 canvas 縮圖重編碼後包成 SVG（ADR-0032）。
@@ -506,6 +532,16 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
                   </button>
                 );
               })}
+              <button
+                type="button"
+                className="stickerpick__tab stickerpick__tab--manage"
+                title={t("trigger_manage")}
+                aria-label={t("trigger_manage")}
+                data-testid="trigger-manage"
+                onClick={() => setShowTrigPanel(true)}
+              >
+                ⌨
+              </button>
             </div>
             <div className="stickerpick__grid">
               {stickerTab === "__mine" ? (
@@ -723,6 +759,56 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
           onSave={acquireSticker}
           onClose={() => setEditor(null)}
         />
+      )}
+
+      {showTrigPanel && (
+        <div className="modal" role="dialog" aria-modal="true" aria-label={t("trigger_manage")} onClick={() => setShowTrigPanel(false)}>
+          <div className="modal__box win trigpanel" onClick={(e) => e.stopPropagation()}>
+            <div className="win__title">
+              <span>{t("trigger_manage")}（{triggers.length} / {TRIGGERS_MAX}）</span>
+              <span className="spacer" />
+              <span className="win__btn" role="button" aria-label={t("convo_close")} onClick={() => setShowTrigPanel(false)}>×</span>
+            </div>
+            <div className="trigpanel__body" data-testid="trigger-panel">
+              {triggers.length === 0 ? (
+                <div className="trigpanel__empty">{t("trigger_empty")}</div>
+              ) : (
+                [...triggers]
+                  .sort((a, b) => a.trigger.localeCompare(b.trigger))
+                  .map((e) => {
+                    const st = resolveAny(e.ref);
+                    return (
+                      <div className="trigpanel__row" key={e.trigger}>
+                        {st ? (
+                          <img src={svgToDataUri(st.svg)} alt={st.label} />
+                        ) : (
+                          <span className="trigpanel__gone" title={t("trigger_deleted")}>🚫</span>
+                        )}
+                        <code className="trigpanel__trigger">{e.trigger}</code>
+                        <span className="trigpanel__label">{st ? st.label : t("trigger_deleted")}</span>
+                        <button
+                          type="button"
+                          title={t("trigger_rename")}
+                          aria-label={t("trigger_rename")}
+                          onClick={() => renameOneTrigger(e.trigger)}
+                        >
+                          ✎
+                        </button>
+                        <button
+                          type="button"
+                          title={t("trigger_delete")}
+                          aria-label={t("trigger_delete")}
+                          onClick={() => deleteOneTrigger(e.trigger)}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    );
+                  })
+              )}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

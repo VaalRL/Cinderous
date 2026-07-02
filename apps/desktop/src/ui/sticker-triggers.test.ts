@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildTriggerIndex,
   matchTriggers,
+  renameTrigger,
   normalizeTrigger,
   removeTrigger,
   removeTriggersFor,
@@ -44,6 +46,51 @@ describe("觸發字正規化與 CRUD（ADR-0037）", () => {
     expect(removeTrigger(list, "哈哈")).toHaveLength(2);
     expect(triggersFor(list, ref("cat"))).toEqual(["哈哈", "喵"]);
     expect(removeTriggersFor(list, ref("cat"))).toEqual([entry("汪", "dog")]);
+  });
+});
+
+describe("renameTrigger（管理面板用）", () => {
+  const list = [entry("哈哈", "cat"), entry("汪", "dog")];
+
+  it("改名保留參照；同名冪等；舊字不存在回報 missing；新字非法回報 invalid", () => {
+    const r = renameTrigger(list, "哈哈", "嘻嘻");
+    expect(r.ok && r.list).toContainEqual(entry("嘻嘻", "cat"));
+    expect(r.ok && r.list).not.toContainEqual(entry("哈哈", "cat"));
+    expect(renameTrigger(list, "哈哈", " 哈哈 ")).toEqual({ ok: true, list });
+    expect(renameTrigger(list, "不存在", "x")).toEqual({ ok: false, reason: "missing" });
+    expect(renameTrigger(list, "哈哈", "  ")).toEqual({ ok: false, reason: "invalid" });
+  });
+
+  it("改名撞上既有觸發字：覆蓋並回報 replaced", () => {
+    const r = renameTrigger(list, "哈哈", "汪");
+    expect(r.ok && r.replaced).toEqual(ref("dog"));
+    if (!r.ok) throw new Error("unexpected");
+    expect(r.list).toEqual([entry("汪", "cat")]);
+  });
+});
+
+describe("字首索引 buildTriggerIndex（ADR-0037 後續）", () => {
+  it("索引路徑與全掃描結果完全一致（含中英混雜與代理對字首）", () => {
+    const list = [
+      entry("哈哈", "a"),
+      entry("哈囉", "b"),
+      entry("喵", "c"),
+      entry("lol", "d"),
+      entry("laugh", "e"),
+      entry("😂笑", "f"), // 代理對字首
+    ];
+    const index = buildTriggerIndex(list);
+    const samples = ["今天真好笑哈哈", "哈", "小貓喵", "笑死 LO", "😂", "xx😂笑", "完全無關", ""];
+    for (const text of samples) {
+      expect(matchTriggers(text, list, index), text).toEqual(matchTriggers(text, list));
+    }
+  });
+
+  it("索引桶依字首分組", () => {
+    const index = buildTriggerIndex([entry("哈哈", "a"), entry("哈囉", "b"), entry("喵", "c")]);
+    expect(index.get("哈")).toHaveLength(2);
+    expect(index.get("喵")).toHaveLength(1);
+    expect(index.get("汪")).toBeUndefined();
   });
 });
 

@@ -19,7 +19,8 @@ export interface TriggerMatch {
 }
 
 export const TRIGGER_MAX_LEN = 16;
-export const TRIGGERS_MAX = 64;
+/** 觸發字總數上限（字首索引使比對成本與總數脫鉤，ADR-0037 後續）。 */
+export const TRIGGERS_MAX = 256;
 /** 建議列上限。 */
 export const TRIGGER_SUGGEST_MAX = 5;
 
@@ -72,16 +73,59 @@ export function removeTriggersFor(list: TriggerEntry[], ref: StickerRef): Trigge
   return list.filter((e) => !sameRef(e.ref, ref));
 }
 
+/** 重新命名觸發字（純函式）：舊字不存在回報 missing；新字非法回報 invalid；佔用即覆蓋（回報 replaced）。 */
+export type RenameTriggerResult =
+  | { ok: true; list: TriggerEntry[]; replaced?: StickerRef }
+  | { ok: false; reason: "invalid" | "missing" };
+
+export function renameTrigger(list: TriggerEntry[], oldRaw: string, newRaw: string): RenameTriggerResult {
+  const oldT = normalizeTrigger(oldRaw);
+  const entry = oldT ? list.find((e) => e.trigger === oldT) : undefined;
+  if (!entry) return { ok: false, reason: "missing" };
+  const newT = normalizeTrigger(newRaw);
+  if (!newT) return { ok: false, reason: "invalid" };
+  if (newT === entry.trigger) return { ok: true, list };
+  const r = setTrigger(removeTrigger(list, entry.trigger), newT, entry.ref);
+  if (!r.ok) return { ok: false, reason: "invalid" }; // 移除後再加不會滿，僅剩非法
+  return { ok: true, list: r.list, ...(r.replaced ? { replaced: r.replaced } : {}) };
+}
+
+/** 字首 → 觸發字索引（ADR-0037 後續）：比對成本與觸發字總數脫鉤。 */
+export type TriggerIndex = Map<string, TriggerEntry[]>;
+
+export function buildTriggerIndex(list: TriggerEntry[]): TriggerIndex {
+  const index: TriggerIndex = new Map();
+  for (const entry of list) {
+    const first = String.fromCodePoint(entry.trigger.codePointAt(0)!);
+    const bucket = index.get(first);
+    if (bucket) bucket.push(entry);
+    else index.set(first, [entry]);
+  }
+  return index;
+}
+
 /**
  * 比對 composer 尾端（ADR-0037）：
  * 尾端等於觸發字前綴且長度 ≥2 即建議；單字觸發需完整命中。
  * 排序：完整命中優先 → 命中長度降冪 → 觸發字字典序；上限 5 筆。
+ * 提供 `index`（字首索引）時只檢查候選桶；結果與全掃描完全一致。
  */
-export function matchTriggers(text: string, list: TriggerEntry[]): TriggerMatch[] {
+export function matchTriggers(text: string, list: TriggerEntry[], index?: TriggerIndex): TriggerMatch[] {
   const tail = text.slice(-TRIGGER_MAX_LEN).toLowerCase();
   if (tail.length === 0) return [];
+  // 任何命中（tail 尾端 = 觸發字前綴）都要求觸發字字首出現在 tail 內，
+  // 故索引候選集必然涵蓋全部命中。
+  let candidates: Iterable<TriggerEntry> = list;
+  if (index) {
+    const seen = new Set<TriggerEntry>();
+    for (const ch of tail) {
+      const bucket = index.get(ch);
+      if (bucket) for (const e of bucket) seen.add(e);
+    }
+    candidates = seen;
+  }
   const out: TriggerMatch[] = [];
-  for (const entry of list) {
+  for (const entry of candidates) {
     const maxK = Math.min(entry.trigger.length, tail.length);
     let k = 0;
     for (let n = maxK; n >= 1; n--) {

@@ -232,6 +232,18 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
 .trigbar__item img { width: 24px; height: 24px; }
 .trigbar__item.on, .trigbar__item:hover { border-color: var(--accent); background: var(--hover); }
 .trigbar__hint { color: var(--muted); font-size: 10px; margin-left: auto; flex: none; }
+.stickerpick__tab--manage { margin-left: auto; color: var(--muted); }
+.stickerpick__tab--manage:hover { color: var(--accent); }
+.trigpanel { width: 340px; max-width: calc(100vw - 24px); }
+.trigpanel__body { background: var(--panel); max-height: 320px; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 4px; }
+.trigpanel__empty { color: var(--muted); font-size: 12px; text-align: center; padding: 16px 0; }
+.trigpanel__row { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--ink); }
+.trigpanel__row img { width: 28px; height: 28px; flex: none; }
+.trigpanel__gone { width: 28px; text-align: center; flex: none; }
+.trigpanel__trigger { background: var(--code-bg); border-radius: 4px; padding: 1px 6px; }
+.trigpanel__label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+.trigpanel__row button { border: 1px solid var(--border); border-radius: 4px; background: var(--field); color: var(--ink); font-size: 11px; padding: 1px 6px; cursor: pointer; flex: none; }
+.trigpanel__row button:hover { border-color: var(--accent); color: var(--accent); }
 .settings__relays { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .settings__relayrow { font-size: 12px; }
 .settings__relayrow code { word-break: break-all; }
