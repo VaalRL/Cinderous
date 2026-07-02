@@ -79,8 +79,8 @@ export interface ChatBackendEvents {
   onBlocked?(blocked: BlockedContact[]): void;
   /** 與中繼站的連線狀態改變。 */
   onConnection?(state: ConnectionState): void;
-  /** Relay pool（home + 外部座）各自的連線狀態（ADR-0034）。 */
-  onRelayPool?(relays: { url: string; state: ConnectionState; home: boolean }[]): void;
+  /** Relay pool（home + 外部座）各自的連線狀態；`stale`＝連續離線過久，hint 可能過期（ADR-0034/0036）。 */
+  onRelayPool?(relays: { url: string; state: ConnectionState; home: boolean; stale: boolean }[]): void;
   /** P2P 送檔進度（`id` 對應 sendFile 回傳值；`sent`/`total` 為位元組）。 */
   onFileProgress?(contact: PubkeyHex, id: string, sent: number, total: number): void;
   /** 收到一個經 P2P 傳來的完整檔案。 */

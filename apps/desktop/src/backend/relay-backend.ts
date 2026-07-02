@@ -56,6 +56,8 @@ import type {
 
 const NUDGE_KIND = 20100;
 const HEARTBEAT_MS = 15_000;
+/** pool relay 連續離線超過此時間即標記 hint 可能陳舊（ADR-0036）。 */
+export const RELAY_STALE_MS = 5 * 60_000;
 const PRESENCE_TIMEOUT_MS = 45_000;
 const nowSec = () => Math.floor(Date.now() / 1000);
 
@@ -153,6 +155,9 @@ export class RelayChatBackend implements ChatBackend {
   private readonly seenEvt = new Set<string>();
   /** 各 relay 連線狀態（home + pool），供設定面板顯示（ADR-0034 後續）。 */
   private readonly relayStates = new Map<string, ConnectionState>();
+  /** 各 relay 連續離線的起點（ms）；上線即清除（ADR-0036 陳舊偵測）。 */
+  private readonly offlineSince = new Map<string, number>();
+  private lastRelaySig = "";
   private readonly presence = new PresenceTracker();
   private readonly statuses = new Map<PubkeyHex, PresencePayload>();
   private nowPlaying = "";
@@ -229,7 +234,10 @@ export class RelayChatBackend implements ChatBackend {
     this.resubscribe();
     this.beat();
     this.scheduleBeat();
-    this.renderTimer = setInterval(() => this.emitContacts(), 1000);
+    this.renderTimer = setInterval(() => {
+      this.emitContacts();
+      this.emitRelayPool(); // stale 隨時間推移改變；簽章防抖，沒變不發
+    }, 1000);
     this.emitContacts();
     // 回放本機持久化的歷史訊息
     for (const c of this.contacts) {
@@ -286,8 +294,7 @@ export class RelayChatBackend implements ChatBackend {
         { onEvent: (_sub, event) => this.onEvent(event) },
         // 外部 relay 重連後重掛該 relay 的訂閱；不驅動 UI 主連線指示（ADR-0034）。
         (state) => {
-          this.relayStates.set(url, state);
-          this.emitRelayPool();
+          this.trackRelayState(url, state);
           if (state === "online") this.resubscribeRelay(url);
         },
       );
@@ -304,6 +311,12 @@ export class RelayChatBackend implements ChatBackend {
     const contact = to ? this.contacts.find((c) => c.pubkey === to) : undefined;
     const url = contact ? this.foreignUrlOf(contact) : undefined;
     const client = url ? this.poolClient(url) : undefined;
+    if (client && url && this.relayStates.get(url) === "offline") {
+      // 目標座離線：照常投入其重連佇列，並回退 home 雙發（收端以 id 去重，ADR-0036）。
+      client.publish(evt);
+      this.client.publish(evt);
+      return;
+    }
     (client ?? this.client).publish(evt);
   }
 
@@ -443,6 +456,7 @@ export class RelayChatBackend implements ChatBackend {
 
   /** 處理帶 `g` tag 的群組訊息/控制。 */
   private receiveGroup(eventId: string, sender: PubkeyHex, rumor: Rumor, groupId: string): void {
+    this.learnRelayHint(sender, rumor); // 僅更新既有聯絡人；陌生成員不會被灌入（ADR-0036）
     if (rumor.kind === KIND.GROUP_CONTROL) {
       const control = parseGroupControl(rumor);
       if (control) this.applyControl(sender, control);
@@ -556,16 +570,37 @@ export class RelayChatBackend implements ChatBackend {
     this.emitBlocked();
   }
 
-  /** 通知 relay pool（home 優先）各座連線狀態。 */
+  /** 記錄某座 relay 的狀態與連續離線起點，並發出 pool 快照。 */
+  private trackRelayState(url: string, state: ConnectionState): void {
+    this.relayStates.set(url, state);
+    if (state === "offline") {
+      if (!this.offlineSince.has(url)) this.offlineSince.set(url, Date.now());
+    } else if (state === "online") {
+      this.offlineSince.delete(url);
+    }
+    this.emitRelayPool();
+  }
+
+  private relayEntry(url: string, home: boolean): { url: string; state: ConnectionState; home: boolean; stale: boolean } {
+    const since = this.offlineSince.get(url);
+    return {
+      url,
+      state: this.relayStates.get(url) ?? "connecting",
+      home,
+      stale: since !== undefined && Date.now() - since > RELAY_STALE_MS,
+    };
+  }
+
+  /** 通知 relay pool（home 優先）各座連線狀態；快照沒變則靜默（防抖）。 */
   private emitRelayPool(): void {
     if (!this.handlers?.onRelayPool) return;
-    const homeKey = this.homeUrl ?? "";
-    const list: { url: string; state: ConnectionState; home: boolean }[] = [
-      { url: homeKey, state: this.relayStates.get(homeKey) ?? "connecting", home: true },
+    const list = [
+      this.relayEntry(this.homeUrl ?? "", true),
+      ...[...this.relayPool.keys()].map((url) => this.relayEntry(url, false)),
     ];
-    for (const url of this.relayPool.keys()) {
-      list.push({ url, state: this.relayStates.get(url) ?? "connecting", home: false });
-    }
+    const sig = list.map((r) => `${r.url}|${r.state}|${r.stale}`).join(",");
+    if (sig === this.lastRelaySig) return;
+    this.lastRelaySig = sig;
     this.handlers.onRelayPool(list);
   }
 
@@ -574,8 +609,7 @@ export class RelayChatBackend implements ChatBackend {
   }
 
   private onConnection(state: ConnectionState): void {
-    this.relayStates.set(this.homeUrl ?? "", state);
-    this.emitRelayPool();
+    this.trackRelayState(this.homeUrl ?? "", state);
     this.handlers?.onConnection?.(state);
     // 重連成功後重新訂閱並發送心跳（RelayClient 不會自動重送訂閱）
     if (state === "online" && this.handlers) {
@@ -666,14 +700,17 @@ export class RelayChatBackend implements ChatBackend {
       members,
     };
     const recipients = members.filter((m) => m !== this.self.pubkey);
-    for (const evt of wrapGroupControl(control, this.sk, recipients)) this.publishAddressed(evt);
+    const hint = this.homeUrl ? { relayHint: this.homeUrl } : {};
+    for (const evt of wrapGroupControl(control, this.sk, recipients, hint)) this.publishAddressed(evt);
     this.emitGroups();
   }
 
   sendGroupMessage(groupId: string, text: string): void {
     const group = this.groups.find((g) => g.id === groupId);
     if (!group) return;
-    const evts = wrapGroupMessage(text, this.sk, this.self.pubkey, group);
+    const evts = wrapGroupMessage(text, this.sk, this.self.pubkey, group, {
+      ...(this.homeUrl ? { relayHint: this.homeUrl } : {}),
+    });
     for (const evt of evts) this.publishAddressed(evt);
     const id = evts[0]?.id ?? `g-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     this.seenMsg.add(id);
@@ -686,7 +723,8 @@ export class RelayChatBackend implements ChatBackend {
     const group = this.groups.find((g) => g.id === groupId);
     if (!group) return;
     const recipients = group.members.filter((m) => m !== this.self.pubkey);
-    for (const evt of wrapGroupControl({ type: "group-leave", id: groupId }, this.sk, recipients)) {
+    const leaveHint = this.homeUrl ? { relayHint: this.homeUrl } : {};
+    for (const evt of wrapGroupControl({ type: "group-leave", id: groupId }, this.sk, recipients, leaveHint)) {
       this.publishAddressed(evt);
     }
     this.storage.removeGroup(groupId);

@@ -41,7 +41,7 @@ export function App(): JSX.Element {
   const [blocked, setBlocked] = useState<BlockedContact[]>([]);
   const [unread, setUnread] = useState<Record<string, number>>({});
   const [conn, setConn] = useState<ConnectionState>("online");
-  const [relays, setRelays] = useState<{ url: string; state: ConnectionState; home: boolean }[]>([]);
+  const [relays, setRelays] = useState<{ url: string; state: ConnectionState; home: boolean; stale: boolean }[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
   const [callPeer, setCallPeer] = useState<PubkeyHex | null>(null);
   const [callState, setCallState] = useState<CallState>("idle");

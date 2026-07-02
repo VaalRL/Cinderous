@@ -1,9 +1,9 @@
 import { KIND, wrapMessage, type NostrEvent, type RelayClientHandlers } from "@nostr-buddy/core";
 import { createInMemoryRelayNetwork } from "@nostr-buddy/relay";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { MemoryStorage } from "../storage/memory.js";
 import type { ChatBackendEvents, ChatMessage } from "./types.js";
-import { normalizeRelayUrl, RelayChatBackend } from "./relay-backend.js";
+import { normalizeRelayUrl, RELAY_STALE_MS, RelayChatBackend } from "./relay-backend.js";
 
 const noop: ChatBackendEvents = { onContacts() {}, onMessage() {}, onTyping() {}, onNudge() {} };
 
@@ -252,8 +252,109 @@ describe("跨中繼通訊：Relay Pool 與收件人路由（ADR-0034）", () => 
     a.addContact(`${b.selfNpub}@wss://y`);
 
     const last = seen[seen.length - 1]!;
-    expect(last).toContainEqual({ url: "wss://y", state: "online", home: false });
+    expect(last).toContainEqual({ url: "wss://y", state: "online", home: false, stale: false });
     expect(last.find((r) => r.home)?.url).toBe("wss://x");
+    a.stop();
+    b.stop();
+  });
+
+  it("群訊帶 hint（ADR-0036）：入群（group-create）即學會建群者的 relay", () => {
+    const { netX, netY, connectorFor } = twoRelays();
+    const storeB = new MemoryStorage();
+    const a = new RelayChatBackend(new MemoryStorage(), (h) => netX.connect("a", h), "Alice", {
+      relayUrl: "wss://x",
+      connectorFor,
+    });
+    const b = new RelayChatBackend(storeB, (h) => netY.connect("b", h), "Bob", {
+      relayUrl: "wss://y",
+      connectorFor,
+    });
+    a.start(noop);
+    b.start(noop);
+    // Bob 先手動加了 Alice 但沒有 hint（模擬僅知 npub）
+    b.addContact(a.selfNpub);
+    a.addContact(`${b.selfNpub}@wss://y`);
+
+    a.createGroup("跨座群", [b.self.pubkey]);
+
+    // group-create 的 rumor 帶 hint → Bob 學到 Alice 的 relay
+    expect(storeB.loadContacts().find((c) => c.pubkey === a.self.pubkey)?.relayUrl).toBe("wss://x");
+    a.stop();
+    b.stop();
+  });
+
+  it("陳舊偵測（ADR-0036）：外部座連續離線超過門檻，onRelayPool 標記 stale", () => {
+    vi.useFakeTimers();
+    try {
+      const { netX, connectorFor } = twoRelays();
+      const statusCbs = new Map<string, (s: "connecting" | "online" | "offline") => void>();
+      const statefulFor = (url: string) => {
+        const inner = connectorFor(url);
+        return ((h: RelayClientHandlers, onStatus?: (s: "connecting" | "online" | "offline") => void) => {
+          if (onStatus) statusCbs.set(url, onStatus);
+          return inner(h);
+        }) as ReturnType<typeof connectorFor>;
+      };
+      const b = new RelayChatBackend(new MemoryStorage(), (h) => netX.connect("b", h), "Bob");
+      const a = new RelayChatBackend(new MemoryStorage(), (h) => netX.connect("a", h), "Alice", {
+        relayUrl: "wss://x",
+        connectorFor: statefulFor,
+      });
+      const seen: { url: string; state: string; stale: boolean }[][] = [];
+      a.start({ ...noop, onRelayPool: (rs) => seen.push(rs) });
+      a.addContact(`${b.selfNpub}@wss://y`);
+
+      statusCbs.get("wss://y")!("offline");
+      let y = seen[seen.length - 1]!.find((r) => r.url === "wss://y")!;
+      expect(y.state).toBe("offline");
+      expect(y.stale).toBe(false); // 剛斷線還不算陳舊
+
+      vi.advanceTimersByTime(RELAY_STALE_MS + 2000); // 1 秒 tick 會重算 stale
+      y = seen[seen.length - 1]!.find((r) => r.url === "wss://y")!;
+      expect(y.stale).toBe(true);
+
+      statusCbs.get("wss://y")!("online"); // 復活即解除
+      y = seen[seen.length - 1]!.find((r) => r.url === "wss://y")!;
+      expect(y.stale).toBe(false);
+      a.stop();
+      b.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("離線回退（ADR-0036）：目標座離線時雙發（目標佇列 + home），收端仍只收一次", () => {
+    const { netX, netY, connectorFor, spy } = twoRelays();
+    const statusCbs = new Map<string, (s: "connecting" | "online" | "offline") => void>();
+    const statefulFor = (url: string) => {
+      const inner = connectorFor(url);
+      return ((h: RelayClientHandlers, onStatus?: (s: "connecting" | "online" | "offline") => void) => {
+        if (onStatus) statusCbs.set(url, onStatus);
+        return inner(h);
+      }) as ReturnType<typeof connectorFor>;
+    };
+    const a = new RelayChatBackend(new MemoryStorage(), (h) => netX.connect("a", h), "Alice", {
+      relayUrl: "wss://x",
+      connectorFor: statefulFor,
+    });
+    const b = new RelayChatBackend(new MemoryStorage(), (h) => netY.connect("b", h), "Bob", {
+      relayUrl: "wss://y",
+      connectorFor,
+    });
+    const bIncoming: ChatMessage[] = [];
+    a.start(noop);
+    b.start({ ...noop, onMessage: (_pk, m) => bIncoming.push(m) });
+    a.addContact(`${b.selfNpub}@wss://y`);
+
+    const dmOnX = spy(netX, { kinds: [KIND.OFFLINE_DM_GIFT_WRAP], "#p": [b.self.pubkey] });
+    const dmOnY = spy(netY, { kinds: [KIND.OFFLINE_DM_GIFT_WRAP], "#p": [b.self.pubkey] });
+
+    statusCbs.get("wss://y")!("offline"); // 目標座離線
+    a.sendMessage(b.self.pubkey, "離線期間的訊息");
+
+    expect(dmOnY).toHaveLength(1); // 照常投入目標座（in-memory 立即送達）
+    expect(dmOnX).toHaveLength(1); // 回退 home 的副本
+    expect(bIncoming.filter((m) => m.text === "離線期間的訊息")).toHaveLength(1); // 去重
     a.stop();
     b.stop();
   });

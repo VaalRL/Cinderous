@@ -78,6 +78,7 @@ export interface Messages {
   conn_state_connecting: string;
   conn_state_offline: string;
   settings_relayHome: string;
+  settings_relayStale: string;
   file_attach: string;
   file_download: string;
   file_sending: string;
@@ -207,6 +208,7 @@ const zhHant: Messages = {
   conn_state_connecting: "連線中",
   conn_state_offline: "離線",
   settings_relayHome: "（我的中繼）",
+  settings_relayStale: "長期離線，hint 可能過期",
   file_attach: "傳送檔案（P2P）",
   file_download: "下載",
   file_sending: "傳送中…",
@@ -336,6 +338,7 @@ const en: Messages = {
   conn_state_connecting: "Connecting",
   conn_state_offline: "Offline",
   settings_relayHome: " (my relay)",
+  settings_relayStale: "offline for a while — hint may be stale",
   file_attach: "Send a file (P2P)",
   file_download: "Download",
   file_sending: "Sending…",

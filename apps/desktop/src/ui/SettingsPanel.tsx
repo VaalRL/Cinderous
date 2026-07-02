@@ -6,6 +6,8 @@ export interface RelayPoolEntry {
   url: string;
   state: "connecting" | "online" | "offline";
   home: boolean;
+  /** 連續離線過久，hint 可能過期（ADR-0036）。 */
+  stale?: boolean;
 }
 
 export interface SettingsPanelProps {
@@ -77,6 +79,11 @@ export function SettingsPanel(props: SettingsPanelProps): JSX.Element {
                       <span aria-label={stateLabel} title={stateLabel}>{STATE_DOT[r.state]}</span>{" "}
                       <code>{r.url || t("settings_relayDemo")}</code>
                       {r.home ? <em className="settings__home">{t("settings_relayHome")}</em> : null}
+                      {r.stale ? (
+                        <em className="settings__stale" title={t("settings_relayStale")}>
+                          ⚠ {t("settings_relayStale")}
+                        </em>
+                      ) : null}
                     </li>
                   );
                 })}

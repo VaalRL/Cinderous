@@ -50,9 +50,11 @@ function wrapFor(
   rumor: { kind: number; content: string; groupId: string },
   senderSk: SecretKey,
   nowSec: number,
+  relayHint?: string,
 ): NostrEvent {
+  const tags: string[][] = [["g", rumor.groupId], ...(relayHint ? [["relay", relayHint]] : [])];
   return sealAndWrap(
-    { kind: rumor.kind, created_at: nowSec, tags: [["g", rumor.groupId]], content: rumor.content },
+    { kind: rumor.kind, created_at: nowSec, tags, content: rumor.content },
     senderSk,
     recipientPk,
     {
@@ -74,11 +76,11 @@ export function wrapGroupMessage(
   senderSk: SecretKey,
   senderPk: PubkeyHex,
   group: Group,
-  opts: { now?: number } = {},
+  opts: { now?: number; relayHint?: string } = {},
 ): NostrEvent[] {
   const nowSec = opts.now ?? Math.floor(Date.now() / 1000);
   return others(group.members, senderPk).map((pk) =>
-    wrapFor(pk, { kind: KIND.CHAT, content: text, groupId: group.id }, senderSk, nowSec),
+    wrapFor(pk, { kind: KIND.CHAT, content: text, groupId: group.id }, senderSk, nowSec, opts.relayHint),
   );
 }
 
@@ -87,12 +89,12 @@ export function wrapGroupControl(
   control: GroupControl,
   senderSk: SecretKey,
   recipients: PubkeyHex[],
-  opts: { now?: number } = {},
+  opts: { now?: number; relayHint?: string } = {},
 ): NostrEvent[] {
   const nowSec = opts.now ?? Math.floor(Date.now() / 1000);
   const content = JSON.stringify(control);
   return recipients.map((pk) =>
-    wrapFor(pk, { kind: KIND.GROUP_CONTROL, content, groupId: control.id }, senderSk, nowSec),
+    wrapFor(pk, { kind: KIND.GROUP_CONTROL, content, groupId: control.id }, senderSk, nowSec, opts.relayHint),
   );
 }
 

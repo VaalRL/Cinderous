@@ -56,6 +56,30 @@ describe("群組訊息扇出（M9，Gift-Wrap 成對）", () => {
   });
 });
 
+describe("群訊 relay hint（ADR-0036）", () => {
+  it("wrapGroupMessage/wrapGroupControl 帶 hint：rumor 內層可讀、外層不可見", () => {
+    const aliceSk = generateSecretKey();
+    const alicePk = getPublicKey(aliceSk);
+    const bobSk = generateSecretKey();
+    const bobPk = getPublicKey(bobSk);
+    const group = { id: "g1", name: "測試群", admin: alicePk, members: [alicePk, bobPk] };
+
+    const [msgWrap] = wrapGroupMessage("群訊", aliceSk, alicePk, group, { relayHint: "wss://x" });
+    expect(JSON.stringify(msgWrap!.tags)).not.toContain("wss://x");
+    const opened = openWrap(msgWrap!, bobSk);
+    expect(opened.rumor.tags).toContainEqual(["relay", "wss://x"]);
+    expect(groupTarget(opened.rumor)).toBe("g1"); // g tag 不受影響
+
+    const [ctlWrap] = wrapGroupControl(
+      { type: "group-create", id: "g1", name: "測試群", admin: alicePk, members: [alicePk, bobPk] },
+      aliceSk,
+      [bobPk],
+      { relayHint: "wss://x" },
+    );
+    expect(openWrap(ctlWrap!, bobSk).rumor.tags).toContainEqual(["relay", "wss://x"]);
+  });
+});
+
 describe("群組控制訊息", () => {
   it("group-create 扇出並可還原、解析", () => {
     const g = group();
