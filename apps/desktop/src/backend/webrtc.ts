@@ -147,7 +147,8 @@ export class WebRtcTransfer {
 
   private attachChannel(peerPk: PubkeyHex, peer: PeerConn, dc: RTCDataChannel): void {
     peer.dc = dc;
-    dc.onmessage = (m) => peer.rx.receive(typeof m.data === "string" ? m.data : "");
+    dc.binaryType = "arraybuffer"; // 檔案分塊以二進位框架送達（省 base64 膨脹）
+    dc.onmessage = (m) => peer.rx.receive(m.data as string | ArrayBuffer);
     dc.onopen = () => this.flush(peerPk, peer);
     dc.onerror = () => this.handlers.onError(peerPk, "資料通道錯誤");
     if (dc.readyState === "open") this.flush(peerPk, peer);
@@ -201,7 +202,10 @@ export class WebRtcTransfer {
           setTimeout(pump, 50);
           return;
         }
-        dc.send(messages[i]!);
+        const m = messages[i]!;
+        // 分塊框架為整段 buffer（offset 0），送底層 ArrayBuffer（零拷貝、無 base64 膨脹）。
+        if (typeof m === "string") dc.send(m);
+        else dc.send(m.buffer as ArrayBuffer);
         i += 1;
         // i=1 為 file-begin；之後每則為一個 chunk
         const sent = Math.min(size, (i - 1) * CHUNK_SIZE);

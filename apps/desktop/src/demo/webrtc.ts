@@ -156,7 +156,8 @@ export async function runWebRtcScenario(): Promise<WebRtcResult> {
           resolve({ connected, nudge, fileOk, fileName: file.name, log });
         },
       });
-      ch.onmessage = (m) => rx.receive(typeof m.data === "string" ? m.data : "");
+      ch.binaryType = "arraybuffer";
+      ch.onmessage = (m) => rx.receive(m.data as string | ArrayBuffer);
     };
 
     // A 發送端
@@ -166,7 +167,8 @@ export async function runWebRtcScenario(): Promise<WebRtcResult> {
       say("資料通道開啟（真實 WebRTC P2P）");
       dc.send(encodeNudge());
       for (const msg of encodeFile({ name: fileName, mime: "application/octet-stream", bytes: payload }, "f1", 8_192)) {
-        dc.send(msg);
+        if (typeof msg === "string") dc.send(msg);
+        else dc.send(msg.buffer as ArrayBuffer);
       }
     };
 

@@ -70,7 +70,7 @@
 | 正在輸入中 | 20001 | 否（Ephemeral） | 對話視窗觸發，中繼轉發 |
 | WebRTC SDP 交換 | 21000-21999（NIP-59 包封） | 否（Ephemeral） | 信令交換，純記憶體轉發，避免洩漏「誰呼叫誰」 |
 | 震動（Nudge） | — | — | WebRTC Data Channel；P2P 不可用時降級走中繼 |
-| 檔案傳輸（✅ A4） | — | — | WebRTC Data Channel，不受 JSON 大小限制；對稱 NAT 經 TURN 保底。桌面前端已接（`WebRtcTransfer`：附件/拖放、進度、下載），信令走 kind 21000（見 ADR-0017） |
+| 檔案傳輸（✅ A4；F3/C4 二進位） | — | — | WebRTC Data Channel，不受 JSON 大小限制；對稱 NAT 經 TURN 保底。桌面前端已接（`WebRtcTransfer`：附件/拖放、進度、下載），信令走 kind 21000（ADR-0017）。分塊改**二進位框架**（去 base64 ~33%，ADR-0029） |
 | 訊息回應（Reaction，✅ M6） | 1059（內含 kind 7） | 依訊息 | NIP-25 emoji 回應，`e` tag 指向目標訊息，Gift Wrap 隱藏雙方（已實作，見 ADR-0011） |
 | 收回訊息（Unsend，✅ M6） | 1059（內含 kind 5） | 短期 | NIP-09 刪除，`e` tag 指向目標；收件端顯示「訊息已收回」（已實作，見 ADR-0012） |
 | 限時訊息（Disappearing，✅ M6） | 1059（rumor 內帶較短 NIP-40） | D1 至過期 | 送訊即帶較短過期：rumor 內層 `expiration` 供收件端到期隱藏，外層 wrap 同步縮短以利中繼清除；客戶端到期顯示「訊息已到期」（已實作，見 ADR-0013） |

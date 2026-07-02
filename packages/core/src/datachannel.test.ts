@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { DataChannelReceiver, encodeFile, encodeNudge } from "./datachannel.js";
+import { DataChannelReceiver, decodeFileChunk, encodeFile, encodeFileChunk, encodeNudge } from "./datachannel.js";
 
 function bytes(...n: number[]): Uint8Array {
   return new Uint8Array(n);
@@ -39,6 +39,28 @@ describe("Data Channel — 檔案分塊與重組", () => {
     expect(eq(onFile.mock.calls[0]![0].bytes, payload)).toBe(true);
   });
 
+  it("分塊為二進位框架（非 base64/JSON），可還原 id/seq/bytes 且開銷極小", () => {
+    const frame = encodeFileChunk("id9", 3, bytes(9, 8, 7));
+    expect(frame).toBeInstanceOf(Uint8Array);
+    const dec = decodeFileChunk(frame)!;
+    expect(dec.id).toBe("id9");
+    expect(dec.seq).toBe(3);
+    expect(eq(dec.bytes, bytes(9, 8, 7))).toBe(true);
+    // header = type(1)+idLen(1)+id(3)+seq(4) = 9；payload 原封不動（無 base64 33% 膨脹）
+    expect(frame.length).toBe(9 + 3);
+    // encodeFile 的分塊皆為二進位、begin 為字串
+    const msgs = encodeFile({ name: "a", mime: "x", bytes: new Uint8Array(20) }, "id10", 8);
+    expect(typeof msgs[0]).toBe("string");
+    expect(msgs.slice(1).every((m) => m instanceof Uint8Array)).toBe(true);
+  });
+
+  it("非法二進位框架交給 onError（不丟例外）", () => {
+    const onError = vi.fn();
+    const rx = new DataChannelReceiver({ onError });
+    rx.receive(new Uint8Array([0xff, 0, 0]));
+    expect(onError).toHaveBeenCalled();
+  });
+
   it("空檔案在 begin 後即完成", () => {
     const onFile = vi.fn();
     const rx = new DataChannelReceiver({ onFile });
@@ -75,7 +97,7 @@ describe("Data Channel — 資源上限（防 OOM/洩漏）", () => {
     const onFile = vi.fn();
     const rx = new DataChannelReceiver({ onError, onFile });
     rx.receive(JSON.stringify({ t: "file-begin", id: "y", name: "n", mime: "m", size: 3, chunks: 1 }));
-    rx.receive(JSON.stringify({ t: "file-chunk", id: "y", seq: 0, data: Buffer.from([1, 2, 3, 4, 5]).toString("base64") }));
+    rx.receive(encodeFileChunk("y", 0, bytes(1, 2, 3, 4, 5)));
     expect(onError).toHaveBeenCalled();
     expect(onFile).not.toHaveBeenCalled();
   });

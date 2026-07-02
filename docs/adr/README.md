@@ -43,3 +43,4 @@
 | [0026](./0026-call-runtime-ui.md) | 通話執行期與 UI（M8） | 已接受 |
 | [0027](./0027-group-encryption.md) | 群組聊天加密方案（M9） | 已接受 |
 | [0028](./0028-forward-secrecy.md) | 前向保密：維持靜態金鑰、FS/PCS 交由未來 MLS（F2） | 已接受 |
+| [0029](./0029-datachannel-binary-framing.md) | 資料通道檔案分塊改用二進位框架（F3/C4） | 已接受 |

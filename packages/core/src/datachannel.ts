@@ -1,10 +1,52 @@
-import { base64 } from "@scure/base";
+import { utf8ToBytes } from "@noble/hashes/utils";
 
-/** P2P 資料通道上的訊息（通道本身由 WebRTC DTLS 加密）。 */
+/**
+ * P2P 資料通道上的**控制**訊息（JSON 字串）。檔案分塊改走二進位框架
+ * （見 {@link encodeFileChunk}），省去 base64 約 33% 膨脹（F5/C4）。
+ */
 export type DataMessage =
   | { t: "nudge" }
-  | { t: "file-begin"; id: string; name: string; mime: string; size: number; chunks: number }
-  | { t: "file-chunk"; id: string; seq: number; data: string };
+  | { t: "file-begin"; id: string; name: string; mime: string; size: number; chunks: number };
+
+/** 資料通道可能收到的原始資料（控制為字串、檔案分塊為二進位）。 */
+export type RawData = string | ArrayBuffer | Uint8Array;
+
+const FRAME_CHUNK = 0x01;
+
+/** 把 ArrayBuffer/Uint8Array 正規化為 Uint8Array（不複製）。 */
+function asBytes(data: ArrayBuffer | Uint8Array): Uint8Array {
+  return data instanceof Uint8Array ? data : new Uint8Array(data);
+}
+
+/**
+ * 檔案分塊二進位框架：`[type=1][idLen][id(ASCII)][seq(uint32 BE)][chunk bytes]`。
+ * id 為 app 產生的短 ASCII 字串（≤255 位元組）。
+ */
+export function encodeFileChunk(id: string, seq: number, bytes: Uint8Array): Uint8Array {
+  const idBytes = utf8ToBytes(id);
+  if (idBytes.length > 255) throw new Error("檔案 id 過長");
+  const frame = new Uint8Array(1 + 1 + idBytes.length + 4 + bytes.length);
+  frame[0] = FRAME_CHUNK;
+  frame[1] = idBytes.length;
+  frame.set(idBytes, 2);
+  new DataView(frame.buffer).setUint32(2 + idBytes.length, seq >>> 0, false);
+  frame.set(bytes, 2 + idBytes.length + 4);
+  return frame;
+}
+
+/** 解析二進位檔案分塊框架；非法回傳 null。 */
+export function decodeFileChunk(data: ArrayBuffer | Uint8Array): { id: string; seq: number; bytes: Uint8Array } | null {
+  const buf = asBytes(data);
+  if (buf.length < 6 || buf[0] !== FRAME_CHUNK) return null;
+  const idLen = buf[1]!;
+  const headerEnd = 2 + idLen + 4;
+  if (buf.length < headerEnd) return null;
+  let id = "";
+  for (let i = 2; i < 2 + idLen; i++) id += String.fromCharCode(buf[i]!);
+  const seq = new DataView(buf.buffer, buf.byteOffset, buf.byteLength).getUint32(2 + idLen, false);
+  // 複製出分塊資料，避免持有整個框架的底層 buffer。
+  return { id, seq, bytes: buf.slice(headerEnd) };
+}
 
 export interface OutgoingFile {
   name: string;
@@ -29,9 +71,13 @@ export function encodeNudge(): string {
  * 將檔案編碼為一連串資料通道訊息：一則 `file-begin` 後接 N 則 `file-chunk`。
  * 不受中繼站 JSON 大小限制，速度僅受雙方頻寬影響。
  */
-export function encodeFile(file: OutgoingFile, id: string, chunkSize = DEFAULT_CHUNK_SIZE): string[] {
+export function encodeFile(
+  file: OutgoingFile,
+  id: string,
+  chunkSize = DEFAULT_CHUNK_SIZE,
+): (string | Uint8Array)[] {
   const total = Math.ceil(file.bytes.length / chunkSize);
-  const messages: string[] = [
+  const messages: (string | Uint8Array)[] = [
     JSON.stringify({
       t: "file-begin",
       id,
@@ -43,9 +89,7 @@ export function encodeFile(file: OutgoingFile, id: string, chunkSize = DEFAULT_C
   ];
   for (let seq = 0; seq < total; seq++) {
     const slice = file.bytes.subarray(seq * chunkSize, (seq + 1) * chunkSize);
-    messages.push(
-      JSON.stringify({ t: "file-chunk", id, seq, data: base64.encode(slice) } satisfies DataMessage),
-    );
+    messages.push(encodeFileChunk(id, seq, slice));
   }
   return messages;
 }
@@ -97,7 +141,13 @@ export class DataChannelReceiver {
     this.partials.delete(id);
   }
 
-  receive(raw: string): void {
+  receive(raw: RawData): void {
+    // 二進位資料 = 檔案分塊框架；字串 = JSON 控制訊息。
+    if (typeof raw !== "string") {
+      this.receiveChunk(raw);
+      return;
+    }
+
     let msg: DataMessage;
     try {
       msg = JSON.parse(raw) as DataMessage;
@@ -126,26 +176,31 @@ export class DataChannelReceiver {
         });
         if (msg.chunks === 0) this.complete(msg.id);
         return;
-      case "file-chunk": {
-        const partial = this.partials.get(msg.id);
-        if (!partial) {
-          this.handlers.onError?.(`未知檔案分塊 id：${msg.id}`);
-          return;
-        }
-        const bytes = base64.decode(msg.data);
-        if (!partial.received.has(msg.seq)) partial.receivedBytes += bytes.length;
-        if (partial.receivedBytes > partial.meta.size) {
-          this.partials.delete(msg.id);
-          this.handlers.onError?.(`檔案 ${msg.id} 實際資料超出宣告大小，已中止`);
-          return;
-        }
-        partial.received.set(msg.seq, bytes);
-        if (partial.received.size === partial.meta.chunks) this.complete(msg.id);
-        return;
-      }
       default:
         this.handlers.onError?.("未知資料通道訊息類型");
     }
+  }
+
+  /** 處理二進位檔案分塊框架。 */
+  private receiveChunk(data: ArrayBuffer | Uint8Array): void {
+    const chunk = decodeFileChunk(data);
+    if (!chunk) {
+      this.handlers.onError?.("資料通道二進位框架非法");
+      return;
+    }
+    const partial = this.partials.get(chunk.id);
+    if (!partial) {
+      this.handlers.onError?.(`未知檔案分塊 id：${chunk.id}`);
+      return;
+    }
+    if (!partial.received.has(chunk.seq)) partial.receivedBytes += chunk.bytes.length;
+    if (partial.receivedBytes > partial.meta.size) {
+      this.partials.delete(chunk.id);
+      this.handlers.onError?.(`檔案 ${chunk.id} 實際資料超出宣告大小，已中止`);
+      return;
+    }
+    partial.received.set(chunk.seq, chunk.bytes);
+    if (partial.received.size === partial.meta.chunks) this.complete(chunk.id);
   }
 
   private complete(id: string): void {
