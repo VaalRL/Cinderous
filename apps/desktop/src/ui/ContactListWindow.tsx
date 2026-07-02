@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useI18n } from "../i18n.js";
 import type { BlockedContact, ConnectionState, Contact, Group, Self, Status } from "../backend/types.js";
 import { qrDataUri } from "../qr.js";
+import { hasRichStatus, renderStatus } from "./status-text.js";
 import { TitleControls } from "./TitleControls.js";
 import { avatarColor, initial } from "./util.js";
 
@@ -103,6 +104,9 @@ export function ContactListWindow(props: ContactListProps): JSX.Element {
               onChange={(e) => props.onStatusMessage(e.target.value)}
             />
           </div>
+          {hasRichStatus(self.statusMessage) ? (
+            <div className="me__msg-preview" aria-hidden="true">{renderStatus(self.statusMessage)}</div>
+          ) : null}
           {props.onNowPlaying ? (
             <div className="me__np">
               <span className="me__np-ic">♪</span>
@@ -353,7 +357,7 @@ function ContactRow({
   const { t } = useI18n();
   const secondary = contact.nowPlaying
     ? <span className="np">♪ {contact.nowPlaying}</span>
-    : contact.statusMessage;
+    : renderStatus(contact.statusMessage);
   const remove = () => {
     if (window.confirm(t("contact_removeConfirm", { name: contact.name }))) onRemove?.(contact.pubkey);
   };

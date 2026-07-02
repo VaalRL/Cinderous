@@ -13,6 +13,7 @@ import type {
   Status,
 } from "./backend/types.js";
 import { LocalStorage } from "./storage/local.js";
+import { initIdle, reduceIdle, type IdleState } from "./ui/idle-status.js";
 import { CallWindow } from "./ui/CallWindow.js";
 import { ContactListWindow } from "./ui/ContactListWindow.js";
 import { ConversationWindow } from "./ui/ConversationWindow.js";
@@ -58,6 +59,9 @@ export function App(): JSX.Element {
   const lastTyping = useRef<Record<string, number>>({});
   const notifyRef = useRef(notify);
   notifyRef.current = notify;
+  const selfRef = useRef<Self | null>(self);
+  selfRef.current = self;
+  const idleRef = useRef<IdleState>(initIdle(Date.now()));
 
   // 自動登入：已有持久身分 + relay 網址 → 直接重連（A2 持久化）
   useEffect(() => {
@@ -200,6 +204,29 @@ export function App(): JSX.Element {
     return () => document.removeEventListener("visibilitychange", onVisible);
   }, []);
 
+  // 閒置自動「離開」：無操作逾時自動切 away，一有活動即還原手動狀態
+  useEffect(() => {
+    if (!backend) return;
+    idleRef.current = initIdle(Date.now(), selfRef.current?.status ?? "online");
+    const apply = (status: Status) => {
+      backend.setStatus(status, selfRef.current?.statusMessage ?? "");
+      setSelf((x) => (x ? { ...x, status } : x));
+    };
+    const dispatch = (ev: Parameters<typeof reduceIdle>[1]) => {
+      const { state, setStatus } = reduceIdle(idleRef.current, ev);
+      idleRef.current = state;
+      if (setStatus) apply(setStatus);
+    };
+    const onActivity = () => dispatch({ type: "activity", at: Date.now() });
+    const events = ["mousemove", "mousedown", "keydown", "touchstart", "wheel"] as const;
+    for (const e of events) window.addEventListener(e, onActivity, { passive: true });
+    const timer = setInterval(() => dispatch({ type: "tick", at: Date.now() }), 30_000);
+    return () => {
+      for (const e of events) window.removeEventListener(e, onActivity);
+      clearInterval(timer);
+    };
+  }, [backend]);
+
   const signIn = (name: string, relayUrl: string) => {
     let b: ChatBackend;
     if (relayUrl) {
@@ -218,6 +245,8 @@ export function App(): JSX.Element {
 
   const activeBackend = backend;
   const setStatus = (status: Status) => {
+    // 記錄為手動狀態：閒置邏輯不會覆蓋它（UI 已即時套用，故 reducer 不重複 setStatus）
+    idleRef.current = reduceIdle(idleRef.current, { type: "manual", status, at: Date.now() }).state;
     activeBackend.setStatus(status, self.statusMessage);
     setSelf((x) => (x ? { ...x, status } : x));
   };
