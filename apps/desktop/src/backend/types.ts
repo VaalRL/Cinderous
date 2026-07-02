@@ -140,6 +140,10 @@ export interface ChatBackend {
   blockContact?(pubkey: PubkeyHex): void;
   /** 解除封鎖。 */
   unblockContact?(pubkey: PubkeyHex): void;
+  /** 清除指向某座 relay 的聯絡人 hint 並釋放連線（ADR-0036）。 */
+  clearRelayHint?(url: string): void;
+  /** 確認保留某座 stale relay（重置離線計時、暫時隱藏警告，ADR-0036）。 */
+  acknowledgeRelayStale?(url: string): void;
   /** 自己的 `npub`（供分享/加好友；僅真實 relay 後端提供）。 */
   readonly selfNpub?: string;
   /** 分享用字串 `npub…@wss://…`（帶 relay hint；無 home relay 時同 npub）。 */

@@ -359,6 +359,86 @@ describe("跨中繼通訊：Relay Pool 與收件人路由（ADR-0034）", () => 
     b.stop();
   });
 
+  it("清除 hint（ADR-0036 UI 動作）：聯絡人改回 home 路由、連線關閉並移出 pool", () => {
+    const { netX, netY, connectorFor, spy } = twoRelays();
+    const closed: string[] = [];
+    const closableFor = (url: string) => {
+      const inner = connectorFor(url);
+      return ((h: RelayClientHandlers) => {
+        const c = inner(h) as ReturnType<ReturnType<typeof connectorFor>> & { close?: () => void };
+        c.close = () => closed.push(url);
+        return c;
+      }) as ReturnType<typeof connectorFor>;
+    };
+    const storeA = new MemoryStorage();
+    const a = new RelayChatBackend(storeA, (h) => netX.connect("a", h), "Alice", {
+      relayUrl: "wss://x",
+      connectorFor: closableFor,
+    });
+    const b = new RelayChatBackend(new MemoryStorage(), (h) => netY.connect("b", h), "Bob", {
+      relayUrl: "wss://y",
+      connectorFor,
+    });
+    const seen: { url: string }[][] = [];
+    a.start({ ...noop, onRelayPool: (rs) => seen.push(rs) });
+    b.start(noop);
+    a.addContact(`${b.selfNpub}@wss://y`);
+
+    a.clearRelayHint("wss://y/"); // 正規化後匹配
+
+    // hint 已移除、pool 快照不再含 Y、連線被關閉
+    expect(storeA.loadContacts().find((c) => c.pubkey === b.self.pubkey)?.relayUrl).toBeUndefined();
+    expect(seen[seen.length - 1]!.map((r) => r.url)).toEqual(["wss://x"]);
+    expect(closed).toEqual(["wss://y"]);
+
+    // 後續訊息改走 home X
+    const dmOnX = spy(netX, { kinds: [KIND.OFFLINE_DM_GIFT_WRAP], "#p": [b.self.pubkey] });
+    const dmOnY = spy(netY, { kinds: [KIND.OFFLINE_DM_GIFT_WRAP], "#p": [b.self.pubkey] });
+    a.sendMessage(b.self.pubkey, "清除後");
+    expect(dmOnX).toHaveLength(1);
+    expect(dmOnY).toHaveLength(0);
+    a.stop();
+    b.stop();
+  });
+
+  it("確認保留（ADR-0036 UI 動作）：重置離線計時、警告暫時消失後可再現", () => {
+    vi.useFakeTimers();
+    try {
+      const { netX, connectorFor } = twoRelays();
+      const statusCbs = new Map<string, (s: "connecting" | "online" | "offline") => void>();
+      const statefulFor = (url: string) => {
+        const inner = connectorFor(url);
+        return ((h: RelayClientHandlers, onStatus?: (s: "connecting" | "online" | "offline") => void) => {
+          if (onStatus) statusCbs.set(url, onStatus);
+          return inner(h);
+        }) as ReturnType<typeof connectorFor>;
+      };
+      const b = new RelayChatBackend(new MemoryStorage(), (h) => netX.connect("b", h), "Bob");
+      const a = new RelayChatBackend(new MemoryStorage(), (h) => netX.connect("a", h), "Alice", {
+        relayUrl: "wss://x",
+        connectorFor: statefulFor,
+      });
+      const seen: { url: string; stale: boolean }[][] = [];
+      a.start({ ...noop, onRelayPool: (rs) => seen.push(rs) });
+      a.addContact(`${b.selfNpub}@wss://y`);
+      const yStale = () => seen[seen.length - 1]!.find((r) => r.url === "wss://y")!.stale;
+
+      statusCbs.get("wss://y")!("offline");
+      vi.advanceTimersByTime(RELAY_STALE_MS + 2000);
+      expect(yStale()).toBe(true);
+
+      a.acknowledgeRelayStale("wss://y"); // 確認保留 → 警告消失
+      expect(yStale()).toBe(false);
+
+      vi.advanceTimersByTime(RELAY_STALE_MS + 2000); // 仍持續離線 → 再次警告
+      expect(yStale()).toBe(true);
+      a.stop();
+      b.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("單 relay 模式（未提供 connectorFor）：hint 被忽略、行為與既有相同", () => {
     const net = createInMemoryRelayNetwork();
     const a = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("a", h), "Alice");

@@ -79,6 +79,10 @@ export interface Messages {
   conn_state_offline: string;
   settings_relayHome: string;
   settings_relayStale: string;
+  settings_relayKeep: string;
+  settings_relayKeepTitle: string;
+  settings_relayClear: string;
+  settings_relayClearConfirm: string;
   file_attach: string;
   file_download: string;
   file_sending: string;
@@ -209,6 +213,10 @@ const zhHant: Messages = {
   conn_state_offline: "離線",
   settings_relayHome: "（我的中繼）",
   settings_relayStale: "長期離線，hint 可能過期",
+  settings_relayKeep: "保留",
+  settings_relayKeepTitle: "確認保留此中繼，暫時隱藏警告",
+  settings_relayClear: "清除 hint",
+  settings_relayClearConfirm: "清除 {url} 的 relay hint？使用它的聯絡人將改回你的中繼路由。",
   file_attach: "傳送檔案（P2P）",
   file_download: "下載",
   file_sending: "傳送中…",
@@ -339,6 +347,10 @@ const en: Messages = {
   conn_state_offline: "Offline",
   settings_relayHome: " (my relay)",
   settings_relayStale: "offline for a while — hint may be stale",
+  settings_relayKeep: "Keep",
+  settings_relayKeepTitle: "Keep this relay and dismiss the warning for now",
+  settings_relayClear: "Clear hint",
+  settings_relayClearConfirm: "Clear the relay hint for {url}? Contacts using it will fall back to your relay.",
   file_attach: "Send a file (P2P)",
   file_download: "Download",
   file_sending: "Sending…",

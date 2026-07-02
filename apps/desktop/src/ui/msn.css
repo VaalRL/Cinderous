@@ -229,6 +229,10 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
 .settings__relayrow code { word-break: break-all; }
 .settings__home { color: var(--muted); font-style: normal; margin-left: 4px; }
 .settings__stale { color: #c47f17; font-style: normal; margin-left: 6px; }
+.settings__stalebox { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.settings__staleact { border: 1px solid var(--border); border-radius: 4px; background: var(--field); color: var(--ink); font-size: 11px; padding: 1px 7px; cursor: pointer; }
+.settings__staleact:hover { background: var(--hover); }
+.settings__staleact--danger { color: #b3261e; border-color: #b3261e55; }
 
 /* 貼圖編輯器（ADR-0033） */
 .stickered { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: flex; align-items: center; justify-content: center; z-index: 55; }

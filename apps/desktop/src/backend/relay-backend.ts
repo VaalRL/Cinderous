@@ -72,6 +72,9 @@ export type RelayConnector = (
   onStatus?: (state: ConnectionState) => void,
 ) => RelayClient;
 
+/** 可關閉的 relay client：`close` 停止重連並斷線（清除 hint 時釋放連線）。 */
+export type CloseableRelayClient = RelayClient & { close?: () => void };
+
 const RECONNECT_MAX_MS = 15_000;
 
 /** 正規化 relay URL（trim、去尾斜線）；非 ws(s) 或空值回傳 undefined。 */
@@ -88,10 +91,19 @@ export function webSocketConnector(url: string): RelayConnector {
     let attempt = 0;
     let pending: string[] = [];
 
-    const client = new RelayClient(
+    let stopped = false;
+    const client: CloseableRelayClient = new RelayClient(
       { send: (data) => (open ? ws.send(data) : pending.push(data)) },
       handlers,
     );
+    client.close = () => {
+      stopped = true;
+      try {
+        ws.close();
+      } catch {
+        /* 忽略 */
+      }
+    };
 
     const connect = () => {
       onStatus?.("connecting");
@@ -108,6 +120,7 @@ export function webSocketConnector(url: string): RelayConnector {
       });
       ws.addEventListener("close", () => {
         open = false;
+        if (stopped) return; // 已清除 hint：不再重連
         onStatus?.("offline");
         const delay = Math.min(1000 * 2 ** attempt, RECONNECT_MAX_MS);
         attempt += 1;
@@ -150,7 +163,7 @@ export class RelayChatBackend implements ChatBackend {
   private readonly homeUrl: string | undefined;
   private readonly connectorFor: ((url: string) => RelayConnector) | undefined;
   /** 外部 relay 連線（正規化 URL → client），惰性建立（ADR-0034）。 */
-  private readonly relayPool = new Map<string, RelayClient>();
+  private readonly relayPool = new Map<string, CloseableRelayClient>();
   /** 跨 relay 事件去重（同一事件可能經多個 relay 抵達）。 */
   private readonly seenEvt = new Set<string>();
   /** 各 relay 連線狀態（home + pool），供設定面板顯示（ADR-0034 後續）。 */
@@ -568,6 +581,33 @@ export class RelayChatBackend implements ChatBackend {
     this.storage.unblockContact(pubkey);
     this.blocked = this.storage.loadBlocked();
     this.emitBlocked();
+  }
+
+  /**
+   * 清除指向某座 relay 的所有聯絡人 hint（ADR-0036 後續）：
+   * 相關聯絡人改回 home 路由，關閉該座連線並自 pool 移除。
+   */
+  clearRelayHint(url: string): void {
+    const norm = normalizeRelayUrl(url);
+    if (!norm) return;
+    for (const c of this.contacts) {
+      if (this.foreignUrlOf(c) === norm) this.storage.updateContactRelay(c.pubkey, undefined);
+    }
+    this.contacts = this.storage.loadContacts();
+    this.relayPool.get(norm)?.close?.();
+    this.relayPool.delete(norm);
+    this.relayStates.delete(norm);
+    this.offlineSince.delete(norm);
+    this.resubscribe(); // presence 分組回到 home
+    this.emitRelayPool();
+  }
+
+  /** 確認保留某座 stale relay：重置離線計時，暫時隱藏警告（ADR-0036 後續）。 */
+  acknowledgeRelayStale(url: string): void {
+    const norm = normalizeRelayUrl(url);
+    if (!norm || !this.offlineSince.has(norm)) return;
+    this.offlineSince.set(norm, Date.now());
+    this.emitRelayPool();
   }
 
   /** 記錄某座 relay 的狀態與連續離線起點，並發出 pool 快照。 */

@@ -21,6 +21,10 @@ export interface SettingsPanelProps {
   notifications: boolean;
   onToggleNotifications: () => void;
   onClose: () => void;
+  /** 清除指向某座 stale relay 的聯絡人 hint（ADR-0036）。 */
+  onRelayClear?: (url: string) => void;
+  /** 確認保留某座 stale relay（暫時隱藏警告）。 */
+  onRelayKeep?: (url: string) => void;
 }
 
 const STATE_DOT: Record<RelayPoolEntry["state"], string> = {
@@ -80,9 +84,35 @@ export function SettingsPanel(props: SettingsPanelProps): JSX.Element {
                       <code>{r.url || t("settings_relayDemo")}</code>
                       {r.home ? <em className="settings__home">{t("settings_relayHome")}</em> : null}
                       {r.stale ? (
-                        <em className="settings__stale" title={t("settings_relayStale")}>
-                          ⚠ {t("settings_relayStale")}
-                        </em>
+                        <span className="settings__stalebox">
+                          <em className="settings__stale" title={t("settings_relayStale")}>
+                            ⚠ {t("settings_relayStale")}
+                          </em>
+                          {props.onRelayKeep ? (
+                            <button
+                              type="button"
+                              className="settings__staleact"
+                              title={t("settings_relayKeepTitle")}
+                              onClick={() => props.onRelayKeep?.(r.url)}
+                            >
+                              {t("settings_relayKeep")}
+                            </button>
+                          ) : null}
+                          {props.onRelayClear ? (
+                            <button
+                              type="button"
+                              className="settings__staleact settings__staleact--danger"
+                              title={t("settings_relayClear")}
+                              onClick={() => {
+                                if (window.confirm(t("settings_relayClearConfirm", { url: r.url }))) {
+                                  props.onRelayClear?.(r.url);
+                                }
+                              }}
+                            >
+                              {t("settings_relayClear")}
+                            </button>
+                          ) : null}
+                        </span>
                       ) : null}
                     </li>
                   );

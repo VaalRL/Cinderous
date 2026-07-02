@@ -383,6 +383,12 @@ export function App(): JSX.Element {
             }
           })()}
           {...(relays.length > 0 ? { relays } : {})}
+          {...(activeBackend.clearRelayHint
+            ? { onRelayClear: activeBackend.clearRelayHint.bind(activeBackend) }
+            : {})}
+          {...(activeBackend.acknowledgeRelayStale
+            ? { onRelayKeep: activeBackend.acknowledgeRelayStale.bind(activeBackend) }
+            : {})}
           {...(activeBackend.selfNsec ? { selfNsec: activeBackend.selfNsec } : {})}
           notifications={notify}
           onToggleNotifications={toggleNotifications}
