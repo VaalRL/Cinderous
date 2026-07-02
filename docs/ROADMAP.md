@@ -95,7 +95,7 @@
 | M6 | 限時訊息 | ✅ **完成**：rumor 內帶較短 NIP-40 過期（外層 wrap 同步縮短）；桌面可選限時（1 分/1 時/1 天），到期顯示「訊息已到期」，經真實 relay 驗證（ADR-0013） | 🌐 |
 | M7 | 語音訊息 | ✅ **完成**：`MediaRecorder` 錄音 → 複用 A4 的 WebRTC P2P 檔案通道傳送（audio/* mime）；兩端渲染 `<audio>` 播放器。經真實 relay + 真實 WebRTC 驗證（ADR-0022） | 🌐 |
 | M7 | 相簿 | ✅ **完成**：`image/*` 檔案內嵌縮圖 + 工具列 🖼️ 相簿格狀檢視（帶張數）+ 燈箱放大；由對話訊息即時衍生，複用 A4 P2P 檔案通道。經真實 relay + WebRTC 驗證（ADR-0023） | 🌐 |
-| M7 | 貼圖 Sticker | ✅ **完成**：`nb-sticker:v1:pack/id` 走既有加密訊息通道，客戶端渲染內建原創 SVG 貼圖包（`buddy` 6 款）；選擇器 + 渲染，經真實 relay 驗證（ADR-0021）。持久化/回應/收回/限時自然沿用 | 🌐 |
+| M7 | 貼圖 Sticker | ✅ **完成**：`nb-sticker:v1:pack/id` 走既有加密訊息通道，客戶端渲染內建原創 SVG 貼圖；選擇器 + 渲染，經真實 relay 驗證（ADR-0021）。持久化/回應/收回/限時自然沿用。**強化**：分頁選擇器（🕘最近使用／⭐我的最愛，本地保存）＋多貼圖包（`buddy`/`mood`/`motion`）＋**動態貼圖**（CSS keyframes 內嵌 SVG，尊重 prefers-reduced-motion，ADR-0031）。⏳ 自製/下載貼圖 | 🌐 |
 | M8 | 語音/視訊通話 | ✅ **完成**：信令核心 `call.ts`（狀態機 + kind 21002 加密傳輸，ADR-0025）+ 執行期 `WebRtcCall`（RTCPeerConnection + getUserMedia）+ 通話 UI（撥號/來電/通話中、靜音/掛斷、視訊畫面）。假音源 + 真實 relay + 真實 WebRTC E2E：發起→響鈴→接聽→雙向音訊→掛斷（ADR-0026）。⏳ TURN 保底、來電鈴聲 | 🌐 信令 / ✅ 假裝置 E2E |
 | M9 | QR 加好友 | ✅ **產生完成**：`qr.ts` 以 qrcode-generator 將 `npub` 編為 QR，聯絡人清單 `▦` 顯示 QR 模態框供好友掃描；加入沿用 `addContact`（A3）。E2E 以獨立解碼器 jsQR 驗證 QR 還原 npub（ADR-0024）。相機掃描屬行動端 Phase D | 🌐 產生 / 掃描待 📱 |
 | M9 | 群組聊天 | ✅ **完成（ADR-0027 方案）**：`group.ts` 成對扇出（kind 14 + `g` tag）+ 控制訊息（建立/加入/移除/離開，kind 40）；後端建群/送訊/離開 + 持久化，UI 群組區、建群 modal、群組視窗（發送者標籤、離開）。3-context 真實 relay E2E：建群→扇出→兩成員收訊並正確歸屬發送者 | 🌐 |
