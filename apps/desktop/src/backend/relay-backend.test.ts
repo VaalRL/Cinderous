@@ -1,3 +1,4 @@
+import { generateSecretKey, getPublicKey, wrapGroupMessage } from "@nostr-buddy/core";
 import { createInMemoryRelayNetwork } from "@nostr-buddy/relay";
 import { describe, expect, it } from "vitest";
 import { MemoryStorage } from "../storage/memory.js";
@@ -84,6 +85,52 @@ describe("RelayChatBackend（真實後端 + 持久化）", () => {
     a.stop();
     b.stop();
     c.stop();
+  });
+
+  it("群組授權：非成員（含陌生人）的群訊被拒收（#3）", () => {
+    const net = createInMemoryRelayNetwork();
+    const storeB = new MemoryStorage();
+    const a = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("a", h), "Alice");
+    const b = new RelayChatBackend(storeB, (h) => net.connect("b", h), "Bob");
+    const bGroups: string[] = [];
+    const bMsgs: ChatMessage[] = [];
+    a.start(noop);
+    b.start({ ...noop, onGroups: (gs) => bGroups.push(...gs.map((g) => g.id)), onMessage: (_pk, m) => bMsgs.push(m) });
+
+    a.createGroup("私群", [b.self.pubkey]); // 成員僅 Alice、Bob
+    const gid = bGroups[0]!;
+
+    // 陌生人 Dave（非成員）自組同 id 群、對 Bob 扇出群訊
+    const daveSk = generateSecretKey();
+    const davePk = getPublicKey(daveSk);
+    const fake = { id: gid, name: "x", admin: davePk, members: [davePk, b.self.pubkey] };
+    const daveClient = net.connect("dave", { onEvent: () => {} });
+    for (const evt of wrapGroupMessage("惡意群訊", daveSk, davePk, fake)) daveClient.publish(evt);
+
+    // 合法成員 Alice 的群訊仍正常送達
+    a.sendGroupMessage(gid, "正常");
+
+    expect(bMsgs.some((m) => m.text === "正常")).toBe(true);
+    expect(bMsgs.some((m) => m.text === "惡意群訊")).toBe(false); // Dave 非成員 → 被拒
+    a.stop();
+    b.stop();
+  });
+
+  it("群組授權：不在名單的 group-create 不會讓你入群（#1）", () => {
+    const net = createInMemoryRelayNetwork();
+    const a = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("a", h), "Alice");
+    const b = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("b", h), "Bob");
+    const bGroups: string[][] = [];
+    a.start(noop);
+    b.start({ ...noop, onGroups: (gs) => bGroups.push(gs.map((g) => g.id)) });
+
+    // Alice 建一個「不含 Bob」的群 → Bob 不應被加入
+    const cSk = generateSecretKey();
+    a.createGroup("沒有Bob", [getPublicKey(cSk)]);
+    const joined = bGroups.flat();
+    expect(joined.length).toBe(0);
+    a.stop();
+    b.stop();
   });
 
   it("收回：Alice 收回訊息，Bob 收到 onUnsend 並持久化", () => {

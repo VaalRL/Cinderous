@@ -132,6 +132,8 @@ export function parseGroupControl(rumor: Rumor): GroupControl | null {
 export function applyGroupControl(group: Group, control: GroupControl, from: PubkeyHex): Group {
   switch (control.type) {
     case "group-add":
+      // 僅管理者可新增成員（維護成員清單完整性）。
+      if (from !== group.admin) return group;
       if (group.members.includes(control.member)) return group;
       return { ...group, members: [...group.members, control.member] };
     case "group-remove":

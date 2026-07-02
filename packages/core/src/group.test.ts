@@ -78,6 +78,10 @@ describe("群組控制訊息", () => {
 
   it("applyGroupControl：add/remove(僅管理者)/leave", () => {
     const g: Group = { id: "g1", name: "x", admin: alicePk, members: [alicePk, bobPk] };
+    // 非管理者新增成員無效
+    const byBob = applyGroupControl(g, { type: "group-add", id: "g1", member: carolPk }, bobPk);
+    expect(byBob.members).not.toContain(carolPk);
+    // 管理者新增有效
     const added = applyGroupControl(g, { type: "group-add", id: "g1", member: carolPk }, alicePk);
     expect(added.members).toContain(carolPk);
 

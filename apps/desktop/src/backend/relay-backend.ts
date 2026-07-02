@@ -180,13 +180,18 @@ export class RelayChatBackend implements ChatBackend {
       },
       onError: (peer, reason) => this.handlers?.onFileError?.(peer, reason),
     });
-    this.call = new WebRtcCall(this.sk, {
-      publishCallSignal: (evt) => this.client.publish(evt),
-      onState: (peer, state, media) => this.handlers?.onCallState?.(peer, state, media),
-      onLocalStream: (stream) => this.handlers?.onCallLocalStream?.(stream),
-      onRemoteStream: (stream) => this.handlers?.onCallRemoteStream?.(stream),
-      onError: (reason) => this.handlers?.onFileError?.(this.self.pubkey, reason),
-    });
+    this.call = new WebRtcCall(
+      this.sk,
+      {
+        publishCallSignal: (evt) => this.client.publish(evt),
+        onState: (peer, state, media) => this.handlers?.onCallState?.(peer, state, media),
+        onLocalStream: (stream) => this.handlers?.onCallLocalStream?.(stream),
+        onRemoteStream: (stream) => this.handlers?.onCallRemoteStream?.(stream),
+        onError: (reason) => this.handlers?.onFileError?.(this.self.pubkey, reason),
+      },
+      undefined,
+      (pubkey) => this.isBlocked(pubkey),
+    );
   }
 
   start(handlers: ChatBackendEvents): void {
@@ -342,7 +347,9 @@ export class RelayChatBackend implements ChatBackend {
     }
     if (rumor.kind !== KIND.CHAT) return;
     if (this.isBlocked(sender)) return;
-    if (!this.groups.some((g) => g.id === groupId)) return; // 未知群組（尚未被加入）
+    const g = this.groups.find((gr) => gr.id === groupId);
+    if (!g) return; // 未知群組（尚未被加入）
+    if (!g.members.includes(sender)) return; // 非成員（含已被移除者）不得發訊
     const expirySec = messageExpiry(rumor);
     const expiresAt = expirySec !== undefined ? expirySec * 1000 : undefined;
     const extra = { sender, ...(expiresAt !== undefined ? { expiresAt } : {}) };
@@ -353,10 +360,14 @@ export class RelayChatBackend implements ChatBackend {
 
   private applyControl(from: PubkeyHex, control: GroupControl): void {
     if (control.type === "group-create") {
+      // 授權/同意檢查：封鎖者不得拉你入群；你不在名單就不加入；不重複建立。
+      if (this.isBlocked(from)) return;
+      if (!control.members.includes(this.self.pubkey)) return;
       if (this.groups.some((g) => g.id === control.id)) return;
-      this.storage.saveGroup({ id: control.id, name: control.name, admin: control.admin, members: control.members });
+      // 管理者強制為驗證後的寄件人（不信任 payload 的 admin 欄位）；
+      // 不自動把其他成員塞進個人聯絡人（避免被強行灌入聯絡人清單）。
+      this.storage.saveGroup({ id: control.id, name: control.name, admin: from, members: control.members });
       this.groups = this.storage.loadGroups();
-      for (const m of control.members) if (m !== this.self.pubkey) this.ensureContact(m);
       this.emitGroups();
       return;
     }

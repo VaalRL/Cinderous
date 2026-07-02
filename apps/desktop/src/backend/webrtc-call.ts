@@ -43,6 +43,8 @@ export class WebRtcCall {
     private readonly ownSk: SecretKey,
     private readonly handlers: CallHandlers,
     private readonly rtcConfig?: RTCConfiguration,
+    /** 判斷某公鑰是否已被封鎖（封鎖者的通話信令一律忽略）。 */
+    private readonly isBlocked: (pubkey: PubkeyHex) => boolean = () => false,
   ) {}
 
   private busy(): boolean {
@@ -86,6 +88,9 @@ export class WebRtcCall {
     } catch {
       return;
     }
+
+    // 封鎖者的通話信令一律忽略（不回應其 SDP、不響鈴）。
+    if (this.isBlocked(sender)) return;
 
     if (signal.type === "call-candidate") {
       if (this.peer !== sender || this.session.activeCallId !== signal.callId) return;
