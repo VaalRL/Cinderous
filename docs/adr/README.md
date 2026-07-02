@@ -44,3 +44,4 @@
 | [0027](./0027-group-encryption.md) | 群組聊天加密方案（M9） | 已接受 |
 | [0028](./0028-forward-secrecy.md) | 前向保密：維持靜態金鑰、FS/PCS 交由未來 MLS（F2） | 已接受 |
 | [0029](./0029-datachannel-binary-framing.md) | 資料通道檔案分塊改用二進位框架（F3/C4） | 已接受 |
+| [0030](./0030-presence-ux-idle-away-and-status-formatting.md) | 在線狀態 UX：閒置自動離開與狀態列表情/格式 | 已接受 |
