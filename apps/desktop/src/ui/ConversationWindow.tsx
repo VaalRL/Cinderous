@@ -1,10 +1,12 @@
-import { REACTION_EMOJIS } from "@nostr-buddy/core";
+import { contentHash, REACTION_EMOJIS } from "@nostr-buddy/core";
 import { useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n.js";
 import type { CallMedia } from "@nostr-buddy/core";
 import type { ChatMessage, Contact, Self } from "../backend/types.js";
 import {
+  formatCustomSticker,
   formatSticker,
+  parseCustomSticker,
   parseSticker,
   resolveSticker,
   STICKER_PACK_META,
@@ -14,6 +16,15 @@ import {
   svgToDataUri,
 } from "../stickers.js";
 import {
+  addSticker,
+  CUSTOM_PACK,
+  findSticker,
+  loadLibrary,
+  removeSticker,
+  saveLibrary,
+  type CustomSticker,
+} from "./sticker-library.js";
+import {
   isFavorite,
   loadFavorites,
   loadRecent,
@@ -22,6 +33,7 @@ import {
   toggleFavorite,
   type StickerRef,
 } from "./sticker-prefs.js";
+import { validateStickerSvg, wrapRasterAsSvg } from "./sticker-svg.js";
 import { renderMarkdown } from "./markdown.js";
 import { applyEmoticons } from "./emoticons.js";
 import { avatarColor, EMOTICONS, initial } from "./util.js";
@@ -66,6 +78,8 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
   const [stickerTab, setStickerTab] = useState<string>(STICKER_PACK_ORDER[0] ?? "");
   const [recent, setRecent] = useState<StickerRef[]>([]);
   const [favorites, setFavorites] = useState<StickerRef[]>([]);
+  const [library, setLibrary] = useState<CustomSticker[]>(() => loadLibrary());
+  const stickerFileRef = useRef<HTMLInputElement>(null);
   const [showAlbum, setShowAlbum] = useState(false);
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [ttl, setTtl] = useState(0);
@@ -91,10 +105,62 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
     setRecent(recordRecent({ pack, id }));
     setShowStickers(false);
   };
+  const sendCustomSticker = (s: CustomSticker): void => {
+    props.onSend(formatCustomSticker({ label: s.label, svg: s.svg }));
+    setRecent(recordRecent({ pack: CUSTOM_PACK, id: s.id }));
+    setShowStickers(false);
+  };
   const flipFavorite = (ref: StickerRef): void => {
     const next = toggleFavorite(favorites, ref);
     setFavorites(next);
     saveFavorites(next);
+  };
+
+  // 貼圖庫寫入（匯入 / fork / 點擊收藏共用）；失敗以 alert 呈現拒收原因。
+  const acquireSticker = (label: string, svg: string): boolean => {
+    const r = addSticker(library, label, svg);
+    if (!r.ok) {
+      window.alert(t("sticker_importFail", { reason: r.reason }));
+      return false;
+    }
+    setLibrary(r.list);
+    saveLibrary(r.list);
+    return true;
+  };
+  const deleteCustom = (id: string): void => {
+    const next = removeSticker(library, id);
+    setLibrary(next);
+    saveLibrary(next);
+  };
+  // 統一解析：內建包或自製庫（供最近/最愛分頁）。
+  const resolveAny = (ref: StickerRef): { label: string; svg: string } | undefined =>
+    ref.pack === CUSTOM_PACK ? findSticker(library, ref.id) : resolveSticker(ref.pack, ref.id);
+
+  // 匯入：SVG 檔直接驗證；點陣圖經 canvas 縮圖重編碼後包成 SVG（ADR-0032）。
+  const importStickerFile = async (f: File): Promise<void> => {
+    const stem = f.name.replace(/\.[^.]+$/, "");
+    if (f.type === "image/svg+xml" || f.name.toLowerCase().endsWith(".svg")) {
+      acquireSticker(stem, (await f.text()).trim());
+      return;
+    }
+    if (!f.type.startsWith("image/")) {
+      window.alert(t("sticker_importFail", { reason: "not-image" }));
+      return;
+    }
+    const bitmap = await createImageBitmap(f);
+    const side = 256;
+    const canvas = document.createElement("canvas");
+    canvas.width = side;
+    canvas.height = side;
+    const ctx = canvas.getContext("2d")!;
+    // 等比置中縮放
+    const scale = Math.min(side / bitmap.width, side / bitmap.height);
+    const w = bitmap.width * scale;
+    const h = bitmap.height * scale;
+    ctx.drawImage(bitmap, (side - w) / 2, (side - h) / 2, w, h);
+    bitmap.close();
+    const dataUri = canvas.toDataURL("image/webp", 0.85);
+    acquireSticker(stem, wrapRasterAsSvg(dataUri, side));
   };
 
   const dropFiles = (files: FileList | null) => {
@@ -243,6 +309,8 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
               onReact={props.onReact}
               onUnsend={props.onUnsend}
               onView={setLightbox}
+              ownedIds={new Set(library.map((s) => s.id))}
+              onOwnSticker={acquireSticker}
             />
           ))}
         </div>
@@ -327,8 +395,10 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
             ? recent
             : stickerTab === "__fav"
               ? favorites
-              : Object.keys(STICKER_PACKS[stickerTab] ?? {}).map((id) => ({ pack: stickerTab, id }));
-        const visible = currentRefs.filter((r) => resolveSticker(r.pack, r.id) !== undefined);
+              : stickerTab === "__mine"
+                ? library.map((s) => ({ pack: CUSTOM_PACK, id: s.id }))
+                : Object.keys(STICKER_PACKS[stickerTab] ?? {}).map((id) => ({ pack: stickerTab, id }));
+        const visible = currentRefs.filter((r) => resolveAny(r) !== undefined);
         return (
           <div className="stickerpick" data-testid="stickerpick">
             <div className="stickerpick__tabs" role="tablist" aria-label={t("sticker_title")}>
@@ -354,6 +424,17 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
               >
                 ⭐
               </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={stickerTab === "__mine"}
+                className={`stickerpick__tab${stickerTab === "__mine" ? " on" : ""}`}
+                title={t("sticker_custom")}
+                aria-label={t("sticker_custom")}
+                onClick={() => setStickerTab("__mine")}
+              >
+                ✏️
+              </button>
               {STICKER_PACK_ORDER.map((pack) => {
                 const meta = STICKER_PACK_META[pack]!;
                 const coverSvg = stickerSvg(pack, meta.cover);
@@ -374,12 +455,37 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
               })}
             </div>
             <div className="stickerpick__grid">
-              {visible.length === 0 ? (
+              {stickerTab === "__mine" ? (
+                <>
+                  <button
+                    type="button"
+                    className="stickerpick__item stickerpick__import"
+                    title={t("sticker_import")}
+                    aria-label={t("sticker_import")}
+                    onClick={() => stickerFileRef.current?.click()}
+                  >
+                    ＋
+                  </button>
+                  <input
+                    ref={stickerFileRef}
+                    type="file"
+                    accept=".svg,image/*"
+                    hidden
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) void importStickerFile(f);
+                      e.target.value = "";
+                    }}
+                  />
+                </>
+              ) : null}
+              {visible.length === 0 && stickerTab !== "__mine" ? (
                 <div className="stickerpick__empty">{t("sticker_empty")}</div>
               ) : (
                 visible.map((ref) => {
-                  const s = resolveSticker(ref.pack, ref.id)!;
+                  const s = resolveAny(ref)!;
                   const fav = isFavorite(favorites, ref);
+                  const custom = ref.pack === CUSTOM_PACK;
                   return (
                     <div className="stickerpick__cell" key={`${ref.pack}/${ref.id}`}>
                       <button
@@ -387,7 +493,11 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
                         className="stickerpick__item"
                         title={s.label}
                         aria-label={s.label}
-                        onClick={() => sendSticker(ref.pack, ref.id)}
+                        onClick={() =>
+                          custom
+                            ? sendCustomSticker(findSticker(library, ref.id)!)
+                            : sendSticker(ref.pack, ref.id)
+                        }
                       >
                         <img src={svgToDataUri(s.svg)} alt={s.label} />
                       </button>
@@ -401,6 +511,31 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
                       >
                         {fav ? "★" : "☆"}
                       </button>
+                      {custom ? (
+                        <button
+                          type="button"
+                          className="stickerpick__act"
+                          aria-label={t("sticker_delete")}
+                          title={t("sticker_delete")}
+                          onClick={() => {
+                            if (window.confirm(t("sticker_deleteConfirm", { name: s.label }))) {
+                              deleteCustom(ref.id);
+                            }
+                          }}
+                        >
+                          ✕
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          className="stickerpick__act"
+                          aria-label={t("sticker_fork")}
+                          title={t("sticker_fork")}
+                          onClick={() => acquireSticker(s.label, s.svg)}
+                        >
+                          ⑂
+                        </button>
+                      )}
                     </div>
                   );
                 })
@@ -470,6 +605,8 @@ function MessageLine({
   onReact,
   onUnsend,
   onView,
+  ownedIds,
+  onOwnSticker,
 }: {
   message: ChatMessage;
   who: string;
@@ -479,6 +616,8 @@ function MessageLine({
   onReact?: ((messageId: string, emoji: string) => void) | undefined;
   onUnsend?: ((messageId: string) => void) | undefined;
   onView?: ((url: string) => void) | undefined;
+  ownedIds: Set<string>;
+  onOwnSticker: (label: string, svg: string) => void;
 }): JSX.Element {
   const { t } = useI18n();
   const [picking, setPicking] = useState(false);
@@ -488,6 +627,10 @@ function MessageLine({
   };
   const ref = parseSticker(message.text);
   const sticker = ref ? stickerSvg(ref.pack, ref.id) : undefined;
+  // 自製貼圖（v2）：內容隨訊息；渲染前必過驗證（ADR-0032）。
+  const custom = sticker === undefined ? parseCustomSticker(message.text) : null;
+  const customOk = custom !== null && validateStickerSvg(custom.svg).ok;
+  const owned = customOk && ownedIds.has(contentHash(custom.svg));
 
   if (unsent || expired) {
     const cls = unsent ? "unsent" : "expired";
@@ -536,6 +679,29 @@ function MessageLine({
         <span className="sticker">
           <img src={svgToDataUri(sticker)} alt={t("sticker_alt")} data-testid="sticker-img" />
         </span>
+      ) : customOk ? (
+        <span className="sticker">
+          {!message.outgoing && !owned ? (
+            <button
+              type="button"
+              className="sticker__own"
+              title={t("sticker_own")}
+              aria-label={t("sticker_own")}
+              onClick={() => onOwnSticker(custom.label, custom.svg)}
+            >
+              <img src={svgToDataUri(custom.svg)} alt={custom.label} data-testid="sticker-img" />
+            </button>
+          ) : (
+            <img
+              src={svgToDataUri(custom.svg)}
+              alt={custom.label}
+              title={owned ? t("sticker_owned") : custom.label}
+              data-testid="sticker-img"
+            />
+          )}
+        </span>
+      ) : custom !== null ? (
+        <span className="text expired__text">{t("sticker_invalid")}</span>
       ) : (
         <span className="text">{renderMarkdown(applyEmoticons(message.text))}</span>
       )}

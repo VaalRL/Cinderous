@@ -85,6 +85,15 @@ export interface Messages {
   sticker_favorites: string;
   sticker_favToggle: string;
   sticker_empty: string;
+  sticker_custom: string;
+  sticker_import: string;
+  sticker_delete: string;
+  sticker_deleteConfirm: string;
+  sticker_fork: string;
+  sticker_own: string;
+  sticker_owned: string;
+  sticker_invalid: string;
+  sticker_importFail: string;
   voice_record: string;
   voice_stop: string;
   voice_recording: string;
@@ -190,6 +199,15 @@ const zhHant: Messages = {
   sticker_favorites: "我的最愛",
   sticker_favToggle: "切換最愛",
   sticker_empty: "這裡還沒有貼圖",
+  sticker_custom: "自製貼圖",
+  sticker_import: "匯入圖片或 SVG",
+  sticker_delete: "刪除貼圖",
+  sticker_deleteConfirm: "刪除自製貼圖「{name}」？",
+  sticker_fork: "複製為自製貼圖",
+  sticker_own: "點擊收藏此貼圖",
+  sticker_owned: "已收藏",
+  sticker_invalid: "（無效貼圖）",
+  sticker_importFail: "無法加入貼圖：{reason}",
   voice_record: "錄語音訊息",
   voice_stop: "停止並傳送",
   voice_recording: "錄音中…點擊停止並傳送",
@@ -295,6 +313,15 @@ const en: Messages = {
   sticker_favorites: "Favorites",
   sticker_favToggle: "Toggle favorite",
   sticker_empty: "Nothing here yet",
+  sticker_custom: "My stickers",
+  sticker_import: "Import image or SVG",
+  sticker_delete: "Delete sticker",
+  sticker_deleteConfirm: "Delete custom sticker \"{name}\"?",
+  sticker_fork: "Copy to my stickers",
+  sticker_own: "Click to save this sticker",
+  sticker_owned: "Saved",
+  sticker_invalid: "(invalid sticker)",
+  sticker_importFail: "Could not add sticker: {reason}",
   voice_record: "Record voice message",
   voice_stop: "Stop & send",
   voice_recording: "Recording… click to stop & send",

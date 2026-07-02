@@ -40,3 +40,8 @@ export function serializeEvent(event: UnsignedEvent): string {
 export function getEventHash(event: UnsignedEvent): string {
   return bytesToHex(sha256(utf8ToBytes(serializeEvent(event))));
 }
+
+/** 任意 UTF-8 文字的 sha256（小寫 hex）；供內容定址（如自製貼圖 id）使用。 */
+export function contentHash(text: string): string {
+  return bytesToHex(sha256(utf8ToBytes(text)));
+}

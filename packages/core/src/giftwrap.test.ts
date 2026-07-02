@@ -54,6 +54,13 @@ describe("NIP-17/59 Gift Wrap 離線私訊", () => {
     expect(messageExpiry(rumor)).toBeUndefined();
   });
 
+  it("大內容（~33KB，自製貼圖 v2 規模）可完整 wrap/unwrap（ADR-0032）", () => {
+    const big = `nb-sticker:v2:{"label":"大","svg":"<svg>${"a".repeat(32 * 1024)}</svg>"}`;
+    const wrap = wrapMessage(big, aliceSk, bobPk);
+    const { rumor } = unwrapMessage(wrap, bobSk);
+    expect(rumor.content).toBe(big);
+  });
+
   it("第三者無法解開", () => {
     const wrap = wrapMessage("for bob", aliceSk, bobPk);
     const eveSk = generateSecretKey();

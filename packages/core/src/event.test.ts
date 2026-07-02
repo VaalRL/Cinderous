@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getEventHash, serializeEvent, type UnsignedEvent } from "./event.js";
+import { contentHash, getEventHash, serializeEvent, type UnsignedEvent } from "./event.js";
 
 const sample: UnsignedEvent = {
   pubkey: "ab".repeat(32),
@@ -25,5 +25,11 @@ describe("Nostr 事件序列化（NIP-01）", () => {
 
   it("內容不同會產生不同 id", () => {
     expect(getEventHash(sample)).not.toBe(getEventHash({ ...sample, content: "x" }));
+  });
+
+  it("contentHash：確定性 sha256 hex、內容敏感", () => {
+    expect(contentHash("<svg/>")).toMatch(/^[0-9a-f]{64}$/);
+    expect(contentHash("<svg/>")).toBe(contentHash("<svg/>"));
+    expect(contentHash("<svg/>")).not.toBe(contentHash("<svg />"));
   });
 });

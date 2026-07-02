@@ -7,9 +7,23 @@
 /** 貼圖參照的內容前綴。 */
 export const STICKER_PREFIX = "nb-sticker:v1:";
 
+/** 自製貼圖（內容隨訊息）的前綴（ADR-0032）。 */
+export const CUSTOM_STICKER_PREFIX = "nb-sticker:v2:";
+
 /** 組出一則貼圖訊息的內容字串。 */
 export function formatSticker(pack: string, id: string): string {
   return `${STICKER_PREFIX}${pack}/${id}`;
+}
+
+/** 自製貼圖負載：內容隨訊息送達，id 由收端以內容雜湊自算。 */
+export interface CustomStickerPayload {
+  label: string;
+  svg: string;
+}
+
+/** 組出一則自製貼圖訊息的內容字串（v2，JSON 內嵌 SVG）。 */
+export function formatCustomSticker(payload: CustomStickerPayload): string {
+  return `${CUSTOM_STICKER_PREFIX}${JSON.stringify(payload)}`;
 }
 
 /** 解析訊息內容；非貼圖或格式錯誤回傳 null。 */
@@ -22,6 +36,26 @@ export function parseSticker(content: string): { pack: string; id: string } | nu
   const id = rest.slice(slash + 1);
   if (rest.indexOf("/", slash + 1) !== -1) return null; // 只允許單一 `/`
   return { pack, id };
+}
+
+/** 解析自製貼圖訊息（v2）；非自製貼圖或格式錯誤回傳 null。 */
+export function parseCustomSticker(content: string): CustomStickerPayload | null {
+  if (!content.startsWith(CUSTOM_STICKER_PREFIX)) return null;
+  try {
+    const parsed: unknown = JSON.parse(content.slice(CUSTOM_STICKER_PREFIX.length));
+    if (
+      parsed &&
+      typeof parsed === "object" &&
+      typeof (parsed as CustomStickerPayload).label === "string" &&
+      typeof (parsed as CustomStickerPayload).svg === "string"
+    ) {
+      const { label, svg } = parsed as CustomStickerPayload;
+      return { label, svg };
+    }
+  } catch {
+    /* 非法 JSON */
+  }
+  return null;
 }
 
 const svg = (body: string): string =>

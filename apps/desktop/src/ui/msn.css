@@ -211,7 +211,18 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
 }
 .stickerpick__cell:hover .stickerpick__fav, .stickerpick__fav.on { opacity: 1; }
 .stickerpick__fav.on { color: #f5c518; }
+.stickerpick__act {
+  position: absolute; bottom: -4px; right: -4px; width: 18px; height: 18px; padding: 0; border: none; border-radius: 50%;
+  background: var(--panel); color: var(--muted); font-size: 11px; line-height: 18px; cursor: pointer;
+  box-shadow: 0 1px 3px rgba(0,0,0,.25); opacity: 0; transition: opacity .12s;
+}
+.stickerpick__cell:hover .stickerpick__act { opacity: 1; }
+.stickerpick__act:hover { color: var(--accent); }
+.stickerpick__import { width: 48px; height: 48px; font-size: 22px; color: var(--muted); border-style: dashed; border-color: var(--border); }
+.stickerpick__import:hover { color: var(--accent); }
 .stickerpick__empty { color: var(--muted); font-size: 12px; padding: 14px 4px; }
+.sticker__own { padding: 0; border: none; background: transparent; cursor: pointer; display: block; }
+.sticker__own:hover img { filter: drop-shadow(0 0 4px var(--accent)); }
 .sticker { display: block; margin-top: 2px; }
 .sticker img { width: 96px; height: 96px; }
 
