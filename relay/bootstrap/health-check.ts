@@ -68,6 +68,53 @@ async function probe(url: string): Promise<boolean> {
   });
 }
 
+/** 發佈一個事件到 relay：送 `["EVENT", …]`，等 OK 或逾時。 */
+async function publishEvent(url: string, event: unknown): Promise<boolean> {
+  const id = (event as { id?: string }).id;
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (ok: boolean) => {
+      if (done) return;
+      done = true;
+      try {
+        ws.close();
+      } catch {
+        /* 忽略 */
+      }
+      resolve(ok);
+    };
+    const timer = setTimeout(() => finish(false), PROBE_TIMEOUT_MS);
+    let ws: WebSocket;
+    try {
+      ws = new WebSocket(url);
+    } catch {
+      clearTimeout(timer);
+      resolve(false);
+      return;
+    }
+    ws.addEventListener("open", () => ws.send(JSON.stringify(["EVENT", event])));
+    ws.addEventListener("message", (e) => {
+      try {
+        const msg = JSON.parse(typeof e.data === "string" ? e.data : "");
+        if (Array.isArray(msg) && msg[0] === "OK" && msg[1] === id) {
+          clearTimeout(timer);
+          finish(Boolean(msg[2]));
+        }
+      } catch {
+        /* 忽略 */
+      }
+    });
+    ws.addEventListener("error", () => {
+      clearTimeout(timer);
+      finish(false);
+    });
+    ws.addEventListener("close", () => {
+      clearTimeout(timer);
+      finish(false);
+    });
+  });
+}
+
 async function main(): Promise<void> {
   const current = JSON.parse(readFileSync(LIST_PATH, "utf8")) as RelayListDoc;
   const candidates = [...new Set(current.relays)];
@@ -101,8 +148,11 @@ async function main(): Promise<void> {
     const event = signRelayList(next, nsecDecode(nsec));
     writeFileSync(EVENT_PATH, `${JSON.stringify(event, null, 2)}\n`);
     console.log(`已簽章 relay 清單事件（kind ${event.kind}）→ ${EVENT_PATH}`);
+    // 帶內發佈（ADR-0039）：把簽章清單推到每座健康 relay，客戶端連上即學到。
+    const pubResults = await Promise.all(healthy.map(async (u) => [u, await publishEvent(u, event)] as const));
+    for (const [u, ok] of pubResults) console.log(`  ${ok ? "📡" : "⚠"} 發佈至 ${u}`);
   } else {
-    console.log("未提供 MAINTAINER_NSEC：略過簽章（僅更新明文清單）。");
+    console.log("未提供 MAINTAINER_NSEC：略過簽章與發佈（僅更新明文清單）。");
   }
 }
 

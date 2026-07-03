@@ -378,14 +378,20 @@ export class RelayChatBackend implements ChatBackend {
     }
   }
 
-  /** 健康的引導座（home + 錨點/清單座，狀態非 offline），排除 `exclude`，上限 K。 */
+  /** 健康的引導座（home + 錨點/清單座，狀態非 offline），排除 `exclude`，去重、上限 K。 */
   private healthySeats(exclude: string | undefined): CloseableRelayClient[] {
+    // home 遞補後其 URL 亦在 bootstrapSeats，需去重避免對同一座重複 publish。
+    const seen = new Set<string>(exclude ? [exclude] : []);
     const urls: string[] = [];
-    if (this.homeUrl && this.homeUrl !== exclude && this.relayStates.get(this.homeUrl) !== "offline") {
+    if (this.homeUrl && !seen.has(this.homeUrl) && this.relayStates.get(this.homeUrl) !== "offline") {
       urls.push(this.homeUrl);
+      seen.add(this.homeUrl);
     }
     for (const url of this.bootstrapSeats) {
-      if (url !== exclude && this.relayStates.get(url) !== "offline") urls.push(url);
+      if (!seen.has(url) && this.relayStates.get(url) !== "offline") {
+        urls.push(url);
+        seen.add(url);
+      }
     }
     const out: CloseableRelayClient[] = [];
     for (const url of urls) {
