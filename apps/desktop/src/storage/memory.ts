@@ -1,5 +1,6 @@
 import type {
   AppStorage,
+  StoredBootstrapList,
   StoredContact,
   StoredGroup,
   StoredIdentity,
@@ -84,5 +85,12 @@ export class MemoryStorage implements AppStorage {
   removeGroup(id: string): void {
     this.groups = this.groups.filter((g) => g.id !== id);
     this.messages.delete(id);
+  }
+  private bootstrapList: StoredBootstrapList | null = null;
+  loadBootstrapList(): StoredBootstrapList | null {
+    return this.bootstrapList;
+  }
+  saveBootstrapList(doc: StoredBootstrapList): void {
+    this.bootstrapList = doc;
   }
 }

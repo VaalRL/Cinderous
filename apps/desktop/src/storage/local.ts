@@ -1,5 +1,6 @@
 import type {
   AppStorage,
+  StoredBootstrapList,
   StoredContact,
   StoredGroup,
   StoredIdentity,
@@ -14,6 +15,7 @@ const K_REACTIONS = "nb.reactions";
 const K_DELETED = "nb.deleted";
 const K_BLOCKED = "nb.blocked";
 const K_GROUPS = "nb.groups";
+const K_BOOTSTRAP = "nb.bootstrapList";
 
 function read<T>(key: string, fallback: T): T {
   try {
@@ -125,5 +127,11 @@ export class LocalStorage implements AppStorage {
     } catch {
       /* 忽略 */
     }
+  }
+  loadBootstrapList(): StoredBootstrapList | null {
+    return read<StoredBootstrapList | null>(K_BOOTSTRAP, null);
+  }
+  saveBootstrapList(doc: StoredBootstrapList): void {
+    write(K_BOOTSTRAP, doc);
   }
 }

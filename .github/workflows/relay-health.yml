@@ -1,0 +1,48 @@
+name: Relay 健康檢查（ADR-0039）
+
+# 每小時探測引導 relay 清單、剔除逾時節點、產生簽章清單事件。
+# 信任根＝維護者金鑰（MAINTAINER_NSEC secret）；本 workflow 僅為發佈通道。
+on:
+  schedule:
+    - cron: "0 * * * *"
+  workflow_dispatch:
+
+# 只需寫回 relays.json；不觸碰其他分支。
+permissions:
+  contents: write
+
+concurrency:
+  group: relay-health
+  cancel-in-progress: true
+
+jobs:
+  health:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: 探測 + 更新清單 + 簽章
+        env:
+          # 維護者私鑰（nsec）；未設定時僅更新明文清單、不產生簽章事件。
+          MAINTAINER_NSEC: ${{ secrets.MAINTAINER_NSEC }}
+        run: pnpm --filter @nostr-buddy/relay bootstrap:run
+
+      - name: 提交清單變更（若有）
+        run: |
+          if [ -n "$(git status --porcelain relay/bootstrap/relays.json)" ]; then
+            git config user.name "relay-health-bot"
+            git config user.email "bot@users.noreply.github.com"
+            git add relay/bootstrap/relays.json
+            git commit -m "chore(relay): 自動更新引導 relay 清單健康狀態"
+            git push
+          else
+            echo "清單無變化，略過提交。"
+          fi

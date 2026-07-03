@@ -23,3 +23,4 @@ export * from "./pairing.js";
 export * from "./happy-eyeballs.js";
 export * from "./sync.js";
 export * from "./relay-client.js";
+export * from "./bootstrap.js";

@@ -112,6 +112,7 @@
 | F4 | 第三方安全稽核 | 🔧 **前置已備**：`docs/SECURITY.md`（漏洞回報政策 + 加密盤點 + 威脅模型逐項盤點 + 已知限制 + 建議稽核範圍）。獨立稽核本身需外部稽核員（此環境無法執行）。 |
 | F5 | 容量/成本 | ✅ **大致完成**：心跳合併（音樂併入心跳、移除 kind 20002）+ jitter + **WebRTC 狀態卸載**（開對話主動建 P2P、輸入中優先走 Data Channel、退回中繼；真實 WebRTC E2E 驗證）；容量模型回填 `docs/adr/0006`。付費層評估為部署階段（C4）。 |
 | F7 | 網址衛生 | ✅ **完成（ADR-0038）**：貼上自動清除追蹤參數（`utm_*`/fbclid/gclid… 全域精確名單＋站點範圍規則如 YouTube `si`、Amazon `/ref=`；只刪已註冊名字）＋高風險連結本地啟發式警告（文字偽裝/`@`混淆/punycode/IP 直連=danger；http/非常規 port/短網址=caution；⚠ 徽章＋點擊確認，收發兩端渲染層生效）。**明確否決外部信譽 API**（metadata 洩漏）。純函式測試＋Playwright E2E。**後續完成**：redirect 拆殼（google/url、facebook l.php、youtube/reddit/vk/steam…巢狀遞迴上限 3）＋hash 片段追蹤碼（僅 k=v 形式，SPA 路由與 #:~:text= 不動）＋設定面板「隱私」開關（預設開、持久化）。 |
+| F8 | 混合式引導路由 | ✅ **完成（ADR-0039）**：錨點常數（硬編碼 2–3 座保底）＋維護者**簽章** relay 清單（kind 10037，Nostr 帶內傳播為主、GitHub HTTP 後備、驗簽＋防清空＋較新才取代；否決 GitHub 供應鏈為信任根）＋有界冗餘廣播（主路由離線才向健康引導座 K=2）＋**home 自動遞補**（Node1 長期離線自動切健康座、`selfShareUri` 更新、事後通知）。GitHub Actions cron 健康檢查（REQ→EOSE 探測、never-empty 守門、簽章發佈）。core 8＋backend 4 測試（含「Node1 下架後 A→B 零動作經錨點送達」「home 遞補」「偽造清單拒絕」）；探測＋簽章＋驗簽經真實 relay E2E。 |
 | F6 | 跨中繼互通 | ✅ **完成（ADR-0034）**：客戶端 Relay Pool——好友 relay hint（`npub…@wss://…`，加好友輸入/分享字串/QR 內容皆支援）、addressed 事件路由到收件人的 relay、心跳全 pool 扇出、收件箱全 pool 訂閱、event id 去重；relay 端零改動、不做聯邦。雙 relay 整合測試（8 項）驗證含不對稱認知場景。**後續完成**：hint 自動學習（帶內加密 hint，ADR-0035，第一則來訊自癒＋回程直達測試）＋設定面板 pool 各座連線狀態（🟢🟡🔴 + home 標記）＋**群訊 rumor 帶 hint**（入群即互學路由）＋**陳舊偵測與離線回退**（連續離線 >5 分鐘標 ⚠ stale；目標座離線時回退 home 雙發、收端去重，ADR-0036）＋**stale 動作 UI**（「保留」重置計時／「清除 hint」改回 home 路由並停止該座重連）。 |
 
 ---

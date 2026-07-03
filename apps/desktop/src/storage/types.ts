@@ -73,4 +73,13 @@ export interface AppStorage {
   saveGroup(group: StoredGroup): void;
   /** 移除群組（離開/解散）。 */
   removeGroup(id: string): void;
+  /** last-known-good 引導 relay 清單（ADR-0039）；未採用過回傳 null。 */
+  loadBootstrapList(): StoredBootstrapList | null;
+  saveBootstrapList(doc: StoredBootstrapList): void;
+}
+
+/** 已採用的引導 relay 清單（ADR-0039）。 */
+export interface StoredBootstrapList {
+  relays: string[];
+  updatedAt: number;
 }

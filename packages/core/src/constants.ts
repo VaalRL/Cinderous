@@ -18,6 +18,9 @@ export const KIND = {
   MUSIC: 20002,
 } as const;
 
+/** 引導 relay 清單事件（ADR-0039，維護者簽章、可取代）。 */
+export const RELAY_LIST_KIND = 10037;
+
 /** WebRTC SDP 信令使用的 Ephemeral kind 區間（NIP-59 包封）。 */
 export const SDP_KIND_RANGE = { min: 21000, max: 21999 } as const;
 

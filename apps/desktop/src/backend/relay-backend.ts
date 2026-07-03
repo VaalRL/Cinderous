@@ -20,9 +20,14 @@ import {
   nsecEncode,
   parseGroupControl,
   PresenceTracker,
+  mergeBootstrapPool,
+  normalizeRelay,
   reactionTarget,
   RelayClient,
+  RELAY_LIST_KIND,
   relayHintOf,
+  shouldAdoptList,
+  verifyRelayList,
   SDP_SIGNAL_KIND,
   unwrapMessage,
   wrapDeletion,
@@ -39,6 +44,7 @@ import {
   type PresenceState,
   type PubkeyHex,
   type RelayClientHandlers,
+  type RelayListDoc,
   type Rumor,
   type SecretKey,
 } from "@nostr-buddy/core";
@@ -58,6 +64,8 @@ const NUDGE_KIND = 20100;
 const HEARTBEAT_MS = 15_000;
 /** pool relay 連續離線超過此時間即標記 hint 可能陳舊（ADR-0036）。 */
 export const RELAY_STALE_MS = 5 * 60_000;
+/** 主路由離線時的冗餘廣播座數上限（ADR-0039）。 */
+export const REDUNDANT_K = 2;
 const PRESENCE_TIMEOUT_MS = 45_000;
 const nowSec = () => Math.floor(Date.now() / 1000);
 
@@ -150,18 +158,34 @@ export interface RelayPoolOptions {
   relayUrl?: string;
   /** 依 URL 建立外部 relay 連線的工廠。 */
   connectorFor?: (url: string) => RelayConnector;
+  /** 硬編碼錨點 relay（ADR-0039）：恆連保底 + 引導清單來源。 */
+  anchors?: string[];
+  /** 維護者公鑰：驗證帶內 relay 清單事件（ADR-0039）；未設則不學清單。 */
+  maintainerPubkey?: string;
+  /** home 因長期離線自動遞補到健康引導座時通知（ADR-0039）。 */
+  onHomeSwitched?: (newUrl: string) => void;
 }
 
 export class RelayChatBackend implements ChatBackend {
   readonly self: Self;
   readonly selfNpub: string;
   readonly selfNsec: string;
-  /** 分享用字串：`npub…@wss://…`（設定了 home relay 時），否則同 selfNpub。 */
-  readonly selfShareUri: string;
+  /** 分享用字串：`npub…@wss://…`（設定了 home relay 時），否則同 selfNpub（home 遞補後即時反映）。 */
+  get selfShareUri(): string {
+    return this.homeUrl ? `${this.selfNpub}@${this.homeUrl}` : this.selfNpub;
+  }
   private readonly sk: SecretKey;
   private readonly client: RelayClient;
-  private readonly homeUrl: string | undefined;
+  /** `this.client` 實際連往的 URL（不變）；home 遞補時 effective home 才變。 */
+  private readonly originalHomeUrl: string | undefined;
+  /** 目前 effective home（ADR-0039 可自動遞補）。 */
+  private homeUrl: string | undefined;
   private readonly connectorFor: ((url: string) => RelayConnector) | undefined;
+  /** 引導座（錨點 ∪ 已採用清單，ADR-0039）：恆連保底、冗餘廣播與 home 遞補來源。 */
+  private readonly bootstrapSeats = new Set<string>();
+  private readonly maintainerPubkey: string | undefined;
+  private readonly onHomeSwitched: ((url: string) => void) | undefined;
+  private lastList: RelayListDoc | null;
   /** 外部 relay 連線（正規化 URL → client），惰性建立（ADR-0034）。 */
   private readonly relayPool = new Map<string, CloseableRelayClient>();
   /** 跨 relay 事件去重（同一事件可能經多個 relay 抵達）。 */
@@ -192,7 +216,19 @@ export class RelayChatBackend implements ChatBackend {
     pool?: RelayPoolOptions,
   ) {
     this.homeUrl = normalizeRelayUrl(pool?.relayUrl);
+    this.originalHomeUrl = this.homeUrl;
     this.connectorFor = pool?.connectorFor;
+    this.maintainerPubkey = pool?.maintainerPubkey;
+    this.onHomeSwitched = pool?.onHomeSwitched;
+    for (const a of pool?.anchors ?? []) {
+      const norm = normalizeRelay(a);
+      if (norm && norm !== this.homeUrl) this.bootstrapSeats.add(norm);
+    }
+    this.lastList = storage.loadBootstrapList();
+    for (const r of this.lastList?.relays ?? []) {
+      const norm = normalizeRelay(r);
+      if (norm && norm !== this.homeUrl) this.bootstrapSeats.add(norm);
+    }
     let identity = storage.loadIdentity();
     if (!identity) {
       const sk = generateSecretKey();
@@ -207,7 +243,6 @@ export class RelayChatBackend implements ChatBackend {
     this.self = { pubkey, name: identity.name, status: "online", statusMessage: "" };
     this.selfNpub = npubEncode(pubkey);
     this.selfNsec = identity.nsec;
-    this.selfShareUri = this.homeUrl ? `${this.selfNpub}@${this.homeUrl}` : this.selfNpub;
     this.contacts = storage.loadContacts();
     this.blocked = storage.loadBlocked();
     this.groups = storage.loadGroups();
@@ -249,6 +284,7 @@ export class RelayChatBackend implements ChatBackend {
     this.scheduleBeat();
     this.renderTimer = setInterval(() => {
       this.emitContacts();
+      this.maybeSucceedHome(); // home 長期離線 → 自動遞補健康引導座（ADR-0039）
       this.emitRelayPool(); // stale 隨時間推移改變；簽章防抖，沒變不發
     }, 1000);
     this.emitContacts();
@@ -298,6 +334,14 @@ export class RelayChatBackend implements ChatBackend {
     return url && url !== this.homeUrl ? url : undefined;
   }
 
+  /** effective home 的連線：未遞補時為原始 this.client，遞補後為對應引導座。 */
+  private homeClient(): CloseableRelayClient {
+    if (this.homeUrl && this.homeUrl !== this.originalHomeUrl) {
+      return this.poolClient(this.homeUrl) ?? this.client;
+    }
+    return this.client;
+  }
+
   /** 取得（必要時建立）外部 relay 連線；單 relay 模式回傳 undefined。 */
   private poolClient(url: string): RelayClient | undefined {
     if (!this.connectorFor) return undefined;
@@ -318,19 +362,38 @@ export class RelayChatBackend implements ChatBackend {
     return client;
   }
 
-  /** Addressed 事件（帶收件人 `p` tag）→ 收件人的 relay；無 hint 退回 home。 */
+  /**
+   * Addressed 事件（帶收件人 `p` tag）→ 收件人的 relay；無 hint 退回 home。
+   * 主路由離線時，冗餘廣播到健康引導座（ADR-0036 雙發一般化為 ADR-0039 有界冗餘）。
+   */
   private publishAddressed(evt: NostrEvent): void {
     const to = evt.tags.find((t) => t[0] === "p")?.[1];
     const contact = to ? this.contacts.find((c) => c.pubkey === to) : undefined;
     const url = contact ? this.foreignUrlOf(contact) : undefined;
-    const client = url ? this.poolClient(url) : undefined;
-    if (client && url && this.relayStates.get(url) === "offline") {
-      // 目標座離線：照常投入其重連佇列，並回退 home 雙發（收端以 id 去重，ADR-0036）。
-      client.publish(evt);
-      this.client.publish(evt);
-      return;
+    const primaryUrl = url ?? this.homeUrl;
+    const primary = url ? this.poolClient(url) : this.homeClient();
+    (primary ?? this.client).publish(evt); // 一律投入主路由（離線則入其重連佇列）
+    if (primaryUrl !== undefined && this.relayStates.get(primaryUrl) === "offline") {
+      for (const seat of this.healthySeats(primaryUrl)) seat.publish(evt);
     }
-    (client ?? this.client).publish(evt);
+  }
+
+  /** 健康的引導座（home + 錨點/清單座，狀態非 offline），排除 `exclude`，上限 K。 */
+  private healthySeats(exclude: string | undefined): CloseableRelayClient[] {
+    const urls: string[] = [];
+    if (this.homeUrl && this.homeUrl !== exclude && this.relayStates.get(this.homeUrl) !== "offline") {
+      urls.push(this.homeUrl);
+    }
+    for (const url of this.bootstrapSeats) {
+      if (url !== exclude && this.relayStates.get(url) !== "offline") urls.push(url);
+    }
+    const out: CloseableRelayClient[] = [];
+    for (const url of urls) {
+      const client = url === this.homeUrl ? this.homeClient() : this.poolClient(url);
+      if (client) out.push(client);
+      if (out.length >= REDUNDANT_K) break;
+    }
+    return out;
   }
 
   /** 對某個 relay 掛訂閱：完整收件箱 + 該 relay 上發心跳的聯絡人 presence。 */
@@ -346,6 +409,10 @@ export class RelayChatBackend implements ChatBackend {
     client.subscribe("dm", [{ kinds: [KIND.OFFLINE_DM_GIFT_WRAP], "#p": [this.self.pubkey] }]);
     client.subscribe("sig", [{ kinds: [SDP_SIGNAL_KIND], "#p": [this.self.pubkey] }]);
     client.subscribe("call", [{ kinds: [CALL_SIGNAL_KIND], "#p": [this.self.pubkey] }]);
+    // 帶內引導清單（ADR-0039）：訂閱維護者簽章的 relay 清單事件。
+    if (this.maintainerPubkey) {
+      client.subscribe("relaylist", [{ kinds: [RELAY_LIST_KIND], authors: [this.maintainerPubkey] }]);
+    }
   }
 
   private resubscribeRelay(url: string): void {
@@ -354,14 +421,34 @@ export class RelayChatBackend implements ChatBackend {
   }
 
   private resubscribe(): void {
-    this.subscribeOn(this.client, this.homeUrl);
+    this.subscribeOn(this.client, this.originalHomeUrl);
     if (!this.connectorFor) return;
-    // 確保聯絡人 hint 中的外部 relay 都已連線並掛好訂閱。
+    // 引導座（錨點/清單，ADR-0039）與聯絡人 hint 的外部 relay 都連線並掛訂閱。
+    for (const url of this.bootstrapSeats) if (url !== this.homeUrl) this.poolClient(url);
     for (const c of this.contacts) {
       const url = this.foreignUrlOf(c);
       if (url) this.poolClient(url);
     }
     for (const [url, client] of this.relayPool) this.subscribeOn(client, url);
+  }
+
+  /** 採用帶內收到的維護者 relay 清單（ADR-0039）：驗簽已在 onEvent 完成。 */
+  private adoptRelayList(doc: RelayListDoc): void {
+    if (!shouldAdoptList(this.lastList, doc)) return;
+    this.lastList = doc;
+    this.storage.saveBootstrapList(doc);
+    let added = false;
+    for (const r of doc.relays) {
+      const norm = normalizeRelay(r);
+      if (norm && norm !== this.homeUrl && !this.bootstrapSeats.has(norm)) {
+        this.bootstrapSeats.add(norm);
+        added = true;
+      }
+    }
+    if (added && this.connectorFor) {
+      this.resubscribe(); // 新引導座連線並掛收件箱訂閱
+      this.emitRelayPool();
+    }
   }
 
   private beat(): void {
@@ -399,6 +486,13 @@ export class RelayChatBackend implements ChatBackend {
 
   private onEvent(event: NostrEvent): void {
     if (this.seenBefore(event.id)) return;
+    if (event.kind === RELAY_LIST_KIND) {
+      if (this.maintainerPubkey) {
+        const doc = verifyRelayList(event, this.maintainerPubkey);
+        if (doc) this.adoptRelayList(doc);
+      }
+      return;
+    }
     switch (event.kind) {
       case KIND.HEARTBEAT:
         this.presence.observe(event.pubkey, event.created_at);
@@ -610,6 +704,24 @@ export class RelayChatBackend implements ChatBackend {
     this.emitRelayPool();
   }
 
+  /**
+   * home 連續離線超過門檻且有健康引導座時，自動遞補 effective home（ADR-0039）。
+   * 只切換 effective home（不拆原始連線）：presence 分組、hint 廣播、分享字串隨之更新。
+   */
+  private maybeSucceedHome(): void {
+    if (!this.connectorFor || !this.homeUrl) return;
+    const since = this.offlineSince.get(this.homeUrl);
+    if (since === undefined || Date.now() - since <= RELAY_STALE_MS) return;
+    const healthy = [...this.bootstrapSeats].find(
+      (u) => u !== this.homeUrl && this.relayStates.get(u) === "online",
+    );
+    if (!healthy) return;
+    this.homeUrl = healthy;
+    this.resubscribe();
+    this.beat(); // 立即在新 home 廣播在線
+    if (this.handlers) this.onHomeSwitched?.(healthy);
+  }
+
   /** 記錄某座 relay 的狀態與連續離線起點，並發出 pool 快照。 */
   private trackRelayState(url: string, state: ConnectionState): void {
     this.relayStates.set(url, state);
@@ -636,7 +748,9 @@ export class RelayChatBackend implements ChatBackend {
     if (!this.handlers?.onRelayPool) return;
     const list = [
       this.relayEntry(this.homeUrl ?? "", true),
-      ...[...this.relayPool.keys()].map((url) => this.relayEntry(url, false)),
+      ...[...this.relayPool.keys()]
+        .filter((url) => url !== this.homeUrl)
+        .map((url) => this.relayEntry(url, false)),
     ];
     const sig = list.map((r) => `${r.url}|${r.state}|${r.stale}`).join(",");
     if (sig === this.lastRelaySig) return;
@@ -649,7 +763,7 @@ export class RelayChatBackend implements ChatBackend {
   }
 
   private onConnection(state: ConnectionState): void {
-    this.trackRelayState(this.homeUrl ?? "", state);
+    this.trackRelayState(this.originalHomeUrl ?? "", state);
     this.handlers?.onConnection?.(state);
     // 重連成功後重新訂閱並發送心跳（RelayClient 不會自動重送訂閱）
     if (state === "online" && this.handlers) {

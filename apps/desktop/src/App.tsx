@@ -14,6 +14,7 @@ import type {
 } from "./backend/types.js";
 import { LocalStorage } from "./storage/local.js";
 import { cleanOnPasteEnabled, setCleanOnPasteEnabled } from "./ui/url-hygiene.js";
+import { ANCHOR_RELAYS, MAINTAINER_PUBKEY } from "./bootstrap-config.js";
 import { initIdle, reduceIdle, type IdleState } from "./ui/idle-status.js";
 import { CallWindow } from "./ui/CallWindow.js";
 import { ContactListWindow } from "./ui/ContactListWindow.js";
@@ -76,6 +77,15 @@ export function App(): JSX.Element {
         const b = new RelayChatBackend(storage, webSocketConnector(relayUrl), identity.name, {
           relayUrl,
           connectorFor: webSocketConnector,
+          anchors: ANCHOR_RELAYS,
+          ...(MAINTAINER_PUBKEY ? { maintainerPubkey: MAINTAINER_PUBKEY } : {}),
+          onHomeSwitched: (url) => {
+            try {
+              localStorage.setItem(RELAY_URL_KEY, url);
+            } catch {
+              /* 忽略 */
+            }
+          },
         });
         setConn("connecting");
         setSelf({ ...b.self });
@@ -241,6 +251,15 @@ export function App(): JSX.Element {
       b = new RelayChatBackend(new LocalStorage(), webSocketConnector(relayUrl), name, {
         relayUrl,
         connectorFor: webSocketConnector,
+        anchors: ANCHOR_RELAYS,
+        ...(MAINTAINER_PUBKEY ? { maintainerPubkey: MAINTAINER_PUBKEY } : {}),
+        onHomeSwitched: (url) => {
+          try {
+            localStorage.setItem(RELAY_URL_KEY, url);
+          } catch {
+            /* 忽略 */
+          }
+        },
       });
       setConn("connecting");
     } else {
