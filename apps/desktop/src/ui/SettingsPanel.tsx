@@ -20,6 +20,9 @@ export interface SettingsPanelProps {
   /** 桌面通知是否啟用。 */
   notifications: boolean;
   onToggleNotifications: () => void;
+  /** 貼上時清除網址追蹤參數（ADR-0038）；未提供則不顯示該區塊。 */
+  cleanOnPaste?: boolean;
+  onToggleCleanOnPaste?: () => void;
   onClose: () => void;
   /** 清除指向某座 stale relay 的聯絡人 hint（ADR-0036）。 */
   onRelayClear?: (url: string) => void;
@@ -140,6 +143,21 @@ export function SettingsPanel(props: SettingsPanelProps): JSX.Element {
                   {t("settings_revealKey")}
                 </button>
               )}
+            </section>
+          ) : null}
+
+          {props.onToggleCleanOnPaste ? (
+            <section className="settings__sec">
+              <h4>{t("settings_privacy")}</h4>
+              <label className="settings__toggle">
+                <input
+                  type="checkbox"
+                  data-testid="clean-on-paste"
+                  checked={props.cleanOnPaste ?? true}
+                  onChange={props.onToggleCleanOnPaste}
+                />
+                <span>{t("settings_cleanOnPaste")}</span>
+              </label>
             </section>
           ) : null}
 

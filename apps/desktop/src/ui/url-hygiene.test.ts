@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { assessUrl, cleanText, cleanUrl } from "./url-hygiene.js";
+import { assessUrl, cleanOnPasteEnabled, cleanText, cleanUrl, setCleanOnPasteEnabled } from "./url-hygiene.js";
 
 describe("追蹤參數清除 cleanUrl（ADR-0038）", () => {
   it("清除 utm_* 前綴與已知追蹤參數，保留功能參數", () => {
@@ -34,6 +34,65 @@ describe("追蹤參數清除 cleanUrl（ADR-0038）", () => {
 
   it("大小寫不敏感（FBCLID 也清）", () => {
     expect(cleanUrl("https://ex.com/a?FBCLID=1&q=2")).toBe("https://ex.com/a?q=2");
+  });
+});
+
+describe("redirect 拆殼（ADR-0038 後續）", () => {
+  it("Google /url、Facebook l.php：以真正目的地取代並清其追蹤參數", () => {
+    expect(
+      cleanUrl("https://www.google.com/url?q=https%3A%2F%2Fex.com%2Fa%3Futm_source%3Dg%26id%3D1&sa=t"),
+    ).toBe("https://ex.com/a?id=1");
+    expect(cleanUrl("https://l.facebook.com/l.php?u=https%3A%2F%2Fex.com%2Fb&h=AT0")).toBe("https://ex.com/b");
+  });
+
+  it("巢狀包裝逐層拆、有深度上限", () => {
+    const final = "https://ex.com/x";
+    const g = `https://www.google.com/url?q=${encodeURIComponent(final)}`;
+    const fb = `https://l.facebook.com/l.php?u=${encodeURIComponent(g)}`;
+    expect(cleanUrl(fb)).toBe(final);
+    // 4 層：最外 3 層拆掉後停在第 4 層（不再遞迴，但仍回傳可用網址）
+    let wrapped = final;
+    for (let i = 0; i < 4; i++) wrapped = `https://www.google.com/url?q=${encodeURIComponent(wrapped)}`;
+    expect(cleanUrl(wrapped).startsWith("https://www.google.com/url?q=")).toBe(true);
+  });
+
+  it("目標非 http(s) 或缺參數：不拆殼、照常清理", () => {
+    // utm 被清、q 保留（URLSearchParams 重組會把括號百分比編碼——內容不變）
+    expect(cleanUrl("https://www.google.com/url?q=javascript%3Aalert(1)&utm_source=x")).toBe(
+      "https://www.google.com/url?q=javascript%3Aalert%281%29",
+    );
+    expect(cleanUrl("https://www.google.com/url?other=1")).toBe("https://www.google.com/url?other=1");
+  });
+});
+
+describe("hash 片段追蹤碼（ADR-0038 後續）", () => {
+  it("hash 為參數列時清除追蹤鍵、保留其他鍵", () => {
+    expect(cleanUrl("https://ex.com/a#utm_source=x&keep=1")).toBe("https://ex.com/a#keep=1");
+    expect(cleanUrl("https://ex.com/a#fbclid=z")).toBe("https://ex.com/a");
+  });
+
+  it("SPA 路由與 scroll-to-text 片段不動", () => {
+    expect(cleanUrl("https://ex.com/a#/route?utm_source=x")).toBe("https://ex.com/a#/route?utm_source=x");
+    expect(cleanUrl("https://ex.com/a#:~:text=utm_source")).toBe("https://ex.com/a#:~:text=utm_source");
+    expect(cleanUrl("https://ex.com/a#section")).toBe("https://ex.com/a#section");
+  });
+});
+
+describe("設定開關（ADR-0038 後續）", () => {
+  it("預設開；關閉後持久化、可再開", () => {
+    // node 測試環境沒有 localStorage：給最小 stub
+    const store = new Map<string, string>();
+    (globalThis as { localStorage?: unknown }).localStorage = {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => void store.set(k, v),
+      removeItem: (k: string) => void store.delete(k),
+    };
+    localStorage.removeItem("nb.urlHygiene.cleanOnPaste");
+    expect(cleanOnPasteEnabled()).toBe(true);
+    setCleanOnPasteEnabled(false);
+    expect(cleanOnPasteEnabled()).toBe(false);
+    setCleanOnPasteEnabled(true);
+    expect(cleanOnPasteEnabled()).toBe(true);
   });
 });
 

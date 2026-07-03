@@ -13,6 +13,7 @@ import type {
   Status,
 } from "./backend/types.js";
 import { LocalStorage } from "./storage/local.js";
+import { cleanOnPasteEnabled, setCleanOnPasteEnabled } from "./ui/url-hygiene.js";
 import { initIdle, reduceIdle, type IdleState } from "./ui/idle-status.js";
 import { CallWindow } from "./ui/CallWindow.js";
 import { ContactListWindow } from "./ui/ContactListWindow.js";
@@ -42,6 +43,7 @@ export function App(): JSX.Element {
   const [unread, setUnread] = useState<Record<string, number>>({});
   const [conn, setConn] = useState<ConnectionState>("online");
   const [relays, setRelays] = useState<{ url: string; state: ConnectionState; home: boolean; stale: boolean }[]>([]);
+  const [cleanPaste, setCleanPaste] = useState<boolean>(() => cleanOnPasteEnabled());
   const [groups, setGroups] = useState<Group[]>([]);
   const [callPeer, setCallPeer] = useState<PubkeyHex | null>(null);
   const [callState, setCallState] = useState<CallState>("idle");
@@ -390,6 +392,11 @@ export function App(): JSX.Element {
             ? { onRelayKeep: activeBackend.acknowledgeRelayStale.bind(activeBackend) }
             : {})}
           {...(activeBackend.selfNsec ? { selfNsec: activeBackend.selfNsec } : {})}
+          cleanOnPaste={cleanPaste}
+          onToggleCleanOnPaste={() => {
+            setCleanOnPasteEnabled(!cleanPaste);
+            setCleanPaste(!cleanPaste);
+          }}
           notifications={notify}
           onToggleNotifications={toggleNotifications}
           onClose={() => setSettingsOpen(false)}

@@ -111,7 +111,7 @@
 | F3 | 剩餘 review 技術債 | ✅ **完成**：C4 二進位框架（去 base64 ~33%，ADR-0029）＋ A6 ICE candidate 批次（合併單一 `candidates` 信令，減少中繼發佈）＋ A5 多設備 sync 上限（`DeviceSyncState` 訊息/狀態鍵數上限逐出，防撐爆記憶體）。皆單元測試，WebRTC 項經真實 E2E。 |
 | F4 | 第三方安全稽核 | 🔧 **前置已備**：`docs/SECURITY.md`（漏洞回報政策 + 加密盤點 + 威脅模型逐項盤點 + 已知限制 + 建議稽核範圍）。獨立稽核本身需外部稽核員（此環境無法執行）。 |
 | F5 | 容量/成本 | ✅ **大致完成**：心跳合併（音樂併入心跳、移除 kind 20002）+ jitter + **WebRTC 狀態卸載**（開對話主動建 P2P、輸入中優先走 Data Channel、退回中繼；真實 WebRTC E2E 驗證）；容量模型回填 `docs/adr/0006`。付費層評估為部署階段（C4）。 |
-| F7 | 網址衛生 | ✅ **完成（ADR-0038）**：貼上自動清除追蹤參數（`utm_*`/fbclid/gclid… 全域精確名單＋站點範圍規則如 YouTube `si`、Amazon `/ref=`；只刪已註冊名字）＋高風險連結本地啟發式警告（文字偽裝/`@`混淆/punycode/IP 直連=danger；http/非常規 port/短網址=caution；⚠ 徽章＋點擊確認，收發兩端渲染層生效）。**明確否決外部信譽 API**（metadata 洩漏）。純函式 16 測試＋Playwright E2E。 |
+| F7 | 網址衛生 | ✅ **完成（ADR-0038）**：貼上自動清除追蹤參數（`utm_*`/fbclid/gclid… 全域精確名單＋站點範圍規則如 YouTube `si`、Amazon `/ref=`；只刪已註冊名字）＋高風險連結本地啟發式警告（文字偽裝/`@`混淆/punycode/IP 直連=danger；http/非常規 port/短網址=caution；⚠ 徽章＋點擊確認，收發兩端渲染層生效）。**明確否決外部信譽 API**（metadata 洩漏）。純函式測試＋Playwright E2E。**後續完成**：redirect 拆殼（google/url、facebook l.php、youtube/reddit/vk/steam…巢狀遞迴上限 3）＋hash 片段追蹤碼（僅 k=v 形式，SPA 路由與 #:~:text= 不動）＋設定面板「隱私」開關（預設開、持久化）。 |
 | F6 | 跨中繼互通 | ✅ **完成（ADR-0034）**：客戶端 Relay Pool——好友 relay hint（`npub…@wss://…`，加好友輸入/分享字串/QR 內容皆支援）、addressed 事件路由到收件人的 relay、心跳全 pool 扇出、收件箱全 pool 訂閱、event id 去重；relay 端零改動、不做聯邦。雙 relay 整合測試（8 項）驗證含不對稱認知場景。**後續完成**：hint 自動學習（帶內加密 hint，ADR-0035，第一則來訊自癒＋回程直達測試）＋設定面板 pool 各座連線狀態（🟢🟡🔴 + home 標記）＋**群訊 rumor 帶 hint**（入群即互學路由）＋**陳舊偵測與離線回退**（連續離線 >5 分鐘標 ⚠ stale；目標座離線時回退 home 雙發、收端去重，ADR-0036）＋**stale 動作 UI**（「保留」重置計時／「清除 hint」改回 home 路由並停止該座重連）。 |
 
 ---

@@ -50,7 +50,7 @@ import {
   type TriggerEntry,
   type TriggerMatch,
 } from "./sticker-triggers.js";
-import { cleanText } from "./url-hygiene.js";
+import { cleanOnPasteEnabled, cleanText } from "./url-hygiene.js";
 import { renderMarkdown } from "./markdown.js";
 import { applyEmoticons } from "./emoticons.js";
 import { avatarColor, EMOTICONS, initial } from "./util.js";
@@ -698,7 +698,8 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
             props.onTyping();
           }}
           onPaste={(e) => {
-            // 貼上時清除網址追蹤參數（ADR-0038）；無可清除時走原生貼上。
+            // 貼上時清除網址追蹤參數（ADR-0038）；關閉開關或無可清除時走原生貼上。
+            if (!cleanOnPasteEnabled()) return;
             const pasted = e.clipboardData.getData("text/plain");
             const { text: cleanedPaste, cleaned } = cleanText(pasted);
             if (cleaned === 0) return;
