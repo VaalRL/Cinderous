@@ -86,9 +86,13 @@ export interface ConversationProps {
   onClose: () => void;
 }
 
+/** 訊息列視窗化：初始只渲染最近這麼多則，點「載入較早」再往前展開（審查 P0-3）。 */
+const MESSAGE_WINDOW = 200;
+
 export function ConversationWindow(props: ConversationProps): JSX.Element {
   const { t } = useI18n();
   const { self, contact, messages } = props;
+  const [visibleCount, setVisibleCount] = useState(MESSAGE_WINDOW);
   const [text, setText] = useState("");
   const [showEmo, setShowEmo] = useState(false);
   const [showStickers, setShowStickers] = useState(false);
@@ -111,6 +115,12 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
   const logRef = useRef<HTMLDivElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  // 訊息列視窗化：只渲染最近 visibleCount 則，避免長對話一次渲染上千 DOM 節點。
+  const hiddenCount = Math.max(0, messages.length - visibleCount);
+  const shown = hiddenCount > 0 ? messages.slice(hiddenCount) : messages;
+  // 擁有中的自製貼圖 id 集合：整個訊息列共用一份（不再每則訊息各建一個 Set）。
+  const ownedIds = new Set(library.map((s) => s.id));
 
   // 相簿：本對話中收發過、可顯示的圖片。
   const images = messages
@@ -372,7 +382,17 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
       >
         {dragging ? <div className="dropzone">{t("file_dropHint")}</div> : null}
         <div className="log" ref={logRef} data-testid="log">
-          {messages.map((m) => (
+          {hiddenCount > 0 ? (
+            <button
+              type="button"
+              className="log__earlier"
+              data-testid="load-earlier"
+              onClick={() => setVisibleCount((n) => n + MESSAGE_WINDOW)}
+            >
+              {t("convo_loadEarlier", { count: hiddenCount })}
+            </button>
+          ) : null}
+          {shown.map((m) => (
             <MessageLine
               key={m.id}
               message={m}
@@ -389,7 +409,7 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
               onReact={props.onReact}
               onUnsend={props.onUnsend}
               onView={setLightbox}
-              ownedIds={new Set(library.map((s) => s.id))}
+              ownedIds={ownedIds}
               onOwnSticker={acquireSticker}
             />
           ))}

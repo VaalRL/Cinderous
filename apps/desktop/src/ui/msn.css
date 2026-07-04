@@ -377,6 +377,8 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
 .convo__head .sub { font-size: 11px; color: var(--muted); }
 .convo__body { display: flex; flex: 1; min-height: 0; background: var(--panel); }
 .log { flex: 1; overflow-y: auto; padding: 8px 10px; font-size: 13px; color: var(--ink); }
+.log__earlier { display: block; width: 100%; margin: 0 0 8px; padding: 4px; font-size: 11px; color: var(--accent); background: var(--field); border: 1px solid var(--border); border-radius: 6px; cursor: pointer; }
+.log__earlier:hover { background: var(--hover); }
 .line { margin: 6px 0; }
 .line .who { font-weight: 700; }
 .line.out .who { color: var(--accent); }

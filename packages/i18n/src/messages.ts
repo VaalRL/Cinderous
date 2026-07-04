@@ -49,6 +49,7 @@ export interface Messages {
   convo_react: string;
   convo_unsend: string;
   convo_unsent: string;
+  convo_loadEarlier: string;
   convo_timerTitle: string;
   convo_timerOff: string;
   convo_timer1m: string;
@@ -211,6 +212,7 @@ const zhHant: Messages = {
   convo_react: "回應",
   convo_unsend: "收回",
   convo_unsent: "訊息已收回",
+  convo_loadEarlier: "載入較早的 {count} 則訊息",
   convo_timerTitle: "限時訊息（閱後即焚）",
   convo_timerOff: "限時：關",
   convo_timer1m: "限時：1 分鐘",
@@ -373,6 +375,7 @@ const en: Messages = {
   convo_react: "React",
   convo_unsend: "Unsend",
   convo_unsent: "Message unsent",
+  convo_loadEarlier: "Load {count} earlier messages",
   convo_timerTitle: "Disappearing message",
   convo_timerOff: "Timer: off",
   convo_timer1m: "Timer: 1 min",
