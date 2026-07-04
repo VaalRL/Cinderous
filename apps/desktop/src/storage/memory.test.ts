@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { MemoryStorage } from "./memory.js";
+import { MESSAGES_PER_CONVO } from "./types.js";
 
 describe("MemoryStorage", () => {
   it("身分讀寫", () => {
@@ -49,6 +50,17 @@ describe("MemoryStorage", () => {
     // m1 的孤兒被清、m2（bb 的）保留
     expect(s.loadReactions().map((r) => r.messageId)).toEqual(["m2"]);
     expect(s.loadDeleted()).toEqual(["m2"]);
+  });
+
+  it("每對話訊息上限：超過即逐出最舊、保留最近（P0-1）", () => {
+    const s = new MemoryStorage();
+    for (let i = 0; i < MESSAGES_PER_CONVO + 5; i++) {
+      s.appendMessage({ id: `m${i}`, contact: "aa", outgoing: true, text: "x", at: i });
+    }
+    const ids = s.loadMessages("aa").map((m) => m.id);
+    expect(ids.length).toBe(MESSAGES_PER_CONVO);
+    expect(ids[0]).toBe("m5"); // m0..m4 被逐出
+    expect(ids[ids.length - 1]).toBe(`m${MESSAGES_PER_CONVO + 4}`);
   });
 
   it("封鎖：移出聯絡人、記入封鎖名單、可解除", () => {

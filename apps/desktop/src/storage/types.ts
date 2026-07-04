@@ -1,5 +1,12 @@
 /** 本機持久化的資料型別（身分、聯絡人、訊息）。 */
 
+/**
+ * 每對話持久化訊息上限（審查 P0-1）：超過即逐出最舊，避免單一對話的 JSON
+ * 陣列無限膨脹撐爆 localStorage 配額（比照中繼站的每收件人上限）。視窗化已讓
+ * UI 只渲染最近 N 則，故本地也只需保留近段歷史。
+ */
+export const MESSAGES_PER_CONVO = 1000;
+
 export interface StoredIdentity {
   /** NIP-19 nsec（私鑰）。之後 Tauri 版改存 OS 金鑰庫。 */
   nsec: string;

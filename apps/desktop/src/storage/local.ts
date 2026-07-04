@@ -1,11 +1,12 @@
-import type {
-  AppStorage,
-  StoredBootstrapList,
-  StoredContact,
-  StoredGroup,
-  StoredIdentity,
-  StoredMessage,
-  StoredReaction,
+import {
+  type AppStorage,
+  MESSAGES_PER_CONVO,
+  type StoredBootstrapList,
+  type StoredContact,
+  type StoredGroup,
+  type StoredIdentity,
+  type StoredMessage,
+  type StoredReaction,
 } from "./types.js";
 
 const K_IDENTITY = "nb.identity";
@@ -29,8 +30,10 @@ function read<T>(key: string, fallback: T): T {
 function write(key: string, value: unknown): void {
   try {
     localStorage.setItem(key, JSON.stringify(value));
-  } catch {
-    /* 配額或不可用時忽略 */
+  } catch (e) {
+    // 配額爆掉不再靜默：至少回報（審查 P0-1）。每對話上限已先做逐出以降低發生機率。
+    const quota = e instanceof DOMException && (e.name === "QuotaExceededError" || e.code === 22);
+    console.warn(quota ? `[storage] localStorage 配額已滿，寫入 ${key} 失敗（資料可能未保存）` : e);
   }
 }
 
@@ -100,6 +103,7 @@ export class LocalStorage implements AppStorage {
     const list = this.loadMessages(message.contact);
     if (list.some((m) => m.id === message.id)) return;
     list.push(message);
+    if (list.length > MESSAGES_PER_CONVO) list.splice(0, list.length - MESSAGES_PER_CONVO); // 逐出最舊（P0-1）
     write(K_MSG_PREFIX + message.contact, list);
   }
   loadReactions(): StoredReaction[] {

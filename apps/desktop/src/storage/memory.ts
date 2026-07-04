@@ -1,11 +1,12 @@
-import type {
-  AppStorage,
-  StoredBootstrapList,
-  StoredContact,
-  StoredGroup,
-  StoredIdentity,
-  StoredMessage,
-  StoredReaction,
+import {
+  type AppStorage,
+  MESSAGES_PER_CONVO,
+  type StoredBootstrapList,
+  type StoredContact,
+  type StoredGroup,
+  type StoredIdentity,
+  type StoredMessage,
+  type StoredReaction,
 } from "./types.js";
 
 /** 記憶體儲存（測試用；不持久）。 */
@@ -66,6 +67,7 @@ export class MemoryStorage implements AppStorage {
     const list = this.messages.get(message.contact) ?? [];
     if (list.some((m) => m.id === message.id)) return;
     list.push(message);
+    if (list.length > MESSAGES_PER_CONVO) list.splice(0, list.length - MESSAGES_PER_CONVO); // 逐出最舊（P0-1）
     this.messages.set(message.contact, list);
   }
   loadReactions(): StoredReaction[] {
