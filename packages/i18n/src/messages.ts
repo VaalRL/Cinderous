@@ -166,6 +166,12 @@ export interface Messages {
   group_section: string;
   group_membersCount: string;
   group_leave: string;
+  group_labelAdd: string;
+  group_labelPlaceholder: string;
+  group_labelRemove: string;
+  group_pin: string;
+  group_unpin: string;
+  group_filterAll: string;
 }
 
 const zhHant: Messages = {
@@ -322,6 +328,12 @@ const zhHant: Messages = {
   group_section: "群組",
   group_membersCount: "{count} 位成員",
   group_leave: "離開群組",
+  group_labelAdd: "＋ 標籤",
+  group_labelPlaceholder: "標籤名稱",
+  group_labelRemove: "移除標籤 {label}",
+  group_pin: "置頂",
+  group_unpin: "取消置頂",
+  group_filterAll: "全部",
 };
 
 const en: Messages = {
@@ -478,6 +490,12 @@ const en: Messages = {
   group_section: "Groups",
   group_membersCount: "{count} members",
   group_leave: "Leave group",
+  group_labelAdd: "＋ Label",
+  group_labelPlaceholder: "Label name",
+  group_labelRemove: "Remove label {label}",
+  group_pin: "Pin",
+  group_unpin: "Unpin",
+  group_filterAll: "All",
 };
 
 export const catalog: Record<Locale, Messages> = { "zh-Hant": zhHant, en };

@@ -14,6 +14,17 @@ import type {
 } from "./backend/types.js";
 import { LocalStorage } from "./storage/local.js";
 import { cleanOnPasteEnabled, setCleanOnPasteEnabled } from "./ui/url-hygiene.js";
+import {
+  allLabels,
+  arrangeGroups,
+  type GroupPrefsMap,
+  loadGroupPrefs,
+  pruneGroup,
+  saveGroupPrefs,
+  withLabel,
+  withoutLabel,
+  withPinned,
+} from "./ui/group-labels.js";
 import { ANCHOR_RELAYS, MAINTAINER_PUBKEY } from "./bootstrap-config.js";
 import { initIdle, reduceIdle, type IdleState } from "./ui/idle-status.js";
 import { CallWindow } from "./ui/CallWindow.js";
@@ -46,6 +57,8 @@ export function App(): JSX.Element {
   const [relays, setRelays] = useState<{ url: string; state: ConnectionState; home: boolean; stale: boolean }[]>([]);
   const [cleanPaste, setCleanPaste] = useState<boolean>(() => cleanOnPasteEnabled());
   const [groups, setGroups] = useState<Group[]>([]);
+  const [groupPrefs, setGroupPrefs] = useState<GroupPrefsMap>(() => loadGroupPrefs());
+  const [labelFilter, setLabelFilter] = useState<string | undefined>(undefined);
   const [callPeer, setCallPeer] = useState<PubkeyHex | null>(null);
   const [callState, setCallState] = useState<CallState>("idle");
   const [callMedia, setCallMedia] = useState<CallMedia | null>(null);
@@ -370,11 +383,31 @@ export function App(): JSX.Element {
       : {}),
     blocked,
   };
+  const updatePrefs = (next: GroupPrefsMap) => {
+    setGroupPrefs(next);
+    saveGroupPrefs(next);
+  };
+  const arrangedGroups = arrangeGroups(groups, groupPrefs, labelFilter);
+  const groupLabels: Record<string, string[]> = {};
+  const groupPinned: Record<string, boolean> = {};
+  for (const g of groups) {
+    const p = groupPrefs[g.id];
+    if (p?.labels.length) groupLabels[g.id] = p.labels;
+    if (p?.pinned) groupPinned[g.id] = true;
+  }
   const groupProps = activeBackend.createGroup
     ? {
-        groups,
+        groups: arrangedGroups,
         onCreateGroup: (name: string, members: string[]) => activeBackend.createGroup!(name, members),
         onOpenGroup: openChat,
+        groupLabels,
+        groupPinned,
+        labelOptions: allLabels(groupPrefs),
+        activeLabel: labelFilter,
+        onFilterLabel: setLabelFilter,
+        onAddGroupLabel: (id: string, label: string) => updatePrefs(withLabel(groupPrefs, id, label)),
+        onRemoveGroupLabel: (id: string, label: string) => updatePrefs(withoutLabel(groupPrefs, id, label)),
+        onToggleGroupPin: (id: string) => updatePrefs(withPinned(groupPrefs, id, !groupPrefs[id]?.pinned)),
       }
     : {};
 
@@ -450,6 +483,7 @@ export function App(): JSX.Element {
                     onLeaveGroup: () => {
                       activeBackend.leaveGroup!(pk);
                       setOpen((prev) => prev.filter((x) => x !== pk));
+                      updatePrefs(pruneGroup(groupPrefs, pk));
                     },
                   }
                 : {})}

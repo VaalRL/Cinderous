@@ -328,6 +328,20 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
 .group__add { font-size: 10px; border: 1px solid var(--border); background: var(--field); color: var(--accent); border-radius: 5px; cursor: pointer; padding: 1px 5px; }
 .group__add:hover { background: var(--hover); }
 .group-row .avatar { font-weight: bold; }
+.pin-ic { font-size: 10px; margin-right: 3px; }
+.labelbar { display: flex; flex-wrap: wrap; gap: 4px; padding: 3px 8px 5px; }
+.labelrow { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 3px; }
+.chip { display: inline-flex; align-items: center; gap: 2px; font-size: 10px; line-height: 1.4; padding: 1px 6px; border: 1px solid var(--border); border-radius: 999px; background: var(--field); color: var(--muted); cursor: default; }
+.chip--filter { cursor: pointer; }
+.chip--filter:hover { background: var(--hover); }
+.chip--on { background: var(--accent); color: #fff; border-color: var(--accent); }
+.chip--add { cursor: pointer; color: var(--accent); border-style: dashed; }
+.chip--add:hover { background: var(--hover); }
+.chip__x { border: none; background: none; color: inherit; font-size: 11px; line-height: 1; padding: 0 0 0 1px; cursor: pointer; }
+.chip__x:hover { color: var(--accent); }
+.labelrow__input { font-size: 10px; width: 78px; padding: 1px 5px; border: 1px solid var(--border); border-radius: 999px; background: var(--field); }
+.contact__act.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+.group-row:hover .contact__act { display: inline-flex; }
 .groupmodal { padding: 12px; display: flex; flex-direction: column; gap: 8px; }
 .groupmodal__name { padding: 6px 8px; border: 1px solid var(--border); border-radius: 5px; background: var(--field); }
 .groupmodal__label { font-size: 11px; color: var(--muted); }

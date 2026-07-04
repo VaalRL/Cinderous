@@ -46,6 +46,22 @@ export interface ContactListProps {
   onCreateGroup?: (name: string, memberPubkeys: string[]) => void;
   /** 開啟群組對話。 */
   onOpenGroup?: (groupId: string) => void;
+  /** 各群組的本地標籤（ADR-0040）。 */
+  groupLabels?: Record<string, string[]>;
+  /** 各群組是否置頂。 */
+  groupPinned?: Record<string, boolean>;
+  /** 目前使用中的所有標籤（過濾列用）。 */
+  labelOptions?: string[];
+  /** 目前套用的標籤過濾（undefined＝全部）。 */
+  activeLabel?: string | undefined;
+  /** 切換標籤過濾。 */
+  onFilterLabel?: (label: string | undefined) => void;
+  /** 為群組新增標籤。 */
+  onAddGroupLabel?: (groupId: string, label: string) => void;
+  /** 移除群組某標籤。 */
+  onRemoveGroupLabel?: (groupId: string, label: string) => void;
+  /** 切換群組置頂。 */
+  onToggleGroupPin?: (groupId: string) => void;
 }
 
 export function ContactListWindow(props: ContactListProps): JSX.Element {
@@ -142,20 +158,36 @@ export function ContactListWindow(props: ContactListProps): JSX.Element {
                 ＋ {t("group_create")}
               </button>
             </div>
-            {groups.map((g) => (
-              <div
-                className="contact group-row"
-                key={g.id}
-                data-testid="group-row"
-                onDoubleClick={() => props.onOpenGroup?.(g.id)}
-                title={t("contact_openHint")}
-              >
-                <div className="avatar sm" style={{ background: avatarColor(g.id) }}>#</div>
-                <div className="contact__info">
-                  <div className="contact__name">{g.name}</div>
-                  <div className="contact__msg">{t("group_membersCount", { count: g.members.length })}</div>
-                </div>
+            {props.labelOptions && props.labelOptions.length > 0 ? (
+              <div className="labelbar" data-testid="label-filter">
+                <button
+                  className={`chip chip--filter ${props.activeLabel ? "" : "chip--on"}`}
+                  onClick={() => props.onFilterLabel?.(undefined)}
+                >
+                  {t("group_filterAll")}
+                </button>
+                {props.labelOptions.map((l) => (
+                  <button
+                    key={l}
+                    className={`chip chip--filter ${props.activeLabel === l ? "chip--on" : ""}`}
+                    onClick={() => props.onFilterLabel?.(props.activeLabel === l ? undefined : l)}
+                  >
+                    {l}
+                  </button>
+                ))}
               </div>
+            ) : null}
+            {groups.map((g) => (
+              <GroupRow
+                key={g.id}
+                group={g}
+                labels={props.groupLabels?.[g.id] ?? []}
+                pinned={props.groupPinned?.[g.id] ?? false}
+                onOpen={() => props.onOpenGroup?.(g.id)}
+                {...(props.onAddGroupLabel ? { onAddLabel: (l: string) => props.onAddGroupLabel?.(g.id, l) } : {})}
+                {...(props.onRemoveGroupLabel ? { onRemoveLabel: (l: string) => props.onRemoveGroupLabel?.(g.id, l) } : {})}
+                {...(props.onToggleGroupPin ? { onTogglePin: () => props.onToggleGroupPin?.(g.id) } : {})}
+              />
             ))}
           </>
         ) : null}
@@ -211,6 +243,97 @@ export function ContactListWindow(props: ContactListProps): JSX.Element {
             setGroupModal(false);
           }}
         />
+      ) : null}
+    </div>
+  );
+}
+
+function GroupRow({
+  group,
+  labels,
+  pinned,
+  onOpen,
+  onAddLabel,
+  onRemoveLabel,
+  onTogglePin,
+}: {
+  group: Group;
+  labels: string[];
+  pinned: boolean;
+  onOpen: () => void;
+  onAddLabel?: (label: string) => void;
+  onRemoveLabel?: (label: string) => void;
+  onTogglePin?: () => void;
+}): JSX.Element {
+  const { t } = useI18n();
+  const [adding, setAdding] = useState(false);
+  const [value, setValue] = useState("");
+  const submit = () => {
+    const v = value.trim();
+    if (v) onAddLabel?.(v);
+    setValue("");
+    setAdding(false);
+  };
+  return (
+    <div className="contact group-row" data-testid="group-row" title={t("contact_openHint")}>
+      <div className="avatar sm" style={{ background: avatarColor(group.id) }} onDoubleClick={onOpen}>#</div>
+      <div className="contact__info" onDoubleClick={onOpen}>
+        <div className="contact__name">
+          {pinned ? <span className="pin-ic" aria-hidden="true">📌</span> : null}
+          {group.name}
+        </div>
+        <div className="contact__msg">{t("group_membersCount", { count: group.members.length })}</div>
+        {labels.length > 0 || onAddLabel ? (
+          <div className="labelrow">
+            {labels.map((l) => (
+              <span className="chip" key={l}>
+                {l}
+                {onRemoveLabel ? (
+                  <button
+                    className="chip__x"
+                    aria-label={t("group_labelRemove", { label: l })}
+                    onClick={() => onRemoveLabel(l)}
+                  >
+                    ×
+                  </button>
+                ) : null}
+              </span>
+            ))}
+            {onAddLabel && adding ? (
+              <input
+                className="labelrow__input"
+                aria-label={t("group_labelPlaceholder")}
+                placeholder={t("group_labelPlaceholder")}
+                autoFocus
+                value={value}
+                onChange={(e) => setValue(e.target.value)}
+                onBlur={submit}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") submit();
+                  else if (e.key === "Escape") {
+                    setValue("");
+                    setAdding(false);
+                  }
+                }}
+              />
+            ) : onAddLabel ? (
+              <button className="chip chip--add" data-testid="add-label" onClick={() => setAdding(true)}>
+                {t("group_labelAdd")}
+              </button>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+      {onTogglePin ? (
+        <button
+          className={`contact__act ${pinned ? "on" : ""}`}
+          title={pinned ? t("group_unpin") : t("group_pin")}
+          aria-label={pinned ? t("group_unpin") : t("group_pin")}
+          data-testid="pin-group"
+          onClick={onTogglePin}
+        >
+          📌
+        </button>
       ) : null}
     </div>
   );
