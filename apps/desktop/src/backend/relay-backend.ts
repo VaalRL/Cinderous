@@ -196,11 +196,11 @@ export class RelayChatBackend implements ChatBackend {
   private readonly relayStates = new Map<string, ConnectionState>();
   /** 各 relay 連續離線的起點（ms）；上線即清除（ADR-0036 陳舊偵測）。 */
   private readonly offlineSince = new Map<string, number>();
-  private lastRelaySig = "";
+  /** 各發送頻道的最近內容簽章（防抖：見 emitIfChanged）。 */
+  private readonly emitSigs = new Map<string, string>();
   private readonly presence = new PresenceTracker();
   private readonly statuses = new Map<PubkeyHex, PresencePayload>();
   private nowPlaying = "";
-  private lastContactsSig = "";
   // 訊息去重（審查 P1-4）：有界，逐出最舊；儲存層與 UI 層另有去重兜底。
   private readonly seenMsg = new BoundedSet<string>(8192, 4096);
   private contacts: { pubkey: PubkeyHex; name: string; relayUrl?: string }[];
@@ -787,9 +787,7 @@ export class RelayChatBackend implements ChatBackend {
         .map((url) => this.relayEntry(url, false)),
     ];
     const sig = list.map((r) => `${r.url}|${r.state}|${r.stale}`).join(",");
-    if (sig === this.lastRelaySig) return;
-    this.lastRelaySig = sig;
-    this.handlers.onRelayPool(list);
+    this.emitIfChanged("relayPool", sig, () => this.handlers?.onRelayPool?.(list));
   }
 
   private emitBlocked(): void {
@@ -823,10 +821,14 @@ export class RelayChatBackend implements ChatBackend {
       };
     });
     // 只在實際內容變動時才通知（避免每秒無謂的 React 重渲染）。
-    const sig = JSON.stringify(contacts);
-    if (sig === this.lastContactsSig) return;
-    this.lastContactsSig = sig;
-    this.handlers.onContacts(contacts);
+    this.emitIfChanged("contacts", JSON.stringify(contacts), () => this.handlers?.onContacts(contacts));
+  }
+
+  /** 內容簽章防抖：同一頻道簽章未變則不重發（收斂 emitContacts/emitRelayPool 的重複樣式）。 */
+  private emitIfChanged(channel: string, sig: string, emit: () => void): void {
+    if (this.emitSigs.get(channel) === sig) return;
+    this.emitSigs.set(channel, sig);
+    emit();
   }
 
   setStatus(status: Status, message?: string): void {
