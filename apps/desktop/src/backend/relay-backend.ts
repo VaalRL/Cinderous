@@ -1,5 +1,6 @@
 import {
   applyGroupControl,
+  BoundedSet,
   CALL_SIGNAL_KIND,
   createHeartbeat,
   createTyping,
@@ -190,7 +191,7 @@ export class RelayChatBackend implements ChatBackend {
   /** 外部 relay 連線（正規化 URL → client），惰性建立（ADR-0034）。 */
   private readonly relayPool = new Map<string, CloseableRelayClient>();
   /** 跨 relay 事件去重（同一事件可能經多個 relay 抵達）。 */
-  private readonly seenEvt = new Set<string>();
+  private readonly seenEvt = new BoundedSet<string>(4096, 2048);
   /** 各 relay 連線狀態（home + pool），供設定面板顯示（ADR-0034 後續）。 */
   private readonly relayStates = new Map<string, ConnectionState>();
   /** 各 relay 連續離線的起點（ms）；上線即清除（ADR-0036 陳舊偵測）。 */
@@ -200,7 +201,8 @@ export class RelayChatBackend implements ChatBackend {
   private readonly statuses = new Map<PubkeyHex, PresencePayload>();
   private nowPlaying = "";
   private lastContactsSig = "";
-  private readonly seenMsg = new Set<string>();
+  // 訊息去重（審查 P1-4）：有界，逐出最舊；儲存層與 UI 層另有去重兜底。
+  private readonly seenMsg = new BoundedSet<string>(8192, 4096);
   private contacts: { pubkey: PubkeyHex; name: string; relayUrl?: string }[];
   private blocked: { pubkey: PubkeyHex; name: string }[];
   private groups: Group[];
@@ -512,12 +514,7 @@ export class RelayChatBackend implements ChatBackend {
   /** 跨 relay 事件去重：已見過回傳 true；容量超限折半清理（保留較新）。 */
   private seenBefore(id: string): boolean {
     if (this.seenEvt.has(id)) return true;
-    this.seenEvt.add(id);
-    if (this.seenEvt.size > 4096) {
-      const keep = [...this.seenEvt].slice(2048);
-      this.seenEvt.clear();
-      for (const k of keep) this.seenEvt.add(k);
-    }
+    this.seenEvt.add(id); // BoundedSet 自行修剪
     return false;
   }
 
