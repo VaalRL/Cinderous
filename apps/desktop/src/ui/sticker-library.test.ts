@@ -2,6 +2,7 @@ import { contentHash } from "@nostr-buddy/core";
 import { describe, expect, it } from "vitest";
 import { formatCustomSticker, parseCustomSticker } from "../stickers.js";
 import { addSticker, LIBRARY_MAX, removeSticker, type CustomSticker } from "./sticker-library.js";
+import { STICKER_LABEL_MAX } from "./sticker-svg.js";
 
 const SVG_A = '<svg xmlns="http://www.w3.org/2000/svg"><circle r="4"/></svg>';
 const SVG_B = '<svg xmlns="http://www.w3.org/2000/svg"><rect width="4" height="4"/></svg>';
@@ -68,5 +69,19 @@ describe("自製貼圖線格式（v2）", () => {
     const svg = `<svg>${"a".repeat(32 * 1024 - 11)}</svg>`;
     const content = formatCustomSticker({ label: "大", svg });
     expect(new TextEncoder().encode(content).length).toBeLessThan(65535);
+  });
+});
+
+describe("標籤容量限制（ADR-0042）", () => {
+  it("addSticker 夾住過長標籤至上限", () => {
+    const r = addSticker([], "超長".repeat(50), SVG_A);
+    expect(r.ok && r.sticker.label.length).toBe(STICKER_LABEL_MAX);
+  });
+
+  it("parseCustomSticker 收端夾住對端手工塞的超長標籤", () => {
+    const evil = `nb-sticker:v2:${JSON.stringify({ label: "x".repeat(5000), svg: SVG_A })}`;
+    const p = parseCustomSticker(evil);
+    expect(p?.label.length).toBe(STICKER_LABEL_MAX);
+    expect(p?.svg).toBe(SVG_A);
   });
 });

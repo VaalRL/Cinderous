@@ -4,7 +4,7 @@
 // id 一律為 contentHash(svg)（sha256），天然去重；純陣列運算可於 node 測試。
 
 import { contentHash } from "@nostr-buddy/core";
-import { validateStickerSvg, type SvgVerdict } from "./sticker-svg.js";
+import { clampStickerLabel, validateStickerSvg, type SvgVerdict } from "./sticker-svg.js";
 
 export interface CustomSticker {
   /** contentHash(svg)。 */
@@ -35,7 +35,7 @@ export function addSticker(list: CustomSticker[], label: string, svg: string): A
   const existing = list.find((s) => s.id === id);
   if (existing) return { ok: true, list, sticker: existing };
   if (list.length >= LIBRARY_MAX) return { ok: false, reason: "library-full" };
-  const sticker: CustomSticker = { id, label: label.trim() || "貼圖", svg };
+  const sticker: CustomSticker = { id, label: clampStickerLabel(label) || "貼圖", svg };
   return { ok: true, list: [sticker, ...list], sticker };
 }
 

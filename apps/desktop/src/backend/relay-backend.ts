@@ -18,6 +18,7 @@ import {
   nsecDecode,
   newGroupId,
   nsecEncode,
+  Outbox,
   parseGroupControl,
   PresenceTracker,
   mergeBootstrapPool,
@@ -208,6 +209,9 @@ export class RelayChatBackend implements ChatBackend {
   private handlers: ChatBackendEvents | null = null;
   private heartbeatTimer: ReturnType<typeof setTimeout> | undefined;
   private renderTimer: ReturnType<typeof setInterval> | undefined;
+  /** 可靠訊息（kind 1059 DM/群訊/群控）的節流外送匣（ADR-0041）。 */
+  private readonly outbox: Outbox;
+  private pumpTimer: ReturnType<typeof setInterval> | undefined;
 
   constructor(
     private readonly storage: AppStorage,
@@ -246,8 +250,18 @@ export class RelayChatBackend implements ChatBackend {
     this.contacts = storage.loadContacts();
     this.blocked = storage.loadBlocked();
     this.groups = storage.loadGroups();
+    this.outbox = new Outbox({
+      send: (evt) => this.publishAddressed(evt),
+      onDrop: (evt, reason) => {
+        // 明確拒收或重試耗盡：目前記錄告警（未來可接 UI「未送達」提示）。
+        console.warn(`[outbox] 事件 ${evt.id.slice(0, 8)}… 未送達：${reason}`);
+      },
+    });
     this.client = connector(
-      { onEvent: (_sub, event) => this.onEvent(event) },
+      {
+        onEvent: (_sub, event) => this.onEvent(event),
+        onOk: (id, accepted, message) => this.outbox.onOk(id, accepted, message),
+      },
       (state) => this.onConnection(state),
     );
     this.transfer = new WebRtcTransfer(this.sk, {
@@ -287,6 +301,8 @@ export class RelayChatBackend implements ChatBackend {
       this.maybeSucceedHome(); // home 長期離線 → 自動遞補健康引導座（ADR-0039）
       this.emitRelayPool(); // stale 隨時間推移改變；簽章防抖，沒變不發
     }, 1000);
+    // 外送匣節流泵（ADR-0041）：以固定間隔在併發上限內送出、退避重試、丟棄逾時在途。
+    this.pumpTimer = setInterval(() => this.outbox.pump(), 200);
     this.emitContacts();
     // 回放本機持久化的歷史訊息
     for (const c of this.contacts) {
@@ -366,6 +382,15 @@ export class RelayChatBackend implements ChatBackend {
    * Addressed 事件（帶收件人 `p` tag）→ 收件人的 relay；無 hint 退回 home。
    * 主路由離線時，冗餘廣播到健康引導座（ADR-0036 雙發一般化為 ADR-0039 有界冗餘）。
    */
+  /**
+   * 可靠訊息（kind 1059 DM/群訊/群控）改走節流外送匣：以 OK 確認、暫時失敗退避重試、
+   * 重連補送（ADR-0041）。延遲敏感的信令/輸入中仍走 {@link publishAddressed} 直送。
+   */
+  private publishReliable(evt: NostrEvent): void {
+    this.outbox.enqueue(evt);
+    this.outbox.pump(); // 立即嘗試送出（在併發上限內）；其餘由泵計時器與 OK 回覆續送。
+  }
+
   private publishAddressed(evt: NostrEvent): void {
     const to = evt.tags.find((t) => t[0] === "p")?.[1];
     const contact = to ? this.contacts.find((c) => c.pubkey === to) : undefined;
@@ -775,6 +800,7 @@ export class RelayChatBackend implements ChatBackend {
     if (state === "online" && this.handlers) {
       this.resubscribe();
       this.beat();
+      this.outbox.onReconnect(); // 補送重連前未確認的可靠訊息（ADR-0041）
     }
   }
 
@@ -818,7 +844,7 @@ export class RelayChatBackend implements ChatBackend {
       ...(disappearAt !== undefined ? { disappearAt } : {}),
       ...(this.homeUrl ? { relayHint: this.homeUrl } : {}),
     });
-    this.publishAddressed(evt);
+    this.publishReliable(evt);
     const extra = disappearAt !== undefined ? { expiresAt: disappearAt * 1000 } : {};
     const message = { id: evt.id, contact: to, outgoing: true, text, at: Date.now(), ...extra };
     this.seenMsg.add(evt.id);
@@ -828,7 +854,7 @@ export class RelayChatBackend implements ChatBackend {
 
   sendReaction(to: PubkeyHex, messageId: string, emoji: string): void {
     const evt = wrapReaction(emoji, this.sk, to, messageId);
-    this.publishAddressed(evt);
+    this.publishReliable(evt);
     this.seenMsg.add(evt.id);
     this.storage.addReaction({ id: evt.id, messageId, emoji, mine: true });
     this.handlers?.onReaction?.(messageId, emoji, true);
@@ -836,7 +862,7 @@ export class RelayChatBackend implements ChatBackend {
 
   unsendMessage(to: PubkeyHex, messageId: string): void {
     const evt = wrapDeletion(this.sk, to, messageId);
-    this.publishAddressed(evt);
+    this.publishReliable(evt);
     this.seenMsg.add(evt.id);
     this.storage.markDeleted(messageId);
     this.handlers?.onUnsend?.(messageId);
@@ -861,7 +887,7 @@ export class RelayChatBackend implements ChatBackend {
     };
     const recipients = members.filter((m) => m !== this.self.pubkey);
     const hint = this.homeUrl ? { relayHint: this.homeUrl } : {};
-    for (const evt of wrapGroupControl(control, this.sk, recipients, hint)) this.publishAddressed(evt);
+    for (const evt of wrapGroupControl(control, this.sk, recipients, hint)) this.publishReliable(evt);
     this.emitGroups();
   }
 
@@ -871,7 +897,7 @@ export class RelayChatBackend implements ChatBackend {
     const evts = wrapGroupMessage(text, this.sk, this.self.pubkey, group, {
       ...(this.homeUrl ? { relayHint: this.homeUrl } : {}),
     });
-    for (const evt of evts) this.publishAddressed(evt);
+    for (const evt of evts) this.publishReliable(evt);
     const id = evts[0]?.id ?? `g-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     this.seenMsg.add(id);
     const message = { id, contact: groupId, outgoing: true, text, at: Date.now(), sender: this.self.pubkey };
@@ -885,7 +911,7 @@ export class RelayChatBackend implements ChatBackend {
     const recipients = group.members.filter((m) => m !== this.self.pubkey);
     const leaveHint = this.homeUrl ? { relayHint: this.homeUrl } : {};
     for (const evt of wrapGroupControl({ type: "group-leave", id: groupId }, this.sk, recipients, leaveHint)) {
-      this.publishAddressed(evt);
+      this.publishReliable(evt);
     }
     this.storage.removeGroup(groupId);
     this.groups = this.storage.loadGroups();
@@ -926,6 +952,8 @@ export class RelayChatBackend implements ChatBackend {
   stop(): void {
     if (this.heartbeatTimer) clearTimeout(this.heartbeatTimer);
     if (this.renderTimer) clearInterval(this.renderTimer);
+    if (this.pumpTimer) clearInterval(this.pumpTimer);
+    this.outbox.clear();
     this.transfer.close();
     this.call.close();
     this.handlers = null;
