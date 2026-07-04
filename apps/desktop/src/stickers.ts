@@ -4,7 +4,7 @@
 // 解析後渲染對應的內建向量圖，而非文字。因此持久化、回應、收回、限時皆自然沿用。
 // 內建圖為原創簡易 SVG（避開任何商標素材）。
 
-import { clampStickerLabel } from "./ui/sticker-svg.js";
+import { clampStickerLabel, withReducedMotionGuard } from "./ui/sticker-svg.js";
 
 /** 貼圖參照的內容前綴。 */
 export const STICKER_PREFIX = "nb-sticker:v1:";
@@ -248,7 +248,7 @@ export function stickerSvg(pack: string, id: string): string | undefined {
   return STICKER_PACKS[pack]?.[id]?.svg;
 }
 
-/** 把 SVG 轉為可放進 `<img src>` 的 data URI。 */
+/** 把 SVG 轉為可放進 `<img src>` 的 data URI；一律套用 reduced-motion 護欄（ADR-0043）。 */
 export function svgToDataUri(svgText: string): string {
-  return `data:image/svg+xml,${encodeURIComponent(svgText)}`;
+  return `data:image/svg+xml,${encodeURIComponent(withReducedMotionGuard(svgText))}`;
 }

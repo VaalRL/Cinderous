@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { STICKER_PACKS } from "../stickers.js";
-import { STICKER_SVG_MAX_BYTES, validateStickerSvg, wrapRasterAsSvg } from "./sticker-svg.js";
+import { STICKER_PACKS, svgToDataUri } from "../stickers.js";
+import { STICKER_SVG_MAX_BYTES, validateStickerSvg, withReducedMotionGuard, wrapRasterAsSvg } from "./sticker-svg.js";
 
 const ok = (svg: string) => validateStickerSvg(svg);
 
@@ -53,5 +53,33 @@ describe("自製貼圖 SVG 驗證（拒收制，ADR-0032）", () => {
   it("data: 僅允許 image/*", () => {
     expect(ok('<svg><image href="data:image/png;base64,AA"/></svg>').ok).toBe(true);
     expect(ok('<svg><image href="data:text/html,<script>"/></svg>').ok).toBe(false);
+  });
+});
+
+describe("reduced-motion 無障礙護欄（ADR-0043）", () => {
+  it("為動態自製 SVG 注入 reduced-motion 停用規則於 <svg> 之後", () => {
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg"><style>@keyframes a{}</style><circle r="5"/></svg>';
+    const guarded = withReducedMotionGuard(svg);
+    expect(guarded).toContain("@media(prefers-reduced-motion:reduce)");
+    expect(guarded).toContain("animation:none!important");
+    expect(guarded.indexOf("prefers-reduced-motion")).toBeGreaterThan(guarded.indexOf("<svg"));
+    expect(guarded).toContain("<circle r=\"5\"/>"); // 原內容保留
+  });
+
+  it("已自帶 reduced-motion（內建 anim()）者不重複注入", () => {
+    for (const s of Object.values(STICKER_PACKS.motion ?? {})) {
+      const before = (s.svg.match(/prefers-reduced-motion/gi) ?? []).length;
+      const after = (withReducedMotionGuard(s.svg).match(/prefers-reduced-motion/gi) ?? []).length;
+      expect(after).toBe(before); // 不新增
+    }
+  });
+
+  it("非 SVG 內容原樣返回（不硬塞）", () => {
+    expect(withReducedMotionGuard("not-svg")).toBe("not-svg");
+  });
+
+  it("svgToDataUri 一律套用護欄", () => {
+    const uri = svgToDataUri('<svg xmlns="http://www.w3.org/2000/svg"><circle r="5"/></svg>');
+    expect(decodeURIComponent(uri)).toContain("prefers-reduced-motion");
   });
 });

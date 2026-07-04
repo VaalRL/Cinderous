@@ -18,6 +18,22 @@ export function clampStickerLabel(label: string): string {
   return label.trim().slice(0, STICKER_LABEL_MAX);
 }
 
+/**
+ * 無障礙護欄（ADR-0043，借鏡 LINE 動態貼圖規範）：於任何貼圖 SVG 注入
+ * `prefers-reduced-motion` 停用動畫規則，讓自製/匯入的動態貼圖預設尊重系統偏好
+ * （與內建 anim() 一致）。用 `*` 選擇器不必管使用者的 class 名稱；已含此規則者不重複注入。
+ */
+const REDUCED_MOTION_GUARD =
+  "<style>@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}</style>";
+
+export function withReducedMotionGuard(svg: string): string {
+  if (/prefers-reduced-motion/i.test(svg)) return svg; // 內建 anim() 已自帶
+  const open = svg.match(/<svg\b[^>]*>/i);
+  if (!open || open.index === undefined) return svg; // 非 SVG：原樣返回
+  const at = open.index + open[0].length;
+  return svg.slice(0, at) + REDUCED_MOTION_GUARD + svg.slice(at);
+}
+
 export type SvgVerdict = { ok: true } | { ok: false; reason: string };
 
 /** 危險樣式（不分大小寫）：任一命中即整張拒收。 */
