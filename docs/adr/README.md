@@ -60,3 +60,4 @@
 | [0043](./0043-animated-sticker-norms.md) | 自製動態貼圖規範（借鏡 LINE：reduced-motion 護欄 + 維持 SVG/上限） | 已接受 |
 | [0044](./0044-enterprise-closed-relay.md) | 企業模式：封閉 allowlist 中繼 + 自架單節點 | 已接受 |
 | [0045](./0045-multi-identity-profiles.md) | 單一 App 多身分並存與切換（工作＋個人） | 已接受 |
+| [0046](./0046-enterprise-membership-and-boundary.md) | 企業成員判定與對外通訊邊界（威脅模型） | 已接受 |
