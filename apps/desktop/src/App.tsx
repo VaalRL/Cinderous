@@ -1,7 +1,24 @@
-import type { CallMedia, CallState, PubkeyHex } from "@nostr-buddy/core";
+import {
+  type CallMedia,
+  type CallState,
+  generateSecretKey,
+  getPublicKey,
+  nsecDecode,
+  nsecEncode,
+  type PubkeyHex,
+} from "@nostr-buddy/core";
 import { useEffect, useRef, useState } from "react";
 import { BrowserChatBackend } from "./backend/browser-backend.js";
 import { RelayChatBackend, webSocketConnector } from "./backend/relay-backend.js";
+import {
+  activeProfile,
+  loadProfiles,
+  type Profile,
+  type ProfilesState,
+  saveProfiles,
+  setActive,
+  upsertProfile,
+} from "./storage/profiles.js";
 import type {
   BlockedContact,
   ChatBackend,
@@ -41,8 +58,35 @@ const NOTIFY_KEY = "nb.notify";
 let _uid = 0;
 const uid = (prefix: string): string => `${prefix}_${Date.now()}_${_uid++}`;
 
+/**
+ * 依身分設定檔建立後端（ADR-0045）。工作身分（enterprise）鎖定單座：不給
+ * connectorFor/anchors/onHomeSwitched → 不漫遊、不遞補；個人身分走開放模式。
+ * 資料以 profile.namespace 隔離。
+ */
+function buildBackend(p: Profile): ChatBackend {
+  if (!p.relayUrl) return new BrowserChatBackend(p.name);
+  const storage = new LocalStorage(p.namespace);
+  const opts = p.enterprise
+    ? { relayUrl: p.relayUrl }
+    : {
+        relayUrl: p.relayUrl,
+        connectorFor: webSocketConnector,
+        anchors: ANCHOR_RELAYS,
+        ...(MAINTAINER_PUBKEY ? { maintainerPubkey: MAINTAINER_PUBKEY } : {}),
+        onHomeSwitched: (url: string) => {
+          try {
+            localStorage.setItem(RELAY_URL_KEY, url);
+          } catch {
+            /* 忽略 */
+          }
+        },
+      };
+  return new RelayChatBackend(storage, webSocketConnector(p.relayUrl), p.name, opts);
+}
+
 export function App(): JSX.Element {
   const [backend, setBackend] = useState<ChatBackend | null>(null);
+  const [profilesState, setProfilesState] = useState<ProfilesState>(() => loadProfiles());
   const [self, setSelf] = useState<Self | null>(null);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [convos, setConvos] = useState<Record<string, ChatMessage[]>>({});
@@ -66,6 +110,7 @@ export function App(): JSX.Element {
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [open, setOpen] = useState<string[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [addIdOpen, setAddIdOpen] = useState(false);
   const [notify, setNotify] = useState<boolean>(() => {
     try {
       return localStorage.getItem(NOTIFY_KEY) === "1";
@@ -80,33 +125,20 @@ export function App(): JSX.Element {
   selfRef.current = self;
   const idleRef = useRef<IdleState>(initIdle(Date.now()));
 
-  // 自動登入：已有持久身分 + relay 網址 → 直接重連（A2 持久化）
+  // 自動登入：以「作用中身分設定檔」建立後端（ADR-0045；相容既有單一身分）
   useEffect(() => {
     try {
-      const storage = new LocalStorage();
-      const identity = storage.loadIdentity();
-      const relayUrl = localStorage.getItem(RELAY_URL_KEY);
-      if (identity && relayUrl) {
-        const b = new RelayChatBackend(storage, webSocketConnector(relayUrl), identity.name, {
-          relayUrl,
-          connectorFor: webSocketConnector,
-          anchors: ANCHOR_RELAYS,
-          ...(MAINTAINER_PUBKEY ? { maintainerPubkey: MAINTAINER_PUBKEY } : {}),
-          onHomeSwitched: (url) => {
-            try {
-              localStorage.setItem(RELAY_URL_KEY, url);
-            } catch {
-              /* 忽略 */
-            }
-          },
-        });
-        setConn("connecting");
-        setSelf({ ...b.self });
-        setBackend(b);
-      }
+      const active = activeProfile(profilesState);
+      if (!active) return;
+      const b = buildBackend(active);
+      setConn(active.relayUrl ? "connecting" : "online");
+      setSelf({ ...b.self });
+      setBackend(b);
     } catch {
       /* 忽略 */
     }
+    // 僅在掛載時依當時作用中身分啟動；切換身分走 reload。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -262,29 +294,48 @@ export function App(): JSX.Element {
   }, [backend]);
 
   const signIn = (name: string, relayUrl: string) => {
-    let b: ChatBackend;
-    if (relayUrl) {
-      localStorage.setItem(RELAY_URL_KEY, relayUrl);
-      b = new RelayChatBackend(new LocalStorage(), webSocketConnector(relayUrl), name, {
-        relayUrl,
-        connectorFor: webSocketConnector,
-        anchors: ANCHOR_RELAYS,
-        ...(MAINTAINER_PUBKEY ? { maintainerPubkey: MAINTAINER_PUBKEY } : {}),
-        onHomeSwitched: (url) => {
-          try {
-            localStorage.setItem(RELAY_URL_KEY, url);
-          } catch {
-            /* 忽略 */
-          }
-        },
-      });
-      setConn("connecting");
-    } else {
-      b = new BrowserChatBackend(name);
+    if (!relayUrl) {
+      const b = new BrowserChatBackend(name);
       setConn("online");
+      setSelf({ ...b.self });
+      setBackend(b);
+      return;
     }
+    localStorage.setItem(RELAY_URL_KEY, relayUrl);
+    // 第一個身分沿用舊鍵命名空間（空），達成向後相容
+    const b = buildBackend({ pubkey: "", name, relayUrl, enterprise: false, namespace: "" });
+    const profile: Profile = { pubkey: b.self.pubkey, name, relayUrl, enterprise: false, namespace: "" };
+    const next = upsertProfile(profilesState, profile);
+    saveProfiles(next);
+    setProfilesState(next);
+    setConn("connecting");
     setSelf({ ...b.self });
     setBackend(b);
+  };
+
+  // 切換身分：持久化作用中選擇後重載，讓所有 per-身分 狀態乾淨重建（ADR-0045）。
+  const switchProfile = (pubkey: string) => {
+    if (pubkey === profilesState.active) return;
+    saveProfiles(setActive(profilesState, pubkey));
+    try {
+      location.reload();
+    } catch {
+      /* 忽略 */
+    }
+  };
+
+  // 新增身分：產生或匯入 nsec → 存入該身分命名空間 → 登錄並切換（重載）。
+  const addIdentity = (name: string, relayUrl: string, enterprise: boolean, nsecInput?: string) => {
+    const sk = nsecInput?.trim() ? nsecDecode(nsecInput.trim()) : generateSecretKey();
+    const pubkey = getPublicKey(sk);
+    new LocalStorage(pubkey).saveIdentity({ nsec: nsecEncode(sk), name });
+    const profile: Profile = { pubkey, name, relayUrl, enterprise, namespace: pubkey };
+    saveProfiles(upsertProfile(profilesState, profile));
+    try {
+      location.reload();
+    } catch {
+      /* 忽略 */
+    }
   };
 
   if (!backend || !self) return <SignIn onSignIn={signIn} />;
@@ -417,6 +468,31 @@ export function App(): JSX.Element {
 
   return (
     <div className="desktop">
+      {profilesState.profiles.length > 0 ? (
+        <div className="idbar" data-testid="identity-bar">
+          <span className="idbar__icon" aria-hidden="true">
+            {activeProfile(profilesState)?.enterprise ? "🏢" : "👤"}
+          </span>
+          <select
+            className="idbar__select"
+            aria-label="切換身分"
+            value={profilesState.active ?? ""}
+            onChange={(e) => switchProfile(e.target.value)}
+          >
+            {profilesState.profiles.map((p) => (
+              <option key={p.pubkey} value={p.pubkey}>
+                {(p.enterprise ? "🏢 " : "👤 ") + p.name}
+              </option>
+            ))}
+          </select>
+          <button className="idbar__add" title="新增身分" onClick={() => setAddIdOpen(true)}>
+            ＋
+          </button>
+        </div>
+      ) : null}
+      {addIdOpen ? (
+        <AddIdentityModal onCancel={() => setAddIdOpen(false)} onAdd={addIdentity} />
+      ) : null}
       <ContactListWindow
         self={self}
         contacts={contacts}
@@ -547,6 +623,63 @@ export function App(): JSX.Element {
           onHangup={() => activeBackend.hangupCall?.()}
         />
       ) : null}
+    </div>
+  );
+}
+
+/** 新增身分小視窗（ADR-0045）：名稱＋relay＋是否工作身分＋可選匯入 nsec。 */
+function AddIdentityModal({
+  onAdd,
+  onCancel,
+}: {
+  onAdd: (name: string, relayUrl: string, enterprise: boolean, nsec?: string) => void;
+  onCancel: () => void;
+}): JSX.Element {
+  const [name, setName] = useState("");
+  const [relayUrl, setRelayUrl] = useState("");
+  const [enterprise, setEnterprise] = useState(false);
+  const [nsec, setNsec] = useState("");
+  const submit = () => {
+    if (!name.trim() || !relayUrl.trim()) return;
+    try {
+      onAdd(name.trim(), relayUrl.trim(), enterprise, nsec.trim() || undefined);
+    } catch {
+      /* 非法 nsec：保留輸入 */
+    }
+  };
+  return (
+    <div className="modal" role="dialog" aria-modal="true" aria-label="新增身分" onClick={onCancel}>
+      <div className="modal__box win" onClick={(e) => e.stopPropagation()}>
+        <div className="win__title">
+          <span>新增身分</span>
+          <span className="spacer" />
+          <span className="win__btn" role="button" aria-label="關閉" onClick={onCancel}>
+            ×
+          </span>
+        </div>
+        <div className="groupmodal">
+          <input className="groupmodal__name" placeholder="顯示名稱" value={name} onChange={(e) => setName(e.target.value)} />
+          <input
+            className="groupmodal__name"
+            placeholder="relay 網址（wss://…）"
+            value={relayUrl}
+            onChange={(e) => setRelayUrl(e.target.value)}
+          />
+          <label className="groupmodal__item">
+            <input type="checkbox" checked={enterprise} onChange={(e) => setEnterprise(e.target.checked)} />
+            <span>工作身分（鎖定此節點、不漫遊）</span>
+          </label>
+          <input
+            className="groupmodal__name"
+            placeholder="匯入 nsec（留空＝產生新身分）"
+            value={nsec}
+            onChange={(e) => setNsec(e.target.value)}
+          />
+          <button className="groupmodal__create" data-testid="add-identity-confirm" disabled={!name.trim() || !relayUrl.trim()} onClick={submit}>
+            建立並切換
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

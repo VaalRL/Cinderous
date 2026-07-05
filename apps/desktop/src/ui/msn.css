@@ -39,6 +39,12 @@
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg-b); color: var(--ink); }
 
+.idbar { display: flex; align-items: center; gap: 6px; padding: 4px 8px; }
+.idbar__icon { font-size: 14px; }
+.idbar__select { flex: 1; max-width: 220px; padding: 3px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--field); color: var(--ink); font-size: 12px; }
+.idbar__add { border: 1px solid var(--border); background: var(--field); color: var(--accent); border-radius: 6px; cursor: pointer; padding: 2px 8px; font-size: 13px; }
+.idbar__add:hover { background: var(--hover); }
+
 .desktop {
   min-height: 100vh;
   background: radial-gradient(120% 100% at 50% 0%, var(--bg-a) 0%, var(--bg-b) 60%, var(--bg-c) 100%);
