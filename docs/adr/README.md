@@ -59,3 +59,4 @@
 | [0042](./0042-custom-sticker-limits.md) | 自製貼圖容量與規格限制（標籤上限 + 現有 SVG 上限盤點） | 已接受 |
 | [0043](./0043-animated-sticker-norms.md) | 自製動態貼圖規範（借鏡 LINE：reduced-motion 護欄 + 維持 SVG/上限） | 已接受 |
 | [0044](./0044-enterprise-closed-relay.md) | 企業模式：封閉 allowlist 中繼 + 自架單節點 | 已接受 |
+| [0045](./0045-multi-identity-profiles.md) | 單一 App 多身分並存與切換（工作＋個人） | 已接受 |
