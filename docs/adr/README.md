@@ -58,3 +58,4 @@
 | [0041](./0041-outbox-paced-delivery.md) | 可靠訊息節流外送匣：OK 感知重試 + 重連補送 | 已接受 |
 | [0042](./0042-custom-sticker-limits.md) | 自製貼圖容量與規格限制（標籤上限 + 現有 SVG 上限盤點） | 已接受 |
 | [0043](./0043-animated-sticker-norms.md) | 自製動態貼圖規範（借鏡 LINE：reduced-motion 護欄 + 維持 SVG/上限） | 已接受 |
+| [0044](./0044-enterprise-closed-relay.md) | 企業模式：封閉 allowlist 中繼 + 自架單節點 | 已接受 |

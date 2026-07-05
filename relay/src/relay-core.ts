@@ -55,6 +55,12 @@ export interface RelayCoreOptions {
    * 未設定時不啟用（維持原行為）。
    */
   maxClockSkewSec?: number;
+  /**
+   * 企業封閉模式（ADR-0044）：僅允許名單內 pubkey（hex）發布事件的 allowlist。
+   * 未設＝開放中繼（現況）。設定後非名單成員的任何事件（含心跳）一律拒收，
+   * 使「同一企業只用同一節點、外部客戶不進系統」在內容層成立。
+   */
+  allowedAuthors?: Iterable<string>;
 }
 
 interface SubEntry {
@@ -81,8 +87,12 @@ export class RelayCore {
   private readonly anyKindSubs = new Set<SubEntry>();
   /** 已處理事件 id → created_at（時鐘窗內去重，防重放）。 */
   private readonly seenIds = new Map<string, number>();
+  /** 企業封閉模式的發布 allowlist（hex pubkey）；undefined＝開放（ADR-0044）。 */
+  private readonly allowed: Set<string> | undefined;
 
-  constructor(private readonly opts: RelayCoreOptions = {}) {}
+  constructor(private readonly opts: RelayCoreOptions = {}) {
+    this.allowed = opts.allowedAuthors ? new Set(opts.allowedAuthors) : undefined;
+  }
 
   private now(): number {
     return this.opts.now?.() ?? Math.floor(Date.now() / 1000);
@@ -153,6 +163,11 @@ export class RelayCore {
   private handleEvent(connId: string, event: NostrEvent): Outbound[] {
     if (!verifyEvent(event)) {
       return [{ to: connId, message: ["OK", event.id, false, "invalid: 簽章驗證失敗"] }];
+    }
+
+    // 企業封閉模式（ADR-0044）：非 allowlist 成員一律拒收（含心跳），永久性拒絕。
+    if (this.allowed && !this.allowed.has(event.pubkey)) {
+      return [{ to: connId, message: ["OK", event.id, false, "blocked: 非本企業成員（allowlist）"] }];
     }
 
     // C2：時鐘偏移與重放防護（啟用時）。

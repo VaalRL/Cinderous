@@ -213,3 +213,35 @@ describe("RelayCore — 時鐘偏移與重放防護（C2）", () => {
     expect(core.handle("c", EVENT(e))[0]?.message[2]).toBe(true);
   });
 });
+
+describe("RelayCore — 企業封閉模式 allowlist（ADR-0044）", () => {
+  const signedHb = (sk: Uint8Array): NostrEvent =>
+    finalizeEvent({ kind: 20000, created_at: 1700000000, tags: [], content: "" }, sk);
+
+  it("名單內成員可發布並扇出；名單外成員一律拒收（含心跳）", () => {
+    const memberSk = generateSecretKey();
+    const outsiderSk = generateSecretKey();
+    const member = getPublicKey(memberSk);
+    const core = new RelayCore({ allowedAuthors: [member] });
+    core.connect("watcher");
+    core.handle("watcher", REQ("s1", { kinds: [20000] }));
+
+    const good = signedHb(memberSk);
+    const goodOut = core.handle("member", EVENT(good));
+    expect(goodOut).toContainEqual({ to: "member", message: ["OK", good.id, true, ""] });
+    expect(goodOut).toContainEqual({ to: "watcher", message: ["EVENT", "s1", good] });
+
+    const bad = signedHb(outsiderSk);
+    const badOut = core.handle("outsider", EVENT(bad));
+    expect(badOut[0]?.message[2]).toBe(false);
+    expect(String(badOut[0]?.message[3])).toContain("blocked");
+    // 非成員的事件不扇出給任何訂閱者
+    expect(badOut.some((o) => o.to === "watcher")).toBe(false);
+  });
+
+  it("未設定 allowedAuthors 時為開放中繼（維持原行為）", () => {
+    const core = new RelayCore();
+    const e = signedHb(generateSecretKey());
+    expect(core.handle("c", EVENT(e))[0]?.message[2]).toBe(true);
+  });
+});
