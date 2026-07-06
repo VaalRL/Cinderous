@@ -62,6 +62,7 @@ import {
   type Rumor,
   type SecretKey,
 } from "@nostr-buddy/core";
+import { buildRtcConfig } from "./rtc-config.js";
 import { WebRtcCall } from "./webrtc-call.js";
 import { WebRtcTransfer } from "./webrtc.js";
 import type { AppStorage } from "../storage/types.js";
@@ -180,6 +181,8 @@ export interface RelayPoolOptions {
   onHomeSwitched?: (newUrl: string) => void;
   /** 企業組織名冊的管理者公鑰（ADR-0047）；設定後訂閱並自動採用名冊、同步通訊錄。 */
   orgAdminPubkey?: string;
+  /** 企業 TURN 伺服器（ADR-0048）：供強制 TURN 政策使用；relay-only 時的 ICE 中繼。 */
+  turnServers?: RTCIceServer[];
 }
 
 export class RelayChatBackend implements ChatBackend {
@@ -203,6 +206,9 @@ export class RelayChatBackend implements ChatBackend {
   /** 企業名冊管理者公鑰與最近採用的名冊（ADR-0047）。 */
   private readonly orgAdminPubkey: string | undefined;
   private lastRoster: OrgRosterDoc | null = null;
+  /** 企業 TURN 伺服器與強制 TURN 政策狀態（ADR-0048）：供 WebRTC ICE 設定。 */
+  private readonly turnServers: RTCIceServer[] | undefined;
+  private forceTurn = false;
   private readonly onHomeSwitched: ((url: string) => void) | undefined;
   private lastList: RelayListDoc | null;
   /** 外部 relay 連線（正規化 URL → client），惰性建立（ADR-0034）。 */
@@ -243,6 +249,7 @@ export class RelayChatBackend implements ChatBackend {
     this.connectorFor = pool?.connectorFor;
     this.maintainerPubkey = pool?.maintainerPubkey;
     this.orgAdminPubkey = pool?.orgAdminPubkey;
+    this.turnServers = pool?.turnServers;
     this.onHomeSwitched = pool?.onHomeSwitched;
     for (const a of pool?.anchors ?? []) {
       const norm = normalizeRelay(a);
@@ -284,7 +291,9 @@ export class RelayChatBackend implements ChatBackend {
       },
       (state) => this.onConnection(state),
     );
-    this.transfer = new WebRtcTransfer(this.sk, {
+    this.transfer = new WebRtcTransfer(
+      this.sk,
+      {
       publishSignal: (evt) => this.publishAddressed(evt),
       onOutgoingProgress: (peer, id, sent, total) => this.handlers?.onFileProgress?.(peer, id, sent, total),
       onIncoming: (peer, file) => {
@@ -296,7 +305,9 @@ export class RelayChatBackend implements ChatBackend {
         if (!this.isBlocked(peer)) this.handlers?.onTyping(peer);
       },
       onError: (peer, reason) => this.handlers?.onFileError?.(peer, reason),
-    });
+      },
+      () => this.rtcConfig(),
+    );
     this.call = new WebRtcCall(
       this.sk,
       {
@@ -306,7 +317,7 @@ export class RelayChatBackend implements ChatBackend {
         onRemoteStream: (stream) => this.handlers?.onCallRemoteStream?.(stream),
         onError: (reason) => this.handlers?.onFileError?.(this.self.pubkey, reason),
       },
-      undefined,
+      () => this.rtcConfig(),
       (pubkey) => this.isBlocked(pubkey),
     );
   }
@@ -515,6 +526,11 @@ export class RelayChatBackend implements ChatBackend {
     }
   }
 
+  /** 當前 WebRTC ICE 設定（ADR-0048）：強制 TURN 政策生效時只走 relay 候選。 */
+  private rtcConfig(): RTCConfiguration | undefined {
+    return buildRtcConfig(this.forceTurn, this.turnServers);
+  }
+
   /**
    * 採用帶內收到的管理者組織名冊（ADR-0047）：驗簽已在 onEvent 完成。
    * 工作身分聯絡人由名冊**權威管理**——移除名冊外者（撤銷/離職）、匯入名冊成員。
@@ -523,6 +539,7 @@ export class RelayChatBackend implements ChatBackend {
     if (!shouldAdoptRoster(this.lastRoster, doc)) return;
     this.lastRoster = doc;
     if (doc.policy) this.handlers?.onPolicy?.(doc.policy); // 企業政策（ADR-0048）
+    this.forceTurn = doc.policy?.forceTurn === true; // 強制 TURN 生效於後續新建的 WebRTC 連線
     const self = this.self.pubkey;
     const desired = doc.members.filter((m) => m.pubkey !== self);
     const desiredKeys = new Set(desired.map((m) => m.pubkey));

@@ -42,7 +42,8 @@ export class WebRtcCall {
   constructor(
     private readonly ownSk: SecretKey,
     private readonly handlers: CallHandlers,
-    private readonly rtcConfig?: RTCConfiguration,
+    /** ICE 設定；可為函式以於每次建連時取當前值（企業強制 TURN 動態生效）。 */
+    private readonly rtcConfig?: RTCConfiguration | (() => RTCConfiguration | undefined),
     /** 判斷某公鑰是否已被封鎖（封鎖者的通話信令一律忽略）。 */
     private readonly isBlocked: (pubkey: PubkeyHex) => boolean = () => false,
   ) {}
@@ -131,7 +132,7 @@ export class WebRtcCall {
   }
 
   private ensurePc(): void {
-    const pc = new RTCPeerConnection(this.rtcConfig);
+    const pc = new RTCPeerConnection(typeof this.rtcConfig === "function" ? this.rtcConfig() : this.rtcConfig);
     pc.onicecandidate = (ev) => {
       const c = ev.candidate;
       const callId = this.session.activeCallId;

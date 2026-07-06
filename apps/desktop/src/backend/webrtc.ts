@@ -64,7 +64,8 @@ export class WebRtcTransfer {
   constructor(
     private readonly ownSk: SecretKey,
     private readonly handlers: TransferHandlers,
-    private readonly rtcConfig?: RTCConfiguration,
+    /** ICE 設定；可為函式以於每次建連時取當前值（企業強制 TURN 動態生效）。 */
+    private readonly rtcConfig?: RTCConfiguration | (() => RTCConfiguration | undefined),
   ) {}
 
   /** 主動建立與對方的 P2P 通道（開啟對話時呼叫，讓後續狀態/輸入中可走 P2P）。 */
@@ -139,7 +140,7 @@ export class WebRtcTransfer {
   private ensurePeer(peerPk: PubkeyHex): PeerConn {
     const existing = this.peers.get(peerPk);
     if (existing) return existing;
-    const pc = new RTCPeerConnection(this.rtcConfig);
+    const pc = new RTCPeerConnection(typeof this.rtcConfig === "function" ? this.rtcConfig() : this.rtcConfig);
     const conn: PeerConn = {
       pc,
       rx: new DataChannelReceiver({

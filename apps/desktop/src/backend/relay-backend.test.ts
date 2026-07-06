@@ -370,6 +370,30 @@ describe("RelayChatBackend（真實後端 + 持久化）", () => {
     expect(store.loadMessages("notice")).toEqual([]);
     member.stop();
   });
+  it("企業政策（ADR-0048）：採用帶 forceTurn 的名冊 → onPolicy 收到 forceTurn（驅動 WebRTC relay-only）", () => {
+    const net = createInMemoryRelayNetwork();
+    const adminSk = generateSecretKey();
+    const admin = getPublicKey(adminSk);
+    let got: { forceTurn?: boolean } | undefined;
+    const member = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("m", h), "M", { orgAdminPubkey: admin });
+    member.start({ ...noop, onPolicy: (p) => { got = p; } });
+
+    net.connect("admin").publish(
+      signOrgRoster(
+        {
+          org: "Acme",
+          members: [{ pubkey: member.self.pubkey, name: "M" }],
+          policy: { forceTurn: true },
+          updatedAt: 1000,
+        },
+        adminSk,
+      ),
+    );
+
+    expect(got?.forceTurn).toBe(true);
+    member.stop();
+  });
+
   it("組織群組（ADR-0049）：管理者自建臨時群不因採用自己的名冊而被誤刪", () => {
     const net = createInMemoryRelayNetwork();
     const adminSk = generateSecretKey();
