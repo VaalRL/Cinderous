@@ -245,3 +245,24 @@ describe("RelayCore — 企業封閉模式 allowlist（ADR-0044）", () => {
     expect(core.handle("c", EVENT(e))[0]?.message[2]).toBe(true);
   });
 });
+
+describe("RelayCore — 企業政策 allowedKinds（ADR-0048）", () => {
+  const signedHb = (sk: Uint8Array): NostrEvent =>
+    finalizeEvent({ kind: 20000, created_at: 1700000000, tags: [], content: "" }, sk);
+  const signedKind = (sk: Uint8Array, kind: number): NostrEvent =>
+    finalizeEvent({ kind, created_at: 1700000000, tags: [], content: "" }, sk);
+
+  it("允許名單內 kind 通過、名單外拒收", () => {
+    const core = new RelayCore({ allowedKinds: [20000] });
+    const sk = generateSecretKey();
+    expect(core.handle("c", EVENT(signedHb(sk)))[0]?.message[2]).toBe(true);
+    const dropped = core.handle("c", EVENT(signedKind(sk, 21000))); // 信令 kind 被政策擋
+    expect(dropped[0]?.message[2]).toBe(false);
+    expect(String(dropped[0]?.message[3])).toContain("blocked");
+  });
+
+  it("未設 allowedKinds 時不限制", () => {
+    const core = new RelayCore();
+    expect(core.handle("c", EVENT(signedKind(generateSecretKey(), 21000)))[0]?.message[2]).toBe(true);
+  });
+});

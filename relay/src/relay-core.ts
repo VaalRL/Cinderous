@@ -61,6 +61,11 @@ export interface RelayCoreOptions {
    * 使「同一企業只用同一節點、外部客戶不進系統」在內容層成立。
    */
   allowedAuthors?: Iterable<string>;
+  /**
+   * 企業政策（ADR-0048）：僅轉發/儲存 kind 在此名單的事件；其餘拒收。
+   * 未設＝不限制。停用檔案/通話＝從名單排除其信令 kind（無信令即無 WebRTC）。
+   */
+  allowedKinds?: Iterable<number>;
 }
 
 interface SubEntry {
@@ -89,9 +94,12 @@ export class RelayCore {
   private readonly seenIds = new Map<string, number>();
   /** 企業封閉模式的發布 allowlist（hex pubkey）；undefined＝開放（ADR-0044）。 */
   private readonly allowed: Set<string> | undefined;
+  /** 企業政策的事件類型 allowlist（kind）；undefined＝不限制（ADR-0048）。 */
+  private readonly allowedKinds: Set<number> | undefined;
 
   constructor(private readonly opts: RelayCoreOptions = {}) {
     this.allowed = opts.allowedAuthors ? new Set(opts.allowedAuthors) : undefined;
+    this.allowedKinds = opts.allowedKinds ? new Set(opts.allowedKinds) : undefined;
   }
 
   private now(): number {
@@ -168,6 +176,11 @@ export class RelayCore {
     // 企業封閉模式（ADR-0044）：非 allowlist 成員一律拒收（含心跳），永久性拒絕。
     if (this.allowed && !this.allowed.has(event.pubkey)) {
       return [{ to: connId, message: ["OK", event.id, false, "blocked: 非本企業成員（allowlist）"] }];
+    }
+
+    // 企業政策（ADR-0048）：kind 不在允許名單一律拒收（停用檔案/通話等）。
+    if (this.allowedKinds && !this.allowedKinds.has(event.kind)) {
+      return [{ to: connId, message: ["OK", event.id, false, "blocked: 此事件類型已被政策停用"] }];
     }
 
     // C2：時鐘偏移與重放防護（啟用時）。
