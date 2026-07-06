@@ -22,6 +22,17 @@ export interface Group {
   /** 建立者/管理者公鑰（成員清單變更的權威）。 */
   admin: PubkeyHex;
   members: PubkeyHex[];
+  /** 公告頻道（ADR-0049）：僅管理者可發文、成員唯讀。 */
+  announce?: boolean;
+}
+
+/**
+ * 發文授權（ADR-0049）：announce 群僅管理者可發、一般群任何成員可發（皆須為成員）。
+ * 接收端與 UI 共用此判準。
+ */
+export function canPostToGroup(group: Group, sender: PubkeyHex): boolean {
+  if (!group.members.includes(sender)) return false;
+  return group.announce ? sender === group.admin : true;
 }
 
 /** 帶內群組控制訊息。 */

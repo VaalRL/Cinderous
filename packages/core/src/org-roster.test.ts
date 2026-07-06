@@ -84,4 +84,22 @@ describe("org-roster 簽章名冊（ADR-0047）", () => {
     const ev = signOrgRoster({ org: "Acme", members: [{ pubkey: a, name: "Alice" }], updatedAt: 1000 }, adminSk);
     expect(verifyOrgRoster(ev, admin)?.policy).toBeUndefined();
   });
+  it("groups（ADR-0049）：round-trip 保留部門群與公告旗標", () => {
+    const ev = signOrgRoster(
+      {
+        org: "Acme",
+        members: [{ pubkey: a, name: "Alice" }],
+        groups: [
+          { id: "dev", name: "研發", members: [a, b] },
+          { id: "notice", name: "公告", members: [a, b], announce: true },
+        ],
+        updatedAt: 1000,
+      },
+      adminSk,
+    );
+    const out = verifyOrgRoster(ev, admin);
+    expect(out?.groups?.map((g) => g.id)).toEqual(["dev", "notice"]);
+    expect(out?.groups?.find((g) => g.id === "notice")?.announce).toBe(true);
+    expect(out?.groups?.find((g) => g.id === "dev")?.announce).toBeUndefined();
+  });
 });

@@ -63,3 +63,4 @@
 | [0046](./0046-enterprise-membership-and-boundary.md) | 企業成員判定與對外通訊邊界（威脅模型） | 已接受 |
 | [0047](./0047-enterprise-provisioning-roster.md) | 企業佈建與組織通訊錄（管理者簽章名冊） | 已接受 |
 | [0048](./0048-enterprise-policy-and-turn.md) | 企業政策開關與強制 TURN（relay allowedKinds + 名冊政策） | 已接受 |
+| [0049](./0049-org-groups-and-announcements.md) | 組織群組與公告（管理者佈建） | 已接受 |

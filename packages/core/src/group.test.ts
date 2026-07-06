@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { KIND } from "./constants.js";
 import {
   applyGroupControl,
+  canPostToGroup,
   groupTarget,
   newGroupId,
   parseGroupControl,
@@ -118,5 +119,19 @@ describe("群組控制訊息", () => {
     // 離開移除自己
     const left = applyGroupControl(added, { type: "group-leave", id: "g1" }, bobPk);
     expect(left.members).not.toContain(bobPk);
+  });
+});
+
+describe("canPostToGroup（公告授權，ADR-0049）", () => {
+  const g = { id: "g", name: "n", admin: "admin", members: ["admin", "alice"] };
+  it("一般群：任何成員可發、非成員不可", () => {
+    expect(canPostToGroup(g, "alice")).toBe(true);
+    expect(canPostToGroup(g, "admin")).toBe(true);
+    expect(canPostToGroup(g, "stranger")).toBe(false);
+  });
+  it("公告群：僅管理者可發", () => {
+    const a = { ...g, announce: true };
+    expect(canPostToGroup(a, "admin")).toBe(true);
+    expect(canPostToGroup(a, "alice")).toBe(false);
   });
 });

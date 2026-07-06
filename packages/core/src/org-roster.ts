@@ -25,14 +25,39 @@ export interface OrgPolicy {
   forceTurn?: boolean;
 }
 
+/** 組織群組（ADR-0049）：管理者佈建的部門群／公告頻道。 */
+export interface OrgGroup {
+  id: string;
+  name: string;
+  members: PubkeyHex[];
+  /** 公告頻道：僅管理者可發文、成員唯讀。 */
+  announce?: boolean;
+}
+
 /** 組織名冊文件（簽章事件的 content JSON）。 */
 export interface OrgRosterDoc {
   org: string;
   members: OrgMember[];
   /** 集中政策（可選，ADR-0048）。 */
   policy?: OrgPolicy;
+  /** 組織群組（可選，ADR-0049）。 */
+  groups?: OrgGroup[];
   /** 發佈時間（unix 秒）；用於「較新才取代」。 */
   updatedAt: number;
+}
+
+/** 從任意值解析組織群組（僅保留合法項）；無有效群組回傳 undefined。 */
+function parseGroups(value: unknown): OrgGroup[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const out: OrgGroup[] = [];
+  for (const g of value) {
+    if (!g || typeof g !== "object") continue;
+    const o = g as Record<string, unknown>;
+    if (typeof o.id !== "string" || typeof o.name !== "string" || !Array.isArray(o.members)) continue;
+    const members = o.members.filter((m): m is string => typeof m === "string");
+    out.push({ id: o.id, name: o.name, members, ...(o.announce === true ? { announce: true } : {}) });
+  }
+  return out.length > 0 ? out : undefined;
 }
 
 /** 從任意值解析政策（僅保留布林旗標）；無有效旗標回傳 undefined。 */
@@ -67,12 +92,19 @@ function dedupeMembers(members: OrgMember[]): OrgMember[] {
 export function signOrgRoster(doc: OrgRosterDoc, adminSk: SecretKey): NostrEvent {
   const members = dedupeMembers(doc.members);
   const policy = parsePolicy(doc.policy);
+  const groups = parseGroups(doc.groups);
   return finalizeEvent(
     {
       kind: ORG_ROSTER_KIND,
       created_at: doc.updatedAt,
       tags: [],
-      content: JSON.stringify({ org: doc.org, members, ...(policy ? { policy } : {}), updatedAt: doc.updatedAt }),
+      content: JSON.stringify({
+        org: doc.org,
+        members,
+        ...(policy ? { policy } : {}),
+        ...(groups ? { groups } : {}),
+        updatedAt: doc.updatedAt,
+      }),
     },
     adminSk,
   );
@@ -107,7 +139,8 @@ export function verifyOrgRoster(event: NostrEvent, adminPubkey: PubkeyHex): OrgR
   );
   if (members.length < MIN_ROSTER) return null;
   const policy = parsePolicy(doc.policy);
-  return { org: doc.org, members, ...(policy ? { policy } : {}), updatedAt: doc.updatedAt };
+  const groups = parseGroups(doc.groups);
+  return { org: doc.org, members, ...(policy ? { policy } : {}), ...(groups ? { groups } : {}), updatedAt: doc.updatedAt };
 }
 
 /** 僅當候選較新（updatedAt 更大）且成員數達標時取代目前 last-known-good。 */
