@@ -3,9 +3,11 @@ import {
   type CallState,
   generateSecretKey,
   getPublicKey,
+  newGroupId,
   npubDecode,
   nsecDecode,
   nsecEncode,
+  type OrgGroup,
   type OrgMember,
   type PubkeyHex,
 } from "@nostr-buddy/core";
@@ -526,7 +528,7 @@ export function App(): JSX.Element {
         <RosterAdminModal
           selfNpub={activeBackend.selfNpub ?? ""}
           onCancel={() => setRosterOpen(false)}
-          onPublish={(org, members, pol) => activeBackend.publishRoster!(org, members, pol)}
+          onPublish={(org, members, pol, groups) => activeBackend.publishRoster!(org, members, pol, groups)}
         />
       ) : null}
       <ContactListWindow
@@ -594,6 +596,7 @@ export function App(): JSX.Element {
               onSend={(text) => activeBackend.sendGroupMessage?.(pk, text)}
               onTyping={() => {}}
               onNudge={() => {}}
+              {...(group.announce && group.admin !== self.pubkey ? { readOnly: true } : {})}
               {...(activeBackend.leaveGroup
                 ? {
                     onLeaveGroup: () => {
@@ -749,11 +752,12 @@ function RosterAdminModal({
   onCancel,
 }: {
   selfNpub: string;
-  onPublish: (org: string, members: OrgMember[], policy?: OrgPolicy) => string[];
+  onPublish: (org: string, members: OrgMember[], policy?: OrgPolicy, groups?: OrgGroup[]) => string[];
   onCancel: () => void;
 }): JSX.Element {
   const [org, setOrg] = useState("");
   const [text, setText] = useState(selfNpub ? `${selfNpub} 管理者` : "");
+  const [groupText, setGroupText] = useState("");
   const [pol, setPol] = useState<OrgPolicy>({});
   const [allowlist, setAllowlist] = useState<string[] | null>(null);
   const [error, setError] = useState("");
@@ -776,9 +780,37 @@ function RosterAdminModal({
       setError("至少需要一位成員");
       return;
     }
+    // 管理者自身公鑰（發布者）：自動納入每個群組，確保有人可管理／發布公告。
+    let adminPubkey: PubkeyHex | null = null;
+    try {
+      adminPubkey = selfNpub ? npubDecode(selfNpub) : null;
+    } catch {
+      adminPubkey = null;
+    }
+    const groups: OrgGroup[] = [];
+    for (const line of groupText.split("\n")) {
+      const t = line.trim();
+      if (!t) continue;
+      // 格式：`群組名稱, npub, npub …`；名稱前綴 `!` 代表公告頻道（僅管理者可發文）。
+      const parts = t.split(",").map((s) => s.trim()).filter(Boolean);
+      const rawName = parts.shift() ?? "";
+      const announce = rawName.startsWith("!");
+      const name = (announce ? rawName.slice(1) : rawName).trim() || "群組";
+      const gm = new Set<PubkeyHex>();
+      if (adminPubkey) gm.add(adminPubkey);
+      try {
+        for (const np of parts) gm.add(npubDecode(np));
+      } catch {
+        setError(`群組無法解析：${t}`);
+        return;
+      }
+      groups.push({ id: newGroupId(), name, members: [...gm], ...(announce ? { announce: true } : {}) });
+    }
     try {
       const anyPol = Object.values(pol).some(Boolean);
-      setAllowlist(onPublish(org.trim() || "組織", members, anyPol ? pol : undefined));
+      setAllowlist(
+        onPublish(org.trim() || "組織", members, anyPol ? pol : undefined, groups.length ? groups : undefined),
+      );
     } catch {
       setError("發布失敗");
     }
@@ -818,6 +850,15 @@ function RosterAdminModal({
             <input type="checkbox" checked={!!pol.forceTurn} onChange={() => flip("forceTurn")} />
             <span>強制 TURN（不揭露內網 IP）</span>
           </label>
+          <div className="groupmodal__label">組織群組（可選，每行：群組名稱, npub, npub…；名稱前綴 ! 為公告頻道）</div>
+          <textarea
+            className="groupmodal__name"
+            rows={4}
+            aria-label="組織群組"
+            placeholder="!全體公告, npub1…, npub1…"
+            value={groupText}
+            onChange={(e) => setGroupText(e.target.value)}
+          />
           {error ? <div className="text expired__text">{error}</div> : null}
           <button className="groupmodal__create" data-testid="roster-publish" onClick={publish}>
             簽章並發布名冊

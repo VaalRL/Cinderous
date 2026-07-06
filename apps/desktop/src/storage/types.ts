@@ -37,6 +37,8 @@ export interface StoredGroup {
   name: string;
   admin: string;
   members: string[];
+  /** 公告頻道（ADR-0049）：僅管理者可發文、成員唯讀。 */
+  announce?: boolean;
 }
 
 export interface StoredReaction {

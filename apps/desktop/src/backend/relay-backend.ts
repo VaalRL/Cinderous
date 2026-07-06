@@ -1,6 +1,7 @@
 import {
   applyGroupControl,
   BoundedSet,
+  canPostToGroup,
   CALL_SIGNAL_KIND,
   createHeartbeat,
   createTyping,
@@ -46,6 +47,7 @@ import {
   type Group,
   type GroupControl,
   type NostrEvent,
+  type OrgGroup,
   type OrgMember,
   type OrgPolicy,
   type OrgRosterDoc,
@@ -540,6 +542,38 @@ export class RelayChatBackend implements ChatBackend {
       this.resubscribe();
       this.emitContacts();
     }
+    this.reconcileOrgGroups(doc);
+  }
+
+  /** 組織群組對帳（ADR-0049）：加入名冊中含自己的群、移除名冊外的組織群（admin=管理者）。 */
+  private reconcileOrgGroups(doc: OrgRosterDoc): void {
+    const adminPk = this.orgAdminPubkey;
+    if (!adminPk) return;
+    const self = this.self.pubkey;
+    const orgGroups = doc.groups ?? [];
+    const desiredIds = new Set(orgGroups.filter((g) => g.members.includes(self)).map((g) => g.id));
+    let changed = false;
+    for (const g of this.groups) {
+      if (g.admin === adminPk && !desiredIds.has(g.id)) {
+        this.storage.removeGroup(g.id);
+        changed = true;
+      }
+    }
+    for (const og of orgGroups) {
+      if (!og.members.includes(self)) continue;
+      this.storage.saveGroup({
+        id: og.id,
+        name: og.name,
+        admin: adminPk,
+        members: og.members,
+        ...(og.announce ? { announce: true } : {}),
+      });
+      changed = true;
+    }
+    if (changed) {
+      this.groups = this.storage.loadGroups();
+      this.emitGroups();
+    }
   }
 
   private beat(): void {
@@ -666,7 +700,7 @@ export class RelayChatBackend implements ChatBackend {
     if (this.isBlocked(sender)) return;
     const g = this.groups.find((gr) => gr.id === groupId);
     if (!g) return; // 未知群組（尚未被加入）
-    if (!g.members.includes(sender)) return; // 非成員（含已被移除者）不得發訊
+    if (!canPostToGroup(g, sender)) return; // 非成員/公告群非管理者不得發訊（ADR-0049）
     const expirySec = messageExpiry(rumor);
     const expiresAt = expirySec !== undefined ? expirySec * 1000 : undefined;
     const extra = { sender, ...(expiresAt !== undefined ? { expiresAt } : {}) };
@@ -941,8 +975,14 @@ export class RelayChatBackend implements ChatBackend {
    * 回傳供 relay `allowedAuthors` 佈建的 pubkey 清單。只有把此身分 pubkey 設為
    * `adminPubkey` 的成員會採用此名冊。
    */
-  publishRoster(org: string, members: OrgMember[], policy?: OrgPolicy): PubkeyHex[] {
-    const doc: OrgRosterDoc = { org, members, ...(policy ? { policy } : {}), updatedAt: nowSec() };
+  publishRoster(org: string, members: OrgMember[], policy?: OrgPolicy, groups?: OrgGroup[]): PubkeyHex[] {
+    const doc: OrgRosterDoc = {
+      org,
+      members,
+      ...(policy ? { policy } : {}),
+      ...(groups && groups.length > 0 ? { groups } : {}),
+      updatedAt: nowSec(),
+    };
     const evt = signOrgRoster(doc, this.sk);
     this.client.publish(evt);
     this.lastRoster = doc; // 自身也記錄，避免採用自己較舊的
@@ -971,6 +1011,7 @@ export class RelayChatBackend implements ChatBackend {
   sendGroupMessage(groupId: string, text: string): void {
     const group = this.groups.find((g) => g.id === groupId);
     if (!group) return;
+    if (!canPostToGroup(group, this.self.pubkey)) return; // 公告群僅管理者可發（ADR-0049）
     const evts = wrapGroupMessage(text, this.sk, this.self.pubkey, group, {
       ...(this.homeUrl ? { relayHint: this.homeUrl } : {}),
     });

@@ -420,6 +420,7 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
 .emopick span { cursor: pointer; font-size: 16px; }
 .composer { display: flex; gap: 6px; padding: 8px; border-top: 1px solid var(--border); background: var(--surface2); }
 .composer textarea { flex: 1; resize: none; height: 46px; border: 1px solid var(--border); border-radius: 5px; padding: 6px 8px; font: inherit; background: var(--field); color: var(--ink); }
+.composer--ro { justify-content: center; align-items: center; color: var(--muted); font-size: 12px; min-height: 46px; }
 
 @keyframes nudge { 0%,100%{transform:translate(0,0)} 15%{transform:translate(-8px,5px)} 30%{transform:translate(8px,-5px)} 45%{transform:translate(-7px,-4px)} 60%{transform:translate(7px,4px)} 75%{transform:translate(-4px,2px)} }
 .nudging { animation: nudge 0.55s ease; }

@@ -1,6 +1,16 @@
-import type { CallMedia, CallState, Group, OrgMember, OrgPolicy, OutgoingFile, PubkeyHex, ReceivedFile } from "@nostr-buddy/core";
+import type {
+  CallMedia,
+  CallState,
+  Group,
+  OrgGroup,
+  OrgMember,
+  OrgPolicy,
+  OutgoingFile,
+  PubkeyHex,
+  ReceivedFile,
+} from "@nostr-buddy/core";
 
-export type { Group, OrgMember, OrgPolicy };
+export type { Group, OrgGroup, OrgMember, OrgPolicy };
 
 /** 使用者可見狀態（避開商標，以中文呈現於 UI）。 */
 export type Status = "online" | "away" | "busy" | "offline";
@@ -131,8 +141,8 @@ export interface ChatBackend {
   sendGroupMessage?(groupId: string, text: string): void;
   /** 離開群組。 */
   leaveGroup?(groupId: string): void;
-  /** 管理者佈建（ADR-0047/0048）：簽章並發布組織名冊（含可選政策），回傳供 relay allowlist 佈建的 pubkey 清單。 */
-  publishRoster?(org: string, members: OrgMember[], policy?: OrgPolicy): PubkeyHex[];
+  /** 管理者佈建（ADR-0047/0048/0049）：簽章並發布組織名冊（含可選政策/群組），回傳供 relay allowlist 佈建的 pubkey 清單。 */
+  publishRoster?(org: string, members: OrgMember[], policy?: OrgPolicy, groups?: OrgGroup[]): PubkeyHex[];
   /** 發起語音/視訊通話（M8，媒體全程 P2P）。 */
   startCall?(to: PubkeyHex, media: CallMedia): void;
   /** 接聽目前來電。 */

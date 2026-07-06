@@ -85,6 +85,8 @@ export interface ConversationProps {
   onLeaveGroup?: () => void;
   /** 企業政策停用貼圖時隱藏貼圖鈕（ADR-0048）。 */
   stickersDisabled?: boolean;
+  /** 公告頻道唯讀（ADR-0049）：非管理者隱藏輸入區。 */
+  readOnly?: boolean;
   onClose: () => void;
 }
 
@@ -426,7 +428,7 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
 
       <div className="typing">{props.typing ? t("convo_typing", { name: contact.name }) : ""}</div>
 
-      <div className="toolbar">
+      <div className="toolbar" style={props.readOnly ? { display: "none" } : undefined}>
         <button className="tool" title={t("convo_emojiTitle")} onClick={() => setShowEmo((v) => !v)}>🙂</button>
         {props.stickersDisabled ? null : (
           <button
@@ -710,6 +712,9 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
         </div>
       ) : null}
 
+      {props.readOnly ? (
+        <div className="composer composer--ro" data-testid="announce-readonly">📢 公告頻道（唯讀，僅管理者可發布）</div>
+      ) : (
       <div className="composer">
         <textarea
           aria-label={t("convo_composerPlaceholder")}
@@ -764,6 +769,7 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
         />
         <button className="composer__send" onClick={send}>{t("convo_send")}</button>
       </div>
+      )}
 
       {showAlbum && (
         <div className="modal" role="dialog" aria-modal="true" aria-label={t("album_open")} onClick={() => setShowAlbum(false)}>

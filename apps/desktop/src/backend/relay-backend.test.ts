@@ -297,4 +297,33 @@ describe("RelayChatBackend（真實後端 + 持久化）", () => {
     admin.stop();
     member.stop();
   });
+  it("組織群組（ADR-0049）：名冊帶群→成員自動入群；公告群非管理者發文被擋", () => {
+    const net = createInMemoryRelayNetwork();
+    const adminSk = generateSecretKey();
+    const admin = getPublicKey(adminSk);
+    const store = new MemoryStorage();
+    const member = new RelayChatBackend(store, (h) => net.connect("member", h), "Member", { orgAdminPubkey: admin });
+    member.start(noop);
+    const memberPk = member.self.pubkey;
+
+    net.connect("admin").publish(
+      signOrgRoster(
+        {
+          org: "Acme",
+          members: [{ pubkey: memberPk, name: "M" }],
+          groups: [{ id: "notice", name: "公告", members: [admin, memberPk], announce: true }],
+          updatedAt: 1000,
+        },
+        adminSk,
+      ),
+    );
+
+    // 成員自動入公告群
+    expect(store.loadGroups().map((g) => g.id)).toContain("notice");
+    expect(store.loadGroups().find((g) => g.id === "notice")?.announce).toBe(true);
+    // 成員（非管理者）對公告群發文被擋 → 不持久化
+    member.sendGroupMessage("notice", "我不該能發");
+    expect(store.loadMessages("notice")).toEqual([]);
+    member.stop();
+  });
 });
