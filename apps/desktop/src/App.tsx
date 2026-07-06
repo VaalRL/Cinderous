@@ -6,6 +6,7 @@ import {
   npubDecode,
   nsecDecode,
   nsecEncode,
+  type OrgMember,
   type PubkeyHex,
 } from "@nostr-buddy/core";
 import { useEffect, useRef, useState } from "react";
@@ -124,6 +125,7 @@ export function App(): JSX.Element {
   const [open, setOpen] = useState<string[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [addIdOpen, setAddIdOpen] = useState(false);
+  const [rosterOpen, setRosterOpen] = useState(false);
   const [notify, setNotify] = useState<boolean>(() => {
     try {
       return localStorage.getItem(NOTIFY_KEY) === "1";
@@ -507,10 +509,22 @@ export function App(): JSX.Element {
           <button className="idbar__add" title="新增身分" onClick={() => setAddIdOpen(true)}>
             ＋
           </button>
+          {activeBackend.publishRoster ? (
+            <button className="idbar__add" title="組織名冊（管理者）" onClick={() => setRosterOpen(true)}>
+              🗂
+            </button>
+          ) : null}
         </div>
       ) : null}
       {addIdOpen ? (
         <AddIdentityModal onCancel={() => setAddIdOpen(false)} onAdd={addIdentity} />
+      ) : null}
+      {rosterOpen ? (
+        <RosterAdminModal
+          selfNpub={activeBackend.selfNpub ?? ""}
+          onCancel={() => setRosterOpen(false)}
+          onPublish={(org, members) => activeBackend.publishRoster!(org, members)}
+        />
       ) : null}
       <ContactListWindow
         self={self}
@@ -714,6 +728,78 @@ function AddIdentityModal({
           <button className="groupmodal__create" data-testid="add-identity-confirm" disabled={!name.trim() || !relayUrl.trim()} onClick={submit}>
             建立並切換
           </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** 組織名冊管理（ADR-0047）：每行「npub 名稱」→ 簽章發布 → 顯示供 relay 佈建的 allowlist。 */
+function RosterAdminModal({
+  selfNpub,
+  onPublish,
+  onCancel,
+}: {
+  selfNpub: string;
+  onPublish: (org: string, members: OrgMember[]) => string[];
+  onCancel: () => void;
+}): JSX.Element {
+  const [org, setOrg] = useState("");
+  const [text, setText] = useState(selfNpub ? `${selfNpub} 管理者` : "");
+  const [allowlist, setAllowlist] = useState<string[] | null>(null);
+  const [error, setError] = useState("");
+  const publish = () => {
+    setError("");
+    const members: OrgMember[] = [];
+    for (const line of text.split("\n")) {
+      const t = line.trim();
+      if (!t) continue;
+      const [np, ...rest] = t.split(/\s+/);
+      try {
+        members.push({ pubkey: npubDecode((np ?? "").trim()), name: rest.join(" ") || "成員" });
+      } catch {
+        setError(`無法解析：${t}`);
+        return;
+      }
+    }
+    if (members.length === 0) {
+      setError("至少需要一位成員");
+      return;
+    }
+    try {
+      setAllowlist(onPublish(org.trim() || "組織", members));
+    } catch {
+      setError("發布失敗");
+    }
+  };
+  return (
+    <div className="modal" role="dialog" aria-modal="true" aria-label="組織名冊" onClick={onCancel}>
+      <div className="modal__box win" onClick={(e) => e.stopPropagation()}>
+        <div className="win__title">
+          <span>組織名冊（管理者佈建）</span>
+          <span className="spacer" />
+          <span className="win__btn" role="button" aria-label="關閉" onClick={onCancel}>×</span>
+        </div>
+        <div className="groupmodal">
+          <input className="groupmodal__name" placeholder="組織名稱" value={org} onChange={(e) => setOrg(e.target.value)} />
+          <div className="groupmodal__label">成員（每行：npub 名稱）</div>
+          <textarea
+            className="groupmodal__name"
+            rows={6}
+            aria-label="成員清單"
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+          />
+          {error ? <div className="text expired__text">{error}</div> : null}
+          <button className="groupmodal__create" data-testid="roster-publish" onClick={publish}>
+            簽章並發布名冊
+          </button>
+          {allowlist ? (
+            <>
+              <div className="groupmodal__label">✅ 已發布。以下 pubkey 供 relay allowedAuthors 佈建：</div>
+              <textarea className="groupmodal__name" rows={4} readOnly value={allowlist.join("\n")} />
+            </>
+          ) : null}
         </div>
       </div>
     </div>

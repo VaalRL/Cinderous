@@ -1,6 +1,6 @@
-import type { CallMedia, CallState, Group, OutgoingFile, PubkeyHex, ReceivedFile } from "@nostr-buddy/core";
+import type { CallMedia, CallState, Group, OrgMember, OutgoingFile, PubkeyHex, ReceivedFile } from "@nostr-buddy/core";
 
-export type { Group };
+export type { Group, OrgMember };
 
 /** 使用者可見狀態（避開商標，以中文呈現於 UI）。 */
 export type Status = "online" | "away" | "busy" | "offline";
@@ -129,6 +129,8 @@ export interface ChatBackend {
   sendGroupMessage?(groupId: string, text: string): void;
   /** 離開群組。 */
   leaveGroup?(groupId: string): void;
+  /** 管理者佈建（ADR-0047）：簽章並發布組織名冊，回傳供 relay allowlist 佈建的 pubkey 清單。 */
+  publishRoster?(org: string, members: OrgMember[]): PubkeyHex[];
   /** 發起語音/視訊通話（M8，媒體全程 P2P）。 */
   startCall?(to: PubkeyHex, media: CallMedia): void;
   /** 接聽目前來電。 */

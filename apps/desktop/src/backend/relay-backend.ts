@@ -28,7 +28,9 @@ import {
   reactionTarget,
   RelayClient,
   RELAY_LIST_KIND,
+  rosterAllowlist,
   shouldAdoptRoster,
+  signOrgRoster,
   verifyOrgRoster,
   relayHintOf,
   shouldAdoptList,
@@ -44,6 +46,7 @@ import {
   type Group,
   type GroupControl,
   type NostrEvent,
+  type OrgMember,
   type OrgRosterDoc,
   type OutgoingFile,
   type PresencePayload,
@@ -929,6 +932,19 @@ export class RelayChatBackend implements ChatBackend {
 
   sendFile(to: PubkeyHex, file: OutgoingFile): string {
     return this.transfer.sendFile(to, file);
+  }
+
+  /**
+   * 管理者佈建（ADR-0047）：以自身金鑰簽章並發布組織名冊到中繼；
+   * 回傳供 relay `allowedAuthors` 佈建的 pubkey 清單。只有把此身分 pubkey 設為
+   * `adminPubkey` 的成員會採用此名冊。
+   */
+  publishRoster(org: string, members: OrgMember[]): PubkeyHex[] {
+    const doc: OrgRosterDoc = { org, members, updatedAt: nowSec() };
+    const evt = signOrgRoster(doc, this.sk);
+    this.client.publish(evt);
+    this.lastRoster = doc; // 自身也記錄，避免採用自己較舊的
+    return rosterAllowlist(doc);
   }
 
   createGroup(name: string, memberPubkeys: PubkeyHex[]): void {

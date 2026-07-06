@@ -280,4 +280,21 @@ describe("RelayChatBackend（真實後端 + 持久化）", () => {
     expect(store.loadContacts().map((c) => c.pubkey)).toEqual([memberA]);
     work.stop();
   });
+  it("管理者佈建：publishRoster 發布名冊、成員自動採用、回傳 allowlist（ADR-0047 收尾）", () => {
+    const net = createInMemoryRelayNetwork();
+    const admin = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("admin", h), "Admin");
+    admin.start(noop);
+    const memberStore = new MemoryStorage();
+    const member = new RelayChatBackend(memberStore, (h) => net.connect("member", h), "Member", {
+      orgAdminPubkey: admin.self.pubkey,
+    });
+    member.start(noop);
+
+    const alice = getPublicKey(generateSecretKey());
+    const allow = admin.publishRoster("Acme", [{ pubkey: alice, name: "Alice" }]);
+    expect(allow).toContain(alice); // 回傳供 relay allowlist 佈建的 pubkey
+    expect(memberStore.loadContacts().map((c) => c.pubkey)).toContain(alice); // 成員自動採用
+    admin.stop();
+    member.stop();
+  });
 });
