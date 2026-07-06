@@ -61,12 +61,12 @@ export const MAINTAINER_PUBKEY = "你的維護者公鑰 hex（64 字元）";
 
 ## C. 版本控制
 
-- 目前所有功能開發在分支 `claude/audit-unused-directives-72ftvr`，已推遠端。
-- **合併到 `main` 由你決定**：需要時說一聲，我會將 `main` 快轉並推上（或你自行 `git merge --ff-only`）。
+- 功能開發在分支 `claude/audit-unused-directives-72ftvr`；已多次 fast-forward 合併到 `main`（最新含 Cinder 更名、@提及、對話串、G2 強制 TURN、M8 來電鈴聲）。
+- 後續變更沿用同流程：分支開發 → 驗證全綠 → 經你同意再 `git merge --ff-only` 合回 `main`。
 
 ---
 
-## D. 待你裁示才動工的功能研究
+## D. 待你裁示才動工的功能
 
-- **Discord/Slack 風格功能移植**（自訂頻道、emoji reaction、自訂 emoji）：研究見
-  `docs/research/discord-slack-features.md`，結論與建議在該文件；核准後才立 ADR 實作。
+- **G4 企業金鑰託管**：需先立 ADR 定「還原 vs 帳號死亡」隱私取捨，核准後才實作（見 `ROADMAP.md` 未決策 ADR）。
+- **Discord/Slack 風格功能移植**：研究見 `docs/research/discord-slack-features.md`。其中**對話串（Thread）已實作**（ADR-0051，Slack 式右側面板）、**emoji reaction 已實作**（ADR-0011）；剩餘自訂頻道等仍待裁示才立 ADR。
