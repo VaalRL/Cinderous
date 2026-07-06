@@ -38,6 +38,7 @@ import {
   shouldAdoptList,
   verifyRelayList,
   SDP_SIGNAL_KIND,
+  threadRoot,
   unwrapMessage,
   wrapDeletion,
   wrapGroupControl,
@@ -336,6 +337,7 @@ export class RelayChatBackend implements ChatBackend {
           text: m.text,
           at: m.at,
           ...(m.expiresAt !== undefined ? { expiresAt: m.expiresAt } : {}),
+          ...(m.replyTo !== undefined ? { replyTo: m.replyTo } : {}),
         })),
       );
     }
@@ -364,6 +366,7 @@ export class RelayChatBackend implements ChatBackend {
           ...(m.sender !== undefined ? { sender: m.sender } : {}),
           ...(m.expiresAt !== undefined ? { expiresAt: m.expiresAt } : {}),
           ...(m.mentionsMe ? { mentionsMe: true } : {}),
+          ...(m.replyTo !== undefined ? { replyTo: m.replyTo } : {}),
         })),
       );
     }
@@ -688,7 +691,11 @@ export class RelayChatBackend implements ChatBackend {
 
     const expirySec = messageExpiry(rumor);
     const expiresAt = expirySec !== undefined ? expirySec * 1000 : undefined;
-    const extra = expiresAt !== undefined ? { expiresAt } : {};
+    const replyTo = threadRoot(rumor); // 對話串回覆（ADR-0051）
+    const extra = {
+      ...(expiresAt !== undefined ? { expiresAt } : {}),
+      ...(replyTo !== undefined ? { replyTo } : {}),
+    };
     const message = { id: event.id, contact: sender, outgoing: false, text: rumor.content, at: Date.now(), ...extra };
     this.storage.appendMessage(message);
     this.handlers?.onMessage(sender, { id: message.id, outgoing: false, text: rumor.content, at: message.at, ...extra });
@@ -710,10 +717,12 @@ export class RelayChatBackend implements ChatBackend {
     const expirySec = messageExpiry(rumor);
     const expiresAt = expirySec !== undefined ? expirySec * 1000 : undefined;
     const mine = isMentioned(rumor, this.self.pubkey); // @提及我（ADR-0050）
+    const replyTo = threadRoot(rumor); // 對話串回覆（ADR-0051）
     const extra = {
       sender,
       ...(expiresAt !== undefined ? { expiresAt } : {}),
       ...(mine ? { mentionsMe: true } : {}),
+      ...(replyTo !== undefined ? { replyTo } : {}),
     };
     const message = { id: eventId, contact: groupId, outgoing: false, text: rumor.content, at: Date.now(), ...extra };
     this.storage.appendMessage(message);
@@ -947,15 +956,19 @@ export class RelayChatBackend implements ChatBackend {
     this.beat();
   }
 
-  sendMessage(to: PubkeyHex, text: string, ttlSeconds?: number, mentions?: PubkeyHex[]): void {
+  sendMessage(to: PubkeyHex, text: string, ttlSeconds?: number, mentions?: PubkeyHex[], replyTo?: string): void {
     const disappearAt = ttlSeconds ? nowSec() + ttlSeconds : undefined;
     const evt = wrapMessage(text, this.sk, to, {
       ...(disappearAt !== undefined ? { disappearAt } : {}),
       ...(this.homeUrl ? { relayHint: this.homeUrl } : {}),
       ...(mentions && mentions.length > 0 ? { mentions } : {}),
+      ...(replyTo ? { replyTo } : {}),
     });
     this.publishReliable(evt);
-    const extra = disappearAt !== undefined ? { expiresAt: disappearAt * 1000 } : {};
+    const extra = {
+      ...(disappearAt !== undefined ? { expiresAt: disappearAt * 1000 } : {}),
+      ...(replyTo ? { replyTo } : {}),
+    };
     const message = { id: evt.id, contact: to, outgoing: true, text, at: Date.now(), ...extra };
     this.seenMsg.add(evt.id);
     this.storage.appendMessage(message);
@@ -1022,7 +1035,7 @@ export class RelayChatBackend implements ChatBackend {
     this.emitGroups();
   }
 
-  sendGroupMessage(groupId: string, text: string, mentions?: PubkeyHex[]): void {
+  sendGroupMessage(groupId: string, text: string, mentions?: PubkeyHex[], replyTo?: string): void {
     const group = this.groups.find((g) => g.id === groupId);
     if (!group) return;
     if (!canPostToGroup(group, this.self.pubkey)) return; // 公告群僅管理者可發（ADR-0049）
@@ -1031,13 +1044,15 @@ export class RelayChatBackend implements ChatBackend {
     const evts = wrapGroupMessage(text, this.sk, this.self.pubkey, group, {
       ...(this.homeUrl ? { relayHint: this.homeUrl } : {}),
       ...(validMentions.length > 0 ? { mentions: validMentions } : {}),
+      ...(replyTo ? { replyTo } : {}),
     });
     for (const evt of evts) this.publishReliable(evt);
     const id = evts[0]?.id ?? `g-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     this.seenMsg.add(id);
-    const message = { id, contact: groupId, outgoing: true, text, at: Date.now(), sender: this.self.pubkey };
+    const extra = { sender: this.self.pubkey, ...(replyTo ? { replyTo } : {}) };
+    const message = { id, contact: groupId, outgoing: true, text, at: Date.now(), ...extra };
     this.storage.appendMessage(message);
-    this.handlers?.onMessage(groupId, { id, outgoing: true, text, at: message.at, sender: this.self.pubkey });
+    this.handlers?.onMessage(groupId, { id, outgoing: true, text, at: message.at, ...extra });
   }
 
   leaveGroup(groupId: string): void {

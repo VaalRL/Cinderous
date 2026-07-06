@@ -87,6 +87,25 @@ describe("RelayChatBackend（真實後端 + 持久化）", () => {
     c.stop();
   });
 
+  it("對話串（ADR-0051）：Alice 對 Bob 的回覆帶 replyTo，Bob 收到並持久化", () => {
+    const net = createInMemoryRelayNetwork();
+    const storeB = new MemoryStorage();
+    const a = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("a", h), "Alice");
+    const b = new RelayChatBackend(storeB, (h) => net.connect("b", h), "Bob");
+    const bMsgs: ChatMessage[] = [];
+    a.start(noop);
+    b.start({ ...noop, onMessage: (_pk, m) => bMsgs.push(m) });
+
+    a.addContact(b.selfNpub);
+    a.sendMessage(b.self.pubkey, "串回覆", undefined, undefined, "root-1");
+
+    const got = bMsgs.find((m) => m.text === "串回覆");
+    expect(got?.replyTo).toBe("root-1");
+    expect(storeB.loadMessages(a.self.pubkey).find((m) => m.text === "串回覆")?.replyTo).toBe("root-1");
+    a.stop();
+    b.stop();
+  });
+
   it("@提及（ADR-0050）：Alice 群訊提及 Bob，Bob 收到 mentionsMe，Carol 沒有", () => {
     const net = createInMemoryRelayNetwork();
     const a = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("a", h), "Alice");

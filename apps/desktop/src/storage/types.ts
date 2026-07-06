@@ -32,6 +32,8 @@ export interface StoredMessage {
   sender?: string;
   /** 此訊息 @提及了自己（ADR-0050）：供重載後仍凸顯。 */
   mentionsMe?: boolean;
+  /** 對話串回覆（ADR-0051）：所屬串的根訊息 id；無則為主頻道訊息。 */
+  replyTo?: string;
 }
 
 export interface StoredGroup {

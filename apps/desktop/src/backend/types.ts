@@ -70,6 +70,8 @@ export interface ChatMessage {
   sender?: PubkeyHex;
   /** 此訊息 @提及了自己（ADR-0050）：UI 凸顯、可觸發通知。 */
   mentionsMe?: boolean;
+  /** 對話串回覆（ADR-0051）：此訊息所屬串的根訊息 id；無則為主頻道訊息。 */
+  replyTo?: string;
   /** 檔案附件（有值時此訊息為檔案而非文字）。 */
   file?: ChatFile;
 }
@@ -125,8 +127,11 @@ export interface ChatBackend {
   start(handlers: ChatBackendEvents): void;
   setStatus(status: Status, message?: string): void;
   setNowPlaying(text: string): void;
-  /** 送出訊息；`ttlSeconds` 設定時為限時訊息（閱後即焚，NIP-40 短期過期）；`mentions` 為 @提及公鑰（ADR-0050）。 */
-  sendMessage(to: PubkeyHex, text: string, ttlSeconds?: number, mentions?: PubkeyHex[]): void;
+  /**
+   * 送出訊息；`ttlSeconds` 設定時為限時訊息（閱後即焚，NIP-40 短期過期）；
+   * `mentions` 為 @提及公鑰（ADR-0050）；`replyTo` 為對話串根訊息 id（ADR-0051）。
+   */
+  sendMessage(to: PubkeyHex, text: string, ttlSeconds?: number, mentions?: PubkeyHex[], replyTo?: string): void;
   sendTyping(to: PubkeyHex): void;
   sendNudge(to: PubkeyHex): void;
   /** 對某訊息送出 emoji 回應（NIP-25）。 */
@@ -139,8 +144,8 @@ export interface ChatBackend {
   connectPeer?(to: PubkeyHex): void;
   /** 建立群組（M9）：`memberPubkeys` 為其他成員的公鑰（既有聯絡人）。 */
   createGroup?(name: string, memberPubkeys: PubkeyHex[]): void;
-  /** 對群組送出訊息（扇出給所有成員）；`mentions` 為 @提及公鑰（ADR-0050）。 */
-  sendGroupMessage?(groupId: string, text: string, mentions?: PubkeyHex[]): void;
+  /** 對群組送出訊息（扇出給所有成員）；`mentions` 為 @提及公鑰（ADR-0050）；`replyTo` 為對話串根 id（ADR-0051）。 */
+  sendGroupMessage?(groupId: string, text: string, mentions?: PubkeyHex[], replyTo?: string): void;
   /** 離開群組。 */
   leaveGroup?(groupId: string): void;
   /** 管理者佈建（ADR-0047/0048/0049）：簽章並發布組織名冊（含可選政策/群組），回傳供 relay allowlist 佈建的 pubkey 清單。 */
