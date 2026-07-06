@@ -104,7 +104,7 @@
 | M9 | 群組聊天 | ✅ **完成（ADR-0027 方案）**：`group.ts` 成對扇出（kind 14 + `g` tag）+ 控制訊息（建立/加入/移除/離開，kind 40）；後端建群/送訊/離開 + 持久化，UI 群組區、建群 modal、群組視窗（發送者標籤、離開）。3-context 真實 relay E2E：建群→扇出→兩成員收訊並正確歸屬發送者 | 🌐 |
 | — | 群組本地標籤 | ✅ **完成（ADR-0040）**：純客戶端個人標籤/置頂，`localStorage` 命名空間、不進協定；標籤過濾列 + 置頂排序 | 🌐 |
 | — | **@提及 Mention** | ✅ **完成（ADR-0050）**：訊息帶 `["p", pubkey]` tag 於**加密 rumor 內層**（中繼看不到社交圖譜）+ composer `@` 成員自動完成（Tab/Enter/↑↓/Esc）+ 被提及訊息 mention class／@徽章凸顯 + `mentionsMe` 持久化。core `mention`（parseMentions/mentionTags/isMentioned）+ 後端送收接線 + UI 建議列，皆測試涵蓋。與 reactions/deletions 引用**同源**，企業組織群可點名 | 🌐 |
-| — | **對話串 Thread** | 📋 **規劃（研究完成）**：Slack 式對話串——回覆帶 `["e", parentId, "", "reply"]`（NIP-10）；階段 A 引用回覆（輕量）、階段 B 側面板。扇出/加密不變、串結構在密文內（比 Slack 更私密） | 🌐 |
+| — | **對話串 Thread** | ✅ **完成（ADR-0051）**：回覆帶 NIP-10 `["e", rootId, "", "reply"]` 於**加密 rumor 內層**（串結構中繼看不到，比 Slack 更私密）；主頻道排除回覆、根訊息顯示「💬 N 則回覆」入口；點擊於**右側面板**（Slack 佈局）開啟串——根＋回覆＋獨立 composer。扁平串（非巢狀）、扇出/加密不變。core `thread` + 後端送收 `replyTo` + UI 面板，皆測試涵蓋 | 🌐 |
 
 ---
 
