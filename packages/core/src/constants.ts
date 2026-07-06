@@ -21,6 +21,9 @@ export const KIND = {
 /** 引導 relay 清單事件（ADR-0039，維護者簽章、可取代）。 */
 export const RELAY_LIST_KIND = 10037;
 
+/** 企業組織名冊事件（ADR-0047，管理者簽章、可取代）。 */
+export const ORG_ROSTER_KIND = 10038;
+
 /** WebRTC SDP 信令使用的 Ephemeral kind 區間（NIP-59 包封）。 */
 export const SDP_KIND_RANGE = { min: 21000, max: 21999 } as const;
 
