@@ -120,6 +120,8 @@ export interface Messages {
   trigger_conflict: string;
   trigger_skipped: string;
   trigger_hint: string;
+  mention_hint: string;
+  mention_you: string;
   trigger_manage: string;
   trigger_empty: string;
   trigger_rename: string;
@@ -283,6 +285,8 @@ const zhHant: Messages = {
   trigger_conflict: "「{trigger}」已對應其他貼圖，改為對應此貼圖？",
   trigger_skipped: "已略過無效觸發文字：{list}",
   trigger_hint: "Tab 送出・↑↓ 選擇・Esc 關閉",
+  mention_hint: "Tab/Enter 選取・↑↓ 選擇・Esc 關閉",
+  mention_you: "提及了你",
   trigger_manage: "觸發文字總覽",
   trigger_empty: "還沒有觸發文字——在貼圖上按 ⌨ 設定",
   trigger_rename: "改名",
@@ -446,6 +450,8 @@ const en: Messages = {
   trigger_conflict: "\"{trigger}\" is mapped to another sticker. Remap it to this one?",
   trigger_skipped: "Skipped invalid triggers: {list}",
   trigger_hint: "Tab to send · ↑↓ select · Esc dismiss",
+  mention_hint: "Tab/Enter to pick · ↑↓ select · Esc dismiss",
+  mention_you: "mentioned you",
   trigger_manage: "Trigger overview",
   trigger_empty: "No triggers yet — press ⌨ on a sticker to add one",
   trigger_rename: "Rename",

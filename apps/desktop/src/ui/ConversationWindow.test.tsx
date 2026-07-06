@@ -47,4 +47,15 @@ describe("ConversationWindow 訊息列視窗化（P0-3）", () => {
     expect(html).toContain("msg-50");
     expect(html).toContain("msg-249");
   });
+
+  it("@提及我的訊息以 mention class + 徽章凸顯（ADR-0050）", () => {
+    const html = render([
+      { id: "m1", outgoing: false, text: "一般訊息", at: 1 },
+      { id: "m2", outgoing: false, text: "@我 看這個", at: 2, mentionsMe: true },
+    ]);
+    expect(html).toContain('class="line in mention"');
+    expect(html).toContain('class="mention-badge"');
+    // 未被提及的訊息不帶 mention class
+    expect(html).toContain('class="line in"');
+  });
 });

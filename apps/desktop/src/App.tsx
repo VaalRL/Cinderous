@@ -593,7 +593,10 @@ export function App(): JSX.Element {
               typing={false}
               nudgeSignal={0}
               senderName={senderName}
-              onSend={(text) => activeBackend.sendGroupMessage?.(pk, text)}
+              mentionCandidates={group.members
+                .filter((m) => m !== self.pubkey)
+                .map((m) => ({ pubkey: m, name: senderName(m) }))}
+              onSend={(text, _ttl, mentions) => activeBackend.sendGroupMessage?.(pk, text, mentions)}
               onTyping={() => {}}
               onNudge={() => {}}
               {...(group.announce && group.admin !== self.pubkey ? { readOnly: true } : {})}
@@ -642,7 +645,8 @@ export function App(): JSX.Element {
             {...fileProps}
             {...callProps}
             {...stickerProps}
-            onSend={(text, ttlSeconds) => activeBackend.sendMessage(pk, text, ttlSeconds)}
+            mentionCandidates={[{ pubkey: contact.pubkey, name: contact.name }]}
+            onSend={(text, ttlSeconds, mentions) => activeBackend.sendMessage(pk, text, ttlSeconds, mentions)}
             onTyping={() => {
               const now = Date.now();
               if (now - (lastTyping.current[pk] ?? 0) < 1000) return;

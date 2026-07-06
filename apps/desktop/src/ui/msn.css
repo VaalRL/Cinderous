@@ -238,6 +238,10 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
 .trigbar__item img { width: 24px; height: 24px; }
 .trigbar__item.on, .trigbar__item:hover { border-color: var(--accent); background: var(--hover); }
 .trigbar__hint { color: var(--muted); font-size: 10px; margin-left: auto; flex: none; }
+.menbar { display: flex; align-items: center; gap: 6px; padding: 4px 8px; background: var(--surface2); border-top: 1px solid var(--border); overflow-x: auto; }
+.menbar__item { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); color: var(--ink); font-size: 12px; padding: 2px 8px 2px 3px; cursor: pointer; flex: none; }
+.menbar__item.on, .menbar__item:hover { border-color: var(--accent); background: var(--hover); }
+.menbar__avatar { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 50%; color: #fff; font-size: 11px; font-weight: 700; }
 .stickerpick__tab--manage { margin-left: auto; color: var(--muted); }
 .stickerpick__tab--manage:hover { color: var(--accent); }
 .trigpanel { width: 340px; max-width: calc(100vw - 24px); }
@@ -391,6 +395,8 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
 .line.in .who { color: var(--in-name); }
 .line .time { color: var(--muted); font-size: 10px; margin-left: 6px; }
 .line .text { display: block; margin-top: 1px; white-space: pre-wrap; word-break: break-word; }
+.line.mention { background: var(--mention-bg, rgba(255,196,0,.12)); border-left: 3px solid var(--accent); border-radius: 4px; padding: 2px 6px; margin-left: -6px; }
+.mention-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 15px; height: 15px; margin-left: 6px; padding: 0 3px; border-radius: 8px; background: var(--accent); color: #fff; font-size: 10px; font-weight: 700; }
 .react { position: relative; margin-left: 4px; }
 .react__btn { border: 1px solid var(--border); background: var(--field); color: var(--muted); border-radius: 10px; width: 18px; height: 16px; line-height: 12px; font-size: 11px; cursor: pointer; padding: 0; }
 .line:hover .react__btn { color: var(--accent); }

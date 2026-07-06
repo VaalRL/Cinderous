@@ -1,7 +1,8 @@
-import { contentHash, REACTION_EMOJIS } from "@nostr-buddy/core";
+import { contentHash, parseMentions, REACTION_EMOJIS } from "@nostr-buddy/core";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "../i18n.js";
-import type { CallMedia } from "@nostr-buddy/core";
+import type { CallMedia, MentionCandidate } from "@nostr-buddy/core";
+import { applyMention, suggestMentions } from "./mention-suggest.js";
 import type { ChatMessage, Contact, Self } from "../backend/types.js";
 import {
   formatCustomSticker,
@@ -68,8 +69,10 @@ export interface ConversationProps {
   unsent?: Set<string>;
   /** 已到期（限時訊息）的訊息 id 集合。 */
   expired?: Set<string>;
-  onSend: (text: string, ttlSeconds?: number) => void;
+  onSend: (text: string, ttlSeconds?: number, mentions?: string[]) => void;
   onTyping: () => void;
+  /** @提及候選（ADR-0050）：群成員／對方，供 composer 自動完成與送出解析。 */
+  mentionCandidates?: MentionCandidate[];
   onNudge: () => void;
   /** 對某訊息送出 emoji 回應（未提供則不顯示回應功能）。 */
   onReact?: (messageId: string, emoji: string) => void;
@@ -112,6 +115,9 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
   const [trigSel, setTrigSel] = useState(0);
   const [trigDismissed, setTrigDismissed] = useState(false);
   const [showTrigPanel, setShowTrigPanel] = useState(false);
+  /** @提及建議（ADR-0050）。 */
+  const [menSel, setMenSel] = useState(0);
+  const [menDismissed, setMenDismissed] = useState(false);
   const [showAlbum, setShowAlbum] = useState(false);
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [ttl, setTtl] = useState(0);
@@ -313,10 +319,20 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
     el.classList.add("nudging");
   }, [props.nudgeSignal]);
 
+  // @提及自動完成（ADR-0050）：進行中的 @token → 候選列。
+  const menSuggest = !menDismissed && props.mentionCandidates ? suggestMentions(text, props.mentionCandidates) : null;
+  const menList = menSuggest?.candidates ?? [];
+  const menActive = Math.min(menSel, Math.max(menList.length - 1, 0));
+  const acceptMention = (cand: MentionCandidate): void => {
+    setText(applyMention(text, menSuggest!, cand));
+    setMenSel(0);
+  };
+
   const send = () => {
-    const t = text.trim();
-    if (!t) return;
-    props.onSend(t, ttl > 0 ? ttl : undefined);
+    const body = text.trim();
+    if (!body) return;
+    const mentions = props.mentionCandidates ? parseMentions(body, props.mentionCandidates) : [];
+    props.onSend(body, ttl > 0 ? ttl : undefined, mentions.length > 0 ? mentions : undefined);
     setText("");
   };
 
@@ -691,6 +707,27 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
         );
       })()}
 
+      {menList.length > 0 ? (
+        <div className="menbar" data-testid="mention-bar">
+          {menList.map((c, i) => (
+            <button
+              key={c.pubkey}
+              type="button"
+              className={`menbar__item${i === menActive ? " on" : ""}`}
+              title={c.name}
+              onMouseDown={(e) => {
+                e.preventDefault(); // 避免 textarea 失焦
+                acceptMention(c);
+              }}
+            >
+              <span className="menbar__avatar" style={{ background: avatarColor(c.pubkey) }}>{initial(c.name)}</span>
+              <span>@{c.name}</span>
+            </button>
+          ))}
+          <span className="trigbar__hint">{t("mention_hint")}</span>
+        </div>
+      ) : null}
+
       {trigMatches.length > 0 ? (
         <div className="trigbar" data-testid="trigger-bar">
           {trigMatches.map((m, i) => {
@@ -724,6 +761,8 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
             setText(e.target.value);
             setTrigSel(0);
             setTrigDismissed(false);
+            setMenSel(0);
+            setMenDismissed(false);
             props.onTyping();
           }}
           onPaste={(e) => {
@@ -744,6 +783,23 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
             props.onTyping();
           }}
           onKeyDown={(e) => {
+            if (menList.length > 0) {
+              if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
+                e.preventDefault();
+                acceptMention(menList[menActive]!);
+                return;
+              }
+              if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+                e.preventDefault();
+                const delta = e.key === "ArrowDown" ? 1 : -1;
+                setMenSel((menActive + delta + menList.length) % menList.length);
+                return;
+              }
+              if (e.key === "Escape") {
+                setMenDismissed(true);
+                return;
+              }
+            }
             if (trigMatches.length > 0) {
               if (e.key === "Tab") {
                 e.preventDefault();
@@ -914,9 +970,12 @@ function MessageLine({
   }
 
   return (
-    <div className={`line ${message.outgoing ? "out" : "in"}`}>
+    <div className={`line ${message.outgoing ? "out" : "in"}${message.mentionsMe ? " mention" : ""}`}>
       <span className="who">{who}</span>
       <span className="time">{new Date(message.at).toLocaleTimeString()}</span>
+      {message.mentionsMe ? (
+        <span className="mention-badge" title={t("mention_you")}>@</span>
+      ) : null}
       {message.expiresAt !== undefined ? (
         <span className="timer-badge" title={t("convo_timerTitle")}>⏱</span>
       ) : null}
