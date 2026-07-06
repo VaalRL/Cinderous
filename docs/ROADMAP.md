@@ -11,12 +11,15 @@
 
 ## 0. 現況快照
 
-- **共用協定/邏輯層（`packages/core`、`relay`）**：secp256k1 身分 → NIP-01 事件/簽章 → NIP-44 加密 → NIP-17/59 Gift Wrap → 心跳/輸入中/音樂 → WebRTC 信令/資料通道/降級 → QR 配對/競速/多設備收斂 → RelayClient → 防濫用(PoW/訂閱上限)/時鐘·重放防護。**約 90%，127 測試。** ✅
+- **共用協定/邏輯層（`packages/core`、`relay`）**：secp256k1 身分 → NIP-01 事件/簽章 → NIP-44 加密 → NIP-17/59 Gift Wrap → 心跳/輸入中/音樂 → 群組成對扇出 → WebRTC 信令/資料通道/降級 → QR 配對/競速/多設備收斂 → RelayClient → **節流外送匣 Outbox / 有界去重 BoundedSet** → 防濫用(PoW/訂閱上限/**企業 allowlist**)/時鐘·重放防護。**core 143 + relay 35 測試。** ✅
 - **桌面前端（`apps/desktop`）**：登入、聯絡人清單、對話視窗、表情、Markdown、Nudge、輸入中、深色/明亮、多語系；**Phase A 產品化完成**——接真實 relay（含自動重連/連線狀態）、本機持久化、聯絡人管理（刪除/封鎖）、設定面板（身分備份/通知）、未讀徽章、音樂狀態、**WebRTC P2P 檔案傳輸**。示範模式（記憶體 relay + 機器人）仍保留供體驗。✅
 - **Demo**：`demo.html`、`webrtc.html`（真實 WebRTC）、主應用 `/`，皆 Playwright 驗證。✅
-- **治理**：pnpm monorepo、TS strict、TDD、CI、10 份 ADR、AGPL-3.0。✅
+- **進階功能（Phase E，M6–M9）**：✅ 訊息回應/收回/限時、語音訊息/相簿/貼圖（含動態/自製/編輯器/觸發字）、語音視訊通話、QR 加好友、群組聊天、群組本地標籤。約 desktop 178 測試。
+- **安全與規模化（Phase F）+ 審查修正**：✅ 前向保密決策、二進位框架、混合式引導路由、跨中繼互通、網址衛生；**審查規模化修正**（啟動回放批次化、訊息列視窗化、去重集合有界、孤兒清理、每對話上限）。
+- **企業模式（Phase G，起步）**：✅ 封閉 allowlist 中繼、單一 App 多身分並存與切換（工作/個人、鎖定/開放、資料命名空間隔離）。
+- **治理**：pnpm monorepo、TS strict、TDD、CI、**46 份 ADR**、AGPL-3.0。✅
 
-**缺口總覽**：真實後端整合、本機持久化、聯絡人管理、Tauri 桌面殼、relay 生產部署、行動端、以及 M6–M9 進階功能。
+**缺口總覽**：Tauri 桌面殼 GUI 接線、relay 生產部署（D1/AUTH）、行動端、企業佈建工具（G1–G3）、@提及/對話串（規劃）。
 
 ---
 
@@ -99,6 +102,9 @@
 | M8 | 語音/視訊通話 | ✅ **完成**：信令核心 `call.ts`（狀態機 + kind 21002 加密傳輸，ADR-0025）+ 執行期 `WebRtcCall`（RTCPeerConnection + getUserMedia）+ 通話 UI（撥號/來電/通話中、靜音/掛斷、視訊畫面）。假音源 + 真實 relay + 真實 WebRTC E2E：發起→響鈴→接聽→雙向音訊→掛斷（ADR-0026）。⏳ TURN 保底、來電鈴聲 | 🌐 信令 / ✅ 假裝置 E2E |
 | M9 | QR 加好友 | ✅ **產生完成**：`qr.ts` 以 qrcode-generator 將 `npub` 編為 QR，聯絡人清單 `▦` 顯示 QR 模態框供好友掃描；加入沿用 `addContact`（A3）。E2E 以獨立解碼器 jsQR 驗證 QR 還原 npub（ADR-0024）。相機掃描屬行動端 Phase D | 🌐 產生 / 掃描待 📱 |
 | M9 | 群組聊天 | ✅ **完成（ADR-0027 方案）**：`group.ts` 成對扇出（kind 14 + `g` tag）+ 控制訊息（建立/加入/移除/離開，kind 40）；後端建群/送訊/離開 + 持久化，UI 群組區、建群 modal、群組視窗（發送者標籤、離開）。3-context 真實 relay E2E：建群→扇出→兩成員收訊並正確歸屬發送者 | 🌐 |
+| — | 群組本地標籤 | ✅ **完成（ADR-0040）**：純客戶端個人標籤/置頂，`localStorage` 命名空間、不進協定；標籤過濾列 + 置頂排序 | 🌐 |
+| — | **@提及 Mention** | 📋 **規劃**：訊息帶 `["p", pubkey]` tag + composer `@` 自動完成（聯絡人/群成員）、渲染高亮 + 通知。與 reactions/deletions 的 e-tag 引用**同源**；**企業組織群特別有價值** | 🌐 |
+| — | **對話串 Thread** | 📋 **規劃（研究完成）**：Slack 式對話串——回覆帶 `["e", parentId, "", "reply"]`（NIP-10）；階段 A 引用回覆（輕量）、階段 B 側面板。扇出/加密不變、串結構在密文內（比 Slack 更私密） | 🌐 |
 
 ---
 
