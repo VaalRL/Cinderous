@@ -122,6 +122,11 @@ export interface Messages {
   trigger_hint: string;
   mention_hint: string;
   mention_you: string;
+  thread_title: string;
+  thread_empty: string;
+  thread_reply: string;
+  thread_open: string;
+  thread_replies: string;
   trigger_manage: string;
   trigger_empty: string;
   trigger_rename: string;
@@ -287,6 +292,11 @@ const zhHant: Messages = {
   trigger_hint: "Tab 送出・↑↓ 選擇・Esc 關閉",
   mention_hint: "Tab/Enter 選取・↑↓ 選擇・Esc 關閉",
   mention_you: "提及了你",
+  thread_title: "討論串",
+  thread_empty: "尚無回覆，開始討論吧",
+  thread_reply: "回覆討論串…",
+  thread_open: "在討論串回覆",
+  thread_replies: "{count} 則回覆",
   trigger_manage: "觸發文字總覽",
   trigger_empty: "還沒有觸發文字——在貼圖上按 ⌨ 設定",
   trigger_rename: "改名",
@@ -452,6 +462,11 @@ const en: Messages = {
   trigger_hint: "Tab to send · ↑↓ select · Esc dismiss",
   mention_hint: "Tab/Enter to pick · ↑↓ select · Esc dismiss",
   mention_you: "mentioned you",
+  thread_title: "Thread",
+  thread_empty: "No replies yet — start the discussion",
+  thread_reply: "Reply in thread…",
+  thread_open: "Reply in thread",
+  thread_replies: "{count} replies",
   trigger_manage: "Trigger overview",
   trigger_empty: "No triggers yet — press ⌨ on a sticker to add one",
   trigger_rename: "Rename",

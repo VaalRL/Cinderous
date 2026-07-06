@@ -382,6 +382,15 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
 
 /* ── 對話視窗 ── */
 .convo { width: 380px; display: flex; flex-direction: column; height: 460px; }
+/* 對話串（ADR-0051）：主視窗與右側面板並排（Slack 佈局）。 */
+.convo-dock { display: flex; gap: 8px; align-items: flex-start; }
+.thread-panel { width: 320px; }
+.thread-panel .win__title { background: var(--titlebar); }
+.thread__btn { border: 1px solid var(--border); background: var(--field); color: var(--muted); border-radius: 10px; height: 16px; line-height: 12px; font-size: 11px; cursor: pointer; padding: 0 4px; margin-left: 4px; }
+.line:hover .thread__btn { color: var(--accent); }
+.thread__count { display: inline-block; margin-top: 2px; border: 1px solid var(--border); background: var(--surface2); color: var(--accent); border-radius: 10px; font-size: 11px; padding: 1px 8px; cursor: pointer; }
+.thread__count:hover { background: var(--hover); }
+.thread__empty { color: var(--muted); font-size: 12px; padding: 8px; text-align: center; }
 .convo__head { padding: 8px 10px; background: var(--surface2); border-bottom: 1px solid var(--border); color: var(--ink); }
 .convo__head b { font-size: 13px; }
 .convo__head .sub { font-size: 11px; color: var(--muted); }

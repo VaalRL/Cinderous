@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "../i18n.js";
 import type { CallMedia, MentionCandidate } from "@nostr-buddy/core";
 import { applyMention, suggestMentions } from "./mention-suggest.js";
+import { mainMessages, replyCounts, threadMessages } from "./thread-util.js";
 import type { ChatMessage, Contact, Self } from "../backend/types.js";
 import {
   formatCustomSticker,
@@ -69,7 +70,7 @@ export interface ConversationProps {
   unsent?: Set<string>;
   /** 已到期（限時訊息）的訊息 id 集合。 */
   expired?: Set<string>;
-  onSend: (text: string, ttlSeconds?: number, mentions?: string[]) => void;
+  onSend: (text: string, ttlSeconds?: number, mentions?: string[], replyTo?: string) => void;
   onTyping: () => void;
   /** @提及候選（ADR-0050）：群成員／對方，供 composer 自動完成與送出解析。 */
   mentionCandidates?: MentionCandidate[];
@@ -118,6 +119,9 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
   /** @提及建議（ADR-0050）。 */
   const [menSel, setMenSel] = useState(0);
   const [menDismissed, setMenDismissed] = useState(false);
+  /** 對話串面板（ADR-0051）：開啟中的串根訊息 id（null＝未開）。 */
+  const [threadRoot, setThreadRoot] = useState<string | null>(null);
+  const [threadText, setThreadText] = useState("");
   const [showAlbum, setShowAlbum] = useState(false);
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [ttl, setTtl] = useState(0);
@@ -126,9 +130,12 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
   const rootRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
+  // 對話串（ADR-0051）：主頻道排除回覆、彙整各根回覆數；回覆只在右側面板顯示。
+  const channel = mainMessages(messages);
+  const counts = replyCounts(messages);
   // 訊息列視窗化：只渲染最近 visibleCount 則，避免長對話一次渲染上千 DOM 節點。
-  const hiddenCount = Math.max(0, messages.length - visibleCount);
-  const shown = hiddenCount > 0 ? messages.slice(hiddenCount) : messages;
+  const hiddenCount = Math.max(0, channel.length - visibleCount);
+  const shown = hiddenCount > 0 ? channel.slice(hiddenCount) : channel;
   // 擁有中的自製貼圖 id 集合：整個訊息列共用一份（不再每則訊息各建一個 Set）。
   const ownedIds = new Set(library.map((s) => s.id));
 
@@ -336,7 +343,19 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
     setText("");
   };
 
+  // 對話串（ADR-0051）：發送者顯示名稱、串內回覆送出。
+  const whoOf = (m: ChatMessage): string =>
+    m.outgoing ? self.name : m.sender && props.senderName ? props.senderName(m.sender) : contact.name;
+  const sendThread = () => {
+    const body = threadText.trim();
+    if (!body || threadRoot === null) return;
+    const mentions = props.mentionCandidates ? parseMentions(body, props.mentionCandidates) : [];
+    props.onSend(body, undefined, mentions.length > 0 ? mentions : undefined, threadRoot);
+    setThreadText("");
+  };
+
   return (
+    <div className="convo-dock">
     <div className="win convo" ref={rootRef} data-contact={contact.name}>
       <div className="win__title">
         <span>{contact.name}</span>
@@ -416,13 +435,7 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
             <MessageLine
               key={m.id}
               message={m}
-              who={
-                m.outgoing
-                  ? self.name
-                  : m.sender && props.senderName
-                    ? props.senderName(m.sender)
-                    : contact.name
-              }
+              who={whoOf(m)}
               reactions={props.reactions?.[m.id] ?? []}
               unsent={props.unsent?.has(m.id) ?? false}
               expired={props.expired?.has(m.id) ?? false}
@@ -431,6 +444,8 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
               onView={setLightbox}
               ownedIds={ownedIds}
               onOwnSticker={acquireSticker}
+              replyCount={counts.get(m.id) ?? 0}
+              onOpenThread={props.readOnly ? undefined : () => setThreadRoot(m.id)}
             />
           ))}
         </div>
@@ -915,6 +930,60 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
         </div>
       )}
     </div>
+    {threadRoot !== null ? (
+      <div className="win convo thread-panel" data-testid="thread-panel">
+        <div className="win__title">
+          <span>🧵 {t("thread_title")}</span>
+          <span className="spacer" />
+          <span
+            className="win__btn"
+            role="button"
+            aria-label={t("convo_close")}
+            onClick={() => {
+              setThreadRoot(null);
+              setThreadText("");
+            }}
+          >
+            ×
+          </span>
+        </div>
+        <div className="convo__body">
+          <div className="log" data-testid="thread-log">
+            {threadMessages(messages, threadRoot).map((m) => (
+              <MessageLine
+                key={m.id}
+                message={m}
+                who={whoOf(m)}
+                reactions={props.reactions?.[m.id] ?? []}
+                unsent={props.unsent?.has(m.id) ?? false}
+                expired={props.expired?.has(m.id) ?? false}
+                onReact={props.onReact}
+                onUnsend={props.onUnsend}
+                onView={setLightbox}
+                ownedIds={ownedIds}
+                onOwnSticker={acquireSticker}
+              />
+            ))}
+          </div>
+        </div>
+        <div className="composer">
+          <textarea
+            aria-label={t("thread_reply")}
+            value={threadText}
+            placeholder={t("thread_reply")}
+            onChange={(e) => setThreadText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                sendThread();
+              }
+            }}
+          />
+          <button className="composer__send" onClick={sendThread}>{t("convo_send")}</button>
+        </div>
+      </div>
+    ) : null}
+    </div>
   );
 }
 
@@ -929,6 +998,8 @@ function MessageLine({
   onView,
   ownedIds,
   onOwnSticker,
+  replyCount = 0,
+  onOpenThread,
 }: {
   message: ChatMessage;
   who: string;
@@ -940,6 +1011,10 @@ function MessageLine({
   onView?: ((url: string) => void) | undefined;
   ownedIds: Set<string>;
   onOwnSticker: (label: string, svg: string) => void;
+  /** 此訊息作為串根的回覆數（ADR-0051）。 */
+  replyCount?: number;
+  /** 開啟此訊息的對話串面板；未提供則不顯示串入口。 */
+  onOpenThread?: (() => void) | undefined;
 }): JSX.Element {
   const { t } = useI18n();
   const [picking, setPicking] = useState(false);
@@ -1000,6 +1075,9 @@ function MessageLine({
           {t("convo_unsend")}
         </button>
       ) : null}
+      {onOpenThread ? (
+        <button className="thread__btn" title={t("thread_open")} aria-label={t("thread_open")} onClick={onOpenThread}>🧵</button>
+      ) : null}
       {sticker ? (
         <span className="sticker">
           <img src={svgToDataUri(sticker)} alt={t("sticker_alt")} data-testid="sticker-img" />
@@ -1036,6 +1114,11 @@ function MessageLine({
             <span key={e} className="reaction">{e}</span>
           ))}
         </span>
+      ) : null}
+      {replyCount > 0 && onOpenThread ? (
+        <button className="thread__count" data-testid="thread-count" onClick={onOpenThread}>
+          💬 {t("thread_replies", { count: replyCount })}
+        </button>
       ) : null}
     </div>
   );

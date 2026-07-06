@@ -48,6 +48,21 @@ describe("ConversationWindow 訊息列視窗化（P0-3）", () => {
     expect(html).toContain("msg-249");
   });
 
+  it("對話串（ADR-0051）：回覆不入主頻道、根訊息顯示回覆數入口", () => {
+    const html = render([
+      { id: "root", outgoing: false, text: "主頻道根訊息", at: 1 },
+      { id: "r1", outgoing: false, text: "串內回覆一", at: 2, replyTo: "root" },
+      { id: "r2", outgoing: true, text: "串內回覆二", at: 3, replyTo: "root" },
+    ]);
+    expect(html).toContain("主頻道根訊息");
+    // 回覆只在面板顯示，不灌進主頻道
+    expect(html).not.toContain("串內回覆一");
+    expect(html).not.toContain("串內回覆二");
+    // 根訊息顯示回覆數入口（測試環境 I18n 預設英文）
+    expect(html).toContain('data-testid="thread-count"');
+    expect(html).toContain("2 replies");
+  });
+
   it("@提及我的訊息以 mention class + 徽章凸顯（ADR-0050）", () => {
     const html = render([
       { id: "m1", outgoing: false, text: "一般訊息", at: 1 },

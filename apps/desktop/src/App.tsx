@@ -596,7 +596,7 @@ export function App(): JSX.Element {
               mentionCandidates={group.members
                 .filter((m) => m !== self.pubkey)
                 .map((m) => ({ pubkey: m, name: senderName(m) }))}
-              onSend={(text, _ttl, mentions) => activeBackend.sendGroupMessage?.(pk, text, mentions)}
+              onSend={(text, _ttl, mentions, replyTo) => activeBackend.sendGroupMessage?.(pk, text, mentions, replyTo)}
               onTyping={() => {}}
               onNudge={() => {}}
               {...(group.announce && group.admin !== self.pubkey ? { readOnly: true } : {})}
@@ -646,7 +646,9 @@ export function App(): JSX.Element {
             {...callProps}
             {...stickerProps}
             mentionCandidates={[{ pubkey: contact.pubkey, name: contact.name }]}
-            onSend={(text, ttlSeconds, mentions) => activeBackend.sendMessage(pk, text, ttlSeconds, mentions)}
+            onSend={(text, ttlSeconds, mentions, replyTo) =>
+              activeBackend.sendMessage(pk, text, ttlSeconds, mentions, replyTo)
+            }
             onTyping={() => {
               const now = Date.now();
               if (now - (lastTyping.current[pk] ?? 0) < 1000) return;
