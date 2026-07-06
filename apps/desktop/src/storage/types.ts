@@ -39,6 +39,8 @@ export interface StoredGroup {
   members: string[];
   /** 公告頻道（ADR-0049）：僅管理者可發文、成員唯讀。 */
   announce?: boolean;
+  /** 組織名冊分發的群（ADR-0049）：由名冊對帳權威管理，區隔本機自建群以免誤刪。 */
+  org?: boolean;
 }
 
 export interface StoredReaction {

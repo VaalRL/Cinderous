@@ -1,4 +1,4 @@
-import { generateSecretKey, getPublicKey, signOrgRoster, wrapGroupMessage } from "@nostr-buddy/core";
+import { generateSecretKey, getPublicKey, nsecEncode, signOrgRoster, wrapGroupMessage } from "@nostr-buddy/core";
 import { createInMemoryRelayNetwork } from "@nostr-buddy/relay";
 import { describe, expect, it } from "vitest";
 import { MemoryStorage } from "../storage/memory.js";
@@ -325,5 +325,30 @@ describe("RelayChatBackend（真實後端 + 持久化）", () => {
     member.sendGroupMessage("notice", "我不該能發");
     expect(store.loadMessages("notice")).toEqual([]);
     member.stop();
+  });
+  it("組織群組（ADR-0049）：管理者自建臨時群不因採用自己的名冊而被誤刪", () => {
+    const net = createInMemoryRelayNetwork();
+    const adminSk = generateSecretKey();
+    const admin = getPublicKey(adminSk);
+    const store = new MemoryStorage();
+    // 讓後端身分即為管理者（self === orgAdminPubkey），重現管理者自身情境。
+    store.saveIdentity({ nsec: nsecEncode(adminSk), name: "Admin" });
+    const backend = new RelayChatBackend(store, (h) => net.connect("admin", h), "Admin", { orgAdminPubkey: admin });
+    backend.start(noop);
+
+    // 管理者自建一個臨時群（非組織名冊分發）。
+    backend.createGroup("午餐團", [getPublicKey(generateSecretKey())]);
+    const adhocId = store.loadGroups().find((g) => g.name === "午餐團")?.id;
+    expect(adhocId).toBeTruthy();
+
+    // 發布只含組織群「dept」的名冊——本機立即對帳。
+    backend.publishRoster("Acme", [{ pubkey: admin, name: "Admin" }], undefined, [
+      { id: "dept", name: "部門", members: [admin] },
+    ]);
+
+    const ids = store.loadGroups().map((g) => g.id);
+    expect(ids).toContain("dept"); // 組織群已在本機生效
+    expect(ids).toContain(adhocId); // 臨時群未被誤刪
+    backend.stop();
   });
 });

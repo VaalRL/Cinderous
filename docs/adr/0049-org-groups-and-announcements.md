@@ -11,6 +11,8 @@
 ## 決策
 
 1. **組織群組經名冊分發：** `OrgRosterDoc` 加可選 `groups: OrgGroup[]`，`OrgGroup = { id, name, members: pubkey[], announce? }`。客戶端採用名冊時**對帳本地群組**——加入名冊新群、移除名冊外的組織群（權威管理，比照聯絡人對帳）。群組 `admin` = 名冊管理者。
+   - **以 `org` 旗標識別名冊群，非以 `admin`：** 本地儲存的名冊群標記 `org: true`；對帳只增刪 `org` 群。因管理者自身 `self === orgAdminPubkey`，若以 `admin === 管理者` 判定會誤刪管理者自建的臨時群，故需明確旗標區隔。
+   - **管理者發布即本機對帳：** `publishRoster` 設定 `lastRoster` 後即呼叫對帳，否則管理者因 `lastRoster` 已設而不會再採用自己的名冊、要重載才看得到剛發布的群。
 2. **公告 = announce 群組：** `Group` 加 `announce?` 旗標。**發文授權**以純函式 `canPostToGroup(group, sender)` 判定：announce 群僅**管理者**可發、一般群任何成員可發（皆須為成員）。
    - **接收端強制：** 群訊接收時以 `canPostToGroup` 取代原本的「sender ∈ members」檢查——announce 群非管理者的訊息一律拒收。
    - **UI：** announce 群且自己非管理者時**隱藏輸入框**（唯讀）。

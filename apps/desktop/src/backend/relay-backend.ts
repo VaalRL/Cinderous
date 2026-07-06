@@ -545,7 +545,10 @@ export class RelayChatBackend implements ChatBackend {
     this.reconcileOrgGroups(doc);
   }
 
-  /** 組織群組對帳（ADR-0049）：加入名冊中含自己的群、移除名冊外的組織群（admin=管理者）。 */
+  /**
+   * 組織群組對帳（ADR-0049）：加入名冊中含自己的群、移除名冊外的組織群。
+   * 只動 `org` 旗標標記的名冊群——管理者自建的臨時群（admin 亦等於自身）不受影響。
+   */
   private reconcileOrgGroups(doc: OrgRosterDoc): void {
     const adminPk = this.orgAdminPubkey;
     if (!adminPk) return;
@@ -553,8 +556,8 @@ export class RelayChatBackend implements ChatBackend {
     const orgGroups = doc.groups ?? [];
     const desiredIds = new Set(orgGroups.filter((g) => g.members.includes(self)).map((g) => g.id));
     let changed = false;
-    for (const g of this.groups) {
-      if (g.admin === adminPk && !desiredIds.has(g.id)) {
+    for (const g of this.storage.loadGroups()) {
+      if (g.org && !desiredIds.has(g.id)) {
         this.storage.removeGroup(g.id);
         changed = true;
       }
@@ -566,6 +569,7 @@ export class RelayChatBackend implements ChatBackend {
         name: og.name,
         admin: adminPk,
         members: og.members,
+        org: true,
         ...(og.announce ? { announce: true } : {}),
       });
       changed = true;
@@ -986,6 +990,8 @@ export class RelayChatBackend implements ChatBackend {
     const evt = signOrgRoster(doc, this.sk);
     this.client.publish(evt);
     this.lastRoster = doc; // 自身也記錄，避免採用自己較舊的
+    // 管理者本機立即對帳，否則因 lastRoster 已設而不會再採用自己的名冊、看不到剛發布的群。
+    this.reconcileOrgGroups(doc);
     return rosterAllowlist(doc);
   }
 
