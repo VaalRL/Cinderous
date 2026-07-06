@@ -13,6 +13,7 @@ export * from "./nip44.js";
 export * from "./nip59.js";
 export * from "./giftwrap.js";
 export * from "./mention.js";
+export * from "./thread.js";
 export * from "./reaction.js";
 export * from "./deletion.js";
 export * from "./signaling.js";

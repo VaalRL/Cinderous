@@ -65,3 +65,4 @@
 | [0048](./0048-enterprise-policy-and-turn.md) | 企業政策開關與強制 TURN（relay allowedKinds + 名冊政策） | 已接受 |
 | [0049](./0049-org-groups-and-announcements.md) | 組織群組與公告（管理者佈建） | 已接受 |
 | [0050](./0050-mentions.md) | @提及 Mention：NIP-01 p-tag 攜帶於加密 rumor 內層 | 已接受 |
+| [0051](./0051-threads.md) | 對話串 Thread：NIP-10 reply e-tag + 右側面板（Slack 佈局） | 已接受 |

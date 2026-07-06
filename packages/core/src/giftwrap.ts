@@ -3,6 +3,7 @@ import type { NostrEvent } from "./event.js";
 import type { PubkeyHex, SecretKey } from "./keys.js";
 import { mentionTags } from "./mention.js";
 import { openWrap, sealAndWrap, type Rumor } from "./nip59.js";
+import { replyTag } from "./thread.js";
 
 const KIND_CHAT = 14;
 const DAY_SECONDS = 86_400;
@@ -32,6 +33,8 @@ export interface WrapOptions {
   relayHint?: string;
   /** @提及（ADR-0050）：寫進 **rumor 內層** `p` tag，隨加密僅收件人可見。 */
   mentions?: PubkeyHex[];
+  /** 對話串回覆（ADR-0051）：寫進 **rumor 內層** NIP-10 reply e-tag，指向串根訊息。 */
+  replyTo?: string;
 }
 
 /**
@@ -50,6 +53,7 @@ export function wrapMessage(
     ...(opts.disappearAt !== undefined ? [["expiration", String(opts.disappearAt)]] : []),
     ...(opts.relayHint ? [["relay", opts.relayHint]] : []),
     ...(opts.mentions && opts.mentions.length > 0 ? mentionTags(opts.mentions) : []),
+    ...(opts.replyTo ? [replyTag(opts.replyTo)] : []),
   ];
   return sealAndWrap(
     { kind: KIND_CHAT, created_at: nowSec, tags: rumorTags, content },

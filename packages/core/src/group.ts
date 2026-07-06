@@ -12,6 +12,7 @@ import type { PubkeyHex, SecretKey } from "./keys.js";
 import { mentionTags } from "./mention.js";
 import type { Rumor } from "./nip59.js";
 import { sealAndWrap } from "./nip59.js";
+import { replyTag } from "./thread.js";
 
 const DAY_SECONDS = 86_400;
 const DEFAULT_TTL_SECONDS = 7 * DAY_SECONDS;
@@ -59,7 +60,7 @@ function others(members: PubkeyHex[], self: PubkeyHex): PubkeyHex[] {
 
 function wrapFor(
   recipientPk: PubkeyHex,
-  rumor: { kind: number; content: string; groupId: string; mentions?: PubkeyHex[] },
+  rumor: { kind: number; content: string; groupId: string; mentions?: PubkeyHex[]; replyTo?: string },
   senderSk: SecretKey,
   nowSec: number,
   relayHint?: string,
@@ -68,6 +69,7 @@ function wrapFor(
     ["g", rumor.groupId],
     ...(relayHint ? [["relay", relayHint]] : []),
     ...(rumor.mentions && rumor.mentions.length > 0 ? mentionTags(rumor.mentions) : []),
+    ...(rumor.replyTo ? [replyTag(rumor.replyTo)] : []),
   ];
   return sealAndWrap(
     { kind: rumor.kind, created_at: nowSec, tags, content: rumor.content },
@@ -92,7 +94,7 @@ export function wrapGroupMessage(
   senderSk: SecretKey,
   senderPk: PubkeyHex,
   group: Group,
-  opts: { now?: number; relayHint?: string; mentions?: PubkeyHex[] } = {},
+  opts: { now?: number; relayHint?: string; mentions?: PubkeyHex[]; replyTo?: string } = {},
 ): NostrEvent[] {
   const nowSec = opts.now ?? Math.floor(Date.now() / 1000);
   const rumor = {
@@ -100,6 +102,7 @@ export function wrapGroupMessage(
     content: text,
     groupId: group.id,
     ...(opts.mentions && opts.mentions.length > 0 ? { mentions: opts.mentions } : {}),
+    ...(opts.replyTo ? { replyTo: opts.replyTo } : {}),
   };
   return others(group.members, senderPk).map((pk) => wrapFor(pk, rumor, senderSk, nowSec, opts.relayHint));
 }

@@ -11,6 +11,7 @@ import {
   type Group,
 } from "./group.js";
 import { isMentioned } from "./mention.js";
+import { threadRoot } from "./thread.js";
 import { generateSecretKey, getPublicKey } from "./keys.js";
 import { openWrap } from "./nip59.js";
 
@@ -48,6 +49,13 @@ describe("群組訊息扇出（M9，Gift-Wrap 成對）", () => {
     const asCarol = openWrap(events[1]!, carolSk);
     expect(isMentioned(asCarol.rumor, bobPk)).toBe(true); // 群成員都看得到提及對象
     expect(isMentioned(asCarol.rumor, carolPk)).toBe(false);
+  });
+
+  it("對話串（ADR-0051）：replyTo 寫進加密 rumor 內層 reply e-tag，收端可讀串根", () => {
+    const g = group();
+    const events = wrapGroupMessage("我覺得可行", aliceSk, alicePk, g, { replyTo: "root-msg" });
+    const asBob = openWrap(events[0]!, bobSk);
+    expect(threadRoot(asBob.rumor)).toBe("root-msg");
   });
 
   it("外層作者非寄件人（隱藏群組社交圖譜）", () => {
