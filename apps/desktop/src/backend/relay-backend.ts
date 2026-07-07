@@ -184,6 +184,11 @@ export interface RelayPoolOptions {
   orgAdminPubkey?: string;
   /** 企業 TURN 伺服器（ADR-0048）：供強制 TURN 政策使用；relay-only 時的 ICE 中繼。 */
   turnServers?: RTCIceServer[];
+  /**
+   * 私鑰由外部（OS 金鑰庫）提供而非 localStorage（B5，ADR-0053）。設定後以此為身分
+   * 私鑰、**不寫入** identity blob；未設則沿用既有行為（從 storage 讀/自動產生）。
+   */
+  nsecOverride?: string;
 }
 
 export class RelayChatBackend implements ChatBackend {
@@ -262,7 +267,10 @@ export class RelayChatBackend implements ChatBackend {
       if (norm && norm !== this.homeUrl) this.bootstrapSeats.add(norm);
     }
     let identity = storage.loadIdentity();
-    if (!identity) {
+    if (pool?.nsecOverride) {
+      // B5（ADR-0053）：私鑰由 OS 金鑰庫提供，不落 localStorage identity blob。
+      identity = { nsec: pool.nsecOverride, name: name?.trim() || identity?.name || "我" };
+    } else if (!identity) {
       const sk = generateSecretKey();
       identity = { nsec: nsecEncode(sk), name: name?.trim() || "我" };
       storage.saveIdentity(identity);

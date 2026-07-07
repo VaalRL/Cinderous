@@ -12,9 +12,11 @@ import {
   type OrgMember,
   type PubkeyHex,
 } from "@cinder/core";
+import { isTauri } from "@tauri-apps/api/core";
 import { useEffect, useRef, useState } from "react";
 import { BrowserChatBackend } from "./backend/browser-backend.js";
 import { RelayChatBackend, webSocketConnector } from "./backend/relay-backend.js";
+import { getKeyVault } from "./native/keyvault.js";
 import {
   activeProfile,
   loadProfiles,
@@ -82,7 +84,7 @@ function normalizeAdminPubkey(input: string): string | undefined {
  * connectorFor/anchors/onHomeSwitched → 不漫遊、不遞補；個人身分走開放模式。
  * 資料以 profile.namespace 隔離。
  */
-function buildBackend(p: Profile): ChatBackend {
+function buildBackend(p: Profile, nsecOverride?: string): ChatBackend {
   if (!p.relayUrl) return new BrowserChatBackend(p.name);
   const storage = new LocalStorage(p.namespace);
   const opts = p.enterprise
@@ -100,7 +102,32 @@ function buildBackend(p: Profile): ChatBackend {
           }
         },
       };
-  return new RelayChatBackend(storage, webSocketConnector(p.relayUrl), p.name, opts);
+  return new RelayChatBackend(
+    storage,
+    webSocketConnector(p.relayUrl),
+    p.name,
+    nsecOverride ? { ...opts, nsecOverride } : opts,
+  );
+}
+
+/**
+ * B5（ADR-0053）：在 Tauri 執行期取得某身分的私鑰——優先 OS 金鑰庫；若金鑰庫尚無、
+ * 但 localStorage 仍有既有明文 nsec（舊版/首次遷移），將其搬入金鑰庫並**抹除明文**。
+ * 回傳 nsec（供 buildBackend override）；找不到回 undefined。
+ */
+async function loadNsecFromVault(p: Profile): Promise<string | undefined> {
+  const vault = getKeyVault();
+  let nsec = await vault.getKey(p.pubkey);
+  if (!nsec) {
+    const legacy = new LocalStorage(p.namespace).loadIdentity();
+    if (legacy?.nsec) {
+      await vault.setKey(p.pubkey, legacy.nsec);
+      // 抹掉 localStorage 內的明文私鑰（保留名稱），達成「私鑰不明文落地」。
+      new LocalStorage(p.namespace).saveIdentity({ nsec: "", name: legacy.name });
+      nsec = legacy.nsec;
+    }
+  }
+  return nsec ?? undefined;
 }
 
 export function App(): JSX.Element {
@@ -149,19 +176,28 @@ export function App(): JSX.Element {
   selfRef.current = self;
   const idleRef = useRef<IdleState>(initIdle(Date.now()));
 
-  // 自動登入：以「作用中身分設定檔」建立後端（ADR-0045；相容既有單一身分）
+  // 自動登入：以「作用中身分設定檔」建立後端（ADR-0045；相容既有單一身分）。
+  // B5（ADR-0053）：Tauri 下私鑰改由 OS 金鑰庫提供，須先 async 載入才建後端；瀏覽器不變。
   useEffect(() => {
-    try {
-      const active = activeProfile(profilesState);
-      if (!active) return;
-      const b = buildBackend(active);
-      setConn(active.relayUrl ? "connecting" : "online");
-      setSelf({ ...b.self });
-      setBackend(b);
-    } catch {
-      /* 忽略 */
-    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const active = activeProfile(profilesState);
+        if (!active) return;
+        const override = isTauri() && active.relayUrl ? await loadNsecFromVault(active) : undefined;
+        if (cancelled) return;
+        const b = buildBackend(active, override);
+        setConn(active.relayUrl ? "connecting" : "online");
+        setSelf({ ...b.self });
+        setBackend(b);
+      } catch {
+        /* 忽略 */
+      }
+    })();
     // 僅在掛載時依當時作用中身分啟動；切換身分走 reload。
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -358,7 +394,7 @@ export function App(): JSX.Element {
     };
   }, [backend]);
 
-  const signIn = (name: string, relayUrl: string) => {
+  const signIn = async (name: string, relayUrl: string) => {
     if (!relayUrl) {
       const b = new BrowserChatBackend(name);
       setConn("online");
@@ -368,7 +404,17 @@ export function App(): JSX.Element {
     }
     localStorage.setItem(RELAY_URL_KEY, relayUrl);
     // 第一個身分沿用舊鍵命名空間（空），達成向後相容
-    const b = buildBackend({ pubkey: "", name, relayUrl, enterprise: false, namespace: "" });
+    const first: Profile = { pubkey: "", name, relayUrl, enterprise: false, namespace: "" };
+    let b: ChatBackend;
+    if (isTauri()) {
+      // B5（ADR-0053）：私鑰本機產生後存 OS 金鑰庫，不落 localStorage
+      const sk = generateSecretKey();
+      const nsec = nsecEncode(sk);
+      await getKeyVault().setKey(getPublicKey(sk), nsec);
+      b = buildBackend(first, nsec);
+    } else {
+      b = buildBackend(first); // 瀏覽器：後端自動產生 nsec 存 localStorage（既有行為）
+    }
     const profile: Profile = { pubkey: b.self.pubkey, name, relayUrl, enterprise: false, namespace: "" };
     const next = upsertProfile(profilesState, profile);
     saveProfiles(next);
@@ -390,7 +436,7 @@ export function App(): JSX.Element {
   };
 
   // 新增身分：產生或匯入 nsec → 存入該身分命名空間 → 登錄並切換（重載）。
-  const addIdentity = (
+  const addIdentity = async (
     name: string,
     relayUrl: string,
     enterprise: boolean,
@@ -398,7 +444,11 @@ export function App(): JSX.Element {
   ) => {
     const sk = opts.nsec?.trim() ? nsecDecode(opts.nsec.trim()) : generateSecretKey();
     const pubkey = getPublicKey(sk);
-    new LocalStorage(pubkey).saveIdentity({ nsec: nsecEncode(sk), name });
+    if (isTauri()) {
+      await getKeyVault().setKey(pubkey, nsecEncode(sk)); // B5：私鑰 → OS 金鑰庫，不落 localStorage
+    } else {
+      new LocalStorage(pubkey).saveIdentity({ nsec: nsecEncode(sk), name }); // 瀏覽器：既有行為
+    }
     const admin = enterprise && opts.adminPubkey?.trim() ? normalizeAdminPubkey(opts.adminPubkey.trim()) : undefined;
     const profile: Profile = { pubkey, name, relayUrl, enterprise, namespace: pubkey, ...(admin ? { adminPubkey: admin } : {}) };
     saveProfiles(upsertProfile(profilesState, profile));
