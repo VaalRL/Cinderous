@@ -49,7 +49,7 @@ import {
 } from "./ui/group-labels.js";
 import { ANCHOR_RELAYS, MAINTAINER_PUBKEY } from "./bootstrap-config.js";
 import { initIdle, reduceIdle, type IdleState } from "./ui/idle-status.js";
-import { createRinger } from "./ui/ringtone.js";
+import { createRinger, createRingback } from "./ui/ringtone.js";
 import { CallWindow } from "./ui/CallWindow.js";
 import { ContactListWindow } from "./ui/ContactListWindow.js";
 import { ConversationWindow } from "./ui/ConversationWindow.js";
@@ -126,8 +126,9 @@ export function App(): JSX.Element {
   const [callMedia, setCallMedia] = useState<CallMedia | null>(null);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
-  /** 來電鈴聲（M8）：來電時循環播放，接聽/拒接/結束即停。 */
+  /** 來電鈴聲 / 外撥回鈴音（M8）：依通話狀態循環播放，狀態一變即停。 */
   const ringerRef = useRef(createRinger());
+  const ringbackRef = useRef(createRingback());
   const [open, setOpen] = useState<string[]>([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [addIdOpen, setAddIdOpen] = useState(false);
@@ -263,12 +264,24 @@ export function App(): JSX.Element {
     return () => backend.stop();
   }, [backend]);
 
-  // 來電鈴聲（M8）：僅在「來電中」循環播放；狀態一變（接聽/拒接/結束）即停。
+  // 通話鈴聲（M8）：來電中播來電鈴、外撥等待中播回鈴音；其餘狀態兩者皆停。
   useEffect(() => {
     const ringer = ringerRef.current;
-    if (callState === "incoming") ringer.start();
-    else ringer.stop();
-    return () => ringer.stop();
+    const ringback = ringbackRef.current;
+    if (callState === "incoming") {
+      ringer.start();
+      ringback.stop();
+    } else if (callState === "outgoing") {
+      ringback.start();
+      ringer.stop();
+    } else {
+      ringer.stop();
+      ringback.stop();
+    }
+    return () => {
+      ringer.stop();
+      ringback.stop();
+    };
   }, [callState]);
 
   // 限時訊息：定期掃描到期訊息，到期即標記（UI 顯示「訊息已到期」）
