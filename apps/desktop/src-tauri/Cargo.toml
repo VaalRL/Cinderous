@@ -36,7 +36,7 @@ sqlcipher = ["dep:rusqlite", "rusqlite/bundled-sqlcipher-vendored-openssl"]
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-tauri = { version = "2", optional = true }
+tauri = { version = "2", optional = true , features = [] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net"], optional = true }
 tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"], optional = true }
 futures-util = { version = "0.3", optional = true }
@@ -44,4 +44,4 @@ rusqlite = { version = "0.32", optional = true }
 keyring = { version = "3", optional = true, features = ["windows-native", "apple-native", "sync-secret-service"] }
 
 [build-dependencies]
-tauri-build = { version = "2", optional = true }
+tauri-build = { version = "2", optional = true , features = [] }
