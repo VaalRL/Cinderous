@@ -21,7 +21,7 @@
 - **企業模式（Phase G，G0–G4 完成）**：✅ 封閉 allowlist 中繼、單一 App 多身分並存與切換（工作/個人、鎖定/開放、資料命名空間隔離）；✅ 簽章名冊佈建＋企業通訊錄（G1）、政策開關＋**強制 TURN 接入 WebRTC**（G2）、組織群組／公告（G3）、**工作身分輪替（G4，否決金鑰托管、無後門，ADR-0052）**。餘 G5 SSO/元資料稽核。
 - **治理**：pnpm monorepo、TS strict、TDD、CI、**52 份 ADR**、AGPL-3.0。✅
 
-**缺口總覽**：Tauri 桌面殼 GUI 接線、relay 生產部署（D1/AUTH）、行動端、企業 G5（SSO/元資料稽核）、通話 TURN 保底真機驗證、F4 第三方稽核。
+**缺口總覽**：Tauri **原生服務接線**（B2/B5 背景連線·SQLCipher·金鑰庫）與**打包**（B6）、relay **離線留言 D1／AUTH**（節點已上線）、行動端、企業 G5（SSO/元資料稽核）、通話 TURN 保底真機驗證、F4 第三方稽核。
 
 ---
 
@@ -50,7 +50,7 @@
 
 | # | 任務 | 說明 |
 | --- | --- | --- |
-| B1 | Tauri 二進位 | 🔧 **殼已建**：`src-tauri` 的 `main.rs`、`tauri.conf.json`（`frontendDist=../dist`）、`build.rs`、capabilities、圖示；feature-gate `tauri-app` 讓預設 `cargo test` 不需 Tauri 工具鏈。實際 `tauri build`／視窗行為需 Tauri 環境驗證（ADR-0018）。 |
+| B1 | Tauri 二進位 | ✅ **可建可跑（Windows 實機驗證）**：`src-tauri` 殼（`main.rs`、`tauri.conf.json`、capabilities、圖示組含 `icon.ico`）＋ Tauri CLI 與 `tauri:dev`/`tauri:build` 腳本（內建 `-f tauri-app`）。`cargo build --features tauri-app` 乾淨產出 `cinder-desktop.exe`；`tauri:dev` 開原生視窗、載入前端、登入實機通過（ADR-0018）。⏳ `tauri build` 安裝檔打包＝B6。 |
 | B2 | IPC 契約 / `TauriChatBackend` | 🔧 **契約已定**：`ipc.rs` 的 serde DTO 與前端 `types.ts` 對齊並測試；近期 webview 直接跑既有前端（UI 不改）。原生服務接管時再補 `TauriChatBackend`。 |
 | B3 | Rust 背景長連線 | ✅ **核心+執行期完成**：`session::Session` 政策驅動器（訂閱集、離線佇列、退避、重連即重送訂閱，7 單元測試）＋ `net::run`（tokio + tokio-tungstenite，`net` feature）。以本機 WS 伺服器即時整合測試驗證「連上→送訂閱→收事件→外送」。視窗關閉仍在線（連線由背景 task 持有）。GUI 整合待 Tauri 環境（ADR-0019）。 |
 | B4 | 原生持久化 | ✅ **完成**：`storage::Store`（rusqlite）schema 對齊前端 `AppStorage`（身分/聯絡人/訊息/回應/收回/封鎖），`PRAGMA key` 支援 SQLCipher。`persistence`（bundled SQLite）9 測試；`sqlcipher`（bundled-sqlcipher + vendored OpenSSL）實際加密驗證，含「錯誤金鑰無法開啟」。GUI 接線待 Tauri 環境（ADR-0020）。 |
