@@ -24,6 +24,9 @@ target/
 # Tauri generated bundles
 apps/desktop/src-tauri/gen/
 apps/desktop/src-tauri/WixTools/
+# 行動端啟動圖示由 `tauri icon` 生成，桌面建置不需要（Phase D 再納入）
+apps/desktop/src-tauri/icons/android/
+apps/desktop/src-tauri/icons/ios/
 
 # === React Native / mobile ===
 # iOS

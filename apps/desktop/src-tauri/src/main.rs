@@ -10,7 +10,7 @@
 //! 需以 `--features tauri-app` 在具 Tauri 工具鏈與 webkit2gtk 的環境建置。
 
 use cinder_desktop::ipc::{BridgeEvent, ConnectionState, EVENT_CHANNEL};
-use tauri::{Emitter, Manager};
+use tauri::Emitter;
 
 /// 橋接健康檢查：供前端確認原生層就緒（B2 IPC 契約的首個 command）。
 #[tauri::command]
