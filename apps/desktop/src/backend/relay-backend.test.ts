@@ -87,6 +87,53 @@ describe("RelayChatBackend（真實後端 + 持久化）", () => {
     c.stop();
   });
 
+  it("群組成員管理（M9）：管理者加入新成員→其實例化群；移除成員→該成員退群", () => {
+    const net = createInMemoryRelayNetwork();
+    const storeC = new MemoryStorage();
+    const a = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("a", h), "Alice");
+    const b = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("b", h), "Bob");
+    const c = new RelayChatBackend(storeC, (h) => net.connect("c", h), "Carol");
+    const bGroups: string[] = [];
+    a.start(noop);
+    b.start({ ...noop, onGroups: (gs) => bGroups.push(...gs.map((g) => g.id)) });
+    c.start(noop);
+
+    a.createGroup("小群", [b.self.pubkey]); // 僅 Alice、Bob
+    const gid = bGroups[0]!;
+    expect(storeC.loadGroups()).toEqual([]); // Carol 尚未在群
+
+    // 加入 Carol → Carol 端實例化該群、成員含三人
+    a.addGroupMember(gid, c.self.pubkey);
+    const cg = storeC.loadGroups().find((g) => g.id === gid);
+    expect(cg?.members).toContain(c.self.pubkey);
+    expect(cg?.members).toContain(b.self.pubkey);
+
+    // 移除 Carol → Carol 端退出該群
+    a.removeGroupMember(gid, c.self.pubkey);
+    expect(storeC.loadGroups().find((g) => g.id === gid)).toBeUndefined();
+
+    a.stop();
+    b.stop();
+    c.stop();
+  });
+
+  it("群組成員管理：非管理者呼叫 add 無效", () => {
+    const net = createInMemoryRelayNetwork();
+    const storeB = new MemoryStorage();
+    const a = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("a", h), "Alice");
+    const b = new RelayChatBackend(storeB, (h) => net.connect("b", h), "Bob");
+    const bGroups: string[] = [];
+    a.start(noop);
+    b.start({ ...noop, onGroups: (gs) => bGroups.push(...gs.map((g) => g.id)) });
+    a.createGroup("小群", [b.self.pubkey]);
+    const gid = bGroups[0]!;
+    const dave = getPublicKey(generateSecretKey());
+    b.addGroupMember(gid, dave); // Bob 非管理者
+    expect(storeB.loadGroups().find((g) => g.id === gid)?.members).not.toContain(dave);
+    a.stop();
+    b.stop();
+  });
+
   it("對話串（ADR-0051）：Alice 對 Bob 的回覆帶 replyTo，Bob 收到並持久化", () => {
     const net = createInMemoryRelayNetwork();
     const storeB = new MemoryStorage();

@@ -242,6 +242,12 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
 .menbar__item { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); color: var(--ink); font-size: 12px; padding: 2px 8px 2px 3px; cursor: pointer; flex: none; }
 .menbar__item.on, .menbar__item:hover { border-color: var(--accent); background: var(--hover); }
 .menbar__avatar { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 50%; color: #fff; font-size: 11px; font-weight: 700; }
+.member__row { display: flex; align-items: center; gap: 8px; padding: 4px 2px; font-size: 13px; }
+.member__name { flex: 1; color: var(--ink); }
+.member__remove { border: 1px solid var(--border); background: var(--field); color: var(--muted); border-radius: 10px; width: 18px; height: 18px; line-height: 14px; font-size: 11px; cursor: pointer; padding: 0; }
+.member__remove:hover { color: #c0392b; border-color: #c0392b; }
+.member__add { display: block; width: 100%; text-align: left; border: 1px solid var(--border); background: var(--panel); color: var(--accent); border-radius: 6px; font-size: 13px; padding: 4px 8px; margin-top: 4px; cursor: pointer; }
+.member__add:hover { background: var(--hover); }
 .stickerpick__tab--manage { margin-left: auto; color: var(--muted); }
 .stickerpick__tab--manage:hover { color: var(--accent); }
 .trigpanel { width: 340px; max-width: calc(100vw - 24px); }

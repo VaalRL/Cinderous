@@ -63,6 +63,33 @@ describe("ConversationWindow 訊息列視窗化（P0-3）", () => {
     expect(html).toContain("2 replies");
   });
 
+  it("群組視窗提供成員清單時顯示 👥 成員管理入口（M9）", () => {
+    const html = renderToStaticMarkup(
+      <I18nProvider>
+        <ThemeProvider>
+          <ConversationWindow
+            self={self}
+            contact={contact}
+            messages={[]}
+            typing={false}
+            nudgeSignal={0}
+            senderName={(pk) => pk}
+            groupMembers={[
+              { pubkey: "aa", name: "我" },
+              { pubkey: "cc", name: "Carol" },
+            ]}
+            isGroupAdmin
+            onSend={() => {}}
+            onTyping={() => {}}
+            onNudge={() => {}}
+            onClose={() => {}}
+          />
+        </ThemeProvider>
+      </I18nProvider>,
+    );
+    expect(html).toContain('data-testid="members-btn"');
+  });
+
   it("@提及我的訊息以 mention class + 徽章凸顯（ADR-0050）", () => {
     const html = render([
       { id: "m1", outgoing: false, text: "一般訊息", at: 1 },

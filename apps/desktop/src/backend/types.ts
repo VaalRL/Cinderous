@@ -148,6 +148,10 @@ export interface ChatBackend {
   sendGroupMessage?(groupId: string, text: string, mentions?: PubkeyHex[], replyTo?: string): void;
   /** 離開群組。 */
   leaveGroup?(groupId: string): void;
+  /** 管理者新增群組成員（M9 成員管理）。 */
+  addGroupMember?(groupId: string, pubkey: PubkeyHex): void;
+  /** 管理者移除群組成員（M9 成員管理）。 */
+  removeGroupMember?(groupId: string, pubkey: PubkeyHex): void;
   /** 管理者佈建（ADR-0047/0048/0049）：簽章並發布組織名冊（含可選政策/群組），回傳供 relay allowlist 佈建的 pubkey 清單。 */
   publishRoster?(org: string, members: OrgMember[], policy?: OrgPolicy, groups?: OrgGroup[]): PubkeyHex[];
   /** 發起語音/視訊通話（M8，媒體全程 P2P）。 */

@@ -1085,6 +1085,43 @@ export class RelayChatBackend implements ChatBackend {
     this.emitGroups();
   }
 
+  /** 管理者新增群組成員（M9 成員管理）：既有成員收 group-add、新成員收 group-create 以實例化群。 */
+  addGroupMember(groupId: string, pubkey: PubkeyHex): void {
+    const group = this.groups.find((g) => g.id === groupId);
+    if (!group || group.admin !== this.self.pubkey) return; // 僅管理者可管理成員
+    if (group.members.includes(pubkey)) return;
+    const members = [...group.members, pubkey];
+    this.storage.saveGroup({ ...group, members });
+    this.groups = this.storage.loadGroups();
+    this.ensureContact(pubkey);
+    const hint = this.homeUrl ? { relayHint: this.homeUrl } : {};
+    const existing = group.members.filter((m) => m !== this.self.pubkey);
+    for (const evt of wrapGroupControl({ type: "group-add", id: groupId, member: pubkey }, this.sk, existing, hint)) {
+      this.publishReliable(evt);
+    }
+    // 新成員尚無此群，送 group-create 讓其實例化（帶完整成員清單）。
+    const create: GroupControl = { type: "group-create", id: groupId, name: group.name, admin: this.self.pubkey, members };
+    for (const evt of wrapGroupControl(create, this.sk, [pubkey], hint)) this.publishReliable(evt);
+    this.emitGroups();
+  }
+
+  /** 管理者移除群組成員（M9）：所有原成員（含被移除者）收 group-remove。 */
+  removeGroupMember(groupId: string, pubkey: PubkeyHex): void {
+    const group = this.groups.find((g) => g.id === groupId);
+    if (!group || group.admin !== this.self.pubkey) return; // 僅管理者
+    if (pubkey === this.self.pubkey) return; // 管理者自身請用離開/解散
+    if (!group.members.includes(pubkey)) return;
+    const members = group.members.filter((m) => m !== pubkey);
+    this.storage.saveGroup({ ...group, members });
+    this.groups = this.storage.loadGroups();
+    const hint = this.homeUrl ? { relayHint: this.homeUrl } : {};
+    const recipients = group.members.filter((m) => m !== this.self.pubkey); // 含被移除者，令其客戶端退群
+    for (const evt of wrapGroupControl({ type: "group-remove", id: groupId, member: pubkey }, this.sk, recipients, hint)) {
+      this.publishReliable(evt);
+    }
+    this.emitGroups();
+  }
+
   startCall(to: PubkeyHex, media: CallMedia): void {
     this.call.startCall(to, media);
   }

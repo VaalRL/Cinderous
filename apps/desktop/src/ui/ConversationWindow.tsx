@@ -87,6 +87,16 @@ export interface ConversationProps {
   senderName?: (pubkey: string) => string;
   /** 離開群組（群組視窗才提供）。 */
   onLeaveGroup?: () => void;
+  /** 群組成員清單（提供即顯示 👥 成員管理入口，M9）。 */
+  groupMembers?: MentionCandidate[];
+  /** 自己是否為群組管理者（可增/移成員）。 */
+  isGroupAdmin?: boolean;
+  /** 可加入的聯絡人（不在群內者），供管理者新增成員。 */
+  addableContacts?: MentionCandidate[];
+  /** 管理者新增成員。 */
+  onAddMember?: (pubkey: string) => void;
+  /** 管理者移除成員。 */
+  onRemoveMember?: (pubkey: string) => void;
   /** 企業政策停用貼圖時隱藏貼圖鈕（ADR-0048）。 */
   stickersDisabled?: boolean;
   /** 公告頻道唯讀（ADR-0049）：非管理者隱藏輸入區。 */
@@ -126,6 +136,7 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
   const [threadMenSel, setThreadMenSel] = useState(0);
   const [threadMenDismissed, setThreadMenDismissed] = useState(false);
   const [showAlbum, setShowAlbum] = useState(false);
+  const [showMembers, setShowMembers] = useState(false);
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [ttl, setTtl] = useState(0);
   const [dragging, setDragging] = useState(false);
@@ -393,6 +404,17 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
               🎥
             </span>
           </>
+        ) : null}
+        {props.groupMembers ? (
+          <span
+            className="win__btn"
+            role="button"
+            title={t("members_title")}
+            data-testid="members-btn"
+            onClick={() => setShowMembers(true)}
+          >
+            👥
+          </span>
         ) : null}
         {props.onLeaveGroup ? (
           <span
@@ -880,6 +902,55 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
       {lightbox && (
         <div className="lightbox" role="dialog" aria-modal="true" onClick={() => setLightbox(null)}>
           <img src={lightbox} alt={t("image_alt")} />
+        </div>
+      )}
+
+      {showMembers && props.groupMembers && (
+        <div className="modal" role="dialog" aria-modal="true" aria-label={t("members_title")} onClick={() => setShowMembers(false)}>
+          <div className="modal__box win" onClick={(e) => e.stopPropagation()}>
+            <div className="win__title">
+              <span>{t("members_title")}（{props.groupMembers.length}）</span>
+              <span className="spacer" />
+              <span className="win__btn" role="button" aria-label={t("convo_close")} onClick={() => setShowMembers(false)}>×</span>
+            </div>
+            <div className="groupmodal" data-testid="members-panel">
+              {props.groupMembers.map((m) => (
+                <div className="member__row" key={m.pubkey}>
+                  <span className="menbar__avatar" style={{ background: avatarColor(m.pubkey) }}>{initial(m.name)}</span>
+                  <span className="member__name">
+                    {m.name}
+                    {m.pubkey === self.pubkey ? `（${t("members_you")}）` : ""}
+                  </span>
+                  {props.isGroupAdmin && props.onRemoveMember && m.pubkey !== self.pubkey ? (
+                    <button
+                      type="button"
+                      className="member__remove"
+                      title={t("members_remove")}
+                      aria-label={t("members_remove")}
+                      onClick={() => props.onRemoveMember!(m.pubkey)}
+                    >
+                      ✕
+                    </button>
+                  ) : null}
+                </div>
+              ))}
+              {props.isGroupAdmin && props.addableContacts && props.addableContacts.length > 0 ? (
+                <>
+                  <div className="groupmodal__label">{t("members_add")}</div>
+                  {props.addableContacts.map((c) => (
+                    <button
+                      type="button"
+                      className="member__add"
+                      key={c.pubkey}
+                      onClick={() => props.onAddMember?.(c.pubkey)}
+                    >
+                      ＋ {c.name}
+                    </button>
+                  ))}
+                </>
+              ) : null}
+            </div>
+          </div>
         </div>
       )}
 

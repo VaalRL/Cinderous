@@ -620,6 +620,17 @@ export function App(): JSX.Element {
               mentionCandidates={group.members
                 .filter((m) => m !== self.pubkey)
                 .map((m) => ({ pubkey: m, name: senderName(m) }))}
+              groupMembers={group.members.map((m) => ({ pubkey: m, name: senderName(m) }))}
+              isGroupAdmin={group.admin === self.pubkey}
+              addableContacts={contacts
+                .filter((c) => !group.members.includes(c.pubkey))
+                .map((c) => ({ pubkey: c.pubkey, name: c.name }))}
+              {...(activeBackend.addGroupMember
+                ? { onAddMember: (m: string) => activeBackend.addGroupMember!(pk, m) }
+                : {})}
+              {...(activeBackend.removeGroupMember
+                ? { onRemoveMember: (m: string) => activeBackend.removeGroupMember!(pk, m) }
+                : {})}
               onSend={(text, _ttl, mentions, replyTo) => activeBackend.sendGroupMessage?.(pk, text, mentions, replyTo)}
               onTyping={() => {}}
               onNudge={() => {}}

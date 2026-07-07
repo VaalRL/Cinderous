@@ -127,6 +127,10 @@ export interface Messages {
   thread_reply: string;
   thread_open: string;
   thread_replies: string;
+  members_title: string;
+  members_you: string;
+  members_remove: string;
+  members_add: string;
   trigger_manage: string;
   trigger_empty: string;
   trigger_rename: string;
@@ -297,6 +301,10 @@ const zhHant: Messages = {
   thread_reply: "回覆討論串…",
   thread_open: "在討論串回覆",
   thread_replies: "{count} 則回覆",
+  members_title: "群組成員",
+  members_you: "你",
+  members_remove: "移除成員",
+  members_add: "新增成員",
   trigger_manage: "觸發文字總覽",
   trigger_empty: "還沒有觸發文字——在貼圖上按 ⌨ 設定",
   trigger_rename: "改名",
@@ -467,6 +475,10 @@ const en: Messages = {
   thread_reply: "Reply in thread…",
   thread_open: "Reply in thread",
   thread_replies: "{count} replies",
+  members_title: "Group members",
+  members_you: "you",
+  members_remove: "Remove member",
+  members_add: "Add member",
   trigger_manage: "Trigger overview",
   trigger_empty: "No triggers yet — press ⌨ on a sticker to add one",
   trigger_rename: "Rename",
