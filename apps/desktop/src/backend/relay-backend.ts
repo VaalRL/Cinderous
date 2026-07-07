@@ -1089,6 +1089,7 @@ export class RelayChatBackend implements ChatBackend {
   addGroupMember(groupId: string, pubkey: PubkeyHex): void {
     const group = this.groups.find((g) => g.id === groupId);
     if (!group || group.admin !== this.self.pubkey) return; // 僅管理者可管理成員
+    if (group.org) return; // 組織群由名冊權威管理（ADR-0049），不手動增/移
     if (group.members.includes(pubkey)) return;
     const members = [...group.members, pubkey];
     this.storage.saveGroup({ ...group, members });
@@ -1109,6 +1110,7 @@ export class RelayChatBackend implements ChatBackend {
   removeGroupMember(groupId: string, pubkey: PubkeyHex): void {
     const group = this.groups.find((g) => g.id === groupId);
     if (!group || group.admin !== this.self.pubkey) return; // 僅管理者
+    if (group.org) return; // 組織群由名冊權威管理（ADR-0049），不手動增/移
     if (pubkey === this.self.pubkey) return; // 管理者自身請用離開/解散
     if (!group.members.includes(pubkey)) return;
     const members = group.members.filter((m) => m !== pubkey);

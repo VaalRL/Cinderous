@@ -621,7 +621,8 @@ export function App(): JSX.Element {
                 .filter((m) => m !== self.pubkey)
                 .map((m) => ({ pubkey: m, name: senderName(m) }))}
               groupMembers={group.members.map((m) => ({ pubkey: m, name: senderName(m) }))}
-              isGroupAdmin={group.admin === self.pubkey}
+              // 組織群（ADR-0049）由名冊權威管理，不開放手動增/移成員（避免與名冊分歧）。
+              isGroupAdmin={group.admin === self.pubkey && !group.org}
               addableContacts={contacts
                 .filter((c) => !group.members.includes(c.pubkey))
                 .map((c) => ({ pubkey: c.pubkey, name: c.name }))}

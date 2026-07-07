@@ -117,6 +117,29 @@ describe("RelayChatBackend（真實後端 + 持久化）", () => {
     c.stop();
   });
 
+  it("群組成員管理：組織群（org）拒絕手動增/移成員（名冊權威，ADR-0049）", () => {
+    const net = createInMemoryRelayNetwork();
+    const adminSk = generateSecretKey();
+    const admin = getPublicKey(adminSk);
+    const store = new MemoryStorage();
+    // 身分即為 orgAdmin；採用自己名冊的組織群（org:true）。
+    store.saveIdentity({ nsec: nsecEncode(adminSk), name: "Admin" });
+    const backend = new RelayChatBackend(store, (h) => net.connect("admin", h), "Admin", { orgAdminPubkey: admin });
+    backend.start(noop);
+    const other = getPublicKey(generateSecretKey());
+    backend.publishRoster("Acme", [{ pubkey: admin, name: "Admin" }], undefined, [
+      { id: "dept", name: "部門", members: [admin] },
+    ]);
+    expect(store.loadGroups().find((g) => g.id === "dept")?.org).toBe(true);
+
+    // 手動加人/移人皆被拒（成員清單不變）。
+    backend.addGroupMember("dept", other);
+    expect(store.loadGroups().find((g) => g.id === "dept")?.members).not.toContain(other);
+    backend.removeGroupMember("dept", admin);
+    expect(store.loadGroups().find((g) => g.id === "dept")?.members).toContain(admin);
+    backend.stop();
+  });
+
   it("群組成員管理：非管理者呼叫 add 無效", () => {
     const net = createInMemoryRelayNetwork();
     const storeB = new MemoryStorage();

@@ -26,6 +26,8 @@ export interface Group {
   members: PubkeyHex[];
   /** 公告頻道（ADR-0049）：僅管理者可發文、成員唯讀。 */
   announce?: boolean;
+  /** 組織名冊分發的群（ADR-0049）：由名冊對帳權威管理，客戶端不得手動增/移成員。 */
+  org?: boolean;
 }
 
 /**
