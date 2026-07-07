@@ -167,6 +167,6 @@ Phase A（前端產品化，可在此環境大量推進）
 
 1. **需你決策**：M7 語音訊息離線退回策略、G5 SSO/元資料稽核（各先立 ADR）。
 2. **需換環境**：Phase B（Tauri 打包＋OS 金鑰庫）、Phase C（Cloudflare relay 部署＋D1＋NIP-42 AUTH）、Phase D（React Native 行動端＋QR 相機掃描）、通話 TURN 部署、F4 第三方稽核。
-3. **此環境可選打磨**：G4 輪替後續（輪替提示 i18n、Rust store 平價）、G1 多管理者名冊、多身分切換列同時在線。
+3. **此環境可選打磨**：**顯示名稱傳遞（Nostr kind 0 profile metadata——聯絡人顯示對方自選暱稱，而非 npub／本地標籤；見 ARCHITECTURE §9）**、G4 輪替後續（輪替提示 i18n、Rust store 平價）、G1 多管理者名冊、多身分切換列同時在線。
 
 > 只有人能做的部署/金鑰步驟集中在 [`OPERATOR-TODO.md`](./OPERATOR-TODO.md)。
