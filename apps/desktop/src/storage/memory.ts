@@ -65,6 +65,18 @@ export class MemoryStorage implements AppStorage {
     this.groups = this.groups.map((g) =>
       g.members.includes(from) ? { ...g, members: [...new Set(g.members.map((p) => (p === from ? to : p)))] } : g,
     );
+    // 群訊發送者標籤 remap（ADR-0052）：群組歷史中舊 npub 的 sender 改寫為新 npub。
+    for (const g of this.groups) {
+      const list = this.messages.get(g.id);
+      if (!list) continue;
+      let changed = false;
+      const rewritten = list.map((m) => {
+        if (m.sender !== from) return m;
+        changed = true;
+        return { ...m, sender: to };
+      });
+      if (changed) this.messages.set(g.id, rewritten);
+    }
     this.contacts = this.contacts.filter((c) => c.pubkey !== from);
   }
   blockContact(contact: StoredContact): void {

@@ -84,6 +84,18 @@ describe("MemoryStorage", () => {
     expect(s.loadGroups().find((g) => g.id === "g")?.members).toEqual(["new", "bob"]); // old→new 併入、不重複
   });
 
+  it("remapContact（ADR-0052）：群訊發送者標籤 from→to 改寫、他人不受影響", () => {
+    const s = new MemoryStorage();
+    s.saveGroup({ id: "g", name: "研發", admin: "admin", members: ["old", "bob"] });
+    s.appendMessage({ id: "gm1", contact: "g", outgoing: false, text: "嗨", at: 1, sender: "old" });
+    s.appendMessage({ id: "gm2", contact: "g", outgoing: false, text: "你好", at: 2, sender: "bob" });
+    s.remapContact("old", "new");
+    const msgs = s.loadMessages("g");
+    expect(msgs.find((m) => m.id === "gm1")?.sender).toBe("new"); // old 的群訊改標新身分
+    expect(msgs.find((m) => m.id === "gm2")?.sender).toBe("bob"); // 其他發送者不受影響
+    expect(s.loadGroups().find((g) => g.id === "g")?.members).toEqual(["new", "bob"]); // 成員也 remap
+  });
+
   it("封鎖：移出聯絡人、記入封鎖名單、可解除", () => {
     const s = new MemoryStorage();
     s.addContact({ pubkey: "aa", name: "A" });

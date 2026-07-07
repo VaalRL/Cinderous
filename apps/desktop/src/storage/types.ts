@@ -71,7 +71,8 @@ export interface AppStorage {
   /**
    * 身分輪替（ADR-0052）：把舊 npub `from` 的對話歷史與群組成員資格接續到新 npub `to`。
    * 移動 1:1 訊息（重寫 `contact`、併入 `to` 的對話、以 id 去重、依時間排序、遵守每對話上限）、
-   * 更新各群組 `members`（from→to 去重），並移除舊聯絡人條目（`to` 的聯絡人由名冊對帳補上）。
+   * 更新各群組 `members`（from→to 去重）、改寫群組訊息的 `sender` 標籤（from→to，維持歷史歸屬），
+   * 並移除舊聯絡人條目（`to` 的聯絡人由名冊對帳補上）。
    */
   remapContact(from: string, to: string): void;
   /** 封鎖某身分（會一併移出聯絡人），並記入封鎖名單。 */

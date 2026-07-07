@@ -219,8 +219,13 @@ export function App(): JSX.Element {
         // 並注入一則系統提示。開啟中的對話一併換鍵。
         const note: ChatMessage = { id: uid("rot"), outgoing: false, text: `🔑 ${name} 已更新金鑰（對話已接續）`, at: Date.now() };
         setConvos((prev) => {
-          const merged = [...(prev[to] ?? []), ...(prev[from] ?? []), note].sort((a, b) => a.at - b.at);
-          const next = { ...prev, [to]: merged };
+          // 先把所有對話（含群組）中 sender=from 的訊息改寫為 to（群訊發送者標籤 remap）。
+          const next: Record<string, ChatMessage[]> = {};
+          for (const [key, msgs] of Object.entries(prev)) {
+            next[key] = msgs.map((m) => (m.sender === from ? { ...m, sender: to } : m));
+          }
+          // 再把 1:1 舊對話併入新 npub + 系統提示。
+          next[to] = [...(next[to] ?? []), ...(next[from] ?? []), note].sort((a, b) => a.at - b.at);
           delete next[from];
           return next;
         });

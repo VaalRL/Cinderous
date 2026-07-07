@@ -411,6 +411,9 @@ describe("RelayChatBackend（真實後端 + 持久化）", () => {
     net.connect("admin").publish(signOrgRoster({ org: "Acme", members: [{ pubkey: aliceOld, name: "Alice" }], updatedAt: 1000 }, adminSk));
     expect(store.loadContacts().map((c) => c.pubkey)).toEqual([aliceOld]);
     store.appendMessage({ id: "m1", contact: aliceOld, outgoing: false, text: "早安", at: 1 });
+    // 並模擬一個含 Alice 的群組與其群訊（驗證群成員與 sender 標籤一併 remap）
+    store.saveGroup({ id: "grp", name: "研發", admin, members: [aliceOld, work.self.pubkey] });
+    store.appendMessage({ id: "gm1", contact: "grp", outgoing: false, text: "群訊", at: 2, sender: aliceOld });
 
     // v2：Alice 輪替 aliceOld → aliceNew（舊標 supersededBy、新加入）
     net.connect("admin2").publish(
@@ -427,6 +430,8 @@ describe("RelayChatBackend（真實後端 + 持久化）", () => {
     expect(store.loadContacts().map((c) => c.pubkey)).toEqual([aliceNew]); // 通訊錄換成新 npub
     expect(store.loadMessages(aliceOld)).toEqual([]); // 舊對話已搬走
     expect(store.loadMessages(aliceNew).map((m) => m.id)).toEqual(["m1"]); // 歷史接續到新 npub
+    expect(store.loadGroups().find((g) => g.id === "grp")?.members).toEqual([aliceNew, work.self.pubkey]); // 群成員 remap
+    expect(store.loadMessages("grp").find((m) => m.id === "gm1")?.sender).toBe(aliceNew); // 群訊發送者標籤 remap
     expect(rotations).toEqual([{ from: aliceOld, to: aliceNew, name: "Alice" }]); // UI 通知
     work.stop();
   });

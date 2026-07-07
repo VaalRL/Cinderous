@@ -102,12 +102,21 @@ export class LocalStorage implements AppStorage {
     } catch {
       /* 忽略 */
     }
-    write(
-      this.k("groups"),
-      this.loadGroups().map((g) =>
-        g.members.includes(from) ? { ...g, members: [...new Set(g.members.map((p) => (p === from ? to : p)))] } : g,
-      ),
+    const groups = this.loadGroups().map((g) =>
+      g.members.includes(from) ? { ...g, members: [...new Set(g.members.map((p) => (p === from ? to : p)))] } : g,
     );
+    write(this.k("groups"), groups);
+    // 群訊發送者標籤 remap（ADR-0052）：群組歷史中舊 npub 的 sender 改寫為新 npub。
+    for (const g of groups) {
+      const list = this.loadMessages(g.id);
+      let changed = false;
+      const rewritten = list.map((m) => {
+        if (m.sender !== from) return m;
+        changed = true;
+        return { ...m, sender: to };
+      });
+      if (changed) write(this.k("msgs." + g.id), rewritten);
+    }
     write(this.k("contacts"), this.loadContacts().filter((c) => c.pubkey !== from));
   }
   blockContact(contact: StoredContact): void {
