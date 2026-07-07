@@ -21,7 +21,7 @@
 - **企業模式（Phase G，G0–G4 完成）**：✅ 封閉 allowlist 中繼、單一 App 多身分並存與切換（工作/個人、鎖定/開放、資料命名空間隔離）；✅ 簽章名冊佈建＋企業通訊錄（G1）、政策開關＋**強制 TURN 接入 WebRTC**（G2）、組織群組／公告（G3）、**工作身分輪替（G4，否決金鑰托管、無後門，ADR-0052）**。餘 G5 SSO/元資料稽核。
 - **治理**：pnpm monorepo、TS strict、TDD、CI、**52 份 ADR**、AGPL-3.0。✅
 
-**缺口總覽**：Tauri **原生服務接線**（B2 背景連線·SQLCipher；B5 金鑰庫 ✅）與**打包**（B6）、relay **離線留言 D1／AUTH**（節點已上線）、行動端、企業 G5（SSO/元資料稽核）、通話 TURN 保底真機驗證、F4 第三方稽核。
+**缺口總覽**：Tauri **原生服務接線**（B2 背景連線·SQLCipher；B5 金鑰庫 ✅）與**打包簽章/自動更新**（B6；未簽章安裝檔已可產出）、relay **離線留言 D1／AUTH**（節點已上線）、行動端、企業 G5（SSO/元資料稽核）、通話 TURN 保底真機驗證、F4 第三方稽核。
 
 ---
 
@@ -55,7 +55,7 @@
 | B3 | Rust 背景長連線 | ✅ **核心+執行期完成**：`session::Session` 政策驅動器（訂閱集、離線佇列、退避、重連即重送訂閱，7 單元測試）＋ `net::run`（tokio + tokio-tungstenite，`net` feature）。以本機 WS 伺服器即時整合測試驗證「連上→送訂閱→收事件→外送」。視窗關閉仍在線（連線由背景 task 持有）。GUI 整合待 Tauri 環境（ADR-0019）。 |
 | B4 | 原生持久化 | ✅ **完成**：`storage::Store`（rusqlite）schema 對齊前端 `AppStorage`（身分/聯絡人/訊息/回應/收回/封鎖），`PRAGMA key` 支援 SQLCipher。`persistence`（bundled SQLite）9 測試；`sqlcipher`（bundled-sqlcipher + vendored OpenSSL）實際加密驗證，含「錯誤金鑰無法開啟」。GUI 接線待 Tauri 環境（ADR-0020）。 |
 | B5 | OS 金鑰儲存 | ✅ **完成（ADR-0053，Windows 實機驗證）**：`keyvault`（`keyring` crate）+ `key_set/get/delete` IPC；前端 KeyVault（Tauri→OS 金鑰庫、瀏覽器→localStorage 後備）+ 開機 async 載入 + 首次遷移。私鑰入 Credential Manager（`<pubkey>.app.cinder.desktop`）、明文不落 localStorage、重載自金鑰庫自動登入——皆實機確認。瀏覽器路徑零回歸（218 測試綠）。 |
-| B6 | 打包/更新 | 簽章、自動更新、系統匣/通知。 |
+| B6 | 打包/更新 | 🔧 **安裝檔完成（Windows 實機）**：`tauri:build` 產出 NSIS `.exe` setup（1.9MB）＋ MSI（2.8MB）於 `target/release/bundle/`；`bundle.icon` 指向完整圖示組（含 `.ico`）。⏳ **未簽章**（SmartScreen 會警告）＋自動更新＋系統匣/通知——皆需程式碼簽章憑證／updater 金鑰。 |
 
 **完成定義**：可安裝的桌面 App，背景在線、資料與私鑰安全落地。
 
