@@ -31,6 +31,7 @@ import {
   RelayClient,
   RELAY_LIST_KIND,
   rosterAllowlist,
+  rosterRemap,
   shouldAdoptRoster,
   signOrgRoster,
   verifyOrgRoster,
@@ -532,6 +533,31 @@ export class RelayChatBackend implements ChatBackend {
   }
 
   /**
+   * 身分輪替遷移（ADR-0052）：對名冊宣告的每筆「舊 npub → 新 npub」，若本機原本認得舊
+   * npub（聯絡人或群成員），把 1:1 歷史與群組成員資格接續到新 npub，並通知 UI「◯◯ 已更新
+   * 金鑰」。回傳是否有任何遷移發生（供 adoptRoster 決定是否重載聯絡人）。
+   */
+  private applyRotations(doc: OrgRosterDoc): boolean {
+    const self = this.self.pubkey;
+    const groups = this.storage.loadGroups();
+    let migrated = false;
+    for (const { from, to } of rosterRemap(doc)) {
+      if (from === self || to === self) continue;
+      const known = this.contacts.some((c) => c.pubkey === from) || groups.some((g) => g.members.includes(from));
+      if (!known) continue;
+      this.storage.remapContact(from, to);
+      this.statuses.delete(from);
+      const name =
+        doc.members.find((m) => m.pubkey === to)?.name ??
+        doc.members.find((m) => m.pubkey === from)?.name ??
+        to.slice(0, 8);
+      this.handlers?.onIdentityRotated?.(from, to, name);
+      migrated = true;
+    }
+    return migrated;
+  }
+
+  /**
    * 採用帶內收到的管理者組織名冊（ADR-0047）：驗簽已在 onEvent 完成。
    * 工作身分聯絡人由名冊**權威管理**——移除名冊外者（撤銷/離職）、匯入名冊成員。
    */
@@ -541,9 +567,12 @@ export class RelayChatBackend implements ChatBackend {
     if (doc.policy) this.handlers?.onPolicy?.(doc.policy); // 企業政策（ADR-0048）
     this.forceTurn = doc.policy?.forceTurn === true; // 強制 TURN 生效於後續新建的 WebRTC 連線
     const self = this.self.pubkey;
-    const desired = doc.members.filter((m) => m.pubkey !== self);
+    // ADR-0052：先把本機認得的舊 npub 接續到新 npub（歷史/群資格遷移），再以在世成員對帳。
+    let changed = this.applyRotations(doc);
+    if (changed) this.contacts = this.storage.loadContacts();
+    // 僅在世成員（排除已輪替的舊 npub）為權威通訊錄——舊 npub 於下方撤銷、新 npub 於下方匯入。
+    const desired = doc.members.filter((m) => m.pubkey !== self && !m.supersededBy);
     const desiredKeys = new Set(desired.map((m) => m.pubkey));
-    let changed = false;
     // 撤銷：移除名冊外的（非封鎖）聯絡人
     for (const c of this.contacts) {
       if (!desiredKeys.has(c.pubkey) && !this.isBlocked(c.pubkey)) {
@@ -1029,6 +1058,11 @@ export class RelayChatBackend implements ChatBackend {
     this.client.publish(evt);
     this.lastRoster = doc; // 自身也記錄，避免採用自己較舊的
     // 管理者本機立即對帳，否則因 lastRoster 已設而不會再採用自己的名冊、看不到剛發布的群。
+    if (this.applyRotations(doc)) {
+      // ADR-0052：管理者自身若也認得被輪替的舊 npub，一併接續。
+      this.contacts = this.storage.loadContacts();
+      this.emitContacts();
+    }
     this.reconcileOrgGroups(doc);
     return rosterAllowlist(doc);
   }

@@ -86,6 +86,30 @@ export class LocalStorage implements AppStorage {
     write(this.k("reactions"), this.loadReactions().filter((r) => !messageIds.has(r.messageId)));
     write(this.k("deleted"), this.loadDeleted().filter((id) => !messageIds.has(id)));
   }
+  remapContact(from: string, to: string): void {
+    if (from === to) return;
+    const moved = this.loadMessages(from).map((m) => ({ ...m, contact: to }));
+    if (moved.length > 0) {
+      const dest = this.loadMessages(to);
+      const seen = new Set(dest.map((m) => m.id));
+      for (const m of moved) if (!seen.has(m.id)) dest.push(m);
+      dest.sort((a, b) => a.at - b.at);
+      if (dest.length > MESSAGES_PER_CONVO) dest.splice(0, dest.length - MESSAGES_PER_CONVO);
+      write(this.k("msgs." + to), dest);
+    }
+    try {
+      localStorage.removeItem(this.k("msgs." + from));
+    } catch {
+      /* 忽略 */
+    }
+    write(
+      this.k("groups"),
+      this.loadGroups().map((g) =>
+        g.members.includes(from) ? { ...g, members: [...new Set(g.members.map((p) => (p === from ? to : p)))] } : g,
+      ),
+    );
+    write(this.k("contacts"), this.loadContacts().filter((c) => c.pubkey !== from));
+  }
   blockContact(contact: StoredContact): void {
     this.removeContact(contact.pubkey);
     const blocked = this.loadBlocked();

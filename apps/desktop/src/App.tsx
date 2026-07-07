@@ -1,4 +1,5 @@
 import {
+  applyRosterRotations,
   type CallMedia,
   type CallState,
   generateSecretKey,
@@ -213,6 +214,21 @@ export function App(): JSX.Element {
       onConnection: setConn,
       onRelayPool: setRelays,
       onPolicy: setPolicy,
+      onIdentityRotated: (from, to, name) => {
+        // 企業身分輪替（ADR-0052）：storage 已由後端接續；同步記憶體對話狀態（舊→新 npub）
+        // 並注入一則系統提示。開啟中的對話一併換鍵。
+        const note: ChatMessage = { id: uid("rot"), outgoing: false, text: `🔑 ${name} 已更新金鑰（對話已接續）`, at: Date.now() };
+        setConvos((prev) => {
+          const merged = [...(prev[to] ?? []), ...(prev[from] ?? []), note].sort((a, b) => a.at - b.at);
+          const next = { ...prev, [to]: merged };
+          delete next[from];
+          return next;
+        });
+        setOpen((prev) => {
+          const mapped = prev.map((pk) => (pk === from ? to : pk));
+          return mapped.filter((pk, i) => mapped.indexOf(pk) === i);
+        });
+      },
       onFileProgress: (pk, id, sent) =>
         setConvos((prev) => {
           const cur = prev[pk];
@@ -800,6 +816,7 @@ function RosterAdminModal({
   const [org, setOrg] = useState("");
   const [text, setText] = useState(selfNpub ? `${selfNpub} 管理者` : "");
   const [groupText, setGroupText] = useState("");
+  const [rotText, setRotText] = useState("");
   const [pol, setPol] = useState<OrgPolicy>({});
   const [allowlist, setAllowlist] = useState<string[] | null>(null);
   const [error, setError] = useState("");
@@ -818,7 +835,25 @@ function RosterAdminModal({
         return;
       }
     }
-    if (members.length === 0) {
+    // 身分輪替（ADR-0052）：每行 `舊npub 新npub [名稱]`；舊成員標記作廢、新 npub 補入。
+    const rotations: { from: PubkeyHex; to: PubkeyHex; name?: string }[] = [];
+    for (const line of rotText.split("\n")) {
+      const t = line.trim();
+      if (!t) continue;
+      const [oldNp, newNp, ...rest] = t.split(/\s+/);
+      try {
+        rotations.push({
+          from: npubDecode((oldNp ?? "").trim()),
+          to: npubDecode((newNp ?? "").trim()),
+          ...(rest.length > 0 ? { name: rest.join(" ") } : {}),
+        });
+      } catch {
+        setError(`輪替無法解析：${t}`);
+        return;
+      }
+    }
+    const finalMembers = rotations.length > 0 ? applyRosterRotations(members, rotations) : members;
+    if (finalMembers.length === 0) {
       setError("至少需要一位成員");
       return;
     }
@@ -851,7 +886,7 @@ function RosterAdminModal({
     try {
       const anyPol = Object.values(pol).some(Boolean);
       setAllowlist(
-        onPublish(org.trim() || "組織", members, anyPol ? pol : undefined, groups.length ? groups : undefined),
+        onPublish(org.trim() || "組織", finalMembers, anyPol ? pol : undefined, groups.length ? groups : undefined),
       );
     } catch {
       setError("發布失敗");
@@ -900,6 +935,15 @@ function RosterAdminModal({
             placeholder="!全體公告, npub1…, npub1…"
             value={groupText}
             onChange={(e) => setGroupText(e.target.value)}
+          />
+          <div className="groupmodal__label">身分輪替（可選，換機/遺失，每行：舊npub 新npub 名稱）</div>
+          <textarea
+            className="groupmodal__name"
+            rows={3}
+            aria-label="身分輪替"
+            placeholder="npub1舊… npub1新… Alice"
+            value={rotText}
+            onChange={(e) => setRotText(e.target.value)}
           />
           {error ? <div className="text expired__text">{error}</div> : null}
           <button className="groupmodal__create" data-testid="roster-publish" onClick={publish}>

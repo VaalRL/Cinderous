@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { generateSecretKey, getPublicKey } from "./keys.js";
 import {
+  applyRosterRotations,
   diffRoster,
   type OrgRosterDoc,
   rosterAllowlist,
+  rosterRemap,
   shouldAdoptRoster,
   signOrgRoster,
   verifyOrgRoster,
@@ -13,6 +15,8 @@ const adminSk = generateSecretKey();
 const admin = getPublicKey(adminSk);
 const a = getPublicKey(generateSecretKey());
 const b = getPublicKey(generateSecretKey());
+const c = getPublicKey(generateSecretKey());
+const d = getPublicKey(generateSecretKey());
 
 const doc = (members: OrgRosterDoc["members"], updatedAt = 1000): OrgRosterDoc => ({ org: "Acme", members, updatedAt });
 
@@ -101,5 +105,113 @@ describe("org-roster 簽章名冊（ADR-0047）", () => {
     expect(out?.groups?.map((g) => g.id)).toEqual(["dev", "notice"]);
     expect(out?.groups?.find((g) => g.id === "notice")?.announce).toBe(true);
     expect(out?.groups?.find((g) => g.id === "dev")?.announce).toBeUndefined();
+  });
+});
+
+describe("身分輪替（ADR-0052）", () => {
+  it("supersededBy round-trip 保留於簽章名冊", () => {
+    const ev = signOrgRoster(
+      doc([{ pubkey: a, name: "Alice", supersededBy: b }, { pubkey: b, name: "Alice" }]),
+      adminSk,
+    );
+    const out = verifyOrgRoster(ev, admin);
+    expect(out?.members.find((m) => m.pubkey === a)?.supersededBy).toBe(b);
+    expect(out?.members.find((m) => m.pubkey === b)?.supersededBy).toBeUndefined();
+  });
+
+  it("rosterAllowlist 排除已輪替的舊 npub、保留在世者", () => {
+    const d0 = doc([{ pubkey: a, name: "Alice", supersededBy: b }, { pubkey: b, name: "Alice" }, { pubkey: c, name: "Cara" }]);
+    expect(rosterAllowlist(d0)).toEqual([b, c]);
+  });
+
+  it("rosterAllowlist 無輪替時行為不變（相容 ADR-0047）", () => {
+    expect(rosterAllowlist(doc([{ pubkey: a, name: "A" }, { pubkey: b, name: "B" }]))).toEqual([a, b]);
+  });
+
+  it("rosterRemap：單次輪替 舊→新", () => {
+    const d0 = doc([{ pubkey: a, name: "Alice", supersededBy: b }, { pubkey: b, name: "Alice" }]);
+    expect(rosterRemap(d0)).toEqual([{ from: a, to: b }]);
+  });
+
+  it("rosterRemap：連鎖輪替 A→B→C，A 與 B 皆對映到最終在世者 C", () => {
+    const d0 = doc([
+      { pubkey: a, name: "Alice", supersededBy: b },
+      { pubkey: b, name: "Alice", supersededBy: c },
+      { pubkey: c, name: "Alice" },
+    ]);
+    const remap = rosterRemap(d0);
+    expect(remap).toContainEqual({ from: a, to: c });
+    expect(remap).toContainEqual({ from: b, to: c });
+    expect(remap).toHaveLength(2);
+  });
+
+  it("rosterRemap：環（A→B→A）與自我指向不產生對映、不丟例外", () => {
+    const cycle = doc([{ pubkey: a, name: "A", supersededBy: b }, { pubkey: b, name: "B", supersededBy: a }]);
+    expect(rosterRemap(cycle)).toEqual([]);
+    const self = doc([{ pubkey: a, name: "A", supersededBy: a }]);
+    expect(rosterRemap(self)).toEqual([]);
+  });
+
+  it("diffRoster：本機認得的舊 npub 產生 remap，且不重複列入 add/remove", () => {
+    const prev = doc([{ pubkey: admin, name: "Me" }, { pubkey: a, name: "Alice" }]);
+    const next = doc([
+      { pubkey: admin, name: "Me" },
+      { pubkey: a, name: "Alice", supersededBy: b },
+      { pubkey: b, name: "Alice" },
+    ]);
+    const { toAdd, toRemove, toRemap } = diffRoster(prev, next, admin);
+    expect(toRemap).toEqual([{ from: a, to: b }]);
+    expect(toAdd.map((m) => m.pubkey)).toEqual([]); // b 由 remap 接續，不另外新增
+    expect(toRemove).toEqual([]); // a 由 remap 消化，非離職
+  });
+
+  it("diffRoster：本機未曾認得舊 npub 時不 remap，新 npub 走一般新增", () => {
+    const prev = doc([{ pubkey: admin, name: "Me" }]);
+    const next = doc([
+      { pubkey: admin, name: "Me" },
+      { pubkey: a, name: "Alice", supersededBy: b },
+      { pubkey: b, name: "Alice" },
+    ]);
+    const { toAdd, toRemap } = diffRoster(prev, next, admin);
+    expect(toRemap).toEqual([]);
+    expect(toAdd.map((m) => m.pubkey)).toEqual([b]);
+  });
+
+  it("diffRoster：輪替與離職並存——remap 老員、移除離職者、新增新人", () => {
+    const prev = doc([{ pubkey: admin, name: "Me" }, { pubkey: a, name: "Alice" }, { pubkey: c, name: "Cara" }]);
+    const next = doc([
+      { pubkey: admin, name: "Me" },
+      { pubkey: a, name: "Alice", supersededBy: b }, // Alice 換金鑰
+      { pubkey: b, name: "Alice" },
+      { pubkey: d, name: "Dan" }, // 新人
+    ]); // Cara 離職（不在 next）
+    const { toAdd, toRemove, toRemap } = diffRoster(prev, next, admin);
+    expect(toRemap).toEqual([{ from: a, to: b }]);
+    expect(toAdd.map((m) => m.pubkey)).toEqual([d]);
+    expect(toRemove).toEqual([c]);
+  });
+
+  it("applyRosterRotations：既有舊成員標 supersededBy、自動補入新成員", () => {
+    const members = [{ pubkey: admin, name: "Me" }, { pubkey: a, name: "Alice" }];
+    const out = applyRosterRotations(members, [{ from: a, to: b }]);
+    expect(out.find((m) => m.pubkey === a)?.supersededBy).toBe(b);
+    expect(out.find((m) => m.pubkey === b)).toEqual({ pubkey: b, name: "Alice" }); // 沿用舊名補入
+    // allowlist 只留在世者、rosterRemap 解出 a→b
+    expect(rosterAllowlist({ org: "X", members: out, updatedAt: 1 })).toEqual([admin, b]);
+    expect(rosterRemap({ org: "X", members: out, updatedAt: 1 })).toEqual([{ from: a, to: b }]);
+  });
+
+  it("applyRosterRotations：舊 npub 不在原清單時補一筆已作廢舊條目；不改動輸入", () => {
+    const members = [{ pubkey: admin, name: "Me" }];
+    const frozen = JSON.parse(JSON.stringify(members));
+    const out = applyRosterRotations(members, [{ from: a, to: b, name: "Alice" }]);
+    expect(out.find((m) => m.pubkey === a)).toEqual({ pubkey: a, name: "Alice", supersededBy: b });
+    expect(out.find((m) => m.pubkey === b)).toEqual({ pubkey: b, name: "Alice" });
+    expect(members).toEqual(frozen); // 純函式：輸入未被改動
+  });
+
+  it("applyRosterRotations：from===to 略過（不自我作廢）", () => {
+    const members = [{ pubkey: a, name: "Alice" }];
+    expect(applyRosterRotations(members, [{ from: a, to: a }])).toEqual([{ pubkey: a, name: "Alice" }]);
   });
 });

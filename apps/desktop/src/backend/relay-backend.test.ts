@@ -1,4 +1,4 @@
-import { generateSecretKey, getPublicKey, nsecEncode, signOrgRoster, wrapGroupMessage } from "@cinder/core";
+import { applyRosterRotations, generateSecretKey, getPublicKey, nsecEncode, signOrgRoster, wrapGroupMessage } from "@cinder/core";
 import { createInMemoryRelayNetwork } from "@cinder/relay";
 import { describe, expect, it } from "vitest";
 import { MemoryStorage } from "../storage/memory.js";
@@ -393,6 +393,74 @@ describe("RelayChatBackend（真實後端 + 持久化）", () => {
     net.connect("admin2").publish(signOrgRoster({ org: "Acme", members: [{ pubkey: memberA, name: "Alice" }], updatedAt: 1001 }, adminSk));
     expect(store.loadContacts().map((c) => c.pubkey)).toEqual([memberA]);
     work.stop();
+  });
+
+  it("身分輪替（ADR-0052）：舊 npub→新 npub，歷史接續、通訊錄換人、觸發 onIdentityRotated", () => {
+    const net = createInMemoryRelayNetwork();
+    const adminSk = generateSecretKey();
+    const admin = getPublicKey(adminSk);
+    const store = new MemoryStorage();
+    const rotations: { from: string; to: string; name: string }[] = [];
+    const work = new RelayChatBackend(store, (h) => net.connect("work", h), "Worker", { orgAdminPubkey: admin });
+    work.start({ ...noop, onIdentityRotated: (from, to, name) => rotations.push({ from, to, name }) });
+
+    const aliceOld = getPublicKey(generateSecretKey());
+    const aliceNew = getPublicKey(generateSecretKey());
+
+    // v1：Alice 舊身分入通訊錄，並模擬既有對話歷史
+    net.connect("admin").publish(signOrgRoster({ org: "Acme", members: [{ pubkey: aliceOld, name: "Alice" }], updatedAt: 1000 }, adminSk));
+    expect(store.loadContacts().map((c) => c.pubkey)).toEqual([aliceOld]);
+    store.appendMessage({ id: "m1", contact: aliceOld, outgoing: false, text: "早安", at: 1 });
+
+    // v2：Alice 輪替 aliceOld → aliceNew（舊標 supersededBy、新加入）
+    net.connect("admin2").publish(
+      signOrgRoster(
+        {
+          org: "Acme",
+          members: [{ pubkey: aliceOld, name: "Alice", supersededBy: aliceNew }, { pubkey: aliceNew, name: "Alice" }],
+          updatedAt: 1001,
+        },
+        adminSk,
+      ),
+    );
+
+    expect(store.loadContacts().map((c) => c.pubkey)).toEqual([aliceNew]); // 通訊錄換成新 npub
+    expect(store.loadMessages(aliceOld)).toEqual([]); // 舊對話已搬走
+    expect(store.loadMessages(aliceNew).map((m) => m.id)).toEqual(["m1"]); // 歷史接續到新 npub
+    expect(rotations).toEqual([{ from: aliceOld, to: aliceNew, name: "Alice" }]); // UI 通知
+    work.stop();
+  });
+
+  it("佈建輪替（ADR-0052 #3）：管理者以 applyRosterRotations 發布、成員端接續、allowlist 只放行新 npub", () => {
+    const net = createInMemoryRelayNetwork();
+    const admin = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("admin", h), "Admin");
+    admin.start(noop);
+
+    const aliceOld = getPublicKey(generateSecretKey());
+    const aliceNew = getPublicKey(generateSecretKey());
+
+    // 成員端事先認得 Alice 舊身分（既有聯絡人＋歷史）——建構前先播種，建構子即載入。
+    const memberStore = new MemoryStorage();
+    memberStore.addContact({ pubkey: aliceOld, name: "Alice" });
+    memberStore.appendMessage({ id: "m1", contact: aliceOld, outgoing: false, text: "hi", at: 1 });
+    const rotations: { from: string; to: string }[] = [];
+    const member = new RelayChatBackend(memberStore, (h) => net.connect("member", h), "Member", {
+      orgAdminPubkey: admin.self.pubkey,
+    });
+    member.start({ ...noop, onIdentityRotated: (from, to) => rotations.push({ from, to }) });
+
+    // 管理者用佈建輔助建立輪替名冊並發布；回傳 allowlist 只含新 npub。
+    const rotated = applyRosterRotations([{ pubkey: aliceOld, name: "Alice" }], [{ from: aliceOld, to: aliceNew }]);
+    const allow = admin.publishRoster("Acme", rotated);
+    expect(allow).toContain(aliceNew);
+    expect(allow).not.toContain(aliceOld); // 舊金鑰不再放行
+
+    // 成員端接續：通訊錄換新、歷史搬移、觸發通知。
+    expect(memberStore.loadContacts().map((c) => c.pubkey)).toEqual([aliceNew]);
+    expect(memberStore.loadMessages(aliceNew).map((m) => m.id)).toEqual(["m1"]);
+    expect(rotations).toEqual([{ from: aliceOld, to: aliceNew }]);
+    admin.stop();
+    member.stop();
   });
   it("管理者佈建：publishRoster 發布名冊、成員自動採用、回傳 allowlist（ADR-0047 收尾）", () => {
     const net = createInMemoryRelayNetwork();

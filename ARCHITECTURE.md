@@ -133,6 +133,11 @@
 **資料流（工作身分送一則群訊）**
 `App → buildBackend(工作profile, 鎖定) → RelayChatBackend(LocalStorage(pubkey)) → Outbox 節流扇出 Gift Wrap → 公司自架 RelayCore（allowlist 驗 pubkey）→ 只轉發給名單內成員`。中繼全程只見密文與成員 pubkey，看不到群組/內容/串結構。
 
+**身分輪替（ADR-0052）— 換機/遺失還原，無金鑰託管**
+- 名冊契約：`OrgMember.supersededBy`（舊 npub 指向新 npub）。`rosterAllowlist` 排除已作廢舊金鑰；`rosterRemap` / `diffRoster().toRemap` 解出「舊→新」對映（支援連鎖 A→B→C、防環）。
+- 客戶端：`RelayChatBackend.applyRotations` 於採用名冊時把本機聯絡人/群成員與 1:1 歷史從舊 npub 接續到新 npub（`AppStorage.remapContact`），回報 `onIdentityRotated`（UI 提示「◯◯ 已更新金鑰」）。管理者以 `applyRosterRotations` ＋佈建 UI 輪替欄構建名冊並 `publishRoster`。
+- 隱私：員工新金鑰**自產**、公司無解密後門；「不想丟歷史」＝建議雙設備登記（M4 冗餘），非托管。詳見 PRD §13.6。
+
 ## 9. 待決議（Open Questions）
 
 - 中繼站採自建 Worker relay 還是相容既有 Nostr relay 實作？

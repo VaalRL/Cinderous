@@ -63,6 +63,27 @@ describe("MemoryStorage", () => {
     expect(ids[ids.length - 1]).toBe(`m${MESSAGES_PER_CONVO + 4}`);
   });
 
+  it("remapContact（ADR-0052）：搬移對話歷史、去重、按時間排序、移除舊聯絡人", () => {
+    const s = new MemoryStorage();
+    s.addContact({ pubkey: "old", name: "Alice" });
+    s.appendMessage({ id: "m1", contact: "old", outgoing: false, text: "早", at: 1 });
+    s.appendMessage({ id: "m2", contact: "old", outgoing: true, text: "安", at: 3 });
+    s.appendMessage({ id: "m0", contact: "new", outgoing: true, text: "既有", at: 2 }); // new 對話已有一則
+    s.remapContact("old", "new");
+    expect(s.loadContacts().map((c) => c.pubkey)).toEqual([]); // 舊聯絡人移除（new 由名冊補上）
+    expect(s.loadMessages("old")).toEqual([]);
+    const moved = s.loadMessages("new");
+    expect(moved.map((m) => m.id)).toEqual(["m1", "m0", "m2"]); // 併入並依 at 排序
+    expect(moved.every((m) => m.contact === "new")).toBe(true); // contact 欄位改寫
+  });
+
+  it("remapContact（ADR-0052）：群組成員 from→to 去重", () => {
+    const s = new MemoryStorage();
+    s.saveGroup({ id: "g", name: "研發", admin: "admin", members: ["old", "new", "bob"] });
+    s.remapContact("old", "new");
+    expect(s.loadGroups().find((g) => g.id === "g")?.members).toEqual(["new", "bob"]); // old→new 併入、不重複
+  });
+
   it("封鎖：移出聯絡人、記入封鎖名單、可解除", () => {
     const s = new MemoryStorage();
     s.addContact({ pubkey: "aa", name: "A" });

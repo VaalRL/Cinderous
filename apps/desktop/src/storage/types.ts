@@ -68,6 +68,12 @@ export interface AppStorage {
   updateContactRelay(pubkey: string, relayUrl: string | undefined): void;
   /** 移除聯絡人並清除其對話訊息。 */
   removeContact(pubkey: string): void;
+  /**
+   * 身分輪替（ADR-0052）：把舊 npub `from` 的對話歷史與群組成員資格接續到新 npub `to`。
+   * 移動 1:1 訊息（重寫 `contact`、併入 `to` 的對話、以 id 去重、依時間排序、遵守每對話上限）、
+   * 更新各群組 `members`（from→to 去重），並移除舊聯絡人條目（`to` 的聯絡人由名冊對帳補上）。
+   */
+  remapContact(from: string, to: string): void;
   /** 封鎖某身分（會一併移出聯絡人），並記入封鎖名單。 */
   blockContact(contact: StoredContact): void;
   /** 解除封鎖（僅移出封鎖名單；如需再次往來須重新加好友）。 */

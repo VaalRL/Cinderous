@@ -50,6 +50,23 @@ export class MemoryStorage implements AppStorage {
     this.reactions = this.reactions.filter((r) => !messageIds.has(r.messageId));
     for (const id of messageIds) this.deleted.delete(id);
   }
+  remapContact(from: string, to: string): void {
+    if (from === to) return;
+    const moved = (this.messages.get(from) ?? []).map((m) => ({ ...m, contact: to }));
+    if (moved.length > 0) {
+      const dest = this.messages.get(to) ?? [];
+      const seen = new Set(dest.map((m) => m.id));
+      for (const m of moved) if (!seen.has(m.id)) dest.push(m);
+      dest.sort((a, b) => a.at - b.at);
+      if (dest.length > MESSAGES_PER_CONVO) dest.splice(0, dest.length - MESSAGES_PER_CONVO);
+      this.messages.set(to, dest);
+    }
+    this.messages.delete(from);
+    this.groups = this.groups.map((g) =>
+      g.members.includes(from) ? { ...g, members: [...new Set(g.members.map((p) => (p === from ? to : p)))] } : g,
+    );
+    this.contacts = this.contacts.filter((c) => c.pubkey !== from);
+  }
   blockContact(contact: StoredContact): void {
     this.removeContact(contact.pubkey);
     if (!this.blocked.some((b) => b.pubkey === contact.pubkey)) this.blocked.push(contact);

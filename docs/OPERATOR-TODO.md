@@ -72,6 +72,6 @@ export const MAINTAINER_PUBKEY = "你的維護者公鑰 hex（64 字元）";
 
 ## D. 待你裁示才動工的功能（決策卡關，非環境）
 
-- **G4 企業金鑰託管**：需先立 ADR 定「還原 vs 帳號死亡」隱私取捨，核准後才實作（見 `ROADMAP.md` 未決策 ADR）。
+- ~~**G4 企業金鑰託管**~~ → **已決策並實作**：否決金鑰托管（避免公司持有解密後門），改採「工作身分輪替」（ADR-0052）。換機/遺失＝管理者以名冊撤舊發新、成員端自動接續；「不想丟歷史」＝建議雙設備登記。
 - **M7 語音訊息離線退回策略**：語音檔受中繼大小限制時的退回方式，需定案（`ROADMAP.md` 未決策 ADR）。
 - **Discord/Slack 風格功能移植**：研究見 `docs/research/discord-slack-features.md`。其中**對話串（Thread）已實作**（ADR-0051，Slack 式右側面板）、**emoji reaction 已實作**（ADR-0011）；剩餘自訂頻道等仍待裁示才立 ADR。
