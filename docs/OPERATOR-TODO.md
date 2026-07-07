@@ -48,14 +48,18 @@ export const MAINTAINER_PUBKEY = "你的維護者公鑰 hex（64 字元）";
 
 ---
 
-## B. 一般部署前置（本專案整體，非本次限定）
+## B. 此環境（雲端沙箱）無法執行、需你在對應環境完成的事
 
-| 項目 | 需要 | 對應 |
-| --- | --- | --- |
-| 中繼站生產部署 | Cloudflare 帳號、`wrangler deploy`、D1 綁定、NIP-42 AUTH | Phase C（C1–C4） |
-| Tauri 桌面打包 | Tauri 工具鏈、簽章憑證、OS 金鑰庫 | Phase B（B1–B6） |
-| 行動端 | React Native 工具鏈、APNs/FCM 憑證 | Phase D |
-| 第三方安全稽核 | 外部稽核員 | F4（`docs/SECURITY.md` 已備前置） |
+> 以下皆非程式缺口——**程式已完成並全綠測試**，只是最後一哩需要 Tauri/Cloudflare/RN 工具鏈、外部帳號、實體伺服器或外部人員，此開發環境做不到。
+
+| 項目 | 需要 | 對應 | 現況 |
+| --- | --- | --- | --- |
+| 中繼站生產部署 | Cloudflare 帳號、`wrangler deploy`、D1 綁定、NIP-42 AUTH | Phase C（C1–C4） | 程式/測試已備，離線留言待接 D1 |
+| Tauri 桌面打包 | Tauri 工具鏈、簽章憑證、OS 金鑰庫（keyring） | Phase B（B1–B6） | Rust 背景連線/SQLCipher 已測，GUI 接線待驗 |
+| 行動端 + QR 相機掃描 | React Native 工具鏈、APNs/FCM 憑證、相機權限 | Phase D、M9 | 大量重用 core/i18n；QR 產生已完成、掃描待 RN |
+| **企業強制 TURN 真機驗證** | 部署 TURN 伺服器、把 `turnServers` 填入 `RelayPoolOptions` | G2（ADR-0048） | `forceTurn`→`iceTransportPolicy:"relay"` 程式已接（`buildRtcConfig`），缺 TURN 才能實測；同時作為通話 NAT 保底 |
+| 第三方安全稽核 | 外部稽核員 | F4（`docs/SECURITY.md` 已備前置） | 前置威脅模型/加密盤點已備 |
+| 企業 SSO / 元資料稽核 | 外部 IdP（AD/LDAP/OIDC）、自架 relay 記錄連線元資料 | G5 | 需先立 ADR 與環境；未動工 |
 
 ---
 
@@ -66,7 +70,8 @@ export const MAINTAINER_PUBKEY = "你的維護者公鑰 hex（64 字元）";
 
 ---
 
-## D. 待你裁示才動工的功能
+## D. 待你裁示才動工的功能（決策卡關，非環境）
 
 - **G4 企業金鑰託管**：需先立 ADR 定「還原 vs 帳號死亡」隱私取捨，核准後才實作（見 `ROADMAP.md` 未決策 ADR）。
+- **M7 語音訊息離線退回策略**：語音檔受中繼大小限制時的退回方式，需定案（`ROADMAP.md` 未決策 ADR）。
 - **Discord/Slack 風格功能移植**：研究見 `docs/research/discord-slack-features.md`。其中**對話串（Thread）已實作**（ADR-0051，Slack 式右側面板）、**emoji reaction 已實作**（ADR-0011）；剩餘自訂頻道等仍待裁示才立 ADR。
