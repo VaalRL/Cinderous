@@ -22,7 +22,9 @@ required-features = ["tauri-app"]
 
 [features]
 # 完整 Tauri 桌面二進位（需 Tauri 工具鏈與 webkit2gtk 等系統庫）。
-tauri-app = ["dep:tauri", "dep:tokio", "dep:tauri-build"]
+tauri-app = ["dep:tauri", "dep:tokio", "dep:tauri-build", "keyring"]
+# OS 金鑰庫（B5，ADR-0053）：私鑰託管於作業系統安全儲存。可獨立測試（會存取真實金鑰庫）。
+keyring = ["dep:keyring"]
 # 背景 WebSocket 連線執行期（tokio + tungstenite）。可獨立於 GUI 建置/測試，
 # 但拉入 async I/O 相依，故預設關閉以維持精簡的 `cargo test`。
 net = ["dep:tokio", "dep:tokio-tungstenite", "dep:futures-util"]
@@ -39,6 +41,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time"
 tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"], optional = true }
 futures-util = { version = "0.3", optional = true }
 rusqlite = { version = "0.32", optional = true }
+keyring = { version = "3", optional = true, features = ["windows-native", "apple-native", "sync-secret-service"] }
 
 [build-dependencies]
 tauri-build = { version = "2", optional = true }

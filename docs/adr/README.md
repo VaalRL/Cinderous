@@ -67,3 +67,4 @@
 | [0050](./0050-mentions.md) | @提及 Mention：NIP-01 p-tag 攜帶於加密 rumor 內層 | 已接受 |
 | [0051](./0051-threads.md) | 對話串 Thread：NIP-10 reply e-tag + 右側面板（Slack 佈局） | 已接受 |
 | [0052](./0052-enterprise-identity-rotation.md) | 企業工作身分輪替/重佈建（否決金鑰托管，無後門） | 已接受 |
+| [0053](./0053-tauri-native-substrate-integration.md) | Tauri 原生整合：基質替換（重用 TS 引擎）＋ B5 金鑰庫 | 已接受 |

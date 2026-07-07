@@ -4,6 +4,8 @@
 //! 長連線、OS 金鑰安全儲存、IPC）將在具 Tauri 工具鏈的環境擴充。
 
 pub mod ipc;
+#[cfg(feature = "keyring")]
+pub mod keyvault;
 #[cfg(feature = "net")]
 pub mod net;
 pub mod reconnect;

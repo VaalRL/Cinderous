@@ -18,6 +18,26 @@ fn native_ready() -> String {
     format!("cinder native bridge {}", env!("CARGO_PKG_VERSION"))
 }
 
+// ── B5 金鑰庫 IPC（ADR-0053）：私鑰託管於 OS 安全儲存，前端經 invoke 存取 ──────
+
+/// 存入某身分（pubkey）的 nsec 到 OS 金鑰庫。
+#[tauri::command]
+fn key_set(pubkey: String, nsec: String) -> Result<(), String> {
+    cinder_desktop::keyvault::set_key(&pubkey, &nsec).map_err(|e| e.to_string())
+}
+
+/// 取出某身分的 nsec；不存在回 `None`。
+#[tauri::command]
+fn key_get(pubkey: String) -> Result<Option<String>, String> {
+    cinder_desktop::keyvault::get_key(&pubkey).map_err(|e| e.to_string())
+}
+
+/// 刪除某身分的 nsec（登出/移除身分）。
+#[tauri::command]
+fn key_delete(pubkey: String) -> Result<(), String> {
+    cinder_desktop::keyvault::delete_key(&pubkey).map_err(|e| e.to_string())
+}
+
 fn main() {
     tauri::Builder::default()
         .setup(|app| {
@@ -30,7 +50,7 @@ fn main() {
             )?;
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![native_ready])
+        .invoke_handler(tauri::generate_handler![native_ready, key_set, key_get, key_delete])
         .run(tauri::generate_context!())
         .expect("執行 Tauri 應用程式時發生錯誤");
 }
