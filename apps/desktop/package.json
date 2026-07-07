@@ -18,6 +18,7 @@
   "dependencies": {
     "@cinder/core": "workspace:*",
     "@cinder/i18n": "workspace:*",
+    "@tauri-apps/api": "^2",
     "qrcode-generator": "^2.0.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
