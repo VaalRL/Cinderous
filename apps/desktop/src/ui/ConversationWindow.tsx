@@ -122,6 +122,9 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
   /** 對話串面板（ADR-0051）：開啟中的串根訊息 id（null＝未開）。 */
   const [threadRoot, setThreadRoot] = useState<string | null>(null);
   const [threadText, setThreadText] = useState("");
+  /** 串內 composer 的 @提及建議（獨立於主 composer）。 */
+  const [threadMenSel, setThreadMenSel] = useState(0);
+  const [threadMenDismissed, setThreadMenDismissed] = useState(false);
   const [showAlbum, setShowAlbum] = useState(false);
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [ttl, setTtl] = useState(0);
@@ -352,6 +355,15 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
     const mentions = props.mentionCandidates ? parseMentions(body, props.mentionCandidates) : [];
     props.onSend(body, undefined, mentions.length > 0 ? mentions : undefined, threadRoot);
     setThreadText("");
+  };
+  // 串內 @提及自動完成（ADR-0050/0051）。
+  const threadMenSuggest =
+    !threadMenDismissed && props.mentionCandidates ? suggestMentions(threadText, props.mentionCandidates) : null;
+  const threadMenList = threadMenSuggest?.candidates ?? [];
+  const threadMenActive = Math.min(threadMenSel, Math.max(threadMenList.length - 1, 0));
+  const acceptThreadMention = (cand: MentionCandidate): void => {
+    setThreadText(applyMention(threadText, threadMenSuggest!, cand));
+    setThreadMenSel(0);
   };
 
   return (
@@ -966,13 +978,54 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
             ))}
           </div>
         </div>
+        {threadMenList.length > 0 ? (
+          <div className="menbar" data-testid="thread-mention-bar">
+            {threadMenList.map((c, i) => (
+              <button
+                key={c.pubkey}
+                type="button"
+                className={`menbar__item${i === threadMenActive ? " on" : ""}`}
+                title={c.name}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  acceptThreadMention(c);
+                }}
+              >
+                <span className="menbar__avatar" style={{ background: avatarColor(c.pubkey) }}>{initial(c.name)}</span>
+                <span>@{c.name}</span>
+              </button>
+            ))}
+            <span className="trigbar__hint">{t("mention_hint")}</span>
+          </div>
+        ) : null}
         <div className="composer">
           <textarea
             aria-label={t("thread_reply")}
             value={threadText}
             placeholder={t("thread_reply")}
-            onChange={(e) => setThreadText(e.target.value)}
+            onChange={(e) => {
+              setThreadText(e.target.value);
+              setThreadMenSel(0);
+              setThreadMenDismissed(false);
+            }}
             onKeyDown={(e) => {
+              if (threadMenList.length > 0) {
+                if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
+                  e.preventDefault();
+                  acceptThreadMention(threadMenList[threadMenActive]!);
+                  return;
+                }
+                if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+                  e.preventDefault();
+                  const delta = e.key === "ArrowDown" ? 1 : -1;
+                  setThreadMenSel((threadMenActive + delta + threadMenList.length) % threadMenList.length);
+                  return;
+                }
+                if (e.key === "Escape") {
+                  setThreadMenDismissed(true);
+                  return;
+                }
+              }
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
                 sendThread();
