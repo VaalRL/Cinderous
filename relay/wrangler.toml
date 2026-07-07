@@ -9,4 +9,6 @@ class_name = "RelayRoom"
 
 [[migrations]]
 tag = "v1"
-new_classes = ["RelayRoom"]
+# SQLite-backed Durable Object：符合 Workers 免費層；此 DO 僅在記憶體持有 WebSocket
+# 連線、不用持久儲存，故 backend 選擇不影響行為（亦為未來離線留言存於 DO SQLite 鋪路）。
+new_sqlite_classes = ["RelayRoom"]
