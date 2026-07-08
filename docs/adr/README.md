@@ -75,3 +75,4 @@
 | [0058](./0058-delivery-read-receipts.md) | 送達／已讀回條（Gift Wrap 回條，已讀 opt-in＋互惠） | 已接受 |
 | [0059](./0059-relay-hibernation-heartbeat.md) | 中繼站 WebSocket 休眠化 + 心跳 30s（降免費層 duration/請求） | 已接受 |
 | [0060](./0060-local-ollama-rewrite.md) | 本機 Ollama 訊息改寫（Rust IPC、localhost 限定、先預覽再採用） | 已接受 |
+| [0061](./0061-encrypted-display-name.md) | 顯示名稱以加密個人檔廣播給聯絡人（非公開 kind 0） | 已接受 |

@@ -42,6 +42,9 @@ export class MemoryStorage implements AppStorage {
       return relayUrl ? { ...rest, relayUrl } : rest;
     });
   }
+  updateContactName(pubkey: string, name: string): void {
+    this.contacts = this.contacts.map((c) => (c.pubkey === pubkey ? { ...c, name } : c));
+  }
   removeContact(pubkey: string): void {
     const ids = new Set((this.messages.get(pubkey) ?? []).map((m) => m.id));
     this.contacts = this.contacts.filter((c) => c.pubkey !== pubkey);

@@ -74,6 +74,8 @@ export interface AppStorage {
   addContact(contact: StoredContact): void;
   /** 更新聯絡人的 relay hint（ADR-0035 自動學習）；undefined 表示清除。 */
   updateContactRelay(pubkey: string, relayUrl: string | undefined): void;
+  /** 更新聯絡人顯示名稱（收到對方加密個人檔時；ADR-0061）。 */
+  updateContactName(pubkey: string, name: string): void;
   /** 移除聯絡人並清除其對話訊息。 */
   removeContact(pubkey: string): void;
   /**

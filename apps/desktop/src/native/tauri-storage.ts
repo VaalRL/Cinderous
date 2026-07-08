@@ -111,6 +111,10 @@ export class TauriStorage implements AppStorage {
     this.mem.updateContactRelay(pubkey, relayUrl);
     this.persist();
   }
+  updateContactName(pubkey: string, name: string): void {
+    this.mem.updateContactName(pubkey, name);
+    this.persist();
+  }
   removeContact(pubkey: string): void {
     this.mem.removeContact(pubkey);
     this.persist();

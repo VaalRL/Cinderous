@@ -72,6 +72,9 @@ export class LocalStorage implements AppStorage {
       }),
     );
   }
+  updateContactName(pubkey: string, name: string): void {
+    write(this.k("contacts"), this.loadContacts().map((c) => (c.pubkey === pubkey ? { ...c, name } : c)));
+  }
   removeContact(pubkey: string): void {
     const ids = new Set(this.loadMessages(pubkey).map((m) => m.id));
     write(this.k("contacts"), this.loadContacts().filter((c) => c.pubkey !== pubkey));

@@ -49,6 +49,8 @@ import {
   wrapReaction,
   wrapReceipt,
   receiptOf,
+  wrapProfile,
+  parseProfile,
   type CallMedia,
   type Group,
   type GroupControl,
@@ -353,6 +355,7 @@ export class RelayChatBackend implements ChatBackend {
     this.handlers = handlers;
     this.resubscribe();
     this.beat();
+    this.broadcastProfile(); // ADR-0061：把自己的顯示名稱廣播給聯絡人
     this.scheduleBeat();
     this.renderTimer = setInterval(() => {
       this.emitContacts();
@@ -772,6 +775,19 @@ export class RelayChatBackend implements ChatBackend {
       return;
     }
 
+    const profileName = parseProfile(rumor);
+    if (profileName) {
+      // ADR-0061：以對方自選暱稱更新聯絡人顯示名稱（僅在變動時）。
+      if (profileName !== this.contacts.find((c) => c.pubkey === sender)?.name) {
+        this.storage.updateContactName(sender, profileName);
+        this.contacts = this.storage.loadContacts();
+        this.emitContacts();
+      }
+      // 尚未送過自己的個人檔給對方（例如對方單向加我）→ 回送一次，讓對方也學到我的暱稱。
+      if (!this.profileSentTo.has(sender)) this.sendProfileTo(sender);
+      return;
+    }
+
     const expirySec = messageExpiry(rumor);
     const expiresAt = expirySec !== undefined ? expirySec * 1000 : undefined;
     const replyTo = threadRoot(rumor); // 對話串回覆（ADR-0051）
@@ -881,6 +897,7 @@ export class RelayChatBackend implements ChatBackend {
     this.contacts = this.storage.loadContacts();
     this.resubscribe();
     this.emitContacts();
+    this.sendProfileTo(pubkey); // ADR-0061：加好友時把自己的顯示名稱送給對方
   }
 
   removeContact(pubkey: PubkeyHex): void {
@@ -1068,6 +1085,20 @@ export class RelayChatBackend implements ChatBackend {
     this.seenMsg.add(evt.id);
     this.storage.addReaction({ id: evt.id, messageId, emoji, mine: true });
     this.handlers?.onReaction?.(messageId, emoji, true);
+  }
+
+  /** 本 session 已送過個人檔的對象（避免收到對方個人檔時來回反覆傳送）。 */
+  private readonly profileSentTo = new Set<PubkeyHex>();
+
+  /** ADR-0061：把自己的顯示名稱（加密個人檔）送給某聯絡人。 */
+  private sendProfileTo(pubkey: PubkeyHex): void {
+    this.profileSentTo.add(pubkey);
+    this.publishReliable(wrapProfile(this.self.name, this.sk, pubkey));
+  }
+
+  /** 廣播自己的顯示名稱給所有聯絡人（開機時，讓既有聯絡人也學到暱稱）。 */
+  private broadcastProfile(): void {
+    for (const c of this.contacts) this.sendProfileTo(c.pubkey);
   }
 
   /** Tier 1（ADR-0058）：relay 接受某訊息＝已送中繼，標 sent 並通知 UI。 */

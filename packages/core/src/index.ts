@@ -16,6 +16,7 @@ export * from "./mention.js";
 export * from "./thread.js";
 export * from "./reaction.js";
 export * from "./receipt.js";
+export * from "./profile.js";
 export * from "./deletion.js";
 export * from "./signaling.js";
 export * from "./call.js";

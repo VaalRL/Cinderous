@@ -53,10 +53,11 @@ describe("跨中繼通訊：Relay Pool 與收件人路由（ADR-0034）", () => 
     a.start(noop);
     b.start({ ...noop, onMessage: (_pk, m) => bIncoming.push(m) });
 
+    a.addContact(`${b.selfNpub}@wss://y`);
+    // 側錄在加好友「之後」掛上——加好友會先送一則個人檔 gift wrap（ADR-0061），
+    // 這裡只想量「訊息」的路由（個人檔路由另有測試）。
     const dmOnX = spy(netX, { kinds: [KIND.OFFLINE_DM_GIFT_WRAP], "#p": [b.self.pubkey] });
     const dmOnY = spy(netY, { kinds: [KIND.OFFLINE_DM_GIFT_WRAP], "#p": [b.self.pubkey] });
-
-    a.addContact(`${b.selfNpub}@wss://y`);
     a.sendMessage(b.self.pubkey, "跨 relay 哈囉");
 
     expect(bIncoming.map((m) => m.text)).toContain("跨 relay 哈囉");

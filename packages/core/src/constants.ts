@@ -1,5 +1,7 @@
 /** Nostr 事件 Kind 常數（對應 ARCHITECTURE.md §5 事件契約）。 */
 export const KIND = {
+  /** NIP-01 個人檔（顯示名稱）——作為 rumor kind，加密廣播給聯絡人（ADR-0061）。 */
+  PROFILE: 0,
   /** NIP-09 事件刪除（收回訊息，作為 rumor kind）。 */
   DELETE: 5,
   /** NIP-25 訊息回應（作為 rumor kind，包進 Gift Wrap）。 */

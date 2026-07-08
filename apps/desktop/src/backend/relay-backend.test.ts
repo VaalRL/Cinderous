@@ -644,3 +644,21 @@ describe("送達/已讀回條（ADR-0058）", () => {
     b.stop();
   });
 });
+
+describe("顯示名稱個人檔（ADR-0061，加密廣播）", () => {
+  it("單向加好友即互換個人檔：雙方顯示對方自選暱稱（非 npub）", () => {
+    const net = createInMemoryRelayNetwork();
+    const storeA = new MemoryStorage();
+    const storeB = new MemoryStorage();
+    const a = new RelayChatBackend(storeA, (h) => net.connect("a", h), "Alice");
+    const b = new RelayChatBackend(storeB, (h) => net.connect("b", h), "Bob");
+    a.start(noop);
+    b.start(noop);
+    a.addContact(b.selfNpub); // 只有 A 主動加 B
+    // B 自動加入 A 並學到「Alice」、回送個人檔 → A 也學到「Bob」
+    expect(storeB.loadContacts().find((c) => c.pubkey === a.self.pubkey)?.name).toBe("Alice");
+    expect(storeA.loadContacts().find((c) => c.pubkey === b.self.pubkey)?.name).toBe("Bob");
+    a.stop();
+    b.stop();
+  });
+});
