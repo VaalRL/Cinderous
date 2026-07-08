@@ -2,8 +2,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { I18nProvider } from "../i18n.js";
 import { ThemeProvider } from "../theme.js";
-import type { Group, Self } from "../backend/types.js";
-import { ContactListWindow } from "./ContactListWindow.js";
+import type { Contact, Group, Self, Status } from "../backend/types.js";
+import { ContactListWindow, sortByStatus } from "./ContactListWindow.js";
 
 const self: Self = { pubkey: "aa", name: "我", status: "online", statusMessage: "" };
 const groups: Group[] = [{ id: "g1", name: "工作群", admin: "aa", members: ["aa", "bb"] }];
@@ -55,5 +55,29 @@ describe("ContactListWindow 群組標籤 UI（ADR-0040）", () => {
     const html = render({});
     expect(html).not.toContain('data-testid="label-filter"');
     expect(html).not.toContain('data-testid="add-label"');
+  });
+});
+
+describe("ContactListWindow — 依上線狀態排序 + 頂部狀態（MSN 風）", () => {
+  const mk = (name: string, status: Status): Contact => ({ pubkey: name, name, status, statusMessage: "", nowPlaying: "" });
+
+  it("sortByStatus：線上→離開→忙碌→離線，同狀態依名稱", () => {
+    const sorted = sortByStatus([mk("Zoe", "busy"), mk("Amy", "online"), mk("Bob", "online"), mk("Cara", "away")]);
+    expect(sorted.map((c) => c.name)).toEqual(["Amy", "Bob", "Cara", "Zoe"]);
+  });
+
+  it("sortByStatus 不改動輸入陣列", () => {
+    const input = [mk("B", "busy"), mk("A", "online")];
+    sortByStatus(input);
+    expect(input.map((c) => c.name)).toEqual(["B", "A"]);
+  });
+
+  it("頂部渲染自己的狀態圓點（.dot online）", () => {
+    expect(render({})).toContain("dot online");
+  });
+
+  it("線上清單依狀態排序渲染：online 早於 busy", () => {
+    const html = render({ contacts: [mk("Zed", "busy"), mk("Ann", "online")] });
+    expect(html.indexOf("Ann")).toBeLessThan(html.indexOf("Zed"));
   });
 });

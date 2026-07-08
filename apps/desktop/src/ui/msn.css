@@ -151,7 +151,9 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
 .avatar.sm { width: 30px; height: 30px; font-size: 13px; border-width: 1px; border-radius: 5px; }
 .me__info { flex: 1; min-width: 0; }
 .me__name { font-weight: 700; display: flex; align-items: center; gap: 6px; color: var(--ink); }
-.me__name select { font: inherit; border: 1px solid var(--border); border-radius: 4px; background: var(--field); color: var(--ink); }
+.me__name-txt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; }
+.me__name .dot { width: 11px; height: 11px; }
+.me__name select { font: inherit; border: 1px solid var(--border); border-radius: 4px; background: var(--field); color: var(--ink); flex: none; }
 .me__msg input {
   width: 100%; border: none; background: transparent; color: var(--muted); font-size: 12px; font-style: italic; padding: 2px 0;
 }

@@ -14,6 +14,16 @@ const STATUS_KEY: Record<Status, MessageKey> = {
   offline: "status_offline",
 };
 
+/** 上線狀態排序權重（MSN 風：線上→離開→忙碌→離線）。 */
+const STATUS_ORDER: Record<Status, number> = { online: 0, away: 1, busy: 2, offline: 3 };
+
+/** 依上線狀態、再依名稱排序聯絡人（MSN 風清單）。回傳新陣列，不改動輸入。 */
+export function sortByStatus(contacts: Contact[]): Contact[] {
+  return [...contacts].sort(
+    (a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status] || a.name.localeCompare(b.name),
+  );
+}
+
 export interface ContactListProps {
   self: Self;
   contacts: Contact[];
@@ -67,8 +77,8 @@ export interface ContactListProps {
 export function ContactListWindow(props: ContactListProps): JSX.Element {
   const { t } = useI18n();
   const { self, contacts } = props;
-  const online = contacts.filter((c) => c.status !== "offline");
-  const offline = contacts.filter((c) => c.status === "offline");
+  const online = sortByStatus(contacts.filter((c) => c.status !== "offline"));
+  const offline = sortByStatus(contacts.filter((c) => c.status === "offline"));
   const [groupModal, setGroupModal] = useState(false);
   const groups = props.groups ?? [];
 
@@ -101,7 +111,8 @@ export function ContactListWindow(props: ContactListProps): JSX.Element {
         <div className="avatar" style={{ background: avatarColor(self.pubkey) }}>{initial(self.name)}</div>
         <div className="me__info">
           <div className="me__name">
-            <span>{self.name}</span>
+            <span className={`dot ${self.status}`} title={t(STATUS_KEY[self.status])} />
+            <span className="me__name-txt">{self.name}</span>
             <select
               aria-label={t("status_label")}
               value={self.status}
