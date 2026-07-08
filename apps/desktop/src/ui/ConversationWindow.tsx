@@ -55,6 +55,7 @@ import {
 } from "./sticker-triggers.js";
 import { cleanOnPasteEnabled, cleanText } from "./url-hygiene.js";
 import { indentText } from "./composer-indent.js";
+import { ComposerInsert, type InsertTemplate } from "./ComposerInsert.js";
 import { renderMarkdown } from "./markdown.js";
 import { ComposerRewrite } from "./ComposerRewrite.js";
 import { applyEmoticons } from "./emoticons.js";
@@ -136,6 +137,21 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
   }, [contact.pubkey, messages.length, onMarkRead]);
   const [visibleCount, setVisibleCount] = useState(MESSAGE_WINDOW);
   const [text, setText] = useState("");
+  const composerRef = useRef<HTMLTextAreaElement>(null);
+  /** 快速插入模板（➕ 選單）：插到游標處（非行首自動補換行），並選取佔位字。 */
+  const insertSnippet = (tpl: InsertTemplate): void => {
+    const el = composerRef.current;
+    const at = el?.selectionStart ?? text.length;
+    const end = el?.selectionEnd ?? text.length;
+    const prefix = at > 0 && text[at - 1] !== "\n" ? "\n" : "";
+    setText(text.slice(0, at) + prefix + tpl.text + text.slice(end));
+    const s = at + prefix.length + tpl.selStart;
+    const e2 = at + prefix.length + tpl.selEnd;
+    requestAnimationFrame(() => {
+      el?.focus();
+      el?.setSelectionRange(s, e2);
+    });
+  };
   const [showEmo, setShowEmo] = useState(false);
   const [showStickers, setShowStickers] = useState(false);
   const [stickerTab, setStickerTab] = useState<string>(STICKER_PACK_ORDER[0] ?? "");
@@ -855,6 +871,7 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
       ) : (
       <div className="composer">
         <textarea
+          ref={composerRef}
           aria-label={t("convo_composerPlaceholder")}
           value={text}
           placeholder={t("convo_composerPlaceholder")}
@@ -933,6 +950,7 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
             }
           }}
         />
+        <ComposerInsert onPick={insertSnippet} />
         {props.onRewrite ? (
           <ComposerRewrite
             text={text}

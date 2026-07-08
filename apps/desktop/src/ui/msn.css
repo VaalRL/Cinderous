@@ -480,6 +480,23 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
 .line .text .md-pre code { background: none; padding: 0; }
 .line .text .md-list { margin: 2px 0; padding-left: 20px; }
 .line .text .md-list .md-list { margin: 0; }
+
+/* 引言與 Obsidian 風 callout（markdown.tsx） */
+.md-quote { border-left: 3px solid var(--border); margin: 4px 0; padding: 2px 10px; color: var(--muted); }
+.md-callout {
+  --co: var(--accent);
+  display: block; margin: 4px 0; padding: 6px 10px; border-radius: 6px;
+  border-left: 3px solid var(--co);
+  background: color-mix(in srgb, var(--co) 10%, transparent);
+}
+.md-callout--blue { --co: #3b82f6; }
+.md-callout--green { --co: #22a55e; }
+.md-callout--amber { --co: #d98a1f; }
+.md-callout--red { --co: #e5484d; }
+.md-callout--purple { --co: #8b5cf6; }
+.md-callout--grey { --co: #8a97ab; }
+.md-callout__head { display: flex; align-items: center; gap: 6px; font-weight: 700; color: var(--co); font-size: 13px; }
+.md-callout__body { margin-top: 2px; }
 .line .text a { color: var(--accent); }
 .line.sys { color: var(--muted); font-size: 11px; text-align: center; }
 .pics { width: 76px; border-left: 1px solid var(--border); padding: 8px 6px; display: flex; flex-direction: column; gap: 8px; align-items: center; background: var(--surface2); }
@@ -495,6 +512,31 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
 .composer { display: flex; gap: 6px; padding: 8px; border-top: 1px solid var(--border); background: var(--surface2); }
 
 /* 本機 AI 改寫（✨）：composer 內按鈕 + 上方彈出面板（ADR-0060）。 */
+/* 快速插入選單（➕，ComposerInsert） */
+.insertm { position: relative; flex: none; display: flex; align-items: flex-end; }
+.insertm__btn { border: 1px solid var(--border); background: var(--field); border-radius: 6px; font-size: 13px; line-height: 1.2; padding: 5px 7px; cursor: pointer; }
+.insertm__btn:hover { background: var(--hover); }
+.insertm__panel {
+  position: absolute; bottom: calc(100% + 6px); left: 0; z-index: 30; width: 300px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 6px 18px rgba(0,0,0,.2); padding: 8px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.insertm__grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px; }
+.insertm__grid--blocks { border-top: 1px solid var(--border); padding-top: 6px; }
+.insertm__item {
+  --co: var(--accent);
+  display: flex; align-items: center; gap: 6px; text-align: left;
+  border: 1px solid var(--border); background: var(--field); color: var(--ink);
+  border-radius: 6px; font-size: 12px; padding: 4px 8px; cursor: pointer;
+}
+.insertm__item:hover { background: color-mix(in srgb, var(--co) 12%, var(--field)); border-color: var(--co); }
+.insertm__item--blue { --co: #3b82f6; }
+.insertm__item--green { --co: #22a55e; }
+.insertm__item--amber { --co: #d98a1f; }
+.insertm__item--red { --co: #e5484d; }
+.insertm__item--purple { --co: #8b5cf6; }
+.insertm__item--grey { --co: #8a97ab; }
+
 .rewrite { position: relative; flex: none; display: flex; align-items: flex-end; }
 .rewrite__btn { border: 1px solid var(--border); background: var(--field); border-radius: 6px; font-size: 15px; line-height: 1; padding: 5px 7px; cursor: pointer; }
 .rewrite__btn:hover:not(:disabled) { background: var(--hover); }

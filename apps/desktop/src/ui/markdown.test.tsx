@@ -89,3 +89,43 @@ describe("區塊 Markdown 渲染（程式碼區塊 / 清單）", () => {
     expect(html("-not a list")).not.toContain("<ul");
   });
 });
+
+describe("引言與 Obsidian 風 callout", () => {
+  it("callout：型別色系 + 圖示 + 標題 + 內文", () => {
+    const out = html("> [!tip] 標題\n> 內文");
+    expect(out).toContain("md-callout--green");
+    expect(out).toContain("💡");
+    expect(out).toContain("標題");
+    expect(out).toContain("內文");
+  });
+
+  it("無標題時以型別名（首字大寫）為標題；warning 為 amber", () => {
+    const out = html("> [!warning]\n> 小心");
+    expect(out).toContain("Warning");
+    expect(out).toContain("md-callout--amber");
+  });
+
+  it("未知型別退回 note（blue）；標題可帶行內格式", () => {
+    const out = html("> [!xyz] **粗**標");
+    expect(out).toContain("md-callout--blue");
+    expect(out).toContain("<strong>粗</strong>");
+  });
+
+  it("callout 內文遞迴解析：清單與程式碼區塊都有效", () => {
+    const out = html("> [!note] t\n> - a\n> ```\n> code\n> ```");
+    expect(out).toContain('<ul class="md-list">');
+    expect(out).toContain("md-pre");
+  });
+
+  it("一般引言（無 [!type]）成 blockquote；非 callout", () => {
+    const out = html("> 純引言");
+    expect(out).toContain('<blockquote class="md-quote">');
+    expect(out).not.toContain("md-callout");
+  });
+
+  it("惡意深巢 > 不撐爆（深度上限退回字面渲染）", () => {
+    const evil = `${">".repeat(200)} deep`;
+    expect(() => html(evil)).not.toThrow();
+    expect(html(evil)).toContain("deep");
+  });
+});

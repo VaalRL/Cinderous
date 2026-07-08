@@ -59,6 +59,13 @@ export interface Messages {
   settings_ollamaEndpoint: string;
   settings_ollamaModel: string;
   settings_ollamaLocalOnly: string;
+  insert_open: string;
+  insert_codeBlock: string;
+  insert_list: string;
+  insert_titlePh: string;
+  insert_bodyPh: string;
+  insert_codePh: string;
+  insert_itemPh: string;
   settings_accent: string;
   settings_accentCustom: string;
   settings_accentReset: string;
@@ -277,6 +284,13 @@ const zhHant: Messages = {
   settings_ollamaEndpoint: "Ollama 端點",
   settings_ollamaModel: "模型名稱",
   settings_ollamaLocalOnly: "僅允許本機（localhost）——關閉才准非本機端點（文字會離開裝置）",
+  insert_open: "插入格式",
+  insert_codeBlock: "程式碼區塊",
+  insert_list: "清單",
+  insert_titlePh: "標題",
+  insert_bodyPh: "內容",
+  insert_codePh: "程式碼",
+  insert_itemPh: "項目",
   settings_accent: "主題色",
   settings_accentCustom: "自訂色",
   settings_accentReset: "預設",
@@ -495,6 +509,13 @@ const en: Messages = {
   settings_ollamaEndpoint: "Ollama endpoint",
   settings_ollamaModel: "Model name",
   settings_ollamaLocalOnly: "Local only (localhost) — turn off to allow a non-local endpoint (text leaves this device)",
+  insert_open: "Insert formatting",
+  insert_codeBlock: "Code block",
+  insert_list: "List",
+  insert_titlePh: "Title",
+  insert_bodyPh: "Body",
+  insert_codePh: "code",
+  insert_itemPh: "item",
   settings_accent: "Theme color",
   settings_accentCustom: "Custom color",
   settings_accentReset: "Default",
