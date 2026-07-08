@@ -558,9 +558,19 @@ export function App(): JSX.Element {
     setOpen((prev) => (prev.includes(pk) ? prev : [...prev, pk]));
   };
 
+  // 跨身分互加防呆（ADR-0055）：加自己任一身分（作用中或其他 profile）都會把分身連結給
+  // 中繼站、破壞區隔，故從介面擋下（丟 "self-identity" 讓 AddContact 顯示明確訊息）。
+  const addContactGuarded = (input: string): void => {
+    const raw = input.trim().split(/[@\s]+/, 1)[0] ?? "";
+    const pk = npubDecode(raw); // 非法 npub → 由 AddContact 顯示「無效」
+    if (profilesState.profiles.some((p) => p.pubkey === pk)) {
+      throw new Error("self-identity");
+    }
+    activeBackend.addContact!(input);
+  };
   const addContactProps = activeBackend.addContact
     ? {
-        onAddContact: activeBackend.addContact.bind(activeBackend),
+        onAddContact: addContactGuarded,
         selfNpub: activeBackend.selfShareUri ?? activeBackend.selfNpub ?? "",
       }
     : {};

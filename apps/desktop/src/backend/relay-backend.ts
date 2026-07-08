@@ -840,7 +840,8 @@ export class RelayChatBackend implements ChatBackend {
   addContact(input: string, relayUrl?: string): void {
     const [rawNpub, inlineHint] = input.trim().split(/[@\s]+/, 2);
     const pubkey = npubDecode((rawNpub ?? "").trim());
-    if (this.isBlocked(pubkey) || this.contacts.some((c) => c.pubkey === pubkey)) return;
+    // 自我防呆（ADR-0055）：不得加自己作用中身分（跨身分連結風險；App 層另擋其他自身身分）。
+    if (pubkey === this.self.pubkey || this.isBlocked(pubkey) || this.contacts.some((c) => c.pubkey === pubkey)) return;
     const hint = normalizeRelayUrl(relayUrl ?? inlineHint);
     this.storage.addContact({
       pubkey,

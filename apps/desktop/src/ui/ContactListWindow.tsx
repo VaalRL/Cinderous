@@ -412,14 +412,18 @@ function AddContact({
   const { t } = useI18n();
   const [value, setValue] = useState("");
   const [showQr, setShowQr] = useState(false);
+  const [error, setError] = useState("");
   const add = () => {
     const v = value.trim();
     if (!v) return;
     try {
       onAdd(v);
       setValue("");
-    } catch {
-      /* 非法 npub：保留輸入 */
+      setError("");
+    } catch (e) {
+      // onAdd 以 "self-identity" 代碼表示「加到自己的身分」（跨身分互加被擋，見 ADR-0055）；
+      // 其餘（含非法 npub）顯示為無效。
+      setError(e instanceof Error && e.message === "self-identity" ? t("contact_addSelf") : t("contact_addInvalid"));
     }
   };
   return (
@@ -458,6 +462,11 @@ function AddContact({
         />
         <button onClick={add}>{addLabel}</button>
       </div>
+      {error ? (
+        <div className="addbar__error" data-testid="add-error" role="alert">
+          {error}
+        </div>
+      ) : null}
     </div>
   );
 }

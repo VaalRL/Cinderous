@@ -1,4 +1,4 @@
-import { applyRosterRotations, generateSecretKey, getPublicKey, nsecEncode, signOrgRoster, wrapGroupMessage } from "@cinder/core";
+import { applyRosterRotations, generateSecretKey, getPublicKey, npubEncode, nsecEncode, signOrgRoster, wrapGroupMessage } from "@cinder/core";
 import { createInMemoryRelayNetwork } from "@cinder/relay";
 import { describe, expect, it } from "vitest";
 import { MemoryStorage } from "../storage/memory.js";
@@ -466,6 +466,16 @@ describe("RelayChatBackend（真實後端 + 持久化）", () => {
     expect(rotations).toEqual([{ from: aliceOld, to: aliceNew }]);
     admin.stop();
     member.stop();
+  });
+
+  it("addContact 擋加自己作用中身分（ADR-0055 self-guard）", () => {
+    const net = createInMemoryRelayNetwork();
+    const store = new MemoryStorage();
+    const backend = new RelayChatBackend(store, (h) => net.connect("me", h), "Me");
+    backend.start(noop);
+    backend.addContact(npubEncode(backend.self.pubkey)); // 加自己
+    expect(store.loadContacts()).toEqual([]); // 未新增自己
+    backend.stop();
   });
   it("管理者佈建：publishRoster 發布名冊、成員自動採用、回傳 allowlist（ADR-0047 收尾）", () => {
     const net = createInMemoryRelayNetwork();

@@ -23,6 +23,8 @@ export interface Messages {
   contact_myId: string;
   contact_addPlaceholder: string;
   contact_add: string;
+  contact_addSelf: string;
+  contact_addInvalid: string;
   contact_remove: string;
   contact_block: string;
   contact_unblock: string;
@@ -197,6 +199,8 @@ const zhHant: Messages = {
   contact_myId: "我的 ID",
   contact_addPlaceholder: "貼上好友的 npub…（可附 @wss://中繼）",
   contact_add: "加好友",
+  contact_addSelf: "不能把自己的身分加為好友（會把你的分身連結給中繼站）",
+  contact_addInvalid: "無效的 npub",
   contact_remove: "刪除",
   contact_block: "封鎖",
   contact_unblock: "解除封鎖",
@@ -371,6 +375,8 @@ const en: Messages = {
   contact_myId: "My ID",
   contact_addPlaceholder: "Paste a buddy's npub… (optionally @wss://relay)",
   contact_add: "Add",
+  contact_addSelf: "Can't add your own identity (it would link your personas to the relay)",
+  contact_addInvalid: "Invalid npub",
   contact_remove: "Delete",
   contact_block: "Block",
   contact_unblock: "Unblock",
