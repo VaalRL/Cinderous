@@ -68,7 +68,7 @@
 | # | 任務 | 說明 |
 | --- | --- | --- |
 | C1 | 離線留言持久化 | ✅ **核心完成（ADR-0056）**：改用 **DO 內建 SQLite**（同步，免 D1 async 摩擦、免額外 binding）。`OfflineStore` 介面＋`SqlMessageStore`（NIP-40 過期/每收件人 cap/`#p` 索引/matchFilter，以 `node:sqlite` headless 測 6 項）＋`RelayRoom` DO 接線。⏳ 使用者 `wrangler deploy` 後驗離線收送。 |
-| C2 | NIP-40 排程 prune | DO `alarm()` 定期清過期留言（review 項 A3）。 |
+| C2 | NIP-40 排程 prune | ✅ **完成**：`RelayRoom` DO 每小時 `alarm()` → `store.prune()` 清過期留言並重排（DO 休眠仍被喚醒）；建構時若無 alarm 即排程。`prune` 邏輯已測（C1）；alarm 觸發為執行期，`wrangler deploy` 後生效。 |
 | C3 | NIP-42 AUTH | 訂閱/發布前認證，補齊防濫用（PoW/速率上限已完成）。 |
 | C4 | 部署與容量校準 | `wrangler deploy`；上線後實測請求數回填 `docs/adr/0006`。 |
 

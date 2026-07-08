@@ -8,6 +8,9 @@ export interface Env {
 /** 每收件人離線留言上限（防單一收件人塞爆免費額度；PRD §8）。 */
 const MAX_PER_RECIPIENT = 500;
 
+/** NIP-40 過期留言的清理間隔（C2）：DO alarm 每小時 prune 一次。 */
+const PRUNE_INTERVAL_MS = 60 * 60 * 1000;
+
 /** Worker 進入點：WebSocket 升級後交給單一 Durable Object 房間以共享連線狀態。 */
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -22,14 +25,30 @@ export default {
 /** 持有 RelayCore 與所有 WebSocket，負責實際收發。 */
 export class RelayRoom {
   private readonly core: RelayCore;
+  private readonly store: SqlMessageStore;
+  private readonly storage: DurableObjectStorage;
   private readonly conns = new Map<string, WebSocket>();
 
   constructor(ctx: DurableObjectState, _env: Env) {
     // 離線留言持久化於 DO 內建 SQLite（同步、免 D1；ADR-0056）。
+    this.storage = ctx.storage;
     const sql = ctx.storage.sql;
     const exec = (query: string, ...bindings: (string | number | null)[]): Record<string, unknown>[] =>
       sql.exec(query, ...bindings).toArray() as Record<string, unknown>[];
-    this.core = new RelayCore({ store: new SqlMessageStore(exec, { maxPerRecipient: MAX_PER_RECIPIENT }) });
+    this.store = new SqlMessageStore(exec, { maxPerRecipient: MAX_PER_RECIPIENT });
+    this.core = new RelayCore({ store: this.store });
+    // C2：排程 NIP-40 過期清理——若尚未設過 alarm 則設一個（DO 休眠仍會被喚醒執行）。
+    ctx.blockConcurrencyWhile(async () => {
+      if ((await ctx.storage.getAlarm()) === null) {
+        await ctx.storage.setAlarm(Date.now() + PRUNE_INTERVAL_MS);
+      }
+    });
+  }
+
+  /** DO 定時鬧鐘（C2）：清除已過期留言並重排下一次。 */
+  async alarm(): Promise<void> {
+    this.store.prune(Math.floor(Date.now() / 1000));
+    await this.storage.setAlarm(Date.now() + PRUNE_INTERVAL_MS);
   }
 
   fetch(_request: Request): Response {
