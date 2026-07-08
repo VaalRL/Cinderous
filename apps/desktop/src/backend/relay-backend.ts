@@ -81,12 +81,13 @@ import type {
 } from "./types.js";
 
 const NUDGE_KIND = 20100;
-const HEARTBEAT_MS = 15_000;
+// 心跳間隔（ADR-0059）：30 秒——降低中繼站請求數/CPU；離線判定門檻同步放寬保留 3× 容忍。
+const HEARTBEAT_MS = 30_000;
 /** pool relay 連續離線超過此時間即標記 hint 可能陳舊（ADR-0036）。 */
 export const RELAY_STALE_MS = 5 * 60_000;
 /** 主路由離線時的冗餘廣播座數上限（ADR-0039）。 */
 export const REDUNDANT_K = 2;
-const PRESENCE_TIMEOUT_MS = 45_000;
+const PRESENCE_TIMEOUT_MS = 90_000; // 3× 心跳（30s）：容忍偶發丟包/抖動，不因單次遲到就翻離線（ADR-0059）
 const nowSec = () => Math.floor(Date.now() / 1000);
 
 const shortNpub = (npub: string) => `${npub.slice(0, 12)}…`;

@@ -37,6 +37,17 @@ export interface Outbound {
   message: RelayMessage;
 }
 
+/** 某連線的可序列化狀態快照（供 DO 休眠後還原；ADR-0059）。 */
+export interface ConnSnapshot {
+  connId: string;
+  /** NIP-42 挑戰（未認證前）。 */
+  challenge?: string;
+  /** 已認證的 pubkey（認證後）。 */
+  pubkey?: string;
+  /** 此連線目前的訂閱（subId + filters）。 */
+  subs: { subId: string; filters: RelayFilter[] }[];
+}
+
 export interface RelayCoreOptions {
   /**
    * 離線留言持久層（M2）。Ephemeral 事件**絕不會**寫入此處，
@@ -144,6 +155,39 @@ export class RelayCore {
     if (conn) for (const entry of conn.values()) this.unindex(entry);
     this.subs.delete(connId);
     this.authState.delete(connId);
+  }
+
+  /**
+   * 匯出某連線的可序列化狀態（訂閱＋認證）；供 DO 休眠後從 WebSocket attachment 還原
+   * （ADR-0059）。休眠會清空記憶體，故每次狀態變動後宿主應存回此快照。
+   */
+  exportConn(connId: string): ConnSnapshot {
+    const auth = this.authState.get(connId);
+    const conn = this.subs.get(connId);
+    const subs = conn ? [...conn.values()].map((e) => ({ subId: e.subId, filters: e.filters })) : [];
+    return {
+      connId,
+      ...(auth?.challenge !== undefined ? { challenge: auth.challenge } : {}),
+      ...(auth?.pubkey !== undefined ? { pubkey: auth.pubkey } : {}),
+      subs,
+    };
+  }
+
+  /** 從快照還原連線狀態（重建訂閱索引與認證，不觸發任何送出）；休眠喚醒時呼叫（ADR-0059）。 */
+  rehydrate(snapshot: ConnSnapshot): void {
+    if (!this.subs.has(snapshot.connId)) this.subs.set(snapshot.connId, new Map());
+    const conn = this.subs.get(snapshot.connId)!;
+    if (snapshot.challenge !== undefined || snapshot.pubkey !== undefined) {
+      this.authState.set(snapshot.connId, {
+        challenge: snapshot.challenge ?? "",
+        ...(snapshot.pubkey !== undefined ? { pubkey: snapshot.pubkey } : {}),
+      });
+    }
+    for (const { subId, filters } of snapshot.subs) {
+      const entry = buildEntry(snapshot.connId, subId, filters);
+      conn.set(subId, entry);
+      this.index(entry);
+    }
   }
 
   handle(connId: string, raw: string): Outbound[] {

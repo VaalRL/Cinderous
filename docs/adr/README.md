@@ -73,3 +73,4 @@
 | [0056](./0056-offline-store-durable-object-sqlite.md) | 離線留言持久層：Durable Object 內建 SQLite（非獨立 D1） | 已接受 |
 | [0057](./0057-open-relay-nip42-auth.md) | 開放中繼 NIP-42 AUTH（讀取＋發布；企業維持 allowlist） | 已接受 |
 | [0058](./0058-delivery-read-receipts.md) | 送達／已讀回條（Gift Wrap 回條，已讀 opt-in＋互惠） | 已接受 |
+| [0059](./0059-relay-hibernation-heartbeat.md) | 中繼站 WebSocket 休眠化 + 心跳 30s（降免費層 duration/請求） | 已接受 |

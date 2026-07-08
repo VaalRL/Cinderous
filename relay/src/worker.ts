@@ -1,4 +1,4 @@
-import { RelayCore, type Outbound } from "./relay-core.js";
+import { RelayCore, type ConnSnapshot, type Outbound } from "./relay-core.js";
 import { SqlMessageStore } from "./sql-message-store.js";
 
 export interface Env {
@@ -22,23 +22,28 @@ export default {
   },
 };
 
-/** 持有 RelayCore 與所有 WebSocket，負責實際收發。 */
+/**
+ * 持有 RelayCore；以**休眠式 WebSocket**（ADR-0059）收發：DO 可在訊息間休眠、不計 idle
+ * duration。休眠會清空記憶體，故每連線的訂閱/認證狀態存在其 WebSocket 的 attachment，
+ * 喚醒時從所有存活連線的 attachment 重建 RelayCore。
+ */
 export class RelayRoom {
+  private readonly ctx: DurableObjectState;
   private readonly core: RelayCore;
   private readonly store: SqlMessageStore;
-  private readonly storage: DurableObjectStorage;
-  private readonly conns = new Map<string, WebSocket>();
+  /** 本次喚醒是否已從 attachment 重建 RelayCore 狀態。 */
+  private hydrated = false;
 
   constructor(ctx: DurableObjectState, _env: Env) {
-    // 離線留言持久化於 DO 內建 SQLite（同步、免 D1；ADR-0056）。
-    this.storage = ctx.storage;
+    this.ctx = ctx;
+    // 離線留言持久化於 DO 內建 SQLite（同步、免 D1；ADR-0056）——storage 跨休眠存活。
     const sql = ctx.storage.sql;
     const exec = (query: string, ...bindings: (string | number | null)[]): Record<string, unknown>[] =>
       sql.exec(query, ...bindings).toArray() as Record<string, unknown>[];
     this.store = new SqlMessageStore(exec, { maxPerRecipient: MAX_PER_RECIPIENT });
     // NIP-42 AUTH（ADR-0057）：開放中繼要求認證——只有本人能拉自己的加密收件匣。
     this.core = new RelayCore({ store: this.store, requireAuth: true });
-    // C2：排程 NIP-40 過期清理——若尚未設過 alarm 則設一個（DO 休眠仍會被喚醒執行）。
+    // C2：排程 NIP-40 過期清理（DO 休眠仍會被 alarm 喚醒執行）。
     ctx.blockConcurrencyWhile(async () => {
       if ((await ctx.storage.getAlarm()) === null) {
         await ctx.storage.setAlarm(Date.now() + PRUNE_INTERVAL_MS);
@@ -49,7 +54,7 @@ export class RelayRoom {
   /** DO 定時鬧鐘（C2）：清除已過期留言並重排下一次。 */
   async alarm(): Promise<void> {
     this.store.prune(Math.floor(Date.now() / 1000));
-    await this.storage.setAlarm(Date.now() + PRUNE_INTERVAL_MS);
+    await this.ctx.storage.setAlarm(Date.now() + PRUNE_INTERVAL_MS);
   }
 
   fetch(_request: Request): Response {
@@ -57,29 +62,65 @@ export class RelayRoom {
     const client = pair[0];
     const server = pair[1];
     const connId = crypto.randomUUID();
-
-    server.accept();
-    this.conns.set(connId, server);
-    this.dispatch(this.core.connect(connId)); // 送出 NIP-42 AUTH 挑戰（requireAuth 時；否則空）
-
-    server.addEventListener("message", (evt: MessageEvent) => {
-      const raw = typeof evt.data === "string" ? evt.data : "";
-      this.dispatch(this.core.handle(connId, raw));
-    });
-
-    const cleanup = (): void => {
-      this.core.disconnect(connId);
-      this.conns.delete(connId);
-    };
-    server.addEventListener("close", cleanup);
-    server.addEventListener("error", cleanup);
-
+    // 休眠式接受：以 connId 為 tag 供路由；DO 於訊息間可休眠（ADR-0059）。
+    this.ctx.acceptWebSocket(server, [connId]);
+    this.ensureHydrated();
+    const out = this.core.connect(connId); // 產生 NIP-42 AUTH 挑戰
+    this.persist(server, connId); // 存回 attachment（含挑戰），休眠後可還原
+    this.dispatch(out);
     return new Response(null, { status: 101, webSocket: client });
+  }
+
+  webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): void {
+    this.ensureHydrated();
+    const connId = connIdOf(ws);
+    if (!connId) return;
+    const raw = typeof message === "string" ? message : "";
+    const out = this.core.handle(connId, raw);
+    this.persist(ws, connId); // 訂閱/認證可能已變，更新 attachment
+    this.dispatch(out);
+  }
+
+  webSocketClose(ws: WebSocket): void {
+    this.ensureHydrated();
+    const connId = connIdOf(ws);
+    if (connId) this.core.disconnect(connId);
+    try {
+      ws.close();
+    } catch {
+      /* 已關閉 */
+    }
+  }
+
+  webSocketError(ws: WebSocket): void {
+    const connId = connIdOf(ws);
+    if (connId) this.core.disconnect(connId);
+  }
+
+  /** 休眠喚醒後，從所有存活 WebSocket 的 attachment 重建 RelayCore 狀態（ADR-0059）。 */
+  private ensureHydrated(): void {
+    if (this.hydrated) return;
+    this.hydrated = true;
+    for (const ws of this.ctx.getWebSockets()) {
+      const snap = ws.deserializeAttachment() as ConnSnapshot | null;
+      if (snap) this.core.rehydrate(snap);
+    }
+  }
+
+  private persist(ws: WebSocket, connId: string): void {
+    ws.serializeAttachment(this.core.exportConn(connId));
   }
 
   private dispatch(outbound: Outbound[]): void {
     for (const { to, message } of outbound) {
-      this.conns.get(to)?.send(JSON.stringify(message));
+      const [ws] = this.ctx.getWebSockets(to); // 以 connId tag 找回該連線
+      ws?.send(JSON.stringify(message));
     }
   }
+}
+
+/** 從 WebSocket 的 attachment 取回其 connId。 */
+function connIdOf(ws: WebSocket): string | undefined {
+  const snap = ws.deserializeAttachment() as ConnSnapshot | null;
+  return snap?.connId;
 }

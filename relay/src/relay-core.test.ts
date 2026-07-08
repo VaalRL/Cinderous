@@ -313,6 +313,49 @@ describe("RelayCore — NIP-42 AUTH（ADR-0057）", () => {
   });
 });
 
+describe("RelayCore — 休眠狀態還原（ADR-0059）", () => {
+  const AUTHMSG = (e: NostrEvent) => JSON.stringify(["AUTH", e]);
+
+  it("exportConn/rehydrate：喚醒後還原認證與訂閱，扇出仍正確", () => {
+    const sk = generateSecretKey();
+    const self = getPublicKey(sk);
+    // 原 core：認證 + 掛上收件匣訂閱
+    const core1 = new RelayCore({ requireAuth: true, authChallenge: () => "c1" });
+    core1.connect("c");
+    core1.handle("c", AUTHMSG(buildAuthEvent("c1", "wss://r", sk)));
+    core1.handle("c", REQ("inbox", { kinds: [1059], "#p": [self] }));
+    const snap = core1.exportConn("c");
+    expect(snap.pubkey).toBe(self);
+    expect(snap.subs.map((s) => s.subId)).toEqual(["inbox"]);
+
+    // 模擬休眠喚醒：全新 core，只 rehydrate（不重連、不重認證）
+    const core2 = new RelayCore({ requireAuth: true, authChallenge: () => "c2" });
+    core2.rehydrate(snap);
+    // 認證已還原：REQ 不被擋 → EOSE
+    expect(core2.handle("c", REQ("probe", { kinds: [1] }))).toContainEqual({ to: "c", message: ["EOSE", "probe"] });
+    // 訂閱已還原：另一連線發 #p:[self] 的 1059 → 扇出給還原的 "c/inbox"
+    core2.connect("pub");
+    core2.handle("pub", AUTHMSG(buildAuthEvent("c2", "wss://r", generateSecretKey())));
+    const pubEv = finalizeEvent({ kind: 1059, created_at: 1700000000, tags: [["p", self]], content: "x" }, generateSecretKey());
+    expect(core2.handle("pub", EVENT(pubEv))).toContainEqual({ to: "c", message: ["EVENT", "inbox", pubEv] });
+  });
+
+  it("未認證連線的挑戰也隨快照還原（喚醒後仍能完成認證）", () => {
+    const core1 = new RelayCore({ requireAuth: true, authChallenge: () => "chal-x" });
+    core1.connect("c");
+    const snap = core1.exportConn("c");
+    expect(snap.challenge).toBe("chal-x");
+    expect(snap.pubkey).toBeUndefined();
+
+    const core2 = new RelayCore({ requireAuth: true, authChallenge: () => "other" });
+    core2.rehydrate(snap);
+    // 用還原的挑戰認證 → 成功
+    const sk = generateSecretKey();
+    const out = core2.handle("c", AUTHMSG(buildAuthEvent("chal-x", "wss://r", sk)));
+    expect(out[0]?.message[2]).toBe(true);
+  });
+});
+
 describe("RelayCore — 企業政策 allowedKinds（ADR-0048）", () => {
   const signedHb = (sk: Uint8Array): NostrEvent =>
     finalizeEvent({ kind: 20000, created_at: 1700000000, tags: [], content: "" }, sk);
