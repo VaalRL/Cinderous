@@ -21,15 +21,17 @@ export type ClientMessage =
   | { type: "EVENT"; event: NostrEvent }
   | { type: "REQ"; subId: string; filters: RelayFilter[] }
   | { type: "CLOSE"; subId: string }
+  | { type: "AUTH"; event: NostrEvent }
   | { type: "INVALID"; reason: string };
 
-/** Relay → Client 訊息（NIP-01）。 */
+/** Relay → Client 訊息（NIP-01 + NIP-42 AUTH 挑戰）。 */
 export type RelayMessage =
   | ["EVENT", string, NostrEvent]
   | ["OK", string, boolean, string]
   | ["EOSE", string]
   | ["CLOSED", string, string]
-  | ["NOTICE", string];
+  | ["NOTICE", string]
+  | ["AUTH", string];
 
 const invalid = (reason: string): ClientMessage => ({ type: "INVALID", reason });
 
@@ -59,6 +61,11 @@ export function parseClientMessage(raw: string): ClientMessage {
       const subId = arr[1];
       if (typeof subId !== "string") return invalid("missing subscription id");
       return { type: "CLOSE", subId };
+    }
+    case "AUTH": {
+      const event = arr[1];
+      if (typeof event !== "object" || event === null) return invalid("missing auth event");
+      return { type: "AUTH", event: event as NostrEvent };
     }
     default:
       return invalid(`unknown message type: ${String(arr[0])}`);

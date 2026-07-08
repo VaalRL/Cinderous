@@ -18,7 +18,7 @@ const wss = new WebSocketServer({ port });
 wss.on("connection", (ws) => {
   const id = `c${counter++}`;
   sockets.set(id, ws);
-  core.connect(id);
+  for (const { to, message } of core.connect(id)) sockets.get(to)?.send(JSON.stringify(message)); // AUTH 挑戰
 
   ws.on("message", (data) => {
     for (const { to, message } of core.handle(id, data.toString())) {

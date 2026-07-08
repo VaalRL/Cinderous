@@ -59,7 +59,7 @@ export class RelayRoom {
 
     server.accept();
     this.conns.set(connId, server);
-    this.core.connect(connId);
+    this.dispatch(this.core.connect(connId)); // 送出 NIP-42 AUTH 挑戰（requireAuth 時；否則空）
 
     server.addEventListener("message", (evt: MessageEvent) => {
       const raw = typeof evt.data === "string" ? evt.data : "";

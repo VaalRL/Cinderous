@@ -1,4 +1,4 @@
-import { verifyEvent, type NostrEvent } from "@cinder/core";
+import { AUTH_KIND, authChallengeOf, verifyEvent, type NostrEvent } from "@cinder/core";
 import { matchFilter } from "./filters.js";
 import type { OfflineStore } from "./message-store.js";
 import {
@@ -66,6 +66,14 @@ export interface RelayCoreOptions {
    * 未設＝不限制。停用檔案/通話＝從名單排除其信令 kind（無信令即無 WebRTC）。
    */
   allowedKinds?: Iterable<number>;
+  /**
+   * NIP-42 AUTH（開放中繼，ADR-0057）：開啟後連線須先回應 AUTH 挑戰才准讀寫；
+   * 且帶 `#p` 的訂閱只能查自己的收件匣（認證 pubkey ∈ `#p`）。未設＝開放（現況）。
+   * 企業模式維持 allowlist、不開此項（ADR-0044）。
+   */
+  requireAuth?: boolean;
+  /** 產生 AUTH 挑戰字串（測試可注入以求確定性）；預設 `crypto.randomUUID()`。 */
+  authChallenge?: () => string;
 }
 
 interface SubEntry {
@@ -96,32 +104,65 @@ export class RelayCore {
   private readonly allowed: Set<string> | undefined;
   /** 企業政策的事件類型 allowlist（kind）；undefined＝不限制（ADR-0048）。 */
   private readonly allowedKinds: Set<number> | undefined;
+  /** connId → NIP-42 認證狀態（此連線的挑戰與已認證 pubkey）；ADR-0057。 */
+  private readonly authState = new Map<string, { challenge: string; pubkey?: string }>();
+  /** 是否要求 NIP-42 AUTH（開放中繼；ADR-0057）。 */
+  private readonly requireAuth: boolean;
 
   constructor(private readonly opts: RelayCoreOptions = {}) {
     this.allowed = opts.allowedAuthors ? new Set(opts.allowedAuthors) : undefined;
     this.allowedKinds = opts.allowedKinds ? new Set(opts.allowedKinds) : undefined;
+    this.requireAuth = opts.requireAuth === true;
+  }
+
+  private newChallenge(): string {
+    return (this.opts.authChallenge ?? (() => crypto.randomUUID()))();
+  }
+
+  private isAuthed(connId: string): boolean {
+    return this.authState.get(connId)?.pubkey !== undefined;
   }
 
   private now(): number {
     return this.opts.now?.() ?? Math.floor(Date.now() / 1000);
   }
 
-  connect(connId: string): void {
+  /** 建立連線；`requireAuth` 時回 NIP-42 AUTH 挑戰供宿主送出（否則空）。 */
+  connect(connId: string): Outbound[] {
     if (!this.subs.has(connId)) this.subs.set(connId, new Map());
+    if (!this.requireAuth) return [];
+    // 已有挑戰（含已認證）者只重發、不重置——避免重複呼叫把認證狀態洗掉。
+    const existing = this.authState.get(connId);
+    if (existing) return [{ to: connId, message: ["AUTH", existing.challenge] }];
+    const challenge = this.newChallenge();
+    this.authState.set(connId, { challenge });
+    return [{ to: connId, message: ["AUTH", challenge] }];
   }
 
   disconnect(connId: string): void {
     const conn = this.subs.get(connId);
     if (conn) for (const entry of conn.values()) this.unindex(entry);
     this.subs.delete(connId);
+    this.authState.delete(connId);
   }
 
   handle(connId: string, raw: string): Outbound[] {
     const msg = parseClientMessage(raw);
     switch (msg.type) {
+      case "AUTH":
+        return this.handleAuth(connId, msg.event);
       case "EVENT":
+        if (this.requireAuth && !this.isAuthed(connId)) {
+          return this.authRequired(connId, ["OK", msg.event.id, false, "auth-required: 請先認證（NIP-42）"]);
+        }
         return this.handleEvent(connId, msg.event);
       case "REQ":
+        if (this.requireAuth && !this.isAuthed(connId)) {
+          return this.authRequired(connId, ["CLOSED", msg.subId, "auth-required: 請先認證（NIP-42）"]);
+        }
+        if (this.requireAuth && !this.inboxAllowed(connId, msg.filters)) {
+          return [{ to: connId, message: ["CLOSED", msg.subId, "restricted: 只能訂閱自己的收件匣"] }];
+        }
         return this.handleReq(connId, msg.subId, msg.filters);
       case "CLOSE": {
         const conn = this.subs.get(connId);
@@ -137,8 +178,39 @@ export class RelayCore {
     }
   }
 
+  /** 處理客戶端的 NIP-42 AUTH 回應：驗簽 + kind + 挑戰相符 → 標記此連線認證身分。 */
+  private handleAuth(connId: string, event: NostrEvent): Outbound[] {
+    const state = this.authState.get(connId);
+    if (!state) {
+      return [{ to: connId, message: ["OK", event.id, false, "auth-failed: 尚未發出挑戰"] }];
+    }
+    if (event.kind !== AUTH_KIND || !verifyEvent(event) || authChallengeOf(event) !== state.challenge) {
+      return [{ to: connId, message: ["OK", event.id, false, "auth-failed: 認證事件無效或挑戰不符"] }];
+    }
+    state.pubkey = event.pubkey;
+    return [{ to: connId, message: ["OK", event.id, true, ""] }];
+  }
+
+  /** 未認證時回拒絕訊息並（重）發此連線的 AUTH 挑戰。 */
+  private authRequired(connId: string, rejection: RelayMessage): Outbound[] {
+    const out: Outbound[] = [{ to: connId, message: rejection }];
+    const state = this.authState.get(connId);
+    if (state) out.push({ to: connId, message: ["AUTH", state.challenge] });
+    return out;
+  }
+
+  /** 帶 `#p` 的 filter：其所有 `#p` 值須等於認證 pubkey（只能查自己的收件匣，ADR-0057）。 */
+  private inboxAllowed(connId: string, filters: RelayFilter[]): boolean {
+    const self = this.authState.get(connId)?.pubkey;
+    for (const filter of filters) {
+      const pValues = filter["#p"];
+      if (pValues && pValues.length > 0 && !pValues.every((v) => v === self)) return false;
+    }
+    return true;
+  }
+
   private handleReq(connId: string, subId: string, filters: RelayFilter[]): Outbound[] {
-    this.connect(connId);
+    if (!this.subs.has(connId)) this.subs.set(connId, new Map()); // 確保連線存在，不碰 AUTH 狀態
     const conn = this.subs.get(connId)!;
 
     const cap = this.opts.maxSubscriptions;

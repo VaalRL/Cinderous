@@ -21,9 +21,9 @@ export function createInMemoryRelayNetwork(opts?: RelayCoreOptions): InMemoryRel
   return {
     core,
     connect(connId: string, handlers: RelayClientHandlers = {}): RelayClient {
-      core.connect(connId);
       const client = new RelayClient({ send: (data) => route(core.handle(connId, data)) }, handlers);
       clients.set(connId, client);
+      route(core.connect(connId)); // 送出 NIP-42 AUTH 挑戰（requireAuth 時；否則空）
       return client;
     },
   };

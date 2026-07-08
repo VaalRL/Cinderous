@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildAuthEvent,
   finalizeEvent,
   generateSecretKey,
   getPublicKey,
@@ -243,6 +244,72 @@ describe("RelayCore — 企業封閉模式 allowlist（ADR-0044）", () => {
     const core = new RelayCore();
     const e = signedHb(generateSecretKey());
     expect(core.handle("c", EVENT(e))[0]?.message[2]).toBe(true);
+  });
+});
+
+describe("RelayCore — NIP-42 AUTH（ADR-0057）", () => {
+  const AUTHMSG = (e: NostrEvent) => JSON.stringify(["AUTH", e]);
+  const authCore = () => new RelayCore({ requireAuth: true, authChallenge: () => "chal-1" });
+
+  it("connect 發出 AUTH 挑戰", () => {
+    expect(authCore().connect("c")).toEqual([{ to: "c", message: ["AUTH", "chal-1"] }]);
+  });
+
+  it("未認證的 REQ 被擋並重發挑戰", () => {
+    const core = authCore();
+    core.connect("c");
+    const out = core.handle("c", REQ("s", { kinds: [1] }));
+    expect(out).toContainEqual({ to: "c", message: ["CLOSED", "s", "auth-required: 請先認證（NIP-42）"] });
+    expect(out).toContainEqual({ to: "c", message: ["AUTH", "chal-1"] });
+  });
+
+  it("未認證的 EVENT 被擋", () => {
+    const core = authCore();
+    core.connect("c");
+    const e = heartbeat();
+    expect(core.handle("c", EVENT(e))).toContainEqual({
+      to: "c",
+      message: ["OK", e.id, false, "auth-required: 請先認證（NIP-42）"],
+    });
+  });
+
+  it("正確 AUTH → 認證成功，之後（非 #p）REQ 通過", () => {
+    const core = authCore();
+    core.connect("c");
+    const authEv = buildAuthEvent("chal-1", "wss://r", generateSecretKey());
+    expect(core.handle("c", AUTHMSG(authEv))).toEqual([{ to: "c", message: ["OK", authEv.id, true, ""] }]);
+    expect(core.handle("c", REQ("s", { kinds: [1] }))).toContainEqual({ to: "c", message: ["EOSE", "s"] });
+  });
+
+  it("挑戰不符的 AUTH 被拒", () => {
+    const core = authCore();
+    core.connect("c");
+    const out = core.handle("c", AUTHMSG(buildAuthEvent("wrong", "wss://r", generateSecretKey())));
+    expect(out[0]?.message[0]).toBe("OK");
+    expect(out[0]?.message[2]).toBe(false);
+  });
+
+  it("#p 收件匣閘門：只能訂閱自己的 pubkey", () => {
+    const core = authCore();
+    core.connect("c");
+    const sk = generateSecretKey();
+    const self = getPublicKey(sk);
+    core.handle("c", AUTHMSG(buildAuthEvent("chal-1", "wss://r", sk)));
+    expect(core.handle("c", REQ("mine", { kinds: [1059], "#p": [self] }))).toContainEqual({
+      to: "c",
+      message: ["EOSE", "mine"],
+    });
+    const other = getPublicKey(generateSecretKey());
+    expect(core.handle("c", REQ("other", { kinds: [1059], "#p": [other] }))).toContainEqual({
+      to: "c",
+      message: ["CLOSED", "other", "restricted: 只能訂閱自己的收件匣"],
+    });
+  });
+
+  it("requireAuth 關（預設）：connect 不發挑戰、免認證即可讀寫", () => {
+    const core = new RelayCore();
+    expect(core.connect("c")).toEqual([]);
+    expect(core.handle("c", REQ("s", { kinds: [20000] }))).toEqual([{ to: "c", message: ["EOSE", "s"] }]);
   });
 });
 
