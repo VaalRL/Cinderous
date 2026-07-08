@@ -3,6 +3,8 @@
 //! 目前提供與平台無關的 relay 重連退避；完整 Tauri 整合（背景 WebSocket
 //! 長連線、OS 金鑰安全儲存、IPC）將在具 Tauri 工具鏈的環境擴充。
 
+#[cfg(feature = "encstore")]
+pub mod encstore;
 pub mod ipc;
 #[cfg(feature = "keyring")]
 pub mod keyvault;
