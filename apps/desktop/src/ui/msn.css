@@ -110,9 +110,8 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
 .signin { margin: 8vh auto; width: 360px; }
 .signin__body { padding: 28px 24px; text-align: center; background: var(--panel); color: var(--ink); }
 .signin__logo {
-  width: 64px; height: 64px; border-radius: 50%; margin: 0 auto 12px;
-  background: linear-gradient(135deg, #7fd07f, #2f9e44); display: grid; place-items: center;
-  font-size: 30px; box-shadow: inset 0 -4px 8px rgba(0,0,0,.15);
+  width: 64px; height: 64px; margin: 0 auto 12px; display: grid; place-items: center;
+  filter: drop-shadow(0 6px 14px rgba(226, 74, 43, .28)); /* 餘燼暖光 */
 }
 .signin input {
   width: 100%; padding: 8px 10px; margin: 10px 0; border: 1px solid var(--border); border-radius: 5px; font-size: 14px;
@@ -153,6 +152,7 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
 .me__info { flex: 1; min-width: 0; }
 .me__name { font-weight: 700; display: flex; align-items: center; gap: 6px; color: var(--ink); }
 .me__name-txt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; }
+.me__mascot { flex: none; align-self: center; line-height: 0; }
 
 /* MSN 風狀態選單（彩色圓點下拉，取代原生 select）。 */
 .statuspick { position: relative; flex: none; }

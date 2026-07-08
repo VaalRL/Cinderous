@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useI18n } from "../i18n.js";
+import { CinderMark } from "./Brand.js";
 import { TitleControls } from "./TitleControls.js";
 
 function initialRelay(): string {
@@ -27,7 +28,7 @@ export function SignIn({ onSignIn }: { onSignIn: (name: string, relayUrl: string
           <TitleControls />
         </div>
         <div className="signin__body">
-          <div className="signin__logo">🐱</div>
+          <div className="signin__logo"><CinderMark size={64} /></div>
           <h2 style={{ margin: "0 0 4px" }}>{t("signIn_title")}</h2>
           <p className="hint">{t("signIn_hint")}</p>
           <input

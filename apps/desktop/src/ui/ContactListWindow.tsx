@@ -3,6 +3,7 @@ import { Fragment, useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n.js";
 import type { BlockedContact, ConnectionState, Contact, Group, Self, Status } from "../backend/types.js";
 import { qrDataUri } from "../qr.js";
+import { CinderMascot } from "./Brand.js";
 import { hasRichStatus, renderStatus } from "./status-text.js";
 import { TitleControls } from "./TitleControls.js";
 import { avatarColor, initial } from "./util.js";
@@ -138,6 +139,7 @@ export function ContactListWindow(props: ContactListProps): JSX.Element {
   const { t } = useI18n();
   const { self, contacts } = props;
   const sections = groupByStatus(contacts);
+  const totalUnread = Object.values(props.unread ?? {}).reduce((a, b) => a + b, 0);
   const renderRow = (c: Contact): JSX.Element => (
     <ContactRow
       key={c.pubkey}
@@ -209,6 +211,9 @@ export function ContactListWindow(props: ContactListProps): JSX.Element {
               />
             </div>
           ) : null}
+        </div>
+        <div className="me__mascot" title="Cinder">
+          <CinderMascot alert={totalUnread > 0} size={44} />
         </div>
       </div>
 
