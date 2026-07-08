@@ -1,5 +1,5 @@
 import type { MessageKey } from "@cinder/i18n";
-import { useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n.js";
 import type { BlockedContact, ConnectionState, Contact, Group, Self, Status } from "../backend/types.js";
 import { qrDataUri } from "../qr.js";
@@ -14,14 +14,21 @@ const STATUS_KEY: Record<Status, MessageKey> = {
   offline: "status_offline",
 };
 
-/** 上線狀態排序權重（MSN 風：線上→離開→忙碌→離線）。 */
-const STATUS_ORDER: Record<Status, number> = { online: 0, away: 1, busy: 2, offline: 3 };
+/** 上線狀態的分區順序（MSN 風：線上→離開→忙碌→離線）。 */
+const STATUS_SECTIONS: Status[] = ["online", "away", "busy", "offline"];
 
-/** 依上線狀態、再依名稱排序聯絡人（MSN 風清單）。回傳新陣列，不改動輸入。 */
-export function sortByStatus(contacts: Contact[]): Contact[] {
-  return [...contacts].sort(
-    (a, b) => STATUS_ORDER[a.status] - STATUS_ORDER[b.status] || a.name.localeCompare(b.name),
-  );
+/** 依上線狀態分區、每區內依名稱排序；只回傳非空的區（MSN 風清單）。不改動輸入。 */
+export function groupByStatus(contacts: Contact[]): { status: Status; contacts: Contact[] }[] {
+  return STATUS_SECTIONS.map((status) => ({
+    status,
+    contacts: contacts.filter((c) => c.status === status).sort((a, b) => a.name.localeCompare(b.name)),
+  })).filter((sec) => sec.contacts.length > 0);
+}
+
+/** 縮短 npub / 分享字串供顯示（保留頭尾、中間省略）；完整值仍供複製、QR 與 title。 */
+export function shortId(id: string): string {
+  const npub = id.split("@")[0] ?? id;
+  return npub.length > 22 ? `${npub.slice(0, 12)}…${npub.slice(-6)}` : npub;
 }
 
 export interface ContactListProps {
@@ -74,11 +81,72 @@ export interface ContactListProps {
   onToggleGroupPin?: (groupId: string) => void;
 }
 
+/** MSN 風狀態選單：目前狀態的彩色圓點＋下拉，每項附對應顏色圓點（取代原生 select）。 */
+function StatusPicker({ value, onChange }: { value: Status; onChange: (s: Status) => void }): JSX.Element {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent): void => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [open]);
+  return (
+    <div className="statuspick" ref={ref}>
+      <button
+        type="button"
+        className="statuspick__cur"
+        aria-label={t("status_label")}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+      >
+        <span className={`dot ${value}`} />
+        <span className="statuspick__txt">{t(STATUS_KEY[value])}</span>
+        <span className="statuspick__caret" aria-hidden="true">▾</span>
+      </button>
+      {open ? (
+        <div className="statuspick__menu" role="listbox">
+          {STATUS_SECTIONS.map((s) => (
+            <button
+              type="button"
+              key={s}
+              role="option"
+              aria-selected={s === value}
+              className={`statuspick__opt ${s === value ? "on" : ""}`}
+              onClick={() => {
+                onChange(s);
+                setOpen(false);
+              }}
+            >
+              <span className={`dot ${s}`} />
+              <span>{t(STATUS_KEY[s])}</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function ContactListWindow(props: ContactListProps): JSX.Element {
   const { t } = useI18n();
   const { self, contacts } = props;
-  const online = sortByStatus(contacts.filter((c) => c.status !== "offline"));
-  const offline = sortByStatus(contacts.filter((c) => c.status === "offline"));
+  const sections = groupByStatus(contacts);
+  const renderRow = (c: Contact): JSX.Element => (
+    <ContactRow
+      key={c.pubkey}
+      contact={c}
+      onOpen={props.onOpen}
+      hint={t("contact_openHint")}
+      unread={props.unread?.[c.pubkey] ?? 0}
+      {...(props.onRemoveContact ? { onRemove: props.onRemoveContact } : {})}
+      {...(props.onBlockContact ? { onBlock: props.onBlockContact } : {})}
+    />
+  );
   const [groupModal, setGroupModal] = useState(false);
   const groups = props.groups ?? [];
 
@@ -108,20 +176,11 @@ export function ContactListWindow(props: ContactListProps): JSX.Element {
       ) : null}
 
       <div className="me">
-        <div className="avatar" style={{ background: avatarColor(self.pubkey) }}>{initial(self.name)}</div>
+        <div className={`avatar ring-${self.status}`} style={{ background: avatarColor(self.pubkey) }}>{initial(self.name)}</div>
         <div className="me__info">
           <div className="me__name">
-            <span className={`dot ${self.status}`} title={t(STATUS_KEY[self.status])} />
             <span className="me__name-txt">{self.name}</span>
-            <select
-              aria-label={t("status_label")}
-              value={self.status}
-              onChange={(e) => props.onStatus(e.target.value as Status)}
-            >
-              {(["online", "away", "busy", "offline"] as Status[]).map((s) => (
-                <option key={s} value={s}>{t(STATUS_KEY[s])}</option>
-              ))}
-            </select>
+            <StatusPicker value={self.status} onChange={props.onStatus} />
           </div>
           <div className="me__msg">
             <input
@@ -202,29 +261,13 @@ export function ContactListWindow(props: ContactListProps): JSX.Element {
             ))}
           </>
         ) : null}
-        <div className="group">{t("group_online", { count: online.length })}</div>
-        {online.map((c) => (
-          <ContactRow
-            key={c.pubkey}
-            contact={c}
-            onOpen={props.onOpen}
-            hint={t("contact_openHint")}
-            unread={props.unread?.[c.pubkey] ?? 0}
-            {...(props.onRemoveContact ? { onRemove: props.onRemoveContact } : {})}
-            {...(props.onBlockContact ? { onBlock: props.onBlockContact } : {})}
-          />
-        ))}
-        <div className="group">{t("group_offline", { count: offline.length })}</div>
-        {offline.map((c) => (
-          <ContactRow
-            key={c.pubkey}
-            contact={c}
-            onOpen={props.onOpen}
-            hint={t("contact_openHint")}
-            unread={props.unread?.[c.pubkey] ?? 0}
-            {...(props.onRemoveContact ? { onRemove: props.onRemoveContact } : {})}
-            {...(props.onBlockContact ? { onBlock: props.onBlockContact } : {})}
-          />
+        {sections.map((sec) => (
+          <Fragment key={sec.status}>
+            <div className="group">
+              {t(STATUS_KEY[sec.status])}（{sec.contacts.length}）
+            </div>
+            {sec.contacts.map(renderRow)}
+          </Fragment>
         ))}
         {props.blocked && props.blocked.length > 0 ? (
           <>
@@ -424,6 +467,12 @@ function AddContact({
   const [value, setValue] = useState("");
   const [showQr, setShowQr] = useState(false);
   const [error, setError] = useState("");
+  const [copied, setCopied] = useState(false);
+  const copy = (): void => {
+    void navigator.clipboard?.writeText(selfNpub);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
   const add = () => {
     const v = value.trim();
     if (!v) return;
@@ -440,11 +489,21 @@ function AddContact({
   return (
     <div className="addbar">
       <div className="myid" title={selfNpub}>
-        <b>{myIdLabel}:</b> <span className="myid__val" data-testid="my-npub">{selfNpub}</span>
+        <b>{myIdLabel}:</b> <span className="myid__val" data-testid="my-npub">{shortId(selfNpub)}</span>
         {selfNpub ? (
-          <button className="myid__qr" title={t("qr_show")} data-testid="qr-show" onClick={() => setShowQr(true)}>
-            ▦
-          </button>
+          <>
+            <button
+              className="myid__qr"
+              title={copied ? t("contact_copied") : t("contact_copy")}
+              data-testid="copy-id"
+              onClick={copy}
+            >
+              {copied ? "✓" : "📋"}
+            </button>
+            <button className="myid__qr" title={t("qr_show")} data-testid="qr-show" onClick={() => setShowQr(true)}>
+              ▦
+            </button>
+          </>
         ) : null}
       </div>
       {showQr && selfNpub ? (
@@ -513,7 +572,7 @@ function ContactRow({
       onDoubleClick={() => onOpen(contact.pubkey)}
       title={hint}
     >
-      <div className="avatar sm" style={{ background: avatarColor(contact.pubkey) }}>{initial(contact.name)}</div>
+      <div className={`avatar sm ring-${contact.status}`} style={{ background: avatarColor(contact.pubkey) }}>{initial(contact.name)}</div>
       <div className="contact__info">
         <div className="contact__name">{contact.name}</div>
         <div className="contact__msg">{secondary}</div>

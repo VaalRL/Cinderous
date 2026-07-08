@@ -142,7 +142,8 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
 .addbar__row button { padding: 4px 10px; border: 1px solid #2f8a3c; border-radius: 5px; background: linear-gradient(180deg, #8ad08a, #2f9e44); color: #fff; font-size: 12px; font-weight: 600; cursor: pointer; }
 .me {
   display: flex; gap: 10px; padding: 10px; align-items: center;
-  background: var(--surface2); border-bottom: 1px solid var(--border);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 22%, var(--surface2)) 0%, var(--surface2) 100%);
+  border-bottom: 1px solid var(--border);
 }
 .avatar {
   width: 44px; height: 44px; border-radius: 6px; border: 2px solid #ffffff; box-shadow: 0 1px 3px rgba(0,0,0,.2);
@@ -152,8 +153,32 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
 .me__info { flex: 1; min-width: 0; }
 .me__name { font-weight: 700; display: flex; align-items: center; gap: 6px; color: var(--ink); }
 .me__name-txt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; }
-.me__name .dot { width: 11px; height: 11px; }
-.me__name select { font: inherit; border: 1px solid var(--border); border-radius: 4px; background: var(--field); color: var(--ink); flex: none; }
+
+/* MSN 風狀態選單（彩色圓點下拉，取代原生 select）。 */
+.statuspick { position: relative; flex: none; }
+.statuspick__cur {
+  display: inline-flex; align-items: center; gap: 5px; font: inherit; font-size: 12px; font-weight: 600;
+  border: 1px solid var(--border); border-radius: 5px; background: var(--field); color: var(--ink); padding: 2px 6px; cursor: pointer;
+}
+.statuspick__cur:hover { background: var(--hover); }
+.statuspick__caret { color: var(--muted); font-size: 10px; }
+.statuspick__menu {
+  position: absolute; right: 0; top: calc(100% + 3px); z-index: 20; min-width: 150px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 7px; box-shadow: 0 4px 14px rgba(0,0,0,.18);
+  padding: 3px; display: flex; flex-direction: column; gap: 1px;
+}
+.statuspick__opt {
+  display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; font: inherit; font-size: 13px;
+  border: none; background: transparent; color: var(--ink); border-radius: 5px; padding: 5px 8px; cursor: pointer;
+}
+.statuspick__opt:hover { background: var(--hover); }
+.statuspick__opt.on { background: var(--hover); font-weight: 700; }
+
+/* 大頭貼狀態外框光暈（MSN 風）。 */
+.avatar.ring-online { box-shadow: 0 0 0 2px #36c46b, 0 0 7px #36c46b; }
+.avatar.ring-away { box-shadow: 0 0 0 2px #f2b134, 0 0 7px #f2b134; }
+.avatar.ring-busy { box-shadow: 0 0 0 2px #e5484d, 0 0 6px #e5484d; }
+.avatar.ring-offline { box-shadow: 0 1px 3px rgba(0,0,0,.2); }
 .me__msg input {
   width: 100%; border: none; background: transparent; color: var(--muted); font-size: 12px; font-style: italic; padding: 2px 0;
 }

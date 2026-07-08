@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { I18nProvider } from "../i18n.js";
 import { ThemeProvider } from "../theme.js";
 import type { Contact, Group, Self, Status } from "../backend/types.js";
-import { ContactListWindow, sortByStatus } from "./ContactListWindow.js";
+import { ContactListWindow, groupByStatus, shortId } from "./ContactListWindow.js";
 
 const self: Self = { pubkey: "aa", name: "我", status: "online", statusMessage: "" };
 const groups: Group[] = [{ id: "g1", name: "工作群", admin: "aa", members: ["aa", "bb"] }];
@@ -58,26 +58,40 @@ describe("ContactListWindow 群組標籤 UI（ADR-0040）", () => {
   });
 });
 
-describe("ContactListWindow — 依上線狀態排序 + 頂部狀態（MSN 風）", () => {
+describe("ContactListWindow — 狀態分區 + 頂部狀態 + 分享（MSN 風）", () => {
   const mk = (name: string, status: Status): Contact => ({ pubkey: name, name, status, statusMessage: "", nowPlaying: "" });
+  const longId = "npub1qqqqqqqqqqqqqqqqqqqqqqqqqqwxyz@wss://r";
 
-  it("sortByStatus：線上→離開→忙碌→離線，同狀態依名稱", () => {
-    const sorted = sortByStatus([mk("Zoe", "busy"), mk("Amy", "online"), mk("Bob", "online"), mk("Cara", "away")]);
-    expect(sorted.map((c) => c.name)).toEqual(["Amy", "Bob", "Cara", "Zoe"]);
+  it("groupByStatus：分區順序 線上→離開→忙碌→離線，每區依名稱、跳過空區", () => {
+    const secs = groupByStatus([mk("Zoe", "busy"), mk("Amy", "online"), mk("Bob", "online"), mk("Cara", "away")]);
+    expect(secs.map((s) => s.status)).toEqual(["online", "away", "busy"]); // 無 offline → 跳過
+    expect(secs[0]!.contacts.map((c) => c.name)).toEqual(["Amy", "Bob"]);
   });
 
-  it("sortByStatus 不改動輸入陣列", () => {
+  it("groupByStatus 不改動輸入陣列", () => {
     const input = [mk("B", "busy"), mk("A", "online")];
-    sortByStatus(input);
+    groupByStatus(input);
     expect(input.map((c) => c.name)).toEqual(["B", "A"]);
   });
 
-  it("頂部渲染自己的狀態圓點（.dot online）", () => {
+  it("shortId：長 npub 中間省略、帶 @relay 只取 npub 段、短字串原樣", () => {
+    expect(shortId(longId)).toContain("…");
+    expect(shortId(longId)).not.toContain("@");
+    expect(shortId("short")).toBe("short");
+  });
+
+  it("頂部狀態選單渲染目前狀態圓點（.dot online）", () => {
     expect(render({})).toContain("dot online");
   });
 
-  it("線上清單依狀態排序渲染：online 早於 busy", () => {
+  it("狀態分區渲染：online 區早於 busy 區", () => {
     const html = render({ contacts: [mk("Zed", "busy"), mk("Ann", "online")] });
     expect(html.indexOf("Ann")).toBeLessThan(html.indexOf("Zed"));
+  });
+
+  it("分享列顯示縮短 ID + 複製鈕（提供 onAddContact 時）", () => {
+    const html = render({ onAddContact: () => {}, selfNpub: longId });
+    expect(html).toContain('data-testid="copy-id"');
+    expect(html).toContain("…");
   });
 });
