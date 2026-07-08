@@ -1,21 +1,42 @@
-// 本機 Ollama 改寫（ADR-0060）。把 composer 的草稿送給本機 Ollama（localhost:11434）改寫。
-// Tauri 走 Rust IPC（無 CORS、prod 穩）；瀏覽器走 fetch 後備。純函式（prompt/端點判斷）
-// 與客戶端分離，IO 可注入以利測試。
+// 本機/線上 LLM 改寫與摘要（ADR-0060/0062）。Tauri 走 Rust IPC（無 CORS、prod 穩、線上
+// provider 的 API key 存 OS 金鑰庫、不落 JS/localStorage）；瀏覽器 fetch 後備（僅本機 Ollama）。
+// 純函式（prompt/端點判斷）與客戶端分離，IO 可注入以利測試。
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import type { MessageKey } from "@cinder/i18n";
 
-/** Ollama 連線設定。 */
+/** LLM provider：本機 Ollama 或 OpenAI 相容線上服務（OpenAI/Groq/OpenRouter/LM Studio…）。 */
+export type AiProvider = "ollama" | "openai";
+
+/** LLM 連線設定。 */
 export interface OllamaConfig {
+  /** provider（預設 ollama＝本機）。 */
+  provider?: AiProvider;
   endpoint: string;
   model: string;
-  /** localhost 硬守則（ADR-0060）：預設 true＝只准本機端點；false 才准非本機（文字會離開裝置）。 */
+  /** localhost 硬守則（ADR-0060）：預設 true＝只准本機端點；false 才准非本機（含線上 provider）。 */
   localOnly?: boolean;
 }
-export const DEFAULT_OLLAMA: OllamaConfig = { endpoint: "http://localhost:11434", model: "llama3.2", localOnly: true };
+export const DEFAULT_OLLAMA: OllamaConfig = {
+  provider: "ollama",
+  endpoint: "http://localhost:11434",
+  model: "llama3.2",
+  localOnly: true,
+};
+
+/** 各 provider 的預設端點/模型（切換時自動帶入）。 */
+export const PROVIDER_DEFAULTS: Record<AiProvider, { endpoint: string; model: string }> = {
+  ollama: { endpoint: "http://localhost:11434", model: "llama3.2" },
+  openai: { endpoint: "https://api.openai.com", model: "gpt-4o-mini" },
+};
+
+export function providerOf(cfg: OllamaConfig): AiProvider {
+  return cfg.provider ?? "ollama";
+}
 
 /**
- * localhost 硬守則：`localOnly`（預設視為 true）下，非本機端點一律拒絕——把「訊息外流」
- * 從「UI 警告」升級為「client 層強制」。所有 rewrite/summarize 呼叫前必經此關（ADR-0060）。
+ * localhost 硬守則：`localOnly`（預設視為 true）下，非本機端點一律拒絕——把「訊息外流」從
+ * 「UI 警告」升級為「client 層強制」。線上 provider 端點本就非本機，故需使用者關掉 localOnly
+ * （明確同意文字外流）才能用。所有 rewrite/summarize 呼叫前必經此關（ADR-0060）。
  */
 export function ensureAllowed(cfg: OllamaConfig): void {
   if (cfg.localOnly !== false && !isLocalEndpoint(cfg.endpoint)) {
@@ -62,41 +83,44 @@ export function isLocalEndpoint(endpoint: string): boolean {
 
 /** 底層收發（可注入以利測試）。 */
 export interface OllamaIo {
-  generate(endpoint: string, model: string, prompt: string): Promise<string>;
-  available(endpoint: string): Promise<boolean>;
-  /** 列出本機已安裝的模型名稱（供設定頁下拉選擇）。 */
-  models(endpoint: string): Promise<string[]>;
+  generate(cfg: OllamaConfig, prompt: string): Promise<string>;
+  available(cfg: OllamaConfig): Promise<boolean>;
+  models(cfg: OllamaConfig): Promise<string[]>;
 }
 
-/** 預設 IO：Tauri 走 Rust IPC（無 CORS）；瀏覽器走 fetch 後備。 */
+/** 預設 IO：Tauri 走 Rust IPC（多 provider、API key 存金鑰庫）；瀏覽器 fetch 後備（僅 Ollama）。 */
 export function defaultOllamaIo(): OllamaIo {
   if (isTauri()) {
     return {
-      generate: (endpoint, model, prompt) => invoke<string>("ollama_generate", { endpoint, model, prompt }),
-      available: (endpoint) => invoke<boolean>("ollama_available", { endpoint }),
-      models: (endpoint) => invoke<string[]>("ollama_models", { endpoint }),
+      generate: (cfg, prompt) =>
+        invoke<string>("ai_generate", { provider: providerOf(cfg), endpoint: cfg.endpoint, model: cfg.model, prompt }),
+      available: (cfg) => invoke<boolean>("ai_available", { provider: providerOf(cfg), endpoint: cfg.endpoint }),
+      models: (cfg) => invoke<string[]>("ai_models", { provider: providerOf(cfg), endpoint: cfg.endpoint }),
     };
   }
   return {
-    async generate(endpoint, model, prompt) {
-      const r = await fetch(`${endpoint}/api/generate`, {
+    async generate(cfg, prompt) {
+      if (providerOf(cfg) !== "ollama") throw new Error("browser 僅支援本機 Ollama");
+      const r = await fetch(`${cfg.endpoint}/api/generate`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ model, prompt, stream: false }),
-        signal: AbortSignal.timeout(120_000), // 逾時保護，避免卡住
+        body: JSON.stringify({ model: cfg.model, prompt, stream: false }),
+        signal: AbortSignal.timeout(120_000),
       });
       if (!r.ok) throw new Error(`ollama ${r.status}`);
       return String(((await r.json()) as { response?: unknown }).response ?? "");
     },
-    async available(endpoint) {
+    async available(cfg) {
+      if (providerOf(cfg) !== "ollama") return false;
       try {
-        return (await fetch(`${endpoint}/api/tags`, { signal: AbortSignal.timeout(5_000) })).ok;
+        return (await fetch(`${cfg.endpoint}/api/tags`, { signal: AbortSignal.timeout(5_000) })).ok;
       } catch {
         return false;
       }
     },
-    async models(endpoint) {
-      const r = await fetch(`${endpoint}/api/tags`, { signal: AbortSignal.timeout(5_000) });
+    async models(cfg) {
+      if (providerOf(cfg) !== "ollama") return [];
+      const r = await fetch(`${cfg.endpoint}/api/tags`, { signal: AbortSignal.timeout(5_000) });
       if (!r.ok) throw new Error(`ollama ${r.status}`);
       const data = (await r.json()) as { models?: { name?: unknown }[] };
       return (data.models ?? []).map((m) => String(m.name ?? "")).filter(Boolean);
@@ -104,7 +128,7 @@ export function defaultOllamaIo(): OllamaIo {
   };
 }
 
-/** 請 Ollama 依指示改寫並回傳整理後結果。 */
+/** 請 LLM 依指示改寫並回傳整理後結果。 */
 export async function ollamaRewrite(
   text: string,
   instruction: string,
@@ -112,7 +136,7 @@ export async function ollamaRewrite(
   io: OllamaIo = defaultOllamaIo(),
 ): Promise<string> {
   ensureAllowed(cfg);
-  const out = await io.generate(cfg.endpoint, cfg.model, buildRewritePrompt(text, instruction));
+  const out = await io.generate(cfg, buildRewritePrompt(text, instruction));
   return out.trim();
 }
 
@@ -135,23 +159,33 @@ export function buildSummaryPrompt(messages: { sender: string; text: string }[])
   ].join("\n");
 }
 
-/** 請 Ollama 摘要一段收到的訊息（點開對話前的未讀摘要；ADR-0060）。 */
+/** 請 LLM 摘要一段收到的訊息（點開對話前的未讀摘要；ADR-0060）。 */
 export async function ollamaSummarize(
   messages: { sender: string; text: string }[],
   cfg: OllamaConfig,
   io: OllamaIo = defaultOllamaIo(),
 ): Promise<string> {
   ensureAllowed(cfg);
-  const out = await io.generate(cfg.endpoint, cfg.model, buildSummaryPrompt(messages));
+  const out = await io.generate(cfg, buildSummaryPrompt(messages));
   return out.trim();
 }
 
-/** 偵測 Ollama 是否可用（未啟動就把 UI 入口隱藏/停用）。 */
+/** 偵測所選 provider 是否可用（未就緒就把 UI 入口隱藏/停用）。 */
 export function ollamaAvailable(cfg: OllamaConfig, io: OllamaIo = defaultOllamaIo()): Promise<boolean> {
-  return io.available(cfg.endpoint);
+  return io.available(cfg);
 }
 
-/** 列出本機已安裝的模型（供設定頁下拉）。 */
+/** 列出可用模型（Ollama＝已安裝；OpenAI＝帳號可用模型）。 */
 export function ollamaModels(cfg: OllamaConfig, io: OllamaIo = defaultOllamaIo()): Promise<string[]> {
-  return io.models(cfg.endpoint);
+  return io.models(cfg);
+}
+
+/** 存線上 provider 的 API key 到 OS 金鑰庫（不落 JS/localStorage；ADR-0062）。僅 Tauri。 */
+export async function setApiKey(provider: AiProvider, key: string): Promise<void> {
+  if (isTauri()) await invoke("ai_set_key", { provider, key });
+}
+
+/** 該 provider 是否已設 API key（金鑰庫）。 */
+export function hasApiKey(provider: AiProvider): Promise<boolean> {
+  return isTauri() ? invoke<boolean>("ai_has_key", { provider }) : Promise.resolve(false);
 }

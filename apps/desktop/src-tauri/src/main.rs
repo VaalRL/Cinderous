@@ -102,9 +102,10 @@ fn store_save(app: tauri::AppHandle, namespace: String, json: String) -> Result<
     std::fs::write(&path, ciphertext).map_err(|e| e.to_string())
 }
 
-// ── Ollama 本機 AI 改寫 IPC（ADR-0060）：webview → Rust reqwest → 本機 Ollama（無 CORS）──
+// ── LLM 改寫/摘要 IPC（ADR-0060/0062）：本機 Ollama 或 OpenAI 相容線上服務。webview → Rust
+//    reqwest（無 CORS）；線上 provider 的 API key 存 OS 金鑰庫、不落 JS/localStorage。──
 
-fn ollama_url(endpoint: &str, path: &str) -> String {
+fn ai_url(endpoint: &str, path: &str) -> String {
     format!("{}{}", endpoint.trim_end_matches('/'), path)
 }
 
@@ -127,13 +128,51 @@ fn http() -> &'static reqwest::Client {
 const GEN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 const TAGS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
-/// 請本機 Ollama 生成（改寫/摘要用）；回傳純文字結果。
+/// 線上 provider 的 API key（存 OS 金鑰庫，account `ai:<provider>`；ADR-0062）。
+fn api_key(provider: &str) -> Option<String> {
+    cinder_desktop::keyvault::get_key(&format!("ai:{provider}")).ok().flatten()
+}
+
+/// 存某 provider 的 API key 到金鑰庫（不落 JS/localStorage）。
 #[tauri::command]
-async fn ollama_generate(endpoint: String, model: String, prompt: String) -> Result<String, String> {
+fn ai_set_key(provider: String, key: String) -> Result<(), String> {
+    cinder_desktop::keyvault::set_key(&format!("ai:{provider}"), &key).map_err(|e| e.to_string())
+}
+
+/// 某 provider 是否已設 API key。
+#[tauri::command]
+fn ai_has_key(provider: String) -> bool {
+    api_key(&provider).is_some()
+}
+
+/// 生成（改寫/摘要）。ollama → /api/generate；openai → /v1/chat/completions（Bearer key）。
+#[tauri::command]
+async fn ai_generate(provider: String, endpoint: String, model: String, prompt: String) -> Result<String, String> {
     check_endpoint(&endpoint)?;
+    if provider == "openai" {
+        let key = api_key("openai").ok_or("未設定 OpenAI API key")?;
+        let body = serde_json::json!({
+            "model": model,
+            "messages": [{ "role": "user", "content": prompt }],
+            "stream": false
+        });
+        let resp = http()
+            .post(ai_url(&endpoint, "/v1/chat/completions"))
+            .timeout(GEN_TIMEOUT)
+            .bearer_auth(key)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        if !resp.status().is_success() {
+            return Err(format!("openai {}", resp.status()));
+        }
+        let data: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+        return Ok(data["choices"][0]["message"]["content"].as_str().unwrap_or("").to_string());
+    }
     let body = serde_json::json!({ "model": model, "prompt": prompt, "stream": false });
     let resp = http()
-        .post(ollama_url(&endpoint, "/api/generate"))
+        .post(ai_url(&endpoint, "/api/generate"))
         .timeout(GEN_TIMEOUT)
         .json(&body)
         .send()
@@ -146,38 +185,45 @@ async fn ollama_generate(endpoint: String, model: String, prompt: String) -> Res
     Ok(data.get("response").and_then(|v| v.as_str()).unwrap_or("").to_string())
 }
 
-/// 偵測本機 Ollama 是否可用（GET /api/tags）。
+/// 偵測可用。ollama → GET /api/tags；openai → 有 key 即視為可用（不多打一次 API）。
 #[tauri::command]
-async fn ollama_available(endpoint: String) -> bool {
+async fn ai_available(provider: String, endpoint: String) -> bool {
     if check_endpoint(&endpoint).is_err() {
         return false;
     }
+    if provider == "openai" {
+        return api_key("openai").is_some();
+    }
     matches!(
-        http().get(ollama_url(&endpoint, "/api/tags")).timeout(TAGS_TIMEOUT).send().await,
+        http().get(ai_url(&endpoint, "/api/tags")).timeout(TAGS_TIMEOUT).send().await,
         Ok(r) if r.status().is_success()
     )
 }
 
-/// 列出本機已安裝的模型名稱（GET /api/tags）。
+/// 列出模型。ollama → /api/tags 的 name；openai → /v1/models 的 id（Bearer key）。
 #[tauri::command]
-async fn ollama_models(endpoint: String) -> Result<Vec<String>, String> {
+async fn ai_models(provider: String, endpoint: String) -> Result<Vec<String>, String> {
     check_endpoint(&endpoint)?;
-    let resp = http()
-        .get(ollama_url(&endpoint, "/api/tags"))
-        .timeout(TAGS_TIMEOUT)
-        .send()
-        .await
-        .map_err(|e| e.to_string())?;
+    let (path, list_key, id_key, auth) = if provider == "openai" {
+        ("/v1/models", "data", "id", api_key("openai"))
+    } else {
+        ("/api/tags", "models", "name", None)
+    };
+    let mut req = http().get(ai_url(&endpoint, path)).timeout(TAGS_TIMEOUT);
+    if let Some(key) = auth {
+        req = req.bearer_auth(key);
+    }
+    let resp = req.send().await.map_err(|e| e.to_string())?;
     if !resp.status().is_success() {
-        return Err(format!("ollama {}", resp.status()));
+        return Err(format!("{provider} {}", resp.status()));
     }
     let data: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
     let names = data
-        .get("models")
+        .get(list_key)
         .and_then(|v| v.as_array())
         .map(|arr| {
             arr.iter()
-                .filter_map(|m| m.get("name").and_then(|n| n.as_str()).map(str::to_string))
+                .filter_map(|m| m.get(id_key).and_then(|n| n.as_str()).map(str::to_string))
                 .collect()
         })
         .unwrap_or_default();
@@ -237,9 +283,11 @@ fn main() {
             key_delete,
             store_load,
             store_save,
-            ollama_generate,
-            ollama_available,
-            ollama_models
+            ai_generate,
+            ai_available,
+            ai_models,
+            ai_set_key,
+            ai_has_key
         ])
         .run(tauri::generate_context!())
         .expect("執行 Tauri 應用程式時發生錯誤");

@@ -1,9 +1,17 @@
 import { useEffect, useState } from "react";
 import { useI18n } from "../i18n.js";
-import { isLocalEndpoint, ollamaModels } from "../native/ollama.js";
+import {
+  type AiProvider,
+  hasApiKey,
+  isLocalEndpoint,
+  ollamaModels,
+  PROVIDER_DEFAULTS,
+  setApiKey,
+} from "../native/ollama.js";
 
-/** 本機 AI 改寫設定（ADR-0060）。 */
+/** AI 改寫設定（ADR-0060/0062）。 */
 export interface OllamaSettingsValue {
+  provider?: AiProvider;
   endpoint: string;
   model: string;
   enabled: boolean;
@@ -219,14 +227,17 @@ function OllamaSettings({
   onChange: (next: OllamaSettingsValue) => void;
 }): JSX.Element {
   const { t } = useI18n();
+  const provider: AiProvider = value.provider ?? "ollama";
   const [models, setModels] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
+  const [apiKey, setApiKeyInput] = useState("");
+  const [keySet, setKeySet] = useState(false);
   const local = isLocalEndpoint(value.endpoint);
 
   const loadModels = async (): Promise<void> => {
     setLoading(true);
     try {
-      setModels(await ollamaModels({ endpoint: value.endpoint, model: value.model }));
+      setModels(await ollamaModels(value));
     } catch {
       setModels([]);
     } finally {
@@ -235,8 +246,19 @@ function OllamaSettings({
   };
   useEffect(() => {
     if (value.enabled) void loadModels();
+    if (provider === "openai") void hasApiKey("openai").then(setKeySet);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value.enabled, value.endpoint]);
+  }, [value.enabled, value.endpoint, provider]);
+
+  // 切換 provider 帶入預設端點/模型；線上服務預設關「僅本機」（否則會被硬守則擋）。
+  const switchProvider = (p: AiProvider): void =>
+    onChange({ ...value, provider: p, ...PROVIDER_DEFAULTS[p], localOnly: p === "ollama" });
+  const saveKey = async (): Promise<void> => {
+    if (!apiKey.trim()) return;
+    await setApiKey(provider, apiKey.trim());
+    setApiKeyInput("");
+    setKeySet(true);
+  };
 
   // 下拉一定包含目前選的模型（即使尚未載到清單），避免顯示空白。
   const options = models.includes(value.model) ? models : [value.model, ...models].filter(Boolean);
@@ -251,9 +273,39 @@ function OllamaSettings({
       {value.enabled ? (
         <div className="settings__ollama">
           <label className="settings__field">
+            <span>{t("settings_aiProvider")}</span>
+            <select
+              value={provider}
+              onChange={(e) => switchProvider(e.target.value as AiProvider)}
+              data-testid="ai-provider"
+            >
+              <option value="ollama">{t("settings_aiProviderOllama")}</option>
+              <option value="openai">{t("settings_aiProviderOpenai")}</option>
+            </select>
+          </label>
+          <label className="settings__field">
             <span>{t("settings_ollamaEndpoint")}</span>
             <input value={value.endpoint} onChange={(e) => onChange({ ...value, endpoint: e.target.value })} />
           </label>
+          {provider === "openai" ? (
+            <label className="settings__field">
+              <span>
+                {t("settings_aiApiKey")}
+                {keySet ? " ✓" : ""}
+              </span>
+              <span className="settings__modelrow">
+                <input
+                  type="password"
+                  value={apiKey}
+                  placeholder={keySet ? "••••••" : ""}
+                  onChange={(e) => setApiKeyInput(e.target.value)}
+                />
+                <button type="button" disabled={!apiKey.trim()} onClick={() => void saveKey()}>
+                  {t("settings_aiSaveKey")}
+                </button>
+              </span>
+            </label>
+          ) : null}
           <label className="settings__toggle">
             <input
               type="checkbox"
@@ -263,6 +315,7 @@ function OllamaSettings({
             <span>{t("settings_ollamaLocalOnly")}</span>
           </label>
           {value.localOnly === false && !local ? <div className="settings__warn">{t("ai_nonLocalWarn")}</div> : null}
+          {value.localOnly !== false && !local ? <div className="settings__warn">{t("ai_localOnlyBlocks")}</div> : null}
           <label className="settings__field">
             <span>{t("settings_ollamaModel")}</span>
             <span className="settings__modelrow">

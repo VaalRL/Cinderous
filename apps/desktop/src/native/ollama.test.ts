@@ -9,7 +9,10 @@ import {
   ollamaModels,
   ollamaRewrite,
   ollamaSummarize,
+  type OllamaConfig,
   type OllamaIo,
+  PROVIDER_DEFAULTS,
+  providerOf,
   REWRITE_STYLES,
 } from "./ollama.js";
 
@@ -34,11 +37,11 @@ describe("Ollama 改寫（ADR-0060）", () => {
   });
 
   it("ollamaRewrite：以注入 IO 產 prompt、回傳整理（trim）後結果", async () => {
-    const generate = vi.fn(async (_e: string, _m: string, _p: string) => "  改寫後的文字  ");
+    const generate = vi.fn(async (_cfg: OllamaConfig, _p: string) => "  改寫後的文字  ");
     const io: OllamaIo = { generate, available: vi.fn(async () => true), models: vi.fn(async () => []) };
     const out = await ollamaRewrite("原文", "更精簡", DEFAULT_OLLAMA, io);
     expect(out).toBe("改寫後的文字");
-    const prompt = generate.mock.calls[0]![2];
+    const prompt = generate.mock.calls[0]![1];
     expect(prompt).toContain("原文");
     expect(prompt).toContain("更精簡");
   });
@@ -79,10 +82,17 @@ describe("Ollama 改寫（ADR-0060）", () => {
   });
 
   it("ollamaSummarize：本機端點以注入 IO 摘要、回傳整理後結果", async () => {
-    const generate = vi.fn(async (_e: string, _m: string, _p: string) => "  摘要重點  ");
+    const generate = vi.fn(async (_cfg: OllamaConfig, _p: string) => "  摘要重點  ");
     const io: OllamaIo = { generate, available: vi.fn(async () => true), models: vi.fn(async () => []) };
     const out = await ollamaSummarize([{ sender: "A", text: "訊息一" }], DEFAULT_OLLAMA, io);
     expect(out).toBe("摘要重點");
-    expect(generate.mock.calls[0]![2]).toContain("訊息一");
+    expect(generate.mock.calls[0]![1]).toContain("訊息一");
+  });
+
+  it("provider：預設 ollama；PROVIDER_DEFAULTS 有 openai（非本機端點）", () => {
+    expect(providerOf({ endpoint: "x", model: "m" })).toBe("ollama");
+    expect(providerOf({ provider: "openai", endpoint: "x", model: "m" })).toBe("openai");
+    expect(PROVIDER_DEFAULTS.openai.endpoint.startsWith("https://")).toBe(true);
+    expect(isLocalEndpoint(PROVIDER_DEFAULTS.openai.endpoint)).toBe(false); // 線上＝非本機
   });
 });

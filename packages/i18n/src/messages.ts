@@ -59,6 +59,12 @@ export interface Messages {
   settings_ollamaEndpoint: string;
   settings_ollamaModel: string;
   settings_ollamaLocalOnly: string;
+  settings_aiProvider: string;
+  settings_aiProviderOllama: string;
+  settings_aiProviderOpenai: string;
+  settings_aiApiKey: string;
+  settings_aiSaveKey: string;
+  ai_localOnlyBlocks: string;
   ai_summarize: string;
   ai_summaryTitle: string;
   ai_summarizing: string;
@@ -267,6 +273,12 @@ const zhHant: Messages = {
   settings_ollamaEndpoint: "Ollama 端點",
   settings_ollamaModel: "模型名稱",
   settings_ollamaLocalOnly: "僅允許本機（localhost）——關閉才准非本機端點（文字會離開裝置）",
+  settings_aiProvider: "AI 服務",
+  settings_aiProviderOllama: "本機 Ollama",
+  settings_aiProviderOpenai: "OpenAI 相容（線上）",
+  settings_aiApiKey: "API 金鑰",
+  settings_aiSaveKey: "儲存",
+  ai_localOnlyBlocks: "此端點非本機，但「僅本機」開啟中 → 會被擋；要用線上服務請關掉「僅本機」。",
   ai_summarize: "AI 摘要未讀",
   ai_summaryTitle: "未讀摘要",
   ai_summarizing: "摘要中…",
@@ -475,6 +487,12 @@ const en: Messages = {
   settings_ollamaEndpoint: "Ollama endpoint",
   settings_ollamaModel: "Model name",
   settings_ollamaLocalOnly: "Local only (localhost) — turn off to allow a non-local endpoint (text leaves this device)",
+  settings_aiProvider: "AI provider",
+  settings_aiProviderOllama: "Local Ollama",
+  settings_aiProviderOpenai: "OpenAI-compatible (online)",
+  settings_aiApiKey: "API key",
+  settings_aiSaveKey: "Save",
+  ai_localOnlyBlocks: "This endpoint is non-local but 'local only' is on → it will be blocked; turn off 'local only' to use an online provider.",
   ai_summarize: "Summarize unread",
   ai_summaryTitle: "Unread summary",
   ai_summarizing: "Summarizing…",
