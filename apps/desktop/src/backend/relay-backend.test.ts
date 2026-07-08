@@ -593,3 +593,54 @@ describe("RelayChatBackend（真實後端 + 持久化）", () => {
     backend.stop();
   });
 });
+
+describe("送達/已讀回條（ADR-0058）", () => {
+  const pair = () => {
+    const net = createInMemoryRelayNetwork();
+    const storeA = new MemoryStorage();
+    const a = new RelayChatBackend(storeA, (h) => net.connect("a", h), "Alice");
+    const b = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("b", h), "Bob");
+    return { storeA, a, b };
+  };
+
+  it("Tier1+2：送出 → sent → delivered（同步網路一次到位）", () => {
+    const { storeA, a, b } = pair();
+    const statuses: string[] = [];
+    a.start({ ...noop, onMessageStatus: (_c, _id, s) => statuses.push(s) });
+    b.start(noop);
+    a.addContact(b.selfNpub);
+    a.sendMessage(b.self.pubkey, "hi");
+    expect(storeA.loadMessages(b.self.pubkey)[0]?.status).toBe("delivered");
+    expect(statuses).toContain("sent");
+    expect(statuses).toContain("delivered");
+    a.stop();
+    b.stop();
+  });
+
+  it("Tier3：雙方開啟已讀 → markRead 後升為 read", () => {
+    const { storeA, a, b } = pair();
+    a.start(noop);
+    b.start(noop);
+    a.setReadReceipts?.(true);
+    b.setReadReceipts?.(true);
+    a.addContact(b.selfNpub);
+    a.sendMessage(b.self.pubkey, "hi");
+    b.markRead?.(a.self.pubkey);
+    expect(storeA.loadMessages(b.self.pubkey)[0]?.status).toBe("read");
+    a.stop();
+    b.stop();
+  });
+
+  it("Tier3 互惠：a 關閉已讀 → 對方 markRead 不會升為 read（停在 delivered）", () => {
+    const { storeA, a, b } = pair();
+    a.start(noop);
+    b.start(noop);
+    b.setReadReceipts?.(true); // 只有 b 開；a 預設關
+    a.addContact(b.selfNpub);
+    a.sendMessage(b.self.pubkey, "hi");
+    b.markRead?.(a.self.pubkey);
+    expect(storeA.loadMessages(b.self.pubkey)[0]?.status).toBe("delivered");
+    a.stop();
+    b.stop();
+  });
+});

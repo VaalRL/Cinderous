@@ -1,5 +1,7 @@
 import {
   type AppStorage,
+  MESSAGE_STATUS_RANK,
+  type MessageStatus,
   MESSAGES_PER_CONVO,
   type StoredBootstrapList,
   type StoredContact,
@@ -141,6 +143,14 @@ export class LocalStorage implements AppStorage {
     list.push(message);
     if (list.length > MESSAGES_PER_CONVO) list.splice(0, list.length - MESSAGES_PER_CONVO); // 逐出最舊（P0-1）
     write(this.k("msgs." + message.contact), list);
+  }
+  setMessageStatus(contactPubkey: string, messageId: string, status: MessageStatus): void {
+    const list = this.loadMessages(contactPubkey);
+    const msg = list.find((m) => m.id === messageId);
+    if (!msg) return;
+    if (MESSAGE_STATUS_RANK[status] <= MESSAGE_STATUS_RANK[msg.status ?? "sending"]) return; // 只前進
+    msg.status = status;
+    write(this.k("msgs." + contactPubkey), list);
   }
   loadReactions(): StoredReaction[] {
     return read<StoredReaction[]>(this.k("reactions"), []);

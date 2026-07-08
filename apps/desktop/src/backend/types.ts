@@ -9,8 +9,10 @@ import type {
   PubkeyHex,
   ReceivedFile,
 } from "@cinder/core";
+import type { MessageStatus } from "../storage/types.js";
 
 export type { Group, OrgGroup, OrgMember, OrgPolicy };
+export type { MessageStatus };
 
 /** 使用者可見狀態（避開商標，以中文呈現於 UI）。 */
 export type Status = "online" | "away" | "busy" | "offline";
@@ -78,9 +80,6 @@ export interface ChatMessage {
   status?: MessageStatus;
 }
 
-/** 送出訊息的送達狀態（ADR-0058）：送出中→已送中繼→已送達裝置→已讀。 */
-export type MessageStatus = "sending" | "sent" | "delivered" | "read";
-
 export interface ChatBackendEvents {
   /** 聯絡人清單或其狀態/音樂有更新時觸發。 */
   onContacts(contacts: Contact[]): void;
@@ -99,6 +98,8 @@ export interface ChatBackendEvents {
   onReaction?(messageId: string, emoji: string, mine: boolean): void;
   /** 某訊息被收回（NIP-09），應顯示為「已收回」。 */
   onUnsend?(messageId: string): void;
+  /** 自己送出的某訊息送達/已讀狀態更新（ADR-0058）。 */
+  onMessageStatus?(contact: PubkeyHex, messageId: string, status: MessageStatus): void;
   /** 封鎖名單有更新。 */
   onBlocked?(blocked: BlockedContact[]): void;
   /** 與中繼站的連線狀態改變。 */
@@ -148,6 +149,10 @@ export interface ChatBackend {
   sendReaction?(to: PubkeyHex, messageId: string, emoji: string): void;
   /** 收回（刪除）自己送出的某訊息（NIP-09）。 */
   unsendMessage?(to: PubkeyHex, messageId: string): void;
+  /** 開啟對話時呼叫：若啟用已讀回條則送出「已讀到最新」水位（ADR-0058 Tier 3）。 */
+  markRead?(contact: PubkeyHex): void;
+  /** 設定已讀回條開關（opt-in + 互惠；ADR-0058）。 */
+  setReadReceipts?(enabled: boolean): void;
   /** 以 WebRTC P2P 傳送檔案（不經中繼），回傳追蹤用的傳輸 id。 */
   sendFile?(to: PubkeyHex, file: OutgoingFile): string;
   /** 開啟對話時主動建立 P2P 通道（F5：讓輸入中等狀態卸載中繼）。 */

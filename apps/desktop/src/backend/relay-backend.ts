@@ -47,6 +47,8 @@ import {
   wrapGroupMessage,
   wrapMessage,
   wrapReaction,
+  wrapReceipt,
+  receiptOf,
   type CallMedia,
   type Group,
   type GroupControl,
@@ -57,6 +59,7 @@ import {
   type OrgRosterDoc,
   type OutgoingFile,
   type PresencePayload,
+  type ReceiptType,
   type PresenceState,
   type PubkeyHex,
   type RelayClientHandlers,
@@ -231,6 +234,13 @@ export class RelayChatBackend implements ChatBackend {
   private readonly presence = new PresenceTracker();
   private readonly statuses = new Map<PubkeyHex, PresencePayload>();
   private nowPlaying = "";
+  // 送達/已讀回條（ADR-0058）。
+  /** 已送出、待 relay OK 的訊息 id → 收件人（供 OK 後標 sent）。 */
+  private readonly awaitingSent = new Map<string, PubkeyHex>();
+  /** 每對話已送出的最新「已讀」水位訊息 id（避免重複送已讀回條）。 */
+  private readonly lastReadSent = new Map<PubkeyHex, string>();
+  /** 已讀回條開關（opt-in，預設關；關閉時不送也不顯示他人已讀——互惠）。 */
+  private readReceipts = false;
   // 訊息去重（審查 P1-4）：有界，逐出最舊；儲存層與 UI 層另有去重兜底。
   private readonly seenMsg = new BoundedSet<string>(8192, 4096);
   private contacts: { pubkey: PubkeyHex; name: string; relayUrl?: string }[];
@@ -297,7 +307,10 @@ export class RelayChatBackend implements ChatBackend {
     this.client = connector(
       {
         onEvent: (_sub, event) => this.onEvent(event),
-        onOk: (id, accepted, message) => this.outbox.onOk(id, accepted, message),
+        onOk: (id, accepted, message) => {
+          this.outbox.onOk(id, accepted, message);
+          if (accepted) this.markSent(id); // Tier 1（ADR-0058）：relay 接受＝已送中繼
+        },
         // NIP-42 AUTH（ADR-0057）：回應挑戰；認證成功後重掛訂閱（解「訂閱早於認證」）。
         authSigner: (challenge) => buildAuthEvent(challenge, this.homeUrl ?? "", this.sk),
         onAuthenticated: (client) => this.subscribeOn(client, this.homeUrl),
@@ -752,6 +765,12 @@ export class RelayChatBackend implements ChatBackend {
       return;
     }
 
+    const receipt = receiptOf(rumor);
+    if (receipt) {
+      this.applyReceipt(sender, receipt.messageId, receipt.type); // ADR-0058：標記自己訊息的送達/已讀
+      return;
+    }
+
     const expirySec = messageExpiry(rumor);
     const expiresAt = expirySec !== undefined ? expirySec * 1000 : undefined;
     const replyTo = threadRoot(rumor); // 對話串回覆（ADR-0051）
@@ -762,6 +781,7 @@ export class RelayChatBackend implements ChatBackend {
     const message = { id: event.id, contact: sender, outgoing: false, text: rumor.content, at: Date.now(), ...extra };
     this.storage.appendMessage(message);
     this.handlers?.onMessage(sender, { id: message.id, outgoing: false, text: rumor.content, at: message.at, ...extra });
+    this.publishReliable(wrapReceipt("delivered", this.sk, sender, event.id)); // ADR-0058 Tier 2：已送達回條
   }
 
   /** 處理帶 `g` tag 的群組訊息/控制。 */
@@ -1028,15 +1048,17 @@ export class RelayChatBackend implements ChatBackend {
       ...(mentions && mentions.length > 0 ? { mentions } : {}),
       ...(replyTo ? { replyTo } : {}),
     });
-    this.publishReliable(evt);
     const extra = {
       ...(disappearAt !== undefined ? { expiresAt: disappearAt * 1000 } : {}),
       ...(replyTo ? { replyTo } : {}),
     };
-    const message = { id: evt.id, contact: to, outgoing: true, text, at: Date.now(), ...extra };
+    const message = { id: evt.id, contact: to, outgoing: true, text, at: Date.now(), status: "sending" as const, ...extra };
     this.seenMsg.add(evt.id);
     this.storage.appendMessage(message);
-    this.handlers?.onMessage(to, { id: evt.id, outgoing: true, text, at: message.at, ...extra });
+    this.handlers?.onMessage(to, { id: evt.id, outgoing: true, text, at: message.at, status: "sending" as const, ...extra });
+    // 先存後送：確保同步（測試網路）回來的 OK/回條找得到已存訊息才更新狀態（ADR-0058）。
+    this.awaitingSent.set(evt.id, to);
+    this.publishReliable(evt);
   }
 
   sendReaction(to: PubkeyHex, messageId: string, emoji: string): void {
@@ -1045,6 +1067,48 @@ export class RelayChatBackend implements ChatBackend {
     this.seenMsg.add(evt.id);
     this.storage.addReaction({ id: evt.id, messageId, emoji, mine: true });
     this.handlers?.onReaction?.(messageId, emoji, true);
+  }
+
+  /** Tier 1（ADR-0058）：relay 接受某訊息＝已送中繼，標 sent 並通知 UI。 */
+  private markSent(eventId: string): void {
+    const contact = this.awaitingSent.get(eventId);
+    if (!contact) return;
+    this.awaitingSent.delete(eventId);
+    this.storage.setMessageStatus(contact, eventId, "sent");
+    this.handlers?.onMessageStatus?.(contact, eventId, "sent");
+  }
+
+  /** 套用收到的送達/已讀回條到自己送出的訊息（ADR-0058）。 */
+  private applyReceipt(from: PubkeyHex, messageId: string, type: ReceiptType): void {
+    if (type === "read") {
+      if (!this.readReceipts) return; // 互惠：自己關閉已讀就不顯示他人已讀
+      // 水位：把該對話中、時間不晚於目標訊息的自己訊息全標為已讀。
+      const msgs = this.storage.loadMessages(from);
+      const upto = msgs.find((m) => m.id === messageId)?.at ?? Infinity;
+      for (const m of msgs) {
+        if (!m.outgoing || m.at > upto || m.status === "read") continue;
+        this.storage.setMessageStatus(from, m.id, "read");
+        this.handlers?.onMessageStatus?.(from, m.id, "read");
+      }
+      return;
+    }
+    this.storage.setMessageStatus(from, messageId, "delivered");
+    this.handlers?.onMessageStatus?.(from, messageId, "delivered");
+  }
+
+  /** 開啟對話時呼叫（ADR-0058 Tier 3）：啟用已讀回條時，送「已讀到最新」水位回條。 */
+  markRead(contact: PubkeyHex): void {
+    if (!this.readReceipts) return;
+    const incoming = this.storage.loadMessages(contact).filter((m) => !m.outgoing);
+    const latest = incoming[incoming.length - 1];
+    if (!latest || this.lastReadSent.get(contact) === latest.id) return; // 無收訊或已送過同一水位
+    this.lastReadSent.set(contact, latest.id);
+    this.publishReliable(wrapReceipt("read", this.sk, contact, latest.id));
+  }
+
+  /** 設定已讀回條開關（opt-in + 互惠；ADR-0058）。 */
+  setReadReceipts(enabled: boolean): void {
+    this.readReceipts = enabled;
   }
 
   unsendMessage(to: PubkeyHex, messageId: string): void {

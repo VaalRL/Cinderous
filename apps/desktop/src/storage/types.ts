@@ -20,6 +20,12 @@ export interface StoredContact {
   relayUrl?: string;
 }
 
+/** 送出訊息的送達狀態（ADR-0058）：送出中→已送中繼→已送達裝置→已讀。 */
+export type MessageStatus = "sending" | "sent" | "delivered" | "read";
+
+/** 狀態前進順序；回條只能往前推進、不得倒退（避免 read 被較晚到的 delivered 蓋掉）。 */
+export const MESSAGE_STATUS_RANK: Record<MessageStatus, number> = { sending: 0, sent: 1, delivered: 2, read: 3 };
+
 export interface StoredMessage {
   id: string;
   contact: string;
@@ -34,6 +40,8 @@ export interface StoredMessage {
   mentionsMe?: boolean;
   /** 對話串回覆（ADR-0051）：所屬串的根訊息 id；無則為主頻道訊息。 */
   replyTo?: string;
+  /** 送達/已讀狀態（自己送出的訊息才有意義；ADR-0058）。 */
+  status?: MessageStatus;
 }
 
 export interface StoredGroup {
@@ -83,6 +91,8 @@ export interface AppStorage {
   loadBlocked(): StoredContact[];
   loadMessages(contactPubkey: string): StoredMessage[];
   appendMessage(message: StoredMessage): void;
+  /** 只往前推進某訊息的送達/已讀狀態（ADR-0058）；訊息不存在或狀態不前進則忽略。 */
+  setMessageStatus(contactPubkey: string, messageId: string, status: MessageStatus): void;
   loadReactions(): StoredReaction[];
   addReaction(reaction: StoredReaction): void;
   /** 標記某訊息為已收回（NIP-09）。 */

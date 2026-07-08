@@ -6,6 +6,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { MemoryStorage } from "../storage/memory.js";
 import type {
   AppStorage,
+  MessageStatus,
   StoredBootstrapList,
   StoredContact,
   StoredGroup,
@@ -128,6 +129,10 @@ export class TauriStorage implements AppStorage {
   }
   appendMessage(message: StoredMessage): void {
     this.mem.appendMessage(message);
+    this.persist();
+  }
+  setMessageStatus(contactPubkey: string, messageId: string, status: MessageStatus): void {
+    this.mem.setMessageStatus(contactPubkey, messageId, status);
     this.persist();
   }
   addReaction(reaction: StoredReaction): void {
