@@ -4,7 +4,8 @@ import { useI18n } from "../i18n.js";
 import type { CallMedia, MentionCandidate } from "@cinder/core";
 import { applyMention, suggestMentions } from "./mention-suggest.js";
 import { mainMessages, replyCounts, threadMessages } from "./thread-util.js";
-import type { ChatMessage, Contact, Self } from "../backend/types.js";
+import type { MessageKey } from "@cinder/i18n";
+import type { ChatMessage, Contact, MessageStatus, Self } from "../backend/types.js";
 import {
   formatCustomSticker,
   formatSticker,
@@ -57,6 +58,14 @@ import { renderMarkdown } from "./markdown.js";
 import { applyEmoticons } from "./emoticons.js";
 import { avatarColor, EMOTICONS, initial } from "./util.js";
 
+/** 送達/已讀狀態的 i18n 標籤（ADR-0058）。 */
+const MSG_STATUS_KEY: Record<MessageStatus, MessageKey> = {
+  sending: "msgStatus_sending",
+  sent: "msgStatus_sent",
+  delivered: "msgStatus_delivered",
+  read: "msgStatus_read",
+};
+
 export interface ConversationProps {
   self: Self;
   contact: Contact;
@@ -79,6 +88,8 @@ export interface ConversationProps {
   onReact?: (messageId: string, emoji: string) => void;
   /** 收回自己送出的某訊息（未提供則不顯示收回功能）。 */
   onUnsend?: (messageId: string) => void;
+  /** 檢視此對話時呼叫（供送出已讀回條；ADR-0058）。開窗與新訊息到達時觸發。 */
+  onMarkRead?: () => void;
   /** 以 P2P 傳送檔案（未提供則不顯示檔案功能）。 */
   onSendFile?: (file: File) => void;
   /** 發起語音/視訊通話（未提供則不顯示通話按鈕）。 */
@@ -110,6 +121,11 @@ const MESSAGE_WINDOW = 200;
 export function ConversationWindow(props: ConversationProps): JSX.Element {
   const { t } = useI18n();
   const { self, contact, messages } = props;
+  // 檢視此對話（開窗或新訊息到達）→ 送已讀回條（ADR-0058；App 端另以聚焦把關）。
+  const onMarkRead = props.onMarkRead;
+  useEffect(() => {
+    onMarkRead?.();
+  }, [contact.pubkey, messages.length, onMarkRead]);
   const [visibleCount, setVisibleCount] = useState(MESSAGE_WINDOW);
   const [text, setText] = useState("");
   const [showEmo, setShowEmo] = useState(false);
@@ -1172,6 +1188,15 @@ function MessageLine({
     <div className={`line ${message.outgoing ? "out" : "in"}${message.mentionsMe ? " mention" : ""}`}>
       <span className="who">{who}</span>
       <span className="time">{new Date(message.at).toLocaleTimeString()}</span>
+      {message.outgoing && message.status ? (
+        <span
+          className={`tick tick--${message.status}`}
+          title={t(MSG_STATUS_KEY[message.status])}
+          aria-label={t(MSG_STATUS_KEY[message.status])}
+        >
+          {message.status === "sending" ? "🕓" : message.status === "sent" ? "✓" : "✓✓"}
+        </span>
+      ) : null}
       {message.mentionsMe ? (
         <span className="mention-badge" title={t("mention_you")}>@</span>
       ) : null}

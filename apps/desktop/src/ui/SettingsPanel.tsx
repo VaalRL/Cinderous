@@ -20,6 +20,8 @@ export interface SettingsPanelProps {
   /** 桌面通知是否啟用。 */
   notifications: boolean;
   onToggleNotifications: () => void;
+  readReceipts?: boolean;
+  onToggleReadReceipts?: () => void;
   /** 貼上時清除網址追蹤參數（ADR-0038）；未提供則不顯示該區塊。 */
   cleanOnPaste?: boolean;
   onToggleCleanOnPaste?: () => void;
@@ -172,6 +174,20 @@ export function SettingsPanel(props: SettingsPanelProps): JSX.Element {
               <span>{t("settings_notificationsHint")}</span>
             </label>
           </section>
+
+          {props.onToggleReadReceipts ? (
+            <section className="settings__sec">
+              <h4>{t("settings_readReceipts")}</h4>
+              <label className="settings__toggle">
+                <input
+                  type="checkbox"
+                  checked={props.readReceipts ?? false}
+                  onChange={props.onToggleReadReceipts}
+                />
+                <span>{t("settings_readReceiptsHint")}</span>
+              </label>
+            </section>
+          ) : null}
         </div>
       </div>
     </div>

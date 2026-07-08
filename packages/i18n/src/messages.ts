@@ -37,6 +37,12 @@ export interface Messages {
   status_away: string;
   status_busy: string;
   status_offline: string;
+  msgStatus_sending: string;
+  msgStatus_sent: string;
+  msgStatus_delivered: string;
+  msgStatus_read: string;
+  settings_readReceipts: string;
+  settings_readReceiptsHint: string;
   group_online: string;
   group_offline: string;
   status_label: string;
@@ -215,6 +221,12 @@ const zhHant: Messages = {
   status_away: "離開",
   status_busy: "忙碌",
   status_offline: "顯示為離線（隱身）",
+  msgStatus_sending: "傳送中",
+  msgStatus_sent: "已送出",
+  msgStatus_delivered: "已送達",
+  msgStatus_read: "已讀",
+  settings_readReceipts: "已讀回條",
+  settings_readReceiptsHint: "開啟後，你讀取訊息會通知對方；關閉則不送、也不顯示對方的已讀（互惠）。",
   status_label: "狀態",
   group_online: "線上 ({count})",
   group_offline: "離線 ({count})",
@@ -393,6 +405,12 @@ const en: Messages = {
   status_away: "Away",
   status_busy: "Busy",
   status_offline: "Appear offline",
+  msgStatus_sending: "Sending",
+  msgStatus_sent: "Sent",
+  msgStatus_delivered: "Delivered",
+  msgStatus_read: "Read",
+  settings_readReceipts: "Read receipts",
+  settings_readReceiptsHint: "When on, others are told when you read their messages; off means you neither send yours nor see theirs (reciprocal).",
   status_label: "Status",
   group_online: "Online ({count})",
   group_offline: "Offline ({count})",

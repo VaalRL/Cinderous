@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { I18nProvider } from "../i18n.js";
 import { ThemeProvider } from "../theme.js";
-import type { ChatMessage, Contact, Self } from "../backend/types.js";
+import type { ChatMessage, Contact, MessageStatus, Self } from "../backend/types.js";
 import { ConversationWindow } from "./ConversationWindow.js";
 
 const self: Self = { pubkey: "aa", name: "我", status: "online", statusMessage: "" };
@@ -99,5 +99,26 @@ describe("ConversationWindow 訊息列視窗化（P0-3）", () => {
     expect(html).toContain('class="mention-badge"');
     // 未被提及的訊息不帶 mention class
     expect(html).toContain('class="line in"');
+  });
+});
+
+describe("ConversationWindow 送達/已讀狀態勾（ADR-0058）", () => {
+  const out = (status: MessageStatus): ChatMessage => ({ id: "x", outgoing: true, text: "hi", at: 1, status });
+
+  it("已讀渲染 ✓✓ 與 tick--read", () => {
+    const html = render([out("read")]);
+    expect(html).toContain("tick--read");
+    expect(html).toContain("✓✓");
+  });
+
+  it("已送出渲染單勾、非 read 色", () => {
+    const html = render([out("sent")]);
+    expect(html).toContain("tick--sent");
+    expect(html).not.toContain("tick--read");
+  });
+
+  it("對方訊息（incoming）不顯示狀態勾", () => {
+    const html = render([{ id: "y", outgoing: false, text: "hi", at: 1, status: "read" }]);
+    expect(html).not.toContain("tick--");
   });
 });

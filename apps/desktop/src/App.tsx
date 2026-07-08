@@ -65,6 +65,7 @@ import "./ui/msn.css";
 const TYPING_VISIBLE_MS = 6_000;
 const RELAY_URL_KEY = "nb.relayUrl";
 const NOTIFY_KEY = "nb.notify";
+const READ_RECEIPTS_KEY = "nb.readReceipts";
 
 let _uid = 0;
 const uid = (prefix: string): string => `${prefix}_${Date.now()}_${_uid++}`;
@@ -171,9 +172,20 @@ export function App(): JSX.Element {
       return false;
     }
   });
+  const [readReceipts, setReadReceipts] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(READ_RECEIPTS_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
   const lastTyping = useRef<Record<string, number>>({});
   const notifyRef = useRef(notify);
   notifyRef.current = notify;
+  // 已讀回條開關同步到後端（ADR-0058）；後端重建或開關變動時皆推送。
+  useEffect(() => {
+    backend?.setReadReceipts?.(readReceipts);
+  }, [backend, readReceipts]);
   const selfRef = useRef<Self | null>(self);
   selfRef.current = self;
   const idleRef = useRef<IdleState>(initIdle(Date.now()));
@@ -255,6 +267,18 @@ export function App(): JSX.Element {
           const next = new Set(prev);
           next.add(messageId);
           return next;
+        }),
+      onMessageStatus: (pk, messageId, status) =>
+        setConvos((prev) => {
+          const cur = prev[pk];
+          if (!cur) return prev;
+          let changed = false;
+          const next = cur.map((m) => {
+            if (m.id !== messageId || m.status === status) return m;
+            changed = true;
+            return { ...m, status };
+          });
+          return changed ? { ...prev, [pk]: next } : prev;
         }),
       onBlocked: setBlocked,
       onConnection: setConn,
@@ -492,6 +516,16 @@ export function App(): JSX.Element {
     if (!groups.some((g) => g.id === pk)) activeBackend.connectPeer?.(pk);
   };
 
+  const toggleReadReceipts = () => {
+    const next = !readReceipts;
+    setReadReceipts(next);
+    try {
+      localStorage.setItem(READ_RECEIPTS_KEY, next ? "1" : "0");
+    } catch {
+      /* 忽略 */
+    }
+  };
+
   const toggleNotifications = () => {
     if (notify) {
       setNotify(false);
@@ -687,6 +721,8 @@ export function App(): JSX.Element {
           }}
           notifications={notify}
           onToggleNotifications={toggleNotifications}
+          readReceipts={readReceipts}
+          onToggleReadReceipts={toggleReadReceipts}
           onClose={() => setSettingsOpen(false)}
         />
       ) : null}
@@ -770,6 +806,10 @@ export function App(): JSX.Element {
             expired={expired}
             typing={(typingAt[pk] ?? 0) > Date.now() - TYPING_VISIBLE_MS}
             nudgeSignal={nudge[pk] ?? 0}
+            onMarkRead={() => {
+              // 僅在視窗聚焦時送已讀（開著但沒看不算讀；ADR-0058）。
+              if (typeof document === "undefined" || !document.hidden) activeBackend.markRead?.(pk);
+            }}
             {...reactProps}
             {...unsendProps}
             {...fileProps}
