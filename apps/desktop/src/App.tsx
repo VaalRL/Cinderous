@@ -58,9 +58,16 @@ import { createRinger, createRingback } from "./ui/ringtone.js";
 import { CallWindow } from "./ui/CallWindow.js";
 import { ContactListWindow } from "./ui/ContactListWindow.js";
 import { ConversationWindow } from "./ui/ConversationWindow.js";
-import { DEFAULT_OLLAMA, ollamaRewrite, type OllamaConfig } from "./native/ollama.js";
+import {
+  DEFAULT_OLLAMA,
+  ollamaAvailable,
+  ollamaRewrite,
+  ollamaSummarize,
+  type OllamaConfig,
+} from "./native/ollama.js";
 import { SettingsPanel } from "./ui/SettingsPanel.js";
 import { SignIn } from "./ui/SignIn.js";
+import { SummaryModal } from "./ui/SummaryModal.js";
 import "./ui/msn.css";
 
 const TYPING_VISIBLE_MS = 6_000;
@@ -204,11 +211,29 @@ export function App(): JSX.Element {
       /* 忽略 */
     }
   };
-  // AI 改寫回呼：僅在啟用時提供給 composer（否則不顯示 ✨）。
+  // AI 改寫/摘要回呼：僅在啟用時提供（否則不顯示入口）。localOnly 由 ollama 設定內強制。
   const rewriteFn = ollama.enabled
-    ? (text: string, instruction: string): Promise<string> =>
-        ollamaRewrite(text, instruction, { endpoint: ollama.endpoint, model: ollama.model })
+    ? (text: string, instruction: string): Promise<string> => ollamaRewrite(text, instruction, ollama)
     : undefined;
+  const checkAiAvailable = ollama.enabled ? (): Promise<boolean> => ollamaAvailable(ollama) : undefined;
+  // 未讀摘要（點開對話前）：狀態驅動的小視窗。
+  const [summary, setSummary] = useState<{ pubkey: string; status: "busy" | "done" | "error" | "empty"; text: string } | null>(
+    null,
+  );
+  const summarizeUnread = (pubkey: string): void => {
+    const n = unread[pubkey] ?? 0;
+    const recent = (convos[pubkey] ?? []).filter((m) => !m.outgoing).slice(-(n || 5));
+    if (recent.length === 0) {
+      setSummary({ pubkey, status: "empty", text: "" });
+      return;
+    }
+    setSummary({ pubkey, status: "busy", text: "" });
+    const nameOf = (pk: string): string => contacts.find((c) => c.pubkey === pk)?.name ?? pk.slice(0, 8);
+    const named = recent.map((m) => ({ sender: nameOf(m.sender ?? pubkey), text: m.text }));
+    ollamaSummarize(named, ollama)
+      .then((s) => setSummary({ pubkey, status: "done", text: s }))
+      .catch(() => setSummary({ pubkey, status: "error", text: "" }));
+  };
   const lastTyping = useRef<Record<string, number>>({});
   const notifyRef = useRef(notify);
   notifyRef.current = notify;
@@ -722,6 +747,7 @@ export function App(): JSX.Element {
         onOpenSettings={() => setSettingsOpen(true)}
         onNowPlaying={(text) => activeBackend.setNowPlaying(text)}
         unread={unread}
+        {...(ollama.enabled ? { onSummarize: summarizeUnread } : {})}
         connection={conn}
         {...addContactProps}
         {...manageProps}
@@ -758,6 +784,19 @@ export function App(): JSX.Element {
           onClose={() => setSettingsOpen(false)}
         />
       ) : null}
+      {summary ? (
+        <SummaryModal
+          status={summary.status}
+          text={summary.text}
+          contactName={contacts.find((c) => c.pubkey === summary.pubkey)?.name ?? ""}
+          onOpen={() => {
+            const pk = summary.pubkey;
+            setOpen((prev) => (prev.includes(pk) ? prev : [...prev, pk]));
+            setSummary(null);
+          }}
+          onClose={() => setSummary(null)}
+        />
+      ) : null}
       {open.map((pk) => {
         const group = groups.find((g) => g.id === pk);
         if (group) {
@@ -779,6 +818,7 @@ export function App(): JSX.Element {
               typing={false}
               nudgeSignal={0}
               {...(rewriteFn ? { onRewrite: rewriteFn } : {})}
+              {...(checkAiAvailable ? { onCheckAiAvailable: checkAiAvailable } : {})}
               senderName={senderName}
               mentionCandidates={group.members
                 .filter((m) => m !== self.pubkey)
@@ -844,6 +884,7 @@ export function App(): JSX.Element {
               if (typeof document === "undefined" || !document.hidden) activeBackend.markRead?.(pk);
             }}
             {...(rewriteFn ? { onRewrite: rewriteFn } : {})}
+            {...(checkAiAvailable ? { onCheckAiAvailable: checkAiAvailable } : {})}
             {...reactProps}
             {...unsendProps}
             {...fileProps}

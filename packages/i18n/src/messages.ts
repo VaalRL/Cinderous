@@ -58,6 +58,13 @@ export interface Messages {
   settings_ollama: string;
   settings_ollamaEndpoint: string;
   settings_ollamaModel: string;
+  settings_ollamaLocalOnly: string;
+  ai_summarize: string;
+  ai_summaryTitle: string;
+  ai_summarizing: string;
+  ai_summaryOpen: string;
+  ai_summaryDisclaimer: string;
+  ai_summaryEmpty: string;
   group_online: string;
   group_offline: string;
   status_label: string;
@@ -259,6 +266,13 @@ const zhHant: Messages = {
   settings_ollama: "AI 改寫（本機 Ollama）",
   settings_ollamaEndpoint: "Ollama 端點",
   settings_ollamaModel: "模型名稱",
+  settings_ollamaLocalOnly: "僅允許本機（localhost）——關閉才准非本機端點（文字會離開裝置）",
+  ai_summarize: "AI 摘要未讀",
+  ai_summaryTitle: "未讀摘要",
+  ai_summarizing: "摘要中…",
+  ai_summaryOpen: "開啟對話",
+  ai_summaryDisclaimer: "AI 產生，可能不準確；請以原訊息為準。",
+  ai_summaryEmpty: "沒有未讀訊息可摘要。",
   status_label: "狀態",
   group_online: "線上 ({count})",
   group_offline: "離線 ({count})",
@@ -460,6 +474,13 @@ const en: Messages = {
   settings_ollama: "AI rewrite (local Ollama)",
   settings_ollamaEndpoint: "Ollama endpoint",
   settings_ollamaModel: "Model name",
+  settings_ollamaLocalOnly: "Local only (localhost) — turn off to allow a non-local endpoint (text leaves this device)",
+  ai_summarize: "Summarize unread",
+  ai_summaryTitle: "Unread summary",
+  ai_summarizing: "Summarizing…",
+  ai_summaryOpen: "Open conversation",
+  ai_summaryDisclaimer: "AI-generated, may be inaccurate; refer to the original messages.",
+  ai_summaryEmpty: "No unread messages to summarize.",
   status_label: "Status",
   group_online: "Online ({count})",
   group_offline: "Offline ({count})",

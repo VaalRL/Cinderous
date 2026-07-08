@@ -117,21 +117,24 @@ fn check_endpoint(endpoint: &str) -> Result<(), String> {
     }
 }
 
-/// 帶逾時的 HTTP client——避免 Ollama 卡住時 UI 無限等待（技術債修正）。
-fn ollama_client(secs: u64) -> Result<reqwest::Client, String> {
-    reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(secs))
-        .build()
-        .map_err(|e| e.to_string())
+/// 共用的 reqwest client（重用連線池，技術債修正）；逾時改為 per-request 設定。
+fn http() -> &'static reqwest::Client {
+    use std::sync::OnceLock;
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(reqwest::Client::new)
 }
+
+const GEN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
+const TAGS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// 請本機 Ollama 生成（改寫/摘要用）；回傳純文字結果。
 #[tauri::command]
 async fn ollama_generate(endpoint: String, model: String, prompt: String) -> Result<String, String> {
     check_endpoint(&endpoint)?;
     let body = serde_json::json!({ "model": model, "prompt": prompt, "stream": false });
-    let resp = ollama_client(120)?
+    let resp = http()
         .post(ollama_url(&endpoint, "/api/generate"))
+        .timeout(GEN_TIMEOUT)
         .json(&body)
         .send()
         .await
@@ -149,18 +152,19 @@ async fn ollama_available(endpoint: String) -> bool {
     if check_endpoint(&endpoint).is_err() {
         return false;
     }
-    match ollama_client(5) {
-        Ok(c) => matches!(c.get(ollama_url(&endpoint, "/api/tags")).send().await, Ok(r) if r.status().is_success()),
-        Err(_) => false,
-    }
+    matches!(
+        http().get(ollama_url(&endpoint, "/api/tags")).timeout(TAGS_TIMEOUT).send().await,
+        Ok(r) if r.status().is_success()
+    )
 }
 
 /// 列出本機已安裝的模型名稱（GET /api/tags）。
 #[tauri::command]
 async fn ollama_models(endpoint: String) -> Result<Vec<String>, String> {
     check_endpoint(&endpoint)?;
-    let resp = ollama_client(5)?
+    let resp = http()
         .get(ollama_url(&endpoint, "/api/tags"))
+        .timeout(TAGS_TIMEOUT)
         .send()
         .await
         .map_err(|e| e.to_string())?;

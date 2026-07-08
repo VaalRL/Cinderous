@@ -55,6 +55,8 @@ export interface ContactListProps {
   onNowPlaying?: (text: string) => void;
   /** 每位聯絡人的未讀訊息數。 */
   unread?: Record<string, number>;
+  /** 點開對話前以本機 AI 摘要未讀（ADR-0060）；提供且有未讀時顯示 🧠。 */
+  onSummarize?: (pubkey: string) => void;
   /** 與中繼站的連線狀態（非 online 時顯示提示）。 */
   connection?: ConnectionState;
   /** 群組清單（M9）。 */
@@ -145,6 +147,7 @@ export function ContactListWindow(props: ContactListProps): JSX.Element {
       unread={props.unread?.[c.pubkey] ?? 0}
       {...(props.onRemoveContact ? { onRemove: props.onRemoveContact } : {})}
       {...(props.onBlockContact ? { onBlock: props.onBlockContact } : {})}
+      {...(props.onSummarize ? { onSummarize: props.onSummarize } : {})}
     />
   );
   const [groupModal, setGroupModal] = useState(false);
@@ -548,6 +551,7 @@ function ContactRow({
   unread,
   onRemove,
   onBlock,
+  onSummarize,
 }: {
   contact: Contact;
   onOpen: (pk: string) => void;
@@ -555,6 +559,7 @@ function ContactRow({
   unread: number;
   onRemove?: ((pubkey: string) => void) | undefined;
   onBlock?: ((pubkey: string) => void) | undefined;
+  onSummarize?: ((pubkey: string) => void) | undefined;
 }): JSX.Element {
   const { t } = useI18n();
   const secondary = contact.nowPlaying
@@ -581,6 +586,16 @@ function ContactRow({
         <span className="unread-badge" title={t("unread_title", { count: unread })}>{unread}</span>
       ) : null}
       <span className="contact__acts">
+        {onSummarize && unread > 0 ? (
+          <button
+            className="contact__act"
+            title={t("ai_summarize")}
+            data-testid="summarize-btn"
+            onClick={() => onSummarize(contact.pubkey)}
+          >
+            🧠
+          </button>
+        ) : null}
         {onBlock ? (
           <button className="contact__act" title={t("contact_block")} onClick={block}>🚫</button>
         ) : null}

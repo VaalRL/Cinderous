@@ -36,4 +36,9 @@
   - 改寫品質取決於使用者選的本機模型。
 - 增量：
   1. **core/TS（本增量）：** `native/ollama.ts`（風格/prompt/`isLocalEndpoint`/客戶端 + 可注入 IO）+ i18n + 測試。
-  2. **Rust + UI（下一增量）：** `ollama_generate`/`ollama_available` 命令（reqwest）；composer ✨ 改寫鈕 + 快選/自由指示 + 預覽採用/取消 + 載入/偵測；SettingsPanel 端點/模型設定。
+  2. **Rust + UI（增量2）：** `ollama_generate`/`ollama_available`/`ollama_models` 命令（reqwest）；composer ✨ 改寫鈕 + 快選/自由指示 + 預覽採用/取消 + 載入/偵測；SettingsPanel 端點/**已安裝模型下拉**。
+  3. **審查修正 + 摘要（增量3）：**
+     - **技術債**：Rust 命令加逾時（generate 120s / tags 5s）+ 共用 reqwest client；`check_endpoint` 限 http/https；ComposerRewrite 點外關閉、開啟預偵測可用性、作廢過期結果。
+     - **資安：localhost 硬守則**——設定 `localOnly`（預設 true），`ensureAllowed()` 在 client 層**強制**非本機端點一律拒絕（不再只是 UI 警告）。
+     - **未讀摘要功能**：`ollamaSummarize` + 聯絡人清單 🧠（有未讀時）→ 點開對話前先摘要。輸入為**收到的訊息（他人可控）**，故 `buildSummaryPrompt` 做 **prompt injection 緩解**（框定訊息為資料、指示模型不遵從內含指令、分隔標記），UI 標示「AI 生成、可能不準」。摘要一樣受 localhost 硬守則保護。
+     - **刻意延後**：①**串流輸出**（UX 增強，需 Tauri Channel IPC，另做）；②**嚴格 CSP**（全 webview 強化、非本功能專屬，需 tauri:dev 逐項驗 relay/媒體/HMR，另做）。

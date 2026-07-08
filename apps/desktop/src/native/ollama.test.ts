@@ -1,11 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   buildRewritePrompt,
+  buildSummaryPrompt,
   DEFAULT_OLLAMA,
+  ensureAllowed,
   isLocalEndpoint,
   ollamaAvailable,
   ollamaModels,
   ollamaRewrite,
+  ollamaSummarize,
   type OllamaIo,
   REWRITE_STYLES,
 } from "./ollama.js";
@@ -52,5 +55,34 @@ describe("Ollama 改寫（ADR-0060）", () => {
       models: vi.fn(async () => ["llama3.2", "qwen2.5"]),
     };
     expect(await ollamaModels(DEFAULT_OLLAMA, io)).toEqual(["llama3.2", "qwen2.5"]);
+  });
+
+  it("ensureAllowed：localOnly（預設）擋非本機、放行本機；localOnly=false 才准非本機", () => {
+    expect(() => ensureAllowed({ endpoint: "http://ai.example.com", model: "m" })).toThrow();
+    expect(() => ensureAllowed({ endpoint: "http://localhost:11434", model: "m" })).not.toThrow();
+    expect(() => ensureAllowed({ endpoint: "http://ai.example.com", model: "m", localOnly: false })).not.toThrow();
+  });
+
+  it("ollamaRewrite/ollamaSummarize：localOnly 下非本機端點被擋（不外流）", async () => {
+    const io: OllamaIo = { generate: vi.fn(async () => "x"), available: vi.fn(async () => true), models: vi.fn(async () => []) };
+    const remote = { endpoint: "http://ai.example.com", model: "m" };
+    await expect(ollamaRewrite("t", "i", remote, io)).rejects.toThrow();
+    await expect(ollamaSummarize([{ sender: "A", text: "hi" }], remote, io)).rejects.toThrow();
+    expect(io.generate).not.toHaveBeenCalled();
+  });
+
+  it("buildSummaryPrompt：含訊息內容 + prompt injection 緩解框定", () => {
+    const p = buildSummaryPrompt([{ sender: "Alice", text: "晚點吃飯" }]);
+    expect(p).toContain("晚點吃飯");
+    expect(p).toContain("Alice");
+    expect(p).toContain("不要理會");
+  });
+
+  it("ollamaSummarize：本機端點以注入 IO 摘要、回傳整理後結果", async () => {
+    const generate = vi.fn(async (_e: string, _m: string, _p: string) => "  摘要重點  ");
+    const io: OllamaIo = { generate, available: vi.fn(async () => true), models: vi.fn(async () => []) };
+    const out = await ollamaSummarize([{ sender: "A", text: "訊息一" }], DEFAULT_OLLAMA, io);
+    expect(out).toBe("摘要重點");
+    expect(generate.mock.calls[0]![2]).toContain("訊息一");
   });
 });

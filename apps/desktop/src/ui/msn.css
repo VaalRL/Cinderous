@@ -511,6 +511,14 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
 .settings__modelrow select { flex: 1; min-width: 0; }
 .settings__modelrow button { border: 1px solid var(--border); background: var(--field); color: var(--accent); border-radius: 5px; cursor: pointer; padding: 0 8px; }
 .settings__warn { font-size: 12px; color: #c0392b; }
+
+/* AI 未讀摘要視窗（ADR-0060）。 */
+.summary { width: 340px; max-width: calc(100vw - 24px); }
+.summary__body { padding: 12px; display: flex; flex-direction: column; gap: 8px; background: var(--panel); }
+.summary__text { font-size: 13px; color: var(--ink); white-space: pre-wrap; word-break: break-word; }
+.summary__msg { font-size: 13px; color: var(--muted); }
+.summary__note { font-size: 11px; color: var(--muted); font-style: italic; }
+.summary__actions { display: flex; justify-content: flex-end; }
 .composer textarea { flex: 1; resize: none; height: 46px; border: 1px solid var(--border); border-radius: 5px; padding: 6px 8px; font: inherit; background: var(--field); color: var(--ink); }
 .composer--ro { justify-content: center; align-items: center; color: var(--muted); font-size: 12px; min-height: 46px; }
 

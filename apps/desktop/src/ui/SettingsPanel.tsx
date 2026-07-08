@@ -7,6 +7,8 @@ export interface OllamaSettingsValue {
   endpoint: string;
   model: string;
   enabled: boolean;
+  /** 僅允許 localhost 端點（預設 true）。 */
+  localOnly?: boolean;
 }
 
 /** Relay pool 一座的連線狀態（ADR-0034）。 */
@@ -252,7 +254,15 @@ function OllamaSettings({
             <span>{t("settings_ollamaEndpoint")}</span>
             <input value={value.endpoint} onChange={(e) => onChange({ ...value, endpoint: e.target.value })} />
           </label>
-          {local ? null : <div className="settings__warn">{t("ai_nonLocalWarn")}</div>}
+          <label className="settings__toggle">
+            <input
+              type="checkbox"
+              checked={value.localOnly !== false}
+              onChange={() => onChange({ ...value, localOnly: !(value.localOnly !== false) })}
+            />
+            <span>{t("settings_ollamaLocalOnly")}</span>
+          </label>
+          {value.localOnly === false && !local ? <div className="settings__warn">{t("ai_nonLocalWarn")}</div> : null}
           <label className="settings__field">
             <span>{t("settings_ollamaModel")}</span>
             <span className="settings__modelrow">
