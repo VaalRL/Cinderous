@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { ACCENT_PRESETS, useAccent } from "../accent.js";
 import { useI18n } from "../i18n.js";
 import {
   type AiProvider,
@@ -59,7 +60,45 @@ const STATE_DOT: Record<RelayPoolEntry["state"], string> = {
   offline: "🔴",
 };
 
-/** 設定面板：中繼站、身分備份（私鑰）、桌面通知。 */
+/** 主題色設定（ADR-0064）：預設色票 + 自訂色 + 重設；即時套用、只存本機。 */
+function AccentSettings(): JSX.Element {
+  const { t } = useI18n();
+  const { accent, setAccent } = useAccent();
+  const cur = accent?.toLowerCase();
+  return (
+    <section className="settings__sec">
+      <h4>{t("settings_accent")}</h4>
+      <div className="accent__row">
+        {ACCENT_PRESETS.map((p) => (
+          <button
+            key={p.key}
+            type="button"
+            className={`accent__sw${cur === p.hex.toLowerCase() ? " on" : ""}`}
+            style={{ background: p.hex }}
+            aria-label={p.key}
+            title={p.key}
+            onClick={() => setAccent(p.hex)}
+          />
+        ))}
+        <label className="accent__custom" title={t("settings_accentCustom")}>
+          <span aria-hidden="true">🎨</span>
+          <input
+            type="color"
+            value={accent ?? "#2f6cd6"}
+            aria-label={t("settings_accentCustom")}
+            onChange={(e) => setAccent(e.target.value)}
+          />
+        </label>
+        <button type="button" className="accent__reset" onClick={() => setAccent(null)} disabled={!accent}>
+          {t("settings_accentReset")}
+        </button>
+      </div>
+      <p className="settings__hint">{t("settings_accentHint")}</p>
+    </section>
+  );
+}
+
+/** 設定面板：主題色、中繼站、身分備份（私鑰）、桌面通知。 */
 export function SettingsPanel(props: SettingsPanelProps): JSX.Element {
   const { t } = useI18n();
   const [reveal, setReveal] = useState(false);
@@ -94,6 +133,7 @@ export function SettingsPanel(props: SettingsPanelProps): JSX.Element {
           </span>
         </div>
         <div className="settings__body">
+          <AccentSettings />
           <section className="settings__sec">
             <h4>{t("settings_relayUrl")}</h4>
             {props.relays && props.relays.length > 0 ? (

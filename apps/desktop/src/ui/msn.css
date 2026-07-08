@@ -1,7 +1,8 @@
 /* 原創懷舊即時通風格（不使用任何第三方商標素材） */
 :root {
-  --titlebar: linear-gradient(180deg, #4a8bf0, #2f6cd6);
   --accent: #2f6cd6;
+  /* 標題列由 --accent 推導（ADR-0064）：覆寫 --accent 即連動標題列與整個色系。 */
+  --titlebar: linear-gradient(180deg, color-mix(in srgb, var(--accent) 68%, #ffffff), var(--accent));
   --ink: #1b2b44;
   --muted: #6b7d99;
   --bg-a: #9cc0ef;
@@ -19,8 +20,8 @@
 }
 
 :root[data-theme="dark"] {
-  --titlebar: linear-gradient(180deg, #2a4f86, #1d3a64);
   --accent: #6ea8ff;
+  --titlebar: linear-gradient(180deg, color-mix(in srgb, var(--accent) 52%, #101a2e), color-mix(in srgb, var(--accent) 36%, #0b1424));
   --ink: #e6edf7;
   --muted: #93a1ba;
   --bg-a: #243246;
@@ -403,7 +404,17 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
 .settings__sec h4 { margin: 0 0 4px; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
 .settings__relay { font-size: 12px; word-break: break-all; }
 .settings__warn { font-size: 11px; color: #c0392b; margin: 0 0 6px; line-height: 1.4; }
+.settings__hint { font-size: 11px; color: var(--muted); margin: 6px 0 0; line-height: 1.4; }
 .settings__key code { display: block; font-size: 11px; word-break: break-all; background: var(--code-bg); padding: 6px; border-radius: 4px; }
+
+/* 主題色選擇（ADR-0064） */
+.accent__row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.accent__sw { width: 26px; height: 26px; border-radius: 50%; border: 2px solid var(--border); cursor: pointer; padding: 0; }
+.accent__sw.on { box-shadow: 0 0 0 2px var(--panel), 0 0 0 4px var(--accent); }
+.accent__custom { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 26px; border-radius: 50%; border: 2px dashed var(--border); cursor: pointer; font-size: 13px; overflow: hidden; }
+.accent__custom input[type="color"] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.accent__reset { border: 1px solid var(--border); background: var(--field); color: var(--accent); border-radius: 6px; font-size: 12px; padding: 3px 9px; cursor: pointer; }
+.accent__reset:disabled { opacity: .5; cursor: default; }
 .settings__keyrow { display: flex; gap: 6px; margin-top: 6px; }
 .settings__toggle { display: flex; gap: 6px; align-items: flex-start; font-size: 12px; }
 

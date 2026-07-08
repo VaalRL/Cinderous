@@ -42,6 +42,12 @@ export function CinderMascot({ alert = false, size = 48 }: { alert?: boolean; si
   const id = useId().replace(/:/g, "");
   const height = Math.round((size * 150) / 120);
   const flame = alert ? FLAME_TALL : FLAME;
+  // 身體色系跟隨主題色 --accent（ADR-0064）；頭的餘燼維持恆常。
+  const accentVar = "var(--accent, #2f6cd6)";
+  const bodyTop = `color-mix(in srgb, ${accentVar} 74%, #ffffff)`;
+  const armHi = `color-mix(in srgb, ${accentVar} 42%, #ffffff)`;
+  const bodyShadow = `color-mix(in srgb, ${accentVar} 45%, #000000)`;
+  const handHi = `color-mix(in srgb, ${accentVar} 22%, #ffffff)`;
   return (
     <svg
       width={size}
@@ -58,8 +64,8 @@ export function CinderMascot({ alert = false, size = 48 }: { alert?: boolean; si
           <stop offset="100%" stopColor="#e24a2b" />
         </radialGradient>
         <linearGradient id={`${id}b`} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#5b93ec" />
-          <stop offset="100%" stopColor="#2f6cd6" />
+          <stop offset="0%" style={{ stopColor: bodyTop }} />
+          <stop offset="100%" style={{ stopColor: accentVar }} />
         </linearGradient>
         <filter id={`${id}g`} x="-60%" y="-60%" width="220%" height="220%">
           <feGaussianBlur stdDeviation={alert ? 5 : 4} />
@@ -69,14 +75,14 @@ export function CinderMascot({ alert = false, size = 48 }: { alert?: boolean; si
       <path d={flame} fill={alert ? "#ffab3d" : "#ff7a2f"} opacity={alert ? 0.4 : 0.26} filter={`url(#${id}g)`} />
       <path d="M40 86 C26 93 20 107 24 122" stroke={`url(#${id}b)`} strokeWidth="13" strokeLinecap="round" fill="none" />
       <path d="M80 86 C94 93 100 107 96 122" stroke={`url(#${id}b)`} strokeWidth="13" strokeLinecap="round" fill="none" />
-      <path d="M39 84 C26 91 20 105 23 120" stroke="#aacdf8" strokeWidth="4.5" strokeLinecap="round" fill="none" opacity="0.6" />
-      <path d="M81 84 C94 91 100 105 97 120" stroke="#aacdf8" strokeWidth="4.5" strokeLinecap="round" fill="none" opacity="0.6" />
+      <path d="M39 84 C26 91 20 105 23 120" style={{ stroke: armHi }} strokeWidth="4.5" strokeLinecap="round" fill="none" opacity="0.6" />
+      <path d="M81 84 C94 91 100 105 97 120" style={{ stroke: armHi }} strokeWidth="4.5" strokeLinecap="round" fill="none" opacity="0.6" />
       <path d={BODY} fill={`url(#${id}b)`} />
       <ellipse cx="60" cy="70" rx={alert ? 28 : 27} ry={alert ? 12 : 11} fill={alert ? "#ffab3d" : "#ffa24d"} opacity={alert ? 0.42 : 0.33} />
       <ellipse cx="48" cy="92" rx="12" ry="18" fill="#ffffff" opacity="0.13" />
-      <ellipse cx="60" cy="124" rx="27" ry="12" fill="#123a6b" opacity="0.22" />
-      <circle cx="20" cy="119" r="2.6" fill="#dbeafe" opacity="0.55" />
-      <circle cx="100" cy="119" r="2.6" fill="#dbeafe" opacity="0.55" />
+      <ellipse cx="60" cy="124" rx="27" ry="12" style={{ fill: bodyShadow }} opacity="0.22" />
+      <circle cx="20" cy="119" r="2.6" style={{ fill: handHi }} opacity="0.55" />
+      <circle cx="100" cy="119" r="2.6" style={{ fill: handHi }} opacity="0.55" />
       <path d={flame} fill={`url(#${id}e)`} />
       <ellipse cx={alert ? 53 : 54} cy={alert ? 49 : 50} rx="2.6" ry="3.6" fill="#5a2410" />
       <ellipse cx={alert ? 67 : 66} cy={alert ? 49 : 50} rx="2.6" ry="3.6" fill="#5a2410" />

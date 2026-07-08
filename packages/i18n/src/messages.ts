@@ -59,6 +59,10 @@ export interface Messages {
   settings_ollamaEndpoint: string;
   settings_ollamaModel: string;
   settings_ollamaLocalOnly: string;
+  settings_accent: string;
+  settings_accentCustom: string;
+  settings_accentReset: string;
+  settings_accentHint: string;
   settings_aiProvider: string;
   settings_aiProviderOllama: string;
   settings_aiProviderOpenai: string;
@@ -273,6 +277,10 @@ const zhHant: Messages = {
   settings_ollamaEndpoint: "Ollama 端點",
   settings_ollamaModel: "模型名稱",
   settings_ollamaLocalOnly: "僅允許本機（localhost）——關閉才准非本機端點（文字會離開裝置）",
+  settings_accent: "主題色",
+  settings_accentCustom: "自訂色",
+  settings_accentReset: "預設",
+  settings_accentHint: "即時套用、只存在本機；深色主題會自動提亮以維持對比。連吉祥物身體也會跟著換色。",
   settings_aiProvider: "AI 服務",
   settings_aiProviderOllama: "本機 Ollama",
   settings_aiProviderOpenai: "OpenAI 相容（線上）",
@@ -487,6 +495,10 @@ const en: Messages = {
   settings_ollamaEndpoint: "Ollama endpoint",
   settings_ollamaModel: "Model name",
   settings_ollamaLocalOnly: "Local only (localhost) — turn off to allow a non-local endpoint (text leaves this device)",
+  settings_accent: "Theme color",
+  settings_accentCustom: "Custom color",
+  settings_accentReset: "Default",
+  settings_accentHint: "Applies instantly, stored locally; auto-brightened in dark theme. The mascot's body recolors too.",
   settings_aiProvider: "AI provider",
   settings_aiProviderOllama: "Local Ollama",
   settings_aiProviderOpenai: "OpenAI-compatible (online)",

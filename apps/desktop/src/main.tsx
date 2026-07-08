@@ -1,5 +1,6 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import { AccentProvider } from "./accent.js";
 import { App } from "./App.js";
 import { I18nProvider } from "./i18n.js";
 import { ThemeProvider } from "./theme.js";
@@ -9,9 +10,11 @@ if (container) {
   createRoot(container).render(
     <StrictMode>
       <ThemeProvider>
-        <I18nProvider>
-          <App />
-        </I18nProvider>
+        <AccentProvider>
+          <I18nProvider>
+            <App />
+          </I18nProvider>
+        </AccentProvider>
       </ThemeProvider>
     </StrictMode>,
   );
