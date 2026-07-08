@@ -423,6 +423,14 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
 .line:hover .thread__btn { color: var(--accent); }
 .thread__count { display: inline-block; margin-top: 2px; border: 1px solid var(--border); background: var(--surface2); color: var(--accent); border-radius: 10px; font-size: 11px; padding: 1px 8px; cursor: pointer; }
 .thread__count:hover { background: var(--hover); }
+
+/* 長訊息詳情面板（右側；Slack 風，與對話串面板同槽位、互斥）。 */
+.detail-panel { width: 340px; }
+.detail-panel .win__title { background: var(--titlebar); }
+/* 主頻道長訊息截斷：省略號 + 行內「展開全文」鈕。 */
+.text__ellip { color: var(--muted); }
+.text__more { border: none; background: transparent; color: var(--accent); font: inherit; font-weight: 600; text-decoration: underline; cursor: pointer; padding: 0; }
+.text__more:hover { color: var(--ink); }
 .thread__empty { color: var(--muted); font-size: 12px; padding: 8px; text-align: center; }
 .convo__head { padding: 8px 10px; background: var(--surface2); border-bottom: 1px solid var(--border); color: var(--ink); }
 .convo__head b { font-size: 13px; }

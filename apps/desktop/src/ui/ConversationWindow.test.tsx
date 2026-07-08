@@ -122,3 +122,19 @@ describe("ConversationWindow 送達/已讀狀態勾（ADR-0058）", () => {
     expect(html).not.toContain("tick--");
   });
 });
+
+describe("ConversationWindow 長訊息截斷 + 展開全文", () => {
+  it("超長訊息在主頻道截斷（尾端被切）並顯示『展開全文』鈕", () => {
+    const long = `${"A".repeat(600)}TAILWORD`;
+    const html = render([{ id: "m1", outgoing: false, text: long, at: 1 }]);
+    expect(html).toContain('data-testid="expand-msg"');
+    expect(html).toContain("Show full message"); // en 語系
+    expect(html).not.toContain("TAILWORD"); // 尾端被截掉
+  });
+
+  it("短訊息不截斷、無展開鈕", () => {
+    const html = render([{ id: "m2", outgoing: false, text: "短訊息", at: 1 }]);
+    expect(html).not.toContain('data-testid="expand-msg"');
+    expect(html).toContain("短訊息");
+  });
+});

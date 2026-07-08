@@ -117,6 +117,8 @@ export interface ConversationProps {
 
 /** 訊息列視窗化：初始只渲染最近這麼多則，點「載入較早」再往前展開（審查 P0-3）。 */
 const MESSAGE_WINDOW = 200;
+/** 主頻道單則訊息文字截斷門檻（字數）；超過即只顯示前段 + 「展開全文」開右側詳情面板。 */
+const MESSAGE_TRUNCATE_CHARS = 600;
 
 export function ConversationWindow(props: ConversationProps): JSX.Element {
   const { t } = useI18n();
@@ -148,6 +150,33 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
   /** 對話串面板（ADR-0051）：開啟中的串根訊息 id（null＝未開）。 */
   const [threadRoot, setThreadRoot] = useState<string | null>(null);
   const [threadText, setThreadText] = useState("");
+  /** 長訊息詳情面板：開啟中的訊息 id（null＝未開）。與對話串面板互斥（共用右側槽位）。 */
+  const [detailMsgId, setDetailMsgId] = useState<string | null>(null);
+  /** 開右側面板：兩者互斥（Slack 風，右側一次只一個）。 */
+  const openThread = (id: string): void => {
+    setDetailMsgId(null);
+    setThreadRoot(id);
+  };
+  const openDetail = (id: string): void => {
+    setThreadRoot(null);
+    setThreadText("");
+    setDetailMsgId(id);
+  };
+  const detailMsg = detailMsgId !== null ? messages.find((m) => m.id === detailMsgId) : undefined;
+  // Slack 風：Esc 關閉右側面板（但輸入框內的 Esc 留給既有處理，如關閉 @提及建議）。
+  useEffect(() => {
+    if (threadRoot === null && detailMsgId === null) return;
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== "Escape") return;
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
+      setThreadRoot(null);
+      setThreadText("");
+      setDetailMsgId(null);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [threadRoot, detailMsgId]);
   /** 串內 composer 的 @提及建議（獨立於主 composer）。 */
   const [threadMenSel, setThreadMenSel] = useState(0);
   const [threadMenDismissed, setThreadMenDismissed] = useState(false);
@@ -495,7 +524,8 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
               ownedIds={ownedIds}
               onOwnSticker={acquireSticker}
               replyCount={counts.get(m.id) ?? 0}
-              onOpenThread={props.readOnly ? undefined : () => setThreadRoot(m.id)}
+              onOpenThread={props.readOnly ? undefined : () => openThread(m.id)}
+              onExpand={() => openDetail(m.id)}
             />
           ))}
         </div>
@@ -1123,6 +1153,39 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
         </div>
       </div>
     ) : null}
+    {detailMsg ? (
+      <div className="win convo detail-panel" data-testid="detail-panel">
+        <div className="win__title">
+          <span>{t("convo_msgDetail")}</span>
+          <span className="spacer" />
+          <span
+            className="win__btn"
+            role="button"
+            aria-label={t("convo_close")}
+            onClick={() => setDetailMsgId(null)}
+          >
+            ×
+          </span>
+        </div>
+        <div className="convo__body">
+          <div className="log" data-testid="detail-log">
+            <MessageLine
+              message={detailMsg}
+              who={whoOf(detailMsg)}
+              reactions={props.reactions?.[detailMsg.id] ?? []}
+              unsent={props.unsent?.has(detailMsg.id) ?? false}
+              expired={props.expired?.has(detailMsg.id) ?? false}
+              onReact={props.onReact}
+              onUnsend={props.onUnsend}
+              onView={setLightbox}
+              ownedIds={ownedIds}
+              onOwnSticker={acquireSticker}
+              expanded
+            />
+          </div>
+        </div>
+      </div>
+    ) : null}
     </div>
   );
 }
@@ -1140,6 +1203,8 @@ function MessageLine({
   onOwnSticker,
   replyCount = 0,
   onOpenThread,
+  onExpand,
+  expanded = false,
 }: {
   message: ChatMessage;
   who: string;
@@ -1155,6 +1220,10 @@ function MessageLine({
   replyCount?: number;
   /** 開啟此訊息的對話串面板；未提供則不顯示串入口。 */
   onOpenThread?: (() => void) | undefined;
+  /** 開啟此訊息的詳情面板（長訊息「展開全文」）；未提供則不顯示入口。 */
+  onExpand?: (() => void) | undefined;
+  /** 於詳情面板中渲染時為 true：不截斷、顯示完整內文。 */
+  expanded?: boolean;
 }): JSX.Element {
   const { t } = useI18n();
   const [picking, setPicking] = useState(false);
@@ -1254,6 +1323,16 @@ function MessageLine({
         </span>
       ) : custom !== null ? (
         <span className="text expired__text">{t("sticker_invalid")}</span>
+      ) : !expanded && message.text.length > MESSAGE_TRUNCATE_CHARS ? (
+        <span className="text">
+          {renderMarkdown(applyEmoticons(message.text.slice(0, MESSAGE_TRUNCATE_CHARS)))}
+          <span className="text__ellip">… </span>
+          {onExpand ? (
+            <button type="button" className="text__more" data-testid="expand-msg" onClick={onExpand}>
+              {t("convo_showFull")}
+            </button>
+          ) : null}
+        </span>
       ) : (
         <span className="text">{renderMarkdown(applyEmoticons(message.text))}</span>
       )}
