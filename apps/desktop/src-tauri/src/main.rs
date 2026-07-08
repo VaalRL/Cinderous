@@ -108,11 +108,29 @@ fn ollama_url(endpoint: &str, path: &str) -> String {
     format!("{}{}", endpoint.trim_end_matches('/'), path)
 }
 
-/// 請本機 Ollama 生成（改寫用）；回傳純文字結果。
+/// 僅允許 http/https 端點——防止把訊息內容 POST 到非 HTTP 目標（防禦性；ADR-0060）。
+fn check_endpoint(endpoint: &str) -> Result<(), String> {
+    match reqwest::Url::parse(endpoint) {
+        Ok(u) if matches!(u.scheme(), "http" | "https") => Ok(()),
+        Ok(_) => Err("端點僅允許 http/https".into()),
+        Err(_) => Err("無效的端點 URL".into()),
+    }
+}
+
+/// 帶逾時的 HTTP client——避免 Ollama 卡住時 UI 無限等待（技術債修正）。
+fn ollama_client(secs: u64) -> Result<reqwest::Client, String> {
+    reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(secs))
+        .build()
+        .map_err(|e| e.to_string())
+}
+
+/// 請本機 Ollama 生成（改寫/摘要用）；回傳純文字結果。
 #[tauri::command]
 async fn ollama_generate(endpoint: String, model: String, prompt: String) -> Result<String, String> {
+    check_endpoint(&endpoint)?;
     let body = serde_json::json!({ "model": model, "prompt": prompt, "stream": false });
-    let resp = reqwest::Client::new()
+    let resp = ollama_client(120)?
         .post(ollama_url(&endpoint, "/api/generate"))
         .json(&body)
         .send()
@@ -128,16 +146,20 @@ async fn ollama_generate(endpoint: String, model: String, prompt: String) -> Res
 /// 偵測本機 Ollama 是否可用（GET /api/tags）。
 #[tauri::command]
 async fn ollama_available(endpoint: String) -> bool {
-    matches!(
-        reqwest::Client::new().get(ollama_url(&endpoint, "/api/tags")).send().await,
-        Ok(r) if r.status().is_success()
-    )
+    if check_endpoint(&endpoint).is_err() {
+        return false;
+    }
+    match ollama_client(5) {
+        Ok(c) => matches!(c.get(ollama_url(&endpoint, "/api/tags")).send().await, Ok(r) if r.status().is_success()),
+        Err(_) => false,
+    }
 }
 
 /// 列出本機已安裝的模型名稱（GET /api/tags）。
 #[tauri::command]
 async fn ollama_models(endpoint: String) -> Result<Vec<String>, String> {
-    let resp = reqwest::Client::new()
+    check_endpoint(&endpoint)?;
+    let resp = ollama_client(5)?
         .get(ollama_url(&endpoint, "/api/tags"))
         .send()
         .await

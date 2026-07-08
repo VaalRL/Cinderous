@@ -71,19 +71,20 @@ export function defaultOllamaIo(): OllamaIo {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ model, prompt, stream: false }),
+        signal: AbortSignal.timeout(120_000), // 逾時保護，避免卡住
       });
       if (!r.ok) throw new Error(`ollama ${r.status}`);
       return String(((await r.json()) as { response?: unknown }).response ?? "");
     },
     async available(endpoint) {
       try {
-        return (await fetch(`${endpoint}/api/tags`)).ok;
+        return (await fetch(`${endpoint}/api/tags`, { signal: AbortSignal.timeout(5_000) })).ok;
       } catch {
         return false;
       }
     },
     async models(endpoint) {
-      const r = await fetch(`${endpoint}/api/tags`);
+      const r = await fetch(`${endpoint}/api/tags`, { signal: AbortSignal.timeout(5_000) });
       if (!r.ok) throw new Error(`ollama ${r.status}`);
       const data = (await r.json()) as { models?: { name?: unknown }[] };
       return (data.models ?? []).map((m) => String(m.name ?? "")).filter(Boolean);
