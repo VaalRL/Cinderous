@@ -1,8 +1,12 @@
 import { RelayCore, type Outbound } from "./relay-core.js";
+import { SqlMessageStore } from "./sql-message-store.js";
 
 export interface Env {
   RELAY_ROOM: DurableObjectNamespace;
 }
+
+/** 每收件人離線留言上限（防單一收件人塞爆免費額度；PRD §8）。 */
+const MAX_PER_RECIPIENT = 500;
 
 /** Worker 進入點：WebSocket 升級後交給單一 Durable Object 房間以共享連線狀態。 */
 export default {
@@ -17,8 +21,16 @@ export default {
 
 /** 持有 RelayCore 與所有 WebSocket，負責實際收發。 */
 export class RelayRoom {
-  private readonly core = new RelayCore();
+  private readonly core: RelayCore;
   private readonly conns = new Map<string, WebSocket>();
+
+  constructor(ctx: DurableObjectState, _env: Env) {
+    // 離線留言持久化於 DO 內建 SQLite（同步、免 D1；ADR-0056）。
+    const sql = ctx.storage.sql;
+    const exec = (query: string, ...bindings: (string | number | null)[]): Record<string, unknown>[] =>
+      sql.exec(query, ...bindings).toArray() as Record<string, unknown>[];
+    this.core = new RelayCore({ store: new SqlMessageStore(exec, { maxPerRecipient: MAX_PER_RECIPIENT }) });
+  }
 
   fetch(_request: Request): Response {
     const pair = new WebSocketPair();

@@ -16,6 +16,40 @@ export interface MessageStoreOptions {
 }
 
 /**
+ * 離線留言持久層的行為契約（ADR-0056）。記憶體版（{@link MessageStore}）與
+ * Worker 端 DO SQLite 版（`SqlMessageStore`）皆實作，`RelayCore` 依此介面接。
+ */
+export interface OfflineStore {
+  /** 寫入一筆留言；已過期則拒絕並回 false。 */
+  put(event: NostrEvent, nowSec: number): boolean;
+  /** 查詢符合 filter 且未過期的留言。 */
+  query(filter: RelayFilter, nowSec: number): NostrEvent[];
+  /** 清除所有已過期留言。 */
+  prune(nowSec: number): void;
+}
+
+/** 取事件的收件人（`p` 標籤值）清單；供記憶體與 SQL 版共用。 */
+export function recipientsOf(event: NostrEvent): string[] {
+  const out: string[] = [];
+  for (const tag of event.tags) {
+    if (tag[0] === "p" && tag[1] !== undefined) out.push(tag[1]);
+  }
+  return out;
+}
+
+/** 以 event id 去重（保留首次出現）；供記憶體與 SQL 版共用。 */
+export function dedupById(events: NostrEvent[]): NostrEvent[] {
+  const seen = new Set<string>();
+  const out: NostrEvent[] = [];
+  for (const event of events) {
+    if (seen.has(event.id)) continue;
+    seen.add(event.id);
+    out.push(event);
+  }
+  return out;
+}
+
+/**
  * 離線留言的持久化行為（NIP-40 過期、每收件人配額）。
  *
  * 以收件人（`p` 標籤）為索引：NIP-17 私訊查詢一律帶 `#p`，因此常見路徑
@@ -23,7 +57,7 @@ export interface MessageStoreOptions {
  * 事件與不帶 `#p` 的查詢走全掃備援。Worker 端接 D1 時應比照以
  * `p_tag`/`expiration` 建索引。
  */
-export class MessageStore {
+export class MessageStore implements OfflineStore {
   /** 收件人 pubkey → 該收件人的留言。 */
   private readonly byRecipient = new Map<string, NostrEvent[]>();
   /** 無 `p` 標籤的事件。 */
@@ -34,7 +68,7 @@ export class MessageStore {
   /** 寫入一筆留言；若已過期則拒絕並回 false。 */
   put(event: NostrEvent, nowSec: number): boolean {
     if (this.isExpired(event, nowSec)) return false;
-    const recipients = this.recipientsOf(event);
+    const recipients = recipientsOf(event);
     if (recipients.length === 0) {
       this.noRecipient.push(event);
       return true;
@@ -85,14 +119,6 @@ export class MessageStore {
     return exp !== undefined && exp <= nowSec;
   }
 
-  private recipientsOf(event: NostrEvent): string[] {
-    const out: string[] = [];
-    for (const tag of event.tags) {
-      if (tag[0] === "p" && tag[1] !== undefined) out.push(tag[1]);
-    }
-    return out;
-  }
-
   private enforceCap(recipients: string[]): void {
     const cap = this.opts.maxPerRecipient;
     if (cap === undefined) return;
@@ -103,15 +129,4 @@ export class MessageStore {
       bucket.splice(0, bucket.length - cap);
     }
   }
-}
-
-function dedupById(events: NostrEvent[]): NostrEvent[] {
-  const seen = new Set<string>();
-  const out: NostrEvent[] = [];
-  for (const event of events) {
-    if (seen.has(event.id)) continue;
-    seen.add(event.id);
-    out.push(event);
-  }
-  return out;
 }

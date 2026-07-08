@@ -1,6 +1,6 @@
 import { verifyEvent, type NostrEvent } from "@cinder/core";
 import { matchFilter } from "./filters.js";
-import type { MessageStore } from "./message-store.js";
+import type { OfflineStore } from "./message-store.js";
 import {
   parseClientMessage,
   type RelayFilter,
@@ -42,7 +42,7 @@ export interface RelayCoreOptions {
    * 離線留言持久層（M2）。Ephemeral 事件**絕不會**寫入此處，
    * 以保證上線狀態/心跳純記憶體轉發、不寫資料庫。
    */
-  store?: MessageStore;
+  store?: OfflineStore;
   /** 取得目前 unix 秒（用於 NIP-40 過期判定）；預設為系統時鐘。 */
   now?: () => number;
   /** 每連線最大訂閱數；超過則拒絕新訂閱（防濫用）。 */

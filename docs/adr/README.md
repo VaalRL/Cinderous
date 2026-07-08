@@ -70,3 +70,4 @@
 | [0053](./0053-tauri-native-substrate-integration.md) | Tauri 原生整合：基質替換（重用 TS 引擎）＋ B5 金鑰庫 | 已接受 |
 | [0054](./0054-encrypted-storage-substrate-aes-gcm.md) | 加密儲存基質：AES-256-GCM 加密 blob（純 Rust，免 SQLCipher/Perl） | 已接受 |
 | [0055](./0055-block-cross-identity-friending.md) | 禁止跨身分互加好友（保護分身不可連結） | 已接受 |
+| [0056](./0056-offline-store-durable-object-sqlite.md) | 離線留言持久層：Durable Object 內建 SQLite（非獨立 D1） | 已接受 |
