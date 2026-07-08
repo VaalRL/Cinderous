@@ -55,11 +55,26 @@ export const MAINTAINER_PUBKEY = "你的維護者公鑰 hex（64 字元）";
 | 項目 | 需要 | 對應 | 現況 |
 | --- | --- | --- | --- |
 | 中繼站生產部署 | Cloudflare 帳號、`wrangler deploy`、D1 綁定、NIP-42 AUTH | Phase C（C1–C4） | 程式/測試已備，離線留言待接 D1 |
-| Tauri 桌面打包 | Tauri 工具鏈、簽章憑證、OS 金鑰庫（keyring） | Phase B（B1–B6） | Rust 背景連線/SQLCipher 已測，GUI 接線待驗 |
+| Tauri 桌面**簽章/自動更新** | Windows 程式碼簽章憑證（Authenticode）；（更新用）updater 金鑰＋更新託管端點 | Phase B ③ | B1 殼/B5 金鑰庫/B6 安裝檔/系統匣背景皆已 **Windows 實機完成**；僅剩**未簽章**（SmartScreen 警告）＋無自動更新，步驟見下方 §B-Tauri |
 | 行動端 + QR 相機掃描 | React Native 工具鏈、APNs/FCM 憑證、相機權限 | Phase D、M9 | 大量重用 core/i18n；QR 產生已完成、掃描待 RN |
 | **企業強制 TURN 真機驗證** | 部署 TURN 伺服器、把 `turnServers` 填入 `RelayPoolOptions` | G2（ADR-0048） | `forceTurn`→`iceTransportPolicy:"relay"` 程式已接（`buildRtcConfig`），缺 TURN 才能實測；同時作為通話 NAT 保底 |
 | 第三方安全稽核 | 外部稽核員 | F4（`docs/SECURITY.md` 已備前置） | 前置威脅模型/加密盤點已備 |
 | 企業 SSO / 元資料稽核 | 外部 IdP（AD/LDAP/OIDC）、自架 relay 記錄連線元資料 | G5 | 需先立 ADR 與環境；未動工 |
+
+### §B-Tauri：程式碼簽章與自動更新（Phase B ③）
+
+安裝檔已可產出（`pnpm --filter @cinder/desktop tauri:build` → NSIS `.exe` + MSI），但**未簽章**、**無自動更新**。要補這兩項（皆需「你持有的信任根」，此環境無法代辦）：
+
+**① 程式碼簽章（去掉 SmartScreen「未知發行者」警告）**
+- 取得 **Windows 程式碼簽章憑證**（Authenticode；OV 約 US$100–400/年，EV 較貴但 SmartScreen 信譽較佳）。測試可用自簽（`New-SelfSignedCertificate`），但他人安裝仍會警告。
+- 於 `apps/desktop/src-tauri/tauri.conf.json` 的 `bundle.windows` 設 `certificateThumbprint`（或 `signCommand`）→ `tauri:build` 會自動簽 exe/msi/nsis。
+
+**② 自動更新（Tauri updater plugin）**
+- 產 updater 簽章金鑰：`pnpm dlx @tauri-apps/cli signer generate`（**私鑰保密**、公鑰填設定；與 Authenticode 無關）。
+- 決定**更新託管端點**（放 `latest.json` + 已簽安裝檔的靜態位址，如 GitHub Releases 或自架）。
+- 加 `@tauri-apps/plugin-updater` ＋ 於 `tauri.conf.json` 設 `plugins.updater`（endpoints + pubkey），前端接更新流程；`tauri:build` 以 updater 私鑰簽產物，客戶端驗簽後才套用。
+
+**③ 發行前小整理**：`tauri.conf.json` 的 `identifier` 仍是 `app.nostrbuddy.desktop`（更名殘留）。**首次正式簽章發行前**改為 `app.cinder.desktop`（會變更 app 資料夾路徑，故要在有正式使用者資料前改）。
 
 ---
 
