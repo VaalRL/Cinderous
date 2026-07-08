@@ -16,6 +16,8 @@
     "typecheck": "tsc --noEmit",
     "build:dev": "esbuild src/dev-server.ts --bundle --platform=node --format=esm --outfile=dist/dev-server.js --external:ws",
     "dev": "node dist/dev-server.js",
+    "build:node-relay": "esbuild src/node-relay.ts --bundle --platform=node --format=esm --outfile=dist/node-relay.js --external:ws",
+    "node-relay": "pnpm build:node-relay && node dist/node-relay.js",
     "bootstrap:build": "esbuild bootstrap/health-check.ts --bundle --platform=node --format=esm --outfile=dist/health-check.js",
     "bootstrap:run": "pnpm bootstrap:build && node dist/health-check.js"
   },
