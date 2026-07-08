@@ -65,6 +65,8 @@ export const MAINTAINER_PUBKEY = "你的維護者公鑰 hex（64 字元）";
 
 安裝檔已可產出（`pnpm --filter @cinder/desktop tauri:build` → NSIS `.exe` + MSI），但**未簽章**、**無自動更新**。要補這兩項（皆需「你持有的信任根」，此環境無法代辦）：
 
+> **決定（2026-07-08）**：**目前不簽章**——開發/自用階段，SmartScreen「未知發行者→仍要執行」可接受，安裝檔照常可用。**未來對外發行時走 SignPath Foundation**（開源專案免費、公信；Cinder 為 AGPL 符合資格）。自動更新一併等有簽章後再接。
+
 **① 程式碼簽章（去掉 SmartScreen「未知發行者」警告）**
 - 取得 **Windows 程式碼簽章憑證**（Authenticode；OV 約 US$100–400/年，EV 較貴但 SmartScreen 信譽較佳）。測試可用自簽（`New-SelfSignedCertificate`），但他人安裝仍會警告。
 - 於 `apps/desktop/src-tauri/tauri.conf.json` 的 `bundle.windows` 設 `certificateThumbprint`（或 `signCommand`）→ `tauri:build` 會自動簽 exe/msi/nsis。
