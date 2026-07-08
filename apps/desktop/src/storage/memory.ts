@@ -1,6 +1,7 @@
 import {
   type AppStorage,
   MESSAGES_PER_CONVO,
+  type StorageSnapshot,
   type StoredBootstrapList,
   type StoredContact,
   type StoredGroup,
@@ -132,5 +133,35 @@ export class MemoryStorage implements AppStorage {
   }
   saveBootstrapList(doc: StoredBootstrapList): void {
     this.bootstrapList = doc;
+  }
+
+  /** 匯出整包狀態快照（B2 加密儲存，ADR-0054）；深拷貝以免外部改動內部。 */
+  exportSnapshot(): StorageSnapshot {
+    const messages: Record<string, StoredMessage[]> = {};
+    for (const [k, v] of this.messages) messages[k] = [...v];
+    return {
+      identity: this.identity,
+      contacts: [...this.contacts],
+      blocked: [...this.blocked],
+      messages,
+      reactions: [...this.reactions],
+      deleted: [...this.deleted],
+      groups: this.groups.map((g) => ({ ...g, members: [...g.members] })),
+      bootstrapList: this.bootstrapList,
+    };
+  }
+
+  /** 以快照覆蓋內部狀態（開機從加密 blob 灌入）。 */
+  importSnapshot(s: StorageSnapshot): void {
+    this.identity = s.identity;
+    this.contacts = [...s.contacts];
+    this.blocked = [...s.blocked];
+    this.messages.clear();
+    for (const [k, v] of Object.entries(s.messages)) this.messages.set(k, [...v]);
+    this.reactions = [...s.reactions];
+    this.deleted.clear();
+    for (const id of s.deleted) this.deleted.add(id);
+    this.groups = s.groups.map((g) => ({ ...g, members: [...g.members] }));
+    this.bootstrapList = s.bootstrapList;
   }
 }

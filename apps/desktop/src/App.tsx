@@ -38,6 +38,8 @@ import type {
   Status,
 } from "./backend/types.js";
 import { LocalStorage } from "./storage/local.js";
+import { TauriStorage } from "./native/tauri-storage.js";
+import type { AppStorage } from "./storage/types.js";
 import { cleanOnPasteEnabled, setCleanOnPasteEnabled } from "./ui/url-hygiene.js";
 import {
   allLabels,
@@ -84,9 +86,9 @@ function normalizeAdminPubkey(input: string): string | undefined {
  * connectorFor/anchors/onHomeSwitched → 不漫遊、不遞補；個人身分走開放模式。
  * 資料以 profile.namespace 隔離。
  */
-function buildBackend(p: Profile, nsecOverride?: string): ChatBackend {
+function buildBackend(p: Profile, nsecOverride?: string, storage?: AppStorage): ChatBackend {
   if (!p.relayUrl) return new BrowserChatBackend(p.name);
-  const storage = new LocalStorage(p.namespace);
+  const store = storage ?? new LocalStorage(p.namespace);
   const opts = p.enterprise
     ? { relayUrl: p.relayUrl, ...(p.adminPubkey ? { orgAdminPubkey: p.adminPubkey } : {}) }
     : {
@@ -103,7 +105,7 @@ function buildBackend(p: Profile, nsecOverride?: string): ChatBackend {
         },
       };
   return new RelayChatBackend(
-    storage,
+    store,
     webSocketConnector(p.relayUrl),
     p.name,
     nsecOverride ? { ...opts, nsecOverride } : opts,
@@ -184,9 +186,17 @@ export function App(): JSX.Element {
       try {
         const active = activeProfile(profilesState);
         if (!active) return;
-        const override = isTauri() && active.relayUrl ? await loadNsecFromVault(active) : undefined;
+        let override: string | undefined;
+        let storage: AppStorage | undefined;
+        if (isTauri() && active.relayUrl) {
+          // B2（ADR-0054）：從加密 blob 載入狀態；B5：私鑰自 OS 金鑰庫載入。
+          const ts = new TauriStorage(active.namespace);
+          await ts.hydrate();
+          storage = ts;
+          override = await loadNsecFromVault(active);
+        }
         if (cancelled) return;
-        const b = buildBackend(active, override);
+        const b = buildBackend(active, override, storage);
         setConn(active.relayUrl ? "connecting" : "online");
         setSelf({ ...b.self });
         setBackend(b);
@@ -407,11 +417,14 @@ export function App(): JSX.Element {
     const first: Profile = { pubkey: "", name, relayUrl, enterprise: false, namespace: "" };
     let b: ChatBackend;
     if (isTauri()) {
-      // B5（ADR-0053）：私鑰本機產生後存 OS 金鑰庫，不落 localStorage
+      // B5（ADR-0053）：私鑰本機產生後存 OS 金鑰庫，不落 localStorage。
+      // B2（ADR-0054）：狀態走加密 blob（TauriStorage）而非 localStorage。
       const sk = generateSecretKey();
       const nsec = nsecEncode(sk);
       await getKeyVault().setKey(getPublicKey(sk), nsec);
-      b = buildBackend(first, nsec);
+      const ts = new TauriStorage(first.namespace);
+      await ts.hydrate(); // 首個身分：空
+      b = buildBackend(first, nsec, ts);
     } else {
       b = buildBackend(first); // 瀏覽器：後端自動產生 nsec 存 localStorage（既有行為）
     }

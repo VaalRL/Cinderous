@@ -105,3 +105,18 @@ export interface StoredBootstrapList {
   relays: string[];
   updatedAt: number;
 }
+
+/**
+ * 整包狀態快照（B2 加密儲存基質，ADR-0054）：供 `TauriStorage` 與 Rust 加密 blob
+ * 之間 export/import。`messages` 以對話鍵（聯絡人 pubkey 或群組 id）分流。
+ */
+export interface StorageSnapshot {
+  identity: StoredIdentity | null;
+  contacts: StoredContact[];
+  blocked: StoredContact[];
+  messages: Record<string, StoredMessage[]>;
+  reactions: StoredReaction[];
+  deleted: string[];
+  groups: StoredGroup[];
+  bootstrapList: StoredBootstrapList | null;
+}
