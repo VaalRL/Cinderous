@@ -43,6 +43,21 @@ export interface Messages {
   msgStatus_read: string;
   settings_readReceipts: string;
   settings_readReceiptsHint: string;
+  ai_stylePolite: string;
+  ai_styleConcise: string;
+  ai_styleGrammar: string;
+  ai_styleFormal: string;
+  ai_styleEnglish: string;
+  ai_rewrite: string;
+  ai_rewriteHint: string;
+  ai_rewriting: string;
+  ai_adopt: string;
+  ai_cancel: string;
+  ai_unavailable: string;
+  ai_nonLocalWarn: string;
+  settings_ollama: string;
+  settings_ollamaEndpoint: string;
+  settings_ollamaModel: string;
   group_online: string;
   group_offline: string;
   status_label: string;
@@ -229,6 +244,21 @@ const zhHant: Messages = {
   msgStatus_read: "已讀",
   settings_readReceipts: "已讀回條",
   settings_readReceiptsHint: "開啟後，你讀取訊息會通知對方；關閉則不送、也不顯示對方的已讀（互惠）。",
+  ai_stylePolite: "更客氣",
+  ai_styleConcise: "更精簡",
+  ai_styleGrammar: "修正錯字",
+  ai_styleFormal: "更正式",
+  ai_styleEnglish: "翻成英文",
+  ai_rewrite: "AI 改寫",
+  ai_rewriteHint: "自訂改寫指示…（例：讓語氣更輕鬆）",
+  ai_rewriting: "改寫中…",
+  ai_adopt: "採用",
+  ai_cancel: "取消",
+  ai_unavailable: "未偵測到 Ollama（請確認已啟動）",
+  ai_nonLocalWarn: "⚠️ 非本機端點：文字會離開此裝置",
+  settings_ollama: "AI 改寫（本機 Ollama）",
+  settings_ollamaEndpoint: "Ollama 端點",
+  settings_ollamaModel: "模型名稱",
   status_label: "狀態",
   group_online: "線上 ({count})",
   group_offline: "離線 ({count})",
@@ -415,6 +445,21 @@ const en: Messages = {
   msgStatus_read: "Read",
   settings_readReceipts: "Read receipts",
   settings_readReceiptsHint: "When on, others are told when you read their messages; off means you neither send yours nor see theirs (reciprocal).",
+  ai_stylePolite: "More polite",
+  ai_styleConcise: "More concise",
+  ai_styleGrammar: "Fix grammar",
+  ai_styleFormal: "More formal",
+  ai_styleEnglish: "To English",
+  ai_rewrite: "AI rewrite",
+  ai_rewriteHint: "Custom rewrite instruction… (e.g. make the tone lighter)",
+  ai_rewriting: "Rewriting…",
+  ai_adopt: "Use it",
+  ai_cancel: "Cancel",
+  ai_unavailable: "Ollama not detected (make sure it's running)",
+  ai_nonLocalWarn: "⚠️ Non-local endpoint: text will leave this device",
+  settings_ollama: "AI rewrite (local Ollama)",
+  settings_ollamaEndpoint: "Ollama endpoint",
+  settings_ollamaModel: "Model name",
   status_label: "Status",
   group_online: "Online ({count})",
   group_offline: "Offline ({count})",

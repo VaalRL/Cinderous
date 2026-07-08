@@ -74,3 +74,4 @@
 | [0057](./0057-open-relay-nip42-auth.md) | 開放中繼 NIP-42 AUTH（讀取＋發布；企業維持 allowlist） | 已接受 |
 | [0058](./0058-delivery-read-receipts.md) | 送達／已讀回條（Gift Wrap 回條，已讀 opt-in＋互惠） | 已接受 |
 | [0059](./0059-relay-hibernation-heartbeat.md) | 中繼站 WebSocket 休眠化 + 心跳 30s（降免費層 duration/請求） | 已接受 |
+| [0060](./0060-local-ollama-rewrite.md) | 本機 Ollama 訊息改寫（Rust IPC、localhost 限定、先預覽再採用） | 已接受 |
