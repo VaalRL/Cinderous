@@ -69,7 +69,7 @@
 | --- | --- | --- |
 | C1 | 離線留言持久化 | ✅ **核心完成（ADR-0056）**：改用 **DO 內建 SQLite**（同步，免 D1 async 摩擦、免額外 binding）。`OfflineStore` 介面＋`SqlMessageStore`（NIP-40 過期/每收件人 cap/`#p` 索引/matchFilter，以 `node:sqlite` headless 測 6 項）＋`RelayRoom` DO 接線。⏳ 使用者 `wrangler deploy` 後驗離線收送。 |
 | C2 | NIP-40 排程 prune | ✅ **完成**：`RelayRoom` DO 每小時 `alarm()` → `store.prune()` 清過期留言並重排（DO 休眠仍被喚醒）；建構時若無 alarm 即排程。`prune` 邏輯已測（C1）；alarm 觸發為執行期，`wrangler deploy` 後生效。 |
-| C3 | NIP-42 AUTH | 🔧 **core/relay 完成（ADR-0057）**：`RelayCore.requireAuth`——連線發 AUTH 挑戰、驗 kind 22242、發布/讀取閘門、`#p` 收件匣只准本人（core `nip42` + relay-core 共 9 測試）。**production 未啟用**（安全，開放中繼行為不變）。⏳ 客戶端 `RelayClient` 接線（後端提供簽章）＋ worker 啟用 ＋ 真線上驗＝下一增量。 |
+| C3 | NIP-42 AUTH | ✅ **完成（ADR-0057）**：`RelayCore.requireAuth`（連線挑戰、驗 kind 22242、發布/讀取閘門、`#p` 收件匣只准本人）＋ `RelayClient` 自動回應挑戰（`authSigner`）＋認證後重掛訂閱（`onAuthenticated`，解「訂閱早於認證」）＋後端接線＋**worker 啟用**。core/relay/desktop 共 14+ 測試（含 requireAuth 下兩端仍能對話）。⏳ 真線上驗（`wrangler deploy` 後）。 |
 | C4 | 部署與容量校準 | `wrangler deploy`；上線後實測請求數回填 `docs/adr/0006`。 |
 
 **完成定義**：公開可用的中繼站，離線留言真正持久化並自動過期。

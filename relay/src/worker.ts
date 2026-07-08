@@ -36,7 +36,8 @@ export class RelayRoom {
     const exec = (query: string, ...bindings: (string | number | null)[]): Record<string, unknown>[] =>
       sql.exec(query, ...bindings).toArray() as Record<string, unknown>[];
     this.store = new SqlMessageStore(exec, { maxPerRecipient: MAX_PER_RECIPIENT });
-    this.core = new RelayCore({ store: this.store });
+    // NIP-42 AUTH（ADR-0057）：開放中繼要求認證——只有本人能拉自己的加密收件匣。
+    this.core = new RelayCore({ store: this.store, requireAuth: true });
     // C2：排程 NIP-40 過期清理——若尚未設過 alarm 則設一個（DO 休眠仍會被喚醒執行）。
     ctx.blockConcurrencyWhile(async () => {
       if ((await ctx.storage.getAlarm()) === null) {

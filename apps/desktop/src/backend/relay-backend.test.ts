@@ -34,6 +34,26 @@ describe("RelayChatBackend（真實後端 + 持久化）", () => {
     b.stop();
   });
 
+  it("NIP-42 AUTH（ADR-0057）：requireAuth 下兩端仍能對話（自動認證 + 認證後訂閱）", () => {
+    const net = createInMemoryRelayNetwork({ requireAuth: true });
+    const storeA = new MemoryStorage();
+    const storeB = new MemoryStorage();
+    const a = new RelayChatBackend(storeA, (h) => net.connect("a", h), "Alice");
+    const b = new RelayChatBackend(storeB, (h) => net.connect("b", h), "Bob");
+    const bIncoming: ChatMessage[] = [];
+    a.start(noop);
+    b.start({ ...noop, onMessage: (_pk, m) => bIncoming.push(m) });
+
+    a.addContact(b.selfNpub);
+    a.sendMessage(b.self.pubkey, "authed 嗨");
+
+    // 認證透明完成：Bob 仍收到訊息、雙方持久化
+    expect(bIncoming.map((m) => m.text)).toContain("authed 嗨");
+    expect(storeB.loadMessages(a.self.pubkey).map((m) => m.text)).toEqual(["authed 嗨"]);
+    a.stop();
+    b.stop();
+  });
+
   it("回應：Bob 對 Alice 的訊息按 emoji，Alice 收到 onReaction", () => {
     const net = createInMemoryRelayNetwork();
     const a = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("a", h), "Alice");

@@ -1,6 +1,7 @@
 import {
   applyGroupControl,
   BoundedSet,
+  buildAuthEvent,
   canPostToGroup,
   CALL_SIGNAL_KIND,
   createHeartbeat,
@@ -297,6 +298,9 @@ export class RelayChatBackend implements ChatBackend {
       {
         onEvent: (_sub, event) => this.onEvent(event),
         onOk: (id, accepted, message) => this.outbox.onOk(id, accepted, message),
+        // NIP-42 AUTH（ADR-0057）：回應挑戰；認證成功後重掛訂閱（解「訂閱早於認證」）。
+        authSigner: (challenge) => buildAuthEvent(challenge, this.homeUrl ?? "", this.sk),
+        onAuthenticated: (client) => this.subscribeOn(client, this.homeUrl),
       },
       (state) => this.onConnection(state),
     );
@@ -413,7 +417,12 @@ export class RelayChatBackend implements ChatBackend {
     let client = this.relayPool.get(url);
     if (!client) {
       client = this.connectorFor(url)(
-        { onEvent: (_sub, event) => this.onEvent(event) },
+        {
+          onEvent: (_sub, event) => this.onEvent(event),
+          // NIP-42 AUTH（ADR-0057）：外部 relay 的挑戰回應 + 認證後重掛該 relay 訂閱。
+          authSigner: (challenge) => buildAuthEvent(challenge, url, this.sk),
+          onAuthenticated: (client) => this.subscribeOn(client, url),
+        },
         // 外部 relay 重連後重掛該 relay 的訂閱；不驅動 UI 主連線指示（ADR-0034）。
         (state) => {
           this.trackRelayState(url, state);
