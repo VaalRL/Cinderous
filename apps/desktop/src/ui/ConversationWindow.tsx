@@ -54,6 +54,7 @@ import {
   type TriggerMatch,
 } from "./sticker-triggers.js";
 import { cleanOnPasteEnabled, cleanText } from "./url-hygiene.js";
+import { indentText } from "./composer-indent.js";
 import { renderMarkdown } from "./markdown.js";
 import { ComposerRewrite } from "./ComposerRewrite.js";
 import { applyEmoticons } from "./emoticons.js";
@@ -916,6 +917,15 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
                 setTrigDismissed(true);
                 return;
               }
+            }
+            if (e.key === "Tab") {
+              // Tab 縮排／Shift+Tab 退排（快選未開啟時；供清單巢狀與程式碼區塊）
+              e.preventDefault();
+              const el = e.currentTarget;
+              const r = indentText(text, el.selectionStart ?? 0, el.selectionEnd ?? 0, e.shiftKey);
+              setText(r.text);
+              requestAnimationFrame(() => el.setSelectionRange(r.start, r.end));
+              return;
             }
             if (e.key === "Enter" && !e.shiftKey) {
               e.preventDefault();

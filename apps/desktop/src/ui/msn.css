@@ -476,6 +476,10 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
 .timer-badge { margin-left: 4px; font-size: 10px; opacity: .7; }
 .tool--timer { font-size: 11px; }
 .line .text code { background: var(--code-bg); padding: 1px 4px; border-radius: 3px; font-family: "Consolas", monospace; font-size: 12px; }
+.line .text .md-pre { display: block; background: var(--code-bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; margin: 4px 0; overflow-x: auto; font-size: 12px; line-height: 1.45; }
+.line .text .md-pre code { background: none; padding: 0; }
+.line .text .md-list { margin: 2px 0; padding-left: 20px; }
+.line .text .md-list .md-list { margin: 0; }
 .line .text a { color: var(--accent); }
 .line.sys { color: var(--muted); font-size: 11px; text-align: center; }
 .pics { width: 76px; border-left: 1px solid var(--border); padding: 8px 6px; display: flex; flex-direction: column; gap: 8px; align-items: center; background: var(--surface2); }
