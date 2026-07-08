@@ -102,6 +102,62 @@ fn store_save(app: tauri::AppHandle, namespace: String, json: String) -> Result<
     std::fs::write(&path, ciphertext).map_err(|e| e.to_string())
 }
 
+// ── Ollama 本機 AI 改寫 IPC（ADR-0060）：webview → Rust reqwest → 本機 Ollama（無 CORS）──
+
+fn ollama_url(endpoint: &str, path: &str) -> String {
+    format!("{}{}", endpoint.trim_end_matches('/'), path)
+}
+
+/// 請本機 Ollama 生成（改寫用）；回傳純文字結果。
+#[tauri::command]
+async fn ollama_generate(endpoint: String, model: String, prompt: String) -> Result<String, String> {
+    let body = serde_json::json!({ "model": model, "prompt": prompt, "stream": false });
+    let resp = reqwest::Client::new()
+        .post(ollama_url(&endpoint, "/api/generate"))
+        .json(&body)
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        return Err(format!("ollama {}", resp.status()));
+    }
+    let data: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+    Ok(data.get("response").and_then(|v| v.as_str()).unwrap_or("").to_string())
+}
+
+/// 偵測本機 Ollama 是否可用（GET /api/tags）。
+#[tauri::command]
+async fn ollama_available(endpoint: String) -> bool {
+    matches!(
+        reqwest::Client::new().get(ollama_url(&endpoint, "/api/tags")).send().await,
+        Ok(r) if r.status().is_success()
+    )
+}
+
+/// 列出本機已安裝的模型名稱（GET /api/tags）。
+#[tauri::command]
+async fn ollama_models(endpoint: String) -> Result<Vec<String>, String> {
+    let resp = reqwest::Client::new()
+        .get(ollama_url(&endpoint, "/api/tags"))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        return Err(format!("ollama {}", resp.status()));
+    }
+    let data: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+    let names = data
+        .get("models")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|m| m.get("name").and_then(|n| n.as_str()).map(str::to_string))
+                .collect()
+        })
+        .unwrap_or_default();
+    Ok(names)
+}
+
 fn main() {
     tauri::Builder::default()
         // 背景在線（Phase B ②）：關閉視窗＝隱藏到系統匣，保留 webview 存活＝引擎續連、
@@ -154,7 +210,10 @@ fn main() {
             key_get,
             key_delete,
             store_load,
-            store_save
+            store_save,
+            ollama_generate,
+            ollama_available,
+            ollama_models
         ])
         .run(tauri::generate_context!())
         .expect("執行 Tauri 應用程式時發生錯誤");

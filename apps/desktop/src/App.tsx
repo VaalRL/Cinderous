@@ -58,6 +58,7 @@ import { createRinger, createRingback } from "./ui/ringtone.js";
 import { CallWindow } from "./ui/CallWindow.js";
 import { ContactListWindow } from "./ui/ContactListWindow.js";
 import { ConversationWindow } from "./ui/ConversationWindow.js";
+import { DEFAULT_OLLAMA, ollamaRewrite, type OllamaConfig } from "./native/ollama.js";
 import { SettingsPanel } from "./ui/SettingsPanel.js";
 import { SignIn } from "./ui/SignIn.js";
 import "./ui/msn.css";
@@ -66,6 +67,13 @@ const TYPING_VISIBLE_MS = 6_000;
 const RELAY_URL_KEY = "nb.relayUrl";
 const NOTIFY_KEY = "nb.notify";
 const READ_RECEIPTS_KEY = "nb.readReceipts";
+const OLLAMA_KEY = "nb.ollama";
+
+/** 本機 AI 改寫設定（ADR-0060）；`enabled` 開啟才在 composer 顯示 ✨。 */
+interface OllamaState extends OllamaConfig {
+  enabled: boolean;
+}
+const DEFAULT_OLLAMA_STATE: OllamaState = { ...DEFAULT_OLLAMA, enabled: false };
 
 let _uid = 0;
 const uid = (prefix: string): string => `${prefix}_${Date.now()}_${_uid++}`;
@@ -179,6 +187,28 @@ export function App(): JSX.Element {
       return false;
     }
   });
+  const [ollama, setOllama] = useState<OllamaState>(() => {
+    try {
+      const raw = localStorage.getItem(OLLAMA_KEY);
+      if (raw) return { ...DEFAULT_OLLAMA_STATE, ...(JSON.parse(raw) as Partial<OllamaState>) };
+    } catch {
+      /* 忽略 */
+    }
+    return DEFAULT_OLLAMA_STATE;
+  });
+  const updateOllama = (next: OllamaState): void => {
+    setOllama(next);
+    try {
+      localStorage.setItem(OLLAMA_KEY, JSON.stringify(next));
+    } catch {
+      /* 忽略 */
+    }
+  };
+  // AI 改寫回呼：僅在啟用時提供給 composer（否則不顯示 ✨）。
+  const rewriteFn = ollama.enabled
+    ? (text: string, instruction: string): Promise<string> =>
+        ollamaRewrite(text, instruction, { endpoint: ollama.endpoint, model: ollama.model })
+    : undefined;
   const lastTyping = useRef<Record<string, number>>({});
   const notifyRef = useRef(notify);
   notifyRef.current = notify;
@@ -723,6 +753,8 @@ export function App(): JSX.Element {
           onToggleNotifications={toggleNotifications}
           readReceipts={readReceipts}
           onToggleReadReceipts={toggleReadReceipts}
+          ollama={ollama}
+          onOllamaChange={updateOllama}
           onClose={() => setSettingsOpen(false)}
         />
       ) : null}
@@ -746,6 +778,7 @@ export function App(): JSX.Element {
               messages={convos[pk] ?? []}
               typing={false}
               nudgeSignal={0}
+              {...(rewriteFn ? { onRewrite: rewriteFn } : {})}
               senderName={senderName}
               mentionCandidates={group.members
                 .filter((m) => m !== self.pubkey)
@@ -810,6 +843,7 @@ export function App(): JSX.Element {
               // 僅在視窗聚焦時送已讀（開著但沒看不算讀；ADR-0058）。
               if (typeof document === "undefined" || !document.hidden) activeBackend.markRead?.(pk);
             }}
+            {...(rewriteFn ? { onRewrite: rewriteFn } : {})}
             {...reactProps}
             {...unsendProps}
             {...fileProps}

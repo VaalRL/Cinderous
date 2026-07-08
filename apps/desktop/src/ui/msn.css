@@ -478,6 +478,39 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
 .emopick { display: flex; gap: 4px; padding: 4px 8px; background: var(--surface2); border-top: 1px dashed var(--border); flex-wrap: wrap; }
 .emopick span { cursor: pointer; font-size: 16px; }
 .composer { display: flex; gap: 6px; padding: 8px; border-top: 1px solid var(--border); background: var(--surface2); }
+
+/* 本機 AI 改寫（✨）：composer 內按鈕 + 上方彈出面板（ADR-0060）。 */
+.rewrite { position: relative; flex: none; display: flex; align-items: flex-end; }
+.rewrite__btn { border: 1px solid var(--border); background: var(--field); border-radius: 6px; font-size: 15px; line-height: 1; padding: 5px 7px; cursor: pointer; }
+.rewrite__btn:hover:not(:disabled) { background: var(--hover); }
+.rewrite__btn:disabled { opacity: .4; cursor: not-allowed; }
+.rewrite__panel {
+  position: absolute; bottom: calc(100% + 6px); right: 0; z-index: 30; width: 280px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 6px 18px rgba(0,0,0,.2); padding: 8px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.rewrite__styles { display: flex; flex-wrap: wrap; gap: 4px; }
+.rewrite__style { border: 1px solid var(--border); background: var(--field); color: var(--accent); border-radius: 12px; font-size: 12px; padding: 2px 9px; cursor: pointer; }
+.rewrite__style:hover:not(:disabled) { background: var(--hover); }
+.rewrite__custom { display: flex; gap: 4px; }
+.rewrite__custom input { flex: 1; min-width: 0; border: 1px solid var(--border); border-radius: 5px; background: var(--field); color: var(--ink); font-size: 12px; padding: 4px 6px; }
+.rewrite__go { border: 1px solid #2f8a3c; background: linear-gradient(180deg, #8ad08a, #2f9e44); color: #fff; border-radius: 5px; font-size: 12px; font-weight: 600; padding: 3px 8px; cursor: pointer; }
+.rewrite__go:disabled { opacity: .5; cursor: not-allowed; }
+.rewrite__busy { font-size: 12px; color: var(--muted); }
+.rewrite__error { font-size: 12px; color: #c0392b; }
+.rewrite__result { font-size: 13px; color: var(--ink); white-space: pre-wrap; word-break: break-word; max-height: 180px; overflow-y: auto; background: var(--surface2); border-radius: 6px; padding: 6px 8px; }
+.rewrite__actions { display: flex; gap: 6px; justify-content: flex-end; }
+.rewrite__adopt { border: 1px solid #2f8a3c; background: linear-gradient(180deg, #8ad08a, #2f9e44); color: #fff; border-radius: 5px; font-size: 12px; font-weight: 600; padding: 3px 12px; cursor: pointer; }
+.rewrite__cancel { border: 1px solid var(--border); background: var(--field); color: var(--muted); border-radius: 5px; font-size: 12px; padding: 3px 10px; cursor: pointer; }
+
+/* 設定：Ollama 端點/模型。 */
+.settings__ollama { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.settings__field { display: flex; flex-direction: column; gap: 2px; font-size: 12px; color: var(--muted); }
+.settings__field input, .settings__field select { border: 1px solid var(--border); border-radius: 5px; background: var(--field); color: var(--ink); font-size: 13px; padding: 4px 6px; }
+.settings__modelrow { display: flex; gap: 4px; }
+.settings__modelrow select { flex: 1; min-width: 0; }
+.settings__modelrow button { border: 1px solid var(--border); background: var(--field); color: var(--accent); border-radius: 5px; cursor: pointer; padding: 0 8px; }
+.settings__warn { font-size: 12px; color: #c0392b; }
 .composer textarea { flex: 1; resize: none; height: 46px; border: 1px solid var(--border); border-radius: 5px; padding: 6px 8px; font: inherit; background: var(--field); color: var(--ink); }
 .composer--ro { justify-content: center; align-items: center; color: var(--muted); font-size: 12px; min-height: 46px; }
 

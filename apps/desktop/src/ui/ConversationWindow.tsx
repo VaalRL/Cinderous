@@ -55,6 +55,7 @@ import {
 } from "./sticker-triggers.js";
 import { cleanOnPasteEnabled, cleanText } from "./url-hygiene.js";
 import { renderMarkdown } from "./markdown.js";
+import { ComposerRewrite } from "./ComposerRewrite.js";
 import { applyEmoticons } from "./emoticons.js";
 import { avatarColor, EMOTICONS, initial } from "./util.js";
 
@@ -81,6 +82,8 @@ export interface ConversationProps {
   expired?: Set<string>;
   onSend: (text: string, ttlSeconds?: number, mentions?: string[], replyTo?: string) => void;
   onTyping: () => void;
+  /** 本機 AI 改寫（ADR-0060）：提供才顯示 ✨ 改寫入口；回傳改寫後文字。 */
+  onRewrite?: (text: string, instruction: string) => Promise<string>;
   /** @提及候選（ADR-0050）：群成員／對方，供 composer 自動完成與送出解析。 */
   mentionCandidates?: MentionCandidate[];
   onNudge: () => void;
@@ -918,6 +921,9 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
             }
           }}
         />
+        {props.onRewrite ? (
+          <ComposerRewrite text={text} onRewrite={props.onRewrite} onAdopt={setText} />
+        ) : null}
         <button className="composer__send" onClick={send}>{t("convo_send")}</button>
       </div>
       )}

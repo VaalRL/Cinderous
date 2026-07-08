@@ -52,6 +52,8 @@ export function isLocalEndpoint(endpoint: string): boolean {
 export interface OllamaIo {
   generate(endpoint: string, model: string, prompt: string): Promise<string>;
   available(endpoint: string): Promise<boolean>;
+  /** 列出本機已安裝的模型名稱（供設定頁下拉選擇）。 */
+  models(endpoint: string): Promise<string[]>;
 }
 
 /** 預設 IO：Tauri 走 Rust IPC（無 CORS）；瀏覽器走 fetch 後備。 */
@@ -60,6 +62,7 @@ export function defaultOllamaIo(): OllamaIo {
     return {
       generate: (endpoint, model, prompt) => invoke<string>("ollama_generate", { endpoint, model, prompt }),
       available: (endpoint) => invoke<boolean>("ollama_available", { endpoint }),
+      models: (endpoint) => invoke<string[]>("ollama_models", { endpoint }),
     };
   }
   return {
@@ -79,6 +82,12 @@ export function defaultOllamaIo(): OllamaIo {
         return false;
       }
     },
+    async models(endpoint) {
+      const r = await fetch(`${endpoint}/api/tags`);
+      if (!r.ok) throw new Error(`ollama ${r.status}`);
+      const data = (await r.json()) as { models?: { name?: unknown }[] };
+      return (data.models ?? []).map((m) => String(m.name ?? "")).filter(Boolean);
+    },
   };
 }
 
@@ -96,4 +105,9 @@ export async function ollamaRewrite(
 /** 偵測 Ollama 是否可用（未啟動就把 UI 入口隱藏/停用）。 */
 export function ollamaAvailable(cfg: OllamaConfig, io: OllamaIo = defaultOllamaIo()): Promise<boolean> {
   return io.available(cfg.endpoint);
+}
+
+/** 列出本機已安裝的模型（供設定頁下拉）。 */
+export function ollamaModels(cfg: OllamaConfig, io: OllamaIo = defaultOllamaIo()): Promise<string[]> {
+  return io.models(cfg.endpoint);
 }

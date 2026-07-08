@@ -1,5 +1,13 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useI18n } from "../i18n.js";
+import { isLocalEndpoint, ollamaModels } from "../native/ollama.js";
+
+/** 本機 AI 改寫設定（ADR-0060）。 */
+export interface OllamaSettingsValue {
+  endpoint: string;
+  model: string;
+  enabled: boolean;
+}
 
 /** Relay pool 一座的連線狀態（ADR-0034）。 */
 export interface RelayPoolEntry {
@@ -22,6 +30,9 @@ export interface SettingsPanelProps {
   onToggleNotifications: () => void;
   readReceipts?: boolean;
   onToggleReadReceipts?: () => void;
+  /** 本機 AI 改寫設定（ADR-0060）；未提供則不顯示該區塊。 */
+  ollama?: OllamaSettingsValue;
+  onOllamaChange?: (next: OllamaSettingsValue) => void;
   /** 貼上時清除網址追蹤參數（ADR-0038）；未提供則不顯示該區塊。 */
   cleanOnPaste?: boolean;
   onToggleCleanOnPaste?: () => void;
@@ -188,8 +199,76 @@ export function SettingsPanel(props: SettingsPanelProps): JSX.Element {
               </label>
             </section>
           ) : null}
+          {props.ollama && props.onOllamaChange ? (
+            <OllamaSettings value={props.ollama} onChange={props.onOllamaChange} />
+          ) : null}
         </div>
       </div>
     </div>
+  );
+}
+
+/** 本機 AI 改寫設定區塊：啟用開關、端點、以及「從已安裝模型下拉選擇」（ADR-0060）。 */
+function OllamaSettings({
+  value,
+  onChange,
+}: {
+  value: OllamaSettingsValue;
+  onChange: (next: OllamaSettingsValue) => void;
+}): JSX.Element {
+  const { t } = useI18n();
+  const [models, setModels] = useState<string[]>([]);
+  const [loading, setLoading] = useState(false);
+  const local = isLocalEndpoint(value.endpoint);
+
+  const loadModels = async (): Promise<void> => {
+    setLoading(true);
+    try {
+      setModels(await ollamaModels({ endpoint: value.endpoint, model: value.model }));
+    } catch {
+      setModels([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+  useEffect(() => {
+    if (value.enabled) void loadModels();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value.enabled, value.endpoint]);
+
+  // 下拉一定包含目前選的模型（即使尚未載到清單），避免顯示空白。
+  const options = models.includes(value.model) ? models : [value.model, ...models].filter(Boolean);
+
+  return (
+    <section className="settings__sec">
+      <h4>{t("settings_ollama")}</h4>
+      <label className="settings__toggle">
+        <input type="checkbox" checked={value.enabled} onChange={() => onChange({ ...value, enabled: !value.enabled })} />
+        <span>{t("ai_rewrite")}</span>
+      </label>
+      {value.enabled ? (
+        <div className="settings__ollama">
+          <label className="settings__field">
+            <span>{t("settings_ollamaEndpoint")}</span>
+            <input value={value.endpoint} onChange={(e) => onChange({ ...value, endpoint: e.target.value })} />
+          </label>
+          {local ? null : <div className="settings__warn">{t("ai_nonLocalWarn")}</div>}
+          <label className="settings__field">
+            <span>{t("settings_ollamaModel")}</span>
+            <span className="settings__modelrow">
+              <select value={value.model} onChange={(e) => onChange({ ...value, model: e.target.value })} data-testid="ollama-model">
+                {options.map((m) => (
+                  <option key={m} value={m}>{m}</option>
+                ))}
+              </select>
+              <button type="button" title={t("settings_ollamaModel")} disabled={loading} onClick={() => void loadModels()}>
+                {loading ? "…" : "↻"}
+              </button>
+            </span>
+          </label>
+          {!loading && models.length === 0 ? <div className="settings__warn">{t("ai_unavailable")}</div> : null}
+        </div>
+      ) : null}
+    </section>
   );
 }

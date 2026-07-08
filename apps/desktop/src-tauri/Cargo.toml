@@ -22,7 +22,7 @@ required-features = ["tauri-app"]
 
 [features]
 # 完整 Tauri 桌面二進位（需 Tauri 工具鏈與 webkit2gtk 等系統庫）。
-tauri-app = ["dep:tauri", "dep:tokio", "dep:tauri-build", "keyring", "encstore"]
+tauri-app = ["dep:tauri", "dep:tokio", "dep:tauri-build", "dep:reqwest", "keyring", "encstore"]
 # OS 金鑰庫（B5，ADR-0053）：私鑰託管於作業系統安全儲存。可獨立測試（會存取真實金鑰庫）。
 keyring = ["dep:keyring"]
 # 加密儲存 blob（B2 儲存基質，ADR-0054）：AES-256-GCM（純 Rust，免 OpenSSL/Perl）。純函式可測。
@@ -46,6 +46,8 @@ rusqlite = { version = "0.32", optional = true }
 keyring = { version = "3", optional = true, features = ["windows-native", "apple-native", "sync-secret-service"] }
 aes-gcm = { version = "0.10", optional = true, features = ["getrandom"] }
 base64 = { version = "0.22", optional = true }
+# 本機 Ollama HTTP 客戶端（AI 改寫，ADR-0060）；rustls 免 OpenSSL/Perl（比照 encstore）。
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"], optional = true }
 
 [build-dependencies]
 tauri-build = { version = "2", optional = true , features = [] }
