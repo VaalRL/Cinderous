@@ -74,7 +74,12 @@ export interface ChatMessage {
   replyTo?: string;
   /** 檔案附件（有值時此訊息為檔案而非文字）。 */
   file?: ChatFile;
+  /** 送達/已讀狀態（自己送出的訊息才有意義；ADR-0058）。 */
+  status?: MessageStatus;
 }
+
+/** 送出訊息的送達狀態（ADR-0058）：送出中→已送中繼→已送達裝置→已讀。 */
+export type MessageStatus = "sending" | "sent" | "delivered" | "read";
 
 export interface ChatBackendEvents {
   /** 聯絡人清單或其狀態/音樂有更新時觸發。 */

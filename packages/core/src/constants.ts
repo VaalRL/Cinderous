@@ -8,6 +8,8 @@ export const KIND = {
   CHAT: 14,
   /** 群組控制訊息（建立/加入/移除/離開；app 內部 rumor kind，經 Gift Wrap）。 */
   GROUP_CONTROL: 40,
+  /** 送達/已讀回條（app 內部 rumor kind，經 Gift Wrap；ADR-0058）。 */
+  RECEIPT: 41,
   /** 離線留言：NIP-17/59 Gift Wrap。 */
   OFFLINE_DM_GIFT_WRAP: 1059,
   /** 好友上線/離線心跳（Ephemeral）。 */
