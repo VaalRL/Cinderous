@@ -19,7 +19,7 @@
 - **進階功能（Phase E，M6–M9）**：✅ 訊息回應/收回/限時、語音訊息/相簿/貼圖（含動態/自製/編輯器/觸發字）、語音視訊通話（含**來電鈴聲**）、QR 加好友、群組聊天、群組本地標籤、**@提及 Mention**、**對話串 Thread（Slack 式右側面板）**。
 - **安全與規模化（Phase F）+ 審查修正**：✅ 前向保密決策、二進位框架、混合式引導路由、跨中繼互通、網址衛生；**審查規模化修正**（啟動回放批次化、訊息列視窗化、去重集合有界、孤兒清理、每對話上限）。
 - **企業模式（Phase G，G0–G4 完成）**：✅ 封閉 allowlist 中繼、單一 App 多身分並存與切換（工作/個人、鎖定/開放、資料命名空間隔離）；✅ 簽章名冊佈建＋企業通訊錄（G1）、政策開關＋**強制 TURN 接入 WebRTC**（G2）、組織群組／公告（G3）、**工作身分輪替（G4，否決金鑰托管、無後門，ADR-0052）**。餘 G5 SSO/元資料稽核。
-- **治理**：pnpm monorepo、TS strict、TDD、CI、**71 份 ADR**、AGPL-3.0。✅
+- **治理**：pnpm monorepo、TS strict、TDD、CI、**72 份 ADR**、AGPL-3.0。✅
 - **本階段新增（額外需求，皆測試綠）**：✅ 跨身分互加防呆（ADR-0055）；**relay 生產部署上線**（免費層 SQLite DO）＋**WebSocket 休眠化＋心跳 30s**（降免費層 duration，ADR-0059）；**樹莓派自架 node-relay**（＋說明文件）；**送達/已讀回條**（Gift Wrap，已讀 opt-in＋互惠，ADR-0058）；**MSN 風 UI**（依上線狀態排序/彩色狀態選單/頂部漸層/大頭貼光暈）＋**分享 ID 縮短+複製**＋**長訊息右側詳情面板**；**本機 Ollama AI 改寫＋未讀摘要**（Rust IPC、localhost 硬守則、prompt injection 緩解，ADR-0060）；**顯示名稱加密個人檔**（只送聯絡人、非公開 kind 0，ADR-0061）。
 
 **缺口總覽**：Tauri **程式碼簽章/自動更新**（B6；需憑證——安裝檔＋系統匣背景＋加密儲存＋金鑰庫皆已 Windows 實機完成）、行動端（Phase D）、企業 G5（SSO/元資料稽核）、通話 TURN 保底真機驗證、F4 第三方稽核。**relay 離線留言/AUTH 已完成並上線**（C1–C3 ✅，C4 容量校準待真實流量）。
@@ -86,7 +86,8 @@
 | D1 | RN App 骨架 | 🔧 **起手完成（此環境）**：`apps/mobile`（react-native-web + 重用 `@cinder/core`/`@cinder/i18n`）；首個 `ContactListScreen`（依上線狀態分區、npub 編碼、多語系），typecheck + 測試綠。⏳ 更多畫面移植（登入/對話）、Expo/Metro 原生打包（需工具鏈或 EAS）。 |
 | D2 | 行動持久化 | RN SQLite + Keystore/Secure Enclave。 |
 | D3 | 無聲推播喚醒 | Worker 存 APNs/FCM 憑證，Silent Push 喚醒背景拉取（PRD §3）。 |
-| D4 | 多設備同步接線 | 接既有 QR 配對 + 持續對帳邏輯。 |
+| D4a | **桌面配對克隆**（🌐 可先行） | 📋 一次性 P2P 全量搬家（ADR-0072）：WebRTC＋拋棄式信令、SAS 短碼互認、舊機授權/新機貼上、捆包＝StorageSnapshot 全量 AEAD；單一作用中身分、企業排除、本地密碼不克隆。不需 RN 工具鏈。 |
+| D4 | 多設備同步接線（行動端＋D4b delta 通道） | 接既有 QR 配對（相機掃描）＋持續對帳邏輯；D4b 即時 delta 另立 ADR。 |
 
 ---
 
@@ -218,7 +219,8 @@ Phase A（前端產品化，可在此環境大量推進）
 
 1. ~~已定案、可直接施工：Phase H~~ ✅ **H1–H3 完成、H4 核心完成**（ADR-0066/0067）——僅餘 H4 的 Tauri 實機驗證（`tauri:dev` 跑解鎖全流程）。
 2. ~~H5／H6／Phase J／Phase I~~ ✅ **全數完成**（ADR-0068/0069/0070/0071）。剩兩件營運事項：`wrangler deploy`（relay 端快照上線）＋錨點前提（OPERATOR-TODO §A，Phase I 實效）。
-3. **需你決策**：M7 語音訊息離線退回策略、G5 SSO/元資料稽核（先立 ADR）；D4 桌面先行多裝置同步（完整歷史搬運＋即時 delta 通道＋快照模式 LWW 同步，若要做需立 ADR）。
+3. **已定案、可直接施工**：**D4a 桌面配對克隆（ADR-0072）**——🌐 可驗（WebRTC 實作重用 A4）。
+4. **需你決策**：G5 SSO/元資料稽核（等企業試點）；D4b 即時 delta 通道（D4a 之後評估）；M7 語音離線退回已暫緩（2026-07-10）。
 3. **需換環境**：Phase B（Tauri 打包＋OS 金鑰庫）、Phase C（Cloudflare relay 部署＋D1＋NIP-42 AUTH）、Phase D（React Native 行動端＋QR 相機掃描）、通話 TURN 部署、F4 第三方稽核。
 4. **此環境可選打磨**：~~顯示名稱傳遞~~ ✅ **已完成（改用加密個人檔，非公開 kind 0，ADR-0061）**；G4 輪替後續（輪替提示 i18n、Rust store 平價）、G1 多管理者名冊、多身分切換列同時在線、AI 改寫串流輸出、嚴格 CSP（需 tauri:dev 逐項驗）。
 
