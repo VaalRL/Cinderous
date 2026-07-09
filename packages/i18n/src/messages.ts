@@ -164,6 +164,11 @@ export interface Messages {
   unlock_password: string;
   unlock_button: string;
   unlock_error: string;
+  settings_backupCode: string;
+  settings_backupCodeHint: string;
+  settings_backupCodePw: string;
+  settings_backupCodePw2: string;
+  settings_backupCodeMake: string;
   file_attach: string;
   file_download: string;
   file_sending: string;
@@ -418,6 +423,11 @@ const zhHant: Messages = {
   unlock_password: "本地密碼",
   unlock_button: "解鎖",
   unlock_error: "密碼錯誤，請再試一次。",
+  settings_backupCode: "產生加密備份碼",
+  settings_backupCodeHint: "備份碼＝密碼加密的私鑰＋你的中繼站網址，印出或存到自選位置。換機時「新增身分→貼上備份碼＋密碼」即可還原。忘記備份密碼＝這份備份失效。",
+  settings_backupCodePw: "備份密碼",
+  settings_backupCodePw2: "再輸入一次備份密碼",
+  settings_backupCodeMake: "產生",
   file_attach: "傳送檔案（P2P）",
   file_download: "下載",
   file_sending: "傳送中…",
@@ -672,6 +682,11 @@ const en: Messages = {
   unlock_password: "Local password",
   unlock_button: "Unlock",
   unlock_error: "Wrong password — try again.",
+  settings_backupCode: "Create encrypted backup code",
+  settings_backupCodeHint: "The backup code is your password-encrypted key plus your relay URL — print it or store it anywhere you choose. To restore on a new device: Add identity → paste the code + password. A forgotten backup password makes this backup unusable.",
+  settings_backupCodePw: "Backup password",
+  settings_backupCodePw2: "Repeat backup password",
+  settings_backupCodeMake: "Create",
   file_attach: "Send a file (P2P)",
   file_download: "Download",
   file_sending: "Sending…",

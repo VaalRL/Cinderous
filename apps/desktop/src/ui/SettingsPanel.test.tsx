@@ -107,3 +107,19 @@ describe("SettingsPanel 安全區塊：本地密碼（ADR-0067）", () => {
     expect(render()).not.toContain('data-testid="security"');
   });
 });
+
+describe("加密備份碼入口（ADR-0070）", () => {
+  beforeEach(() => {
+    (globalThis as Record<string, unknown>).window = { matchMedia: () => ({ matches: false }) };
+    (globalThis as Record<string, unknown>).localStorage = { getItem: () => null };
+  });
+  afterEach(() => {
+    delete (globalThis as Record<string, unknown>).window;
+    delete (globalThis as Record<string, unknown>).localStorage;
+  });
+
+  it("有 selfNsec 時顯示「產生加密備份碼」；無 selfNsec（示範模式）不顯示", () => {
+    expect(render({ selfNsec: "nsec1xxx" })).toContain('data-testid="backup-code"');
+    expect(render()).not.toContain('data-testid="backup-code"');
+  });
+});

@@ -1,6 +1,8 @@
+import { makeBackupCode } from "@cinder/core";
 import { useEffect, useState } from "react";
 import { ACCENT_PRESETS, useAccent } from "../accent.js";
 import { useI18n } from "../i18n.js";
+import { qrSvg } from "../qr.js";
 import {
   type AiProvider,
   hasApiKey,
@@ -112,6 +114,100 @@ function AccentSettings(): JSX.Element {
       </div>
       <p className="settings__hint">{t("settings_accentHint")}</p>
     </section>
+  );
+}
+
+/**
+ * 加密備份碼（ADR-0070）：以備份密碼把 nsec 包成 NIP-49 ncryptsec＋relay 信封，
+ * 輸出字串與 QR——使用者自持（列印/存自選位置），不上雲、不發佈。
+ */
+function BackupCode({ nsec, relayUrl }: { nsec: string; relayUrl: string }): JSX.Element {
+  const { t } = useI18n();
+  const [open, setOpen] = useState(false);
+  const [pw, setPw] = useState("");
+  const [pw2, setPw2] = useState("");
+  const [code, setCode] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const make = () => {
+    setBusy(true);
+    // scrypt（N=2^16）約需一秒：先讓 UI 呈現產生中，再於下一輪事件圈執行。
+    setTimeout(() => {
+      try {
+        setCode(makeBackupCode(nsec, relayUrl, pw));
+      } finally {
+        setBusy(false);
+        setPw("");
+        setPw2("");
+      }
+    }, 0);
+  };
+  const copy = () => {
+    void navigator.clipboard?.writeText(code).then(
+      () => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      },
+      () => {
+        /* 剪貼簿不可用時忽略 */
+      },
+    );
+  };
+  if (!open) {
+    return (
+      <button type="button" className="settings__reveal" data-testid="backup-code" onClick={() => setOpen(true)}>
+        {t("settings_backupCode")}
+      </button>
+    );
+  }
+  if (code) {
+    return (
+      <div className="settings__key">
+        <img
+          src={`data:image/svg+xml;utf8,${encodeURIComponent(qrSvg(code))}`}
+          alt="backup QR"
+          style={{ maxWidth: 160, alignSelf: "center" }}
+        />
+        <code data-testid="backup-code-value" style={{ wordBreak: "break-all" }}>{code}</code>
+        <div className="settings__keyrow">
+          <button type="button" onClick={copy}>{copied ? t("settings_copied") : t("settings_copyKey")}</button>
+          <button
+            type="button"
+            onClick={() => {
+              setCode("");
+              setOpen(false);
+            }}
+          >
+            {t("settings_hideKey")}
+          </button>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div className="settings__key">
+      <p className="hint">{t("settings_backupCodeHint")}</p>
+      <input
+        type="password"
+        aria-label={t("settings_backupCodePw")}
+        value={pw}
+        onChange={(e) => setPw(e.target.value)}
+        placeholder={t("settings_backupCodePw")}
+      />
+      <input
+        type="password"
+        aria-label={t("settings_backupCodePw2")}
+        value={pw2}
+        onChange={(e) => setPw2(e.target.value)}
+        placeholder={t("settings_backupCodePw2")}
+      />
+      <div className="settings__keyrow">
+        <button type="button" disabled={!pw || pw !== pw2 || busy} onClick={make}>
+          {busy ? "…" : t("settings_backupCodeMake")}
+        </button>
+        <button type="button" onClick={() => setOpen(false)}>{t("settings_relayChangeCancel")}</button>
+      </div>
+    </div>
   );
 }
 
@@ -441,6 +537,7 @@ export function SettingsPanel(props: SettingsPanelProps): JSX.Element {
                   {t("settings_revealKey")}
                 </button>
               )}
+              <BackupCode nsec={props.selfNsec} relayUrl={props.relayUrl} />
             </section>
           ) : null}
 

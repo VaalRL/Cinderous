@@ -4,12 +4,15 @@ import {
   type CallState,
   generateSecretKey,
   getPublicKey,
+  isBackupCode,
   newGroupId,
   npubDecode,
   nsecDecode,
   nsecEncode,
   type OrgGroup,
   type OrgMember,
+  parseBackupCode,
+  peekBackupRelay,
   type PubkeyHex,
 } from "@cinder/core";
 import { isTauri } from "@tauri-apps/api/core";
@@ -1131,15 +1134,21 @@ export function AddIdentityModal({
   const [enterprise, setEnterprise] = useState(false);
   const [nsec, setNsec] = useState("");
   const [admin, setAdmin] = useState("");
+  // 加密備份碼匯入（ADR-0070）：偵測到備份碼即要求備份密碼；信封 relay（明文）自動預填。
+  const [backupPw, setBackupPw] = useState("");
+  const [backupErr, setBackupErr] = useState(false);
+  const isCode = isBackupCode(nsec.trim());
   const submit = () => {
     if (!name.trim() || !relayUrl.trim()) return;
+    if (isCode && !backupPw) return;
     try {
+      const imported = isCode ? parseBackupCode(nsec.trim(), backupPw).nsec : nsec.trim() || undefined;
       onAdd(name.trim(), relayUrl.trim(), enterprise, {
-        nsec: nsec.trim() || undefined,
+        nsec: imported,
         adminPubkey: enterprise ? admin.trim() || undefined : undefined,
       });
     } catch {
-      /* 非法 nsec：保留輸入 */
+      setBackupErr(true); // 備份密碼錯誤或非法 nsec：保留輸入
     }
   };
   return (
@@ -1174,11 +1183,36 @@ export function AddIdentityModal({
           ) : null}
           <input
             className="groupmodal__name"
-            placeholder="匯入 nsec（留空＝產生新身分）"
+            placeholder="匯入 nsec 或加密備份碼（留空＝產生新身分）"
             value={nsec}
-            onChange={(e) => setNsec(e.target.value)}
+            onChange={(e) => {
+              const v = e.target.value;
+              setNsec(v);
+              setBackupErr(false);
+              const relay = peekBackupRelay(v.trim());
+              if (relay) setRelayUrl(relay); // 備份碼信封的 home relay 預填（可改）
+            }}
           />
-          <button className="groupmodal__create" data-testid="add-identity-confirm" disabled={!name.trim() || !relayUrl.trim()} onClick={submit}>
+          {isCode ? (
+            <input
+              className="groupmodal__name"
+              type="password"
+              data-testid="backup-password"
+              placeholder="備份密碼"
+              value={backupPw}
+              onChange={(e) => {
+                setBackupPw(e.target.value);
+                setBackupErr(false);
+              }}
+            />
+          ) : null}
+          {backupErr ? <p className="settings__warn">備份密碼錯誤或金鑰格式不符</p> : null}
+          <button
+            className="groupmodal__create"
+            data-testid="add-identity-confirm"
+            disabled={!name.trim() || !relayUrl.trim() || (isCode && !backupPw)}
+            onClick={submit}
+          >
             建立並切換
           </button>
         </div>
