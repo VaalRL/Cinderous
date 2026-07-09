@@ -19,7 +19,7 @@
 - **進階功能（Phase E，M6–M9）**：✅ 訊息回應/收回/限時、語音訊息/相簿/貼圖（含動態/自製/編輯器/觸發字）、語音視訊通話（含**來電鈴聲**）、QR 加好友、群組聊天、群組本地標籤、**@提及 Mention**、**對話串 Thread（Slack 式右側面板）**。
 - **安全與規模化（Phase F）+ 審查修正**：✅ 前向保密決策、二進位框架、混合式引導路由、跨中繼互通、網址衛生；**審查規模化修正**（啟動回放批次化、訊息列視窗化、去重集合有界、孤兒清理、每對話上限）。
 - **企業模式（Phase G，G0–G4 完成）**：✅ 封閉 allowlist 中繼、單一 App 多身分並存與切換（工作/個人、鎖定/開放、資料命名空間隔離）；✅ 簽章名冊佈建＋企業通訊錄（G1）、政策開關＋**強制 TURN 接入 WebRTC**（G2）、組織群組／公告（G3）、**工作身分輪替（G4，否決金鑰托管、無後門，ADR-0052）**。餘 G5 SSO/元資料稽核。
-- **治理**：pnpm monorepo、TS strict、TDD、CI、**67 份 ADR**、AGPL-3.0。✅
+- **治理**：pnpm monorepo、TS strict、TDD、CI、**70 份 ADR**、AGPL-3.0。✅
 - **本階段新增（額外需求，皆測試綠）**：✅ 跨身分互加防呆（ADR-0055）；**relay 生產部署上線**（免費層 SQLite DO）＋**WebSocket 休眠化＋心跳 30s**（降免費層 duration，ADR-0059）；**樹莓派自架 node-relay**（＋說明文件）；**送達/已讀回條**（Gift Wrap，已讀 opt-in＋互惠，ADR-0058）；**MSN 風 UI**（依上線狀態排序/彩色狀態選單/頂部漸層/大頭貼光暈）＋**分享 ID 縮短+複製**＋**長訊息右側詳情面板**；**本機 Ollama AI 改寫＋未讀摘要**（Rust IPC、localhost 硬守則、prompt injection 緩解，ADR-0060）；**顯示名稱加密個人檔**（只送聯絡人、非公開 kind 0，ADR-0061）。
 
 **缺口總覽**：Tauri **程式碼簽章/自動更新**（B6；需憑證——安裝檔＋系統匣背景＋加密儲存＋金鑰庫皆已 Windows 實機完成）、行動端（Phase D）、企業 G5（SSO/元資料稽核）、通話 TURN 保底真機驗證、F4 第三方稽核。**relay 離線留言/AUTH 已完成並上線**（C1–C3 ✅，C4 容量校準待真實流量）。
@@ -154,6 +154,7 @@
 | H2 | 更換 relay 流程 | 🌐 | ✅ **完成**：設定面板 relay「顯示＋更換」；`changeProfileRelay` 保留 namespace／name／enterprise（不走 addIdentity），`relayChangeTarget` 守門（企業禁用、`wss://` 正規化、同值 no-op），更新 `nb.relayUrl` 後 reload；重載後 H1 廣播自動通知改道（ADR-0066 階段 2）。 |
 | H3 | 舊站排水 drain | 🌐 | ✅ **完成**：profile 增 `previousRelayUrl?`＋`drainUntil?`（now＋7 天，對齊 ADR-0065 TTL）；`RelayPoolOptions.drainUrl` 讓舊站進 pool 掛自家收件匣、event-id 去重沿用；到期自動停、設定面板可提前完成。對照組測試證明無排水即漏收（ADR-0066 階段 3）。 |
 | H4 | 本地密碼 | 🌐＋🖥️ | 🔧 **核心完成**：Rust `passlock`（Argon2id 19MiB/t2/p1 衍生 KEK＋AES-256-GCM 包裹，6 單元測試）＋IPC `pass_*` 六命令（db 金鑰解鎖後快取原生記憶體）；`UnlockScreen` 開機閘門、閒置 5 分自動上鎖、設定安全區塊（啟用強制備份確認／改密碼＝重包裹／停用／隱藏身分＋🔒 喚回）。⏳ Tauri 實機驗證解鎖全流程（`tauri:dev`）（ADR-0067）。 |
+| H5 | 群組快照廣播 | 🌐 | 📋 管理員開機對自建群組成員扇出「群組快照」控制訊息（id/名稱/成員、帶 hint、7 天過期）；收端僅信「發送者＝快照所稱 admin」，冪等對帳；與收件匣 7 天重放組成閉環——nsec 換機後群組自動回歸＋漏掉的群訊補收。企業組織群排除（名冊已覆蓋）（ADR-0068）。 |
 
 **完成定義**：既有身分可無損搬家（聯絡人自動改道、排水期零漏信）；共用設備上各身分可獨立上鎖與隱藏。
 
@@ -173,6 +174,8 @@ Phase A（前端產品化，可在此環境大量推進）
 
 ## 未決策 ADR（開工前需定案）
 
+- **ADR-0069（提議中）Relay 自動分配與自動搬家**：簽章清單 schema 擴充（accepting/weight/status）＋分級觸發（T1 session 遞補現況／T2 durable 搬家並修遞補持久化缺口／T3 清單退役分批撤離）＋SignIn 自動選座。營運前提：立起 ≥2 座錨點、填 `bootstrap-config.ts`。
+- **ADR-0070（提議中）加密備份碼**：passlock Argon2id 包裹 `{nsec, relayUrl}` 成單一字串/QR，使用者自持；換機救援變「掃碼＋密碼」。開放問題：是否對齊 NIP-49。
 - **M7 語音訊息離線退回策略**：受中繼大小限制時的退回方式。
 - **G5 SSO / 元資料稽核**：綁 AD/LDAP/OIDC → npub、自架 relay 記錄連線元資料，實作前須立 ADR（並備外部 IdP）。
 
@@ -183,7 +186,8 @@ Phase A（前端產品化，可在此環境大量推進）
 此環境（🌐）**不需新決策就能做的規劃項目已全數完成**（Phase A/E 全部、G0–G4、M8 來電鈴聲、Cinder 更名）。往下推進需要：
 
 1. ~~已定案、可直接施工：Phase H~~ ✅ **H1–H3 完成、H4 核心完成**（ADR-0066/0067）——僅餘 H4 的 Tauri 實機驗證（`tauri:dev` 跑解鎖全流程）。
-2. **需你決策**：M7 語音訊息離線退回策略、G5 SSO/元資料稽核（各先立 ADR）。
+2. **已定案、可直接施工**：**H5 群組快照廣播（ADR-0068）**——純 🌐 可驗。
+3. **需你決策（ADR 提議中）**：ADR-0069 自動分配/自動搬家、ADR-0070 加密備份碼；另 M7 語音訊息離線退回策略、G5 SSO/元資料稽核（先立 ADR）。
 3. **需換環境**：Phase B（Tauri 打包＋OS 金鑰庫）、Phase C（Cloudflare relay 部署＋D1＋NIP-42 AUTH）、Phase D（React Native 行動端＋QR 相機掃描）、通話 TURN 部署、F4 第三方稽核。
 4. **此環境可選打磨**：~~顯示名稱傳遞~~ ✅ **已完成（改用加密個人檔，非公開 kind 0，ADR-0061）**；G4 輪替後續（輪替提示 i18n、Rust store 平價）、G1 多管理者名冊、多身分切換列同時在線、AI 改寫串流輸出、嚴格 CSP（需 tauri:dev 逐項驗）。
 
