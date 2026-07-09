@@ -87,7 +87,7 @@ export const MAINTAINER_PUBKEY = "你的維護者公鑰 hex（64 字元）";
 - 決定**更新託管端點**（放 `latest.json` + 已簽安裝檔的靜態位址，如 GitHub Releases 或自架）。
 - 加 `@tauri-apps/plugin-updater` ＋ 於 `tauri.conf.json` 設 `plugins.updater`（endpoints + pubkey），前端接更新流程；`tauri:build` 以 updater 私鑰簽產物，客戶端驗簽後才套用。
 
-**③ 發行前小整理**：`tauri.conf.json` 的 `identifier` 仍是 `app.nostrbuddy.desktop`（更名殘留）。**首次正式簽章發行前**改為 `app.cinder.desktop`（會變更 app 資料夾路徑，故要在有正式使用者資料前改）。
+**③ 發行前小整理**：✅ **已完成（2026-07-10）**——`identifier` 已改為 `app.cinder.desktop`，本機資料夾已複製遷移（`%APPDATA%` 的 `store/` 與 `%LOCALAPPDATA%` 的 `EBWebView`）；舊資料夾 `app.nostrbuddy.desktop` 保留為備份，於新版實機驗證登入正常後可手動刪除。
 
 ---
 
