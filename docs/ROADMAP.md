@@ -160,6 +160,22 @@
 
 ---
 
+## Phase I — Relay 自動分配與自動搬家（🌐 可在此環境推進；實效需營運前提）
+
+> 決策：ADR-0069（簽章清單驅動、分級觸發；否決「接近額度即搬」與 relay 端指派）。
+> **營運前提**：立起 ≥2 座錨點 relay、填入 `bootstrap-config.ts` 的 `ANCHOR_RELAYS` 與 `MAINTAINER_PUBKEY`——機制可先施工並以測試驗證，實效等錨點上線。
+
+| # | 任務 | 環境 | 說明 / 驗證 |
+| --- | --- | --- | --- |
+| I1 | 簽章清單 schema 擴充 | 🌐＋☁️ | 📋 清單每座增 `{ accepting, weight, status: ok\|draining\|retired }`；core 驗簽/採用邏輯與 relay-health workflow 同步更新；舊欄位相容（缺欄位視為 `accepting: true`）。 |
+| I2 | 遞補持久化＋T2 durable 搬家 | 🌐 | 📋 修 ADR-0039 缺口：遞補後持續離線逾門檻（24h）或開機即死且引導座健康 → 走 H2 `changeProfileRelay`＋H3 排水＋H1 廣播的 durable 搬家＋事後通知；遲滯防抖。 |
+| I3 | T3 清單退役撤離 | 🌐 | 📋 `draining`/`retired` → 既有用戶分批隨機延遲自動搬家（防羊群）；`accepting: false` 僅擋新分配。 |
+| I4 | SignIn 自動選座 | 🌐 | 📋 relay 欄改選填；留空→自 `accepting` 座加權隨機＋健康探測；保留手填與 `?relay=`。 |
+
+**完成定義**：新帳號免填網址上線；relay 死亡/退役對用戶透明，遷移一次到位不重演。
+
+---
+
 ## 相依與建議順序
 
 ```text
@@ -174,7 +190,6 @@ Phase A（前端產品化，可在此環境大量推進）
 
 ## 未決策 ADR（開工前需定案）
 
-- **ADR-0069（提議中）Relay 自動分配與自動搬家**：簽章清單 schema 擴充（accepting/weight/status）＋分級觸發（T1 session 遞補現況／T2 durable 搬家並修遞補持久化缺口／T3 清單退役分批撤離）＋SignIn 自動選座。營運前提：立起 ≥2 座錨點、填 `bootstrap-config.ts`。
 - **ADR-0070（提議中）加密備份碼**：passlock Argon2id 包裹 `{nsec, relayUrl}` 成單一字串/QR，使用者自持；換機救援變「掃碼＋密碼」。開放問題：是否對齊 NIP-49。
 - **M7 語音訊息離線退回策略**：受中繼大小限制時的退回方式。
 - **G5 SSO / 元資料稽核**：綁 AD/LDAP/OIDC → npub、自架 relay 記錄連線元資料，實作前須立 ADR（並備外部 IdP）。
@@ -186,8 +201,8 @@ Phase A（前端產品化，可在此環境大量推進）
 此環境（🌐）**不需新決策就能做的規劃項目已全數完成**（Phase A/E 全部、G0–G4、M8 來電鈴聲、Cinder 更名）。往下推進需要：
 
 1. ~~已定案、可直接施工：Phase H~~ ✅ **H1–H3 完成、H4 核心完成**（ADR-0066/0067）——僅餘 H4 的 Tauri 實機驗證（`tauri:dev` 跑解鎖全流程）。
-2. **已定案、可直接施工**：**H5 群組快照廣播（ADR-0068）**——純 🌐 可驗。
-3. **需你決策（ADR 提議中）**：ADR-0069 自動分配/自動搬家、ADR-0070 加密備份碼；另 M7 語音訊息離線退回策略、G5 SSO/元資料稽核（先立 ADR）。
+2. **已定案、可直接施工**：**H5 群組快照廣播（ADR-0068）**、**Phase I 自動分配/自動搬家（ADR-0069，I1→I4）**——皆 🌐 可驗（I 的實效需錨點營運前提）。
+3. **需你決策（ADR 提議中）**：ADR-0070 加密備份碼；另 M7 語音訊息離線退回策略、G5 SSO/元資料稽核（先立 ADR）。
 3. **需換環境**：Phase B（Tauri 打包＋OS 金鑰庫）、Phase C（Cloudflare relay 部署＋D1＋NIP-42 AUTH）、Phase D（React Native 行動端＋QR 相機掃描）、通話 TURN 部署、F4 第三方稽核。
 4. **此環境可選打磨**：~~顯示名稱傳遞~~ ✅ **已完成（改用加密個人檔，非公開 kind 0，ADR-0061）**；G4 輪替後續（輪替提示 i18n、Rust store 平價）、G1 多管理者名冊、多身分切換列同時在線、AI 改寫串流輸出、嚴格 CSP（需 tauri:dev 逐項驗）。
 
