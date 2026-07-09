@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { ACCENT_PRESETS, useAccent } from "../accent.js";
 import { useI18n } from "../i18n.js";
 import { qrSvg } from "../qr.js";
+import type { CloudSyncMode } from "../storage/cloud-snapshot.js";
 import {
   type AiProvider,
   hasApiKey,
@@ -62,6 +63,13 @@ export interface SettingsPanelProps {
   drain?: { url: string; until: number };
   /** 提前完成排水（確認後）。 */
   onDrainComplete?: () => void;
+  /** 加密雲端快照（ADR-0071）：三檔模式；未提供則不顯示（示範模式/政策禁用）。 */
+  cloud?: {
+    mode: CloudSyncMode;
+    onChange: (mode: CloudSyncMode) => void;
+    /** 立即備份（已開啟時才提供）。 */
+    onBackupNow?: () => void;
+  };
   /** 本地密碼（H4，ADR-0067）：僅 Tauri 提供；未提供則不顯示安全區塊。回 false＝密碼錯誤。 */
   security?: {
     enabled: boolean;
@@ -262,6 +270,46 @@ function RelayChange({ current, onApply }: { current: string; onApply: (url: str
         </button>
       </div>
     </div>
+  );
+}
+
+/**
+ * 加密雲端快照設定（ADR-0071）：三檔模式（關/基本/完整）。切到關＝確認後 purge
+ * （「已關閉」必須立即為真）；文案誠實：快照由身分金鑰保護、relay 只見密文。
+ */
+function CloudSyncSettings({ value }: { value: NonNullable<SettingsPanelProps["cloud"]> }): JSX.Element {
+  const { t } = useI18n();
+  const modes: { key: CloudSyncMode; label: string }[] = [
+    { key: "off", label: t("settings_cloudOff") },
+    { key: "basic", label: t("settings_cloudBasic") },
+    { key: "full", label: t("settings_cloudFull") },
+  ];
+  return (
+    <section className="settings__sec" data-testid="cloud-sync">
+      <h4>{t("settings_cloud")}</h4>
+      <p className="hint">{t("settings_cloudHint")}</p>
+      {modes.map((m) => (
+        <label key={m.key} className="settings__toggle">
+          <input
+            type="radio"
+            name="cloud-mode"
+            data-testid={`cloud-${m.key}`}
+            checked={value.mode === m.key}
+            onChange={() => {
+              if (m.key === value.mode) return;
+              if (m.key === "off" && !window.confirm(t("settings_cloudOffConfirm"))) return;
+              value.onChange(m.key);
+            }}
+          />
+          <span>{m.label}</span>
+        </label>
+      ))}
+      {value.onBackupNow ? (
+        <button type="button" data-testid="cloud-backup-now" onClick={() => value.onBackupNow?.()}>
+          {t("settings_cloudBackupNow")}
+        </button>
+      ) : null}
+    </section>
   );
 }
 
@@ -540,6 +588,8 @@ export function SettingsPanel(props: SettingsPanelProps): JSX.Element {
               <BackupCode nsec={props.selfNsec} relayUrl={props.relayUrl} />
             </section>
           ) : null}
+
+          {props.cloud ? <CloudSyncSettings value={props.cloud} /> : null}
 
           {props.security ? <SecuritySettings value={props.security} /> : null}
 

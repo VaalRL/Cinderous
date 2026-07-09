@@ -29,6 +29,8 @@ export interface OrgPolicy {
   disableStickers?: boolean;
   /** 強制 WebRTC 只走 TURN（iceTransportPolicy: "relay"），避免揭露內網 IP。 */
   forceTurn?: boolean;
+  /** 禁止工作身分把狀態快照上雲（ADR-0071）：組織不願工作狀態密文駐留 relay 時啟用。 */
+  disableCloudBackup?: boolean;
 }
 
 /** 組織群組（ADR-0049）：管理者佈建的部門群／公告頻道。 */
@@ -75,6 +77,7 @@ function parsePolicy(value: unknown): OrgPolicy | undefined {
   if (v.disableCalls === true) p.disableCalls = true;
   if (v.disableStickers === true) p.disableStickers = true;
   if (v.forceTurn === true) p.forceTurn = true;
+  if (v.disableCloudBackup === true) p.disableCloudBackup = true;
   return Object.keys(p).length > 0 ? p : undefined;
 }
 

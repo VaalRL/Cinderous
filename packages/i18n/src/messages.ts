@@ -169,6 +169,13 @@ export interface Messages {
   settings_backupCodePw: string;
   settings_backupCodePw2: string;
   settings_backupCodeMake: string;
+  settings_cloud: string;
+  settings_cloudHint: string;
+  settings_cloudOff: string;
+  settings_cloudBasic: string;
+  settings_cloudFull: string;
+  settings_cloudOffConfirm: string;
+  settings_cloudBackupNow: string;
   file_attach: string;
   file_download: string;
   file_sending: string;
@@ -428,6 +435,13 @@ const zhHant: Messages = {
   settings_backupCodePw: "備份密碼",
   settings_backupCodePw2: "再輸入一次備份密碼",
   settings_backupCodeMake: "產生",
+  settings_cloud: "雲端同步（加密快照）",
+  settings_cloudHint: "把加密的狀態快照存在你的中繼站：換機時「備份碼＋密碼」即可秒級還原。中繼站只見密文；快照由你的身分金鑰保護（本地密碼只保護這台裝置）。30 天未上線自動過期。",
+  settings_cloudOff: "關閉（不上雲）",
+  settings_cloudBasic: "基本：聯絡人、群組、封鎖清單、設定",
+  settings_cloudFull: "完整：基本＋近期訊息",
+  settings_cloudOffConfirm: "關閉雲端同步？中繼站上此裝置的快照將立即刪除，新裝置將無法自動還原。",
+  settings_cloudBackupNow: "立即備份",
   file_attach: "傳送檔案（P2P）",
   file_download: "下載",
   file_sending: "傳送中…",
@@ -687,6 +701,13 @@ const en: Messages = {
   settings_backupCodePw: "Backup password",
   settings_backupCodePw2: "Repeat backup password",
   settings_backupCodeMake: "Create",
+  settings_cloud: "Cloud sync (encrypted snapshot)",
+  settings_cloudHint: "Stores an encrypted state snapshot on your relay: a new device restores in seconds with your backup code + password. The relay only ever sees ciphertext; the snapshot is protected by your identity key (the local password only protects this device). Expires after 30 days offline.",
+  settings_cloudOff: "Off (nothing in the cloud)",
+  settings_cloudBasic: "Basic: contacts, groups, block list, settings",
+  settings_cloudFull: "Full: basic + recent messages",
+  settings_cloudOffConfirm: "Turn off cloud sync? This device's snapshot on the relay is deleted immediately and new devices can no longer restore automatically.",
+  settings_cloudBackupNow: "Back up now",
   file_attach: "Send a file (P2P)",
   file_download: "Download",
   file_sending: "Sending…",

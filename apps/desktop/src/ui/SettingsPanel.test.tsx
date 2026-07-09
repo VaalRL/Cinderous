@@ -108,6 +108,29 @@ describe("SettingsPanel 安全區塊：本地密碼（ADR-0067）", () => {
   });
 });
 
+describe("雲端同步設定（ADR-0071）", () => {
+  beforeEach(() => {
+    (globalThis as Record<string, unknown>).window = { matchMedia: () => ({ matches: false }) };
+    (globalThis as Record<string, unknown>).localStorage = { getItem: () => null };
+  });
+  afterEach(() => {
+    delete (globalThis as Record<string, unknown>).window;
+    delete (globalThis as Record<string, unknown>).localStorage;
+  });
+
+  it("三檔模式選項齊備；開啟時有「立即備份」、關閉時沒有；未提供則無區塊", () => {
+    const on = render({ cloud: { mode: "full", onChange: () => {}, onBackupNow: () => {} } });
+    expect(on).toContain('data-testid="cloud-sync"');
+    expect(on).toContain('data-testid="cloud-off"');
+    expect(on).toContain('data-testid="cloud-basic"');
+    expect(on).toContain('data-testid="cloud-full"');
+    expect(on).toContain('data-testid="cloud-backup-now"');
+    const off = render({ cloud: { mode: "off", onChange: () => {} } });
+    expect(off).not.toContain('data-testid="cloud-backup-now"');
+    expect(render()).not.toContain('data-testid="cloud-sync"');
+  });
+});
+
 describe("加密備份碼入口（ADR-0070）", () => {
   beforeEach(() => {
     (globalThis as Record<string, unknown>).window = { matchMedia: () => ({ matches: false }) };

@@ -189,6 +189,10 @@ export interface ChatBackend {
   clearRelayHint?(url: string): void;
   /** 確認保留某座 stale relay（重置離線計時、暫時隱藏警告，ADR-0036）。 */
   acknowledgeRelayStale?(url: string): void;
+  /** 立即備份雲端快照（ADR-0071；已開啟模式時，跳過節流）。 */
+  publishSnapshotNow?(): void;
+  /** 關閉雲端快照時清除 relay 上此裝置的快照（purge，ADR-0071）。 */
+  purgeCloudSnapshot?(deviceId: string): void;
   /** 自己的 `npub`（供分享/加好友；僅真實 relay 後端提供）。 */
   readonly selfNpub?: string;
   /** 分享用字串 `npub…@wss://…`（帶 relay hint；無 home relay 時同 npub）。 */

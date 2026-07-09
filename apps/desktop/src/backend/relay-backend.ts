@@ -230,6 +230,8 @@ export class RelayChatBackend implements ChatBackend {
   /** 加密雲端快照設定（ADR-0071）；undefined＝不發佈（接收合併恆開）。 */
   private readonly cloudSync: { mode: "basic" | "full"; deviceId: string } | undefined;
   private snapTimer: ReturnType<typeof setInterval> | undefined;
+  /** 企業政策禁止快照上雲（ADR-0071）：名冊採用時設定，即刻停止發佈。 */
+  private cloudBackupBlocked = false;
   /** 引導座（錨點 ∪ 已採用清單，ADR-0039）：恆連保底、冗餘廣播與 home 遞補來源。 */
   private readonly bootstrapSeats = new Set<string>();
   private readonly maintainerPubkey: string | undefined;
@@ -627,6 +629,7 @@ export class RelayChatBackend implements ChatBackend {
     this.lastRoster = doc;
     if (doc.policy) this.handlers?.onPolicy?.(doc.policy); // 企業政策（ADR-0048）
     this.forceTurn = doc.policy?.forceTurn === true; // 強制 TURN 生效於後續新建的 WebRTC 連線
+    this.cloudBackupBlocked = doc.policy?.disableCloudBackup === true; // 禁止快照上雲（ADR-0071）
     const self = this.self.pubkey;
     // ADR-0052：先把本機認得的舊 npub 接續到新 npub（歷史/群資格遷移），再以在世成員對帳。
     let changed = this.applyRotations(doc);
@@ -1217,7 +1220,7 @@ export class RelayChatBackend implements ChatBackend {
 
   /** 開機/定時檢查：內容有變且未達每日上限才發佈快照（ADR-0071 J2）。 */
   private maybePublishSnapshot(): void {
-    if (!this.cloudSync) return;
+    if (!this.cloudSync || this.cloudBackupBlocked) return;
     const content = buildSnapshotContent(this.storage, this.cloudSync.mode);
     const hash = JSON.stringify({ ...content, at: 0 }); // 比對不含產生時間
     if (!this.snapshotDue(hash)) return;
@@ -1226,7 +1229,7 @@ export class RelayChatBackend implements ChatBackend {
 
   /** 立即備份（設定面板「立即備份」；跳過節流）。 */
   publishSnapshotNow(): void {
-    if (!this.cloudSync) return;
+    if (!this.cloudSync || this.cloudBackupBlocked) return;
     const content = buildSnapshotContent(this.storage, this.cloudSync.mode);
     this.publishReliable(buildSnapshotEvent(JSON.stringify(content), this.sk, this.cloudSync.deviceId));
   }

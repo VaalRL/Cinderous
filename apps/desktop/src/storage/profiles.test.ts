@@ -12,6 +12,7 @@ import {
   removeProfile,
   saveProfiles,
   setActive,
+  setProfileCloudSync,
   setProfileSecurity,
   upsertProfile,
   visibleProfiles,
@@ -118,6 +119,15 @@ describe("profiles 純登錄（ADR-0045）", () => {
     expect(visibleProfiles(s).map((p) => p.pubkey)).toEqual(["a", "c"]);
     s = setActive(s, "b"); // 正在使用隱藏身分：本人看得到自己
     expect(visibleProfiles(s).map((p) => p.pubkey)).toEqual(["a", "b", "c"]);
+  });
+
+  it("setProfileCloudSync（ADR-0071）：設定三檔模式、其餘不動；未知 pubkey 不變", () => {
+    const s0 = setActive(upsertProfile(empty, mk("a")), "a");
+    const s1 = setProfileCloudSync(s0, "a", "full");
+    expect(activeProfile(s1)?.cloudSync).toBe("full");
+    expect(activeProfile(s1)?.relayUrl).toBe("wss://r");
+    expect(setProfileCloudSync(s1, "zzz", "off")).toBe(s1);
+    expect(activeProfile(setProfileCloudSync(s1, "a", "off"))?.cloudSync).toBe("off");
   });
 });
 

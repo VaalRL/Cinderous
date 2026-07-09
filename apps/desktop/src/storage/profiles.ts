@@ -26,6 +26,8 @@ export interface Profile {
   locked?: boolean;
   /** 隱藏身分（ADR-0067）：不在切換器顯示（作用中除外）；僅供已啟用密碼的身分選用。 */
   hidden?: boolean;
+  /** 加密雲端快照模式（ADR-0071 三檔）；未設＝關閉。 */
+  cloudSync?: "off" | "basic" | "full";
 }
 
 export interface ProfilesState {
@@ -123,6 +125,19 @@ export function setProfileSecurity(
 /** 切換器可見的身分（ADR-0067 隱藏身分）：過濾 hidden，但作用中即使 hidden 也顯示。 */
 export function visibleProfiles(state: ProfilesState): Profile[] {
   return state.profiles.filter((p) => !p.hidden || p.pubkey === state.active);
+}
+
+/** 設定某身分的雲端快照模式（ADR-0071）；未知 pubkey 回原狀態。 */
+export function setProfileCloudSync(
+  state: ProfilesState,
+  pubkey: string,
+  cloudSync: "off" | "basic" | "full",
+): ProfilesState {
+  if (!state.profiles.some((p) => p.pubkey === pubkey)) return state;
+  return {
+    ...state,
+    profiles: state.profiles.map((p) => (p.pubkey === pubkey ? { ...p, cloudSync } : p)),
+  };
 }
 
 function validate(value: unknown): ProfilesState | null {

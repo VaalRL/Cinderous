@@ -31,10 +31,13 @@ import {
   type ProfilesState,
   saveProfiles,
   setActive,
+  setProfileCloudSync,
   setProfileSecurity,
   upsertProfile,
   visibleProfiles,
 } from "./storage/profiles.js";
+import { getDeviceId } from "./storage/device-id.js";
+import type { CloudSyncMode } from "./storage/cloud-snapshot.js";
 import type {
   BlockedContact,
   ChatBackend,
@@ -128,10 +131,14 @@ function buildBackend(p: Profile, nsecOverride?: string, storage?: AppStorage): 
   if (!p.relayUrl) return new BrowserChatBackend(p.name);
   const store = storage ?? new LocalStorage(p.namespace);
   const drain = activeDrain(p, Date.now()); // 搬家排水（ADR-0066 H3）：未到期才多訂舊站
+  // 加密雲端快照（ADR-0071）：使用者開啟才發佈；企業政策 disableCloudBackup 由後端於名冊採用時再擋。
+  const cloud =
+    p.cloudSync && p.cloudSync !== "off" ? { cloudSync: { mode: p.cloudSync, deviceId: getDeviceId() } } : {};
   const opts = p.enterprise
-    ? { relayUrl: p.relayUrl, ...(p.adminPubkey ? { orgAdminPubkey: p.adminPubkey } : {}) }
+    ? { relayUrl: p.relayUrl, ...cloud, ...(p.adminPubkey ? { orgAdminPubkey: p.adminPubkey } : {}) }
     : {
         relayUrl: p.relayUrl,
+        ...cloud,
         ...(drain ? { drainUrl: drain.url } : {}),
         connectorFor: webSocketConnector,
         anchors: ANCHOR_RELAYS,
@@ -909,6 +916,36 @@ export function App(): JSX.Element {
             return {
               ...(p.enterprise ? { relayLocked: true } : { onRelayChange: changeRelay }),
               ...(drain ? { drain, onDrainComplete: completeDrain } : {}),
+            };
+          })()}
+          {...(() => {
+            // 加密雲端快照（ADR-0071）：三檔模式；示範模式與政策禁用時不顯示。
+            const p = activeProfile(profilesState);
+            if (!p || !p.relayUrl) return {};
+            if (p.enterprise && policy.disableCloudBackup) return {};
+            const mode: CloudSyncMode = p.cloudSync ?? "off";
+            return {
+              cloud: {
+                mode,
+                onChange: (m: CloudSyncMode) => {
+                  if (m === mode) return;
+                  if (m === "off") activeBackend.purgeCloudSnapshot?.(getDeviceId()); // 已關閉必須立即為真
+                  const next = setProfileCloudSync(loadProfiles(), p.pubkey, m);
+                  saveProfiles(next);
+                  setProfilesState(next);
+                  // 稍候讓 purge/設定送出，再重載以新模式重建後端。
+                  setTimeout(() => {
+                    try {
+                      location.reload();
+                    } catch {
+                      /* 忽略 */
+                    }
+                  }, 500);
+                },
+                ...(mode !== "off" && activeBackend.publishSnapshotNow
+                  ? { onBackupNow: () => activeBackend.publishSnapshotNow?.() }
+                  : {}),
+              },
             };
           })()}
           {...(() => {
