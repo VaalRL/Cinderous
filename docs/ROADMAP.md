@@ -86,7 +86,7 @@
 | D1 | RN App 骨架 | 🔧 **起手完成（此環境）**：`apps/mobile`（react-native-web + 重用 `@cinder/core`/`@cinder/i18n`）；首個 `ContactListScreen`（依上線狀態分區、npub 編碼、多語系），typecheck + 測試綠。⏳ 更多畫面移植（登入/對話）、Expo/Metro 原生打包（需工具鏈或 EAS）。 |
 | D2 | 行動持久化 | RN SQLite + Keystore/Secure Enclave。 |
 | D3 | 無聲推播喚醒 | Worker 存 APNs/FCM 憑證，Silent Push 喚醒背景拉取（PRD §3）。 |
-| D4a | **桌面配對克隆**（🌐 可先行） | 📋 一次性 P2P 全量搬家（ADR-0072）：WebRTC＋拋棄式信令、SAS 短碼互認、舊機授權/新機貼上、捆包＝StorageSnapshot 全量 AEAD；單一作用中身分、企業排除、本地密碼不克隆。不需 RN 工具鏈。 |
+| D4a | **桌面配對克隆** | ✅ **完成（ADR-0072）**：core 協定（HELLO/CHALLENGE/BUNDLE/DONE/REJECT＋SAS 四位短碼）、`roomKeyFrom` 拋棄式信令會合（kind 21003、AEAD 密封、NIP-42 以房間金鑰通過）、WebRTC 資料通道長度前綴分塊、捆包＝StorageSnapshot 全量、兩端 UI（舊機 QR/碼/倒數/SAS 確認；新機 SignIn 匯入）。載荷帶會合 relay。⏳ 實機驗證 RTC 直連（`tauri:dev` 兩台/兩實例）。 |
 | D4 | 多設備同步接線（行動端＋D4b delta 通道） | 接既有 QR 配對（相機掃描）＋持續對帳邏輯；D4b 即時 delta 另立 ADR。 |
 
 ---
@@ -219,8 +219,8 @@ Phase A（前端產品化，可在此環境大量推進）
 
 1. ~~已定案、可直接施工：Phase H~~ ✅ **H1–H3 完成、H4 核心完成**（ADR-0066/0067）——僅餘 H4 的 Tauri 實機驗證（`tauri:dev` 跑解鎖全流程）。
 2. ~~H5／H6／Phase J／Phase I~~ ✅ **全數完成**（ADR-0068/0069/0070/0071）。剩兩件營運事項：`wrangler deploy`（relay 端快照上線）＋錨點前提（OPERATOR-TODO §A，Phase I 實效）。
-3. **已定案、可直接施工**：**D4a 桌面配對克隆（ADR-0072）**——🌐 可驗（WebRTC 實作重用 A4）。
-4. **需你決策**：G5 SSO/元資料稽核（等企業試點）；D4b 即時 delta 通道（D4a 之後評估）；M7 語音離線退回已暫緩（2026-07-10）。
+3. ~~D4a 桌面配對克隆~~ ✅ **完成（ADR-0072）**——僅餘 RTC 直連實機驗證（可與 H4 解鎖驗證同一趟 `tauri:dev`）。
+4. **需你決策**：G5 SSO/元資料稽核（等企業試點）；D4b 即時 delta 通道（D4a 用起來後評估）；M7 語音離線退回已暫緩（2026-07-10）。
 3. **需換環境**：Phase B（Tauri 打包＋OS 金鑰庫）、Phase C（Cloudflare relay 部署＋D1＋NIP-42 AUTH）、Phase D（React Native 行動端＋QR 相機掃描）、通話 TURN 部署、F4 第三方稽核。
 4. **此環境可選打磨**：~~顯示名稱傳遞~~ ✅ **已完成（改用加密個人檔，非公開 kind 0，ADR-0061）**；G4 輪替後續（輪替提示 i18n、Rust store 平價）、G1 多管理者名冊、多身分切換列同時在線、AI 改寫串流輸出、嚴格 CSP（需 tauri:dev 逐項驗）。
 
