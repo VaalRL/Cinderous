@@ -18,8 +18,10 @@ import { BrowserChatBackend } from "./backend/browser-backend.js";
 import { normalizeRelayUrl, RelayChatBackend, webSocketConnector } from "./backend/relay-backend.js";
 import { getKeyVault } from "./native/keyvault.js";
 import {
+  activeDrain,
   activeProfile,
   changeProfileRelay,
+  clearDrain,
   loadProfiles,
   type Profile,
   type ProfilesState,
@@ -116,10 +118,12 @@ function normalizeAdminPubkey(input: string): string | undefined {
 function buildBackend(p: Profile, nsecOverride?: string, storage?: AppStorage): ChatBackend {
   if (!p.relayUrl) return new BrowserChatBackend(p.name);
   const store = storage ?? new LocalStorage(p.namespace);
+  const drain = activeDrain(p, Date.now()); // 搬家排水（ADR-0066 H3）：未到期才多訂舊站
   const opts = p.enterprise
     ? { relayUrl: p.relayUrl, ...(p.adminPubkey ? { orgAdminPubkey: p.adminPubkey } : {}) }
     : {
         relayUrl: p.relayUrl,
+        ...(drain ? { drainUrl: drain.url } : {}),
         connectorFor: webSocketConnector,
         anchors: ANCHOR_RELAYS,
         ...(MAINTAINER_PUBKEY ? { maintainerPubkey: MAINTAINER_PUBKEY } : {}),
@@ -546,6 +550,18 @@ export function App(): JSX.Element {
     }
   };
 
+  // 提前完成排水（ADR-0066 H3）：移除舊站記錄後重載，乾淨收掉排水訂閱。
+  const completeDrain = () => {
+    const p = activeProfile(profilesState);
+    if (!p) return;
+    saveProfiles(clearDrain(profilesState, p.pubkey));
+    try {
+      location.reload();
+    } catch {
+      /* 忽略 */
+    }
+  };
+
   // 切換身分：持久化作用中選擇後重載，讓所有 per-身分 狀態乾淨重建（ADR-0045）。
   const switchProfile = (pubkey: string) => {
     if (pubkey === profilesState.active) return;
@@ -797,7 +813,11 @@ export function App(): JSX.Element {
             // 更換 relay（ADR-0066 H2）：個人身分可換；工作身分鎖定（顯示說明）；示範模式無此區塊。
             const p = activeProfile(profilesState);
             if (!p) return {};
-            return p.enterprise ? { relayLocked: true } : { onRelayChange: changeRelay };
+            const drain = activeDrain(p, Date.now()); // H3：排水中顯示舊站與提前完成
+            return {
+              ...(p.enterprise ? { relayLocked: true } : { onRelayChange: changeRelay }),
+              ...(drain ? { drain, onDrainComplete: completeDrain } : {}),
+            };
           })()}
           {...(activeBackend.clearRelayHint
             ? { onRelayClear: activeBackend.clearRelayHint.bind(activeBackend) }

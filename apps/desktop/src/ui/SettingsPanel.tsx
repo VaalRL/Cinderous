@@ -56,6 +56,10 @@ export interface SettingsPanelProps {
   onRelayChange?: (url: string) => void;
   /** 工作身分鎖定漫遊（ADR-0044/0048）：顯示鎖定說明而非更換鈕。 */
   relayLocked?: boolean;
+  /** 進行中的舊站排水（ADR-0066 H3）：顯示舊站與截止時間。 */
+  drain?: { url: string; until: number };
+  /** 提前完成排水（確認後）。 */
+  onDrainComplete?: () => void;
 }
 
 const STATE_DOT: Record<RelayPoolEntry["state"], string> = {
@@ -252,6 +256,24 @@ export function SettingsPanel(props: SettingsPanelProps): JSX.Element {
               <p className="hint" data-testid="relay-locked">
                 {t("settings_relayLocked")}
               </p>
+            ) : null}
+            {props.drain && props.onDrainComplete ? (
+              <div className="settings__key" data-testid="relay-drain">
+                <p className="hint">
+                  {t("settings_relayDrain", {
+                    url: props.drain.url,
+                    date: new Date(props.drain.until).toLocaleString(),
+                  })}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (window.confirm(t("settings_relayDrainDoneConfirm"))) props.onDrainComplete?.();
+                  }}
+                >
+                  {t("settings_relayDrainDone")}
+                </button>
+              </div>
             ) : null}
           </section>
 

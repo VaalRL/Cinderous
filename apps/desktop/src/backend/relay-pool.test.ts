@@ -276,6 +276,42 @@ describe("跨中繼通訊：Relay Pool 與收件人路由（ADR-0034）", () => 
     b.stop();
   });
 
+  it("舊站排水（ADR-0066 H3）：搬家後仍收到被送往舊站的來訊；未設排水則漏收", () => {
+    const { netX, netY, connectorFor } = twoRelays();
+    // Alice 已從 X 搬到 Y，排水期內仍訂舊站 X 的收件匣
+    const a = new RelayChatBackend(new MemoryStorage(), (h) => netY.connect("a", h), "Alice", {
+      relayUrl: "wss://y",
+      connectorFor,
+      drainUrl: "wss://x",
+    });
+    // Carol 也搬到 Y 但「沒有」排水（對照組）
+    const c = new RelayChatBackend(new MemoryStorage(), (h) => netY.connect("c", h), "Carol", {
+      relayUrl: "wss://y",
+      connectorFor,
+    });
+    // Bob 的 home 是 X，對兩人都沒有 hint（stale 認知：以為她們還在 X）→ 訊息退回他的 home X
+    const b = new RelayChatBackend(new MemoryStorage(), (h) => netX.connect("b", h), "Bob", {
+      relayUrl: "wss://x",
+      connectorFor,
+    });
+    const aIncoming: ChatMessage[] = [];
+    const cIncoming: ChatMessage[] = [];
+    a.start({ ...noop, onMessage: (_pk, m) => aIncoming.push(m) });
+    c.start({ ...noop, onMessage: (_pk, m) => cIncoming.push(m) });
+    b.start(noop);
+
+    b.addContact(a.selfNpub); // 無 hint
+    b.addContact(c.selfNpub);
+    b.sendMessage(a.self.pubkey, "送往舊站的信");
+    b.sendMessage(c.self.pubkey, "送往舊站的信");
+
+    expect(aIncoming.map((m) => m.text)).toContain("送往舊站的信"); // 排水接住
+    expect(cIncoming).toHaveLength(0); // 沒有排水＝漏收（正是 H3 要堵的洞）
+    a.stop();
+    b.stop();
+    c.stop();
+  });
+
   it("hint 學習的邊界：與收件人 home 相同存為無 hint；非法 hint 不動現有值", () => {
     const { netX, netY, connectorFor } = twoRelays();
     const storeB = new MemoryStorage();

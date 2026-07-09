@@ -18,6 +18,10 @@ export interface Profile {
   namespace: string;
   /** 企業名冊管理者 hex pubkey（工作身分可選，ADR-0047）：訂閱並自動採用組織通訊錄。 */
   adminPubkey?: string;
+  /** 搬家前的舊 home relay（ADR-0066 H3 排水）；排水期滿或提前完成後移除。 */
+  previousRelayUrl?: string;
+  /** 排水截止（ms epoch）＝搬家時間＋7 天，對齊 relay 端 TTL 上限（ADR-0065）。 */
+  drainUntil?: number;
 }
 
 export interface ProfilesState {
@@ -35,16 +39,50 @@ export function upsertProfile(state: ProfilesState, profile: Profile): ProfilesS
   return { profiles, active: profile.pubkey };
 }
 
+/** 排水窗長度：7 天，對齊 relay 端離線留言 TTL 上限（ADR-0065）——到期後舊站保證沒有自己的信。 */
+export const DRAIN_MS = 7 * 86_400_000;
+
 /**
  * 更換某身分的 home relay（ADR-0066 H2）：只改 relayUrl，namespace／name／enterprise
  * 等其餘欄位與作用中選擇全數保留——搬家不是換身分，資料零損失。未知 pubkey 回原狀態。
+ * 同時記下舊站與排水截止（H3）；排水為單槽：期內再搬只保留最近一站。
  */
-export function changeProfileRelay(state: ProfilesState, pubkey: string, relayUrl: string): ProfilesState {
+export function changeProfileRelay(
+  state: ProfilesState,
+  pubkey: string,
+  relayUrl: string,
+  opts: { now?: number } = {},
+): ProfilesState {
+  if (!state.profiles.some((p) => p.pubkey === pubkey)) return state;
+  const now = opts.now ?? Date.now();
+  return {
+    ...state,
+    profiles: state.profiles.map((p) =>
+      p.pubkey === pubkey
+        ? { ...p, relayUrl, ...(p.relayUrl ? { previousRelayUrl: p.relayUrl, drainUntil: now + DRAIN_MS } : {}) }
+        : p,
+    ),
+  };
+}
+
+/** 排水期滿或使用者提前完成：移除舊站記錄（ADR-0066 H3）。未知 pubkey 回原狀態。 */
+export function clearDrain(state: ProfilesState, pubkey: string): ProfilesState {
   if (!state.profiles.some((p) => p.pubkey === pubkey)) return state;
   return {
     ...state,
-    profiles: state.profiles.map((p) => (p.pubkey === pubkey ? { ...p, relayUrl } : p)),
+    profiles: state.profiles.map((p) => {
+      if (p.pubkey !== pubkey) return p;
+      const { previousRelayUrl: _prev, drainUntil: _until, ...rest } = p;
+      return rest;
+    }),
   };
+}
+
+/** 進行中的排水（ADR-0066 H3）：未到期回舊站與截止時間；到期、與現站相同或從未搬家回 null。 */
+export function activeDrain(p: Profile | null, now: number): { url: string; until: number } | null {
+  if (!p?.previousRelayUrl || p.drainUntil === undefined) return null;
+  if (p.previousRelayUrl === p.relayUrl || now >= p.drainUntil) return null;
+  return { url: p.previousRelayUrl, until: p.drainUntil };
 }
 
 /** 移除設定檔；若移除的是作用中，改指向剩餘的第一個（或 null）。 */

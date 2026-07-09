@@ -196,6 +196,8 @@ export interface RelayPoolOptions {
    * 私鑰、**不寫入** identity blob；未設則沿用既有行為（從 storage 讀/自動產生）。
    */
   nsecOverride?: string;
+  /** 搬家排水（ADR-0066 H3）：額外訂閱這座「舊 home」的自家收件匣；到期與否由 App 層判定。 */
+  drainUrl?: string;
 }
 
 export class RelayChatBackend implements ChatBackend {
@@ -213,6 +215,8 @@ export class RelayChatBackend implements ChatBackend {
   /** 目前 effective home（ADR-0039 可自動遞補）。 */
   private homeUrl: string | undefined;
   private readonly connectorFor: ((url: string) => RelayConnector) | undefined;
+  /** 搬家排水的舊 home（ADR-0066 H3）：只多訂閱其收件匣，不參與發送路由。 */
+  private readonly drainUrl: string | undefined;
   /** 引導座（錨點 ∪ 已採用清單，ADR-0039）：恆連保底、冗餘廣播與 home 遞補來源。 */
   private readonly bootstrapSeats = new Set<string>();
   private readonly maintainerPubkey: string | undefined;
@@ -266,6 +270,8 @@ export class RelayChatBackend implements ChatBackend {
   ) {
     this.homeUrl = normalizeRelayUrl(pool?.relayUrl);
     this.originalHomeUrl = this.homeUrl;
+    const drain = normalizeRelayUrl(pool?.drainUrl);
+    this.drainUrl = drain !== this.homeUrl ? drain : undefined;
     this.connectorFor = pool?.connectorFor;
     this.maintainerPubkey = pool?.maintainerPubkey;
     this.orgAdminPubkey = pool?.orgAdminPubkey;
@@ -535,6 +541,8 @@ export class RelayChatBackend implements ChatBackend {
     if (!this.connectorFor) return;
     // 引導座（錨點/清單，ADR-0039）與聯絡人 hint 的外部 relay 都連線並掛訂閱。
     for (const url of this.bootstrapSeats) if (url !== this.homeUrl) this.poolClient(url);
+    // 搬家排水（ADR-0066 H3）：舊 home 也連線——subscribeOn 會掛自家收件匣，收訊走既有去重。
+    if (this.drainUrl && this.drainUrl !== this.homeUrl) this.poolClient(this.drainUrl);
     for (const c of this.contacts) {
       const url = this.foreignUrlOf(c);
       if (url) this.poolClient(url);

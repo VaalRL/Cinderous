@@ -141,6 +141,9 @@ export interface Messages {
   settings_relayChangeApply: string;
   settings_relayChangeCancel: string;
   settings_relayLocked: string;
+  settings_relayDrain: string;
+  settings_relayDrainDone: string;
+  settings_relayDrainDoneConfirm: string;
   file_attach: string;
   file_download: string;
   file_sending: string;
@@ -372,6 +375,9 @@ const zhHant: Messages = {
   settings_relayChangeApply: "套用並重新載入",
   settings_relayChangeCancel: "取消",
   settings_relayLocked: "工作身分的中繼站由組織管理，無法在此更換。",
+  settings_relayDrain: "舊站排水中：{url}——{date} 前仍會接收送到舊站的訊息。",
+  settings_relayDrainDone: "提前完成排水",
+  settings_relayDrainDoneConfirm: "提前完成排水？期限前仍送到舊站的訊息將不再接收。",
   file_attach: "傳送檔案（P2P）",
   file_download: "下載",
   file_sending: "傳送中…",
@@ -603,6 +609,9 @@ const en: Messages = {
   settings_relayChangeApply: "Apply & reload",
   settings_relayChangeCancel: "Cancel",
   settings_relayLocked: "Work identities use the relay managed by your organization; it can't be changed here.",
+  settings_relayDrain: "Draining old relay {url} — messages sent there are still received until {date}.",
+  settings_relayDrainDone: "Finish draining now",
+  settings_relayDrainDoneConfirm: "Finish draining early? Messages still arriving at the old relay will no longer be received.",
   file_attach: "Send a file (P2P)",
   file_download: "Download",
   file_sending: "Sending…",

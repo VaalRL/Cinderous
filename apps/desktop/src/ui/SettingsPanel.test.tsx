@@ -62,4 +62,14 @@ describe("SettingsPanel relay 區塊：更換中繼站（ADR-0066 H2）", () => 
     expect(out).not.toContain('data-testid="relay-change"');
     expect(out).not.toContain('data-testid="relay-locked"');
   });
+
+  it("排水中（ADR-0066 H3）：顯示舊站與「提前完成」；未排水則無此區塊", () => {
+    const out = render({
+      drain: { url: "wss://old.example", until: 4102444800000 },
+      onDrainComplete: () => {},
+    });
+    expect(out).toContain('data-testid="relay-drain"');
+    expect(out).toContain("wss://old.example");
+    expect(render()).not.toContain('data-testid="relay-drain"');
+  });
 });
