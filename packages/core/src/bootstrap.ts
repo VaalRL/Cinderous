@@ -147,7 +147,7 @@ export interface ResolvedRelayEntry {
 }
 
 /** 物化清單的營運資訊（ADR-0069）：有 entries 用 entries，否則以 relays 補預設值。 */
-export function listEntries(doc: Pick<RelayListDoc, "relays" | "entries">): ResolvedRelayEntry[] {
+export function listEntries(doc: { relays: string[]; entries?: RelayEntry[]; updatedAt?: number }): ResolvedRelayEntry[] {
   const source: RelayEntry[] = doc.entries ?? doc.relays.map((url) => ({ url }));
   return source.map((e) => ({
     url: e.url,
