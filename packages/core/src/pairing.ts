@@ -176,3 +176,41 @@ export async function runPairingTarget(
     transport.close();
   }
 }
+
+// ── 配對會合（D4a）：房間金鑰與信令密封 ───────────────────────────────────────
+
+import { utf8ToBytes } from "@noble/hashes/utils";
+import { getPublicKey, type PubkeyHex, type SecretKey } from "./keys.js";
+
+/** 配對信令 kind（ephemeral 21000–21999；21000＝檔案、21002＝通話、21003＝配對會合）。 */
+export const PAIR_SIGNAL_KIND = 21003;
+
+/**
+ * 房間金鑰：自一次性金鑰**決定性導出**——兩端各自可算、免交換；
+ * 與正式身分不可連結（relay 只見一把拋棄 pubkey 自我收發）。
+ */
+export function roomKeyFrom(key: Uint8Array): { sk: SecretKey; pk: PubkeyHex } {
+  let seed = sha256(new Uint8Array([...key, ...utf8ToBytes("cinder-pair-room-v1")]));
+  for (;;) {
+    try {
+      return { sk: seed, pk: getPublicKey(seed) };
+    } catch {
+      seed = sha256(seed); // 種子非法純理論機率（~2^-128）：再雜湊一次
+    }
+  }
+}
+
+/** 密封信令內容（一次性金鑰 AEAD＋base64）。 */
+export function sealSignal(key: Uint8Array, msg: Record<string, unknown>): string {
+  return base64.encode(encryptBundle(key, utf8ToBytes(JSON.stringify(msg))));
+}
+
+/** 解封信令內容；非本房間金鑰或遭竄改回 null。 */
+export function openSignal(key: Uint8Array, content: string): Record<string, unknown> | null {
+  try {
+    const parsed: unknown = JSON.parse(new TextDecoder().decode(decryptBundle(key, base64.decode(content))));
+    return parsed && typeof parsed === "object" ? (parsed as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}

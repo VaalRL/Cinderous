@@ -7,6 +7,9 @@ import {
   encryptBundle,
   type PairTransport,
   parsePairing,
+  roomKeyFrom,
+  sealSignal,
+  openSignal,
   runPairingSource,
   runPairingTarget,
 } from "./pairing.js";
@@ -141,5 +144,24 @@ describe("配對協定＋SAS（D4a，ADR-0072）", () => {
     expect(deriveSas(k1, na, nb)).toBe(deriveSas(k1, na, nb)); // 決定性
     expect(deriveSas(k1, na, nb)).not.toBe(deriveSas(k2, na, nb));
     expect(deriveSas(k1, na, nb)).not.toBe(deriveSas(k1, nb, na));
+  });
+});
+
+describe("配對會合原語（D4a）", () => {
+  it("roomKeyFrom：決定性、同鑰同房、異鑰異房", () => {
+    const { key } = createPairing("", "r");
+    const a = roomKeyFrom(key);
+    const b = roomKeyFrom(key);
+    expect(a.pk).toBe(b.pk);
+    expect(roomKeyFrom(createPairing("", "r").key).pk).not.toBe(a.pk);
+  });
+
+  it("sealSignal/openSignal：往返；異鑰/竄改回 null；密文不含明文", () => {
+    const { key } = createPairing("", "r");
+    const sealed = sealSignal(key, { t: "offer", sdp: "祕密SDP" });
+    expect(sealed).not.toContain("祕密SDP");
+    expect(openSignal(key, sealed)).toEqual({ t: "offer", sdp: "祕密SDP" });
+    expect(openSignal(createPairing("", "r").key, sealed)).toBeNull();
+    expect(openSignal(key, sealed.slice(0, -4) + "AAAA")).toBeNull();
   });
 });
