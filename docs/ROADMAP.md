@@ -150,10 +150,10 @@
 
 | # | 任務 | 環境 | 說明 / 驗證 |
 | --- | --- | --- | --- |
-| H1 | 個人檔廣播帶 relay hint | 🌐 | 📋 `wrapProfile` 增 `relayHint?` 寫入 rumor 內層 `["relay", url]`（加密、外層不可見）；`sendProfileTo` 帶自己的 home。收端零改動（`receiveDm` 已通用 `learnRelayHint`）。效果：每次開機廣播＝全聯絡人 hint 刷新，陳舊自癒（ADR-0066 階段 1）。 |
-| H2 | 更換 relay 流程 | 🌐 | 📋 設定面板 relay 由唯讀改「顯示＋更換」；App 層 `changeRelay(url)` 保留 namespace／name／enterprise（不走 addIdentity），更新 `nb.relayUrl` 後 reload；重載後 H1 廣播自動通知改道。護欄：企業身分禁用、`wss://` 驗證、同值 no-op（ADR-0066 階段 2）。 |
-| H3 | 舊站排水 drain | 🌐 | 📋 profile 增 `previousRelayUrl?`＋`drainUntil?`（now＋7 天，對齊 ADR-0065 TTL）；未到期時 pool 加訂舊站收件匣、event-id 去重；到期自動停、可提前完成（ADR-0066 階段 3）。 |
-| H4 | 本地密碼 | 🌐＋🖥️ | 📋 每身分選配：Argon2id 衍生 KEK 包裹 nsec＋`db:<namespace>` 金鑰（AES-256-GCM，取代金鑰庫明文條目）；隱藏身分選項、閒置自動上鎖、啟用前強制 nsec 備份、改密碼＝重包裹。KDF 走 Rust `argon2`（ADR-0067）。 |
+| H1 | 個人檔廣播帶 relay hint | 🌐 | ✅ **完成**：`wrapProfile` 增 `relayHint?` 寫入 rumor 內層 `["relay", url]`（加密、外層不可見）；`sendProfileTo` 帶自己的 home。收端零改動（`receiveDm` 已通用 `learnRelayHint`）。測試含「只憑個人檔學 hint」＋三 relay 搬家自癒 E2E（ADR-0066 階段 1）。 |
+| H2 | 更換 relay 流程 | 🌐 | ✅ **完成**：設定面板 relay「顯示＋更換」；`changeProfileRelay` 保留 namespace／name／enterprise（不走 addIdentity），`relayChangeTarget` 守門（企業禁用、`wss://` 正規化、同值 no-op），更新 `nb.relayUrl` 後 reload；重載後 H1 廣播自動通知改道（ADR-0066 階段 2）。 |
+| H3 | 舊站排水 drain | 🌐 | ✅ **完成**：profile 增 `previousRelayUrl?`＋`drainUntil?`（now＋7 天，對齊 ADR-0065 TTL）；`RelayPoolOptions.drainUrl` 讓舊站進 pool 掛自家收件匣、event-id 去重沿用；到期自動停、設定面板可提前完成。對照組測試證明無排水即漏收（ADR-0066 階段 3）。 |
+| H4 | 本地密碼 | 🌐＋🖥️ | 🔧 **核心完成**：Rust `passlock`（Argon2id 19MiB/t2/p1 衍生 KEK＋AES-256-GCM 包裹，6 單元測試）＋IPC `pass_*` 六命令（db 金鑰解鎖後快取原生記憶體）；`UnlockScreen` 開機閘門、閒置 5 分自動上鎖、設定安全區塊（啟用強制備份確認／改密碼＝重包裹／停用／隱藏身分＋🔒 喚回）。⏳ Tauri 實機驗證解鎖全流程（`tauri:dev`）（ADR-0067）。 |
 
 **完成定義**：既有身分可無損搬家（聯絡人自動改道、排水期零漏信）；共用設備上各身分可獨立上鎖與隱藏。
 
@@ -182,7 +182,7 @@ Phase A（前端產品化，可在此環境大量推進）
 
 此環境（🌐）**不需新決策就能做的規劃項目已全數完成**（Phase A/E 全部、G0–G4、M8 來電鈴聲、Cinder 更名）。往下推進需要：
 
-1. **已定案、可直接施工**：**Phase H（H1→H2→H3 搬家、H4 本地密碼；ADR-0066/0067）**——H1–H3 純 🌐，H4 的 KDF 需 🖥️ Rust 端配合。
+1. ~~已定案、可直接施工：Phase H~~ ✅ **H1–H3 完成、H4 核心完成**（ADR-0066/0067）——僅餘 H4 的 Tauri 實機驗證（`tauri:dev` 跑解鎖全流程）。
 2. **需你決策**：M7 語音訊息離線退回策略、G5 SSO/元資料稽核（各先立 ADR）。
 3. **需換環境**：Phase B（Tauri 打包＋OS 金鑰庫）、Phase C（Cloudflare relay 部署＋D1＋NIP-42 AUTH）、Phase D（React Native 行動端＋QR 相機掃描）、通話 TURN 部署、F4 第三方稽核。
 4. **此環境可選打磨**：~~顯示名稱傳遞~~ ✅ **已完成（改用加密個人檔，非公開 kind 0，ADR-0061）**；G4 輪替後續（輪替提示 i18n、Rust store 平價）、G1 多管理者名冊、多身分切換列同時在線、AI 改寫串流輸出、嚴格 CSP（需 tauri:dev 逐項驗）。

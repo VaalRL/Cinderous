@@ -10,9 +10,9 @@
 - **零伺服器狀態**：中繼站不持久化線上狀態與信令（Ephemeral），僅暫存有過期時間的離線留言。Ephemeral 不寫 D1，但仍消耗 Worker 請求數（非零成本）。
 - **端到端加密**：明文不離開裝置；內容以 NIP-44 加密。
 - **元資料隱藏**：私訊以 NIP-17/59 Gift Wrap 包封收發雙方，中繼站無法重建社交圖譜（詳見 PRD §6–§7 與 `docs/adr/0002`）。
-- **靜態落地加密**：私鑰與本機 SQLite 不以明文落地（OS 安全儲存 + 資料庫加密），以對抗設備竊取。
+- **靜態落地加密**：私鑰與本機 SQLite 不以明文落地（OS 安全儲存 + 資料庫加密），以對抗設備竊取。共用設備可再啟用**本地密碼**（ADR-0067）：Argon2id 衍生金鑰包裹 nsec 與資料金鑰、取代金鑰庫明文條目，並支援隱藏身分與閒置自動上鎖；nsec 僅用於匯入／換機／救援，不作日常登入。
 - **雙軌動態切換**：能 P2P 直連就走 WebRTC；不能直連或對方離線時退回 Nostr 中繼；P2P 失敗以 TURN／經中繼降級保底。
-- **跨中繼互通（ADR-0034）**：relay 之間不聯邦；客戶端維護 relay pool——addressed 事件（帶 `p` tag）發往**收件人的 relay**（好友 relay hint，`npub…@wss://…`）、心跳發往 pool 全部、收件箱訂閱掛在 pool 每座 relay，事件以 id 去重；hint 由加密 rumor 內層自動學習（ADR-0035，不用公開的 NIP-65）。任何標準 Nostr relay 皆可互通。
+- **跨中繼互通（ADR-0034）**：relay 之間不聯邦；客戶端維護 relay pool——addressed 事件（帶 `p` tag）發往**收件人的 relay**（好友 relay hint，`npub…@wss://…`）、心跳發往 pool 全部、收件箱訂閱掛在 pool 每座 relay，事件以 id 去重；hint 由加密 rumor 內層自動學習（ADR-0035，不用公開的 NIP-65），且**個人檔開機廣播帶 hint**（ADR-0066）＝每次開機刷新全聯絡人路由、陳舊自癒。更換 home relay 走「保留命名空間搬家＋舊站 7 天排水」（ADR-0066，對齊 ADR-0065 的 relay TTL）。任何標準 Nostr relay 皆可互通。
 
 ## 2. 雙軌混合網路
 
