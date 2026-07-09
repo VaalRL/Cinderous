@@ -79,3 +79,22 @@ describe("MessageStore — 離線留言儲存與過期", () => {
     expect(got.map((e) => e.created_at).sort()).toEqual([2, 3]);
   });
 });
+
+describe("壽命上限（ADR-0065：孤兒資料不可能）", () => {
+  const WEEK = 7 * 86_400;
+
+  it("無 expiration 的事件套預設 TTL：7 天後不返回且 prune 收走", () => {
+    const store = new MessageStore();
+    store.put(giftWrap(), 1000); // 無 expiration
+    expect(store.query({ "#p": [recipient] }, 1000)).toHaveLength(1);
+    expect(store.query({ "#p": [recipient] }, 1000 + WEEK + 1)).toHaveLength(0);
+    store.prune(1000 + WEEK + 1);
+    expect(store.query({ "#p": [recipient] }, 1000)).toHaveLength(0);
+  });
+
+  it("惡意超長 expiration 被截到上限（7 天）", () => {
+    const store = new MessageStore();
+    store.put(giftWrap({ expiration: 999_999_999 }), 1000);
+    expect(store.query({ "#p": [recipient] }, 1000 + WEEK + 1)).toHaveLength(0);
+  });
+});

@@ -13,6 +13,24 @@ export function getExpiration(event: NostrEvent): number | undefined {
 export interface MessageStoreOptions {
   /** 每位收件人（`p` 標籤）保留的最大留言數，超量丟棄最舊。 */
   maxPerRecipient?: number;
+  /**
+   * 留言壽命上限（秒；預設 7 天）。無 `expiration` 標籤的事件以此為預設 TTL、
+   * 有標籤者也不得超過此上限——任何一列的壽命都有界，孤兒資料在數學上不可能（ADR-0065）。
+   */
+  maxTtlSeconds?: number;
+}
+
+/** 預設留言壽命上限：7 天（對齊 client 端 gift wrap 的預設 TTL）。 */
+export const DEFAULT_MAX_TTL_SECONDS = 7 * 86_400;
+
+/**
+ * 有效到期時間（ADR-0065）：`min(標籤值, now + 上限)`；無標籤即 `now + 上限`。
+ * 防兩種永存縫隙：無 expiration 的事件、以及惡意超長 expiration。
+ */
+export function effectiveExpiration(event: NostrEvent, nowSec: number, maxTtlSeconds = DEFAULT_MAX_TTL_SECONDS): number {
+  const cap = nowSec + maxTtlSeconds;
+  const tagged = getExpiration(event);
+  return tagged === undefined ? cap : Math.min(tagged, cap);
 }
 
 /**
@@ -62,12 +80,15 @@ export class MessageStore implements OfflineStore {
   private readonly byRecipient = new Map<string, NostrEvent[]>();
   /** 無 `p` 標籤的事件。 */
   private noRecipient: NostrEvent[] = [];
+  /** event id → 有效到期時間（ADR-0065：每列壽命必有界）。 */
+  private readonly effExp = new Map<string, number>();
 
   constructor(private readonly opts: MessageStoreOptions = {}) {}
 
   /** 寫入一筆留言；若已過期則拒絕並回 false。 */
   put(event: NostrEvent, nowSec: number): boolean {
     if (this.isExpired(event, nowSec)) return false;
+    this.effExp.set(event.id, effectiveExpiration(event, nowSec, this.opts.maxTtlSeconds));
     const recipients = recipientsOf(event);
     if (recipients.length === 0) {
       this.noRecipient.push(event);
@@ -90,12 +111,19 @@ export class MessageStore implements OfflineStore {
 
   /** 清除所有已過期留言。 */
   prune(nowSec: number): void {
+    const survivors = new Set<string>();
     for (const [recipient, bucket] of this.byRecipient) {
       const kept = bucket.filter((e) => !this.isExpired(e, nowSec));
       if (kept.length > 0) this.byRecipient.set(recipient, kept);
       else this.byRecipient.delete(recipient);
+      for (const e of kept) survivors.add(e.id);
     }
     this.noRecipient = this.noRecipient.filter((e) => !this.isExpired(e, nowSec));
+    for (const e of this.noRecipient) survivors.add(e.id);
+    // 同步清 effExp（避免 id → 到期時間的殘留成為另一種孤兒）
+    for (const id of this.effExp.keys()) {
+      if (!survivors.has(id)) this.effExp.delete(id);
+    }
   }
 
   /** 依 filter 縮小候選集合：帶 `#p` 時僅取相關收件人桶，否則全掃。 */
@@ -115,7 +143,7 @@ export class MessageStore implements OfflineStore {
   }
 
   private isExpired(event: NostrEvent, nowSec: number): boolean {
-    const exp = getExpiration(event);
+    const exp = this.effExp.get(event.id) ?? getExpiration(event);
     return exp !== undefined && exp <= nowSec;
   }
 

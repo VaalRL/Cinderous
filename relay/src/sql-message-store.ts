@@ -1,7 +1,9 @@
 import type { NostrEvent } from "@cinder/core";
 import { matchFilter } from "./filters.js";
 import {
+  DEFAULT_MAX_TTL_SECONDS,
   dedupById,
+  effectiveExpiration,
   getExpiration,
   type MessageStoreOptions,
   type OfflineStore,
@@ -38,11 +40,18 @@ export class SqlMessageStore implements OfflineStore {
     );
     this.sql(`CREATE INDEX IF NOT EXISTS idx_offline_recipient ON offline_msgs(recipient)`);
     this.sql(`CREATE INDEX IF NOT EXISTS idx_offline_expiration ON offline_msgs(expiration)`);
+    // ADR-0065 遷移：修正前寫入的無到期列（NULL）補上有界壽命，讓 prune 能收走。
+    this.sql(
+      `UPDATE offline_msgs SET expiration = created_at + ? WHERE expiration IS NULL`,
+      opts.maxTtlSeconds ?? DEFAULT_MAX_TTL_SECONDS,
+    );
   }
 
   put(event: NostrEvent, nowSec: number): boolean {
     const exp = getExpiration(event);
     if (exp !== undefined && exp <= nowSec) return false;
+    // ADR-0065：一律存「有效到期時間」（無標籤給預設 TTL、超長標籤截到上限）——每列壽命必有界。
+    const effExp = effectiveExpiration(event, nowSec, this.opts.maxTtlSeconds);
     const recipients = recipientsOf(event);
     const targets = recipients.length > 0 ? recipients : [""];
     const json = JSON.stringify(event);
@@ -51,7 +60,7 @@ export class SqlMessageStore implements OfflineStore {
         `INSERT OR IGNORE INTO offline_msgs (id, recipient, expiration, created_at, json) VALUES (?, ?, ?, ?, ?)`,
         event.id,
         recipient,
-        exp ?? null,
+        effExp,
         event.created_at,
         json,
       );

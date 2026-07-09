@@ -79,3 +79,4 @@
 | [0062](./0062-online-llm-providers.md) | 桌面版接線上 LLM provider（OpenAI 相容、API key 存金鑰庫、localhost 守則把關） | 已接受 |
 | [0063](./0063-phase-d-mobile-scaffold.md) | Phase D 行動端骨架：react-native-web 於此環境開發、重用 core/i18n | 已接受 |
 | [0064](./0064-custom-accent-color.md) | 自訂主題色（本地儲存、單一 --accent 覆寫、吉祥物連動） | 已接受 |
+| [0065](./0065-offline-store-ttl-cap.md) | 離線留言壽命上限（無標籤給預設 TTL、超長截斷——孤兒資料不可能） | 已接受 |
