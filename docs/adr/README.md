@@ -85,3 +85,4 @@
 | [0068](./0068-group-snapshot-broadcast.md) | 管理員開機群組快照廣播（群組成員資格自癒） | 已接受 |
 | [0069](./0069-auto-relay-assignment-migration.md) | Relay 自動分配與自動搬家（簽章清單驅動） | 已接受 |
 | [0070](./0070-encrypted-backup-code.md) | 加密備份碼（NIP-49 混合式、使用者自持） | 已接受 |
+| [0071](./0071-encrypted-cloud-snapshot.md) | 加密雲端快照（三檔模式、可尋址取代、opt-in） | 已接受 |
