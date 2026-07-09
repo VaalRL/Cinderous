@@ -80,3 +80,5 @@
 | [0063](./0063-phase-d-mobile-scaffold.md) | Phase D 行動端骨架：react-native-web 於此環境開發、重用 core/i18n | 已接受 |
 | [0064](./0064-custom-accent-color.md) | 自訂主題色（本地儲存、單一 --accent 覆寫、吉祥物連動） | 已接受 |
 | [0065](./0065-offline-store-ttl-cap.md) | 離線留言壽命上限（無標籤給預設 TTL、超長截斷——孤兒資料不可能） | 已接受 |
+| [0066](./0066-home-relay-migration.md) | Home relay 搬家（個人檔廣播帶 hint ＋ 舊站排水） | 已接受 |
+| [0067](./0067-local-password.md) | 本地密碼：密碼衍生金鑰包裹身分祕密（否決 nsec 日常登入） | 已接受 |
