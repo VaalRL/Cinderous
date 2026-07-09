@@ -4,6 +4,7 @@ import {
   mergeSnapshotContent,
   parseSnapshotContent,
   SNAPSHOT_MESSAGE_CAP,
+  SNAPSHOT_PLAINTEXT_BUDGET,
 } from "./cloud-snapshot.js";
 import { MemoryStorage } from "./memory.js";
 import type { StoredMessage } from "./types.js";
@@ -43,6 +44,17 @@ describe("快照內容組裝（ADR-0071 三檔模式）", () => {
     const full = buildSnapshotContent(s, "full");
     expect(full.messages).toHaveLength(SNAPSHOT_MESSAGE_CAP);
     expect(full.messages?.[0]?.id).toBe(`m${SNAPSHOT_MESSAGE_CAP + 49}`); // 最新在前
+  });
+
+  it("位元組預算（審查修正 #2）：長訊息不撐爆 relay 單顆上限——序列化長度受控、最新優先", () => {
+    const s = new MemoryStorage();
+    s.addContact({ pubkey: "bob", name: "Bob" });
+    for (let i = 0; i < 300; i++) s.appendMessage(msg(`m${i}`, "bob", i, "長".repeat(1000))); // 每則約 3KB
+    const full = buildSnapshotContent(s, "full");
+    expect(JSON.stringify(full).length).toBeLessThanOrEqual(SNAPSHOT_PLAINTEXT_BUDGET);
+    expect((full.messages?.length ?? 0)).toBeGreaterThan(0);
+    expect((full.messages?.length ?? 0)).toBeLessThan(300); // 有被裁切
+    expect(full.messages?.[0]?.id).toBe("m299"); // 最新的保留
   });
 });
 

@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   activeDrain,
   activeProfile,
+  adoptCloudSyncMode,
   changeProfileRelay,
   clearDrain,
   DRAIN_MS,
@@ -128,6 +129,16 @@ describe("profiles 純登錄（ADR-0045）", () => {
     expect(activeProfile(s1)?.relayUrl).toBe("wss://r");
     expect(setProfileCloudSync(s1, "zzz", "off")).toBe(s1);
     expect(activeProfile(setProfileCloudSync(s1, "a", "off"))?.cloudSync).toBe("off");
+  });
+
+  it("adoptCloudSyncMode（審查修正 #1）：僅本機從未設定時採用快照模式；已設定（含 off）不覆蓋", () => {
+    const fresh = setActive(upsertProfile(empty, mk("a")), "a");
+    expect(activeProfile(adoptCloudSyncMode(fresh, "a", "full"))?.cloudSync).toBe("full");
+    const userOff = setProfileCloudSync(fresh, "a", "off");
+    expect(adoptCloudSyncMode(userOff, "a", "full")).toBe(userOff); // 使用者明確關閉：不覆蓋
+    const userBasic = setProfileCloudSync(fresh, "a", "basic");
+    expect(activeProfile(adoptCloudSyncMode(userBasic, "a", "full"))?.cloudSync).toBe("basic");
+    expect(adoptCloudSyncMode(fresh, "zzz", "full")).toBe(fresh);
   });
 });
 

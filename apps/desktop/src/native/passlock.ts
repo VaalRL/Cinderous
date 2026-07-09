@@ -11,6 +11,20 @@ export function passwordLockAvailable(): boolean {
   return isTauri();
 }
 
+/**
+ * 值是否為密碼包裹 blob（對齊 Rust passlock::is_wrapped；審查修正 #3）。
+ * nsec（bech32）與 db 金鑰（base64）皆非 JSON 物件；加密備份碼信封（ADR-0070）
+ * 有 v:1 但無 kdf 欄——不會誤判。
+ */
+export function isWrappedValue(value: string): boolean {
+  try {
+    const p = JSON.parse(value) as { v?: unknown; kdf?: unknown };
+    return p.v === 1 && p.kdf === "argon2id";
+  } catch {
+    return false;
+  }
+}
+
 /** 某身分是否已啟用本地密碼（以金鑰庫實況為準）。 */
 export async function passStatus(pubkey: string): Promise<boolean> {
   return await invoke<boolean>("pass_status", { pubkey });

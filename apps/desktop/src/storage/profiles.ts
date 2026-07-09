@@ -140,6 +140,20 @@ export function setProfileCloudSync(
   };
 }
 
+/**
+ * 還原時採用快照傳播的模式（ADR-0071）：**僅在本機從未設定**（undefined）時採用——
+ * 新還原裝置自動接續備份習慣，但不覆蓋使用者較新的手動選擇（含明確設「off」）。
+ */
+export function adoptCloudSyncMode(
+  state: ProfilesState,
+  pubkey: string,
+  mode: "basic" | "full",
+): ProfilesState {
+  const p = state.profiles.find((x) => x.pubkey === pubkey);
+  if (!p || p.cloudSync !== undefined) return state;
+  return setProfileCloudSync(state, pubkey, mode);
+}
+
 function validate(value: unknown): ProfilesState | null {
   if (typeof value !== "object" || value === null) return null;
   const s = value as { profiles?: unknown; active?: unknown };

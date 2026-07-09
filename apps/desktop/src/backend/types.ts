@@ -116,6 +116,8 @@ export interface ChatBackendEvents {
   onGroups?(groups: Group[]): void;
   /** 企業政策更新（ADR-0048，來自組織名冊）：前端據此隱藏對應功能。 */
   onPolicy?(policy: OrgPolicy): void;
+  /** 收到自己的雲端快照時回報其模式（ADR-0071）：App 於本機從未設定時採用（還原接續備份習慣）。 */
+  onCloudSyncMode?(mode: "basic" | "full"): void;
   /**
    * 企業工作身分輪替（ADR-0052）：某聯絡人的舊 npub `from` 已由名冊宣告換為新 npub `to`，
    * 對話歷史與群組成員資格已接續。前端可提示「`name` 已更新金鑰」。

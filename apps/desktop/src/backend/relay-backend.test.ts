@@ -730,7 +730,8 @@ describe("加密雲端快照（ADR-0071）", () => {
     storeA3.saveIdentity({ nsec: a1.selfNsec, name: "Alice" });
     const a3 = new RelayChatBackend(storeA3, (h) => net.connect("a3", h), "Alice");
     const a3History: Record<string, ChatMessage[]> = {};
-    a3.start({ ...noop, onHistory: (pk, msgs) => (a3History[pk] = msgs) });
+    let a3Mode: string | undefined;
+    a3.start({ ...noop, onHistory: (pk, msgs) => (a3History[pk] = msgs), onCloudSyncMode: (m) => (a3Mode = m) });
     expect(storeA3.loadContacts()).toHaveLength(0);
 
     // 舊機開啟雲端快照（完整）重啟 → 開機發佈 → 新裝置即時合併
@@ -743,6 +744,7 @@ describe("加密雲端快照（ADR-0071）", () => {
     expect(storeA3.loadGroups().map((g) => g.name)).toContain("讀書會");
     expect(storeA3.loadMessages(b.self.pubkey).map((m) => m.text)).toContain("重要對話");
     expect(a3History[b.self.pubkey]?.map((m) => m.text)).toContain("重要對話"); // UI 歷史重放
+    expect(a3Mode).toBe("full"); // 模式隨快照傳播（審查修正 #1：App 端於未設定時採用）
     a2.stop();
     a3.stop();
     b.stop();

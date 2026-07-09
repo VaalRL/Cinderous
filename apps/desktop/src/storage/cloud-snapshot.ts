@@ -10,8 +10,14 @@ import type { AppStorage, StoredContact, StoredGroup, StoredMessage } from "./ty
 /** 雲端同步模式（ADR-0071 三檔）。 */
 export type CloudSyncMode = "off" | "basic" | "full";
 
-/** 完整模式的訊息上限（近期優先；受 relay 端單顆 256KB 約束的粗預算）。 */
+/** 完整模式的訊息則數上限（近期優先）。 */
 export const SNAPSHOT_MESSAGE_CAP = 500;
+
+/**
+ * 明文位元組預算（審查修正 #2）：NIP-44 加密＋base64 膨脹（約 1.35×）＋事件外殼後，
+ * 仍須低於 relay 端單顆 256KB（ADDRESSABLE_MAX_BYTES）——否則 relay 拒收、備份靜默失敗。
+ */
+export const SNAPSHOT_PLAINTEXT_BUDGET = 180_000;
 
 /** 快照明文內容（NIP-44 加密前）。 */
 export interface CloudSnapshotContent {
@@ -43,7 +49,18 @@ export function buildSnapshotContent(
     all.push(...storage.loadMessages(key));
   }
   all.sort((a, b) => b.at - a.at);
-  return { ...base, messages: all.slice(0, SNAPSHOT_MESSAGE_CAP) };
+  // 則數＋位元組雙預算（審查修正 #2）：由新到舊累計，超過任一上限即停——
+  // 保證「最新優先的前綴」且序列化後不會被 relay 的單顆上限拒收。
+  const kept: StoredMessage[] = [];
+  let used = JSON.stringify({ ...base, messages: [] }).length;
+  for (const m of all) {
+    if (kept.length >= SNAPSHOT_MESSAGE_CAP) break;
+    const len = JSON.stringify(m).length + 1;
+    if (used + len > SNAPSHOT_PLAINTEXT_BUDGET) break;
+    kept.push(m);
+    used += len;
+  }
+  return { ...base, messages: kept };
 }
 
 /** 解析並驗證快照明文；格式不符回 null。 */

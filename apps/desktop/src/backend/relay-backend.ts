@@ -1177,6 +1177,7 @@ export class RelayChatBackend implements ChatBackend {
     if (!plain) return;
     const content = parseSnapshotContent(plain);
     if (!content) return;
+    this.handlers?.onCloudSyncMode?.(content.mode); // 模式隨快照傳播（App 端決定是否採用，審查修正 #1）
     const { changed, convos } = mergeSnapshotContent(this.storage, content);
     if (!changed) return;
     this.contacts = this.storage.loadContacts();

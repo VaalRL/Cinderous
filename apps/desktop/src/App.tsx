@@ -20,10 +20,11 @@ import { useEffect, useRef, useState } from "react";
 import { BrowserChatBackend } from "./backend/browser-backend.js";
 import { normalizeRelayUrl, RelayChatBackend, webSocketConnector } from "./backend/relay-backend.js";
 import { getKeyVault } from "./native/keyvault.js";
-import { passChange, passDisable, passEnable, passLock, passUnlock } from "./native/passlock.js";
+import { isWrappedValue, passChange, passDisable, passEnable, passLock, passUnlock } from "./native/passlock.js";
 import {
   activeDrain,
   activeProfile,
+  adoptCloudSyncMode,
   changeProfileRelay,
   clearDrain,
   loadProfiles,
@@ -299,6 +300,16 @@ export function App(): JSX.Element {
           await ts.hydrate();
           storage = ts;
           override = await loadNsecFromVault(active);
+          // 審查修正 #3：金鑰庫是密碼包裹密文但 locked 旗標遺失（設定檔毀損/重建）——
+          // 不能把 blob 當 nsec 用（會拋錯掉到 SignIn 誤建新身分）；修復旗標並走解鎖。
+          if (override && isWrappedValue(override)) {
+            if (cancelled) return;
+            const repaired = setProfileSecurity(profilesState, active.pubkey, { locked: true });
+            saveProfiles(repaired);
+            setProfilesState(repaired);
+            setLockedProfile({ ...active, locked: true });
+            return;
+          }
         }
         if (cancelled) return;
         const b = buildBackend(active, override, storage);
@@ -377,6 +388,16 @@ export function App(): JSX.Element {
       onConnection: setConn,
       onRelayPool: setRelays,
       onPolicy: setPolicy,
+      onCloudSyncMode: (mode) => {
+        // ADR-0071：還原時採用快照傳播的模式——僅本機從未設定時（不覆蓋較新的手動選擇）。
+        const state = loadProfiles();
+        const p = activeProfile(state);
+        if (!p) return;
+        const next = adoptCloudSyncMode(state, p.pubkey, mode);
+        if (next === state) return;
+        saveProfiles(next);
+        setProfilesState(next);
+      },
       onIdentityRotated: (from, to, name) => {
         // 企業身分輪替（ADR-0052）：storage 已由後端接續；同步記憶體對話狀態（舊→新 npub）
         // 並注入一則系統提示。開啟中的對話一併換鍵。
