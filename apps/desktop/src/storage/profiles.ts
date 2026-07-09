@@ -35,6 +35,18 @@ export function upsertProfile(state: ProfilesState, profile: Profile): ProfilesS
   return { profiles, active: profile.pubkey };
 }
 
+/**
+ * 更換某身分的 home relay（ADR-0066 H2）：只改 relayUrl，namespace／name／enterprise
+ * 等其餘欄位與作用中選擇全數保留——搬家不是換身分，資料零損失。未知 pubkey 回原狀態。
+ */
+export function changeProfileRelay(state: ProfilesState, pubkey: string, relayUrl: string): ProfilesState {
+  if (!state.profiles.some((p) => p.pubkey === pubkey)) return state;
+  return {
+    ...state,
+    profiles: state.profiles.map((p) => (p.pubkey === pubkey ? { ...p, relayUrl } : p)),
+  };
+}
+
 /** 移除設定檔；若移除的是作用中，改指向剩餘的第一個（或 null）。 */
 export function removeProfile(state: ProfilesState, pubkey: string): ProfilesState {
   const profiles = state.profiles.filter((p) => p.pubkey !== pubkey);

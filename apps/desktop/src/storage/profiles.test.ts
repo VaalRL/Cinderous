@@ -2,6 +2,7 @@ import { generateSecretKey, getPublicKey, nsecEncode } from "@cinder/core";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   activeProfile,
+  changeProfileRelay,
   loadProfiles,
   type Profile,
   type ProfilesState,
@@ -53,6 +54,16 @@ describe("profiles 純登錄（ADR-0045）", () => {
     const s = upsertProfile(empty, mk("a"));
     expect(activeProfile(s)?.pubkey).toBe("a");
     expect(activeProfile(empty)).toBeNull();
+  });
+
+  it("changeProfileRelay（ADR-0066 H2）：只改 relayUrl，其餘欄位與 active 全保留；未知 pubkey 不變", () => {
+    const legacy = mk("a", { namespace: "", name: "我", adminPubkey: "admin" });
+    const s0 = setActive(upsertProfile(upsertProfile(empty, legacy), mk("b")), "a");
+    const s1 = changeProfileRelay(s0, "a", "wss://new");
+    expect(s1.profiles.find((x) => x.pubkey === "a")).toEqual({ ...legacy, relayUrl: "wss://new" });
+    expect(s1.active).toBe("a"); // 作用中不變（搬家非切換身分）
+    expect(s1.profiles.find((x) => x.pubkey === "b")?.relayUrl).toBe("wss://r"); // 他人不受影響
+    expect(changeProfileRelay(s1, "zzz", "wss://x")).toBe(s1);
   });
 });
 

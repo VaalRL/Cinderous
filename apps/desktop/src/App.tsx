@@ -15,10 +15,11 @@ import {
 import { isTauri } from "@tauri-apps/api/core";
 import { useEffect, useRef, useState } from "react";
 import { BrowserChatBackend } from "./backend/browser-backend.js";
-import { RelayChatBackend, webSocketConnector } from "./backend/relay-backend.js";
+import { normalizeRelayUrl, RelayChatBackend, webSocketConnector } from "./backend/relay-backend.js";
 import { getKeyVault } from "./native/keyvault.js";
 import {
   activeProfile,
+  changeProfileRelay,
   loadProfiles,
   type Profile,
   type ProfilesState,
@@ -83,6 +84,17 @@ const DEFAULT_OLLAMA_STATE: OllamaState = { ...DEFAULT_OLLAMA, enabled: false };
 
 let _uid = 0;
 const uid = (prefix: string): string => `${prefix}_${Date.now()}_${_uid++}`;
+
+/**
+ * 更換 relay 的守門（ADR-0066 H2，純函式可測）：回傳正規化後的新網址；
+ * 無作用中身分、企業身分（鎖定漫遊，ADR-0044/0048）、非法網址或同值時回 null（no-op）。
+ */
+export function relayChangeTarget(p: Profile | null, url: string): string | null {
+  if (!p || p.enterprise) return null;
+  const norm = normalizeRelayUrl(url);
+  if (!norm || norm === normalizeRelayUrl(p.relayUrl)) return null;
+  return norm;
+}
 
 /** 把管理者輸入（npub… 或 hex）正規化為 hex pubkey；非法回傳 undefined（ADR-0047）。 */
 function normalizeAdminPubkey(input: string): string | undefined {
@@ -515,6 +527,25 @@ export function App(): JSX.Element {
     setBackend(b);
   };
 
+  // 更換 home relay（ADR-0066 H2）：保留 namespace＝資料零損失；重載後開機廣播（H1）
+  // 帶新 hint，聯絡人自動改道。
+  const changeRelay = (url: string) => {
+    const p = activeProfile(profilesState);
+    const target = relayChangeTarget(p, url);
+    if (!p || !target) return;
+    saveProfiles(changeProfileRelay(profilesState, p.pubkey, target));
+    try {
+      localStorage.setItem(RELAY_URL_KEY, target);
+    } catch {
+      /* 忽略 */
+    }
+    try {
+      location.reload();
+    } catch {
+      /* 忽略 */
+    }
+  };
+
   // 切換身分：持久化作用中選擇後重載，讓所有 per-身分 狀態乾淨重建（ADR-0045）。
   const switchProfile = (pubkey: string) => {
     if (pubkey === profilesState.active) return;
@@ -762,6 +793,12 @@ export function App(): JSX.Element {
             }
           })()}
           {...(relays.length > 0 ? { relays } : {})}
+          {...(() => {
+            // 更換 relay（ADR-0066 H2）：個人身分可換；工作身分鎖定（顯示說明）；示範模式無此區塊。
+            const p = activeProfile(profilesState);
+            if (!p) return {};
+            return p.enterprise ? { relayLocked: true } : { onRelayChange: changeRelay };
+          })()}
           {...(activeBackend.clearRelayHint
             ? { onRelayClear: activeBackend.clearRelayHint.bind(activeBackend) }
             : {})}

@@ -52,6 +52,10 @@ export interface SettingsPanelProps {
   onRelayClear?: (url: string) => void;
   /** 確認保留某座 stale relay（暫時隱藏警告）。 */
   onRelayKeep?: (url: string) => void;
+  /** 更換 home relay（ADR-0066 H2）；未提供且非 relayLocked 則唯讀（示範模式）。 */
+  onRelayChange?: (url: string) => void;
+  /** 工作身分鎖定漫遊（ADR-0044/0048）：顯示鎖定說明而非更換鈕。 */
+  relayLocked?: boolean;
 }
 
 const STATE_DOT: Record<RelayPoolEntry["state"], string> = {
@@ -95,6 +99,60 @@ function AccentSettings(): JSX.Element {
       </div>
       <p className="settings__hint">{t("settings_accentHint")}</p>
     </section>
+  );
+}
+
+/** 更換 relay 的輸入驗證（純函式可測）：ws(s):// 且與現值不同才可套用。 */
+export function relayChangeReady(input: string, current: string): boolean {
+  const v = input.trim();
+  return /^wss?:\/\/./i.test(v) && v !== current;
+}
+
+/** 更換 home relay（ADR-0066 H2）：顯示＋更換；套用前確認，App 層再做正規化與守門。 */
+function RelayChange({ current, onApply }: { current: string; onApply: (url: string) => void }): JSX.Element {
+  const { t } = useI18n();
+  const [editing, setEditing] = useState(false);
+  const [url, setUrl] = useState(current);
+  if (!editing) {
+    return (
+      <button
+        type="button"
+        className="settings__reveal"
+        data-testid="relay-change"
+        onClick={() => {
+          setUrl(current);
+          setEditing(true);
+        }}
+      >
+        {t("settings_relayChange")}
+      </button>
+    );
+  }
+  const target = url.trim();
+  return (
+    <div className="settings__key">
+      <input
+        aria-label={t("settings_relayUrl")}
+        value={url}
+        onChange={(e) => setUrl(e.target.value)}
+        placeholder="wss://"
+      />
+      <p className="hint">{t("settings_relayChangeHint")}</p>
+      <div className="settings__keyrow">
+        <button
+          type="button"
+          disabled={!relayChangeReady(url, current)}
+          onClick={() => {
+            if (window.confirm(t("settings_relayChangeConfirm", { url: target }))) onApply(target);
+          }}
+        >
+          {t("settings_relayChangeApply")}
+        </button>
+        <button type="button" onClick={() => setEditing(false)}>
+          {t("settings_relayChangeCancel")}
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -187,6 +245,14 @@ export function SettingsPanel(props: SettingsPanelProps): JSX.Element {
             ) : (
               <div className="settings__relay">{props.relayUrl || t("settings_relayDemo")}</div>
             )}
+            {props.onRelayChange ? (
+              <RelayChange current={props.relayUrl} onApply={props.onRelayChange} />
+            ) : null}
+            {props.relayLocked ? (
+              <p className="hint" data-testid="relay-locked">
+                {t("settings_relayLocked")}
+              </p>
+            ) : null}
           </section>
 
           {props.selfNsec ? (

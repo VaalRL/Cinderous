@@ -135,6 +135,12 @@ export interface Messages {
   settings_relayKeepTitle: string;
   settings_relayClear: string;
   settings_relayClearConfirm: string;
+  settings_relayChange: string;
+  settings_relayChangeHint: string;
+  settings_relayChangeConfirm: string;
+  settings_relayChangeApply: string;
+  settings_relayChangeCancel: string;
+  settings_relayLocked: string;
   file_attach: string;
   file_download: string;
   file_sending: string;
@@ -360,6 +366,12 @@ const zhHant: Messages = {
   settings_relayKeepTitle: "確認保留此中繼，暫時隱藏警告",
   settings_relayClear: "清除 hint",
   settings_relayClearConfirm: "清除 {url} 的 relay hint？使用它的聯絡人將改回你的中繼路由。",
+  settings_relayChange: "更換中繼站",
+  settings_relayChangeHint: "更換後應用程式會重新載入；聯絡人會透過加密個人檔自動學到你的新路由。",
+  settings_relayChangeConfirm: "確定把此身分的中繼站改為 {url}？",
+  settings_relayChangeApply: "套用並重新載入",
+  settings_relayChangeCancel: "取消",
+  settings_relayLocked: "工作身分的中繼站由組織管理，無法在此更換。",
   file_attach: "傳送檔案（P2P）",
   file_download: "下載",
   file_sending: "傳送中…",
@@ -585,6 +597,12 @@ const en: Messages = {
   settings_relayKeepTitle: "Keep this relay and dismiss the warning for now",
   settings_relayClear: "Clear hint",
   settings_relayClearConfirm: "Clear the relay hint for {url}? Contacts using it will fall back to your relay.",
+  settings_relayChange: "Change relay",
+  settings_relayChangeHint: "The app reloads after the change; contacts learn your new route automatically via the encrypted profile broadcast.",
+  settings_relayChangeConfirm: "Change this identity's relay to {url}?",
+  settings_relayChangeApply: "Apply & reload",
+  settings_relayChangeCancel: "Cancel",
+  settings_relayLocked: "Work identities use the relay managed by your organization; it can't be changed here.",
   file_attach: "Send a file (P2P)",
   file_download: "Download",
   file_sending: "Sending…",
