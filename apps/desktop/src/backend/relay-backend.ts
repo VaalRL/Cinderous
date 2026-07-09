@@ -1090,10 +1090,11 @@ export class RelayChatBackend implements ChatBackend {
   /** 本 session 已送過個人檔的對象（避免收到對方個人檔時來回反覆傳送）。 */
   private readonly profileSentTo = new Set<PubkeyHex>();
 
-  /** ADR-0061：把自己的顯示名稱（加密個人檔）送給某聯絡人。 */
+  /** ADR-0061：把自己的顯示名稱（加密個人檔）送給某聯絡人；帶 home hint（ADR-0066）。 */
   private sendProfileTo(pubkey: PubkeyHex): void {
     this.profileSentTo.add(pubkey);
-    this.publishReliable(wrapProfile(this.self.name, this.sk, pubkey));
+    // hint 讓「每次開機廣播」同時成為全聯絡人的路由刷新——搬家後自動改道、陳舊自癒。
+    this.publishReliable(wrapProfile(this.self.name, this.sk, pubkey, this.homeUrl ? { relayHint: this.homeUrl } : {}));
   }
 
   /** 廣播自己的顯示名稱給所有聯絡人（開機時，讓既有聯絡人也學到暱稱）。 */

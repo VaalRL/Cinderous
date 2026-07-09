@@ -16,11 +16,13 @@ export function wrapProfile(
   name: string,
   senderSk: SecretKey,
   recipientPk: PubkeyHex,
-  opts: { now?: number } = {},
+  opts: { now?: number; relayHint?: string } = {},
 ): NostrEvent {
   const nowSec = opts.now ?? Math.floor(Date.now() / 1000);
+  // relayHint（ADR-0066）：寫入 rumor 內層（加密、外層不可見），收端以既有 learnRelayHint 學路由。
+  const tags = opts.relayHint ? [["relay", opts.relayHint]] : [];
   return sealAndWrap(
-    { kind: KIND.PROFILE, created_at: nowSec, tags: [], content: JSON.stringify({ name }) },
+    { kind: KIND.PROFILE, created_at: nowSec, tags, content: JSON.stringify({ name }) },
     senderSk,
     recipientPk,
     {

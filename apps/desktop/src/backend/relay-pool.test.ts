@@ -212,6 +212,70 @@ describe("跨中繼通訊：Relay Pool 與收件人路由（ADR-0034）", () => 
     b.stop();
   });
 
+  it("個人檔廣播帶 hint（ADR-0066 H1）：只憑個人檔（尚無訊息）即學到寄件人 relay", () => {
+    const { netX, netY, connectorFor } = twoRelays();
+    const storeB = new MemoryStorage();
+    const a = new RelayChatBackend(new MemoryStorage(), (h) => netX.connect("a", h), "Alice", {
+      relayUrl: "wss://x",
+      connectorFor,
+    });
+    const b = new RelayChatBackend(storeB, (h) => netY.connect("b", h), "Bob", {
+      relayUrl: "wss://y",
+      connectorFor,
+    });
+    a.start(noop);
+    b.start(noop);
+
+    a.addContact(`${b.selfNpub}@wss://y`); // 只觸發個人檔互換，不送任何訊息
+
+    const bobSeesAlice = storeB.loadContacts().find((c) => c.pubkey === a.self.pubkey);
+    expect(bobSeesAlice?.name).toBe("Alice"); // 既有 ADR-0061：學到暱稱
+    expect(bobSeesAlice?.relayUrl).toBe("wss://x"); // 新：個人檔本身就帶路由
+    a.stop();
+    b.stop();
+  });
+
+  it("搬家自癒（ADR-0066 H1）：Alice 換 home 後重啟，開機廣播讓 Bob 的 hint 自動改道", () => {
+    const netX = createInMemoryRelayNetwork();
+    const netY = createInMemoryRelayNetwork();
+    const netZ = createInMemoryRelayNetwork();
+    const nets: Record<string, ReturnType<typeof createInMemoryRelayNetwork>> = {
+      "wss://x": netX,
+      "wss://y": netY,
+      "wss://z": netZ,
+    };
+    let n = 0;
+    const connectorFor = (url: string) => (h: RelayClientHandlers) => nets[url]!.connect(`pool-${n++}`, h);
+    const storeA = new MemoryStorage();
+    const storeB = new MemoryStorage();
+
+    const a1 = new RelayChatBackend(storeA, (h) => netX.connect("a1", h), "Alice", {
+      relayUrl: "wss://x",
+      connectorFor,
+    });
+    const b = new RelayChatBackend(storeB, (h) => netY.connect("b", h), "Bob", {
+      relayUrl: "wss://y",
+      connectorFor,
+    });
+    a1.start(noop);
+    b.start(noop);
+    a1.addContact(`${b.selfNpub}@wss://y`);
+    expect(storeB.loadContacts().find((c) => c.pubkey === a1.self.pubkey)?.relayUrl).toBe("wss://x");
+    a1.stop();
+
+    // Alice 搬家：同一儲存（同身分、同聯絡人），home 改為 Z——重啟後開機廣播個人檔
+    const a2 = new RelayChatBackend(storeA, (h) => netZ.connect("a2", h), "Alice", {
+      relayUrl: "wss://z",
+      connectorFor,
+    });
+    a2.start(noop);
+
+    expect(a2.self.pubkey).toBe(a1.self.pubkey); // 同一身分（搬家非換身分）
+    expect(storeB.loadContacts().find((c) => c.pubkey === a2.self.pubkey)?.relayUrl).toBe("wss://z");
+    a2.stop();
+    b.stop();
+  });
+
   it("hint 學習的邊界：與收件人 home 相同存為無 hint；非法 hint 不動現有值", () => {
     const { netX, netY, connectorFor } = twoRelays();
     const storeB = new MemoryStorage();
