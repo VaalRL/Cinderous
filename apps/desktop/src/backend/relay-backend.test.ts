@@ -1,4 +1,4 @@
-import { applyRosterRotations, generateSecretKey, getPublicKey, npubEncode, nsecEncode, signOrgRoster, wrapGroupControl, wrapGroupMessage } from "@cinder/core";
+import { applyRosterRotations, generateSecretKey, getPublicKey, type NostrEvent, npubEncode, nsecEncode, signOrgRoster, wrapGroupControl, wrapGroupMessage } from "@cinder/core";
 import { createInMemoryRelayNetwork } from "@cinder/relay";
 import { describe, expect, it } from "vitest";
 import { MemoryStorage } from "../storage/memory.js";
@@ -708,6 +708,81 @@ describe("群組快照廣播（ADR-0068）", () => {
     a.stop();
     b.stop();
     c.stop();
+  });
+});
+
+describe("加密雲端快照（ADR-0071）", () => {
+  it("換機還原：舊機開啟完整模式重啟發佈快照，新裝置自動合併聯絡人/群組/訊息", () => {
+    const net = createInMemoryRelayNetwork();
+    const storeA = new MemoryStorage();
+    const a1 = new RelayChatBackend(storeA, (h) => net.connect("a1", h), "Alice");
+    const b = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("b", h), "Bob");
+    const bIncoming: ChatMessage[] = [];
+    a1.start(noop);
+    b.start({ ...noop, onMessage: (_pk, m) => bIncoming.push(m) });
+    a1.addContact(b.selfNpub);
+    a1.sendMessage(b.self.pubkey, "重要對話");
+    a1.createGroup("讀書會", [b.self.pubkey]);
+    a1.stop();
+
+    // Alice 的新裝置（白紙）先上線訂閱自己的快照（接收合併恆開、不需設定）
+    const storeA3 = new MemoryStorage();
+    storeA3.saveIdentity({ nsec: a1.selfNsec, name: "Alice" });
+    const a3 = new RelayChatBackend(storeA3, (h) => net.connect("a3", h), "Alice");
+    const a3History: Record<string, ChatMessage[]> = {};
+    a3.start({ ...noop, onHistory: (pk, msgs) => (a3History[pk] = msgs) });
+    expect(storeA3.loadContacts()).toHaveLength(0);
+
+    // 舊機開啟雲端快照（完整）重啟 → 開機發佈 → 新裝置即時合併
+    const a2 = new RelayChatBackend(storeA, (h) => net.connect("a2", h), "Alice", {
+      cloudSync: { mode: "full", deviceId: "desk" },
+    });
+    a2.start(noop);
+
+    expect(storeA3.loadContacts().map((c) => c.pubkey)).toContain(b.self.pubkey);
+    expect(storeA3.loadGroups().map((g) => g.name)).toContain("讀書會");
+    expect(storeA3.loadMessages(b.self.pubkey).map((m) => m.text)).toContain("重要對話");
+    expect(a3History[b.self.pubkey]?.map((m) => m.text)).toContain("重要對話"); // UI 歷史重放
+    a2.stop();
+    a3.stop();
+    b.stop();
+  });
+
+  it("基本模式不含訊息；快照事件對第三者只是密文", () => {
+    const net = createInMemoryRelayNetwork();
+    const storeA = new MemoryStorage();
+    const a1 = new RelayChatBackend(storeA, (h) => net.connect("a1", h), "Alice");
+    const b = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("b", h), "Bob");
+    a1.start(noop);
+    b.start(noop);
+    a1.addContact(b.selfNpub);
+    a1.sendMessage(b.self.pubkey, "祕密內容");
+    a1.stop();
+
+    // 側錄快照事件（開放模式無 AUTH——密文本身就是防線）
+    const spied: NostrEvent[] = [];
+    const spy = net.connect("spy", { onEvent: (_s, e) => spied.push(e) });
+    spy.subscribe("s", [{ kinds: [30078] } as never]);
+
+    const storeA3 = new MemoryStorage();
+    storeA3.saveIdentity({ nsec: a1.selfNsec, name: "Alice" });
+    const a3 = new RelayChatBackend(storeA3, (h) => net.connect("a3", h), "Alice");
+    a3.start(noop);
+    const a2 = new RelayChatBackend(storeA, (h) => net.connect("a2", h), "Alice", {
+      cloudSync: { mode: "basic", deviceId: "desk" },
+    });
+    a2.start(noop);
+
+    // 基本模式：聯絡人回來了、訊息沒有
+    expect(storeA3.loadContacts().map((c) => c.pubkey)).toContain(b.self.pubkey);
+    expect(storeA3.loadMessages(b.self.pubkey)).toHaveLength(0);
+    // 第三者只見密文
+    expect(spied.length).toBeGreaterThan(0);
+    expect(JSON.stringify(spied)).not.toContain("祕密內容");
+    expect(JSON.stringify(spied)).not.toContain(b.self.pubkey.slice(0, 16));
+    a2.stop();
+    a3.stop();
+    b.stop();
   });
 });
 

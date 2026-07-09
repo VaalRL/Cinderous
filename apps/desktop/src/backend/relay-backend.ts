@@ -31,6 +31,10 @@ import {
   reactionTarget,
   RelayClient,
   RELAY_LIST_KIND,
+  buildSnapshotEvent,
+  buildSnapshotPurge,
+  openSnapshotEvent,
+  SNAPSHOT_KIND,
   rosterAllowlist,
   rosterRemap,
   shouldAdoptRoster,
@@ -72,6 +76,7 @@ import {
 import { buildRtcConfig } from "./rtc-config.js";
 import { WebRtcCall } from "./webrtc-call.js";
 import { WebRtcTransfer } from "./webrtc.js";
+import { buildSnapshotContent, mergeSnapshotContent, parseSnapshotContent } from "../storage/cloud-snapshot.js";
 import type { AppStorage } from "../storage/types.js";
 import type {
   ChatBackend,
@@ -198,6 +203,11 @@ export interface RelayPoolOptions {
   nsecOverride?: string;
   /** 搬家排水（ADR-0066 H3）：額外訂閱這座「舊 home」的自家收件匣；到期與否由 App 層判定。 */
   drainUrl?: string;
+  /**
+   * 加密雲端快照（ADR-0071 J2）：設定後於開機與定時檢查發佈狀態快照
+   * （NIP-44 加密給自己、`d`＝deviceId）。未設＝不發佈；接收合併（J3）恆開。
+   */
+  cloudSync?: { mode: "basic" | "full"; deviceId: string };
 }
 
 export class RelayChatBackend implements ChatBackend {
@@ -217,6 +227,9 @@ export class RelayChatBackend implements ChatBackend {
   private readonly connectorFor: ((url: string) => RelayConnector) | undefined;
   /** 搬家排水的舊 home（ADR-0066 H3）：只多訂閱其收件匣，不參與發送路由。 */
   private readonly drainUrl: string | undefined;
+  /** 加密雲端快照設定（ADR-0071）；undefined＝不發佈（接收合併恆開）。 */
+  private readonly cloudSync: { mode: "basic" | "full"; deviceId: string } | undefined;
+  private snapTimer: ReturnType<typeof setInterval> | undefined;
   /** 引導座（錨點 ∪ 已採用清單，ADR-0039）：恆連保底、冗餘廣播與 home 遞補來源。 */
   private readonly bootstrapSeats = new Set<string>();
   private readonly maintainerPubkey: string | undefined;
@@ -272,6 +285,7 @@ export class RelayChatBackend implements ChatBackend {
     this.originalHomeUrl = this.homeUrl;
     const drain = normalizeRelayUrl(pool?.drainUrl);
     this.drainUrl = drain !== this.homeUrl ? drain : undefined;
+    this.cloudSync = pool?.cloudSync;
     this.connectorFor = pool?.connectorFor;
     this.maintainerPubkey = pool?.maintainerPubkey;
     this.orgAdminPubkey = pool?.orgAdminPubkey;
@@ -363,6 +377,8 @@ export class RelayChatBackend implements ChatBackend {
     this.beat();
     this.broadcastProfile(); // ADR-0061：把自己的顯示名稱廣播給聯絡人
     this.broadcastGroups(); // ADR-0068：管理員把自建群組快照廣播給成員（換機自癒）
+    this.maybePublishSnapshot(); // ADR-0071：雲端快照（開機檢查；內容有變＋每日至多一次）
+    this.snapTimer = setInterval(() => this.maybePublishSnapshot(), 30 * 60_000);
     this.scheduleBeat();
     this.renderTimer = setInterval(() => {
       this.emitContacts();
@@ -520,6 +536,8 @@ export class RelayChatBackend implements ChatBackend {
     client.subscribe("typing", [{ kinds: [KIND.TYPING], authors: all, "#p": [this.self.pubkey] }]);
     client.subscribe("nudge", [{ kinds: [NUDGE_KIND], authors: all, "#p": [this.self.pubkey] }]);
     client.subscribe("dm", [{ kinds: [KIND.OFFLINE_DM_GIFT_WRAP], "#p": [this.self.pubkey] }]);
+    // 自己的雲端快照（ADR-0071 J3）：接收合併恆開——換機還原不需任何前置設定。
+    client.subscribe("snap", [{ kinds: [SNAPSHOT_KIND], authors: [this.self.pubkey] }]);
     client.subscribe("sig", [{ kinds: [SDP_SIGNAL_KIND], "#p": [this.self.pubkey] }]);
     client.subscribe("call", [{ kinds: [CALL_SIGNAL_KIND], "#p": [this.self.pubkey] }]);
     // 帶內引導清單（ADR-0039）：訂閱維護者簽章的 relay 清單事件。
@@ -704,6 +722,10 @@ export class RelayChatBackend implements ChatBackend {
 
   private onEvent(event: NostrEvent): void {
     if (this.seenBefore(event.id)) return;
+    if (event.kind === SNAPSHOT_KIND) {
+      this.receiveSnapshot(event); // 加密雲端快照（ADR-0071 J3）
+      return;
+    }
     if (event.kind === RELAY_LIST_KIND) {
       if (this.maintainerPubkey) {
         const doc = verifyRelayList(event, this.maintainerPubkey);
@@ -1142,6 +1164,78 @@ export class RelayChatBackend implements ChatBackend {
     }
   }
 
+  /**
+   * 合併自己的雲端快照（ADR-0071 J3）：交換律語意——多台裝置的快照任意順序合併
+   * 收斂一致。補回的對話以 onHistory 重放（App 端僅在該對話尚未載入時採用）。
+   */
+  private receiveSnapshot(event: NostrEvent): void {
+    if (event.pubkey !== this.self.pubkey) return; // 只信自己的快照
+    const plain = openSnapshotEvent(event, this.sk);
+    if (!plain) return;
+    const content = parseSnapshotContent(plain);
+    if (!content) return;
+    const { changed, convos } = mergeSnapshotContent(this.storage, content);
+    if (!changed) return;
+    this.contacts = this.storage.loadContacts();
+    this.blocked = this.storage.loadBlocked();
+    this.groups = this.storage.loadGroups();
+    this.resubscribe(); // 新聯絡人的 hint／新群組成員的 presence 分組
+    this.emitContacts();
+    this.emitGroups();
+    this.emitBlocked();
+    for (const convo of convos) {
+      const msgs = this.storage.loadMessages(convo);
+      for (const m of msgs) this.seenMsg.add(m.id);
+      this.handlers?.onHistory?.(
+        convo,
+        msgs.map((m) => ({
+          id: m.id,
+          outgoing: m.outgoing,
+          text: m.text,
+          at: m.at,
+          ...(m.sender !== undefined ? { sender: m.sender } : {}),
+          ...(m.expiresAt !== undefined ? { expiresAt: m.expiresAt } : {}),
+          ...(m.replyTo !== undefined ? { replyTo: m.replyTo } : {}),
+        })),
+      );
+    }
+  }
+
+  /** 快照發佈節流（ADR-0071）：內容有變＋每日至多一次；localStorage 不可用時放行。 */
+  private snapshotDue(contentHash: string): boolean {
+    const key = `nb.snapPub.${this.self.pubkey.slice(0, 8)}.${this.cloudSync?.deviceId ?? ""}`;
+    try {
+      const raw = localStorage.getItem(key);
+      const last = raw ? (JSON.parse(raw) as { at: number; hash: string }) : undefined;
+      if (last && (last.hash === contentHash || Date.now() - last.at < 86_400_000)) return false;
+      localStorage.setItem(key, JSON.stringify({ at: Date.now(), hash: contentHash }));
+      return true;
+    } catch {
+      return true;
+    }
+  }
+
+  /** 開機/定時檢查：內容有變且未達每日上限才發佈快照（ADR-0071 J2）。 */
+  private maybePublishSnapshot(): void {
+    if (!this.cloudSync) return;
+    const content = buildSnapshotContent(this.storage, this.cloudSync.mode);
+    const hash = JSON.stringify({ ...content, at: 0 }); // 比對不含產生時間
+    if (!this.snapshotDue(hash)) return;
+    this.publishReliable(buildSnapshotEvent(JSON.stringify(content), this.sk, this.cloudSync.deviceId));
+  }
+
+  /** 立即備份（設定面板「立即備份」；跳過節流）。 */
+  publishSnapshotNow(): void {
+    if (!this.cloudSync) return;
+    const content = buildSnapshotContent(this.storage, this.cloudSync.mode);
+    this.publishReliable(buildSnapshotEvent(JSON.stringify(content), this.sk, this.cloudSync.deviceId));
+  }
+
+  /** 關閉雲端快照＝立即清除 relay 上此裝置的快照（purge；「已關閉」必須立即為真）。 */
+  purgeCloudSnapshot(deviceId: string): void {
+    this.publishReliable(buildSnapshotPurge(this.sk, deviceId));
+  }
+
   /** Tier 1（ADR-0058）：relay 接受某訊息＝已送中繼，標 sent 並通知 UI。 */
   private markSent(eventId: string): void {
     const contact = this.awaitingSent.get(eventId);
@@ -1348,6 +1442,7 @@ export class RelayChatBackend implements ChatBackend {
     if (this.heartbeatTimer) clearTimeout(this.heartbeatTimer);
     if (this.renderTimer) clearInterval(this.renderTimer);
     if (this.pumpTimer) clearInterval(this.pumpTimer);
+    if (this.snapTimer) clearInterval(this.snapTimer);
     this.outbox.clear();
     this.transfer.close();
     this.call.close();
