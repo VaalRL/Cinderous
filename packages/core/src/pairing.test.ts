@@ -2,9 +2,13 @@ import { describe, expect, it } from "vitest";
 import {
   createPairing,
   decryptBundle,
+  deriveSas,
   encodePairing,
   encryptBundle,
+  type PairTransport,
   parsePairing,
+  runPairingSource,
+  runPairingTarget,
 } from "./pairing.js";
 
 describe("QR 配對載荷", () => {
@@ -53,5 +57,89 @@ describe("同步包 AES-256-GCM 加解密", () => {
     const last = tampered.length - 1;
     tampered[last] = (tampered[last] ?? 0) ^ 0xff;
     expect(() => decryptBundle(key, tampered)).toThrow();
+  });
+});
+
+describe("配對協定＋SAS（D4a，ADR-0072）", () => {
+  /** 記憶體雙工對接（緩衝註冊前訊息，模擬傳輸層保證）。 */
+  function duplexPair(): [PairTransport, PairTransport] {
+    const make = () => {
+      const queue: Uint8Array[] = [];
+      let handler: ((d: Uint8Array) => void) | undefined;
+      return {
+        deliver(d: Uint8Array) {
+          if (handler) handler(d);
+          else queue.push(d);
+        },
+        transport(peer: () => { deliver(d: Uint8Array): void }): PairTransport {
+          return {
+            send: (d) => peer().deliver(d),
+            onMessage(h) {
+              handler = h;
+              for (const d of queue.splice(0)) h(d);
+            },
+            close() {},
+          };
+        },
+      };
+    };
+    const a = make();
+    const b = make();
+    return [a.transport(() => b), b.transport(() => a)];
+  }
+
+  it("端到端：SAS 兩端一致、確認後捆包送達且完整", async () => {
+    const { key } = createPairing("", "room");
+    const [src, dst] = duplexPair();
+    let sasSource = "";
+    let sasTarget = "";
+    const [sent, json] = await Promise.all([
+      runPairingSource(src, key, '{"祕密":"完整歷史"}', async (s) => {
+        sasSource = s;
+        return true;
+      }),
+      runPairingTarget(dst, key, (s) => (sasTarget = s)),
+    ]);
+    expect(sent).toBe(true);
+    expect(sasSource).toMatch(/^\d{4}$/);
+    expect(sasSource).toBe(sasTarget); // 兩端各自導出、必須一致
+    expect(json).toBe('{"祕密":"完整歷史"}');
+  });
+
+  it("SAS 不符即拒絕：舊機回 false 不送包、新機收到拒絕即失敗", async () => {
+    const { key } = createPairing("", "room");
+    const [src, dst] = duplexPair();
+    const [sent, target] = await Promise.all([
+      runPairingSource(src, key, "secret", async () => false),
+      runPairingTarget(dst, key).then(
+        () => "resolved",
+        (e: Error) => e.message,
+      ),
+    ]);
+    expect(sent).toBe(false);
+    expect(target).toContain("拒絕");
+  });
+
+  it("金鑰不符（剪貼簿竊取者拿舊載荷）：捆包解密失敗", async () => {
+    const { key } = createPairing("", "room");
+    const { key: wrongKey } = createPairing("", "room");
+    const [src, dst] = duplexPair();
+    const results = await Promise.allSettled([
+      // source 短逾時：target 解密失敗即斷，source 等不到 DONE 會逾時（真實傳輸則因對端關閉中斷）。
+      runPairingSource(src, key, "secret", async () => true, { timeoutMs: 300 }),
+      runPairingTarget(dst, wrongKey),
+    ]);
+    expect(results[1]!.status).toBe("rejected"); // GCM 驗證失敗
+  });
+
+  it("deriveSas：4 位數、對（金鑰/nonce）敏感", () => {
+    const k1 = new Uint8Array(32).fill(1);
+    const k2 = new Uint8Array(32).fill(2);
+    const na = new Uint8Array(16).fill(3);
+    const nb = new Uint8Array(16).fill(4);
+    expect(deriveSas(k1, na, nb)).toMatch(/^\d{4}$/);
+    expect(deriveSas(k1, na, nb)).toBe(deriveSas(k1, na, nb)); // 決定性
+    expect(deriveSas(k1, na, nb)).not.toBe(deriveSas(k2, na, nb));
+    expect(deriveSas(k1, na, nb)).not.toBe(deriveSas(k1, nb, na));
   });
 });
