@@ -17,6 +17,7 @@ import { useEffect, useRef, useState } from "react";
 import { BrowserChatBackend } from "./backend/browser-backend.js";
 import { normalizeRelayUrl, RelayChatBackend, webSocketConnector } from "./backend/relay-backend.js";
 import { getKeyVault } from "./native/keyvault.js";
+import { passChange, passDisable, passEnable, passLock, passUnlock } from "./native/passlock.js";
 import {
   activeDrain,
   activeProfile,
@@ -27,7 +28,9 @@ import {
   type ProfilesState,
   saveProfiles,
   setActive,
+  setProfileSecurity,
   upsertProfile,
+  visibleProfiles,
 } from "./storage/profiles.js";
 import type {
   BlockedContact,
@@ -70,10 +73,13 @@ import {
 } from "./native/ollama.js";
 import { SettingsPanel } from "./ui/SettingsPanel.js";
 import { RELAY_URL_KEY, SignIn } from "./ui/SignIn.js";
+import { UnlockScreen } from "./ui/UnlockScreen.js";
 import { SummaryModal } from "./ui/SummaryModal.js";
 import "./ui/msn.css";
 
 const TYPING_VISIBLE_MS = 6_000;
+/** 閒置自動上鎖門檻（H4，ADR-0067）：啟用本地密碼的身分無操作逾時即上鎖。 */
+const PASS_LOCK_MS = 5 * 60_000;
 const NOTIFY_KEY = "nb.notify";
 const READ_RECEIPTS_KEY = "nb.readReceipts";
 const OLLAMA_KEY = "nb.ollama";
@@ -191,6 +197,8 @@ export function App(): JSX.Element {
   const ringerRef = useRef(createRinger());
   const ringbackRef = useRef(createRingback());
   const [open, setOpen] = useState<string[]>([]);
+  /** 開機閘門（H4，ADR-0067）：作用中身分啟用本地密碼→先解鎖再建後端。 */
+  const [lockedProfile, setLockedProfile] = useState<Profile | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [addIdOpen, setAddIdOpen] = useState(false);
   const [rosterOpen, setRosterOpen] = useState(false);
@@ -271,6 +279,11 @@ export function App(): JSX.Element {
         let override: string | undefined;
         let storage: AppStorage | undefined;
         if (isTauri() && active.relayUrl) {
+          // H4（ADR-0067）：啟用本地密碼的身分先出解鎖畫面——沒有密碼，金鑰庫裡只有密文。
+          if (active.locked) {
+            setLockedProfile(active);
+            return;
+          }
           // B2（ADR-0054）：從加密 blob 載入狀態；B5：私鑰自 OS 金鑰庫載入。
           const ts = new TauriStorage(active.namespace);
           await ts.hydrate();
@@ -498,6 +511,75 @@ export function App(): JSX.Element {
     };
   }, [backend]);
 
+  // 閒置自動上鎖（H4，ADR-0067）：啟用本地密碼的身分無操作逾時，清除原生金鑰快取
+  // 並重載——重載後開機閘門回到解鎖畫面。重用與 away 相同的活動事件。
+  useEffect(() => {
+    const p = activeProfile(profilesState);
+    if (!backend || !isTauri() || !p?.locked) return;
+    const ns = p.namespace;
+    let last = Date.now();
+    const onActivity = () => {
+      last = Date.now();
+    };
+    const events = ["mousemove", "mousedown", "keydown", "touchstart", "wheel"] as const;
+    for (const e of events) window.addEventListener(e, onActivity, { passive: true });
+    const timer = setInterval(() => {
+      if (Date.now() - last < PASS_LOCK_MS) return;
+      void passLock(ns).finally(() => {
+        try {
+          location.reload();
+        } catch {
+          /* 忽略 */
+        }
+      });
+    }, 30_000);
+    return () => {
+      for (const e of events) window.removeEventListener(e, onActivity);
+      clearInterval(timer);
+    };
+  }, [backend, profilesState]);
+
+  // 解鎖（H4）：驗密碼→取回 nsec 與 db 金鑰（原生快取）→照常建後端。
+  const unlock = async (password: string): Promise<boolean> => {
+    const p = lockedProfile;
+    if (!p) return false;
+    try {
+      const nsec = await passUnlock(p.namespace, p.pubkey, password);
+      const ts = new TauriStorage(p.namespace);
+      await ts.hydrate();
+      const b = buildBackend(p, nsec, ts);
+      setConn(p.relayUrl ? "connecting" : "online");
+      setSelf({ ...b.self });
+      setBackend(b);
+      setLockedProfile(null);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  // 解鎖隱藏身分（H4）：以密碼逐一嘗試隱藏身分，符合者切換過去（重載後再過解鎖閘門）。
+  const unlockHidden = async (): Promise<void> => {
+    const password = window.prompt("輸入隱藏身分的本地密碼");
+    if (!password) return;
+    const hidden = profilesState.profiles.filter((x) => x.hidden && x.pubkey !== profilesState.active);
+    for (const p of hidden) {
+      try {
+        await passUnlock(p.namespace, p.pubkey, password);
+        saveProfiles(setActive(profilesState, p.pubkey));
+        try {
+          location.reload();
+        } catch {
+          /* 忽略 */
+        }
+        return;
+      } catch {
+        /* 密碼不符此身分：試下一個 */
+      }
+    }
+    window.alert("密碼不符任何隱藏身分");
+  };
+
   const signIn = async (name: string, relayUrl: string) => {
     if (!relayUrl) {
       const b = new BrowserChatBackend(name);
@@ -597,6 +679,8 @@ export function App(): JSX.Element {
     }
   };
 
+  // H4（ADR-0067）：作用中身分已上鎖→解鎖畫面（不落 SignIn，避免誤建新身分）。
+  if (lockedProfile && !backend) return <UnlockScreen name={lockedProfile.name} onUnlock={unlock} />;
   if (!backend || !self) return <SignIn onSignIn={signIn} />;
 
   const activeBackend = backend;
@@ -758,7 +842,7 @@ export function App(): JSX.Element {
             value={profilesState.active ?? ""}
             onChange={(e) => switchProfile(e.target.value)}
           >
-            {profilesState.profiles.map((p) => (
+            {visibleProfiles(profilesState).map((p) => (
               <option key={p.pubkey} value={p.pubkey}>
                 {(p.enterprise ? "🏢 " : "👤 ") + p.name}
               </option>
@@ -767,6 +851,11 @@ export function App(): JSX.Element {
           <button className="idbar__add" title="新增身分" onClick={() => setAddIdOpen(true)}>
             ＋
           </button>
+          {isTauri() ? (
+            <button className="idbar__add" title="解鎖隱藏身分" onClick={() => void unlockHidden()}>
+              🔒
+            </button>
+          ) : null}
           {activeBackend.publishRoster ? (
             <button className="idbar__add" title="組織名冊（管理者）" onClick={() => setRosterOpen(true)}>
               🗂
@@ -817,6 +906,49 @@ export function App(): JSX.Element {
             return {
               ...(p.enterprise ? { relayLocked: true } : { onRelayChange: changeRelay }),
               ...(drain ? { drain, onDrainComplete: completeDrain } : {}),
+            };
+          })()}
+          {...(() => {
+            // 本地密碼（H4，ADR-0067）：僅 Tauri（KDF 在原生層）；示範模式/瀏覽器不顯示。
+            const p = activeProfile(profilesState);
+            if (!p || !isTauri()) return {};
+            const flag = (patch: { locked?: boolean; hidden?: boolean }) => {
+              const next = setProfileSecurity(loadProfiles(), p.pubkey, patch);
+              saveProfiles(next);
+              setProfilesState(next);
+            };
+            return {
+              security: {
+                enabled: !!p.locked,
+                hidden: !!p.hidden,
+                onEnable: async (pw: string) => {
+                  try {
+                    await passEnable(p.namespace, p.pubkey, pw);
+                    flag({ locked: true });
+                    return true;
+                  } catch {
+                    return false;
+                  }
+                },
+                onChangePassword: async (oldPw: string, newPw: string) => {
+                  try {
+                    await passChange(p.namespace, p.pubkey, oldPw, newPw);
+                    return true;
+                  } catch {
+                    return false;
+                  }
+                },
+                onDisable: async (pw: string) => {
+                  try {
+                    await passDisable(p.namespace, p.pubkey, pw);
+                    flag({ locked: false, hidden: false }); // 停用密碼＝隱藏一併解除
+                    return true;
+                  } catch {
+                    return false;
+                  }
+                },
+                onToggleHidden: () => flag({ hidden: !p.hidden }),
+              },
             };
           })()}
           {...(activeBackend.clearRelayHint

@@ -144,6 +144,26 @@ export interface Messages {
   settings_relayDrain: string;
   settings_relayDrainDone: string;
   settings_relayDrainDoneConfirm: string;
+  settings_security: string;
+  settings_passwordOn: string;
+  settings_passwordOffHint: string;
+  settings_passwordEnable: string;
+  settings_passwordChange: string;
+  settings_passwordDisable: string;
+  settings_passwordDisableApply: string;
+  settings_passwordHidden: string;
+  settings_passwordForgetWarn: string;
+  settings_passwordOld: string;
+  settings_passwordNew: string;
+  settings_passwordRepeat: string;
+  settings_passwordBackupConfirm: string;
+  settings_passwordError: string;
+  settings_passwordApply: string;
+  unlock_title: string;
+  unlock_hint: string;
+  unlock_password: string;
+  unlock_button: string;
+  unlock_error: string;
   file_attach: string;
   file_download: string;
   file_sending: string;
@@ -378,6 +398,26 @@ const zhHant: Messages = {
   settings_relayDrain: "舊站排水中：{url}——{date} 前仍會接收送到舊站的訊息。",
   settings_relayDrainDone: "提前完成排水",
   settings_relayDrainDoneConfirm: "提前完成排水？期限前仍送到舊站的訊息將不再接收。",
+  settings_security: "安全（本地密碼）",
+  settings_passwordOn: "本地密碼已啟用：私鑰與資料金鑰以密碼包裹保存，不輸入密碼無法解開。",
+  settings_passwordOffHint: "共用電腦建議啟用：以密碼衍生金鑰（Argon2id）包裹私鑰與資料金鑰，別人拿到這台電腦也解不開。不防執行中的惡意軟體。",
+  settings_passwordEnable: "啟用本地密碼",
+  settings_passwordChange: "改密碼",
+  settings_passwordDisable: "停用",
+  settings_passwordDisableApply: "確認停用",
+  settings_passwordHidden: "隱藏此身分（不在切換器顯示；以 🔒 輸入密碼喚回）",
+  settings_passwordForgetWarn: "忘記密碼＝這台電腦上的資料永久無法解開，只能憑 nsec 備份重建身分。請先完成備份。",
+  settings_passwordOld: "目前密碼",
+  settings_passwordNew: "新密碼",
+  settings_passwordRepeat: "再輸入一次新密碼",
+  settings_passwordBackupConfirm: "我已完成上方「身分備份」的 nsec 備份",
+  settings_passwordError: "密碼錯誤或操作失敗",
+  settings_passwordApply: "套用",
+  unlock_title: "歡迎回來，{name}",
+  unlock_hint: "此身分已啟用本地密碼，輸入密碼解鎖。",
+  unlock_password: "本地密碼",
+  unlock_button: "解鎖",
+  unlock_error: "密碼錯誤，請再試一次。",
   file_attach: "傳送檔案（P2P）",
   file_download: "下載",
   file_sending: "傳送中…",
@@ -612,6 +652,26 @@ const en: Messages = {
   settings_relayDrain: "Draining old relay {url} — messages sent there are still received until {date}.",
   settings_relayDrainDone: "Finish draining now",
   settings_relayDrainDoneConfirm: "Finish draining early? Messages still arriving at the old relay will no longer be received.",
+  settings_security: "Security (local password)",
+  settings_passwordOn: "Local password is on: your private key and data key are wrapped with your password — nothing opens without it.",
+  settings_passwordOffHint: "Recommended on shared computers: a password-derived key (Argon2id) wraps your private key and data key, so others with access to this machine can't open them. Does not protect against running malware.",
+  settings_passwordEnable: "Enable local password",
+  settings_passwordChange: "Change password",
+  settings_passwordDisable: "Disable",
+  settings_passwordDisableApply: "Confirm disable",
+  settings_passwordHidden: "Hide this identity (not shown in the switcher; recall with 🔒 and your password)",
+  settings_passwordForgetWarn: "A forgotten password means data on this machine is permanently unreadable; only an nsec backup can rebuild the identity. Back up first.",
+  settings_passwordOld: "Current password",
+  settings_passwordNew: "New password",
+  settings_passwordRepeat: "Repeat new password",
+  settings_passwordBackupConfirm: "I have completed the nsec backup above (Identity backup)",
+  settings_passwordError: "Wrong password or the operation failed",
+  settings_passwordApply: "Apply",
+  unlock_title: "Welcome back, {name}",
+  unlock_hint: "This identity is protected by a local password. Enter it to unlock.",
+  unlock_password: "Local password",
+  unlock_button: "Unlock",
+  unlock_error: "Wrong password — try again.",
   file_attach: "Send a file (P2P)",
   file_download: "Download",
   file_sending: "Sending…",

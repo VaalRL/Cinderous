@@ -62,11 +62,27 @@ fn store_path(app: &tauri::AppHandle, namespace: &str) -> Result<std::path::Path
     Ok(dir.join(format!("{name}.enc")))
 }
 
+/// 解鎖後的 db 金鑰快取（namespace → key；H4，ADR-0067）：密碼只在解鎖時參與 KDF，
+/// 不進 store_load/store_save 熱路徑；明文金鑰僅存於原生記憶體，上鎖即清除。
+fn unlocked_keys() -> &'static std::sync::Mutex<std::collections::HashMap<String, [u8; encstore::KEY_LEN]>> {
+    use std::sync::OnceLock;
+    static KEYS: OnceLock<std::sync::Mutex<std::collections::HashMap<String, [u8; encstore::KEY_LEN]>>> =
+        OnceLock::new();
+    KEYS.get_or_init(Default::default)
+}
+
 /// 取得或建立某命名空間的 DB 金鑰（存 OS 金鑰庫，account `db:<namespace>`）。
+/// 條目被本地密碼包裹時（ADR-0067），改讀解鎖快取；未解鎖回 `Err`。
 fn db_key(namespace: &str) -> Result<[u8; encstore::KEY_LEN], String> {
     use base64::{engine::general_purpose::STANDARD, Engine};
     let account = format!("db:{namespace}");
     match cinder_desktop::keyvault::get_key(&account).map_err(|e| e.to_string())? {
+        Some(v) if cinder_desktop::passlock::is_wrapped(&v) => unlocked_keys()
+            .lock()
+            .unwrap()
+            .get(namespace)
+            .copied()
+            .ok_or_else(|| "已上鎖：需要本地密碼解鎖".to_string()),
         Some(b64) => {
             let bytes = STANDARD.decode(b64).map_err(|e| e.to_string())?;
             bytes.as_slice().try_into().map_err(|_| "DB 金鑰長度不符".to_string())
@@ -100,6 +116,130 @@ fn store_save(app: tauri::AppHandle, namespace: String, json: String) -> Result<
     let key = db_key(&namespace)?;
     let ciphertext = encstore::encrypt(&key, json.as_bytes()).map_err(|e| e.to_string())?;
     std::fs::write(&path, ciphertext).map_err(|e| e.to_string())
+}
+
+// ── H4 本地密碼 IPC（ADR-0067）：Argon2id KEK 包裹 nsec＋db 金鑰，取代金鑰庫明文條目 ──
+
+/// 是否已啟用本地密碼（以金鑰庫實況為準，而非前端旗標）。
+#[tauri::command]
+fn pass_status(pubkey: String) -> Result<bool, String> {
+    Ok(cinder_desktop::keyvault::get_key(&pubkey)
+        .map_err(|e| e.to_string())?
+        .map(|v| cinder_desktop::passlock::is_wrapped(&v))
+        .unwrap_or(false))
+}
+
+/// 啟用本地密碼：包裹 nsec 與 db 金鑰後寫回（先算齊兩份 blob 再寫，避免半套狀態）。
+#[tauri::command]
+fn pass_enable(namespace: String, pubkey: String, password: String) -> Result<(), String> {
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    if password.is_empty() {
+        return Err("密碼不得為空".into());
+    }
+    let nsec = cinder_desktop::keyvault::get_key(&pubkey)
+        .map_err(|e| e.to_string())?
+        .ok_or("找不到此身分的私鑰")?;
+    if cinder_desktop::passlock::is_wrapped(&nsec) {
+        return Err("此身分已啟用本地密碼".into());
+    }
+    let key = db_key(&namespace)?; // 未包裹路徑：取得（或首次建立）明文 db 金鑰
+    let wrapped_nsec = cinder_desktop::passlock::wrap(&password, &nsec).map_err(|e| e.to_string())?;
+    let wrapped_key =
+        cinder_desktop::passlock::wrap(&password, &STANDARD.encode(key)).map_err(|e| e.to_string())?;
+    cinder_desktop::keyvault::set_key(&pubkey, &wrapped_nsec).map_err(|e| e.to_string())?;
+    cinder_desktop::keyvault::set_key(&format!("db:{namespace}"), &wrapped_key).map_err(|e| e.to_string())?;
+    unlocked_keys().lock().unwrap().insert(namespace, key); // 啟用當下維持解鎖
+    Ok(())
+}
+
+/// 解鎖：驗密碼、回傳 nsec 供建後端，並把 db 金鑰放入快取。密碼錯誤回 `Err`。
+#[tauri::command]
+fn pass_unlock(namespace: String, pubkey: String, password: String) -> Result<String, String> {
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    let v = cinder_desktop::keyvault::get_key(&pubkey)
+        .map_err(|e| e.to_string())?
+        .ok_or("找不到此身分的私鑰")?;
+    if !cinder_desktop::passlock::is_wrapped(&v) {
+        return Err("此身分未啟用本地密碼".into());
+    }
+    let nsec = cinder_desktop::passlock::unwrap(&password, &v).map_err(|e| e.to_string())?;
+    if let Some(kb) = cinder_desktop::keyvault::get_key(&format!("db:{namespace}")).map_err(|e| e.to_string())? {
+        if cinder_desktop::passlock::is_wrapped(&kb) {
+            let key_b64 = cinder_desktop::passlock::unwrap(&password, &kb).map_err(|e| e.to_string())?;
+            let bytes = STANDARD.decode(key_b64).map_err(|e| e.to_string())?;
+            let key: [u8; encstore::KEY_LEN] =
+                bytes.as_slice().try_into().map_err(|_| "DB 金鑰長度不符".to_string())?;
+            unlocked_keys().lock().unwrap().insert(namespace, key);
+        }
+    }
+    Ok(nsec)
+}
+
+/// 上鎖（閒置逾時/登出）：清除快取的 db 金鑰；再存取需重新輸入密碼。
+#[tauri::command]
+fn pass_lock(namespace: String) {
+    unlocked_keys().lock().unwrap().remove(&namespace);
+}
+
+/// 改密碼＝重包裹兩把金鑰（資料金鑰不變，資料檔不需重加密）。先驗舊密碼並算齊再寫。
+#[tauri::command]
+fn pass_change(namespace: String, pubkey: String, old: String, new: String) -> Result<(), String> {
+    if new.is_empty() {
+        return Err("新密碼不得為空".into());
+    }
+    let v = cinder_desktop::keyvault::get_key(&pubkey)
+        .map_err(|e| e.to_string())?
+        .ok_or("找不到此身分的私鑰")?;
+    if !cinder_desktop::passlock::is_wrapped(&v) {
+        return Err("此身分未啟用本地密碼".into());
+    }
+    let nsec = cinder_desktop::passlock::unwrap(&old, &v).map_err(|e| e.to_string())?;
+    let account = format!("db:{namespace}");
+    let key_plain = match cinder_desktop::keyvault::get_key(&account).map_err(|e| e.to_string())? {
+        Some(kb) if cinder_desktop::passlock::is_wrapped(&kb) => {
+            Some(cinder_desktop::passlock::unwrap(&old, &kb).map_err(|e| e.to_string())?)
+        }
+        _ => None,
+    };
+    let wrapped_nsec = cinder_desktop::passlock::wrap(&new, &nsec).map_err(|e| e.to_string())?;
+    let wrapped_key = match &key_plain {
+        Some(k) => Some(cinder_desktop::passlock::wrap(&new, k).map_err(|e| e.to_string())?),
+        None => None,
+    };
+    cinder_desktop::keyvault::set_key(&pubkey, &wrapped_nsec).map_err(|e| e.to_string())?;
+    if let Some(wk) = wrapped_key {
+        cinder_desktop::keyvault::set_key(&account, &wk).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// 停用本地密碼：驗密碼後把明文寫回金鑰庫（信任邊界回到 OS 帳號，ADR-0053 現況）。
+#[tauri::command]
+fn pass_disable(namespace: String, pubkey: String, password: String) -> Result<(), String> {
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    let v = cinder_desktop::keyvault::get_key(&pubkey)
+        .map_err(|e| e.to_string())?
+        .ok_or("找不到此身分的私鑰")?;
+    if !cinder_desktop::passlock::is_wrapped(&v) {
+        return Err("此身分未啟用本地密碼".into());
+    }
+    let nsec = cinder_desktop::passlock::unwrap(&password, &v).map_err(|e| e.to_string())?;
+    let account = format!("db:{namespace}");
+    let key_plain = match cinder_desktop::keyvault::get_key(&account).map_err(|e| e.to_string())? {
+        Some(kb) if cinder_desktop::passlock::is_wrapped(&kb) => {
+            Some(cinder_desktop::passlock::unwrap(&password, &kb).map_err(|e| e.to_string())?)
+        }
+        _ => None,
+    };
+    cinder_desktop::keyvault::set_key(&pubkey, &nsec).map_err(|e| e.to_string())?;
+    if let Some(k) = &key_plain {
+        cinder_desktop::keyvault::set_key(&account, k).map_err(|e| e.to_string())?;
+        let bytes = STANDARD.decode(k).map_err(|e| e.to_string())?;
+        if let Ok(key) = <[u8; encstore::KEY_LEN]>::try_from(bytes.as_slice()) {
+            unlocked_keys().lock().unwrap().insert(namespace, key);
+        }
+    }
+    Ok(())
 }
 
 // ── LLM 改寫/摘要 IPC（ADR-0060/0062）：本機 Ollama 或 OpenAI 相容線上服務。webview → Rust
@@ -283,6 +423,12 @@ fn main() {
             key_delete,
             store_load,
             store_save,
+            pass_status,
+            pass_enable,
+            pass_unlock,
+            pass_lock,
+            pass_change,
+            pass_disable,
             ai_generate,
             ai_available,
             ai_models,

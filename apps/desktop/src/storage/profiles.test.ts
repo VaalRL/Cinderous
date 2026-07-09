@@ -12,7 +12,9 @@ import {
   removeProfile,
   saveProfiles,
   setActive,
+  setProfileSecurity,
   upsertProfile,
+  visibleProfiles,
 } from "./profiles.js";
 
 const mk = (pubkey: string, over: Partial<Profile> = {}): Profile => ({
@@ -98,6 +100,24 @@ describe("profiles 純登錄（ADR-0045）", () => {
     const p = activeProfile(s2)!;
     expect(p.previousRelayUrl).toBe("wss://b");
     expect(p.drainUntil).toBe(2000 + DRAIN_MS);
+  });
+
+  it("本地密碼旗標（ADR-0067）：setProfileSecurity 更新 locked/hidden，其餘不動；未知 pubkey 不變", () => {
+    const s0 = setActive(upsertProfile(empty, mk("a", { name: "我" })), "a");
+    const s1 = setProfileSecurity(s0, "a", { locked: true, hidden: true });
+    expect(activeProfile(s1)).toEqual({ ...mk("a", { name: "我" }), locked: true, hidden: true });
+    const s2 = setProfileSecurity(s1, "a", { hidden: false });
+    expect(activeProfile(s2)?.locked).toBe(true); // 未指定的旗標不動
+    expect(activeProfile(s2)?.hidden).toBe(false);
+    expect(setProfileSecurity(s2, "zzz", { locked: true })).toBe(s2);
+  });
+
+  it("visibleProfiles（ADR-0067 隱藏身分）：過濾 hidden，但作用中即使 hidden 也顯示", () => {
+    let s = upsertProfile(upsertProfile(upsertProfile(empty, mk("a")), mk("b", { hidden: true })), mk("c"));
+    s = setActive(s, "c");
+    expect(visibleProfiles(s).map((p) => p.pubkey)).toEqual(["a", "c"]);
+    s = setActive(s, "b"); // 正在使用隱藏身分：本人看得到自己
+    expect(visibleProfiles(s).map((p) => p.pubkey)).toEqual(["a", "b", "c"]);
   });
 });
 

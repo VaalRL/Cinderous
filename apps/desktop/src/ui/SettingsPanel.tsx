@@ -60,6 +60,15 @@ export interface SettingsPanelProps {
   drain?: { url: string; until: number };
   /** 提前完成排水（確認後）。 */
   onDrainComplete?: () => void;
+  /** 本地密碼（H4，ADR-0067）：僅 Tauri 提供；未提供則不顯示安全區塊。回 false＝密碼錯誤。 */
+  security?: {
+    enabled: boolean;
+    hidden: boolean;
+    onEnable: (password: string) => Promise<boolean>;
+    onChangePassword: (oldPw: string, newPw: string) => Promise<boolean>;
+    onDisable: (password: string) => Promise<boolean>;
+    onToggleHidden: () => void;
+  };
 }
 
 const STATE_DOT: Record<RelayPoolEntry["state"], string> = {
@@ -157,6 +166,144 @@ function RelayChange({ current, onApply }: { current: string; onApply: (url: str
         </button>
       </div>
     </div>
+  );
+}
+
+/**
+ * 本地密碼設定（H4，ADR-0067）：啟用（強制備份確認＋二次輸入）／改密碼＝重包裹／
+ * 停用／隱藏身分。文案誠實：忘記密碼＝本機永久不可解，僅能憑 nsec 備份重建。
+ */
+function SecuritySettings({ value }: { value: NonNullable<SettingsPanelProps["security"]> }): JSX.Element {
+  const { t } = useI18n();
+  const [mode, setMode] = useState<"idle" | "enable" | "change" | "disable">("idle");
+  const [pw, setPw] = useState("");
+  const [pw2, setPw2] = useState("");
+  const [backedUp, setBackedUp] = useState(false);
+  const [error, setError] = useState(false);
+  const reset = (m: "idle" | "enable" | "change" | "disable") => {
+    setMode(m);
+    setPw("");
+    setPw2("");
+    setBackedUp(false);
+    setError(false);
+  };
+  const run = async (ok: Promise<boolean>) => {
+    if (await ok) reset("idle");
+    else setError(true);
+  };
+  return (
+    <section className="settings__sec" data-testid="security">
+      <h4>{t("settings_security")}</h4>
+      {mode === "idle" ? (
+        <div className="settings__key">
+          {value.enabled ? (
+            <>
+              <p className="hint">{t("settings_passwordOn")}</p>
+              <div className="settings__keyrow">
+                <button type="button" data-testid="pass-change" onClick={() => reset("change")}>
+                  {t("settings_passwordChange")}
+                </button>
+                <button type="button" data-testid="pass-disable" onClick={() => reset("disable")}>
+                  {t("settings_passwordDisable")}
+                </button>
+              </div>
+              <label className="settings__toggle">
+                <input type="checkbox" data-testid="pass-hidden" checked={value.hidden} onChange={value.onToggleHidden} />
+                <span>{t("settings_passwordHidden")}</span>
+              </label>
+            </>
+          ) : (
+            <>
+              <p className="hint">{t("settings_passwordOffHint")}</p>
+              <button type="button" data-testid="pass-enable" onClick={() => reset("enable")}>
+                {t("settings_passwordEnable")}
+              </button>
+            </>
+          )}
+        </div>
+      ) : null}
+      {mode === "enable" ? (
+        <div className="settings__key">
+          <p className="settings__warn">⚠️ {t("settings_passwordForgetWarn")}</p>
+          <input
+            type="password"
+            aria-label={t("settings_passwordNew")}
+            value={pw}
+            onChange={(e) => setPw(e.target.value)}
+            placeholder={t("settings_passwordNew")}
+          />
+          <input
+            type="password"
+            aria-label={t("settings_passwordRepeat")}
+            value={pw2}
+            onChange={(e) => setPw2(e.target.value)}
+            placeholder={t("settings_passwordRepeat")}
+          />
+          <label className="settings__toggle">
+            <input type="checkbox" checked={backedUp} onChange={() => setBackedUp(!backedUp)} />
+            <span>{t("settings_passwordBackupConfirm")}</span>
+          </label>
+          {error ? <p className="settings__warn">{t("settings_passwordError")}</p> : null}
+          <div className="settings__keyrow">
+            <button
+              type="button"
+              disabled={!pw || pw !== pw2 || !backedUp}
+              onClick={() => void run(value.onEnable(pw))}
+            >
+              {t("settings_passwordApply")}
+            </button>
+            <button type="button" onClick={() => reset("idle")}>{t("settings_relayChangeCancel")}</button>
+          </div>
+        </div>
+      ) : null}
+      {mode === "change" ? (
+        <div className="settings__key">
+          <input
+            type="password"
+            aria-label={t("settings_passwordOld")}
+            value={pw}
+            onChange={(e) => setPw(e.target.value)}
+            placeholder={t("settings_passwordOld")}
+          />
+          <input
+            type="password"
+            aria-label={t("settings_passwordNew")}
+            value={pw2}
+            onChange={(e) => setPw2(e.target.value)}
+            placeholder={t("settings_passwordNew")}
+          />
+          {error ? <p className="settings__warn">{t("settings_passwordError")}</p> : null}
+          <div className="settings__keyrow">
+            <button
+              type="button"
+              disabled={!pw || !pw2}
+              onClick={() => void run(value.onChangePassword(pw, pw2))}
+            >
+              {t("settings_passwordApply")}
+            </button>
+            <button type="button" onClick={() => reset("idle")}>{t("settings_relayChangeCancel")}</button>
+          </div>
+        </div>
+      ) : null}
+      {mode === "disable" ? (
+        <div className="settings__key">
+          <input
+            type="password"
+            aria-label={t("settings_passwordOld")}
+            value={pw}
+            onChange={(e) => setPw(e.target.value)}
+            placeholder={t("settings_passwordOld")}
+          />
+          {error ? <p className="settings__warn">{t("settings_passwordError")}</p> : null}
+          <div className="settings__keyrow">
+            <button type="button" disabled={!pw} onClick={() => void run(value.onDisable(pw))}>
+              {t("settings_passwordDisableApply")}
+            </button>
+            <button type="button" onClick={() => reset("idle")}>{t("settings_relayChangeCancel")}</button>
+          </div>
+        </div>
+      ) : null}
+    </section>
   );
 }
 
@@ -296,6 +443,8 @@ export function SettingsPanel(props: SettingsPanelProps): JSX.Element {
               )}
             </section>
           ) : null}
+
+          {props.security ? <SecuritySettings value={props.security} /> : null}
 
           {props.onToggleCleanOnPaste ? (
             <section className="settings__sec">

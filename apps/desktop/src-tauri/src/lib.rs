@@ -10,6 +10,8 @@ pub mod ipc;
 pub mod keyvault;
 #[cfg(feature = "net")]
 pub mod net;
+#[cfg(feature = "passlock")]
+pub mod passlock;
 pub mod reconnect;
 pub mod session;
 #[cfg(any(feature = "persistence", feature = "sqlcipher"))]

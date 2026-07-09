@@ -73,3 +73,37 @@ describe("SettingsPanel relay 區塊：更換中繼站（ADR-0066 H2）", () => 
     expect(render()).not.toContain('data-testid="relay-drain"');
   });
 });
+
+describe("SettingsPanel 安全區塊：本地密碼（ADR-0067）", () => {
+  beforeEach(() => {
+    (globalThis as Record<string, unknown>).window = { matchMedia: () => ({ matches: false }) };
+    (globalThis as Record<string, unknown>).localStorage = { getItem: () => null };
+  });
+  afterEach(() => {
+    delete (globalThis as Record<string, unknown>).window;
+    delete (globalThis as Record<string, unknown>).localStorage;
+  });
+  const security = (enabled: boolean) => ({
+    enabled,
+    hidden: false,
+    onEnable: async () => true,
+    onChangePassword: async () => true,
+    onDisable: async () => true,
+    onToggleHidden: () => {},
+  });
+
+  it("未啟用：顯示啟用鈕；已啟用：顯示改密碼/停用/隱藏身分", () => {
+    const off = render({ security: security(false) });
+    expect(off).toContain('data-testid="pass-enable"');
+    expect(off).not.toContain('data-testid="pass-change"');
+    const on = render({ security: security(true) });
+    expect(on).toContain('data-testid="pass-change"');
+    expect(on).toContain('data-testid="pass-disable"');
+    expect(on).toContain('data-testid="pass-hidden"');
+    expect(on).not.toContain('data-testid="pass-enable"');
+  });
+
+  it("未提供 security（瀏覽器/示範模式）：無安全區塊", () => {
+    expect(render()).not.toContain('data-testid="security"');
+  });
+});

@@ -22,6 +22,10 @@ export interface Profile {
   previousRelayUrl?: string;
   /** 排水截止（ms epoch）＝搬家時間＋7 天，對齊 relay 端 TTL 上限（ADR-0065）。 */
   drainUntil?: number;
+  /** 本地密碼已啟用（ADR-0067）：開機須先解鎖；真實狀態以金鑰庫為準，此旗標供 UI 閘門。 */
+  locked?: boolean;
+  /** 隱藏身分（ADR-0067）：不在切換器顯示（作用中除外）；僅供已啟用密碼的身分選用。 */
+  hidden?: boolean;
 }
 
 export interface ProfilesState {
@@ -101,6 +105,24 @@ export function setActive(state: ProfilesState, pubkey: string): ProfilesState {
 /** 目前作用中的設定檔（無則 null）。 */
 export function activeProfile(state: ProfilesState): Profile | null {
   return state.profiles.find((p) => p.pubkey === state.active) ?? null;
+}
+
+/** 更新某身分的本地密碼旗標（ADR-0067）；未指定的旗標不動。未知 pubkey 回原狀態。 */
+export function setProfileSecurity(
+  state: ProfilesState,
+  pubkey: string,
+  patch: { locked?: boolean; hidden?: boolean },
+): ProfilesState {
+  if (!state.profiles.some((p) => p.pubkey === pubkey)) return state;
+  return {
+    ...state,
+    profiles: state.profiles.map((p) => (p.pubkey === pubkey ? { ...p, ...patch } : p)),
+  };
+}
+
+/** 切換器可見的身分（ADR-0067 隱藏身分）：過濾 hidden，但作用中即使 hidden 也顯示。 */
+export function visibleProfiles(state: ProfilesState): Profile[] {
+  return state.profiles.filter((p) => !p.hidden || p.pubkey === state.active);
 }
 
 function validate(value: unknown): ProfilesState | null {
