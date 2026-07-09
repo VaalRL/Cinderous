@@ -66,12 +66,11 @@ import {
   type OllamaConfig,
 } from "./native/ollama.js";
 import { SettingsPanel } from "./ui/SettingsPanel.js";
-import { SignIn } from "./ui/SignIn.js";
+import { RELAY_URL_KEY, SignIn } from "./ui/SignIn.js";
 import { SummaryModal } from "./ui/SummaryModal.js";
 import "./ui/msn.css";
 
 const TYPING_VISIBLE_MS = 6_000;
-const RELAY_URL_KEY = "nb.relayUrl";
 const NOTIFY_KEY = "nb.notify";
 const READ_RECEIPTS_KEY = "nb.readReceipts";
 const OLLAMA_KEY = "nb.ollama";
@@ -729,7 +728,7 @@ export function App(): JSX.Element {
         </div>
       ) : null}
       {addIdOpen ? (
-        <AddIdentityModal onCancel={() => setAddIdOpen(false)} onAdd={addIdentity} />
+        <AddIdentityModal defaultRelayUrl={activeProfile(profilesState)?.relayUrl ?? ""} onCancel={() => setAddIdOpen(false)} onAdd={addIdentity} />
       ) : null}
       {rosterOpen ? (
         <RosterAdminModal
@@ -923,10 +922,13 @@ export function App(): JSX.Element {
 }
 
 /** 新增身分小視窗（ADR-0045）：名稱＋relay＋是否工作身分＋可選匯入 nsec。 */
-function AddIdentityModal({
+export function AddIdentityModal({
+  defaultRelayUrl,
   onAdd,
   onCancel,
 }: {
+  /** relay 欄位預設值（帶入目前作用中身分的網址，可改）。 */
+  defaultRelayUrl: string;
   onAdd: (
     name: string,
     relayUrl: string,
@@ -936,7 +938,7 @@ function AddIdentityModal({
   onCancel: () => void;
 }): JSX.Element {
   const [name, setName] = useState("");
-  const [relayUrl, setRelayUrl] = useState("");
+  const [relayUrl, setRelayUrl] = useState(defaultRelayUrl);
   const [enterprise, setEnterprise] = useState(false);
   const [nsec, setNsec] = useState("");
   const [admin, setAdmin] = useState("");

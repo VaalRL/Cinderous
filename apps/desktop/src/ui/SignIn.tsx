@@ -3,9 +3,18 @@ import { useI18n } from "../i18n.js";
 import { CinderMark } from "./Brand.js";
 import { TitleControls } from "./TitleControls.js";
 
+/** 上次使用 relay 的本地記憶鍵（登入時由 App 寫入，此處讀回作為預設值）。 */
+export const RELAY_URL_KEY = "nb.relayUrl";
+
+/** relay 欄位預設值：`?relay=` 參數優先，其次上次使用的網址（純函式可測）。 */
+export function initialRelayUrl(search: string, lastUsed: string | null): string {
+  const param = new URLSearchParams(search).get("relay");
+  return param ?? lastUsed ?? "";
+}
+
 function initialRelay(): string {
   try {
-    return new URLSearchParams(window.location.search).get("relay") ?? "";
+    return initialRelayUrl(window.location.search, localStorage.getItem(RELAY_URL_KEY));
   } catch {
     return "";
   }
