@@ -154,3 +154,28 @@ describe("canPostToGroup（公告授權，ADR-0049）", () => {
     expect(canPostToGroup(a, "alice")).toBe(false);
   });
 });
+
+describe("群組快照（ADR-0068）", () => {
+  it("group-snapshot 扇出並可還原、解析（同 create 的欄位驗證）", () => {
+    const g = group();
+    const control = { type: "group-snapshot" as const, id: g.id, name: g.name, admin: g.admin, members: g.members };
+    const [evt] = wrapGroupControl(control, aliceSk, [bobPk]);
+    const { sender, rumor } = openWrap(evt!, bobSk);
+    expect(sender).toBe(alicePk);
+    expect(parseGroupControl(rumor)).toEqual(control);
+  });
+
+  it("applyGroupControl snapshot：管理者可對帳名稱/成員；非管理者與組織群不動", () => {
+    const g: Group = { id: "g1", name: "舊名", admin: alicePk, members: [alicePk, bobPk, carolPk] };
+    const snap = { type: "group-snapshot" as const, id: "g1", name: "新名", admin: alicePk, members: [alicePk, bobPk] };
+    // 管理者快照＝權威對帳（名稱與成員以快照為準；Carol 被移除）
+    const reconciled = applyGroupControl(g, snap, alicePk);
+    expect(reconciled.name).toBe("新名");
+    expect(reconciled.members).toEqual([alicePk, bobPk]);
+    // 非管理者（前成員偽造）不動
+    expect(applyGroupControl(g, snap, carolPk)).toEqual(g);
+    // 組織群由名冊權威管理（ADR-0049），快照不得觸碰
+    const org: Group = { ...g, org: true };
+    expect(applyGroupControl(org, snap, alicePk)).toEqual(org);
+  });
+});

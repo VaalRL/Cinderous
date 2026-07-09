@@ -39,9 +39,10 @@ export function canPostToGroup(group: Group, sender: PubkeyHex): boolean {
   return group.announce ? sender === group.admin : true;
 }
 
-/** 帶內群組控制訊息。 */
+/** 帶內群組控制訊息。`group-snapshot`（ADR-0068）＝管理員開機廣播的權威快照。 */
 export type GroupControl =
   | { type: "group-create"; id: string; name: string; admin: PubkeyHex; members: PubkeyHex[] }
+  | { type: "group-snapshot"; id: string; name: string; admin: PubkeyHex; members: PubkeyHex[] }
   | { type: "group-add"; id: string; member: PubkeyHex }
   | { type: "group-remove"; id: string; member: PubkeyHex }
   | { type: "group-leave"; id: string };
@@ -137,10 +138,11 @@ export function parseGroupControl(rumor: Rumor): GroupControl | null {
   if (typeof s.id !== "string" || s.id.length === 0) return null;
   const id = s.id;
   switch (s.type) {
-    case "group-create": {
+    case "group-create":
+    case "group-snapshot": {
       if (typeof s.name !== "string" || typeof s.admin !== "string") return null;
       if (!Array.isArray(s.members) || !s.members.every((m) => typeof m === "string")) return null;
-      return { type: "group-create", id, name: s.name, admin: s.admin, members: s.members as PubkeyHex[] };
+      return { type: s.type, id, name: s.name, admin: s.admin, members: s.members as PubkeyHex[] };
     }
     case "group-add":
       if (typeof s.member !== "string") return null;
@@ -169,6 +171,10 @@ export function applyGroupControl(group: Group, control: GroupControl, from: Pub
       return { ...group, members: group.members.filter((m) => m !== control.member) };
     case "group-leave":
       return { ...group, members: group.members.filter((m) => m !== from) };
+    case "group-snapshot":
+      // 管理員權威快照（ADR-0068）：名稱/成員以快照為準；非管理者偽造與組織群（名冊權威）不動。
+      if (from !== group.admin || group.org) return group;
+      return { ...group, name: control.name, members: [...control.members] };
     case "group-create":
       return group;
   }

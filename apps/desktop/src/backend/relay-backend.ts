@@ -362,6 +362,7 @@ export class RelayChatBackend implements ChatBackend {
     this.resubscribe();
     this.beat();
     this.broadcastProfile(); // ADR-0061：把自己的顯示名稱廣播給聯絡人
+    this.broadcastGroups(); // ADR-0068：管理員把自建群組快照廣播給成員（換機自癒）
     this.scheduleBeat();
     this.renderTimer = setInterval(() => {
       this.emitContacts();
@@ -838,11 +839,12 @@ export class RelayChatBackend implements ChatBackend {
   }
 
   private applyControl(from: PubkeyHex, control: GroupControl): void {
-    if (control.type === "group-create") {
-      // 授權/同意檢查：封鎖者不得拉你入群；你不在名單就不加入；不重複建立。
+    const exists = this.groups.some((g) => g.id === control.id);
+    if ((control.type === "group-create" || control.type === "group-snapshot") && !exists) {
+      // 授權/同意檢查：封鎖者不得拉你入群；你不在名單就不加入。
+      // 快照對白紙裝置＝實例化（ADR-0068 換機自癒），守門同 create。
       if (this.isBlocked(from)) return;
       if (!control.members.includes(this.self.pubkey)) return;
-      if (this.groups.some((g) => g.id === control.id)) return;
       // 管理者強制為驗證後的寄件人（不信任 payload 的 admin 欄位）；
       // 不自動把其他成員塞進個人聯絡人（避免被強行灌入聯絡人清單）。
       this.storage.saveGroup({ id: control.id, name: control.name, admin: from, members: control.members });
@@ -850,6 +852,7 @@ export class RelayChatBackend implements ChatBackend {
       this.emitGroups();
       return;
     }
+    if (control.type === "group-create") return; // 已存在：不重複建立（對帳走快照）
     const g = this.groups.find((gr) => gr.id === control.id);
     if (!g) return;
     const updated = applyGroupControl(g, control, from);
@@ -1108,6 +1111,35 @@ export class RelayChatBackend implements ChatBackend {
   /** 廣播自己的顯示名稱給所有聯絡人（開機時，讓既有聯絡人也學到暱稱）。 */
   private broadcastProfile(): void {
     for (const c of this.contacts) this.sendProfileTo(c.pubkey);
+  }
+
+  /** 每群每日至多一次的快照節流（非敏感時間戳；localStorage 不可用時放行、僅靠 session 一次）。 */
+  private groupSnapshotDue(groupId: string): boolean {
+    const key = `nb.groupSnapAt.${this.self.pubkey.slice(0, 8)}.${groupId}`;
+    try {
+      const last = Number(localStorage.getItem(key) ?? 0);
+      if (Date.now() - last < 86_400_000) return false;
+      localStorage.setItem(key, String(Date.now()));
+      return true;
+    } catch {
+      return true;
+    }
+  }
+
+  /**
+   * ADR-0068：管理員開機把自建群組的權威快照廣播給成員——nsec 換機的成員（白紙裝置）
+   * 收到即重建群組，既有成員冪等對帳。組織群排除（名冊已是更強權威，ADR-0049）。
+   */
+  private broadcastGroups(): void {
+    for (const g of this.groups) {
+      if (g.admin !== this.self.pubkey || g.org) continue;
+      const recipients = g.members.filter((m) => m !== this.self.pubkey);
+      if (recipients.length === 0 || !this.groupSnapshotDue(g.id)) continue;
+      const control: GroupControl = { type: "group-snapshot", id: g.id, name: g.name, admin: g.admin, members: g.members };
+      for (const evt of wrapGroupControl(control, this.sk, recipients, this.homeUrl ? { relayHint: this.homeUrl } : {})) {
+        this.publishReliable(evt);
+      }
+    }
   }
 
   /** Tier 1（ADR-0058）：relay 接受某訊息＝已送中繼，標 sent 並通知 UI。 */

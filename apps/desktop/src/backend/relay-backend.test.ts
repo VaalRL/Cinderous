@@ -1,4 +1,4 @@
-import { applyRosterRotations, generateSecretKey, getPublicKey, npubEncode, nsecEncode, signOrgRoster, wrapGroupMessage } from "@cinder/core";
+import { applyRosterRotations, generateSecretKey, getPublicKey, npubEncode, nsecEncode, signOrgRoster, wrapGroupControl, wrapGroupMessage } from "@cinder/core";
 import { createInMemoryRelayNetwork } from "@cinder/relay";
 import { describe, expect, it } from "vitest";
 import { MemoryStorage } from "../storage/memory.js";
@@ -642,6 +642,72 @@ describe("送達/已讀回條（ADR-0058）", () => {
     expect(storeA.loadMessages(b.self.pubkey)[0]?.status).toBe("delivered");
     a.stop();
     b.stop();
+  });
+});
+
+describe("群組快照廣播（ADR-0068）", () => {
+  it("nsec 換機後：管理員重啟開機廣播，成員新裝置自動重建群組", () => {
+    const net = createInMemoryRelayNetwork();
+    const storeA = new MemoryStorage();
+    const a1 = new RelayChatBackend(storeA, (h) => net.connect("a1", h), "Alice");
+    const b1 = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("b1", h), "Bob");
+    a1.start(noop);
+    b1.start(noop);
+    a1.addContact(b1.selfNpub);
+    a1.createGroup("讀書會", [b1.self.pubkey]);
+    const gid = storeA.loadGroups()[0]!.id;
+    a1.stop();
+    b1.stop();
+
+    // Bob 換機：全新儲存、同一把 nsec——群組不會自己長回來
+    const storeB2 = new MemoryStorage();
+    storeB2.saveIdentity({ nsec: b1.selfNsec, name: "Bob" });
+    const b2 = new RelayChatBackend(storeB2, (h) => net.connect("b2", h), "Bob");
+    b2.start(noop);
+    expect(b2.self.pubkey).toBe(b1.self.pubkey);
+    expect(storeB2.loadGroups()).toEqual([]);
+
+    // 管理員重啟 → 開機快照廣播 → Bob 新裝置重建群組（名稱/成員/admin 正確）
+    const a2 = new RelayChatBackend(storeA, (h) => net.connect("a2", h), "Alice");
+    a2.start(noop);
+    const restored = storeB2.loadGroups().find((g) => g.id === gid);
+    expect(restored?.name).toBe("讀書會");
+    expect(restored?.admin).toBe(a2.self.pubkey);
+    expect(restored?.members).toContain(b2.self.pubkey);
+    a2.stop();
+    b2.stop();
+  });
+
+  it("假快照防護：前成員偽造快照不得改動既有群組（admin/名稱/成員不變）", () => {
+    const net = createInMemoryRelayNetwork();
+    const storeB = new MemoryStorage();
+    const a = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("a", h), "Alice");
+    const b = new RelayChatBackend(storeB, (h) => net.connect("b", h), "Bob");
+    const c = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("c", h), "Carol");
+    a.start(noop);
+    b.start(noop);
+    c.start(noop);
+    a.addContact(b.selfNpub);
+    a.addContact(c.selfNpub);
+    a.createGroup("好友", [b.self.pubkey, c.self.pubkey]);
+    const gid = storeB.loadGroups()[0]!.id;
+
+    // Carol（知道群組 id 的成員）偽造快照：自立為 admin、踢掉 Alice
+    const carolSk = (c as unknown as { sk: Uint8Array }).sk;
+    const forged = wrapGroupControl(
+      { type: "group-snapshot", id: gid, name: "被劫持", admin: c.self.pubkey, members: [c.self.pubkey, b.self.pubkey] },
+      carolSk,
+      [b.self.pubkey],
+    );
+    net.connect("forger", {}).publish(forged[0]!);
+
+    const g = storeB.loadGroups().find((x) => x.id === gid)!;
+    expect(g.admin).toBe(a.self.pubkey);
+    expect(g.name).toBe("好友");
+    expect(g.members).toContain(a.self.pubkey);
+    a.stop();
+    b.stop();
+    c.stop();
   });
 });
 
