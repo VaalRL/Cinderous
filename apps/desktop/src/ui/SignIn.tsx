@@ -65,10 +65,33 @@ function initialRelay(): string {
   }
 }
 
-export function SignIn({ onSignIn }: { onSignIn: (name: string, relayUrl: string) => void }): JSX.Element {
+export function SignIn({
+  onSignIn,
+  onPair,
+}: {
+  onSignIn: (name: string, relayUrl: string) => void;
+  /** 從舊裝置匯入（ADR-0072 D4a）；未提供＝不顯示入口（示範/瀏覽器）。 */
+  onPair?: (code: string, onSas: (sas: string) => void) => Promise<void>;
+}): JSX.Element {
   const { t } = useI18n();
   const [name, setName] = useState("");
   const [relay, setRelay] = useState(initialRelay);
+  // 配對匯入（新機）：貼上載荷 → 顯示 SAS 供與舊機比對 → 舊機確認後自動完成。
+  const [pairOpen, setPairOpen] = useState(false);
+  const [pairCode, setPairCode] = useState("");
+  const [pairSas, setPairSas] = useState("");
+  const [pairErr, setPairErr] = useState("");
+  const [pairBusy, setPairBusy] = useState(false);
+  const startPair = () => {
+    if (!onPair || !pairCode.trim() || pairBusy) return;
+    setPairBusy(true);
+    setPairErr("");
+    void onPair(pairCode.trim(), setPairSas).catch((e: Error) => {
+      setPairErr(e.message || "配對失敗");
+      setPairSas("");
+      setPairBusy(false);
+    });
+  };
 
   // 自動選座（ADR-0069 I4）：欄位無預設值時，自錨點加權隨機＋健康探測預填（可改可清）。
   useEffect(() => {
@@ -124,6 +147,39 @@ export function SignIn({ onSignIn }: { onSignIn: (name: string, relayUrl: string
           />
           <button onClick={submit}>{t("signIn_button")}</button>
           <p className="hint">{t("signIn_hint2")}</p>
+
+          {onPair && !pairOpen ? (
+            <button className="settings__reveal" data-testid="pair-import" onClick={() => setPairOpen(true)}>
+              {t("pair_importButton")}
+            </button>
+          ) : null}
+          {onPair && pairOpen ? (
+            <div className="settings__key" data-testid="pair-import-panel">
+              <p className="hint">{t("pair_importHint")}</p>
+              <input
+                aria-label={t("pair_importCode")}
+                value={pairCode}
+                onChange={(e) => setPairCode(e.target.value)}
+                placeholder={t("pair_importCode")}
+                disabled={pairBusy}
+              />
+              {pairSas ? (
+                <div data-testid="pair-import-sas">
+                  <p className="hint">{t("pair_importSasHint")}</p>
+                  <code style={{ fontSize: 32, textAlign: "center", letterSpacing: 8, display: "block" }}>{pairSas}</code>
+                </div>
+              ) : null}
+              {pairErr ? <p className="settings__warn">{pairErr}</p> : null}
+              <div className="settings__keyrow">
+                <button onClick={startPair} disabled={!pairCode.trim() || pairBusy}>
+                  {pairBusy ? t("pair_importBusy") : t("pair_importStart")}
+                </button>
+                <button onClick={() => setPairOpen(false)} disabled={pairBusy}>
+                  {t("settings_relayChangeCancel")}
+                </button>
+              </div>
+            </div>
+          ) : null}
         </div>
       </div>
     </div>

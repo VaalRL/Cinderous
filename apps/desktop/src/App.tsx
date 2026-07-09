@@ -78,6 +78,9 @@ import {
   ollamaSummarize,
   type OllamaConfig,
 } from "./native/ollama.js";
+import { createPairingOffer, runPairSource, runPairTarget, webRtcPairTransport } from "./backend/pairing-session.js";
+import { applyPairBundle } from "./storage/pair-bundle.js";
+import { PairDeviceModal, type PairPhase } from "./ui/PairDeviceModal.js";
 import { SettingsPanel } from "./ui/SettingsPanel.js";
 import { RELAY_URL_KEY, SignIn } from "./ui/SignIn.js";
 import { UnlockScreen } from "./ui/UnlockScreen.js";
@@ -235,6 +238,9 @@ export function App(): JSX.Element {
   const [open, setOpen] = useState<string[]>([]);
   /** 開機閘門（H4，ADR-0067）：作用中身分啟用本地密碼→先解鎖再建後端。 */
   const [lockedProfile, setLockedProfile] = useState<Profile | null>(null);
+  /** 配對新裝置（D4a，ADR-0072）：舊機視角的階段狀態；null＝面板未開。 */
+  const [pairPhase, setPairPhase] = useState<PairPhase | null>(null);
+  const pairDecision = useRef<((ok: boolean) => void) | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [addIdOpen, setAddIdOpen] = useState(false);
   const [rosterOpen, setRosterOpen] = useState(false);
@@ -300,6 +306,8 @@ export function App(): JSX.Element {
   useEffect(() => {
     backend?.setReadReceipts?.(readReceipts);
   }, [backend, readReceipts]);
+  /** 作用中身分的儲存實例（D4a 配對匯出用；示範模式為 null）。 */
+  const storageRef = useRef<AppStorage | null>(null);
   const selfRef = useRef<Self | null>(self);
   selfRef.current = self;
   const idleRef = useRef<IdleState>(initIdle(Date.now()));
@@ -337,6 +345,8 @@ export function App(): JSX.Element {
           }
         }
         if (cancelled) return;
+        // 配對匯出（D4a）需與後端同一份儲存；非 Tauri 走 LocalStorage 同命名空間。
+        storageRef.current = storage ?? (active.relayUrl ? new LocalStorage(active.namespace) : null);
         const b = buildBackend(active, override, storage);
         setConn(active.relayUrl ? "connecting" : "online");
         setSelf({ ...b.self });
@@ -688,6 +698,76 @@ export function App(): JSX.Element {
     }
   };
 
+  // 配對新裝置（D4a，ADR-0072；舊機／資料持有方）：產生一次性載荷 → 新機接上顯示 SAS
+  // → 使用者確認相符才送出全量捆包。企業身分不提供（組織政策，ADR-0072 v1 排除）。
+  const startPairDevice = () => {
+    const p = activeProfile(profilesState);
+    const store = storageRef.current;
+    if (!p || !p.relayUrl || p.enterprise || !store) return;
+    const { offer, key } = createPairingOffer(p.relayUrl); // 載荷帶會合 relay（新機尚無設定）
+    setPairPhase({ kind: "offer", code: offer.code, expiresAt: offer.expiresAt });
+    const transport = webRtcPairTransport(webSocketConnector);
+    void runPairSource({
+      key,
+      storage: store,
+      profile: { relayUrl: p.relayUrl, ...(p.cloudSync ? { cloudSync: p.cloudSync } : {}) },
+      transport,
+      confirmSas: (sas) =>
+        new Promise<boolean>((resolve) => {
+          setPairPhase({ kind: "sas", sas });
+          pairDecision.current = (ok) => {
+            pairDecision.current = null;
+            setPairPhase(ok ? { kind: "sending" } : null);
+            resolve(ok);
+          };
+        }),
+    }).then(
+      (sent) => {
+        if (sent) setPairPhase({ kind: "done" });
+      },
+      (e: Error) => setPairPhase({ kind: "error", message: e.message || "配對失敗" }),
+    );
+  };
+
+  // 新機：貼上載荷 → 連線 → 顯示 SAS → 舊機確認後收捆包 → 寫入金鑰庫/儲存/登錄 → 重載。
+  const importFromOldDevice = async (code: string, onSas: (sas: string) => void): Promise<void> => {
+    const bundle = await runPairTarget({ code, transport: webRtcPairTransport(webSocketConnector), onSas });
+    const nsec = bundle.snapshot.identity?.nsec;
+    if (!nsec) throw new Error("配對捆包缺少身分");
+    const pubkey = getPublicKey(nsecDecode(nsec));
+    const name = bundle.snapshot.identity?.name ?? "我";
+    const namespace = pubkey;
+    if (isTauri()) {
+      await getKeyVault().setKey(pubkey, nsec); // 私鑰進 OS 金鑰庫（ADR-0053）
+      const ts = new TauriStorage(namespace);
+      await ts.hydrate();
+      applyPairBundle(ts, bundle);
+      await ts.flush(); // 重載前確保加密 blob 落地
+    } else {
+      const ls = new LocalStorage(namespace);
+      applyPairBundle(ls, bundle);
+    }
+    const profile: Profile = {
+      pubkey,
+      name,
+      relayUrl: bundle.relayUrl,
+      enterprise: false,
+      namespace,
+      ...(bundle.cloudSync ? { cloudSync: bundle.cloudSync } : {}),
+    };
+    saveProfiles(upsertProfile(loadProfiles(), profile));
+    try {
+      localStorage.setItem(RELAY_URL_KEY, bundle.relayUrl);
+    } catch {
+      /* 忽略 */
+    }
+    try {
+      location.reload();
+    } catch {
+      /* 忽略 */
+    }
+  };
+
   // 提前完成排水（ADR-0066 H3）：移除舊站記錄後重載，乾淨收掉排水訂閱。
   const completeDrain = () => {
     const p = activeProfile(profilesState);
@@ -737,7 +817,7 @@ export function App(): JSX.Element {
 
   // H4（ADR-0067）：作用中身分已上鎖→解鎖畫面（不落 SignIn，避免誤建新身分）。
   if (lockedProfile && !backend) return <UnlockScreen name={lockedProfile.name} onUnlock={unlock} />;
-  if (!backend || !self) return <SignIn onSignIn={signIn} />;
+  if (!backend || !self) return <SignIn onSignIn={signIn} onPair={importFromOldDevice} />;
 
   const activeBackend = backend;
   const setStatus = (status: Status) => {
@@ -922,6 +1002,17 @@ export function App(): JSX.Element {
       {addIdOpen ? (
         <AddIdentityModal defaultRelayUrl={activeProfile(profilesState)?.relayUrl ?? ""} onCancel={() => setAddIdOpen(false)} onAdd={addIdentity} />
       ) : null}
+      {pairPhase ? (
+        <PairDeviceModal
+          phase={pairPhase}
+          onConfirm={() => pairDecision.current?.(true)}
+          onReject={() => pairDecision.current?.(false)}
+          onClose={() => {
+            pairDecision.current?.(false); // 關閉＝拒絕（不送包）
+            setPairPhase(null);
+          }}
+        />
+      ) : null}
       {rosterOpen ? (
         <RosterAdminModal
           selfNpub={activeBackend.selfNpub ?? ""}
@@ -963,6 +1054,13 @@ export function App(): JSX.Element {
               ...(p.enterprise ? { relayLocked: true } : { onRelayChange: changeRelay }),
               ...(drain ? { drain, onDrainComplete: completeDrain } : {}),
             };
+          })()}
+          {...(() => {
+            // 配對新裝置（ADR-0072 D4a）：個人身分＋真實 relay 才提供（企業 v1 排除）。
+            const p = activeProfile(profilesState);
+            return p && p.relayUrl && !p.enterprise && storageRef.current
+              ? { onPairDevice: () => startPairDevice() }
+              : {};
           })()}
           {...(() => {
             // 加密雲端快照（ADR-0071）：三檔模式；示範模式與政策禁用時不顯示。

@@ -63,6 +63,8 @@ export interface SettingsPanelProps {
   drain?: { url: string; until: number };
   /** 提前完成排水（確認後）。 */
   onDrainComplete?: () => void;
+  /** 配對新裝置（ADR-0072 D4a）；未提供則不顯示（示範模式/企業身分）。 */
+  onPairDevice?: () => void;
   /** 加密雲端快照（ADR-0071）：三檔模式；未提供則不顯示（示範模式/政策禁用）。 */
   cloud?: {
     mode: CloudSyncMode;
@@ -586,6 +588,16 @@ export function SettingsPanel(props: SettingsPanelProps): JSX.Element {
                 </button>
               )}
               <BackupCode nsec={props.selfNsec} relayUrl={props.relayUrl} />
+            </section>
+          ) : null}
+
+          {props.onPairDevice ? (
+            <section className="settings__sec" data-testid="pair-device">
+              <h4>{t("pair_settingsButton")}</h4>
+              <p className="hint">{t("pair_settingsHint")}</p>
+              <button type="button" className="settings__reveal" data-testid="pair-device-btn" onClick={props.onPairDevice}>
+                {t("pair_settingsButton")}
+              </button>
             </section>
           ) : null}
 

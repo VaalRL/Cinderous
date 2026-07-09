@@ -176,6 +176,23 @@ export interface Messages {
   settings_cloudFull: string;
   settings_cloudOffConfirm: string;
   settings_cloudBackupNow: string;
+  pair_title: string;
+  pair_offerHint: string;
+  pair_expiresIn: string;
+  pair_clipboardWarn: string;
+  pair_sasHint: string;
+  pair_sasMatch: string;
+  pair_sasMismatch: string;
+  pair_sending: string;
+  pair_done: string;
+  pair_settingsButton: string;
+  pair_settingsHint: string;
+  pair_importButton: string;
+  pair_importHint: string;
+  pair_importCode: string;
+  pair_importStart: string;
+  pair_importBusy: string;
+  pair_importSasHint: string;
   file_attach: string;
   file_download: string;
   file_sending: string;
@@ -442,6 +459,23 @@ const zhHant: Messages = {
   settings_cloudFull: "完整：基本＋近期訊息",
   settings_cloudOffConfirm: "關閉雲端同步？中繼站上此裝置的快照將立即刪除，新裝置將無法自動還原。",
   settings_cloudBackupNow: "立即備份",
+  pair_title: "配對新裝置",
+  pair_offerHint: "在新裝置的登入畫面選「從舊裝置匯入」，掃描或貼上這段配對碼。兩台裝置需同時開著。",
+  pair_expiresIn: "{sec} 秒後失效",
+  pair_clipboardWarn: "配對碼等同一次性鑰匙：用完請清除剪貼簿。即使被複製，沒有你在本機按下「相符」也拿不到資料。",
+  pair_sasHint: "新裝置已連上。請確認新裝置螢幕顯示的數字與下方相同——不同就是有人冒充，請按「不符」。",
+  pair_sasMatch: "相符，開始傳送",
+  pair_sasMismatch: "不符，中止",
+  pair_sending: "傳送中…（完整歷史可能需要一點時間）",
+  pair_done: "✅ 已傳送完成。新裝置正在載入。",
+  pair_settingsButton: "配對新裝置",
+  pair_settingsHint: "把這個身分的完整資料（含全部歷史）直接傳到你的另一台裝置，全程 P2P、不經中繼站。",
+  pair_importButton: "從舊裝置匯入",
+  pair_importHint: "在舊裝置開啟「設定 → 配對新裝置」，把配對碼貼到這裡。兩台裝置需同時開著。",
+  pair_importCode: "配對碼",
+  pair_importStart: "連線",
+  pair_importBusy: "連線中…",
+  pair_importSasHint: "請確認舊裝置上顯示的數字與下方相同，並在舊裝置按「相符」。",
   file_attach: "傳送檔案（P2P）",
   file_download: "下載",
   file_sending: "傳送中…",
@@ -708,6 +742,23 @@ const en: Messages = {
   settings_cloudFull: "Full: basic + recent messages",
   settings_cloudOffConfirm: "Turn off cloud sync? This device's snapshot on the relay is deleted immediately and new devices can no longer restore automatically.",
   settings_cloudBackupNow: "Back up now",
+  pair_title: "Pair a new device",
+  pair_offerHint: "On the new device's sign-in screen choose “Import from old device”, then scan or paste this pairing code. Both devices must be running.",
+  pair_expiresIn: "expires in {sec}s",
+  pair_clipboardWarn: "The pairing code is a one-time key — clear your clipboard afterwards. Even if it is copied, nothing is sent until you press “Match” on this device.",
+  pair_sasHint: "The new device is connected. Check that the digits on its screen match the ones below — if they differ, someone is impersonating it: press “No match”.",
+  pair_sasMatch: "Match — start transfer",
+  pair_sasMismatch: "No match — abort",
+  pair_sending: "Transferring… (full history may take a moment)",
+  pair_done: "✅ Transfer complete. The new device is loading.",
+  pair_settingsButton: "Pair a new device",
+  pair_settingsHint: "Send this identity's full data (including all history) straight to your other device — peer-to-peer, never via a relay.",
+  pair_importButton: "Import from old device",
+  pair_importHint: "On the old device open “Settings → Pair a new device” and paste its pairing code here. Both devices must be running.",
+  pair_importCode: "Pairing code",
+  pair_importStart: "Connect",
+  pair_importBusy: "Connecting…",
+  pair_importSasHint: "Check that the digits shown on the old device match the ones below, then press “Match” there.",
   file_attach: "Send a file (P2P)",
   file_download: "Download",
   file_sending: "Sending…",

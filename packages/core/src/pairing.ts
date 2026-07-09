@@ -14,15 +14,17 @@ export interface PairingPayload {
   lan: string;
   /** WebRTC 房間號（WAN 打洞用）。 */
   room: string;
+  /** 信令會合的 relay（ADR-0072）：新機尚無身分/設定，需由載荷告知在哪碰面。 */
+  relay?: string;
 }
 
 const KEY_BYTES = 32;
 const NONCE_BYTES = 12;
 
 /** 產生一份新的配對載荷與其原始一次性金鑰（金鑰用後即焚）。 */
-export function createPairing(lan: string, room: string): { payload: PairingPayload; key: Uint8Array } {
+export function createPairing(lan: string, room: string, relay?: string): { payload: PairingPayload; key: Uint8Array } {
   const key = randomBytes(KEY_BYTES);
-  return { payload: { v: 1, key: base64.encode(key), lan, room }, key };
+  return { payload: { v: 1, key: base64.encode(key), lan, room, ...(relay ? { relay } : {}) }, key };
 }
 
 /** 將配對載荷編碼為 QR 內容字串。 */
