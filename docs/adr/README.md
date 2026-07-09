@@ -84,4 +84,4 @@
 | [0067](./0067-local-password.md) | 本地密碼：密碼衍生金鑰包裹身分祕密（否決 nsec 日常登入） | 已接受 |
 | [0068](./0068-group-snapshot-broadcast.md) | 管理員開機群組快照廣播（群組成員資格自癒） | 已接受 |
 | [0069](./0069-auto-relay-assignment-migration.md) | Relay 自動分配與自動搬家（簽章清單驅動） | 已接受 |
-| [0070](./0070-encrypted-backup-code.md) | 加密備份碼（使用者自持的密碼加密身分備份） | 提議中 |
+| [0070](./0070-encrypted-backup-code.md) | 加密備份碼（NIP-49 混合式、使用者自持） | 已接受 |
