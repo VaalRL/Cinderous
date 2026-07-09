@@ -10,7 +10,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { nsecDecode, signRelayList, type RelayListDoc } from "@cinder/core";
+import { listEntries, nsecDecode, signRelayList, type RelayEntry, type RelayListDoc } from "@cinder/core";
 
 // 打包後執行檔位於 relay/dist/；清單常駐 relay/bootstrap/。
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -117,12 +117,14 @@ async function publishEvent(url: string, event: unknown): Promise<boolean> {
 
 async function main(): Promise<void> {
   const current = JSON.parse(readFileSync(LIST_PATH, "utf8")) as RelayListDoc;
-  const candidates = [...new Set(current.relays)];
-  console.log(`探測 ${candidates.length} 座 relay…`);
+  // ADR-0069：清單每座帶營運資訊（accepting/weight/status）；舊格式由 listEntries 物化預設值。
+  const entries = listEntries(current);
+  const active = entries.filter((e) => e.status !== "retired"); // retired 免探測、原樣保留（讓客戶端學到退役）
+  console.log(`探測 ${active.length} 座 relay…（retired ${entries.length - active.length} 座跳過）`);
 
-  const results = await Promise.all(candidates.map(async (url) => [url, await probe(url)] as const));
-  const healthy = results.filter(([, ok]) => ok).map(([url]) => url);
-  for (const [url, ok] of results) console.log(`  ${ok ? "✅" : "❌"} ${url}`);
+  const results = await Promise.all(active.map(async (e) => [e, await probe(e.url)] as const));
+  const healthy = results.filter(([, ok]) => ok).map(([e]) => e);
+  for (const [e, ok] of results) console.log(`  ${ok ? "✅" : "❌"} ${e.url}${e.status !== "ok" ? `（${e.status}）` : ""}`);
 
   // never-empty 守門：全滅則保留原清單、不覆寫（避免把全體客戶端變孤島）。
   if (healthy.length === 0) {
@@ -130,14 +132,25 @@ async function main(): Promise<void> {
     return;
   }
 
-  const changed = JSON.stringify(healthy) !== JSON.stringify(current.relays);
+  // entries＝健康座（保留營運欄位）＋ retired 座；relays（舊欄位）＝健康且未退役的 URL。
+  const compact = (e: (typeof entries)[number]): RelayEntry => ({
+    url: e.url,
+    ...(e.accepting ? {} : { accepting: false }),
+    ...(e.weight !== 1 ? { weight: e.weight } : {}),
+    ...(e.status !== "ok" ? { status: e.status } : {}),
+  });
+  const nextEntries = [...healthy, ...entries.filter((e) => e.status === "retired")].map(compact);
+  const relays = healthy.map((e) => e.url);
+  const changed =
+    JSON.stringify({ r: relays, e: nextEntries }) !==
+    JSON.stringify({ r: current.relays, e: current.entries ?? null });
   const next: RelayListDoc = changed
-    ? { relays: healthy, updatedAt: Math.floor(Date.now() / 1000) }
+    ? { relays, entries: nextEntries, updatedAt: Math.floor(Date.now() / 1000) }
     : current;
 
   if (changed) {
     writeFileSync(LIST_PATH, `${JSON.stringify(next, null, 2)}\n`);
-    console.log(`更新清單：${healthy.length} 座健康。`);
+    console.log(`更新清單：${healthy.length} 座健康、${nextEntries.length - healthy.length} 座已退役。`);
   } else {
     console.log("清單無變化。");
   }
@@ -149,7 +162,9 @@ async function main(): Promise<void> {
     writeFileSync(EVENT_PATH, `${JSON.stringify(event, null, 2)}\n`);
     console.log(`已簽章 relay 清單事件（kind ${event.kind}）→ ${EVENT_PATH}`);
     // 帶內發佈（ADR-0039）：把簽章清單推到每座健康 relay，客戶端連上即學到。
-    const pubResults = await Promise.all(healthy.map(async (u) => [u, await publishEvent(u, event)] as const));
+    const pubResults = await Promise.all(
+      healthy.map(async (e) => [e.url, await publishEvent(e.url, event)] as const),
+    );
     for (const [u, ok] of pubResults) console.log(`  ${ok ? "📡" : "⚠"} 發佈至 ${u}`);
   } else {
     console.log("未提供 MAINTAINER_NSEC：略過簽章與發佈（僅更新明文清單）。");

@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   dedupeRelays,
+  listEntries,
   mergeBootstrapPool,
+  migrationTarget,
+  pickWeighted,
   normalizeRelay,
   shouldAdoptList,
   signRelayList,
@@ -91,5 +94,66 @@ describe("引導 pool 合併 mergeBootstrapPool（ADR-0039）", () => {
       "wss://node2.example.com",
       "wss://home.example",
     ]);
+  });
+});
+
+describe("清單 entries 擴充（ADR-0069）", () => {
+  it("sign/verify 帶 entries 往返：非法項濾除、URL 正規化、retired 保留", () => {
+    const doc: RelayListDoc = {
+      relays: ["wss://a", "wss://b"],
+      entries: [
+        { url: "wss://a" },
+        { url: "wss://b/", accepting: false, weight: 3, status: "draining" },
+        { url: "https://bad" },
+        { url: "wss://c", status: "retired" },
+      ],
+      updatedAt: 100,
+    };
+    const verified = verifyRelayList(signRelayList(doc, maintSk), maintPk)!;
+    expect(verified.entries?.map((e) => e.url)).toEqual(["wss://a", "wss://b", "wss://c"]);
+    const mat = listEntries(verified);
+    expect(mat[0]).toEqual({ url: "wss://a", accepting: true, weight: 1, status: "ok" });
+    expect(mat[1]).toEqual({ url: "wss://b", accepting: false, weight: 3, status: "draining" });
+    expect(mat[2]?.status).toBe("retired");
+  });
+
+  it("舊清單相容：無 entries 時 listEntries 由 relays 物化為 ok 座；舊欄位驗證不變", () => {
+    const evt = signRelayList({ relays: ["wss://a"], updatedAt: 1 }, maintSk);
+    const verified = verifyRelayList(evt, maintPk)!;
+    expect(verified.entries).toBeUndefined();
+    expect(listEntries(verified)).toEqual([{ url: "wss://a", accepting: true, weight: 1, status: "ok" }]);
+  });
+
+  it("pickWeighted（I4 自動分配）：只在 accepting 且 ok 中加權隨機；rand 注入可測", () => {
+    const entries = listEntries({
+      relays: [],
+      entries: [
+        { url: "wss://a", weight: 1 },
+        { url: "wss://b", weight: 3 },
+        { url: "wss://c", accepting: false },
+        { url: "wss://d", status: "draining" },
+      ],
+      updatedAt: 1,
+    });
+    expect(pickWeighted(entries, 0)).toBe("wss://a"); // 權重累計 [0,1) → a
+    expect(pickWeighted(entries, 0.26)).toBe("wss://b"); // [1,4) → b
+    expect(pickWeighted(entries, 0.99)).toBe("wss://b");
+    expect(pickWeighted([], 0.5)).toBeUndefined();
+  });
+
+  it("migrationTarget（I2/I3 搬家目標）：清單序首個 accepting 且 ok、排除指定座（決定性防 split-brain）", () => {
+    const entries = listEntries({
+      relays: [],
+      entries: [
+        { url: "wss://old", status: "retired" },
+        { url: "wss://busy", accepting: false },
+        { url: "wss://next" },
+        { url: "wss://other" },
+      ],
+      updatedAt: 1,
+    });
+    expect(migrationTarget(entries, "wss://old")).toBe("wss://next");
+    expect(migrationTarget(entries, "wss://next")).toBe("wss://other");
+    expect(migrationTarget(listEntries({ relays: ["wss://x"], updatedAt: 1 }), "wss://x")).toBeUndefined();
   });
 });

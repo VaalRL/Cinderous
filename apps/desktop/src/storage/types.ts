@@ -115,6 +115,8 @@ export interface AppStorage {
 /** 已採用的引導 relay 清單（ADR-0039）。 */
 export interface StoredBootstrapList {
   relays: string[];
+  /** 每座營運資訊（ADR-0069）；舊存檔可能缺（形狀鏡像 core RelayEntry）。 */
+  entries?: { url: string; accepting?: boolean; weight?: number; status?: "ok" | "draining" | "retired" }[];
   updatedAt: number;
 }
 
