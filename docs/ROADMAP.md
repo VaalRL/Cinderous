@@ -194,6 +194,22 @@
 
 ---
 
+## Phase K — 社群自訂前端（🌐 可在此環境推進；ADR-0074）
+
+> 三層封裝：**core（加密/協定原語）→ engine（可用 ChatBackend 實作）→ frontend**。
+> 讓社群接自己的前端（Web/RN/其他），而非 fork 整包 desktop。各階獨立可交付。
+
+| # | 任務 | 環境 | 說明 / 驗證 |
+| --- | --- | --- | --- |
+| K1 | 前端開發指南（零程式） | 🌐 | 📋 `docs/` 寫「如何接自己的前端」——三層心智模型、要裝哪些 package、實作/消費 `ChatBackend`、以 `apps/mobile` 為範本。風險零、立即可用。 |
+| K2 | 抽 `@cinder/engine` | 🌐 | 📋 新 workspace 套件：上移 `ChatBackend`/`ChatBackendEvents`＋DTO＋`RelayChatBackend`/`BrowserChatBackend`＋`AppStorage`/`LocalStorage`＋`RelayConnector`/`webSocketConnector`。平台基質（TauriStorage/keyvault）留 desktop 經介面注入。desktop 與 mobile 改接——**mobile 接上後端即實證跨前端重用**（順清 ADR-0063 技術債）。TDD/typecheck 全綠護欄、分批搬移。 |
+| K3 | 執行期語系/主題包（選配） | 🌐 | 📋 `Locale` 放寬為可註冊、主題資料驅動，社群 drop-in 語系/配色免重編。 |
+| K4 | 前端外掛/插槽（選配，另立 ADR） | 🌐 | 📋 第三方在同一 app 注入自訂 UI（不 fork）；涉第三方程式碼載入的安全邊界，單獨立 ADR。 |
+
+**完成定義**：社群裝 core/i18n/engine 三套件、實作 `ChatBackend` 前端即可運作；`apps/mobile` 接上後端為活範本。
+
+---
+
 ## 相依與建議順序
 
 ```text
@@ -210,6 +226,7 @@ Phase A（前端產品化，可在此環境大量推進）
 
 - **M7 語音訊息離線退回策略**：⏸ **暫緩（2026-07-10 裁示：暫不實作）**。屆時方向已議定——短語音（低碼率、NIP-44 單包 64KB 內）走 Gift Wrap 離線退回、長語音誠實提示 P2P-only；分塊多事件方案傾向否決（吃配額）。
 - **G5 SSO / 元資料稽核**：綁 AD/LDAP/OIDC → npub、自架 relay 記錄連線元資料，實作前須立 ADR（並備外部 IdP）。
+- **Phase K4 前端外掛/插槽**：第三方注入自訂 UI（不 fork），涉安全邊界，開工前另立 ADR（ADR-0074 已定 K1–K3）。
 
 （已定案：群組加密方案 → ADR-0027；前向保密 → ADR-0028；@提及 → ADR-0050；對話串 → ADR-0051；**企業身分輪替（否決金鑰托管）→ ADR-0052**）
 
