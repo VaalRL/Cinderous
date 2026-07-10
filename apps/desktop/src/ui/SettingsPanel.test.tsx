@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { AccentProvider } from "../accent.js";
 import { I18nProvider } from "../i18n.js";
+import { LayoutProvider } from "../layout.js";
 import { ThemeProvider } from "../theme.js";
 import { relayChangeReady, SettingsPanel, type SettingsPanelProps } from "./SettingsPanel.js";
 
@@ -19,15 +20,17 @@ function render(extra: Partial<SettingsPanelProps> = {}): string {
   return renderToStaticMarkup(
     <ThemeProvider>
       <AccentProvider>
-        <I18nProvider locale="zh-Hant">
-          <SettingsPanel
-            relayUrl="wss://x"
-            notifications={false}
-            onToggleNotifications={() => {}}
-            onClose={() => {}}
-            {...extra}
-          />
-        </I18nProvider>
+        <LayoutProvider>
+          <I18nProvider locale="zh-Hant">
+            <SettingsPanel
+              relayUrl="wss://x"
+              notifications={false}
+              onToggleNotifications={() => {}}
+              onClose={() => {}}
+              {...extra}
+            />
+          </I18nProvider>
+        </LayoutProvider>
       </AccentProvider>
     </ThemeProvider>,
   );
@@ -128,6 +131,24 @@ describe("雲端同步設定（ADR-0071）", () => {
     const off = render({ cloud: { mode: "off", onChange: () => {} } });
     expect(off).not.toContain('data-testid="cloud-backup-now"');
     expect(render()).not.toContain('data-testid="cloud-sync"');
+  });
+});
+
+describe("版面佈局切換（ADR-0079）", () => {
+  beforeEach(() => {
+    (globalThis as Record<string, unknown>).window = { matchMedia: () => ({ matches: false }) };
+    (globalThis as Record<string, unknown>).localStorage = { getItem: () => null };
+  });
+  afterEach(() => {
+    delete (globalThis as Record<string, unknown>).window;
+    delete (globalThis as Record<string, unknown>).localStorage;
+  });
+
+  it("渲染經典/三欄兩個佈局選項，預設經典為選中", () => {
+    const out = render();
+    expect(out).toContain('data-testid="layout-classic"');
+    expect(out).toContain('data-testid="layout-modern"');
+    expect(out).toMatch(/aria-checked="true"[^>]*data-testid="layout-classic"/); // 預設經典選中
   });
 });
 

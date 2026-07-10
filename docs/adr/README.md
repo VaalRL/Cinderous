@@ -93,3 +93,4 @@
 | [0076](./0076-desktop-native-notifications.md) | 桌面原生通知（外掛＋點擊回跳＋傳訊者/預覽/音效） | 已接受 |
 | [0077](./0077-local-personalization.md) | 本地個人化（對話框縮放＋本地頭像＋每對話背景） | 已接受 |
 | [0078](./0078-secondary-accent-color.md) | 副色（次要主題色：標題列＋頂部漸層） | 已接受 |
+| [0079](./0079-three-column-layout-toggle.md) | 桌面三欄整合佈局＋經典/新版一鍵切換 | 已接受 |

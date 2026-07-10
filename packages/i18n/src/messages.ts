@@ -71,6 +71,11 @@ export interface Messages {
   insert_bodyPh: string;
   insert_codePh: string;
   insert_itemPh: string;
+  settings_layout: string;
+  settings_layoutClassic: string;
+  settings_layoutModern: string;
+  settings_layoutHint: string;
+  deck_auxPlaceholder: string;
   settings_accent: string;
   settings_accentPrimary: string;
   settings_accent2: string;
@@ -384,6 +389,11 @@ const zhHant: Messages = {
   insert_bodyPh: "內容",
   insert_codePh: "程式碼",
   insert_itemPh: "項目",
+  settings_layout: "版面佈局",
+  settings_layoutClassic: "經典（浮動視窗）",
+  settings_layoutModern: "三欄整合",
+  settings_layoutHint: "經典＝可同時攤開多個對話視窗；三欄＝左聯絡人／中對話／右輔助（開發中，逐步完善）。只存本機。",
+  deck_auxPlaceholder: "對話輔助區（建置中）",
   settings_accent: "主題色",
   settings_accentPrimary: "主色（泡泡／按鈕／連結）",
   settings_accent2: "副色（標題列／背景漸層）",
@@ -697,6 +707,11 @@ const en: Messages = {
   insert_bodyPh: "Body",
   insert_codePh: "code",
   insert_itemPh: "item",
+  settings_layout: "Layout",
+  settings_layoutClassic: "Classic (floating windows)",
+  settings_layoutModern: "Three-column",
+  settings_layoutHint: "Classic = open several chat windows side by side; three-column = contacts / conversation / assistant (in progress). Stored locally.",
+  deck_auxPlaceholder: "Conversation assistant (coming soon)",
   settings_accent: "Theme color",
   settings_accentPrimary: "Primary (bubbles / buttons / links)",
   settings_accent2: "Secondary (title bar / background)",

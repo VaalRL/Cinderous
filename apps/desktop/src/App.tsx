@@ -22,6 +22,7 @@ import { normalizeRelayUrl, RelayChatBackend, webSocketConnector } from "@cinder
 import { getKeyVault } from "./native/keyvault.js";
 import { getNotifier, onNotificationClick } from "./native/notify.js";
 import { useI18n } from "./i18n.js";
+import { useLayout } from "./layout.js";
 import { isWrappedValue, passChange, passDisable, passEnable, passLock, passRescue, passUnlock } from "./native/passlock.js";
 import {
   activeDrain,
@@ -215,6 +216,7 @@ async function loadNsecFromVault(p: Profile): Promise<string | undefined> {
 
 export function App(): JSX.Element {
   const { t } = useI18n(); // 通知隱藏預覽的本地化文案（ADR-0076）；其餘 UI 文字仍由子元件各自取用。
+  const { layout } = useLayout(); // 桌面佈局（ADR-0079）：classic 浮動視窗 ↔ modern 三欄。
   const [backend, setBackend] = useState<ChatBackend | null>(null);
   const [profilesState, setProfilesState] = useState<ProfilesState>(() => loadProfiles());
   const [self, setSelf] = useState<Self | null>(null);
@@ -1060,7 +1062,7 @@ export function App(): JSX.Element {
     : {};
 
   return (
-    <div className="desktop">
+    <div className={layout === "modern" ? "deck" : "desktop"} data-layout={layout}>
       {profilesState.profiles.length > 0 ? (
         <div className="idbar" data-testid="identity-bar">
           <span className="idbar__icon" aria-hidden="true">
@@ -1114,21 +1116,28 @@ export function App(): JSX.Element {
           onPublish={(org, members, pol, groups) => activeBackend.publishRoster!(org, members, pol, groups)}
         />
       ) : null}
-      <ContactListWindow
-        self={self}
-        contacts={contacts}
-        onOpen={openChat}
-        onStatus={setStatus}
-        onStatusMessage={setStatusMessage}
-        onOpenSettings={() => setSettingsOpen(true)}
-        onNowPlaying={(text) => activeBackend.setNowPlaying(text)}
-        unread={unread}
-        {...(ollama.enabled ? { onSummarize: summarizeUnread } : {})}
-        connection={conn}
-        {...addContactProps}
-        {...manageProps}
-        {...groupProps}
-      />
+      <div className="deckwrap deckwrap--left">
+        <ContactListWindow
+          self={self}
+          contacts={contacts}
+          onOpen={openChat}
+          onStatus={setStatus}
+          onStatusMessage={setStatusMessage}
+          onOpenSettings={() => setSettingsOpen(true)}
+          onNowPlaying={(text) => activeBackend.setNowPlaying(text)}
+          unread={unread}
+          {...(ollama.enabled ? { onSummarize: summarizeUnread } : {})}
+          connection={conn}
+          {...addContactProps}
+          {...manageProps}
+          {...groupProps}
+        />
+      </div>
+      {layout === "modern" ? (
+        <aside className="deckwrap deckwrap--right" data-testid="deck-right">
+          <div className="deck__ph">{t("deck_auxPlaceholder")}</div>
+        </aside>
+      ) : null}
       {settingsOpen ? (
         <SettingsPanel
           relayUrl={(() => {
@@ -1267,6 +1276,7 @@ export function App(): JSX.Element {
           onClose={() => setSummary(null)}
         />
       ) : null}
+      <div className="deckwrap deckwrap--center">
       {open.map((pk) => {
         const group = groups.find((g) => g.id === pk);
         if (group) {
@@ -1375,6 +1385,7 @@ export function App(): JSX.Element {
           />
         );
       })}
+      </div>
       {callState !== "idle" && callState !== "ended" ? (
         <CallWindow
           peerName={contacts.find((c) => c.pubkey === callPeer)?.name ?? callPeer ?? ""}

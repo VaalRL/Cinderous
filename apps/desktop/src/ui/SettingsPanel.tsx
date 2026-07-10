@@ -1,6 +1,7 @@
 import { makeBackupCode } from "@cinder/core";
 import { useEffect, useState } from "react";
 import { ACCENT_PRESETS, useAccent } from "../accent.js";
+import { useLayout } from "../layout.js";
 import { useI18n } from "../i18n.js";
 import { qrSvg } from "../qr.js";
 import type { CloudSyncMode } from "@cinder/engine";
@@ -158,6 +159,40 @@ function AccentSettings(): JSX.Element {
         </button>
       </div>
       <p className="settings__hint">{t("settings_accentHint")}</p>
+    </section>
+  );
+}
+
+/** 佈局切換（ADR-0079）：經典浮動視窗 ↔ 新三欄整合，一鍵切換、本地儲存。 */
+function LayoutSettings(): JSX.Element {
+  const { t } = useI18n();
+  const { layout, setLayout } = useLayout();
+  return (
+    <section className="settings__sec">
+      <h4>{t("settings_layout")}</h4>
+      <div className="layoutpick" role="radiogroup" aria-label={t("settings_layout")}>
+        <button
+          type="button"
+          role="radio"
+          aria-checked={layout === "classic"}
+          className={`layoutpick__opt${layout === "classic" ? " on" : ""}`}
+          data-testid="layout-classic"
+          onClick={() => setLayout("classic")}
+        >
+          🪟 {t("settings_layoutClassic")}
+        </button>
+        <button
+          type="button"
+          role="radio"
+          aria-checked={layout === "modern"}
+          className={`layoutpick__opt${layout === "modern" ? " on" : ""}`}
+          data-testid="layout-modern"
+          onClick={() => setLayout("modern")}
+        >
+          ▤ {t("settings_layoutModern")}
+        </button>
+      </div>
+      <p className="settings__hint">{t("settings_layoutHint")}</p>
     </section>
   );
 }
@@ -523,6 +558,7 @@ export function SettingsPanel(props: SettingsPanelProps): JSX.Element {
           </span>
         </div>
         <div className="settings__body">
+          <LayoutSettings />
           <AccentSettings />
           <section className="settings__sec">
             <h4>{t("settings_relayUrl")}</h4>
