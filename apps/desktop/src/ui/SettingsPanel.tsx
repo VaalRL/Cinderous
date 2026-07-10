@@ -98,11 +98,13 @@ const STATE_DOT: Record<RelayPoolEntry["state"], string> = {
 /** 主題色設定（ADR-0064）：預設色票 + 自訂色 + 重設；即時套用、只存本機。 */
 function AccentSettings(): JSX.Element {
   const { t } = useI18n();
-  const { accent, setAccent } = useAccent();
+  const { accent, setAccent, accent2, setAccent2 } = useAccent();
   const cur = accent?.toLowerCase();
+  const cur2 = accent2?.toLowerCase();
   return (
     <section className="settings__sec">
       <h4>{t("settings_accent")}</h4>
+      <div className="accent__label">{t("settings_accentPrimary")}</div>
       <div className="accent__row">
         {ACCENT_PRESETS.map((p) => (
           <button
@@ -126,6 +128,33 @@ function AccentSettings(): JSX.Element {
         </label>
         <button type="button" className="accent__reset" onClick={() => setAccent(null)} disabled={!accent}>
           {t("settings_accentReset")}
+        </button>
+      </div>
+      <div className="accent__label">{t("settings_accent2")}</div>
+      <div className="accent__row">
+        {ACCENT_PRESETS.map((p) => (
+          <button
+            key={p.key}
+            type="button"
+            className={`accent__sw${cur2 === p.hex.toLowerCase() ? " on" : ""}`}
+            style={{ background: p.hex }}
+            aria-label={p.key}
+            title={p.key}
+            data-testid={`accent2-${p.key}`}
+            onClick={() => setAccent2(p.hex)}
+          />
+        ))}
+        <label className="accent__custom" title={t("settings_accentCustom")}>
+          <span aria-hidden="true">🎨</span>
+          <input
+            type="color"
+            value={accent2 ?? accent ?? "#2f6cd6"}
+            aria-label={t("settings_accentCustom")}
+            onChange={(e) => setAccent2(e.target.value)}
+          />
+        </label>
+        <button type="button" className="accent__reset" onClick={() => setAccent2(null)} disabled={!accent2}>
+          {t("settings_accent2Follow")}
         </button>
       </div>
       <p className="settings__hint">{t("settings_accentHint")}</p>

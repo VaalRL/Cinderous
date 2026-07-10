@@ -131,6 +131,25 @@ describe("雲端同步設定（ADR-0071）", () => {
   });
 });
 
+describe("主題色：主色＋副色（ADR-0078）", () => {
+  beforeEach(() => {
+    (globalThis as Record<string, unknown>).window = { matchMedia: () => ({ matches: false }) };
+    (globalThis as Record<string, unknown>).localStorage = { getItem: () => null };
+  });
+  afterEach(() => {
+    delete (globalThis as Record<string, unknown>).window;
+    delete (globalThis as Record<string, unknown>).localStorage;
+  });
+
+  it("渲染主色與副色兩排取色器，副色列含「跟隨主色」", () => {
+    const out = render();
+    expect(out).toContain('data-testid="accent2-classic"'); // 副色預設色票
+    expect(out).toContain("主色");
+    expect(out).toContain("副色");
+    expect(out).toContain("跟隨主色");
+  });
+});
+
 describe("加密備份碼入口（ADR-0070）", () => {
   beforeEach(() => {
     (globalThis as Record<string, unknown>).window = { matchMedia: () => ({ matches: false }) };

@@ -1,13 +1,15 @@
 /* 原創懷舊即時通風格（不使用任何第三方商標素材） */
 :root {
   --accent: #2f6cd6;
-  /* 標題列由 --accent 推導（ADR-0064）：覆寫 --accent 即連動標題列與整個色系。 */
-  --titlebar: linear-gradient(180deg, color-mix(in srgb, var(--accent) 68%, #ffffff), var(--accent));
+  /* 副色（ADR-0078）：未設＝跟隨主色；驅動標題列＋頂部漸層。 */
+  --accent2: var(--accent);
+  /* 標題列與頂部漸層由 --accent2 推導：覆寫 --accent2 即連動這兩處，其餘仍吃 --accent。 */
+  --titlebar: linear-gradient(180deg, color-mix(in srgb, var(--accent2) 68%, #ffffff), var(--accent2));
   --ink: #1b2b44;
   --muted: #6b7d99;
-  --bg-a: #9cc0ef;
-  --bg-b: #6f93c9;
-  --bg-c: #5a7fb8;
+  --bg-a: color-mix(in srgb, var(--accent2) 40%, #ffffff);
+  --bg-b: color-mix(in srgb, var(--accent2) 62%, #ffffff);
+  --bg-c: color-mix(in srgb, var(--accent2) 74%, #ffffff);
   --chrome: linear-gradient(180deg, #eaf2ff 0%, #c8ddf6 45%, #b2cdee 100%);
   --panel: #ffffff;
   --surface2: #eef4ff;
@@ -21,12 +23,13 @@
 
 :root[data-theme="dark"] {
   --accent: #6ea8ff;
-  --titlebar: linear-gradient(180deg, color-mix(in srgb, var(--accent) 52%, #101a2e), color-mix(in srgb, var(--accent) 36%, #0b1424));
+  --accent2: var(--accent);
+  --titlebar: linear-gradient(180deg, color-mix(in srgb, var(--accent2) 52%, #101a2e), color-mix(in srgb, var(--accent2) 36%, #0b1424));
   --ink: #e6edf7;
   --muted: #93a1ba;
-  --bg-a: #243246;
-  --bg-b: #1a2433;
-  --bg-c: #121a26;
+  --bg-a: color-mix(in srgb, var(--accent2) 22%, #101623);
+  --bg-b: color-mix(in srgb, var(--accent2) 14%, #0d131f);
+  --bg-c: color-mix(in srgb, var(--accent2) 9%, #0a0f18);
   --chrome: linear-gradient(180deg, #2a3346 0%, #232c3b 45%, #1e2633 100%);
   --panel: #1d2430;
   --surface2: #232c3a;
@@ -443,6 +446,7 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
 .settings__key code { display: block; font-size: 11px; word-break: break-all; background: var(--code-bg); padding: 6px; border-radius: 4px; }
 
 /* 主題色選擇（ADR-0064） */
+.accent__label { font-size: 11px; font-weight: 600; color: var(--muted); margin: 8px 0 4px; }
 .accent__row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .accent__sw { width: 26px; height: 26px; border-radius: 50%; border: 2px solid var(--border); cursor: pointer; padding: 0; }
 .accent__sw.on { box-shadow: 0 0 0 2px var(--panel), 0 0 0 4px var(--accent); }

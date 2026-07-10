@@ -72,6 +72,9 @@ export interface Messages {
   insert_codePh: string;
   insert_itemPh: string;
   settings_accent: string;
+  settings_accentPrimary: string;
+  settings_accent2: string;
+  settings_accent2Follow: string;
   settings_accentCustom: string;
   settings_accentReset: string;
   settings_accentHint: string;
@@ -382,9 +385,12 @@ const zhHant: Messages = {
   insert_codePh: "程式碼",
   insert_itemPh: "項目",
   settings_accent: "主題色",
+  settings_accentPrimary: "主色（泡泡／按鈕／連結）",
+  settings_accent2: "副色（標題列／背景漸層）",
+  settings_accent2Follow: "跟隨主色",
   settings_accentCustom: "自訂色",
   settings_accentReset: "預設",
-  settings_accentHint: "即時套用、只存在本機；深色主題會自動提亮以維持對比。連吉祥物身體也會跟著換色。",
+  settings_accentHint: "即時套用、只存在本機；深色主題會自動提亮以維持對比。主色連吉祥物身體，副色驅動標題列與頂部漸層（留空＝跟隨主色）。",
   settings_aiProvider: "AI 服務",
   settings_aiProviderOllama: "本機 Ollama",
   settings_aiProviderOpenai: "OpenAI 相容（線上）",
@@ -692,9 +698,12 @@ const en: Messages = {
   insert_codePh: "code",
   insert_itemPh: "item",
   settings_accent: "Theme color",
+  settings_accentPrimary: "Primary (bubbles / buttons / links)",
+  settings_accent2: "Secondary (title bar / background)",
+  settings_accent2Follow: "Follow primary",
   settings_accentCustom: "Custom color",
   settings_accentReset: "Default",
-  settings_accentHint: "Applies instantly, stored locally; auto-brightened in dark theme. The mascot's body recolors too.",
+  settings_accentHint: "Applies instantly, stored locally; auto-brightened in dark theme. Primary recolors the mascot too; secondary drives the title bar and background gradient (blank = follow primary).",
   settings_aiProvider: "AI provider",
   settings_aiProviderOllama: "Local Ollama",
   settings_aiProviderOpenai: "OpenAI-compatible (online)",
