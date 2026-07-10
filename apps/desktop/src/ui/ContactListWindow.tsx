@@ -86,7 +86,7 @@ export interface ContactListProps {
 }
 
 /** MSN 風狀態選單：目前狀態的彩色圓點＋下拉，每項附對應顏色圓點（取代原生 select）。 */
-function StatusPicker({ value, onChange }: { value: Status; onChange: (s: Status) => void }): JSX.Element {
+export function StatusPicker({ value, onChange }: { value: Status; onChange: (s: Status) => void }): JSX.Element {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -459,7 +459,7 @@ function GroupModal({
   );
 }
 
-function AddContact({
+export function AddContact({
   selfNpub,
   onAdd,
   myIdLabel,

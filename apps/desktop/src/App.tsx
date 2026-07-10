@@ -73,6 +73,7 @@ import { initIdle, reduceIdle, type IdleState } from "./ui/idle-status.js";
 import { createRinger, createRingback, playChime } from "./ui/ringtone.js";
 import { CallWindow } from "./ui/CallWindow.js";
 import { ContactListWindow } from "./ui/ContactListWindow.js";
+import { DeckSidebar } from "./ui/DeckSidebar.js";
 import { ConversationWindow } from "./ui/ConversationWindow.js";
 import {
   DEFAULT_OLLAMA,
@@ -1117,21 +1118,41 @@ export function App(): JSX.Element {
         />
       ) : null}
       <div className="deckwrap deckwrap--left">
-        <ContactListWindow
-          self={self}
-          contacts={contacts}
-          onOpen={openChat}
-          onStatus={setStatus}
-          onStatusMessage={setStatusMessage}
-          onOpenSettings={() => setSettingsOpen(true)}
-          onNowPlaying={(text) => activeBackend.setNowPlaying(text)}
-          unread={unread}
-          {...(ollama.enabled ? { onSummarize: summarizeUnread } : {})}
-          connection={conn}
-          {...addContactProps}
-          {...manageProps}
-          {...groupProps}
-        />
+        {layout === "modern" ? (
+          <DeckSidebar
+            self={self}
+            contacts={contacts}
+            groups={groups}
+            convos={convos}
+            prefs={groupPrefs}
+            unread={unread}
+            onOpen={openChat}
+            onOpenSettings={() => setSettingsOpen(true)}
+            onStatus={setStatus}
+            onAddLabel={(id, label) => updatePrefs(withLabel(groupPrefs, id, label))}
+            onRemoveLabel={(id, label) => updatePrefs(withoutLabel(groupPrefs, id, label))}
+            labelOptions={allLabels(groupPrefs)}
+            activeLabel={labelFilter}
+            onFilterLabel={setLabelFilter}
+            {...addContactProps}
+          />
+        ) : (
+          <ContactListWindow
+            self={self}
+            contacts={contacts}
+            onOpen={openChat}
+            onStatus={setStatus}
+            onStatusMessage={setStatusMessage}
+            onOpenSettings={() => setSettingsOpen(true)}
+            onNowPlaying={(text) => activeBackend.setNowPlaying(text)}
+            unread={unread}
+            {...(ollama.enabled ? { onSummarize: summarizeUnread } : {})}
+            connection={conn}
+            {...addContactProps}
+            {...manageProps}
+            {...groupProps}
+          />
+        )}
       </div>
       {layout === "modern" ? (
         <aside className="deckwrap deckwrap--right" data-testid="deck-right">

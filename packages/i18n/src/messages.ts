@@ -71,6 +71,9 @@ export interface Messages {
   insert_bodyPh: string;
   insert_codePh: string;
   insert_itemPh: string;
+  sidebar_search: string;
+  sidebar_empty: string;
+  sidebar_labelAdd: string;
   settings_layout: string;
   settings_layoutClassic: string;
   settings_layoutModern: string;
@@ -389,6 +392,9 @@ const zhHant: Messages = {
   insert_bodyPh: "內容",
   insert_codePh: "程式碼",
   insert_itemPh: "項目",
+  sidebar_search: "搜尋名稱或訊息…",
+  sidebar_empty: "沒有符合的聯絡人或群組",
+  sidebar_labelAdd: "加標籤",
   settings_layout: "版面佈局",
   settings_layoutClassic: "經典（浮動視窗）",
   settings_layoutModern: "三欄整合",
@@ -707,6 +713,9 @@ const en: Messages = {
   insert_bodyPh: "Body",
   insert_codePh: "code",
   insert_itemPh: "item",
+  sidebar_search: "Search name or messages…",
+  sidebar_empty: "No matching contacts or groups",
+  sidebar_labelAdd: "Add label",
   settings_layout: "Layout",
   settings_layoutClassic: "Classic (floating windows)",
   settings_layoutModern: "Three-column",
