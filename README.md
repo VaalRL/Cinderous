@@ -65,6 +65,7 @@ M1–M5 的**核心邏輯已實作並通過測試**（pnpm monorepo、TypeScript
 - **尚待執行期環境**（⏳）：真實 WebRTC（`RTCPeerConnection`/ICE/TURN）、Tauri GUI 與 Rust 背景連線、OS 金鑰儲存、Cloudflare Worker 部署。詳見 [`ARCHITECTURE.md`](./ARCHITECTURE.md) §7 與 [`docs/adr/`](./docs/adr)。
 - **完整施工計畫**（現況、各平台待辦、M6–M9 進階功能、相依順序）：見 [`docs/ROADMAP.md`](./docs/ROADMAP.md)。
 - **使用者教學**（給一般使用者：身分與鑰匙、加好友、本地密碼、換裝置三條路、搬家、常見問題）：見 [`docs/使用手冊_User-Guide.md`](./docs/使用手冊_User-Guide.md)。
+- **前端開發指南**（給社群開發者：三層架構、重用 core/i18n、消費 `ChatBackend` 接自己的 UI、AGPL）：見 [`docs/前端開發指南_Frontend-Guide.md`](./docs/前端開發指南_Frontend-Guide.md)（ADR-0074）。
 
 ## 開發指令
 
