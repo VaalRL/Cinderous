@@ -32,6 +32,12 @@ fn native_ready() -> String {
     format!("cinder native bridge {}", env!("CARGO_PKG_VERSION"))
 }
 
+/// 叫回並聚焦主視窗（通知點擊用，ADR-0076）：從系統匣隱藏狀態帶回前景。
+#[tauri::command]
+fn focus_window(app: tauri::AppHandle) {
+    show_main(&app);
+}
+
 // ── B5 金鑰庫 IPC（ADR-0053）：私鑰託管於 OS 安全儲存，前端經 invoke 存取 ──────
 
 /// 存入某身分（pubkey）的 nsec 到 OS 金鑰庫。
@@ -468,6 +474,8 @@ async fn ai_models(provider: String, endpoint: String) -> Result<Vec<String>, St
 
 fn main() {
     tauri::Builder::default()
+        // 桌面原生通知（ADR-0076）：可靠系統 toast、點擊 action 回跳；瀏覽器路徑另走 Web Notification。
+        .plugin(tauri_plugin_notification::init())
         // 背景在線（Phase B ②）：關閉視窗＝隱藏到系統匣，保留 webview 存活＝引擎續連、
         // 仍收得到訊息；真正結束走系統匣選單「結束」。
         .on_window_event(|window, event| {
@@ -514,6 +522,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             native_ready,
+            focus_window,
             key_set,
             key_get,
             key_delete,

@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "Cinder 主視窗預設能力（最小權限：僅核心 API）",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": ["core:default", "notification:default"]
 }

@@ -22,7 +22,7 @@ required-features = ["tauri-app"]
 
 [features]
 # 完整 Tauri 桌面二進位（需 Tauri 工具鏈與 webkit2gtk 等系統庫）。
-tauri-app = ["dep:tauri", "dep:tokio", "dep:tauri-build", "dep:reqwest", "keyring", "encstore", "passlock"]
+tauri-app = ["dep:tauri", "dep:tauri-plugin-notification", "dep:tokio", "dep:tauri-build", "dep:reqwest", "keyring", "encstore", "passlock"]
 # OS 金鑰庫（B5，ADR-0053）：私鑰託管於作業系統安全儲存。可獨立測試（會存取真實金鑰庫）。
 keyring = ["dep:keyring"]
 # 加密儲存 blob（B2 儲存基質，ADR-0054）：AES-256-GCM（純 Rust，免 OpenSSL/Perl）。純函式可測。
@@ -42,6 +42,8 @@ sqlcipher = ["dep:rusqlite", "rusqlite/bundled-sqlcipher-vendored-openssl"]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri = { version = "2", optional = true, features = ["tray-icon"] }
+# 桌面原生通知（ADR-0076）：可靠系統 toast＋點擊 action，取代打包後不穩的 webview Notification。
+tauri-plugin-notification = { version = "2", optional = true }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net"], optional = true }
 tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"], optional = true }
 futures-util = { version = "0.3", optional = true }

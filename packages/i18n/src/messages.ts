@@ -127,6 +127,9 @@ export interface Messages {
   settings_copied: string;
   settings_notifications: string;
   settings_notificationsHint: string;
+  settings_notifySound: string;
+  settings_notifyHidePreview: string;
+  notify_newMessage: string;
   settings_close: string;
   unread_title: string;
   conn_connecting: string;
@@ -427,6 +430,9 @@ const zhHant: Messages = {
   settings_copied: "已複製",
   settings_notifications: "桌面通知",
   settings_notificationsHint: "視窗未聚焦時，有新訊息就通知。",
+  settings_notifySound: "通知提示音",
+  settings_notifyHidePreview: "隱藏內文預覽（只顯示有新訊息）",
+  notify_newMessage: "有新訊息",
   settings_close: "關閉",
   unread_title: "{count} 則未讀",
   conn_connecting: "連線中…",
@@ -727,6 +733,9 @@ const en: Messages = {
   settings_copied: "Copied",
   settings_notifications: "Desktop notifications",
   settings_notificationsHint: "Notify on new messages when the window isn't focused.",
+  settings_notifySound: "Notification sound",
+  settings_notifyHidePreview: "Hide message preview (show only \"New message\")",
+  notify_newMessage: "New message",
   settings_close: "Close",
   unread_title: "{count} unread",
   conn_connecting: "Connecting…",

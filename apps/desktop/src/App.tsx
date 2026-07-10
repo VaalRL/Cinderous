@@ -20,6 +20,8 @@ import { useEffect, useRef, useState } from "react";
 import { BrowserChatBackend } from "@cinder/engine";
 import { normalizeRelayUrl, RelayChatBackend, webSocketConnector } from "@cinder/engine";
 import { getKeyVault } from "./native/keyvault.js";
+import { getNotifier, onNotificationClick } from "./native/notify.js";
+import { useI18n } from "./i18n.js";
 import { isWrappedValue, passChange, passDisable, passEnable, passLock, passRescue, passUnlock } from "./native/passlock.js";
 import {
   activeDrain,
@@ -67,7 +69,7 @@ import {
 } from "./ui/group-labels.js";
 import { ANCHOR_RELAYS, MAINTAINER_PUBKEY } from "./bootstrap-config.js";
 import { initIdle, reduceIdle, type IdleState } from "./ui/idle-status.js";
-import { createRinger, createRingback } from "./ui/ringtone.js";
+import { createRinger, createRingback, playChime } from "./ui/ringtone.js";
 import { CallWindow } from "./ui/CallWindow.js";
 import { ContactListWindow } from "./ui/ContactListWindow.js";
 import { ConversationWindow } from "./ui/ConversationWindow.js";
@@ -91,6 +93,9 @@ const TYPING_VISIBLE_MS = 6_000;
 /** 閒置自動上鎖門檻（H4，ADR-0067）：啟用本地密碼的身分無操作逾時即上鎖。 */
 const PASS_LOCK_MS = 5 * 60_000;
 const NOTIFY_KEY = "nb.notify";
+// 通知子設定（ADR-0076）：提示音預設開、隱藏預覽預設關（顯示內文，LINE 風）。
+const NOTIFY_SOUND_KEY = "nb.notifySound";
+const NOTIFY_PREVIEW_KEY = "nb.notifyHidePreview";
 const READ_RECEIPTS_KEY = "nb.readReceipts";
 const OLLAMA_KEY = "nb.ollama";
 
@@ -209,6 +214,7 @@ async function loadNsecFromVault(p: Profile): Promise<string | undefined> {
 }
 
 export function App(): JSX.Element {
+  const { t } = useI18n(); // 通知隱藏預覽的本地化文案（ADR-0076）；其餘 UI 文字仍由子元件各自取用。
   const [backend, setBackend] = useState<ChatBackend | null>(null);
   const [profilesState, setProfilesState] = useState<ProfilesState>(() => loadProfiles());
   const [self, setSelf] = useState<Self | null>(null);
@@ -248,6 +254,20 @@ export function App(): JSX.Element {
   const [notify, setNotify] = useState<boolean>(() => {
     try {
       return localStorage.getItem(NOTIFY_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+  const [notifySound, setNotifySound] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(NOTIFY_SOUND_KEY) !== "0"; // 預設開
+    } catch {
+      return true;
+    }
+  });
+  const [notifyHidePreview, setNotifyHidePreview] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(NOTIFY_PREVIEW_KEY) === "1"; // 預設關（顯示內文）
     } catch {
       return false;
     }
@@ -302,6 +322,17 @@ export function App(): JSX.Element {
   const lastTyping = useRef<Record<string, number>>({});
   const notifyRef = useRef(notify);
   notifyRef.current = notify;
+  // 通知內容/音效需最新的聯絡人、群組與子設定；onMessage 閉包依 [backend]、故以 ref 取現值（ADR-0076）。
+  const notifySoundRef = useRef(notifySound);
+  notifySoundRef.current = notifySound;
+  const notifyHidePreviewRef = useRef(notifyHidePreview);
+  notifyHidePreviewRef.current = notifyHidePreview;
+  const contactsRef = useRef(contacts);
+  contactsRef.current = contacts;
+  const groupsRef = useRef(groups);
+  groupsRef.current = groups;
+  const tRef = useRef(t);
+  tRef.current = t;
   // 已讀回條開關同步到後端（ADR-0058）；後端重建或開關變動時皆推送。
   useEffect(() => {
     backend?.setReadReceipts?.(readReceipts);
@@ -376,12 +407,22 @@ export function App(): JSX.Element {
         // 未讀徽章與桌面通知：僅在收到他人訊息、且視窗未聚焦時
         if (!msg.outgoing && typeof document !== "undefined" && document.hidden) {
           setUnread((u) => ({ ...u, [pk]: (u[pk] ?? 0) + 1 }));
-          if (notifyRef.current && typeof Notification !== "undefined" && Notification.permission === "granted") {
-            try {
-              new Notification("Cinder", { body: msg.text });
-            } catch {
-              /* 忽略通知失敗 */
+          if (notifyRef.current) {
+            // 標題＝該對話（群組/聯絡人）顯示名；隱藏預覽時只顯示提示語，
+            // 群組訊息在內文前綴傳訊者名（ADR-0076）。以 ref 取現值避免 [backend] 閉包陳舊。
+            const group = groupsRef.current.find((g) => g.id === pk);
+            const title = group?.name ?? contactsRef.current.find((c) => c.pubkey === pk)?.name ?? "Cinder";
+            let body: string;
+            if (notifyHidePreviewRef.current) {
+              body = tRef.current("notify_newMessage");
+            } else if (group && msg.sender) {
+              const sn = contactsRef.current.find((c) => c.pubkey === msg.sender)?.name ?? `${msg.sender.slice(0, 8)}…`;
+              body = `${sn}: ${msg.text}`;
+            } else {
+              body = msg.text;
             }
+            void getNotifier().notify({ title, body, convo: pk });
+            if (notifySoundRef.current) playChime();
           }
         }
       },
@@ -552,6 +593,14 @@ export function App(): JSX.Element {
     };
     document.addEventListener("visibilitychange", onVisible);
     return () => document.removeEventListener("visibilitychange", onVisible);
+  }, []);
+
+  // 通知點擊（ADR-0076 N3）：叫回視窗後開啟該對話並置前（未知 pk 於 render 端回 null，安全）。
+  useEffect(() => {
+    return onNotificationClick((convo) => {
+      if (!convo) return;
+      setOpen((prev) => (prev.includes(convo) ? [...prev.filter((x) => x !== convo), convo] : [...prev, convo]));
+    });
   }, []);
 
   // 閒置自動「離開」：無操作逾時自動切 away，一有活動即還原手動狀態
@@ -889,15 +938,36 @@ export function App(): JSX.Element {
         /* 忽略 */
       }
     };
-    if (typeof Notification === "undefined") {
-      enable();
-    } else if (Notification.permission === "granted") {
-      enable();
-    } else {
-      void Notification.requestPermission().then((p) => {
-        if (p === "granted") enable();
+    // 權限請求交給通知服務（Tauri 走外掛權限、瀏覽器走 Web Notification；ADR-0076）。
+    void getNotifier()
+      .ensurePermission()
+      .then((granted) => {
+        if (granted) enable();
       });
-    }
+  };
+
+  // 通知子開關（ADR-0076）：提示音、隱藏內文預覽，本機持久化。
+  const toggleNotifySound = () => {
+    setNotifySound((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem(NOTIFY_SOUND_KEY, next ? "1" : "0");
+      } catch {
+        /* 忽略 */
+      }
+      return next;
+    });
+  };
+  const toggleNotifyHidePreview = () => {
+    setNotifyHidePreview((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem(NOTIFY_PREVIEW_KEY, next ? "1" : "0");
+      } catch {
+        /* 忽略 */
+      }
+      return next;
+    });
   };
 
   // 刪除/封鎖後：關閉其對話視窗並清掉本地對話快取
@@ -1173,6 +1243,10 @@ export function App(): JSX.Element {
           }}
           notifications={notify}
           onToggleNotifications={toggleNotifications}
+          notifySound={notifySound}
+          onToggleNotifySound={toggleNotifySound}
+          notifyHidePreview={notifyHidePreview}
+          onToggleNotifyHidePreview={toggleNotifyHidePreview}
           readReceipts={readReceipts}
           onToggleReadReceipts={toggleReadReceipts}
           ollama={ollama}

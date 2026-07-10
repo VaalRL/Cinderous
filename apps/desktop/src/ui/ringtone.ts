@@ -139,3 +139,37 @@ export function createRinger(ctor?: AudioCtor): Ringer {
 export function createRingback(ctor?: AudioCtor): Ringer {
   return makeRinger(ringbackCycle(), [RINGBACK_FREQ], ctor);
 }
+
+/** 通知提示音頻率（上行「叮咚」兩音）。 */
+export const CHIME_FREQ_LOW = 880;
+export const CHIME_FREQ_HIGH = 1174;
+
+/**
+ * 一次性通知提示音（ADR-0076）：短促上行「叮咚」，無外部音檔（離線/CSP 相容）。
+ * 無 AudioContext（測試/不支援）時安全 no-op。`ctor` 可注入以利測試。
+ */
+export function playChime(ctor?: AudioCtor): void {
+  const Ctor = resolveCtor(ctor);
+  if (!Ctor) return;
+  try {
+    const ctx = new Ctor();
+    void ctx.resume?.();
+    const now = ctx.currentTime;
+    const dur = 0.2;
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.exponentialRampToValueAtTime(0.12, now + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + dur);
+    gain.connect(ctx.destination);
+    const osc = ctx.createOscillator();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(CHIME_FREQ_LOW, now);
+    osc.frequency.setValueAtTime(CHIME_FREQ_HIGH, now + dur / 2); // 上行兩音的「叮咚」
+    osc.connect(gain);
+    osc.start(now);
+    osc.stop(now + dur);
+    setTimeout(() => void ctx.close?.(), Math.ceil(dur * 1000) + 50);
+  } catch {
+    /* 忽略發聲失敗 */
+  }
+}

@@ -210,6 +210,22 @@
 
 ---
 
+## Phase N — 桌面原生通知（🌐 程式可推進；🖥️ 實機驗證需打包版；ADR-0076）
+
+把「收到訊息跳通知」從打包後不穩的 webview Web Notification，升級為可靠的原生 toast、顯示傳訊者、點擊回到對話（LINE 級體驗）。
+
+| # | 項目 | 狀態 |
+| --- | --- | --- |
+| N1 | 外掛依賴＋權限 | ✅ **完成**：`tauri-plugin-notification`（Rust，收進 `tauri-app` feature）＋`@tauri-apps/plugin-notification`（JS）；`main.rs` 註冊 plugin；`capabilities/default.json` 授 `notification:default`。`cargo check --features tauri-app` 乾淨（帶進 Windows `tauri-winrt-notification` toast 後端）。 |
+| N2 | 通知服務抽象 | ✅ **完成**：`src/native/notify.ts` 單一 `notify()`／`ensurePermission()`，`isTauri()` 走原生外掛否則 fallback Web Notification；App 送出點與權限請求改走它。既有「僅他人訊息＋視窗未聚焦才跳」判斷不變。7 單元測試（Tauri／瀏覽器／無權限／點擊）。 |
+| N3 | 點擊回跳＋開對話 | ✅ **完成（程式）**：新 IPC `focus_window`（薄包 `show_main`＝show+unminimize+set_focus）；`onNotificationClick` 接外掛 `onAction`＋`extra.convo` → 叫回視窗＋開該對話置前；瀏覽器 fallback 走 `Notification.onclick`。⏳ **桌面各 OS 點擊 action 支援度需打包版實機確認**（通知顯示本身不受影響）。 |
+| N4 | 傳訊者名稱＋提示音 | ✅ **完成**：通知標題＝群組/聯絡人顯示名（非固定 "Cinder"），群訊內文前綴傳訊者；提示音 `playChime`（Web Audio 上行雙音、無外部音檔、CSP 相容），**預設開可關**。 |
+| N5 | 設定開關＋文件 | ✅ **完成**：設定面板通知區加「提示音」「隱藏內文預覽」兩子開關（本機持久化，比照 `nb.notify`；預設音開、預覽顯示＝LINE 風）；本表同步。 |
+
+**完成定義**：打包桌面版收到背景訊息時跳原生系統通知、顯示是誰傳的、點擊回到該對話；提示音與預覽可於設定調整。⏳ 真實 OS toast 與點擊 action 待打包版（`tauri:build`）實機驗收。
+
+---
+
 ## 相依與建議順序
 
 ```text

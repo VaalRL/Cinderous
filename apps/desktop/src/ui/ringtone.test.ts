@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { createRinger, createRingback, cycleDurationMs, ringbackCycle, ringCycle } from "./ringtone.js";
+import { createRinger, createRingback, cycleDurationMs, playChime, ringbackCycle, ringCycle } from "./ringtone.js";
 
 describe("ringtone 節拍（M8）", () => {
   it("來電鈴響週期為 響-停-響-長停", () => {
@@ -69,6 +69,40 @@ describe("createRinger", () => {
     vi.advanceTimersByTime(10);
     expect(osc.start).toHaveBeenCalled();
     r.stop();
+    vi.useRealTimers();
+  });
+});
+
+describe("playChime 通知提示音（ADR-0076）", () => {
+  it("無 AudioContext 時安全 no-op（不丟例外）", () => {
+    expect(() => playChime()).not.toThrow(); // 測試環境無 AudioContext
+  });
+
+  it("以注入的 AudioContext 發一次上行雙音、排程關閉", () => {
+    vi.useFakeTimers();
+    const osc = {
+      type: "",
+      frequency: { setValueAtTime: vi.fn() },
+      connect: vi.fn(),
+      start: vi.fn(),
+      stop: vi.fn(),
+    };
+    const gain = { gain: { setValueAtTime: vi.fn(), exponentialRampToValueAtTime: vi.fn() }, connect: vi.fn() };
+    const close = vi.fn();
+    const FakeCtx = vi.fn().mockImplementation(() => ({
+      currentTime: 0,
+      createOscillator: () => osc,
+      createGain: () => gain,
+      resume: vi.fn(),
+      close,
+      destination: {},
+    })) as unknown as { new (): AudioContext };
+
+    playChime(FakeCtx);
+    expect(osc.start).toHaveBeenCalledTimes(1);
+    expect(osc.frequency.setValueAtTime).toHaveBeenCalledTimes(2); // 起音＋中段上行
+    vi.advanceTimersByTime(500);
+    expect(close).toHaveBeenCalled();
     vi.useRealTimers();
   });
 });

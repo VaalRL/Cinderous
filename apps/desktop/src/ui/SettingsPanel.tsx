@@ -42,6 +42,12 @@ export interface SettingsPanelProps {
   /** 桌面通知是否啟用。 */
   notifications: boolean;
   onToggleNotifications: () => void;
+  /** 通知提示音（ADR-0076）；未提供則不顯示該子開關。 */
+  notifySound?: boolean;
+  onToggleNotifySound?: () => void;
+  /** 通知隱藏內文預覽（ADR-0076）；未提供則不顯示該子開關。 */
+  notifyHidePreview?: boolean;
+  onToggleNotifyHidePreview?: () => void;
   readReceipts?: boolean;
   onToggleReadReceipts?: () => void;
   /** 本機 AI 改寫設定（ADR-0060）；未提供則不顯示該區塊。 */
@@ -630,6 +636,22 @@ export function SettingsPanel(props: SettingsPanelProps): JSX.Element {
               />
               <span>{t("settings_notificationsHint")}</span>
             </label>
+            {props.notifications && props.onToggleNotifySound ? (
+              <label className="settings__toggle">
+                <input type="checkbox" checked={props.notifySound ?? true} onChange={props.onToggleNotifySound} />
+                <span>{t("settings_notifySound")}</span>
+              </label>
+            ) : null}
+            {props.notifications && props.onToggleNotifyHidePreview ? (
+              <label className="settings__toggle">
+                <input
+                  type="checkbox"
+                  checked={props.notifyHidePreview ?? false}
+                  onChange={props.onToggleNotifyHidePreview}
+                />
+                <span>{t("settings_notifyHidePreview")}</span>
+              </label>
+            ) : null}
           </section>
 
           {props.onToggleReadReceipts ? (
