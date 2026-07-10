@@ -154,7 +154,7 @@
 | H1 | 個人檔廣播帶 relay hint | 🌐 | ✅ **完成**：`wrapProfile` 增 `relayHint?` 寫入 rumor 內層 `["relay", url]`（加密、外層不可見）；`sendProfileTo` 帶自己的 home。收端零改動（`receiveDm` 已通用 `learnRelayHint`）。測試含「只憑個人檔學 hint」＋三 relay 搬家自癒 E2E（ADR-0066 階段 1）。 |
 | H2 | 更換 relay 流程 | 🌐 | ✅ **完成**：設定面板 relay「顯示＋更換」；`changeProfileRelay` 保留 namespace／name／enterprise（不走 addIdentity），`relayChangeTarget` 守門（企業禁用、`wss://` 正規化、同值 no-op），更新 `nb.relayUrl` 後 reload；重載後 H1 廣播自動通知改道（ADR-0066 階段 2）。 |
 | H3 | 舊站排水 drain | 🌐 | ✅ **完成**：profile 增 `previousRelayUrl?`＋`drainUntil?`（now＋7 天，對齊 ADR-0065 TTL）；`RelayPoolOptions.drainUrl` 讓舊站進 pool 掛自家收件匣、event-id 去重沿用；到期自動停、設定面板可提前完成。對照組測試證明無排水即漏收（ADR-0066 階段 3）。 |
-| H4 | 本地密碼 | 🌐＋🖥️ | 🔧 **核心完成**：Rust `passlock`（Argon2id 19MiB/t2/p1 衍生 KEK＋AES-256-GCM 包裹，6 單元測試）＋IPC `pass_*` 六命令（db 金鑰解鎖後快取原生記憶體）；`UnlockScreen` 開機閘門、閒置 5 分自動上鎖、設定安全區塊（啟用強制備份確認／改密碼＝重包裹／停用／隱藏身分＋🔒 喚回）。⏳ Tauri 實機驗證解鎖全流程（`tauri:dev`）（ADR-0067）。 |
+| H4 | 本地密碼 | 🌐＋🖥️ | 🔧 **核心完成**：Rust `passlock`（Argon2id 19MiB/t2/p1 衍生 KEK＋AES-256-GCM 包裹）＋IPC `pass_*` 七命令（db 金鑰解鎖後快取原生記憶體）；`UnlockScreen` 開機閘門、閒置 5 分自動上鎖、設定安全區塊（啟用強制備份確認／改密碼＝重包裹／停用／隱藏身分＋🔒 喚回）。**＋忘記密碼救援（ADR-0073）**：db 金鑰另以 nsec 衍生金鑰雙重包裹，忘記密碼時輸入 nsec／備份碼即可救回本機完整資料並重設密碼（惰性補建向後相容；30+3 Rust 測試）。⏳ Tauri 實機驗證（`tauri:dev`）。 |
 | H5 | 群組快照廣播 | 🌐 | ✅ **完成**：`group-snapshot` 控制型別＋管理員開機 `broadcastGroups()`（每群每日節流）；白紙裝置收快照＝實例化（守門同 create）、既有群僅 admin 可對帳、組織群排除。測試：nsec 換機重建 E2E＋前成員偽造快照防護（ADR-0068）。 |
 | H6 | 加密備份碼 | 🌐 | ✅ **完成**：core `backup`（內層 NIP-49 ncryptsec＋外層 `{v, ncryptsec, relayUrl}`、peekBackupRelay 預填）；設定面板產生備份碼（二次密碼→字串＋QR＋複製）；新增身分匯入欄自動判別備份碼＋備份密碼欄（ADR-0070，部分取代 ADR-0015）。 |
 

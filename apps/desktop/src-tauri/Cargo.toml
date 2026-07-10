@@ -27,8 +27,9 @@ tauri-app = ["dep:tauri", "dep:tokio", "dep:tauri-build", "dep:reqwest", "keyrin
 keyring = ["dep:keyring"]
 # 加密儲存 blob（B2 儲存基質，ADR-0054）：AES-256-GCM（純 Rust，免 OpenSSL/Perl）。純函式可測。
 encstore = ["dep:aes-gcm", "dep:base64"]
-# 本地密碼（H4，ADR-0067）：Argon2id 衍生 KEK 包裹 nsec＋db 金鑰；AEAD 重用 encstore。純函式可測。
-passlock = ["dep:argon2", "encstore"]
+# 本地密碼（H4，ADR-0067）＋忘記密碼救援（ADR-0073）：Argon2id KEK 包裹 nsec＋db 金鑰；
+# db 金鑰另以 nsec 衍生金鑰（sha2 域分隔）雙重包裹供救援。AEAD 重用 encstore。純函式可測。
+passlock = ["dep:argon2", "dep:sha2", "encstore"]
 # 背景 WebSocket 連線執行期（tokio + tungstenite）。可獨立於 GUI 建置/測試，
 # 但拉入 async I/O 相依，故預設關閉以維持精簡的 `cargo test`。
 net = ["dep:tokio", "dep:tokio-tungstenite", "dep:futures-util"]
@@ -50,6 +51,8 @@ aes-gcm = { version = "0.10", optional = true, features = ["getrandom"] }
 base64 = { version = "0.22", optional = true }
 # 密碼雜湊/KDF（ADR-0067）：Argon2id，記憶體硬、抗 GPU 暴力。
 argon2 = { version = "0.5", optional = true, default-features = false, features = ["alloc"] }
+# nsec 救援金鑰的域分隔雜湊（ADR-0073）；nsec 高熵故用快雜湊即可。
+sha2 = { version = "0.10", optional = true, default-features = false }
 # 本機 Ollama HTTP 客戶端（AI 改寫，ADR-0060）；rustls 免 OpenSSL/Perl（比照 encstore）。
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"], optional = true }
 

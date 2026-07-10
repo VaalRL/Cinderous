@@ -54,3 +54,11 @@ export async function passChange(namespace: string, pubkey: string, oldPassword:
 export async function passDisable(namespace: string, pubkey: string, password: string): Promise<void> {
   await invoke("pass_disable", { namespace, pubkey, password });
 }
+
+/**
+ * 忘記密碼救援（ADR-0073）：以 nsec 解開資料金鑰的第二道包裹、設新密碼、救回舊本地資料。
+ * 回傳 nsec（供建後端）。nsec 不符或無救援資料時 reject。
+ */
+export async function passRescue(namespace: string, pubkey: string, nsec: string, newPassword: string): Promise<string> {
+  return await invoke<string>("pass_rescue", { namespace, pubkey, nsec, newPassword });
+}

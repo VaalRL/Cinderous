@@ -20,7 +20,7 @@ import { useEffect, useRef, useState } from "react";
 import { BrowserChatBackend } from "./backend/browser-backend.js";
 import { normalizeRelayUrl, RelayChatBackend, webSocketConnector } from "./backend/relay-backend.js";
 import { getKeyVault } from "./native/keyvault.js";
-import { isWrappedValue, passChange, passDisable, passEnable, passLock, passUnlock } from "./native/passlock.js";
+import { isWrappedValue, passChange, passDisable, passEnable, passLock, passRescue, passUnlock } from "./native/passlock.js";
 import {
   activeDrain,
   activeProfile,
@@ -606,19 +606,34 @@ export function App(): JSX.Element {
   }, [backend, profilesState]);
 
   // 解鎖（H4）：驗密碼→取回 nsec 與 db 金鑰（原生快取）→照常建後端。
+  // 以取得的 nsec 建後端並進入（解鎖與救援共用）。
+  const enterWithNsec = async (p: Profile, nsec: string): Promise<boolean> => {
+    const ts = new TauriStorage(p.namespace);
+    await ts.hydrate();
+    const b = buildBackend(p, nsec, ts);
+    setConn(p.relayUrl ? "connecting" : "online");
+    setSelf({ ...b.self });
+    setBackend(b);
+    setLockedProfile(null);
+    return true;
+  };
+
   const unlock = async (password: string): Promise<boolean> => {
     const p = lockedProfile;
     if (!p) return false;
     try {
-      const nsec = await passUnlock(p.namespace, p.pubkey, password);
-      const ts = new TauriStorage(p.namespace);
-      await ts.hydrate();
-      const b = buildBackend(p, nsec, ts);
-      setConn(p.relayUrl ? "connecting" : "online");
-      setSelf({ ...b.self });
-      setBackend(b);
-      setLockedProfile(null);
-      return true;
+      return await enterWithNsec(p, await passUnlock(p.namespace, p.pubkey, password));
+    } catch {
+      return false;
+    }
+  };
+
+  // 忘記密碼救援（ADR-0073）：以 nsec 解回資料金鑰、設新密碼、救回舊本地資料後進入。
+  const rescue = async (nsec: string, newPassword: string): Promise<boolean> => {
+    const p = lockedProfile;
+    if (!p) return false;
+    try {
+      return await enterWithNsec(p, await passRescue(p.namespace, p.pubkey, nsec, newPassword));
     } catch {
       return false;
     }
@@ -817,7 +832,7 @@ export function App(): JSX.Element {
   };
 
   // H4（ADR-0067）：作用中身分已上鎖→解鎖畫面（不落 SignIn，避免誤建新身分）。
-  if (lockedProfile && !backend) return <UnlockScreen name={lockedProfile.name} onUnlock={unlock} />;
+  if (lockedProfile && !backend) return <UnlockScreen name={lockedProfile.name} onUnlock={unlock} onRescue={rescue} />;
   if (!backend || !self) return <SignIn onSignIn={signIn} onPair={importFromOldDevice} />;
 
   const activeBackend = backend;

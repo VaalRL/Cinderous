@@ -13,6 +13,7 @@ use crate::encstore;
 use argon2::{Algorithm, Argon2, Params, Version};
 use base64::{engine::general_purpose::STANDARD as B64, Engine};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 /// Argon2id 參數（OWASP 首推組合：19 MiB 記憶體、2 迭代、1 平行度）。
 const M_COST_KIB: u32 = 19_456;
@@ -94,6 +95,35 @@ pub fn is_wrapped(value: &str) -> bool {
     serde_json::from_str::<Blob>(value).map(|b| b.v == 1 && b.kdf == "argon2id").unwrap_or(false)
 }
 
+// ── nsec 救援金鑰（ADR-0073）：資料金鑰的第二把鑰匙，供忘記密碼時救援 ──────────
+
+/// 自 nsec 衍生救援金鑰：域分隔雜湊即可——nsec 已是 256-bit 高熵，
+/// 不需 Argon2 那種慢雜湊（慢雜湊是給低熵密碼防離線暴力的）。
+fn rescue_key(nsec: &str) -> [u8; encstore::KEY_LEN] {
+    let mut h = Sha256::new();
+    h.update(nsec.trim().as_bytes());
+    h.update(b"cinder-rescue-v1");
+    let digest = h.finalize();
+    let mut out = [0u8; encstore::KEY_LEN];
+    out.copy_from_slice(&digest);
+    out
+}
+
+/// 以 nsec 救援金鑰包裹祕密（db 金鑰 b64）；輸出 `nonce‖ct` 的 base64。
+pub fn rescue_wrap(nsec: &str, plaintext: &str) -> Result<String, PassError> {
+    let key = rescue_key(nsec);
+    let data = encstore::encrypt(&key, plaintext.as_bytes()).map_err(|e| PassError(e.to_string()))?;
+    Ok(B64.encode(data))
+}
+
+/// 以 nsec 救援金鑰解開包裹；nsec 不符或資料竄改回 Err（GCM 認證失敗）。
+pub fn rescue_unwrap(nsec: &str, blob_b64: &str) -> Result<String, PassError> {
+    let key = rescue_key(nsec);
+    let data = B64.decode(blob_b64).map_err(|e| PassError(e.to_string()))?;
+    let plain = encstore::decrypt(&key, &data).map_err(|_| PassError("nsec 不符或救援資料已損毀".into()))?;
+    String::from_utf8(plain).map_err(|e| PassError(e.to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -160,5 +190,33 @@ mod tests {
         assert!(!is_wrapped("aGVsbG8=")); // b64 db 金鑰
         assert!(!is_wrapped("{\"v\":2,\"kdf\":\"argon2id\"}")); // 版本不符
         assert!(!is_wrapped("not json"));
+    }
+
+    #[test]
+    fn rescue_roundtrip_and_wrong_nsec_fails() {
+        let nsec = "nsec1_master_backup";
+        let dbkey = "ZGF0YWJhc2Uta2V5LWI2NA==";
+        let blob = rescue_wrap(nsec, dbkey).unwrap();
+        assert!(!blob.contains(dbkey), "救援 blob 不得含明文金鑰");
+        assert_eq!(rescue_unwrap(nsec, &blob).unwrap(), dbkey);
+        // 別把 nsec：解不開（GCM 認證失敗）——只有正確 nsec 能救援
+        assert!(rescue_unwrap("nsec1_other_identity", &blob).is_err());
+    }
+
+    #[test]
+    fn rescue_key_normalizes_whitespace() {
+        // 使用者貼上的 nsec 可能帶前後空白；trim 後應與原始一致
+        let blob = rescue_wrap("nsec1abc", "key").unwrap();
+        assert_eq!(rescue_unwrap("  nsec1abc\n", &blob).unwrap(), "key");
+    }
+
+    #[test]
+    fn rescue_tampered_fails() {
+        let mut blob = rescue_wrap("nsec1abc", "key").unwrap();
+        let mut raw = B64.decode(&blob).unwrap();
+        let last = raw.len() - 1;
+        raw[last] ^= 0x01;
+        blob = B64.encode(raw);
+        assert!(rescue_unwrap("nsec1abc", &blob).is_err());
     }
 }

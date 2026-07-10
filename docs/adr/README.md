@@ -87,3 +87,4 @@
 | [0070](./0070-encrypted-backup-code.md) | 加密備份碼（NIP-49 混合式、使用者自持） | 已接受 |
 | [0071](./0071-encrypted-cloud-snapshot.md) | 加密雲端快照（三檔模式、可尋址取代、opt-in） | 已接受 |
 | [0072](./0072-desktop-pairing-clone.md) | 桌面配對克隆（D4a：一次性 P2P 全量搬家＋SAS 互認） | 已接受 |
+| [0073](./0073-forgotten-password-nsec-rescue.md) | 忘記密碼救援：nsec 解鎖並重設密碼（雙重包裹） | 已接受 |

@@ -143,11 +143,14 @@ fn pass_enable(namespace: String, pubkey: String, password: String) -> Result<()
         return Err("此身分已啟用本地密碼".into());
     }
     let key = db_key(&namespace)?; // 未包裹路徑：取得（或首次建立）明文 db 金鑰
+    let key_b64 = STANDARD.encode(key);
     let wrapped_nsec = cinder_desktop::passlock::wrap(&password, &nsec).map_err(|e| e.to_string())?;
-    let wrapped_key =
-        cinder_desktop::passlock::wrap(&password, &STANDARD.encode(key)).map_err(|e| e.to_string())?;
+    let wrapped_key = cinder_desktop::passlock::wrap(&password, &key_b64).map_err(|e| e.to_string())?;
+    // ADR-0073：db 金鑰另以 nsec 衍生金鑰包裹，供忘記密碼救援。
+    let rescue_blob = cinder_desktop::passlock::rescue_wrap(&nsec, &key_b64).map_err(|e| e.to_string())?;
     cinder_desktop::keyvault::set_key(&pubkey, &wrapped_nsec).map_err(|e| e.to_string())?;
     cinder_desktop::keyvault::set_key(&format!("db:{namespace}"), &wrapped_key).map_err(|e| e.to_string())?;
+    cinder_desktop::keyvault::set_key(&format!("rescue:{namespace}"), &rescue_blob).map_err(|e| e.to_string())?;
     unlocked_keys().lock().unwrap().insert(namespace, key); // 啟用當下維持解鎖
     Ok(())
 }
@@ -184,10 +187,21 @@ fn pass_unlock(namespace: String, pubkey: String, password: String) -> Result<St
                     k
                 }
             };
-            let bytes = STANDARD.decode(key_b64).map_err(|e| e.to_string())?;
+            let bytes = STANDARD.decode(&key_b64).map_err(|e| e.to_string())?;
             let key: [u8; encstore::KEY_LEN] =
                 bytes.as_slice().try_into().map_err(|_| "DB 金鑰長度不符".to_string())?;
-            unlocked_keys().lock().unwrap().insert(namespace, key);
+            unlocked_keys().lock().unwrap().insert(namespace.clone(), key);
+            // ADR-0073 惰性補建：本功能前啟用密碼的使用者無 rescue blob，此時（nsec 與
+            // db 金鑰皆在手）自動補建，讓既有使用者下次解鎖後即獲救援能力。
+            let rescue_account = format!("rescue:{namespace}");
+            let has_rescue = cinder_desktop::keyvault::get_key(&rescue_account)
+                .map_err(|e| e.to_string())?
+                .is_some();
+            if !has_rescue {
+                if let Ok(blob) = cinder_desktop::passlock::rescue_wrap(&nsec, &key_b64) {
+                    let _ = cinder_desktop::keyvault::set_key(&rescue_account, &blob);
+                }
+            }
         }
     }
     Ok(nsec)
@@ -240,6 +254,39 @@ fn pass_change(namespace: String, pubkey: String, old: String, new: String) -> R
     Ok(())
 }
 
+/// 忘記密碼救援（ADR-0073）：以 nsec 解開 `rescue:` 拿回**真正那把** db 金鑰，
+/// 用**新**密碼重包裹 nsec 與 db 金鑰——舊本地資料原封回來（非重來）。回傳 nsec 供建後端。
+#[tauri::command]
+fn pass_rescue(namespace: String, pubkey: String, nsec: String, new_password: String) -> Result<String, String> {
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    if new_password.is_empty() {
+        return Err("新密碼不得為空".into());
+    }
+    let rescue_account = format!("rescue:{namespace}");
+    let rescue_blob = cinder_desktop::keyvault::get_key(&rescue_account)
+        .map_err(|e| e.to_string())?
+        .ok_or("此身分沒有救援資料（可能於本功能上線前啟用；請於記得密碼時解鎖一次以補建）")?;
+    // 只有正確 nsec 能解開（GCM 認證）——錯 nsec 直接失敗，等同身分核對。
+    let key_b64 = cinder_desktop::passlock::rescue_unwrap(nsec.trim(), &rescue_blob).map_err(|e| e.to_string())?;
+    // 以新密碼重包裹（防斷電順序：db-next → nsec → db → 刪 db-next，同 pass_change）。
+    let wrapped_nsec = cinder_desktop::passlock::wrap(&new_password, nsec.trim()).map_err(|e| e.to_string())?;
+    let wrapped_key = cinder_desktop::passlock::wrap(&new_password, &key_b64).map_err(|e| e.to_string())?;
+    let account = format!("db:{namespace}");
+    let next_account = format!("db-next:{namespace}");
+    cinder_desktop::keyvault::set_key(&next_account, &wrapped_key).map_err(|e| e.to_string())?;
+    cinder_desktop::keyvault::set_key(&pubkey, &wrapped_nsec).map_err(|e| e.to_string())?;
+    cinder_desktop::keyvault::set_key(&account, &wrapped_key).map_err(|e| e.to_string())?;
+    let _ = cinder_desktop::keyvault::delete_key(&next_account);
+    // rescue blob 以 nsec 為鑰、nsec 未變，故無需更新；快取 db 金鑰以完成本次解鎖。
+    let bytes = STANDARD.decode(&key_b64).map_err(|e| e.to_string())?;
+    if let Ok(key) = <[u8; encstore::KEY_LEN]>::try_from(bytes.as_slice()) {
+        unlocked_keys().lock().unwrap().insert(namespace, key);
+    } else {
+        return Err("DB 金鑰長度不符".into());
+    }
+    Ok(nsec.trim().to_string())
+}
+
 /// 停用本地密碼：驗密碼後把明文寫回金鑰庫（信任邊界回到 OS 帳號，ADR-0053 現況）。
 #[tauri::command]
 fn pass_disable(namespace: String, pubkey: String, password: String) -> Result<(), String> {
@@ -265,10 +312,11 @@ fn pass_disable(namespace: String, pubkey: String, password: String) -> Result<(
         cinder_desktop::keyvault::set_key(&account, k).map_err(|e| e.to_string())?;
         let bytes = STANDARD.decode(k).map_err(|e| e.to_string())?;
         if let Ok(key) = <[u8; encstore::KEY_LEN]>::try_from(bytes.as_slice()) {
-            unlocked_keys().lock().unwrap().insert(namespace, key);
+            unlocked_keys().lock().unwrap().insert(namespace.clone(), key);
         }
     }
     cinder_desktop::keyvault::set_key(&pubkey, &nsec).map_err(|e| e.to_string())?;
+    let _ = cinder_desktop::keyvault::delete_key(&format!("rescue:{namespace}")); // ADR-0073：一併清救援 blob
     Ok(())
 }
 
@@ -458,6 +506,7 @@ fn main() {
             pass_unlock,
             pass_lock,
             pass_change,
+            pass_rescue,
             pass_disable,
             ai_generate,
             ai_available,
