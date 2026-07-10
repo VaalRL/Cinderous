@@ -118,7 +118,16 @@ const RECONNECT_MAX_MS = 15_000;
 /** 正規化 relay URL（trim、去尾斜線）；非 ws(s) 或空值回傳 undefined。 */
 export function normalizeRelayUrl(url: string | undefined): string | undefined {
   const u = url?.trim().replace(/\/+$/, "");
-  return u && /^wss?:\/\//i.test(u) ? u : undefined;
+  if (!u || !/^wss?:\/\//i.test(u)) return undefined;
+  // 與 core `normalizeRelay` 對齊：協定/主機小寫，避免同一站因大小寫被當兩座 → 重複連線（審查 L7）。
+  try {
+    const parsed = new URL(u);
+    parsed.protocol = parsed.protocol.toLowerCase();
+    parsed.hostname = parsed.hostname.toLowerCase();
+    return parsed.toString().replace(/\/+$/, "");
+  } catch {
+    return u;
+  }
 }
 
 /** 以真實 WebSocket 連上 relay 的連接器，含指數退避自動重連與狀態回報。 */

@@ -16,9 +16,20 @@ export type TranslateParams = Record<string, string | number>;
 // 內建語系（catalog）優先；未命中才查執行期註冊；仍無則回退預設。
 const runtimeCatalog: Record<string, Messages> = {};
 
-/** 註冊執行期語系包（K3）；`code` 為 BCP-47 之類的語系碼，`messages` 需完整覆蓋 `Messages`。 */
-export function registerLocale(code: string, messages: Messages): void {
+/**
+ * 註冊執行期語系包（K3）；`code` 為 BCP-47 之類的語系碼，`messages` 需完整覆蓋 `Messages`。
+ * 回傳是否註冊成功：撞到內建語系（其優先度較高、註冊會無效）時回 `false` 並警告，
+ * 讓社群開發者立刻知道包沒生效，而非靜默 no-op（審查 L5）。
+ */
+export function registerLocale(code: string, messages: Messages): boolean {
+  if (code in catalog) {
+    if (typeof console !== "undefined") {
+      console.warn(`registerLocale: "${code}" 與內建語系衝突，內建優先、此註冊無效`);
+    }
+    return false;
+  }
   runtimeCatalog[code] = messages;
+  return true;
 }
 
 /** 目前可用的語系碼（內建＋執行期註冊）。 */

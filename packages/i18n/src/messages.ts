@@ -19,6 +19,7 @@ export interface Messages {
   signIn_hint2: string;
   signIn_relayUsing: string;
   signIn_relayDemo: string;
+  signIn_relayProbing: string;
   signIn_relayChange: string;
   signIn_relayHide: string;
   signIn_displayName: string;
@@ -179,6 +180,7 @@ export interface Messages {
   rescue_busy: string;
   rescue_back: string;
   rescue_error: string;
+  rescue_resetOk: string;
   settings_backupCode: string;
   settings_backupCodeHint: string;
   settings_backupCodePw: string;
@@ -317,6 +319,7 @@ const zhHant: Messages = {
   signIn_hint2: "本示範會在記憶體中模擬中繼站與幾位好友，方便你體驗。",
   signIn_relayUsing: "將連線到 {host}",
   signIn_relayDemo: "示範模式（不連真實網路）",
+  signIn_relayProbing: "正在挑選中繼站…",
   signIn_relayChange: "使用其他中繼站",
   signIn_relayHide: "使用預設中繼站",
   signIn_displayName: "顯示名稱",
@@ -477,6 +480,7 @@ const zhHant: Messages = {
   rescue_busy: "救援中…",
   rescue_back: "返回",
   rescue_error: "私鑰／備份碼不符，或此身分沒有救援資料。",
+  rescue_resetOk: "密碼已重設成功，但自動解鎖失敗。請重新啟動 App，以新密碼登入。",
   settings_backupCode: "產生加密備份碼",
   settings_backupCodeHint: "備份碼＝密碼加密的私鑰＋你的中繼站網址，印出或存到自選位置。換機時「新增身分→貼上備份碼＋密碼」即可還原。忘記備份密碼＝這份備份失效。",
   settings_backupCodePw: "備份密碼",
@@ -615,6 +619,7 @@ const en: Messages = {
   signIn_hint2: "This demo simulates a relay and a few buddies in memory so you can try it out.",
   signIn_relayUsing: "Will connect to {host}",
   signIn_relayDemo: "Demo mode (not connected to a real network)",
+  signIn_relayProbing: "Picking a relay…",
   signIn_relayChange: "Use a different relay",
   signIn_relayHide: "Use the default relay",
   signIn_displayName: "Display name",
@@ -775,6 +780,7 @@ const en: Messages = {
   rescue_busy: "Recovering…",
   rescue_back: "Back",
   rescue_error: "Key/backup code doesn't match, or this identity has no rescue data.",
+  rescue_resetOk: "Password was reset, but auto-unlock failed. Restart the app and sign in with the new password.",
   settings_backupCode: "Create encrypted backup code",
   settings_backupCodeHint: "The backup code is your password-encrypted key plus your relay URL — print it or store it anywhere you choose. To restore on a new device: Add identity → paste the code + password. A forgotten backup password makes this backup unusable.",
   settings_backupCodePw: "Backup password",

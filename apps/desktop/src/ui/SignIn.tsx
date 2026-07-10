@@ -91,6 +91,8 @@ export function SignIn({
   const [showRelay, setShowRelay] = useState(false);
   // 使用者已動過 relay 欄（展開或編輯）→ 自動選座的慢 probe 不再覆寫（審查 L2）。
   const relayTouched = useRef(false);
+  // 自動選座進行中：顯示「挑選中…」而非誤導的「示範模式」（審查 L3）。
+  const [probing, setProbing] = useState(false);
   const relayHost = hostOf(relay);
   // 配對匯入（新機）：貼上載荷 → 顯示 SAS 供與舊機比對 → 舊機確認後自動完成。
   const [pairOpen, setPairOpen] = useState(false);
@@ -115,16 +117,21 @@ export function SignIn({
     const candidates = autoRelayCandidates(ANCHOR_RELAYS, Math.random);
     if (candidates.length === 0) return;
     let cancelled = false;
+    setProbing(true);
     void (async () => {
-      for (const url of candidates) {
-        const ok = await probeRelay(url, 3000);
-        if (cancelled || relayTouched.current) return; // 使用者已動過欄位（含刻意清空）→ 不覆寫
-        if (ok) {
-          setRelay((cur) => cur || url);
-          return;
+      try {
+        for (const url of candidates) {
+          const ok = await probeRelay(url, 3000);
+          if (cancelled || relayTouched.current) return; // 使用者已動過欄位（含刻意清空）→ 不覆寫
+          if (ok) {
+            setRelay((cur) => cur || url);
+            return;
+          }
         }
+        if (!cancelled && !relayTouched.current) setRelay((cur) => cur || candidates[0] || ""); // 全滅仍給首選
+      } finally {
+        if (!cancelled) setProbing(false);
       }
-      if (!cancelled && !relayTouched.current) setRelay((cur) => cur || candidates[0] || ""); // 全滅仍給首選
     })();
     return () => {
       cancelled = true;
@@ -174,7 +181,11 @@ export function SignIn({
           ) : (
             <p className="hint signin__relayline">
               <span data-testid="relay-status">
-                {relayHost ? t("signIn_relayUsing", { host: relayHost }) : t("signIn_relayDemo")}
+                {relayHost
+                  ? t("signIn_relayUsing", { host: relayHost })
+                  : probing
+                    ? t("signIn_relayProbing")
+                    : t("signIn_relayDemo")}
               </span>
               <button
                 type="button"

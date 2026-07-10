@@ -83,7 +83,7 @@ import { applyPairBundle } from "@cinder/engine";
 import { PairDeviceModal, type PairPhase } from "./ui/PairDeviceModal.js";
 import { SettingsPanel } from "./ui/SettingsPanel.js";
 import { RELAY_URL_KEY, SignIn } from "./ui/SignIn.js";
-import { UnlockScreen } from "./ui/UnlockScreen.js";
+import { RESCUE_RESET_OK, UnlockScreen } from "./ui/UnlockScreen.js";
 import { SummaryModal } from "./ui/SummaryModal.js";
 import "./ui/msn.css";
 
@@ -632,10 +632,18 @@ export function App(): JSX.Element {
   const rescue = async (nsec: string, newPassword: string): Promise<boolean> => {
     const p = lockedProfile;
     if (!p) return false;
+    // passRescue 失敗＝nsec／備份碼不符或無救援資料 → 讓上層報「救援失敗」（回 false）。
+    let key: string;
     try {
-      return await enterWithNsec(p, await passRescue(p.namespace, p.pubkey, nsec, newPassword));
+      key = await passRescue(p.namespace, p.pubkey, nsec, newPassword);
     } catch {
       return false;
+    }
+    // 密碼此刻已重設成功；後續自動進入若失敗屬另一類問題，不能誤報「救援失敗」（審查 F3）。
+    try {
+      return await enterWithNsec(p, key);
+    } catch {
+      throw new Error(RESCUE_RESET_OK);
     }
   };
 

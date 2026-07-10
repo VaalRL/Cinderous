@@ -6,9 +6,13 @@ import { TitleControls } from "./TitleControls.js";
 
 /**
  * 救援結果（ADR-0073）：以 nsec 解開資料金鑰、設新密碼、救回舊本地資料。
- * 回 true＝成功（外層接手建後端）；throw＝失敗（nsec 不符/無救援資料）。
+ * 回 true＝成功（外層接手建後端）；回 false＝救援失敗（nsec 不符/無救援資料）；
+ * throw `RESCUE_RESET_OK`＝密碼已重設成功但自動進入失敗（審查 F3，須提示重新登入而非報失敗）。
  */
 export type RescueFn = (nsec: string, newPassword: string) => Promise<boolean>;
+
+/** 密碼已重設、僅自動解鎖失敗的哨符錯誤訊息（App.rescue → RescuePanel 區分用）。 */
+export const RESCUE_RESET_OK = "RESCUE_RESET_OK";
 
 /**
  * 解鎖畫面（H4，ADR-0067）：作用中身分啟用本地密碼時，開機先驗密碼再建後端。
@@ -102,8 +106,9 @@ function RescuePanel({ name, onRescue, onBack }: { name: string; onRescue: Rescu
           setError(t("rescue_error"));
           setBusy(false);
         }
-      } catch {
-        setError(t("rescue_error"));
+      } catch (e) {
+        // 密碼已重設、僅自動進入失敗 → 提示重新登入，而非誤報救援失敗（審查 F3）。
+        setError((e as Error)?.message === RESCUE_RESET_OK ? t("rescue_resetOk") : t("rescue_error"));
         setBusy(false);
       }
     }, 0);
