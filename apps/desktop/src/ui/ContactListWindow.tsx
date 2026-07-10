@@ -567,9 +567,10 @@ function ContactRow({
   onSummarize?: ((pubkey: string) => void) | undefined;
 }): JSX.Element {
   const { t } = useI18n();
-  const secondary = contact.nowPlaying
-    ? <span className="np">♪ {contact.nowPlaying}</span>
-    : renderStatus(contact.statusMessage);
+  // 精簡單行清單（UI 改善）：次要狀態不再佔一行，改進 title 供滑鼠停留檢視。
+  const secondaryText = contact.nowPlaying?.trim()
+    ? `♪ ${contact.nowPlaying}`
+    : contact.statusMessage?.trim() ?? "";
   const remove = () => {
     if (window.confirm(t("contact_removeConfirm", { name: contact.name }))) onRemove?.(contact.pubkey);
   };
@@ -578,15 +579,12 @@ function ContactRow({
   };
   return (
     <div
-      className={`contact ${contact.status === "offline" ? "offline" : ""}`}
+      className={`contact contact--compact ${contact.status === "offline" ? "offline" : ""}`}
       onDoubleClick={() => onOpen(contact.pubkey)}
-      title={hint}
+      title={secondaryText || hint}
     >
-      <div className={`avatar sm ring-${contact.status}`} style={{ background: avatarColor(contact.pubkey) }}>{initial(contact.name)}</div>
-      <div className="contact__info">
-        <div className="contact__name">{contact.name}</div>
-        <div className="contact__msg">{secondary}</div>
-      </div>
+      <span className={`dot ${contact.status}`} />
+      <span className="contact__name">{contact.name}</span>
       {unread > 0 ? (
         <span className="unread-badge" title={t("unread_title", { count: unread })}>{unread}</span>
       ) : null}
@@ -608,7 +606,6 @@ function ContactRow({
           <button className="contact__act" title={t("contact_remove")} onClick={remove}>🗑</button>
         ) : null}
       </span>
-      <span className={`dot ${contact.status}`} />
     </div>
   );
 }

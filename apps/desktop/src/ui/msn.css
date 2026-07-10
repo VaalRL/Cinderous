@@ -215,6 +215,10 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
 .contact.blocked .contact__name { opacity: 0.6; }
 .contact.blocked .contact__act { display: inline-flex; }
 .unread-badge { flex: none; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px; background: #e0483d; color: #fff; font-size: 10px; font-weight: 700; line-height: 16px; text-align: center; }
+/* 精簡單行聯絡人列（UI 改善）：前導狀態圓點＋名稱＋未讀單行；動作鈕沿用 .contact__acts 的 hover 浮出。 */
+.contact--compact { padding: 4px 10px; }
+.contact--compact .contact__name { flex: 1; }
+.contact--compact.offline .dot { opacity: 0.55; }
 .connbar { padding: 4px 10px; font-size: 11px; text-align: center; color: #fff; }
 .connbar--connecting { background: #d9932b; }
 .connbar--offline { background: #c0392b; }
