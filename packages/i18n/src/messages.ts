@@ -17,6 +17,10 @@ export interface Messages {
   signIn_title: string;
   signIn_hint: string;
   signIn_hint2: string;
+  signIn_relayUsing: string;
+  signIn_relayDemo: string;
+  signIn_relayChange: string;
+  signIn_relayHide: string;
   signIn_displayName: string;
   signIn_relayUrl: string;
   signIn_button: string;
@@ -311,6 +315,10 @@ const zhHant: Messages = {
   signIn_title: "登入 Cinder",
   signIn_hint: "去中心化、端到端加密的即時通。輸入顯示名稱即可開始（你的身分是本機生成的 secp256k1 金鑰）。",
   signIn_hint2: "本示範會在記憶體中模擬中繼站與幾位好友，方便你體驗。",
+  signIn_relayUsing: "將連線到 {host}",
+  signIn_relayDemo: "示範模式（不連真實網路）",
+  signIn_relayChange: "使用其他中繼站",
+  signIn_relayHide: "使用預設中繼站",
   signIn_displayName: "顯示名稱",
   signIn_relayUrl: "中繼站網址（留空使用示範模式）",
   signIn_button: "登入",
@@ -605,6 +613,10 @@ const en: Messages = {
   signIn_title: "Sign in to Cinder",
   signIn_hint: "A decentralized, end-to-end encrypted messenger. Just enter a display name to start (your identity is a secp256k1 key generated on this device).",
   signIn_hint2: "This demo simulates a relay and a few buddies in memory so you can try it out.",
+  signIn_relayUsing: "Will connect to {host}",
+  signIn_relayDemo: "Demo mode (not connected to a real network)",
+  signIn_relayChange: "Use a different relay",
+  signIn_relayHide: "Use the default relay",
   signIn_displayName: "Display name",
   signIn_relayUrl: "Relay URL (leave blank for demo mode)",
   signIn_button: "Sign in",

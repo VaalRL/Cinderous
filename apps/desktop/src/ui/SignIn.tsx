@@ -65,6 +65,17 @@ function initialRelay(): string {
   }
 }
 
+/** 取 relay 網址的主機名（去掉 wss:// 與路徑）供簡潔顯示；解析失敗回原字串。 */
+export function hostOf(url: string): string {
+  const u = url.trim();
+  if (!u) return "";
+  try {
+    return new URL(u).host;
+  } catch {
+    return u.replace(/^wss?:\/\//i, "").replace(/\/.*$/, "");
+  }
+}
+
 export function SignIn({
   onSignIn,
   onPair,
@@ -76,6 +87,9 @@ export function SignIn({
   const { t } = useI18n();
   const [name, setName] = useState("");
   const [relay, setRelay] = useState(initialRelay);
+  // relay 欄預設收起（已自動填好預設站）；點「使用其他中繼站」才展開輸入（ADR-0069）。
+  const [showRelay, setShowRelay] = useState(false);
+  const relayHost = hostOf(relay);
   // 配對匯入（新機）：貼上載荷 → 顯示 SAS 供與舊機比對 → 舊機確認後自動完成。
   const [pairOpen, setPairOpen] = useState(false);
   const [pairCode, setPairCode] = useState("");
@@ -138,13 +152,30 @@ export function SignIn({
             onKeyDown={(e) => e.key === "Enter" && submit()}
             placeholder={t("signIn_displayName")}
           />
-          <input
-            aria-label={t("signIn_relayUrl")}
-            value={relay}
-            onChange={(e) => setRelay(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && submit()}
-            placeholder={t("signIn_relayUrl")}
-          />
+          {showRelay ? (
+            <div className="signin__relay" data-testid="relay-field">
+              <input
+                aria-label={t("signIn_relayUrl")}
+                value={relay}
+                onChange={(e) => setRelay(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && submit()}
+                placeholder={t("signIn_relayUrl")}
+                autoFocus
+              />
+              <button type="button" className="signin__relaytoggle" data-testid="relay-hide" onClick={() => setShowRelay(false)}>
+                {t("signIn_relayHide")}
+              </button>
+            </div>
+          ) : (
+            <p className="hint signin__relayline">
+              <span data-testid="relay-status">
+                {relayHost ? t("signIn_relayUsing", { host: relayHost }) : t("signIn_relayDemo")}
+              </span>
+              <button type="button" className="signin__relaytoggle" data-testid="relay-change" onClick={() => setShowRelay(true)}>
+                {t("signIn_relayChange")}
+              </button>
+            </p>
+          )}
           <button onClick={submit}>{t("signIn_button")}</button>
           <p className="hint">{t("signIn_hint2")}</p>
 

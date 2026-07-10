@@ -123,6 +123,16 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
   border-radius: 6px; padding: 7px 16px; font-size: 13px; font-weight: 600; cursor: pointer;
 }
 .signin .hint { color: var(--muted); font-size: 12px; margin-top: 10px; }
+.signin__relayline {
+  display: flex; align-items: center; justify-content: center; gap: 8px; flex-wrap: wrap;
+}
+.signin__relay { display: flex; flex-direction: column; align-items: stretch; }
+.signin__relaytoggle {
+  background: none; border: none; padding: 0; margin: 2px auto 0;
+  color: var(--accent, #2f9e44); font-size: 12px; font-weight: 600; cursor: pointer;
+  text-decoration: underline; text-underline-offset: 2px; width: auto;
+}
+.signin__relaytoggle:hover { opacity: .8; }
 
 /* ── 聯絡人清單 ── */
 .contacts { width: 300px; display: flex; flex-direction: column; max-height: 80vh; }
