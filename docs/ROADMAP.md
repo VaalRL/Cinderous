@@ -203,8 +203,8 @@
 | --- | --- | --- | --- |
 | K1 | 前端開發指南（零程式） | 🌐 | ✅ **完成**：`docs/前端開發指南_Frontend-Guide.md`——三層心智模型、重用 core/i18n、實作/消費 `ChatBackend` 三步、介面速查、`apps/mobile` 活範本、主題/i18n、AGPL 含意。 |
 | K2 | 抽 `@cinder/engine` | 🌐 | ✅ **完成**：新 workspace 套件 `@cinder/engine`——整組上移 `backend/`（ChatBackend/DTO/RelayChatBackend/BrowserChatBackend/connector/WebRTC/配對）＋`storage/`（AppStorage/LocalStorage/MemoryStorage/profiles/快照）。依賴方向 `engine→relay→core` 無環；平台基質（TauriStorage/keyvault）留 desktop 經介面注入。desktop 12 檔改接、**mobile 新增 `chat.ts` 用 `BrowserChatBackend` 驅動——跨前端重用已實證**。零測試遺失（engine 104＋desktop 234＝原 338）；全 workspace typecheck 綠。 |
-| K3 | 執行期語系/主題包（選配） | 🌐 | 📋 `Locale` 放寬為可註冊、主題資料驅動，社群 drop-in 語系/配色免重編。 |
-| K4 | 前端外掛/插槽（選配，另立 ADR） | 🌐 | 📋 第三方在同一 app 注入自訂 UI（不 fork）；涉第三方程式碼載入的安全邊界，單獨立 ADR。 |
+| K3 | 執行期語系/主題包（選配） | 🌐 | 🔧 **縫已預留**：`@cinder/i18n` 加 `registerLocale`/`availableLocales`（執行期語系包、免重編，8 測試綠）；主題已 token 化（`--accent`＋`data-theme`）為配色縫。完整「drop-in 包載入器/市集」待需求。 |
+| K4 | 前端外掛/插槽（選配，另立 ADR） | 🌐 | 🔧 **縫已預留**：`@cinder/engine` 加 `registerExtension`/`getExtension`/`listExtensions`（行程內第一方註冊表，實驗性）。**第三方/遠端程式碼載入的沙箱與信任邊界待 K4 專屬 ADR**，尚未實作。 |
 
 **完成定義**：社群裝 core/i18n/engine 三套件、實作 `ChatBackend` 前端即可運作；`apps/mobile` 接上後端為活範本。
 

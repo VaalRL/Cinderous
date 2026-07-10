@@ -136,9 +136,29 @@ backend.setStatus("online", "在忙");
 
 ## 7. 加語言（i18n）
 
-`@cinder/i18n` 的 `Locale` 目前是固定 union（`"en" | "zh-Hant"`），`Messages` 是固定 key 集合。新增語言＝在 `packages/i18n/src/messages.ts` 加一份完整訊息物件並擴充 union，然後重編譯。
+兩種方式：
 
-> 「丟一個 JSON 就能加語言」的執行期語系包是 Phase K3 的選配，尚未實作。
+- **執行期語系包（K3 縫已預留）**：不改核心、不重編譯——`registerLocale("ja", { …完整 Messages })` 即可，之後 `translate("ja", key)` 生效，未覆蓋的鍵自動回退預設語系。`availableLocales()` 列出目前可用語系。
+- **內建語系**：把語言加進 `packages/i18n/src/messages.ts` 並擴充 `Locale` union，送 PR 成為官方語系。
+
+```ts
+import { registerLocale, availableLocales, createT } from "@cinder/i18n";
+registerLocale("ja", { /* 完整 Messages 物件 */ });
+const t = createT("ja");
+```
+
+---
+
+## 7.5 做擴充（K4 縫，實驗性）
+
+`@cinder/engine` 預留了行程內、第一方的擴充註冊縫：
+
+```ts
+import { registerExtension, listExtensions } from "@cinder/engine";
+const off = registerExtension({ id: "my.renderer", name: "自訂訊染" /* …你的能力 */ });
+```
+
+> ⚠️ **載入第三方/遠端程式碼的機制尚未實作**——涉及沙箱與信任邊界，將由 K4 專屬 ADR 定案。目前僅供自家程式組合。
 
 ---
 

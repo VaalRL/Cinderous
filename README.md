@@ -67,15 +67,27 @@ M1–M5 的**核心邏輯已實作並通過測試**（pnpm monorepo、TypeScript
 - **使用者教學**（給一般使用者：身分與鑰匙、加好友、本地密碼、換裝置三條路、搬家、常見問題）：見 [`docs/使用手冊_User-Guide.md`](./docs/使用手冊_User-Guide.md)。
 - **前端開發指南**（給社群開發者：三層架構、重用 core/i18n、消費 `ChatBackend` 接自己的 UI、AGPL）：見 [`docs/前端開發指南_Frontend-Guide.md`](./docs/前端開發指南_Frontend-Guide.md)（ADR-0074）。
 
-## 開發指令
+## 開發起始步驟（Getting Started）
 
-需求：Node 22+、pnpm 10+（Rust 測試另需 stable toolchain）。
+需求：**Node 22+**、**pnpm 10+**（Rust 測試另需 stable toolchain）。
 
 ```bash
-pnpm install            # 安裝 workspace 相依
-pnpm -r test            # 所有 TS 測試（core / relay / desktop）
-pnpm -r typecheck       # 所有套件型別檢查
+# 1. 取得原始碼並安裝 workspace 相依
+git clone https://github.com/VaalRL/Nostr-buddy.git cinder && cd cinder
+pnpm install
+
+# 2. 驗證環境（全綠代表就緒）
+pnpm -r test            # 全部 TS 測試（core / engine / i18n / relay / desktop / mobile）
+pnpm -r typecheck       # 全部型別檢查
+
+# 3. 起本機真實 relay，再跑桌面前端（瀏覽器開發、不需 Tauri）
+pnpm --filter @cinder/relay build:dev && pnpm --filter @cinder/relay dev   # ws://localhost:8787
+pnpm --filter @cinder/desktop dev                                          # 前端；開 /?relay=ws://localhost:8787
 ```
+
+> **想接自己的前端、加語言、做擴充或貢獻核心？** 開發者入口見 [`.github/CONTRIBUTING.md`](./.github/CONTRIBUTING.md)（三層架構、環境、參與方式、規範），接前端的完整教學見 [`docs/前端開發指南_Frontend-Guide.md`](./docs/前端開發指南_Frontend-Guide.md)。
+
+### 常用指令
 
 | 任務 | 指令 |
 | --- | --- |
