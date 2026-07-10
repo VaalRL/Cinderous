@@ -71,7 +71,7 @@
 | C1 | 離線留言持久化 | ✅ **核心完成（ADR-0056）**：改用 **DO 內建 SQLite**（同步，免 D1 async 摩擦、免額外 binding）。`OfflineStore` 介面＋`SqlMessageStore`（NIP-40 過期/每收件人 cap/`#p` 索引/matchFilter，以 `node:sqlite` headless 測 6 項）＋`RelayRoom` DO 接線。⏳ 使用者 `wrangler deploy` 後驗離線收送。 |
 | C2 | NIP-40 排程 prune | ✅ **完成**：`RelayRoom` DO 每小時 `alarm()` → `store.prune()` 清過期留言並重排（DO 休眠仍被喚醒）；建構時若無 alarm 即排程。`prune` 邏輯已測（C1）；alarm 觸發為執行期，`wrangler deploy` 後生效。 |
 | C3 | NIP-42 AUTH | ✅ **完成（ADR-0057）**：`RelayCore.requireAuth`（連線挑戰、驗 kind 22242、發布/讀取閘門、`#p` 收件匣只准本人）＋ `RelayClient` 自動回應挑戰（`authSigner`）＋認證後重掛訂閱（`onAuthenticated`，解「訂閱早於認證」）＋後端接線＋**worker 啟用**。core/relay/desktop 共 14+ 測試（含 requireAuth 下兩端仍能對話）。⏳ 真線上驗（`wrangler deploy` 後）。 |
-| C4 | 部署與容量校準 | 🔧 **已部署上線**（`cinder-relay.…workers.dev`，含 C1–C3）＋**WebSocket 休眠化降 duration**＋免費層量級模型（ADR-0059）。⏳ 待真實流量實測請求數校準、回填 `docs/adr/0006`。 |
+| C4 | 部署與容量校準 | 🔧 **已部署上線**（`cinder-relay.…workers.dev`，含 C1–C3、ADR-0065 TTL 上限、ADR-0071 快照 kind；最近部署 2026-07-10）＋**WebSocket 休眠化降 duration**＋免費層量級模型（ADR-0059）。⏳ 待真實流量實測請求數校準、回填 `docs/adr/0006`。 |
 
 **完成定義**：公開可用的中繼站，離線留言真正持久化並自動過期。
 
@@ -185,7 +185,7 @@
 
 | # | 任務 | 環境 | 說明 / 驗證 |
 | --- | --- | --- | --- |
-| J1 | relay 端快照 kind | 🌐＋☁️ | ✅ **完成**：`putAddressable`（(kind,pubkey,d) 只留最新、空 content＝purge、單顆 256KB／每 pubkey 5 位址／30 天過期刷新）記憶體版＋DO SQLite 版；RelayCore requireAuth 下快照密文只回作者本人（重放＋即時扇出雙閘門）。⏳ `wrangler deploy` 後線上生效。 |
+| J1 | relay 端快照 kind | 🌐＋☁️ | ✅ **完成並上線（2026-07-10）**：`putAddressable`（(kind,pubkey,d) 只留最新、空 content＝purge、單顆 256KB／每 pubkey 5 位址／30 天過期刷新）記憶體版＋DO SQLite 版；RelayCore requireAuth 下快照密文只回作者本人（重放＋即時扇出雙閘門）。生產實測：取代語意、purge 零殘留、他人讀不到皆通過。 |
 | J2 | 客戶端快照發佈 | 🌐 | ✅ **完成**：三檔內容組裝（完整＝＋近期訊息上限 500）＋NIP-44 加密給自己＋開機/30 分檢查（內容有變＋每日至多一次節流）＋`publishSnapshotNow`；關閉時 purge。 |
 | J3 | 新裝置還原合併 | 🌐 | ✅ **完成**：接收合併恆開（換機還原零前置）——交換律合併（封鎖聯集優先、補缺不覆蓋、訊息 id 去重由舊到新）＋UI 歷史重放＋模式隨快照傳播（本機未設定時採用）。E2E：換機秒級還原；側錄者只見密文。**注意**：封鎖聯集具破壞性——他機的封鎖合併進來時，與本機封鎖行為一致地連該聯絡人的本機歷史一起刪（安全優先，審查記錄 #7）。 |
 | J4 | 設定 UI＋政策 | 🌐 | ✅ **完成**：設定面板三檔選擇＋切關確認即 purge＋立即備份＋誠實文案；企業政策 `disableCloudBackup`（名冊採用即停發佈、UI 隱藏）。模式跨裝置 LWW 同步待 D4b delta 通道（快照還原時已帶模式）。 |
@@ -218,7 +218,7 @@ Phase A（前端產品化，可在此環境大量推進）
 此環境（🌐）**不需新決策就能做的規劃項目已全數完成**（Phase A/E 全部、G0–G4、M8 來電鈴聲、Cinder 更名）。往下推進需要：
 
 1. ~~已定案、可直接施工：Phase H~~ ✅ **H1–H3 完成、H4 核心完成**（ADR-0066/0067）——僅餘 H4 的 Tauri 實機驗證（`tauri:dev` 跑解鎖全流程）。
-2. ~~H5／H6／Phase J／Phase I~~ ✅ **全數完成**（ADR-0068/0069/0070/0071）。剩兩件營運事項：`wrangler deploy`（relay 端快照上線）＋錨點前提（OPERATOR-TODO §A，Phase I 實效）。
+2. ~~H5／H6／Phase J／Phase I~~ ✅ **全數完成**（ADR-0068/0069/0070/0071），**relay 端已 `wrangler deploy` 上線並實測**（2026-07-10）。剩一件營運事項：錨點前提（OPERATOR-TODO §A，Phase I 實效）。
 3. ~~D4a 桌面配對克隆~~ ✅ **完成（ADR-0072）**——僅餘 RTC 直連實機驗證（可與 H4 解鎖驗證同一趟 `tauri:dev`）。
 4. **需你決策**：G5 SSO/元資料稽核（等企業試點）；D4b 即時 delta 通道（D4a 用起來後評估）；M7 語音離線退回已暫緩（2026-07-10）。
 3. **需換環境**：Phase B（Tauri 打包＋OS 金鑰庫）、Phase C（Cloudflare relay 部署＋D1＋NIP-42 AUTH）、Phase D（React Native 行動端＋QR 相機掃描）、通話 TURN 部署、F4 第三方稽核。

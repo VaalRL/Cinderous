@@ -65,7 +65,7 @@ export const MAINTAINER_PUBKEY = "你的維護者公鑰 hex（64 字元）";
 | 項目 | 需要 | 對應 | 現況 |
 | --- | --- | --- | --- |
 | 中繼站生產部署 | Cloudflare 帳號、`wrangler deploy`、D1 綁定、NIP-42 AUTH | Phase C（C1–C4） | 程式/測試已備，離線留言待接 D1 |
-| **雲端快照上線** | `wrangler deploy`（addressable 表與取代語意隨部署生效） | Phase J（ADR-0071） | 程式/測試已備。**企業自架 relay 注意**：若有設 `allowedKinds`（G2 政策），需把快照 kind **30078** 加入名單，否則政策允許備份時 relay 仍會默默拒收 |
+| **雲端快照上線** | ~~`wrangler deploy`~~ ✅ **已部署（2026-07-10）** | Phase J（ADR-0071） | 生產已上線並實測：取代語意（同 `d` 只留最新）、purge 零殘留、**隱私閘門**（他人已認證仍讀不到你的快照）皆通過。**企業自架 relay 注意**：若有設 `allowedKinds`（G2 政策），需把快照 kind **30078** 加入名單，否則政策允許備份時 relay 仍會默默拒收 |
 | Tauri 桌面**簽章/自動更新** | Windows 程式碼簽章憑證（Authenticode）；（更新用）updater 金鑰＋更新託管端點 | Phase B ③ | B1 殼/B5 金鑰庫/B6 安裝檔/系統匣背景皆已 **Windows 實機完成**；僅剩**未簽章**（SmartScreen 警告）＋無自動更新，步驟見下方 §B-Tauri |
 | 行動端 + QR 相機掃描 | React Native 工具鏈、APNs/FCM 憑證、相機權限 | Phase D、M9 | 大量重用 core/i18n；QR 產生已完成、掃描待 RN |
 | **企業強制 TURN 真機驗證** | 部署 TURN 伺服器、把 `turnServers` 填入 `RelayPoolOptions` | G2（ADR-0048） | `forceTurn`→`iceTransportPolicy:"relay"` 程式已接（`buildRtcConfig`），缺 TURN 才能實測；同時作為通話 NAT 保底 |
