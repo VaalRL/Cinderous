@@ -9,10 +9,10 @@
 // GitHub Actions（.github/workflows/relay-health.yml）只是產生/發佈通道，
 // 被入侵也無法偽造清單（簽章驗不過）。詳見 docs/adr/0039。
 
-/** 硬編碼錨點 relay（填入真實網域，如 "wss://relay.example.tw"）。 */
+/** 硬編碼錨點 relay（恆連保底＋登入自動選座來源，ADR-0039/0069）。 */
 export const ANCHOR_RELAYS: string[] = [
-  // "wss://relay.example.tw",
-  // "wss://relay2.example.tw",
+  "wss://cinder-relay.whoami885.workers.dev", // 生產站（Cloudflare，已部署驗證）
+  // 建議日後再綁一座自架/獨立網域，避免單點故障（ADR-0039 建議 2–3 座）。
 ];
 
 /** 維護者公鑰（hex，64 字元）；發佈簽章 relay 清單者。留空 = 不學帶內清單。 */

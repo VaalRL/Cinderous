@@ -166,3 +166,5 @@ journalctl -u cinder-relay -f   # 看即時日誌
 - 資料庫 `relay.db` 只有密文與過期時間；仍建議放在你信任的機器、限制檔案權限。
 
 有問題或要把 node-relay 打包成更省事的一鍵安裝，回報給維護者即可。
+
+> **不想弄家用網路的開埠/TLS？** 同一個 node-relay 也能一鍵部署到 Zeabur 這類 PaaS（自動 HTTPS/wss、固定網域、免開埠）——見 [`docs/self-hosting-zeabur.md`](./self-hosting-zeabur.md)。

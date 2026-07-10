@@ -2,6 +2,7 @@
 // （例如樹莓派）長駐執行。離線留言以 Node 內建 SQLite 檔案持久化、預設要求 NIP-42 認證、
 // 每小時清除過期留言（對應 Cloudflare 版的 DO alarm）。設定與對外方式見
 // docs/self-hosting-raspberry-pi.md。
+import { createServer } from "node:http";
 import { createRequire } from "node:module";
 import type { DatabaseSync as DatabaseSyncType } from "node:sqlite";
 import { WebSocketServer, type WebSocket } from "ws";
@@ -35,7 +36,13 @@ const dispatch = (out: Outbound[]): void => {
   for (const { to, message } of out) sockets.get(to)?.send(JSON.stringify(message));
 };
 
-const wss = new WebSocketServer({ port });
+// 掛在 HTTP 伺服器上：一般請求回 200（讓 PaaS/容器健康檢查通過，比照 Cloudflare worker），
+// WebSocket 升級請求交給 ws。純 WS 伺服器對 GET / 不回應會被健康檢查誤判為離線。
+const httpServer = createServer((_req, res) => {
+  res.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
+  res.end("Cinder relay");
+});
+const wss = new WebSocketServer({ server: httpServer });
 wss.on("connection", (ws) => {
   const id = `c${counter++}`;
   sockets.set(id, ws);
@@ -52,4 +59,6 @@ wss.on("connection", (ws) => {
 // 每小時清除已過期留言（NIP-40）；對應 Cloudflare 版的 DO alarm（ADR-0056/0059）。
 setInterval(() => store.prune(Math.floor(Date.now() / 1000)), PRUNE_INTERVAL_MS);
 
-console.log(`Cinder node-relay：ws://0.0.0.0:${port}（DB=${dbPath}, requireAuth=${requireAuth}）`);
+httpServer.listen(port, () => {
+  console.log(`Cinder node-relay：ws://0.0.0.0:${port}（DB=${dbPath}, requireAuth=${requireAuth}）`);
+});

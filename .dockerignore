@@ -1,0 +1,9 @@
+# 容器建置（relay/Dockerfile）用：排除不需進 build context 的體積大戶。
+# pnpm install 會在容器內重裝，故本機 node_modules 與各種產物一律排除。
+**/node_modules
+**/dist
+**/target
+**/.git
+**/.vite
+apps/desktop/src-tauri/target
+**/*.log
