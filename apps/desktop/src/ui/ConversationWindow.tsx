@@ -1,5 +1,5 @@
 import { contentHash, parseMentions, REACTION_EMOJIS } from "@cinder/core";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { type MouseEvent as ReactMouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "../i18n.js";
 import type { CallMedia, MentionCandidate } from "@cinder/core";
 import { applyMention, suggestMentions } from "./mention-suggest.js";
@@ -60,6 +60,9 @@ import { renderMarkdown } from "./markdown.js";
 import { ComposerRewrite } from "./ComposerRewrite.js";
 import { applyEmoticons } from "./emoticons.js";
 import { avatarColor, EMOTICONS, initial } from "./util.js";
+import { EditableAvatar, usePersonalizeTick } from "./Avatar.js";
+import { ChatBgPicker } from "./ChatBgPicker.js";
+import { chatBgCss, getChatBg, getConvoSize, setConvoSize } from "./personalize.js";
 
 /** 送達/已讀狀態的 i18n 標籤（ADR-0058）。 */
 const MSG_STATUS_KEY: Record<MessageStatus, MessageKey> = {
@@ -210,6 +213,45 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
   const logRef = useRef<HTMLDivElement>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  // 本地個人化（ADR-0077）：訂閱變更以即時反映背景/頭像；背景套用到訊息區。
+  usePersonalizeTick();
+  const chatBg = chatBgCss(getChatBg(contact.pubkey));
+
+  // O1 對話框縮放：掛載時套用全域尺寸偏好（ADR-0077）。
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el) return;
+    const saved = getConvoSize();
+    if (saved) {
+      el.style.width = `${saved.w}px`;
+      el.style.height = `${saved.h}px`;
+    }
+  }, []);
+  // 右下角把手拖曳縮放：夾在 min/max，放開時持久化為全域偏好。
+  const startResize = (e: ReactMouseEvent): void => {
+    e.preventDefault();
+    const el = rootRef.current;
+    if (!el) return;
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const startW = el.offsetWidth;
+    const startH = el.offsetHeight;
+    const MIN_W = 300;
+    const MIN_H = 320;
+    const MAX_W = 900;
+    const maxH = Math.round(window.innerHeight * 0.92);
+    const onMove = (ev: MouseEvent): void => {
+      el.style.width = `${Math.max(MIN_W, Math.min(MAX_W, startW + ev.clientX - startX))}px`;
+      el.style.height = `${Math.max(MIN_H, Math.min(maxH, startH + ev.clientY - startY))}px`;
+    };
+    const onUp = (): void => {
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      if (el.offsetWidth > 0 && el.offsetHeight > 0) setConvoSize({ w: el.offsetWidth, h: el.offsetHeight });
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  };
 
   // 對話串（ADR-0051）：主頻道排除回覆、彙整各根回覆數；回覆只在右側面板顯示。
   const channel = mainMessages(messages);
@@ -494,6 +536,7 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
             ⎋
           </span>
         ) : null}
+        <ChatBgPicker pubkey={contact.pubkey} />
         <span className="win__btn" onClick={props.onClose} role="button" aria-label={t("convo_close")}>×</span>
       </div>
 
@@ -507,6 +550,7 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
 
       <div
         className={`convo__body ${dragging ? "dropping" : ""}`}
+        {...(chatBg ? { style: { background: chatBg } } : {})}
         onDragOver={(e) => {
           if (!props.onSendFile) return;
           e.preventDefault();
@@ -552,9 +596,9 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
           ))}
         </div>
         <div className="pics">
-          <div className="avatar" style={{ background: avatarColor(contact.pubkey) }}>{initial(contact.name)}</div>
+          <EditableAvatar id={contact.pubkey} name={contact.name} />
           <div className="cap">{contact.name}</div>
-          <div className="avatar" style={{ background: avatarColor(self.pubkey) }}>{initial(self.name)}</div>
+          <EditableAvatar id={self.pubkey} name={self.name} />
           <div className="cap">{self.name}</div>
         </div>
       </div>
@@ -1099,6 +1143,7 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
           </div>
         </div>
       )}
+      <div className="convo__resize" onMouseDown={startResize} data-testid="convo-resize" title={t("convo_resize")} />
     </div>
     {threadRoot !== null ? (
       <div className="win convo thread-panel" data-testid="thread-panel">

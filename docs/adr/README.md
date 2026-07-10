@@ -91,3 +91,4 @@
 | [0074](./0074-frontend-extensibility-engine-package.md) | 社群自訂前端：三層封裝與 @cinder/engine 抽取 | 已接受 |
 | [0075](./0075-containerized-relay-self-hosting.md) | 容器化中繼站自架（Dockerfile＋HTTP 健康端點） | 已接受 |
 | [0076](./0076-desktop-native-notifications.md) | 桌面原生通知（外掛＋點擊回跳＋傳訊者/預覽/音效） | 已接受 |
+| [0077](./0077-local-personalization.md) | 本地個人化（對話框縮放＋本地頭像＋每對話背景） | 已接受 |

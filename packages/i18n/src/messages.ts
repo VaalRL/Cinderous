@@ -100,6 +100,13 @@ export interface Messages {
   convo_composerPlaceholder: string;
   convo_send: string;
   convo_close: string;
+  convo_resize: string;
+  avatar_change: string;
+  avatar_remove: string;
+  personalize_quota: string;
+  chatbg_title: string;
+  chatbg_upload: string;
+  chatbg_clear: string;
   convo_react: string;
   convo_unsend: string;
   convo_showFull: string;
@@ -403,6 +410,13 @@ const zhHant: Messages = {
   convo_composerPlaceholder: "輸入訊息…（Enter 送出，Shift+Enter 換行）",
   convo_send: "送出",
   convo_close: "關閉",
+  convo_resize: "拖曳調整大小",
+  avatar_change: "更換頭像",
+  avatar_remove: "移除頭像",
+  personalize_quota: "圖片太大，本機儲存空間不足，請換小一點的圖。",
+  chatbg_title: "對話背景",
+  chatbg_upload: "上傳圖片",
+  chatbg_clear: "清除背景",
   convo_react: "回應",
   convo_unsend: "收回",
   convo_showFull: "展開全文",
@@ -706,6 +720,13 @@ const en: Messages = {
   convo_composerPlaceholder: "Type a message… (Enter to send, Shift+Enter for newline)",
   convo_send: "Send",
   convo_close: "Close",
+  convo_resize: "Drag to resize",
+  avatar_change: "Change avatar",
+  avatar_remove: "Remove avatar",
+  personalize_quota: "Image too large for local storage — please pick a smaller one.",
+  chatbg_title: "Chat background",
+  chatbg_upload: "Upload image",
+  chatbg_clear: "Clear background",
   convo_react: "React",
   convo_unsend: "Unsend",
   convo_showFull: "Show full message",

@@ -160,6 +160,27 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
   display: grid; place-items: center; color: #fff; font-weight: 700; font-size: 18px; flex: none;
 }
 .avatar.sm { width: 30px; height: 30px; font-size: 13px; border-width: 1px; border-radius: 5px; }
+/* 本地個人化（ADR-0077）：可編輯頭像小選單 ＋ 背景挑選器彈窗。 */
+.avatar--edit { cursor: pointer; }
+.avatar-wrap { position: relative; display: inline-flex; }
+.avatar-menu {
+  position: absolute; top: calc(100% + 4px); left: 0; z-index: 30; min-width: 104px;
+  background: var(--field); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 6px 18px rgba(0,0,0,.2);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.avatar-menu button { text-align: left; padding: 6px 10px; background: none; border: none; color: var(--ink); font: inherit; cursor: pointer; }
+.avatar-menu button:hover { background: var(--hover); }
+.bgpick { position: relative; display: inline-flex; }
+.bgpick__menu {
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: 30; width: 176px;
+  background: var(--field); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.22); padding: 8px;
+}
+.bgpick__grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; }
+.bgpick__swatch { height: 30px; border-radius: 6px; border: 2px solid transparent; cursor: pointer; padding: 0; }
+.bgpick__swatch.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.bgpick__row { display: flex; gap: 6px; margin-top: 8px; }
+.bgpick__row button { flex: 1; padding: 5px 6px; font-size: 12px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); color: var(--ink); cursor: pointer; }
+.bgpick__row button:hover { background: var(--hover); }
 .me__info { flex: 1; min-width: 0; }
 .me__name { font-weight: 700; display: flex; align-items: center; gap: 6px; color: var(--ink); }
 .me__name-txt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; }
@@ -439,7 +460,13 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
 .dot.offline { background: #b8c2d0; }
 
 /* ── 對話視窗 ── */
-.convo { width: 380px; display: flex; flex-direction: column; height: 460px; }
+/* 對話框可滑鼠縮放（ADR-0077 O1）：右下角自訂把手拖曳；尺寸由 JS 持久化為全域偏好。
+   用自訂把手而非 CSS resize，避免 .convo 需 overflow:hidden 而裁掉往上彈的 ➕/AI 面板。 */
+.convo { width: 380px; display: flex; flex-direction: column; height: 460px; position: relative; }
+.convo__resize {
+  position: absolute; right: 0; bottom: 0; width: 15px; height: 15px; z-index: 12; cursor: nwse-resize;
+  background: linear-gradient(135deg, transparent 46%, var(--border) 46%, var(--border) 60%, transparent 60%, transparent 74%, var(--border) 74%, var(--border) 88%, transparent 88%);
+}
 /* 對話串（ADR-0051）：主視窗與右側面板並排（Slack 佈局）。 */
 .convo-dock { display: flex; gap: 8px; align-items: flex-start; }
 .thread-panel { width: 320px; }

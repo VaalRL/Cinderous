@@ -7,6 +7,7 @@ import { CinderMascot } from "./Brand.js";
 import { hasRichStatus, renderStatus } from "./status-text.js";
 import { TitleControls } from "./TitleControls.js";
 import { avatarColor, initial } from "./util.js";
+import { EditableAvatar } from "./Avatar.js";
 
 const STATUS_KEY: Record<Status, MessageKey> = {
   online: "status_online",
@@ -181,7 +182,7 @@ export function ContactListWindow(props: ContactListProps): JSX.Element {
       ) : null}
 
       <div className="me">
-        <div className={`avatar ring-${self.status}`} style={{ background: avatarColor(self.pubkey) }}>{initial(self.name)}</div>
+        <EditableAvatar id={self.pubkey} name={self.name} ring={`ring-${self.status}`} />
         <div className="me__info">
           <div className="me__name">
             <span className="me__name-txt">{self.name}</span>
