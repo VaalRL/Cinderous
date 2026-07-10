@@ -48,6 +48,38 @@ describe("配對信令會合（ADR-0072 D4a-3）", () => {
     s2.close();
   });
 
+  it("NIP-42 競態（實機 E2E 抓到）：認證前送出被 auth-required 拒收，認證完成後自動重送", () => {
+    const { key } = createPairing("", "room");
+    const published: NostrEvent[] = [];
+    let handlers: RelayClientHandlers | undefined;
+    const fakeClient = {
+      publish: (e: NostrEvent) => void published.push(e),
+      subscribe: () => {},
+      unsubscribe: () => {},
+      receive: () => {},
+      close: () => {},
+    };
+    const connector: RelayConnector = (h) => {
+      handlers = h;
+      return fakeClient as never;
+    };
+
+    const signal = createPairingSignal({ key, relayUrl: "wss://r", connector, onMessage: () => {} });
+    signal.send({ t: "offer", sdp: "SDP" });
+    expect(published).toHaveLength(1); // 樂觀送出（開放 relay 直接成功）
+
+    // 生產 relay：尚未認證 → OK false auth-required（原本就此遺失）
+    handlers!.onOk!(published[0]!.id, false, "auth-required: 請先認證（NIP-42）");
+    expect(published).toHaveLength(1); // 尚未重送
+
+    // 認證完成 → 自動重送同一顆信令
+    handlers!.onAuthenticated!(fakeClient as never);
+    expect(published).toHaveLength(2);
+    expect(published[1]!.id).toBe(published[0]!.id);
+    expect(published[1]!.kind).toBe(21003);
+    signal.close();
+  });
+
   it("requireAuth relay：房間金鑰可通過 NIP-42（鑰匙持有即身分），互通不受影響", () => {
     const net = createInMemoryRelayNetwork({ requireAuth: true });
     const { key } = createPairing("", "room");

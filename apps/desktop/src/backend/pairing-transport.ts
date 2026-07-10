@@ -12,6 +12,7 @@
 import {
   buildAuthEvent,
   finalizeEvent,
+  type NostrEvent,
   openSignal,
   PAIR_SIGNAL_KIND,
   type PairTransport,
@@ -29,6 +30,8 @@ function randomHex8(): string {
 const CHUNK_BYTES = 60_000;
 /** 建立連線逾時。 */
 const CONNECT_TIMEOUT_MS = 60_000;
+/** offer 重送間隔：信令為 ephemeral，對端未訂閱時會遺失（實機 E2E 抓到的競態）。 */
+const OFFER_RETRY_MS = 1_500;
 
 export interface PairingSignal {
   send(msg: Record<string, unknown>): void;
@@ -50,6 +53,10 @@ export function createPairingSignal(opts: {
   const subscribe = (client: { subscribe: (id: string, filters: never[]) => void }) => {
     client.subscribe("pair", [{ kinds: [PAIR_SIGNAL_KIND], "#p": [room.pk] } as never]);
   };
+  // NIP-42 競態：連線後、認證前送出的事件會被 relay 以 `auth-required` 拒收。
+  // 信令沒有外送匣可靠層（ADR-0041 只保護 kind 1059），故在此自帶「被拒即認證後重送」。
+  const inFlight = new Map<string, NostrEvent>();
+  const awaitingAuth: NostrEvent[] = [];
   const client = opts.connector({
     onEvent: (_sub, event) => {
       if (event.kind !== PAIR_SIGNAL_KIND || event.pubkey !== room.pk) return;
@@ -57,24 +64,36 @@ export function createPairingSignal(opts: {
       if (!msg || msg.sid === sid) return; // 解不開（非本房）或自己的回音
       opts.onMessage(msg);
     },
+    onOk: (id, accepted, message) => {
+      const evt = inFlight.get(id);
+      if (!evt) return;
+      inFlight.delete(id);
+      if (!accepted && /auth-required/i.test(message)) awaitingAuth.push(evt); // 認證完成後重送
+    },
     authSigner: (challenge) => buildAuthEvent(challenge, opts.relayUrl, room.sk),
-    onAuthenticated: (client) => subscribe(client),
+    onAuthenticated: (client) => {
+      subscribe(client); // 認證前的 REQ 會被 CLOSED，此處重掛
+      for (const evt of awaitingAuth.splice(0)) {
+        inFlight.set(evt.id, evt);
+        client.publish(evt);
+      }
+    },
   });
   subscribe(client);
   return {
     send(msg) {
       const nowSec = Math.floor(Date.now() / 1000);
-      client.publish(
-        finalizeEvent(
-          {
-            kind: PAIR_SIGNAL_KIND,
-            created_at: nowSec,
-            tags: [["p", room.pk]],
-            content: sealSignal(opts.key, { ...msg, sid }),
-          },
-          room.sk,
-        ),
+      const evt = finalizeEvent(
+        {
+          kind: PAIR_SIGNAL_KIND,
+          created_at: nowSec,
+          tags: [["p", room.pk]],
+          content: sealSignal(opts.key, { ...msg, sid }),
+        },
+        room.sk,
       );
+      inFlight.set(evt.id, evt);
+      client.publish(evt);
     },
     close() {
       (client as { close?: () => void }).close?.();
@@ -146,10 +165,15 @@ export function openPairingTransport(opts: {
   return new Promise((resolve, reject) => {
     const pc = new RTCPeerConnection(opts.rtcConfig);
     let settled = false;
-    let offerSeen = false; // 一次性房間：只接第一個 offer
+    let offerRetry: ReturnType<typeof setInterval> | undefined;
+    const stopRetry = () => {
+      if (offerRetry !== undefined) clearInterval(offerRetry);
+      offerRetry = undefined;
+    };
     const fail = (why: string) => {
       if (settled) return;
       settled = true;
+      stopRetry();
       signal.close();
       try {
         pc.close();
@@ -164,6 +188,7 @@ export function openPairingTransport(opts: {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
+        stopRetry();
         signal.close(); // 已直連：會合通道功成身退
         resolve(
           channelTransport(dc, () => {
@@ -176,6 +201,11 @@ export function openPairingTransport(opts: {
         );
       };
     };
+    // ICE candidate 可能早於 remote description 抵達（重送/亂序）；先緩衝、設好再灌入。
+    const pendingCands: RTCIceCandidateInit[] = [];
+    const drainCands = async () => {
+      for (const c of pendingCands.splice(0)) await pc.addIceCandidate(c);
+    };
     const signal = createPairingSignal({
       key: opts.key,
       relayUrl: opts.relayUrl,
@@ -183,16 +213,26 @@ export function openPairingTransport(opts: {
       onMessage: (msg) => {
         void (async () => {
           try {
-            if (opts.role === "source" && msg.t === "offer" && typeof msg.sdp === "string" && !offerSeen) {
-              offerSeen = true;
+            if (opts.role === "source" && msg.t === "offer" && typeof msg.sdp === "string") {
+              // 重送的 offer（新機沒收到 answer）：把既有 answer 再送一次，不重建連線。
+              if (pc.remoteDescription) {
+                if (pc.localDescription) signal.send({ t: "answer", sdp: pc.localDescription.sdp });
+                return;
+              }
               await pc.setRemoteDescription({ type: "offer", sdp: msg.sdp });
               const answer = await pc.createAnswer();
               await pc.setLocalDescription(answer);
               signal.send({ t: "answer", sdp: answer.sdp });
+              await drainCands();
             } else if (opts.role === "target" && msg.t === "answer" && typeof msg.sdp === "string") {
+              if (pc.remoteDescription) return; // 重送的 answer：忽略
+              stopRetry(); // 已收到 answer，停止重送 offer
               await pc.setRemoteDescription({ type: "answer", sdp: msg.sdp });
+              await drainCands();
             } else if (msg.t === "cand" && msg.c) {
-              await pc.addIceCandidate(msg.c as RTCIceCandidateInit);
+              const cand = msg.c as RTCIceCandidateInit;
+              if (pc.remoteDescription) await pc.addIceCandidate(cand);
+              else pendingCands.push(cand);
             }
           } catch (e) {
             fail(`配對信令處理失敗：${String(e)}`);
@@ -209,7 +249,14 @@ export function openPairingTransport(opts: {
         try {
           const offer = await pc.createOffer();
           await pc.setLocalDescription(offer);
-          signal.send({ t: "offer", sdp: offer.sdp });
+          const sendOffer = () => signal.send({ t: "offer", sdp: offer.sdp });
+          sendOffer();
+          // 信令是 ephemeral（relay 不儲存、無重放）：舊機若尚未完成訂閱，offer 會永遠遺失。
+          // 週期重送直到收到 answer；舊機對重送的 offer 只會回既有 answer，不重建連線。
+          offerRetry = setInterval(() => {
+            if (settled || pc.remoteDescription) return stopRetry();
+            sendOffer();
+          }, OFFER_RETRY_MS);
         } catch (e) {
           fail(`建立 offer 失敗：${String(e)}`);
         }

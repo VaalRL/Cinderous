@@ -705,6 +705,7 @@ export function App(): JSX.Element {
     const store = storageRef.current;
     if (!p || !p.relayUrl || p.enterprise || !store) return;
     const { offer, key } = createPairingOffer(p.relayUrl); // 載荷帶會合 relay（新機尚無設定）
+    setSettingsOpen(false); // 設定面板在 DOM 中位於配對面板之後，不關會蓋住 SAS 確認鈕
     setPairPhase({ kind: "offer", code: offer.code, expiresAt: offer.expiresAt });
     const transport = webRtcPairTransport(webSocketConnector);
     void runPairSource({
