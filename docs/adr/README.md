@@ -96,3 +96,4 @@
 | [0079](./0079-three-column-layout-toggle.md) | 桌面三欄整合佈局＋經典/新版一鍵切換 | 已接受 |
 | [0080](./0080-shared-theme-tokens-package.md) | 跨前端設計 token 套件 @cinder/theme（桌面/行動端共用主題色 SSOT） | 已接受 |
 | [0081](./0081-mobile-signin-nsec-and-pairing.md) | 行動端登入：nsec 匯入＋配對匯入（同帳號跨裝置） | 已接受 |
+| [0082](./0082-user-facing-naming-glossary.md) | 使用者可見名稱統一詞彙表（登入／同步／搬家／備份／配對） | 已接受 |

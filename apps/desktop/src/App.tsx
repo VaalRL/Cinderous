@@ -176,8 +176,8 @@ function buildBackend(p: Profile, nsecOverride?: string, storage?: AppStorage): 
           try {
             window.alert(
               reason === "retired"
-                ? `你的中繼站已被維護者標記退役，已自動搬家到 ${newUrl}。舊站來訊將續收 7 天（排水）。`
-                : `你的中繼站已離線超過一天，已自動搬家到 ${newUrl}。舊站來訊將續收 7 天（排水）。`,
+                ? `你的中繼站已被維護者標記退役，已自動更換到 ${newUrl}。舊站來訊將續收 7 天（排水）。`
+                : `你的中繼站已離線超過一天，已自動更換到 ${newUrl}。舊站來訊將續收 7 天（排水）。`,
             );
           } catch {
             /* 忽略 */
