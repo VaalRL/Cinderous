@@ -1545,7 +1545,7 @@ export function AddIdentityModal({
               }}
             />
           ) : null}
-          {backupErr ? <p className="settings__warn">備份密碼錯誤或金鑰格式不符</p> : null}
+          {backupErr ? <p className="settings__warn">備份密碼錯誤或私鑰格式不符</p> : null}
           <button
             className="groupmodal__create"
             data-testid="add-identity-confirm"
@@ -1693,7 +1693,7 @@ function RosterAdminModal({
             value={groupText}
             onChange={(e) => setGroupText(e.target.value)}
           />
-          <div className="groupmodal__label">身分輪替（可選，換機/遺失，每行：舊npub 新npub 名稱）</div>
+          <div className="groupmodal__label">身分輪替（可選，換裝置/遺失，每行：舊npub 新npub 名稱）</div>
           <textarea
             className="groupmodal__name"
             rows={3}
