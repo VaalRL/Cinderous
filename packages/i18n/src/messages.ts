@@ -74,6 +74,7 @@ export interface Messages {
   sidebar_search: string;
   sidebar_empty: string;
   sidebar_labelAdd: string;
+  deck_pickChat: string;
   settings_layout: string;
   settings_layoutClassic: string;
   settings_layoutModern: string;
@@ -395,6 +396,7 @@ const zhHant: Messages = {
   sidebar_search: "搜尋名稱或訊息…",
   sidebar_empty: "沒有符合的聯絡人或群組",
   sidebar_labelAdd: "加標籤",
+  deck_pickChat: "從左側雙擊聯絡人或群組開始對話",
   settings_layout: "版面佈局",
   settings_layoutClassic: "經典（浮動視窗）",
   settings_layoutModern: "三欄整合",
@@ -716,6 +718,7 @@ const en: Messages = {
   sidebar_search: "Search name or messages…",
   sidebar_empty: "No matching contacts or groups",
   sidebar_labelAdd: "Add label",
+  deck_pickChat: "Double-click a contact or group on the left to start",
   settings_layout: "Layout",
   settings_layoutClassic: "Classic (floating windows)",
   settings_layoutModern: "Three-column",

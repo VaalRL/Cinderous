@@ -74,6 +74,7 @@ import { createRinger, createRingback, playChime } from "./ui/ringtone.js";
 import { CallWindow } from "./ui/CallWindow.js";
 import { ContactListWindow } from "./ui/ContactListWindow.js";
 import { DeckSidebar } from "./ui/DeckSidebar.js";
+import { DeckTabs } from "./ui/DeckTabs.js";
 import { ConversationWindow } from "./ui/ConversationWindow.js";
 import {
   DEFAULT_OLLAMA,
@@ -245,6 +246,7 @@ export function App(): JSX.Element {
   const ringerRef = useRef(createRinger());
   const ringbackRef = useRef(createRingback());
   const [open, setOpen] = useState<string[]>([]);
+  const [activeConvo, setActiveConvo] = useState<string | null>(null); // 三欄中欄當前分頁（ADR-0079 Q3）。
   /** 開機閘門（H4，ADR-0067）：作用中身分啟用本地密碼→先解鎖再建後端。 */
   const [lockedProfile, setLockedProfile] = useState<Profile | null>(null);
   /** 配對新裝置（D4a，ADR-0072）：舊機視角的階段狀態；null＝面板未開。 */
@@ -908,9 +910,20 @@ export function App(): JSX.Element {
   };
   const openChat = (pk: string) => {
     setOpen((prev) => (prev.includes(pk) ? prev : [...prev, pk]));
+    setActiveConvo(pk); // 三欄：設為當前分頁（ADR-0079 Q3）；經典不受影響。
     setUnread((u) => (u[pk] ? { ...u, [pk]: 0 } : u));
     // F5：對非群組聯絡人主動建立 P2P 通道，讓輸入中等狀態卸載中繼。
     if (!groups.some((g) => g.id === pk)) activeBackend.connectPeer?.(pk);
+  };
+
+  // 關閉對話（分頁或浮動窗）：移出 open；若關的是當前分頁，改選相鄰分頁（ADR-0079 Q3）。
+  const closeConvo = (pk: string) => {
+    setOpen((prev) => prev.filter((x) => x !== pk));
+    setActiveConvo((a) => {
+      if (a !== pk) return a;
+      const rest = open.filter((x) => x !== pk);
+      return rest[rest.length - 1] ?? null;
+    });
   };
 
   const toggleReadReceipts = () => {
@@ -1298,6 +1311,18 @@ export function App(): JSX.Element {
         />
       ) : null}
       <div className="deckwrap deckwrap--center">
+      {layout === "modern" && open.length > 0 ? (
+        <DeckTabs
+          open={open}
+          active={activeConvo}
+          contacts={contacts}
+          groups={groups}
+          unread={unread}
+          onActivate={setActiveConvo}
+          onClose={closeConvo}
+        />
+      ) : null}
+      {layout === "modern" && open.length === 0 ? <div className="deckcenter__empty">{t("deck_pickChat")}</div> : null}
       {open.map((pk) => {
         const group = groups.find((g) => g.id === pk);
         if (group) {
@@ -1311,8 +1336,9 @@ export function App(): JSX.Element {
           const senderName = (pubkey: string): string =>
             pubkey === self.pubkey ? self.name : contacts.find((c) => c.pubkey === pubkey)?.name ?? `${pubkey.slice(0, 8)}…`;
           return (
+            <div key={pk} className={`convotab${pk === activeConvo ? " on" : ""}`}>
             <ConversationWindow
-              key={pk}
+              embedded={layout === "modern"}
               self={self}
               contact={groupContact}
               messages={convos[pk] ?? []}
@@ -1349,8 +1375,9 @@ export function App(): JSX.Element {
                     },
                   }
                 : {})}
-              onClose={() => setOpen((prev) => prev.filter((x) => x !== pk))}
+              onClose={() => closeConvo(pk)}
             />
+            </div>
           );
         }
         const contact = contacts.find((c) => c.pubkey === pk);
@@ -1370,8 +1397,9 @@ export function App(): JSX.Element {
             : {};
         const stickerProps = policy.disableStickers ? { stickersDisabled: true } : {};
         return (
+          <div key={pk} className={`convotab${pk === activeConvo ? " on" : ""}`}>
           <ConversationWindow
-            key={pk}
+            embedded={layout === "modern"}
             self={self}
             contact={contact}
             messages={convos[pk] ?? []}
@@ -1402,8 +1430,9 @@ export function App(): JSX.Element {
               activeBackend.sendTyping(pk);
             }}
             onNudge={() => activeBackend.sendNudge(pk)}
-            onClose={() => setOpen((prev) => prev.filter((x) => x !== pk))}
+            onClose={() => closeConvo(pk)}
           />
+          </div>
         );
       })}
       </div>

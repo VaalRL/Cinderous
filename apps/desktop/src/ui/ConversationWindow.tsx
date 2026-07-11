@@ -122,6 +122,8 @@ export interface ConversationProps {
   stickersDisabled?: boolean;
   /** 公告頻道唯讀（ADR-0049）：非管理者隱藏輸入區。 */
   readOnly?: boolean;
+  /** 內嵌模式（ADR-0079 Q3）：三欄中欄用——填滿容器、無浮動標題列/縮放把手。 */
+  embedded?: boolean;
   onClose: () => void;
 }
 
@@ -217,16 +219,16 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
   usePersonalizeTick();
   const chatBg = chatBgCss(getChatBg(contact.pubkey));
 
-  // O1 對話框縮放：掛載時套用全域尺寸偏好（ADR-0077）。
+  // O1 對話框縮放：掛載時套用全域尺寸偏好（ADR-0077）。內嵌模式（Q3）由中欄決定尺寸、不套用。
   useEffect(() => {
     const el = rootRef.current;
-    if (!el) return;
+    if (!el || props.embedded) return;
     const saved = getConvoSize();
     if (saved) {
       el.style.width = `${saved.w}px`;
       el.style.height = `${saved.h}px`;
     }
-  }, []);
+  }, [props.embedded]);
   // 右下角把手拖曳縮放：夾在 min/max，放開時持久化為全域偏好。
   const startResize = (e: ReactMouseEvent): void => {
     e.preventDefault();
@@ -487,8 +489,8 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
   };
 
   return (
-    <div className="convo-dock">
-    <div className="win convo" ref={rootRef} data-contact={contact.name}>
+    <div className={`convo-dock${props.embedded ? " convo-dock--embed" : ""}`}>
+    <div className={`win convo${props.embedded ? " convo--embed" : ""}`} ref={rootRef} data-contact={contact.name}>
       <div className="win__title">
         <span>{contact.name}</span>
         <span className="spacer" />
