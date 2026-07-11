@@ -47,6 +47,16 @@ export interface Messages {
   mpair_errNoIdentity: string;
   mpair_restored: string;
   mpair_toNsec: string;
+  // ── 新增身分小視窗（ADR-0045；D 補 i18n）──
+  addId_title: string;
+  addId_close: string;
+  addId_relay: string;
+  addId_enterprise: string;
+  addId_admin: string;
+  addId_import: string;
+  addId_error: string;
+  addId_submit: string;
+  addId_busy: string;
   contact_myId: string;
   contact_addPlaceholder: string;
   contact_add: string;
@@ -397,6 +407,15 @@ const zhHant: Messages = {
   mpair_errNoIdentity: "配對資料不含身分",
   mpair_restored: "已還原身分",
   mpair_toNsec: "改用私鑰登入",
+  addId_title: "新增身分",
+  addId_close: "關閉",
+  addId_relay: "relay 網址（wss://…）",
+  addId_enterprise: "工作身分（鎖定此節點、不漫遊）",
+  addId_admin: "管理者 npub（可選，自動同步企業通訊錄）",
+  addId_import: "匯入 nsec 或加密備份碼（留空＝產生新身分）",
+  addId_error: "備份密碼錯誤或私鑰格式不符",
+  addId_submit: "建立並切換",
+  addId_busy: "還原中…",
   contact_myId: "我的 ID",
   contact_addPlaceholder: "貼上好友的 npub…（可附 @wss://中繼）",
   contact_add: "加好友",
@@ -747,6 +766,15 @@ const en: Messages = {
   mpair_errNoIdentity: "Pairing data has no identity",
   mpair_restored: "Identity restored",
   mpair_toNsec: "Use secret key sign-in",
+  addId_title: "Add identity",
+  addId_close: "Close",
+  addId_relay: "Relay URL (wss://…)",
+  addId_enterprise: "Work identity (locked to this relay, no roaming)",
+  addId_admin: "Admin npub (optional — auto-syncs the org address book)",
+  addId_import: "Import nsec or encrypted backup code (blank = new identity)",
+  addId_error: "Wrong backup password or invalid secret key",
+  addId_submit: "Create & switch",
+  addId_busy: "Restoring…",
   contact_myId: "My ID",
   contact_addPlaceholder: "Paste a buddy's npub… (optionally @wss://relay)",
   contact_add: "Add",

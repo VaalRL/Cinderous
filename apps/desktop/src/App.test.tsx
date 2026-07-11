@@ -1,21 +1,29 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { I18nProvider } from "./i18n.js";
 import { AddIdentityModal, relayChangeTarget } from "./App.js";
 import type { Profile } from "@cinder/engine";
 
+const renderModal = (defaultRelayUrl: string): string =>
+  renderToStaticMarkup(
+    <I18nProvider locale="zh-Hant">
+      <AddIdentityModal defaultRelayUrl={defaultRelayUrl} onAdd={() => {}} onCancel={() => {}} />
+    </I18nProvider>,
+  );
+
 describe("AddIdentityModal", () => {
   it("relay 欄位預填目前作用中身分的網址（可改）", () => {
-    const out = renderToStaticMarkup(
-      <AddIdentityModal defaultRelayUrl="wss://relay.example" onAdd={() => {}} onCancel={() => {}} />,
-    );
-    expect(out).toContain('value="wss://relay.example"');
+    expect(renderModal("wss://relay.example")).toContain('value="wss://relay.example"');
   });
 
   it("預設值為空字串時 relay 欄位維持空白且建立鈕停用", () => {
-    const out = renderToStaticMarkup(
-      <AddIdentityModal defaultRelayUrl="" onAdd={() => {}} onCancel={() => {}} />,
-    );
-    expect(out).toContain("disabled");
+    expect(renderModal("")).toContain("disabled");
+  });
+
+  it("經 i18n 呈現（D）：標題與建立鈕走訊息目錄", () => {
+    const out = renderModal("wss://x");
+    expect(out).toContain("新增身分"); // addId_title
+    expect(out).toContain("建立並切換"); // addId_submit
   });
 });
 

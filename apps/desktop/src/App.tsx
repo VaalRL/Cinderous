@@ -1455,6 +1455,7 @@ export function AddIdentityModal({
   ) => void;
   onCancel: () => void;
 }): JSX.Element {
+  const { t } = useI18n();
   const [name, setName] = useState("");
   const [relayUrl, setRelayUrl] = useState(defaultRelayUrl);
   const [enterprise, setEnterprise] = useState(false);
@@ -1491,38 +1492,43 @@ export function AddIdentityModal({
     }
   };
   return (
-    <div className="modal" role="dialog" aria-modal="true" aria-label="新增身分" onClick={onCancel}>
+    <div className="modal" role="dialog" aria-modal="true" aria-label={t("addId_title")} onClick={onCancel}>
       <div className="modal__box win" onClick={(e) => e.stopPropagation()}>
         <div className="win__title">
-          <span>新增身分</span>
+          <span>{t("addId_title")}</span>
           <span className="spacer" />
-          <span className="win__btn" role="button" aria-label="關閉" onClick={onCancel}>
+          <span className="win__btn" role="button" aria-label={t("addId_close")} onClick={onCancel}>
             ×
           </span>
         </div>
         <div className="groupmodal">
-          <input className="groupmodal__name" placeholder="顯示名稱" value={name} onChange={(e) => setName(e.target.value)} />
           <input
             className="groupmodal__name"
-            placeholder="relay 網址（wss://…）"
+            placeholder={t("signIn_displayName")}
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+          <input
+            className="groupmodal__name"
+            placeholder={t("addId_relay")}
             value={relayUrl}
             onChange={(e) => setRelayUrl(e.target.value)}
           />
           <label className="groupmodal__item">
             <input type="checkbox" checked={enterprise} onChange={(e) => setEnterprise(e.target.checked)} />
-            <span>工作身分（鎖定此節點、不漫遊）</span>
+            <span>{t("addId_enterprise")}</span>
           </label>
           {enterprise ? (
             <input
               className="groupmodal__name"
-              placeholder="管理者 npub（可選，自動同步企業通訊錄）"
+              placeholder={t("addId_admin")}
               value={admin}
               onChange={(e) => setAdmin(e.target.value)}
             />
           ) : null}
           <input
             className="groupmodal__name"
-            placeholder="匯入 nsec 或加密備份碼（留空＝產生新身分）"
+            placeholder={t("addId_import")}
             value={nsec}
             onChange={(e) => {
               const v = e.target.value;
@@ -1537,7 +1543,7 @@ export function AddIdentityModal({
               className="groupmodal__name"
               type="password"
               data-testid="backup-password"
-              placeholder="備份密碼"
+              placeholder={t("settings_backupCodePw")}
               value={backupPw}
               onChange={(e) => {
                 setBackupPw(e.target.value);
@@ -1545,14 +1551,14 @@ export function AddIdentityModal({
               }}
             />
           ) : null}
-          {backupErr ? <p className="settings__warn">備份密碼錯誤或私鑰格式不符</p> : null}
+          {backupErr ? <p className="settings__warn">{t("addId_error")}</p> : null}
           <button
             className="groupmodal__create"
             data-testid="add-identity-confirm"
             disabled={!name.trim() || !relayUrl.trim() || (isCode && !backupPw) || busy}
             onClick={submit}
           >
-            {busy ? "還原中…" : "建立並切換"}
+            {busy ? t("addId_busy") : t("addId_submit")}
           </button>
         </div>
       </div>
