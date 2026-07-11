@@ -83,7 +83,7 @@
 
 | # | 任務 | 說明 |
 | --- | --- | --- |
-| D1 | RN App 骨架 | 🔧 **起手完成（此環境）**：`apps/mobile`（react-native-web + 重用 `@cinder/core`/`@cinder/i18n`）；首個 `ContactListScreen`（依上線狀態分區、npub 編碼、多語系），typecheck + 測試綠。⏳ 更多畫面移植（登入/對話）、Expo/Metro 原生打包（需工具鏈或 EAS）。 |
+| D1 | RN App 骨架 | 🔧 **起手完成（此環境）**：`apps/mobile`（react-native-web + 重用 `@cinder/core`/`@cinder/i18n`/`@cinder/theme`）；首個 `ContactListScreen`（依上線狀態分區、npub 編碼、多語系），typecheck + 測試綠。**設計對齊（ADR-0080）**：色彩改吃 `@cinder/theme` 的 `resolveTheme`，與桌面同一套主色/副色/深淺主題 SSOT（不再硬編碼）。⏳ 更多畫面移植（登入/對話）、Expo/Metro 原生打包（需工具鏈或 EAS）。 |
 | D2 | 行動持久化 | RN SQLite + Keystore/Secure Enclave。 |
 | D3 | 無聲推播喚醒 | Worker 存 APNs/FCM 憑證，Silent Push 喚醒背景拉取（PRD §3）。 |
 | D4a | **桌面配對克隆** | ✅ **完成（ADR-0072）**：core 協定（HELLO/CHALLENGE/BUNDLE/DONE/REJECT＋SAS 四位短碼）、`roomKeyFrom` 拋棄式信令會合（kind 21003、AEAD 密封、NIP-42 以房間金鑰通過）、WebRTC 資料通道長度前綴分塊、捆包＝StorageSnapshot 全量、兩端 UI（舊機 QR/碼/倒數/SAS 確認；新機 SignIn 匯入）。載荷帶會合 relay。✅ **實機 E2E 驗證通過（2026-07-10）**：真實 Chromium×3 context＋真實 WebRTC＋生產 relay，連續三次全綠（SAS 一致、捆包直傳、新舊機狀態收斂一致）。過程抓到並修掉三個真實缺陷（NIP-42 認證競態致信令遺失、ephemeral offer 無重放致間歇失敗、設定面板蓋住 SAS 確認鈕）。 |

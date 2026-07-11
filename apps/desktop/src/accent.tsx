@@ -1,28 +1,20 @@
 // 自訂主題色（ADR-0064）。單一 `--accent` 覆寫即連動整個介面（因為 UI 已 token 化，
 // 且 --titlebar 等由 --accent 以 color-mix 推導）。純本地儲存（localStorage），不上雲。
 // 深色主題下自動提亮以維持對比。
+//
+// 色彩推導（lightenHex/accentForTheme）已抽至 `@cinder/theme` 作為跨前端 SSOT（ADR-0080）；
+// 此處只轉引，桌面與行動端共用同一份提亮邏輯。CSS 端的 --bg-a/b/c/--titlebar 仍由 msn.css 的
+// color-mix 於瀏覽器即時推導，其值與 `@cinder/theme` 以測試對齊。
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { accentForTheme } from "@cinder/theme";
 import { useTheme } from "./theme.js";
+
+// 轉引 SSOT，供設定頁與測試沿用既有 import 路徑。
+export { accentForTheme, lightenHex } from "@cinder/theme";
 
 const STORAGE_KEY = "nb.accent";
 /** 副色（次要主題色，ADR-0078）：驅動標題列＋頂部漸層；未設＝沿用主色。 */
 const STORAGE_KEY2 = "nb.accent2";
-/** 深色主題提亮比例（比照原本暗色 accent 較亮的作法）。 */
-const DARK_LIGHTEN = 0.22;
-
-/** 把 hex 往白色混（提亮）；amount 0..1。非法輸入原樣回傳。 */
-export function lightenHex(hex: string, amount: number): string {
-  const m = /^#([0-9a-f]{6})$/i.exec(hex.trim());
-  if (!m) return hex;
-  const n = parseInt(m[1]!, 16);
-  const ch = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((c) => Math.round(c + (255 - c) * amount));
-  return `#${((1 << 24) | (ch[0]! << 16) | (ch[1]! << 8) | ch[2]!).toString(16).slice(1)}`;
-}
-
-/** 依主題把自訂色調整為實際套用色（深色提亮，淺色原樣）。 */
-export function accentForTheme(hex: string, theme: "light" | "dark"): string {
-  return theme === "dark" ? lightenHex(hex, DARK_LIGHTEN) : hex;
-}
 
 function loadHex(key: string): string | null {
   try {

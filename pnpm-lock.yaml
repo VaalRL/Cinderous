@@ -19,6 +19,9 @@ importers:
       '@cinder/i18n':
         specifier: workspace:*
         version: link:../../packages/i18n
+      '@cinder/theme':
+        specifier: workspace:*
+        version: link:../../packages/theme
       '@tauri-apps/api':
         specifier: ^2
         version: 2.11.1
@@ -71,6 +74,9 @@ importers:
       '@cinder/i18n':
         specifier: workspace:*
         version: link:../../packages/i18n
+      '@cinder/theme':
+        specifier: workspace:*
+        version: link:../../packages/theme
       react:
         specifier: ^18.3.1
         version: 18.3.1
@@ -142,6 +148,15 @@ importers:
         version: 2.1.9(@types/node@22.20.0)
 
   packages/i18n:
+    devDependencies:
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@22.20.0)
+
+  packages/theme:
     devDependencies:
       typescript:
         specifier: ^5.6.3

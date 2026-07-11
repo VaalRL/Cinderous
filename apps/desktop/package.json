@@ -19,6 +19,7 @@
     "@cinder/core": "workspace:*",
     "@cinder/engine": "workspace:*",
     "@cinder/i18n": "workspace:*",
+    "@cinder/theme": "workspace:*",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-notification": "^2",
     "qrcode-generator": "^2.0.4",

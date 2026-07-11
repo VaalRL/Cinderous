@@ -94,3 +94,4 @@
 | [0077](./0077-local-personalization.md) | 本地個人化（對話框縮放＋本地頭像＋每對話背景） | 已接受 |
 | [0078](./0078-secondary-accent-color.md) | 副色（次要主題色：標題列＋頂部漸層） | 已接受 |
 | [0079](./0079-three-column-layout-toggle.md) | 桌面三欄整合佈局＋經典/新版一鍵切換 | 已接受 |
+| [0080](./0080-shared-theme-tokens-package.md) | 跨前端設計 token 套件 @cinder/theme（桌面/行動端共用主題色 SSOT） | 已接受 |
