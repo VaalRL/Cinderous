@@ -29,7 +29,6 @@ import {
   activeProfile,
   adoptCloudSyncMode,
   changeProfileRelay,
-  clearDrain,
   loadProfiles,
   type Profile,
   type ProfilesState,
@@ -176,8 +175,8 @@ function buildBackend(p: Profile, nsecOverride?: string, storage?: AppStorage): 
           try {
             window.alert(
               reason === "retired"
-                ? `你的中繼站已被維護者標記退役，已自動更換到 ${newUrl}。舊站來訊將續收 7 天（排水）。`
-                : `你的中繼站已離線超過一天，已自動更換到 ${newUrl}。舊站來訊將續收 7 天（排水）。`,
+                ? `你的中繼站已被維護者標記退役，已自動更換到 ${newUrl}。舊站來訊仍會續收 7 天。`
+                : `你的中繼站已離線超過一天，已自動更換到 ${newUrl}。舊站來訊仍會續收 7 天。`,
             );
           } catch {
             /* 忽略 */
@@ -847,17 +846,6 @@ export function App(): JSX.Element {
     }
   };
 
-  // 提前完成排水（ADR-0066 H3）：移除舊站記錄後重載，乾淨收掉排水訂閱。
-  const completeDrain = () => {
-    const p = activeProfile(profilesState);
-    if (!p) return;
-    saveProfiles(clearDrain(profilesState, p.pubkey));
-    try {
-      location.reload();
-    } catch {
-      /* 忽略 */
-    }
-  };
 
   // 切換身分：持久化作用中選擇後重載，讓所有 per-身分 狀態乾淨重建（ADR-0045）。
   const switchProfile = (pubkey: string) => {
@@ -1185,13 +1173,10 @@ export function App(): JSX.Element {
           {...(relays.length > 0 ? { relays } : {})}
           {...(() => {
             // 更換 relay（ADR-0066 H2）：個人身分可換；工作身分鎖定（顯示說明）；示範模式無此區塊。
+            // 排水（H3）純內部自動（見 createBackend 的 activeDrain→drainUrl，ADR-0083 完全隱藏）：不露 UI。
             const p = activeProfile(profilesState);
             if (!p) return {};
-            const drain = activeDrain(p, Date.now()); // H3：排水中顯示舊站與提前完成
-            return {
-              ...(p.enterprise ? { relayLocked: true } : { onRelayChange: changeRelay }),
-              ...(drain ? { drain, onDrainComplete: completeDrain } : {}),
-            };
+            return p.enterprise ? { relayLocked: true } : { onRelayChange: changeRelay };
           })()}
           {...(() => {
             // 配對新裝置（ADR-0072 D4a）：個人身分＋真實 relay 才提供（企業 v1 排除）。

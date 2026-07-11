@@ -200,9 +200,6 @@ export interface Messages {
   settings_relayChangeApply: string;
   settings_relayChangeCancel: string;
   settings_relayLocked: string;
-  settings_relayDrain: string;
-  settings_relayDrainDone: string;
-  settings_relayDrainDoneConfirm: string;
   settings_security: string;
   settings_passwordOn: string;
   settings_passwordOffHint: string;
@@ -553,9 +550,6 @@ const zhHant: Messages = {
   settings_relayChangeApply: "套用並重新載入",
   settings_relayChangeCancel: "取消",
   settings_relayLocked: "工作身分的中繼站由組織管理，無法在此更換。",
-  settings_relayDrain: "舊站排水中：{url}——{date} 前仍會接收送到舊站的訊息。",
-  settings_relayDrainDone: "提前完成排水",
-  settings_relayDrainDoneConfirm: "提前完成排水？期限前仍送到舊站的訊息將不再接收。",
   settings_security: "安全（本地密碼）",
   settings_passwordOn: "本地密碼已啟用：私鑰與資料金鑰以密碼包裹保存，不輸入密碼無法解開。",
   settings_passwordOffHint: "共用電腦建議啟用：以密碼衍生金鑰（Argon2id）包裹私鑰與資料金鑰，別人拿到這台電腦也解不開。不防執行中的惡意軟體。",
@@ -906,9 +900,6 @@ const en: Messages = {
   settings_relayChangeApply: "Apply & reload",
   settings_relayChangeCancel: "Cancel",
   settings_relayLocked: "Work identities use the relay managed by your organization; it can't be changed here.",
-  settings_relayDrain: "Draining old relay {url} — messages sent there are still received until {date}.",
-  settings_relayDrainDone: "Finish draining now",
-  settings_relayDrainDoneConfirm: "Finish draining early? Messages still arriving at the old relay will no longer be received.",
   settings_security: "Security (local password)",
   settings_passwordOn: "Local password is on: your private key and data key are wrapped with your password — nothing opens without it.",
   settings_passwordOffHint: "Recommended on shared computers: a password-derived key (Argon2id) wraps your private key and data key, so others with access to this machine can't open them. Does not protect against running malware.",

@@ -66,15 +66,7 @@ describe("SettingsPanel relay 區塊：更換中繼站（ADR-0066 H2）", () => 
     expect(out).not.toContain('data-testid="relay-locked"');
   });
 
-  it("排水中（ADR-0066 H3）：顯示舊站與「提前完成」；未排水則無此區塊", () => {
-    const out = render({
-      drain: { url: "wss://old.example", until: 4102444800000 },
-      onDrainComplete: () => {},
-    });
-    expect(out).toContain('data-testid="relay-drain"');
-    expect(out).toContain("wss://old.example");
-    expect(render()).not.toContain('data-testid="relay-drain"');
-  });
+  // 排水完全隱藏（ADR-0082）：機制仍自動運作（drainUrl 由 App 於 createBackend 傳入），但不再有任何 UI。
 });
 
 describe("SettingsPanel 安全區塊：本地密碼（ADR-0067）", () => {
