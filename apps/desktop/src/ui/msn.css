@@ -93,6 +93,32 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
 .dtabs__x { border: none; background: none; cursor: pointer; color: var(--muted); font-size: 14px; line-height: 1; padding: 0 2px; }
 .dtabs__x:hover { color: var(--ink); }
 
+/* 右側欄對話輔助區（ADR-0079 Q4）：四分頁 threads/members/media/info。 */
+.daux { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.daux__tabs { display: flex; flex: none; border-bottom: 1px solid var(--border); }
+.daux__tab { flex: 1; padding: 8px 4px; border: none; background: none; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; border-bottom: 2px solid transparent; }
+.daux__tab:hover { background: var(--hover); }
+.daux__tab.on { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+.daux__count { display: inline-block; margin-left: 4px; font-size: 10px; color: var(--muted); }
+.daux__tab.on .daux__count { color: var(--accent); }
+.daux__body { flex: 1; min-height: 0; overflow-y: auto; padding: 12px; }
+.daux__info { display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; }
+.daux__info .avatar { width: 72px; height: 72px; font-size: 28px; }
+.daux__name { font-weight: 700; font-size: 15px; color: var(--ink); }
+.daux__sub { font-size: 12px; color: var(--muted); }
+.daux__id { font-size: 10px; color: var(--muted); word-break: break-all; margin-top: 4px; }
+.daux__list { display: flex; flex-direction: column; gap: 2px; }
+.daux__row { display: flex; align-items: center; gap: 8px; padding: 5px 4px; border-radius: 6px; }
+.daux__row:hover { background: var(--hover); }
+.daux__rowname { flex: 1; min-width: 0; font-size: 13px; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.daux__badge { font-size: 10px; color: var(--accent); border: 1px solid var(--accent); border-radius: 999px; padding: 0 6px; }
+.daux__empty { color: var(--muted); font-size: 12px; text-align: center; padding: 24px 8px; }
+.daux__media { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; }
+.daux__thumb { display: block; aspect-ratio: 1; overflow: hidden; border-radius: 6px; border: 1px solid var(--border); }
+.daux__thumb img { width: 100%; height: 100%; object-fit: cover; }
+.daux__thread { padding: 7px 8px; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 4px; }
+.daux__threadtext { font-size: 12px; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
 /* 三欄左側欄（ADR-0079 Q2）：me 條 + 搜尋 + 標籤篩選 + 最近互動清單。 */
 .dsb { display: flex; flex-direction: column; height: 100%; min-height: 0; gap: 6px; }
 .dsb__me { display: flex; align-items: center; gap: 8px; padding: 2px 2px 6px; }

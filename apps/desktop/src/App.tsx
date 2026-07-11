@@ -74,6 +74,7 @@ import { createRinger, createRingback, playChime } from "./ui/ringtone.js";
 import { CallWindow } from "./ui/CallWindow.js";
 import { ContactListWindow } from "./ui/ContactListWindow.js";
 import { DeckSidebar } from "./ui/DeckSidebar.js";
+import { DeckRight } from "./ui/DeckRight.js";
 import { DeckTabs } from "./ui/DeckTabs.js";
 import { ConversationWindow } from "./ui/ConversationWindow.js";
 import {
@@ -1169,7 +1170,7 @@ export function App(): JSX.Element {
       </div>
       {layout === "modern" ? (
         <aside className="deckwrap deckwrap--right" data-testid="deck-right">
-          <div className="deck__ph">{t("deck_auxPlaceholder")}</div>
+          <DeckRight activeId={activeConvo} self={self} contacts={contacts} groups={groups} convos={convos} />
         </aside>
       ) : null}
       {settingsOpen ? (

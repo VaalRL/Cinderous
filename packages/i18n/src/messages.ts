@@ -75,6 +75,16 @@ export interface Messages {
   sidebar_empty: string;
   sidebar_labelAdd: string;
   deck_pickChat: string;
+  aux_pickChat: string;
+  aux_tabInfo: string;
+  aux_tabMembers: string;
+  aux_tabMedia: string;
+  aux_tabThreads: string;
+  aux_noMedia: string;
+  aux_noThreads: string;
+  aux_you: string;
+  aux_admin: string;
+  aux_replies: string;
   settings_layout: string;
   settings_layoutClassic: string;
   settings_layoutModern: string;
@@ -397,6 +407,16 @@ const zhHant: Messages = {
   sidebar_empty: "沒有符合的聯絡人或群組",
   sidebar_labelAdd: "加標籤",
   deck_pickChat: "從左側雙擊聯絡人或群組開始對話",
+  aux_pickChat: "開啟一個對話以檢視輔助資訊",
+  aux_tabInfo: "資訊",
+  aux_tabMembers: "成員",
+  aux_tabMedia: "媒體",
+  aux_tabThreads: "對話串",
+  aux_noMedia: "此對話尚無圖片",
+  aux_noThreads: "此對話尚無對話串",
+  aux_you: "你",
+  aux_admin: "管理者",
+  aux_replies: "{count} 則回覆",
   settings_layout: "版面佈局",
   settings_layoutClassic: "經典（浮動視窗）",
   settings_layoutModern: "三欄整合",
@@ -719,6 +739,16 @@ const en: Messages = {
   sidebar_empty: "No matching contacts or groups",
   sidebar_labelAdd: "Add label",
   deck_pickChat: "Double-click a contact or group on the left to start",
+  aux_pickChat: "Open a conversation to see its details",
+  aux_tabInfo: "Info",
+  aux_tabMembers: "Members",
+  aux_tabMedia: "Media",
+  aux_tabThreads: "Threads",
+  aux_noMedia: "No images in this conversation yet",
+  aux_noThreads: "No threads in this conversation yet",
+  aux_you: "You",
+  aux_admin: "Admin",
+  aux_replies: "{count} replies",
   settings_layout: "Layout",
   settings_layoutClassic: "Classic (floating windows)",
   settings_layoutModern: "Three-column",
