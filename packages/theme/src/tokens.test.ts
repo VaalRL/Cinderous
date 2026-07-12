@@ -24,6 +24,12 @@ describe("@cinder/theme 色彩推導（ADR-0080）", () => {
     expect(accentForTheme("#2f6cd6", "dark")).toBe("#5d8cdf"); // 深色提亮 0.22
   });
 
+  it("lightenHex：任意 amount 逐位元精確（非只 0.22）＋夾限", () => {
+    expect(lightenHex("#000000", 0.1)).toBe("#1a1a1a"); // round(255*0.1)=26=0x1a（原式；非 mixSrgb 的 0x19）
+    expect(lightenHex("#000000", 2)).toBe("#ffffff"); // amount>1 夾限
+    expect(lightenHex("#2f6cd6", -1)).toBe("#2f6cd6"); // amount<0 夾限＝不變
+  });
+
   it("狀態語意色與桌面 .dot 同源（msn.css）", () => {
     expect(STATUS_COLORS).toEqual({
       online: "#36c46b",
@@ -82,5 +88,13 @@ describe("resolveTheme 與桌面 msn.css 對齊（改一邊沒改另一邊＝紅
     expect(t.accent).toBe("#2f6cd6");
     expect(t.titlebarBottom).toBe("#e2632b"); // 標題列吃副色
     expect(t.bgA).not.toBe("#acc4ef"); // 頂部漸層改由副色推導
+  });
+
+  it("非法 hex 的 accent/accent2 視同未設，落回內建預設（SSOT 防呆，不汙染整組色）", () => {
+    const t = resolveTheme({ accent: "bogus", accent2: "#zzz", theme: "light" });
+    expect(t.accent).toBe("#2f6cd6"); // 落回預設，而非字面 "bogus"
+    expect(t.accent2).toBe("#2f6cd6");
+    expect(t.bgA).toBe("#acc4ef"); // 由預設推導、非 "bogus"
+    expect(t.titlebarBottom).toBe("#2f6cd6");
   });
 });

@@ -71,7 +71,11 @@ export function changeProfileRelay(
   };
 }
 
-/** 排水期滿或使用者提前完成：移除舊站記錄（ADR-0066 H3）。未知 pubkey 回原狀態。 */
+/**
+ * 排水期滿或使用者提前完成：移除舊站記錄（ADR-0066 H3）。未知 pubkey 回原狀態。
+ * 註：ADR-0083 排水完全內部化後目前無生產呼叫端（到期由 activeDrain 自然回 null）；
+ * 保留此純函式供未來「立即斷開舊中繼站」進階選項或資料清理復用（含單元測試）。
+ */
 export function clearDrain(state: ProfilesState, pubkey: string): ProfilesState {
   if (!state.profiles.some((p) => p.pubkey === pubkey)) return state;
   return {

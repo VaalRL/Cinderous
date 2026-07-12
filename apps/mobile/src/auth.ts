@@ -48,9 +48,10 @@ export function identityFromNsec(nsec: string, name: string): SignInResult {
 
 /** B：由配對捆包萃取身分（同帳號）；捆包無身分回錯誤鍵。名稱優先用覆寫，其次捆包內名稱。 */
 export function identityFromPairBundle(bundle: PairBundle, overrideName?: string): SignInResult {
-  const id = bundle.snapshot.identity;
+  const id = bundle?.snapshot?.identity; // 防禦：捆包形狀異常時遵守回傳型別，不丟未捕捉 TypeError。
   if (!id || typeof id.nsec !== "string" || !id.nsec) return { ok: false, error: "mobilePair_errNoIdentity" };
-  const name = (overrideName?.trim() || id.name || "").trim();
+  // 捆包沒帶名稱不是「使用者忘了填」——給預設名，避免卡在 errName 死路（配對畫面無名稱欄可修正）。
+  const name = overrideName?.trim() || id.name?.trim() || "我";
   return identityFromNsec(id.nsec, name);
 }
 

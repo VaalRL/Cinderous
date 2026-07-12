@@ -44,8 +44,8 @@ export interface Messages {
   mobilePair_sasHint: string;
   mobilePair_waiting: string;
   mobilePair_errCode: string;
+  mobilePair_errRejected: string;
   mobilePair_errNoIdentity: string;
-  mobilePair_restored: string;
   mobilePair_toNsec: string;
   // ── 新增身分小視窗（ADR-0045；D 補 i18n）──
   addId_title: string;
@@ -404,8 +404,8 @@ const zhHant: Messages = {
   mobilePair_sasHint: "確認兩台裝置顯示相同數字",
   mobilePair_waiting: "等待舊裝置確認…",
   mobilePair_errCode: "配對碼無效或已過期",
+  mobilePair_errRejected: "對方拒絕了配對（顯示的數字不符，可能有安全風險）。請在舊裝置重新產生配對碼再試。",
   mobilePair_errNoIdentity: "配對資料不含身分",
-  mobilePair_restored: "已還原身分",
   mobilePair_toNsec: "改用私鑰登入",
   addId_title: "新增身分",
   addId_close: "關閉",
@@ -763,8 +763,8 @@ const en: Messages = {
   mobilePair_sasHint: "Confirm both devices show the same number",
   mobilePair_waiting: "Waiting for the old device…",
   mobilePair_errCode: "Invalid or expired pairing code",
+  mobilePair_errRejected: "The other device rejected the pairing (the numbers didn't match — a possible security risk). Generate a new code on the old device and retry.",
   mobilePair_errNoIdentity: "Pairing data has no identity",
-  mobilePair_restored: "Identity restored",
   mobilePair_toNsec: "Use secret key sign-in",
   addId_title: "Add identity",
   addId_close: "Close",

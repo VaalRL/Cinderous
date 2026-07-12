@@ -62,6 +62,24 @@ describe("行動端登入 B：配對匯入（ADR-0081）", () => {
     expect(identityFromPairBundle(empty)).toEqual({ ok: false, error: "mobilePair_errNoIdentity" });
   });
 
+  it("捆包身分名稱為空：給預設名而非卡在 errName 死路（審查修 7）", () => {
+    const sk = generateSecretKey();
+    const bundle = { snapshot: { identity: { nsec: nsecEncode(sk), name: "  " } } } as unknown as PairBundle;
+    const r = identityFromPairBundle(bundle);
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.identity.pubkey).toBe(getPublicKey(sk));
+      expect(r.identity.name).toBe("我"); // 預設名，非 mobileSignIn_errName
+    }
+  });
+
+  it("捆包形狀異常（缺 snapshot）：遵守回傳型別、不丟 TypeError（審查修 8）", () => {
+    expect(identityFromPairBundle({} as unknown as PairBundle)).toEqual({
+      ok: false,
+      error: "mobilePair_errNoIdentity",
+    });
+  });
+
   it("previewPairing：有效碼取會合中繼站主機名、非法碼 → mobilePair_errCode", () => {
     const code = encodePairing(createPairing("", "webrtc", "wss://meet.example").payload);
     expect(previewPairing(code)).toEqual({ ok: true, relayHost: "meet.example" });

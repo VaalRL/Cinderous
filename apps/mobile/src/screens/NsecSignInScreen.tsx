@@ -1,7 +1,7 @@
 // 行動端登入 A（ADR-0081）：nsec 匯入。貼上桌面「設定 → 身分備份」的 nsec 即以同帳號登入。
 // 純 UI（RN 元件）：金鑰解碼/驗證在 ../auth（重用 @cinder/core）；色彩吃 @cinder/theme（與桌面同源）。
 // 私鑰只在本機解碼、絕不外流；輸入以 secureTextEntry 遮罩，並即時預覽導出的 npub 供確認。
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { type Locale, type MessageKey, translate } from "@cinder/i18n";
 import { resolveTheme, STATUS_COLORS, type Theme, type ThemeTokens } from "@cinder/theme";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native-web";
@@ -58,8 +58,8 @@ export function NsecSignInScreen({
   accent?: string | null;
   accent2?: string | null;
 }): JSX.Element {
-  const tk = resolveTheme({ theme, accent, accent2 });
-  const styles = makeStyles(tk);
+  const tk = useMemo(() => resolveTheme({ theme, accent, accent2 }), [theme, accent, accent2]);
+  const styles = useMemo(() => makeStyles(tk), [tk]);
   const [name, setName] = useState("");
   const [nsec, setNsec] = useState("");
   const [error, setError] = useState<MessageKey | null>(null);

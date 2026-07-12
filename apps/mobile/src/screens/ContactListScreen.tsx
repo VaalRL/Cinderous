@@ -6,6 +6,7 @@
 // 同一份主色/副色/深淺主題推導，行動端與桌面共用視覺 SSOT。StyleSheet 依當前 token 動態產生。
 // 註：目前直接 import "react-native-web"；日後上原生時可加 bundler 別名（react-native→web）
 // 讓同一份原始碼跨 web/native。
+import { useMemo } from "react";
 import { npubEncode } from "@cinder/core";
 import { type Locale, type MessageKey, translate } from "@cinder/i18n";
 import { resolveTheme, STATUS_COLORS, type Theme, type ThemeTokens } from "@cinder/theme";
@@ -72,8 +73,7 @@ export function ContactListScreen({
   /** 自訂副色 hex；null＝跟隨主色（ADR-0078/0080）。 */
   accent2?: string | null;
 }): JSX.Element {
-  const tk = resolveTheme({ theme, accent, accent2 });
-  const styles = makeStyles(tk);
+  const styles = useMemo(() => makeStyles(resolveTheme({ theme, accent, accent2 })), [theme, accent, accent2]);
   return (
     <View style={styles.root}>
       <View style={styles.me}>

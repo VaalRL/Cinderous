@@ -48,10 +48,20 @@ export function mixSrgb(a: string, b: string, weightA: number): string {
   ]);
 }
 
-/** 把 hex 往白色混（提亮）；amount 0..1。非法輸入原樣回傳。 */
+/**
+ * 把 hex 往白色混（提亮）；amount 夾限 0..1。非法輸入原樣回傳。
+ * 直接以 `c + (255-c)*amount` 逐通道計算（延續 ADR-0064 桌面原式），對任意 amount 皆逐位元精確——
+ * 不走 mixSrgb 轉譯，避免 `1-(1-amount)` 的浮點誤差在 .5 邊界丟失 1 色階。
+ */
 export function lightenHex(hex: string, amount: number): string {
-  // c + (255-c)*amount === mix(hex, white, 1-amount)（同式同捨入）。
-  return mixSrgb(hex, "#ffffff", 1 - amount);
+  const p = parseHex(hex);
+  if (!p) return hex;
+  const a = Math.min(1, Math.max(0, amount));
+  return toHex([
+    Math.round(p[0] + (255 - p[0]) * a),
+    Math.round(p[1] + (255 - p[1]) * a),
+    Math.round(p[2] + (255 - p[2]) * a),
+  ]);
 }
 
 /** 依主題把自訂色調整為實際套用色（深色提亮，淺色原樣）。 */
@@ -143,8 +153,11 @@ export interface ThemeTokens {
  */
 export function resolveTheme(input: ThemeInput): ThemeTokens {
   const cfg = BASE[input.theme];
-  const accent = input.accent ? accentForTheme(input.accent, input.theme) : cfg.defaultAccent;
-  const accent2 = input.accent2 ? accentForTheme(input.accent2, input.theme) : accent;
+  // 非法 hex（非 #rrggbb）視同未設，落回內建預設——避免無效值無聲汙染整組 token（SSOT 自帶防呆）。
+  const validAccent = input.accent && parseHex(input.accent) ? input.accent : null;
+  const validAccent2 = input.accent2 && parseHex(input.accent2) ? input.accent2 : null;
+  const accent = validAccent ? accentForTheme(validAccent, input.theme) : cfg.defaultAccent;
+  const accent2 = validAccent2 ? accentForTheme(validAccent2, input.theme) : accent;
   return {
     accent,
     accent2,

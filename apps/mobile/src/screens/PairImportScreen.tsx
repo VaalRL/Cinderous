@@ -5,7 +5,7 @@
 // `PairBundle`）；色彩吃 @cinder/theme。配對「傳輸」（WebRTC＋relay 會合）由呼叫端注入 `onPair`
 // ——產線走 engine `runPairTarget`＋`webRtcPairTransport`（需原生/EAS，見 ADR-0063）；測試可注入
 // 記憶體傳輸，故本畫面的驅動流程在此環境即可驗。
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import type { PairBundle } from "@cinder/engine";
 import { type Locale, type MessageKey, translate } from "@cinder/i18n";
 import { resolveTheme, STATUS_COLORS, type Theme, type ThemeTokens } from "@cinder/theme";
@@ -69,8 +69,8 @@ export function PairImportScreen({
   accent?: string | null;
   accent2?: string | null;
 }): JSX.Element {
-  const tk = resolveTheme({ theme, accent, accent2 });
-  const styles = makeStyles(tk);
+  const tk = useMemo(() => resolveTheme({ theme, accent, accent2 }), [theme, accent, accent2]);
+  const styles = useMemo(() => makeStyles(tk), [tk]);
   const [code, setCode] = useState("");
   const [sas, setSas] = useState("");
   const [error, setError] = useState<MessageKey | null>(null);
@@ -98,8 +98,10 @@ export function PairImportScreen({
         }
         onSignIn(r.identity);
       })
-      .catch(() => {
-        setError("mobilePair_errCode");
+      .catch((e: unknown) => {
+        // 對方拒絕（SAS 不符→可能中間人）與碼過期/格式錯要分開提示，安全訊號不可被抹平。
+        const msg = e instanceof Error ? e.message : "";
+        setError(msg.includes("拒絕") ? "mobilePair_errRejected" : "mobilePair_errCode");
         setBusy(false);
       });
   };
