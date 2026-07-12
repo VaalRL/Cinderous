@@ -7,8 +7,8 @@ import type { ChatBackend, ChatMessage, Contact, Group, Status } from "@cinder/e
 import { type Locale, type MessageKey, translate } from "@cinder/i18n";
 import type { Theme } from "@cinder/theme";
 import type { MobileIdentity } from "./auth.js";
+import { createBackend } from "./backend.js";
 import { chatList } from "./chat-list.js";
-import { createDemoChat } from "./chat.js";
 import { ChatsListScreen } from "./screens/ChatsListScreen.js";
 import { ConversationScreen } from "./screens/ConversationScreen.js";
 import { NsecSignInScreen } from "./screens/NsecSignInScreen.js";
@@ -24,11 +24,14 @@ const STATUS_KEY: Record<Status, MessageKey> = {
 };
 
 export function MobileApp({
+  relayUrl = null,
   locale = "zh-Hant",
   theme = "light",
   accent = null,
   accent2 = null,
 }: {
+  /** 真實中繼站網址（wss://…）；null＝示範後端（記憶體 relay＋機器人，ADR-0086）。 */
+  relayUrl?: string | null;
   locale?: Locale;
   theme?: Theme;
   accent?: string | null;
@@ -41,6 +44,7 @@ export function MobileApp({
   const [unread, setUnread] = useState<Record<string, number>>({});
   const [activeId, setActiveId] = useState<string | null>(null);
   const [selfName, setSelfName] = useState("");
+  const [selfNpub, setSelfNpub] = useState("");
   const backendRef = useRef<ChatBackend | null>(null);
   // 供 onMessage 閉包判斷「此對話是否正在看」以決定要不要累未讀。
   const screenRef = useRef(screen);
@@ -54,9 +58,10 @@ export function MobileApp({
 
   const handleSignIn = (identity: MobileIdentity): void => {
     backendRef.current?.stop();
-    const backend = createDemoChat(identity.name);
+    const backend = createBackend(identity, relayUrl);
     backendRef.current = backend;
     setSelfName(identity.name);
+    setSelfNpub(backend.selfNpub ?? "");
     backend.start({
       onContacts: setContacts,
       onGroups: setGroups,
@@ -88,6 +93,7 @@ export function MobileApp({
   const send = (text: string): void => {
     if (activeId) backendRef.current?.sendMessage(activeId, text);
   };
+  const addContact = (npub: string): void => backendRef.current?.addContact?.(npub.trim());
   const nameFor = (pk: string): string =>
     pk === backendRef.current?.self.pubkey ? selfName : contacts.find((c) => c.pubkey === pk)?.name ?? `${pk.slice(0, 8)}…`;
 
@@ -126,5 +132,13 @@ export function MobileApp({
       />
     );
   }
-  return <ChatsListScreen entries={entries} onOpen={openConvo} {...themeProps} />;
+  // 加好友/自己 npub 僅在真實 relay 模式提供（示範後端無 addContact、npub 為隨機）。
+  return (
+    <ChatsListScreen
+      entries={entries}
+      onOpen={openConvo}
+      {...(relayUrl ? { onAddContact: addContact, selfNpub } : {})}
+      {...themeProps}
+    />
+  );
 }

@@ -54,6 +54,10 @@ export interface Messages {
   mobileConvo_input: string;
   mobileConvo_send: string;
   mobileConvo_back: string;
+  mobileChats_add: string;
+  mobileChats_addPlaceholder: string;
+  mobileChats_addBtn: string;
+  mobileChats_myNpub: string;
   // ── 新增身分小視窗（ADR-0045；D 補 i18n）──
   addId_title: string;
   addId_close: string;
@@ -420,6 +424,10 @@ const zhHant: Messages = {
   mobileConvo_input: "輸入訊息…",
   mobileConvo_send: "送出",
   mobileConvo_back: "返回",
+  mobileChats_add: "加好友",
+  mobileChats_addPlaceholder: "貼上好友的 npub…",
+  mobileChats_addBtn: "加入",
+  mobileChats_myNpub: "你的 npub（分享給朋友加你）",
   addId_title: "新增身分",
   addId_close: "關閉",
   addId_relay: "relay 網址（wss://…）",
@@ -785,6 +793,10 @@ const en: Messages = {
   mobileConvo_input: "Message…",
   mobileConvo_send: "Send",
   mobileConvo_back: "Back",
+  mobileChats_add: "Add friend",
+  mobileChats_addPlaceholder: "Paste a friend's npub…",
+  mobileChats_addBtn: "Add",
+  mobileChats_myNpub: "Your npub (share it so friends can add you)",
   addId_title: "Add identity",
   addId_close: "Close",
   addId_relay: "Relay URL (wss://…)",

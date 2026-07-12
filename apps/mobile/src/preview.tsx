@@ -6,6 +6,7 @@ import { createRoot } from "react-dom/client";
 import { generateSecretKey, nsecEncode } from "@cinder/core";
 import type { Locale } from "@cinder/i18n";
 import type { Theme } from "@cinder/theme";
+import { DEFAULT_RELAY } from "./backend.js";
 import { MobileApp } from "./MobileApp.js";
 
 const ACCENTS = [
@@ -20,6 +21,8 @@ function Preview(): JSX.Element {
   const [theme, setTheme] = useState<Theme>("light");
   const [locale, setLocale] = useState<Locale>("zh-Hant");
   const [accentIdx, setAccentIdx] = useState(0);
+  const [useRelay, setUseRelay] = useState(false);
+  const [relayUrl, setRelayUrl] = useState(DEFAULT_RELAY);
   // 一組有效的示範 nsec（每次載入頁面固定）：貼到「用私鑰登入」即可進入示範對話。
   const demoNsec = useMemo(() => nsecEncode(generateSecretKey()), []);
   const accent = ACCENTS[accentIdx]!.hex;
@@ -71,7 +74,21 @@ function Preview(): JSX.Element {
             {a.name}
           </button>
         ))}
+        <span style={{ width: 8 }} />
+        <button type="button" style={btn(!useRelay)} onClick={() => setUseRelay(false)}>示範</button>
+        <button type="button" style={btn(useRelay)} onClick={() => setUseRelay(true)}>真實 relay</button>
       </div>
+
+      {useRelay ? (
+        <div style={{ display: "flex", gap: 8, alignItems: "center", maxWidth: 520, width: "100%", boxSizing: "border-box" }}>
+          <input
+            value={relayUrl}
+            onChange={(e) => setRelayUrl(e.target.value)}
+            placeholder="wss://…"
+            style={{ flex: 1, padding: "6px 10px", borderRadius: 8, border: `1px solid ${border}`, background: panelBg, color: ink, fontSize: 12 }}
+          />
+        </div>
+      ) : null}
 
       {/* 示範 nsec */}
       <div
@@ -118,11 +135,20 @@ function Preview(): JSX.Element {
           flexDirection: "column",
         }}
       >
-        <MobileApp theme={theme} locale={locale} accent={accent} />
+        <MobileApp
+          key={useRelay ? `relay:${relayUrl}` : "demo"}
+          theme={theme}
+          locale={locale}
+          accent={accent}
+          relayUrl={useRelay ? relayUrl.trim() : null}
+        />
       </div>
 
       <p style={{ fontSize: 12, color: muted, maxWidth: 520, textAlign: "center" }}>
-        登入後可與示範機器人「小幫手／阿明」對話（記憶體 relay，不連真實網路）。「從舊裝置匯入（配對）」在網頁環境不可用（需原生／WebRTC）。
+        {useRelay
+          ? "真實 relay 模式：登入後按右上「＋」貼好友 npub 加入即可對話；把「你的 npub」分享給對方（或開兩個分頁、各自不同 nsec 互加）才有雙向訊息。"
+          : "示範模式：登入後可與機器人「小幫手／阿明」對話（記憶體 relay，不連真實網路）。"}
+        「從舊裝置匯入（配對）」在網頁環境不可用（需原生／WebRTC）。
       </p>
     </div>
   );

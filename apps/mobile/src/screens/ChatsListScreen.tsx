@@ -1,10 +1,11 @@
-// 行動端聊天清單（ADR-0085）：登入後的主畫面，參考 LINE/Signal——聯絡人＋群組合成單一清單、
+// 行動端聊天清單（ADR-0085/0086）：登入後的主畫面，參考 LINE/Signal——聯絡人＋群組合成單一清單、
 // 預設依最近互動排序，每列＝頭像＋名稱＋最後訊息預覽＋時間＋未讀徽章，點擊開啟對話。
-// 色彩吃 @cinder/theme（與桌面同 SSOT）。清單資料由呼叫端以 chat-list.ts 的 chatList() 排好傳入。
-import { useMemo } from "react";
+// 真實 relay 模式（ADR-0086）：標題列「＋」展開加好友面板（貼 npub），並顯示自己的 npub 供分享。
+// 色彩吃 @cinder/theme。清單資料由呼叫端以 chat-list.ts 的 chatList() 排好傳入。
+import { useMemo, useState } from "react";
 import { type Locale, type MessageKey, translate } from "@cinder/i18n";
 import { resolveTheme, STATUS_COLORS, type Theme, type ThemeTokens } from "@cinder/theme";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native-web";
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native-web";
 import { type ChatListEntry, chatTimeLabel } from "../chat-list.js";
 
 /** 頭像底色：由 id 決定性挑一個柔和色（LINE/Signal 風格的彩色圓）。 */
@@ -21,14 +22,18 @@ function initial(name: string): string {
 function makeStyles(tk: ThemeTokens) {
   return StyleSheet.create({
     root: { flex: 1, backgroundColor: tk.panel },
-    header: {
-      paddingVertical: 14,
-      paddingHorizontal: 16,
-      backgroundColor: tk.surface2,
-      borderBottomWidth: 1,
-      borderBottomColor: tk.border,
-    },
+    header: { paddingVertical: 12, paddingHorizontal: 16, backgroundColor: tk.surface2, borderBottomWidth: 1, borderBottomColor: tk.border },
+    headerRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
     headerTitle: { fontSize: 20, fontWeight: "700", color: tk.ink },
+    addBtn: { width: 32, height: 32, borderRadius: 16, alignItems: "center", justifyContent: "center", backgroundColor: tk.accent },
+    addBtnText: { color: "#ffffff", fontSize: 22, fontWeight: "700", lineHeight: 22 },
+    addPanel: { marginTop: 10, gap: 6 },
+    addLabel: { fontSize: 11, color: tk.muted },
+    myNpub: { fontSize: 11, color: tk.accent },
+    addRow: { flexDirection: "row", gap: 8, alignItems: "center" },
+    addInput: { flex: 1, borderWidth: 1, borderColor: tk.border, borderRadius: 8, backgroundColor: tk.field, color: tk.ink, paddingVertical: 6, paddingHorizontal: 10, fontSize: 13 },
+    addSubmit: { backgroundColor: tk.accent, borderRadius: 8, paddingVertical: 6, paddingHorizontal: 12 },
+    addSubmitText: { color: "#ffffff", fontWeight: "700", fontSize: 13 },
     list: { flex: 1 },
     empty: { padding: 28, textAlign: "center", color: tk.muted, fontSize: 13, lineHeight: 20 },
     row: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 10, paddingHorizontal: 14, borderBottomWidth: 1, borderBottomColor: tk.border },
@@ -49,6 +54,8 @@ function makeStyles(tk: ThemeTokens) {
 export function ChatsListScreen({
   entries,
   onOpen,
+  onAddContact,
+  selfNpub,
   now = Date.now(),
   locale = "zh-Hant",
   theme = "light",
@@ -59,20 +66,75 @@ export function ChatsListScreen({
   entries: ChatListEntry[];
   /** 點擊某列開啟對話（傳 id＝聯絡人 pubkey 或群組 id）。 */
   onOpen: (id: string) => void;
+  /** 加好友（貼 npub）；未提供＝不顯示「＋」（如示範模式）。 */
+  onAddContact?: (npub: string) => void;
+  /** 自己的 npub（真實 relay 模式顯示於加好友面板供分享）。 */
+  selfNpub?: string;
   now?: number;
   locale?: Locale;
   theme?: Theme;
   accent?: string | null;
   accent2?: string | null;
 }): JSX.Element {
-  const styles = useMemo(() => makeStyles(resolveTheme({ theme, accent, accent2 })), [theme, accent, accent2]);
+  const tk = useMemo(() => resolveTheme({ theme, accent, accent2 }), [theme, accent, accent2]);
+  const styles = useMemo(() => makeStyles(tk), [tk]);
   const t = (k: MessageKey): string => translate(locale, k);
+  const [addOpen, setAddOpen] = useState(false);
+  const [draft, setDraft] = useState("");
+
+  const submitAdd = (): void => {
+    const v = draft.trim();
+    if (!v) return;
+    onAddContact?.(v);
+    setDraft("");
+    setAddOpen(false);
+  };
 
   return (
     <View style={styles.root}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>{t("mobileChats_title")}</Text>
+        <View style={styles.headerRow}>
+          <Text style={styles.headerTitle}>{t("mobileChats_title")}</Text>
+          {onAddContact ? (
+            <Pressable
+              style={styles.addBtn}
+              accessibilityRole="button"
+              aria-label={t("mobileChats_add")}
+              onPress={() => setAddOpen((v) => !v)}
+            >
+              <Text style={styles.addBtnText}>＋</Text>
+            </Pressable>
+          ) : null}
+        </View>
+        {addOpen && onAddContact ? (
+          <View style={styles.addPanel}>
+            {selfNpub ? (
+              <>
+                <Text style={styles.addLabel}>{t("mobileChats_myNpub")}</Text>
+                <Text style={styles.myNpub} numberOfLines={1}>
+                  {selfNpub}
+                </Text>
+              </>
+            ) : null}
+            <View style={styles.addRow}>
+              <TextInput
+                style={styles.addInput}
+                value={draft}
+                onChangeText={setDraft}
+                placeholder={t("mobileChats_addPlaceholder")}
+                placeholderTextColor={tk.muted}
+                autoCapitalize="none"
+                autoCorrect={false}
+                aria-label={t("mobileChats_add")}
+              />
+              <Pressable style={styles.addSubmit} accessibilityRole="button" onPress={submitAdd}>
+                <Text style={styles.addSubmitText}>{t("mobileChats_addBtn")}</Text>
+              </Pressable>
+            </View>
+          </View>
+        ) : null}
       </View>
+
       {entries.length === 0 ? (
         <Text style={styles.empty}>{t("mobileChats_empty")}</Text>
       ) : (
