@@ -22,7 +22,7 @@ import { normalizeRelayUrl, RelayChatBackend, webSocketConnector } from "@cinder
 import { getKeyVault } from "./native/keyvault.js";
 import { getNotifier, onNotificationClick } from "./native/notify.js";
 import { useI18n } from "./i18n.js";
-import { useLayout } from "./layout.js";
+import { type Layout, useLayout } from "./layout.js";
 import { isWrappedValue, passChange, passDisable, passEnable, passLock, passRescue, passUnlock } from "./native/passlock.js";
 import {
   activeDrain,
@@ -120,6 +120,27 @@ export function relayChangeTarget(p: Profile | null, url: string): string | null
   const norm = normalizeRelayUrl(url);
   if (!norm || norm === normalizeRelayUrl(p.relayUrl)) return null;
   return norm;
+}
+
+/**
+ * 某對話當下是否「真的看得到」（ADR-0079 三欄修正）：視窗需聚焦，且——
+ * 經典佈局所有視窗同時可見（只看聚焦）；三欄僅 active 分頁可見。
+ * 供未讀累加與已讀回條共用，取代「只看 document.hidden」的舊假設。
+ */
+export function convoVisibleIn(layout: Layout, activeConvo: string | null, pk: string, hidden: boolean): boolean {
+  if (hidden) return false;
+  return layout !== "modern" || pk === activeConvo;
+}
+
+/**
+ * 把某分頁移出後，作用中分頁該遞補誰（ADR-0079 Q3 修正）：非作用中則不動；
+ * 否則挑相鄰（右側優先、否則左側最後一個）；清空回 null。
+ */
+export function nextActiveAfterRemoval(open: string[], pk: string, active: string | null): string | null {
+  if (active !== pk) return active;
+  const idx = open.indexOf(pk);
+  const rest = open.filter((x) => x !== pk);
+  return rest[Math.min(idx, rest.length - 1)] ?? null;
 }
 
 /** 把管理者輸入（npub… 或 hex）正規化為 hex pubkey；非法回傳 undefined（ADR-0047）。 */
@@ -338,6 +359,11 @@ export function App(): JSX.Element {
   groupsRef.current = groups;
   const tRef = useRef(t);
   tRef.current = t;
+  // 三欄可視性（ADR-0079）：讓 onMessage/visibilitychange 這類閉包 handler 讀到當前佈局與作用中分頁。
+  const layoutRef = useRef(layout);
+  layoutRef.current = layout;
+  const activeConvoRef = useRef(activeConvo);
+  activeConvoRef.current = activeConvo;
   // 已讀回條開關同步到後端（ADR-0058）；後端重建或開關變動時皆推送。
   useEffect(() => {
     backend?.setReadReceipts?.(readReceipts);
@@ -409,10 +435,14 @@ export function App(): JSX.Element {
           return { ...prev, [pk]: [...cur, msg] };
         });
         setOpen((prev) => (prev.includes(pk) ? prev : [...prev, pk]));
-        // 未讀徽章與桌面通知：僅在收到他人訊息、且視窗未聚焦時
-        if (!msg.outgoing && typeof document !== "undefined" && document.hidden) {
-          setUnread((u) => ({ ...u, [pk]: (u[pk] ?? 0) + 1 }));
-          if (notifyRef.current) {
+        // 未讀徽章：收到他人訊息、且該對話當下看不到時累加（三欄背景分頁也算看不到，ADR-0079 修正）。
+        // 桌面通知仍僅在整個視窗未聚焦時彈出（視窗聚焦時以未讀徽章提示即可，不打擾）。
+        if (!msg.outgoing) {
+          const hidden = typeof document !== "undefined" && document.hidden;
+          if (!convoVisibleIn(layoutRef.current, activeConvoRef.current, pk, hidden)) {
+            setUnread((u) => ({ ...u, [pk]: (u[pk] ?? 0) + 1 }));
+          }
+          if (hidden && notifyRef.current) {
             // 標題＝該對話（群組/聯絡人）顯示名；隱藏預覽時只顯示提示語，
             // 群組訊息在內文前綴傳訊者名（ADR-0076）。以 ref 取現值避免 [backend] 閉包陳舊。
             const group = groupsRef.current.find((g) => g.id === pk);
@@ -498,6 +528,7 @@ export function App(): JSX.Element {
           const mapped = prev.map((pk) => (pk === from ? to : pk));
           return mapped.filter((pk, i) => mapped.indexOf(pk) === i);
         });
+        setActiveConvo((a) => (a === from ? to : a)); // 三欄：當前分頁若被輪替，接續到新 npub（ADR-0079 修正）。
       },
       onFileProgress: (pk, id, sent) =>
         setConvos((prev) => {
@@ -591,20 +622,28 @@ export function App(): JSX.Element {
     return () => clearInterval(timer);
   }, [convos]);
 
-  // 視窗重新聚焦時清除所有未讀徽章
+  // 視窗重新聚焦時清未讀：經典＝全部可見故全清；三欄＝只有 active 分頁可見，只清它（ADR-0079 修正）。
   useEffect(() => {
     const onVisible = () => {
-      if (!document.hidden) setUnread({});
+      if (document.hidden) return;
+      if (layoutRef.current === "modern") {
+        const a = activeConvoRef.current;
+        if (a) setUnread((u) => (u[a] ? { ...u, [a]: 0 } : u));
+      } else {
+        setUnread({});
+      }
     };
     document.addEventListener("visibilitychange", onVisible);
     return () => document.removeEventListener("visibilitychange", onVisible);
   }, []);
 
-  // 通知點擊（ADR-0076 N3）：叫回視窗後開啟該對話並置前（未知 pk 於 render 端回 null，安全）。
+  // 通知點擊（ADR-0076 N3）：叫回視窗後開啟該對話並置前；三欄下一併設為當前分頁並清未讀（ADR-0079 修正）。
   useEffect(() => {
     return onNotificationClick((convo) => {
       if (!convo) return;
       setOpen((prev) => (prev.includes(convo) ? [...prev.filter((x) => x !== convo), convo] : [...prev, convo]));
+      setActiveConvo(convo);
+      setUnread((u) => (u[convo] ? { ...u, [convo]: 0 } : u));
     });
   }, []);
 
@@ -897,22 +936,27 @@ export function App(): JSX.Element {
     activeBackend.setStatus(self.status, message);
     setSelf((x) => (x ? { ...x, statusMessage: message } : x));
   };
+  // 設為當前分頁（ADR-0079 Q3）：清該對話未讀，且若當下可見則送已讀回條（切到分頁＝看到）。
+  // 供側欄雙擊（openChat）與分頁列點擊（DeckTabs）共用，避免只設 activeConvo 卻漏清未讀。
+  const activateConvo = (pk: string) => {
+    setActiveConvo(pk);
+    setUnread((u) => (u[pk] ? { ...u, [pk]: 0 } : u));
+    if (typeof document === "undefined" || !document.hidden) activeBackend.markRead?.(pk);
+  };
   const openChat = (pk: string) => {
     setOpen((prev) => (prev.includes(pk) ? prev : [...prev, pk]));
-    setActiveConvo(pk); // 三欄：設為當前分頁（ADR-0079 Q3）；經典不受影響。
-    setUnread((u) => (u[pk] ? { ...u, [pk]: 0 } : u));
+    activateConvo(pk); // 三欄：設為當前分頁並清未讀；經典不受影響。
     // F5：對非群組聯絡人主動建立 P2P 通道，讓輸入中等狀態卸載中繼。
     if (!groups.some((g) => g.id === pk)) activeBackend.connectPeer?.(pk);
   };
 
+  // 把某 pk 移出作用中分頁（若正是它）：改選相鄰（ADR-0079 Q3 修正 activeConvo 幽靈）。
+  const dropActive = (pk: string) => setActiveConvo((a) => nextActiveAfterRemoval(open, pk, a));
+
   // 關閉對話（分頁或浮動窗）：移出 open；若關的是當前分頁，改選相鄰分頁（ADR-0079 Q3）。
   const closeConvo = (pk: string) => {
     setOpen((prev) => prev.filter((x) => x !== pk));
-    setActiveConvo((a) => {
-      if (a !== pk) return a;
-      const rest = open.filter((x) => x !== pk);
-      return rest[rest.length - 1] ?? null;
-    });
+    dropActive(pk);
   };
 
   const toggleReadReceipts = () => {
@@ -978,6 +1022,7 @@ export function App(): JSX.Element {
   // 刪除/封鎖後：關閉其對話視窗並清掉本地對話快取
   const forget = (pk: string) => {
     setOpen((prev) => prev.filter((x) => x !== pk));
+    dropActive(pk); // 三欄：若刪的是當前分頁，遞補相鄰（避免中欄空白/右欄幽靈，ADR-0079 修正）。
     setConvos((prev) => {
       if (!(pk in prev)) return prev;
       const next = { ...prev };
@@ -1304,7 +1349,7 @@ export function App(): JSX.Element {
           contacts={contacts}
           groups={groups}
           unread={unread}
-          onActivate={setActiveConvo}
+          onActivate={activateConvo}
           onClose={closeConvo}
         />
       ) : null}
@@ -1357,6 +1402,7 @@ export function App(): JSX.Element {
                     onLeaveGroup: () => {
                       activeBackend.leaveGroup!(pk);
                       setOpen((prev) => prev.filter((x) => x !== pk));
+                      dropActive(pk); // 三欄：離開的群若是當前分頁，遞補相鄰（ADR-0079 修正）。
                       updatePrefs(pruneGroup(groupPrefs, pk));
                     },
                   }
@@ -1395,8 +1441,9 @@ export function App(): JSX.Element {
             typing={(typingAt[pk] ?? 0) > Date.now() - TYPING_VISIBLE_MS}
             nudgeSignal={nudge[pk] ?? 0}
             onMarkRead={() => {
-              // 僅在視窗聚焦時送已讀（開著但沒看不算讀；ADR-0058）。
-              if (typeof document === "undefined" || !document.hidden) activeBackend.markRead?.(pk);
+              // 僅在此對話「當下真的看得到」時送已讀（開著但沒看不算讀；三欄背景分頁也不算，ADR-0058/0079）。
+              const hidden = typeof document !== "undefined" && document.hidden;
+              if (convoVisibleIn(layout, activeConvo, pk, hidden)) activeBackend.markRead?.(pk);
             }}
             {...(rewriteFn ? { onRewrite: rewriteFn } : {})}
             {...(checkAiAvailable ? { onCheckAiAvailable: checkAiAvailable } : {})}
