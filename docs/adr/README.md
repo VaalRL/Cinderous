@@ -99,3 +99,4 @@
 | [0082](./0082-user-facing-naming-glossary.md) | 使用者可見名稱統一詞彙表（登入／同步／搬家／備份／配對） | 已接受 |
 | [0083](./0083-drain-fully-internal.md) | 舊站排水完全內部化（移除所有 UI，機制不變） | 已接受 |
 | [0084](./0084-code-identifier-naming.md) | 程式碼識別字命名：行動端 i18n 前綴一致化，其餘刻意保留 | 已接受 |
+| [0085](./0085-mobile-app-shell-navigation.md) | 行動端 app 殼與導覽：聊天清單（最近互動排序）＋對話（LINE/Signal 風格） | 已接受 |

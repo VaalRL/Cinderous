@@ -11,6 +11,7 @@ declare module "react-native-web" {
   }
   export interface TextProps {
     style?: Style;
+    numberOfLines?: number;
     children?: ReactNode;
   }
   export interface TextInputProps {
@@ -35,10 +36,17 @@ declare module "react-native-web" {
     "aria-label"?: string;
     testID?: string;
   }
+  export interface ScrollViewProps {
+    style?: Style;
+    contentContainerStyle?: Style;
+    horizontal?: boolean;
+    children?: ReactNode;
+  }
   export const View: ComponentType<ViewProps>;
   export const Text: ComponentType<TextProps>;
   export const TextInput: ComponentType<TextInputProps>;
   export const Pressable: ComponentType<PressableProps>;
+  export const ScrollView: ComponentType<ScrollViewProps>;
   export const StyleSheet: {
     create<T extends Record<string, StyleValue>>(styles: T): T;
   };

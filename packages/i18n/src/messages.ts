@@ -47,6 +47,13 @@ export interface Messages {
   mobilePair_errRejected: string;
   mobilePair_errNoIdentity: string;
   mobilePair_toNsec: string;
+  // ── 行動端 app 殼：聊天清單＋對話（ADR-0085）──
+  mobileChats_title: string;
+  mobileChats_empty: string;
+  mobileChats_you: string;
+  mobileConvo_input: string;
+  mobileConvo_send: string;
+  mobileConvo_back: string;
   // ── 新增身分小視窗（ADR-0045；D 補 i18n）──
   addId_title: string;
   addId_close: string;
@@ -407,6 +414,12 @@ const zhHant: Messages = {
   mobilePair_errRejected: "對方拒絕了配對（顯示的數字不符，可能有安全風險）。請在舊裝置重新產生配對碼再試。",
   mobilePair_errNoIdentity: "配對資料不含身分",
   mobilePair_toNsec: "改用私鑰登入",
+  mobileChats_title: "聊天",
+  mobileChats_empty: "還沒有對話。加個好友或建立群組就會出現在這裡。",
+  mobileChats_you: "你：",
+  mobileConvo_input: "輸入訊息…",
+  mobileConvo_send: "送出",
+  mobileConvo_back: "返回",
   addId_title: "新增身分",
   addId_close: "關閉",
   addId_relay: "relay 網址（wss://…）",
@@ -766,6 +779,12 @@ const en: Messages = {
   mobilePair_errRejected: "The other device rejected the pairing (the numbers didn't match — a possible security risk). Generate a new code on the old device and retry.",
   mobilePair_errNoIdentity: "Pairing data has no identity",
   mobilePair_toNsec: "Use secret key sign-in",
+  mobileChats_title: "Chats",
+  mobileChats_empty: "No conversations yet. Add a friend or create a group and it'll show up here.",
+  mobileChats_you: "You: ",
+  mobileConvo_input: "Message…",
+  mobileConvo_send: "Send",
+  mobileConvo_back: "Back",
   addId_title: "Add identity",
   addId_close: "Close",
   addId_relay: "Relay URL (wss://…)",
