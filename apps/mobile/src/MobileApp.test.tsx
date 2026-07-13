@@ -82,3 +82,48 @@ describe("行動端 app 殼與畫面（ADR-0085）", () => {
     expect(html).toContain("送出"); // mobileConvo_send
   });
 });
+
+describe("行動端送出狀態與群組已讀（ADR-0095）", () => {
+  const nameFor = (pk: string) => ({ bob: "Bob", carol: "Carol" })[pk] ?? pk;
+  const convo = (messages: ChatMessage[], members?: string[]) =>
+    renderToStaticMarkup(
+      <ConversationScreen
+        name="小群"
+        messages={messages}
+        onSend={() => {}}
+        onBack={() => {}}
+        locale="zh-Hant"
+        nameFor={nameFor}
+        {...(members ? { groupMembers: members } : {})}
+      />,
+    );
+
+  it("狀態圖示：已讀＝張開眼（有瞳孔）；已送出＝閉眼（無瞳孔）", () => {
+    expect(convo([{ id: "m1", at: 1, text: "hi", outgoing: true, status: "read" }])).toContain("<circle");
+    expect(convo([{ id: "m2", at: 1, text: "hi", outgoing: true, status: "sent" }])).not.toContain("<circle");
+  });
+
+  it("名單制（≤5 人）：顯示誰已讀", () => {
+    const html = convo(
+      [{ id: "m1", at: 1, text: "hi", outgoing: true, status: "read", receipts: { bob: "read", carol: "delivered" } }],
+      ["me", "bob", "carol"], // 3 人＝名單制
+    );
+    expect(html).toContain("已讀：Bob"); // 只列已讀者（Carol 只送達，不列）
+    expect(html).not.toContain("Carol");
+  });
+
+  it("計數制（6–10 人）：只顯示 M/N，不列名", () => {
+    const html = convo(
+      [{ id: "m1", at: 1, text: "hi", outgoing: true, status: "read", receipts: { bob: "read", carol: "read" } }],
+      ["me", "bob", "carol", "d", "e", "f", "g"], // 7 人＝計數制
+    );
+    expect(html).toContain("已讀 2/6"); // 6＝其他成員數
+    expect(html).not.toContain("Bob");
+  });
+
+  it("大群（>10 人）：完全不顯示已讀", () => {
+    const members = ["me", "bob", ...Array.from({ length: 10 }, (_, i) => `x${i}`)]; // 12 人
+    const html = convo([{ id: "m1", at: 1, text: "hi", outgoing: true, status: "sent", receipts: { bob: "read" } }], members);
+    expect(html).not.toContain("已讀");
+  });
+});

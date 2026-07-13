@@ -2,6 +2,7 @@
 // 頂部返回列（‹ 返回＋名稱＋副標）、訊息氣泡（自己靠右主色、對方靠左淺底；群組顯示發送者名）、
 // 底部輸入列（輸入框＋送出）。色彩吃 @cinder/theme。訊息與送出由呼叫端注入（接 ChatBackend）。
 import { useMemo, useState } from "react";
+import { groupReceiptMode } from "@cinder/core";
 import type { ChatMessage, MessageStatus } from "@cinder/engine";
 import { type Locale, type MessageKey, translate } from "@cinder/i18n";
 import { resolveTheme, type Theme, type ThemeTokens } from "@cinder/theme";
@@ -44,7 +45,8 @@ function makeStyles(tk: ThemeTokens) {
     bubbleTheir: { backgroundColor: tk.panel, borderWidth: 1, borderColor: tk.border },
     textMine: { color: "#ffffff", fontSize: 14 },
     textTheir: { color: tk.ink, fontSize: 14 },
-    status: { marginTop: 2, marginRight: 4 },
+    status: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 2, marginRight: 4 },
+    readby: { fontSize: 10, color: tk.muted },
     composer: {
       flexDirection: "row",
       alignItems: "center",
@@ -75,6 +77,7 @@ export function ConversationScreen({
   subtitle,
   messages,
   nameFor,
+  groupMembers,
   onSend,
   onBack,
   locale = "zh-Hant",
@@ -88,6 +91,8 @@ export function ConversationScreen({
   messages: ChatMessage[];
   /** 群組訊息顯示發送者名（傳 pubkey → 名稱）；未提供則不顯示。 */
   nameFor?: (pubkey: string) => string;
+  /** 群組成員 pubkey（含自己）；提供即為群組，用來決定已讀呈現分級（ADR-0095）。 */
+  groupMembers?: string[];
   onSend: (text: string) => void;
   onBack: () => void;
   locale?: Locale;
@@ -97,10 +102,29 @@ export function ConversationScreen({
 }): JSX.Element {
   const tk = useMemo(() => resolveTheme({ theme, accent, accent2 }), [theme, accent, accent2]);
   const styles = useMemo(() => makeStyles(tk), [tk]);
-  const t = (k: MessageKey): string => translate(locale, k);
+  const t = (k: MessageKey, params?: Record<string, string | number>): string => translate(locale, k, params);
   // 狀態圖示配色（ADR-0095）：張開眼＝主色、失敗＝紅、其餘＝灰。
   const statusColor = (s: MessageStatus): string =>
     s === "read" ? tk.accent : s === "failed" ? "#dc2626" : tk.muted;
+
+  /**
+   * 群組已讀呈現（ADR-0095，與桌面同一套分級）：≤5 名單制（誰已讀）、6–10 計數制（已讀 M/N）、
+   * >10 完全不記（回 null，不顯示）。僅自己送出的群訊有意義。
+   */
+  const groupReadOf = (m: ChatMessage): string | null => {
+    if (!m.outgoing || !groupMembers) return null;
+    const total = groupMembers.length - 1; // 其他成員數（不含自己）
+    if (total <= 0) return null;
+    const mode = groupReceiptMode(groupMembers.length);
+    if (mode === "off") return null; // 大群不記
+    const readers = Object.entries(m.receipts ?? {})
+      .filter(([, v]) => v === "read")
+      .map(([pk]) => pk);
+    if (readers.length === 0) return null;
+    return mode === "list"
+      ? t("readBy_list", { names: readers.map((pk) => nameFor?.(pk) ?? `${pk.slice(0, 8)}…`).join("、") })
+      : t("readBy_count", { count: readers.length, total });
+  };
   const [draft, setDraft] = useState("");
 
   const submit = (): void => {
@@ -131,10 +155,16 @@ export function ConversationScreen({
                 {m.file ? `📎 ${m.file.name}` : m.text}
               </Text>
             </View>
-            {/* 送出狀態（ADR-0095）：與桌面同一套——沙漏／閉眼／半開眼／張開眼（主色）／紅色重試。 */}
-            {m.outgoing && m.status ? (
-              <View style={styles.status} aria-label={t(MSG_STATUS_KEY[m.status])}>
-                <MsgStatusIcon status={m.status} color={statusColor(m.status)} size={12} />
+            {/* 送出狀態（ADR-0095）：與桌面同一套——沙漏／閉眼／半開眼／張開眼（主色）／紅色重試。
+                群組另依分級顯示「誰已讀」（≤5）或「已讀 M/N」（6–10）；大群不顯示。 */}
+            {m.outgoing && (m.status || groupReadOf(m)) ? (
+              <View style={styles.status}>
+                {m.status ? (
+                  <View aria-label={t(MSG_STATUS_KEY[m.status])}>
+                    <MsgStatusIcon status={m.status} color={statusColor(m.status)} size={12} />
+                  </View>
+                ) : null}
+                {groupReadOf(m) ? <Text style={styles.readby}>{groupReadOf(m)}</Text> : null}
               </View>
             ) : null}
           </View>

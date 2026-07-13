@@ -249,6 +249,8 @@ export function MobileApp({
       : contact
         ? contact.statusMessage || translate(locale, STATUS_KEY[contact.status])
         : undefined;
+    // 群組另傳成員名解析＋成員清單：供已讀分級（≤5 名單、6–10 計數、>10 不顯示，ADR-0095）。
+    const groupProps = group ? { nameFor, groupMembers: group.members } : {};
     return (
       <ConversationScreen
         name={group?.name ?? contact?.name ?? activeId}
@@ -256,7 +258,7 @@ export function MobileApp({
         onSend={send}
         onBack={back}
         {...(subtitle ? { subtitle } : {})}
-        {...(group ? { nameFor } : {})}
+        {...groupProps}
         {...themeProps}
       />
     );

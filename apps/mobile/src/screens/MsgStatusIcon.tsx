@@ -1,9 +1,11 @@
 // 訊息狀態圖示（ADR-0095）：與桌面**同一套**幾何（@cinder/theme 的 MSG_STATUS_ICONS）。
 //
-// 目前行動端跑在 react-native-web（DOM），故直接用內嵌 <svg>。移植到真正的 React Native 時，
-// 只需把 svg/path/circle 換成 react-native-svg 的 Svg/Path/Circle——幾何與色角色皆不變（共享 SSOT）。
+// 用 react-native-svg（Expo/RN 生態標準，且 react-native-web 亦可用）——不再內嵌 DOM <svg>，
+// 故本元件可原樣移植到真正的 React Native：Metro 會自行挑 native 實作，web 端則由
+// vite.config 的別名指到其 web 實作（見該檔註解）。
 
 import { MSG_STATUS_ICONS, type MsgStatusIconName } from "@cinder/theme";
+import Svg, { Circle, Path } from "react-native-svg";
 
 export function MsgStatusIcon({
   status,
@@ -17,22 +19,19 @@ export function MsgStatusIcon({
 }): JSX.Element {
   const icon = MSG_STATUS_ICONS[status];
   return (
-    <svg
-      viewBox={icon.viewBox}
-      width={size}
-      height={size}
-      fill="none"
-      stroke={color}
-      strokeWidth={icon.strokeWidth}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-      focusable="false"
-    >
+    <Svg viewBox={icon.viewBox} width={size} height={size} fill="none">
       {icon.strokes.map((d) => (
-        <path key={d} d={d} />
+        <Path
+          key={d}
+          d={d}
+          stroke={color}
+          strokeWidth={icon.strokeWidth}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          fill="none"
+        />
       ))}
-      {icon.dot ? <circle cx={icon.dot[0]} cy={icon.dot[1]} r={icon.dot[2]} fill={color} stroke="none" /> : null}
-    </svg>
+      {icon.dot ? <Circle cx={icon.dot[0]} cy={icon.dot[1]} r={icon.dot[2]} fill={color} /> : null}
+    </Svg>
   );
 }
