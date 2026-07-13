@@ -301,6 +301,12 @@ export interface Messages {
   file_attach: string;
   file_download: string;
   file_sending: string;
+  /** 收檔另存後顯示的前綴（ADR-0093），後接儲存路徑。 */
+  file_saved: string;
+  /** 檔案位元組落在使用者的另一台裝置、此裝置只收到 metadata（ADR-0093）。 */
+  file_onOtherDevice: string;
+  /** 已收到位元組但使用者未另存（取消對話框，ADR-0093）。 */
+  file_notSaved: string;
   file_dropHint: string;
   file_error: string;
   sticker_title: string;
@@ -685,6 +691,9 @@ const zhHant: Messages = {
   file_attach: "傳送檔案（P2P）",
   file_download: "下載",
   file_sending: "傳送中…",
+  file_saved: "已儲存於",
+  file_onOtherDevice: "檔案在你另一台裝置",
+  file_notSaved: "已接收（未儲存）",
   file_dropHint: "放開以傳送檔案",
   file_error: "檔案傳輸失敗",
   sticker_title: "貼圖",
@@ -1069,6 +1078,9 @@ const en: Messages = {
   file_attach: "Send a file (P2P)",
   file_download: "Download",
   file_sending: "Sending…",
+  file_saved: "Saved to",
+  file_onOtherDevice: "File is on your other device",
+  file_notSaved: "Received (not saved)",
   file_dropHint: "Drop to send",
   file_error: "File transfer failed",
   sticker_title: "Stickers",

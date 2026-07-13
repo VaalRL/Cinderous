@@ -55,8 +55,10 @@ export interface ChatFile {
   sent: number;
   /** 是否為對方傳來。 */
   incoming: boolean;
-  /** 下載用的物件 URL（收檔完成後才有）。 */
+  /** 下載用的物件 URL（本 session 收/送到位元組時才有；重載後不留，ADR-0093）。 */
   url?: string;
+  /** 收檔後使用者選定的本機儲存路徑（Tauri 另存；瀏覽器下載無法得知則省略，ADR-0093）。 */
+  savedPath?: string;
 }
 
 export interface ChatMessage {
@@ -108,8 +110,12 @@ export interface ChatBackendEvents {
   onRelayPool?(relays: { url: string; state: ConnectionState; home: boolean; stale: boolean }[]): void;
   /** P2P 送檔進度（`id` 對應 sendFile 回傳值；`sent`/`total` 為位元組）。 */
   onFileProgress?(contact: PubkeyHex, id: string, sent: number, total: number): void;
-  /** 收到一個經 P2P 傳來的完整檔案。 */
-  onFileReceived?(contact: PubkeyHex, file: ReceivedFile): void;
+  /**
+   * 此裝置經 P2P 收到某檔案的**位元組**（ADR-0093）：前端據此跳「另存新檔」對話框，
+   * 寫入使用者選定路徑後以 `setFileSavedPath` 回填。`messageId` 對應 `onMessage`/`onHistory`
+   * 發出的檔案訊息（backend 已先建好該訊息，metadata-only）。App 不保管位元組本體。
+   */
+  onFileBytes?(contact: PubkeyHex, messageId: string, file: ReceivedFile): void;
   /** 檔案傳輸錯誤。 */
   onFileError?(contact: PubkeyHex, reason: string): void;
   /** 群組清單更新（M9）。 */
@@ -159,6 +165,8 @@ export interface ChatBackend {
   setReadReceipts?(enabled: boolean): void;
   /** 以 WebRTC P2P 傳送檔案（不經中繼），回傳追蹤用的傳輸 id。 */
   sendFile?(to: PubkeyHex, file: OutgoingFile): string;
+  /** 回填某檔案訊息收檔後的本機儲存路徑（ADR-0093）：App 另存完成後呼叫以持久化路徑。 */
+  setFileSavedPath?(contact: PubkeyHex, messageId: string, savedPath: string): void;
   /** 開啟對話時主動建立 P2P 通道（F5：讓輸入中等狀態卸載中繼）。 */
   connectPeer?(to: PubkeyHex): void;
   /** 建立群組（M9）：`memberPubkeys` 為其他成員的公鑰（既有聯絡人）。 */

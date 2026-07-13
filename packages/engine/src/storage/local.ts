@@ -155,6 +155,13 @@ export class LocalStorage implements AppStorage {
     msg.status = status;
     write(this.k("msgs." + contactPubkey), list);
   }
+  setFileSavedPath(contactPubkey: string, messageId: string, savedPath: string): void {
+    const list = this.loadMessages(contactPubkey);
+    const msg = list.find((m) => m.id === messageId);
+    if (!msg?.file) return;
+    msg.file = { ...msg.file, savedPath };
+    write(this.k("msgs." + contactPubkey), list);
+  }
   loadReactions(): StoredReaction[] {
     return read<StoredReaction[]>(this.k("reactions"), []);
   }

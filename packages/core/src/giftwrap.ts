@@ -69,6 +69,57 @@ export function wrapMessage(
   );
 }
 
+/** 檔案 metadata（ADR-0093）：位元組走 P2P，另發一則加密 rumor 帶此 metadata，
+ *  讓收件人**所有裝置**都知道有檔案。`tid` 對應 P2P 傳輸 id，供關聯位元組與此訊息。 */
+export interface FileMeta {
+  tid: string;
+  name: string;
+  size: number;
+  mime: string;
+}
+
+/**
+ * 送出檔案 metadata 訊息（ADR-0093）：與一般訊息同樣包成 kind 1059 Gift Wrap，
+ * 但 rumor 內層帶一個 `file` tag（`["file", tid, name, size, mime]`）。metadata 全在
+ * 加密內層，中繼看不到（與明文訊息無異）；位元組本體不在此、仍走 P2P。
+ */
+export function wrapFileMessage(
+  senderSk: SecretKey,
+  recipientPk: PubkeyHex,
+  meta: FileMeta,
+  opts: { now?: number; expiration?: number; relayHint?: string } = {},
+): NostrEvent {
+  const nowSec = opts.now ?? Math.floor(Date.now() / 1000);
+  const outerExpiration = opts.expiration ?? nowSec + DEFAULT_TTL_SECONDS;
+  const rumorTags: string[][] = [
+    ["file", meta.tid, meta.name, String(meta.size), meta.mime],
+    ...(opts.relayHint ? [["relay", opts.relayHint]] : []),
+  ];
+  return sealAndWrap(
+    { kind: KIND_CHAT, created_at: nowSec, tags: rumorTags, content: "" },
+    senderSk,
+    recipientPk,
+    {
+      kind: KIND.OFFLINE_DM_GIFT_WRAP,
+      tags: [
+        ["p", recipientPk],
+        ["expiration", String(outerExpiration)],
+      ],
+    },
+  );
+}
+
+/** 讀出 rumor 內層的檔案 metadata（ADR-0093）；非檔案訊息回傳 null。 */
+export function parseFileMeta(rumor: Rumor): FileMeta | null {
+  const t = rumor.tags.find((x) => x[0] === "file");
+  if (!t) return null;
+  const tid = t[1];
+  const name = t[2];
+  if (!tid || !name) return null;
+  const size = Number(t[3]);
+  return { tid, name, size: Number.isFinite(size) ? size : 0, mime: t[4] || "application/octet-stream" };
+}
+
 /** 讀出限時訊息 rumor 內的到期時間（NIP-40 `expiration`，unix 秒）；無則回傳 undefined。 */
 export function messageExpiry(rumor: Rumor): number | undefined {
   const raw = rumor.tags.find((t) => t[0] === "expiration")?.[1];

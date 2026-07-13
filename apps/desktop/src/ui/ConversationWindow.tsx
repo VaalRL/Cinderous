@@ -1487,6 +1487,14 @@ function FileLine({
               </div>
             ) : file.url ? (
               <a className="filecard__dl" href={file.url} download={file.name}>⬇ {t("file_download")}</a>
+            ) : file.savedPath ? (
+              // 收檔另存後只顯示路徑（ADR-0093；App 不保管檔案本體）。
+              <div className="filecard__path" title={file.savedPath}>{t("file_saved")}：{file.savedPath}</div>
+            ) : file.incoming && file.sent < file.size ? (
+              // 位元組落在另一台裝置、此裝置只收到 metadata（ADR-0093）。
+              <div className="filecard__note">📍 {t("file_onOtherDevice")}</div>
+            ) : file.incoming ? (
+              <div className="filecard__note">{t("file_notSaved")}</div>
             ) : null}
           </div>
         </div>

@@ -21,6 +21,7 @@ import { BrowserChatBackend } from "@cinder/engine";
 import { normalizeRelayUrl, RelayChatBackend, webSocketConnector } from "@cinder/engine";
 import { getKeyVault } from "./native/keyvault.js";
 import { getNotifier, onNotificationClick } from "./native/notify.js";
+import { saveIncomingFile } from "./native/save-file.js";
 import { useI18n } from "./i18n.js";
 import { type Layout, useLayout } from "./layout.js";
 import { isWrappedValue, passChange, passDisable, passEnable, passLock, passRescue, passUnlock } from "./native/passlock.js";
@@ -44,6 +45,7 @@ import type { CloudSyncMode } from "@cinder/engine";
 import type {
   BlockedContact,
   ChatBackend,
+  ChatFile,
   ChatMessage,
   ConnectionState,
   Contact,
@@ -111,6 +113,34 @@ const DEFAULT_OLLAMA_STATE: OllamaState = { ...DEFAULT_OLLAMA, enabled: false };
 
 let _uid = 0;
 const uid = (prefix: string): string => `${prefix}_${Date.now()}_${_uid++}`;
+
+/** 就地更新某對話中，符合 `match` 的檔案訊息的附件欄位（ADR-0093）。 */
+function patchFileWhere(
+  prev: Record<string, ChatMessage[]>,
+  pk: string,
+  match: (m: ChatMessage) => boolean,
+  patch: Partial<ChatFile>,
+): Record<string, ChatMessage[]> {
+  const cur = prev[pk];
+  if (!cur) return prev;
+  let changed = false;
+  const next = cur.map((m) => {
+    if (!m.file || !match(m)) return m;
+    changed = true;
+    return { ...m, file: { ...m.file, ...patch } };
+  });
+  return changed ? { ...prev, [pk]: next } : prev;
+}
+
+/** 依訊息 id 更新檔案附件（收檔回填：onFileBytes 的 messageId）。 */
+function patchFileByMsgId(prev: Record<string, ChatMessage[]>, pk: string, messageId: string, patch: Partial<ChatFile>) {
+  return patchFileWhere(prev, pk, (m) => m.id === messageId, patch);
+}
+
+/** 依傳輸 id 更新檔案附件（送出端併入本機 blob URL：file.id＝傳輸 id）。 */
+function patchFileByTid(prev: Record<string, ChatMessage[]>, pk: string, tid: string, patch: Partial<ChatFile>) {
+  return patchFileWhere(prev, pk, (m) => m.file?.id === tid, patch);
+}
 
 /**
  * 更換 relay 的守門（ADR-0066 H2，純函式可測）：回傳正規化後的新網址；
@@ -556,18 +586,19 @@ export function App(): JSX.Element {
           });
           return changed ? { ...prev, [pk]: next } : prev;
         }),
-      onFileReceived: (pk, file) => {
-        const blob = new Blob([file.bytes as BlobPart], { type: file.mime || "application/octet-stream" });
-        const url = URL.createObjectURL(blob);
-        const id = uid("rf");
-        const msg: ChatMessage = {
-          id,
-          outgoing: false,
-          text: "",
-          at: Date.now(),
-          file: { id, name: file.name, mime: file.mime, size: file.bytes.length, sent: file.bytes.length, incoming: true, url },
-        };
-        setConvos((prev) => ({ ...prev, [pk]: [...(prev[pk] ?? []), msg] }));
+      onFileBytes: (pk, messageId, file) => {
+        // 收到位元組（ADR-0093）：跳「另存新檔」讓使用者選位置。App 不保管檔案本體，只回填路徑；
+        // 訊息本身（metadata）已由 backend 經 onMessage/onHistory 建好，這裡只更新該則的檔案欄位。
+        void saveIncomingFile(file.name, file.mime, file.bytes).then((res) => {
+          setConvos((prev) =>
+            patchFileByMsgId(prev, pk, messageId, {
+              sent: file.bytes.length,
+              ...(res.savedPath ? { savedPath: res.savedPath } : {}),
+              ...(res.url ? { url: res.url } : {}),
+            }),
+          );
+          if (res.savedPath) backend.setFileSavedPath?.(pk, messageId, res.savedPath);
+        });
         setOpen((prev) => (prev.includes(pk) ? prev : [...prev, pk]));
       },
       onFileError: (pk, reason) => {
@@ -1065,17 +1096,11 @@ export function App(): JSX.Element {
     if (!activeBackend.sendFile) return;
     const bytes = new Uint8Array(await f.arrayBuffer());
     const mime = f.type || "application/octet-stream";
-    const id = activeBackend.sendFile(pk, { name: f.name, mime, bytes });
-    // 本機保留 blob URL：送出端也能重播/下載（語音訊息尤其需要）
+    // backend 擁有檔案訊息（ADR-0093）：sendFile 會同步 emit onMessage（file.id＝傳輸 id）。
+    const tid = activeBackend.sendFile(pk, { name: f.name, mime, bytes });
+    // 本機保留 blob URL：送出端也能重播/下載（語音訊息尤其需要）。以傳輸 id 併入剛 emit 的那則。
     const url = URL.createObjectURL(f);
-    const msg: ChatMessage = {
-      id: uid("of"),
-      outgoing: true,
-      text: "",
-      at: Date.now(),
-      file: { id, name: f.name, mime, size: bytes.length, sent: 0, incoming: false, url },
-    };
-    setConvos((prev) => ({ ...prev, [pk]: [...(prev[pk] ?? []), msg] }));
+    setConvos((prev) => patchFileByTid(prev, pk, tid, { url }));
     setOpen((prev) => (prev.includes(pk) ? prev : [...prev, pk]));
   };
 

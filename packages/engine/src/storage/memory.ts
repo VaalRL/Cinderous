@@ -111,6 +111,11 @@ export class MemoryStorage implements AppStorage {
     if (MESSAGE_STATUS_RANK[status] <= MESSAGE_STATUS_RANK[msg.status ?? "sending"]) return; // 只前進
     msg.status = status;
   }
+  setFileSavedPath(contactPubkey: string, messageId: string, savedPath: string): void {
+    const msg = this.messages.get(contactPubkey)?.find((m) => m.id === messageId);
+    if (!msg?.file) return;
+    msg.file = { ...msg.file, savedPath };
+  }
   loadReactions(): StoredReaction[] {
     return [...this.reactions];
   }

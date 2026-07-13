@@ -1,6 +1,6 @@
-# 0093. 多設備即時投遞與檔案接收：檔案 metadata 中繼化＋位元組 P2P＋收檔另存至使用者選定路徑（草案）
+# 0093. 多設備即時投遞與檔案接收：檔案 metadata 中繼化＋位元組 P2P＋收檔另存至使用者選定路徑
 
-- 狀態：提議中（草案）
+- 狀態：已接受（已實作）
 - 日期：2026-07-13
 - 相關文件：ADR-0017（WebRTC 檔案傳輸）、0009（多設備同步）、0029（資料通道二進位框架）、
   0054（加密儲存基質）、0034（多中繼路由）、0059/0056（離線留言儲存）；
@@ -69,5 +69,20 @@
   - G1 收斂：沒拿到位元組的裝置**知道有檔案**但**無法自取**（因 item 3 不採備援），UI 提示需請對方重送。
   - Tauri 用 `dialog.save()`＋`fs` 寫檔；瀏覽器退回下載、路徑不可知顯示「已下載」。
   - **選項 X（裝置定址 P2P 扇出）** 留作未來；若「多台同時即時收位元組」成硬需求再立專屬 ADR。
-- 後續（若採納實作）：定 file-message 契約（metadata rumor）→ 實作發送端多發 metadata、接收端另存對話框＋記
-  `savedPath` → UI「檔案在另一台」提示與「開啟路徑」→ 測試。
+
+## 實作（已完成）
+
+- **契約（`packages/core`）**：`wrapFileMessage`/`parseFileMeta`＋rumor `file` tag（`["file", tid, name, size, mime]`，
+  全在加密內層，中繼看不到）；`ReceivedFile` 增 `id`（＝傳輸 id `tid`）供關聯 P2P 位元組與中繼 metadata。
+- **關聯（`relay-backend.ts`）**：`fileMsgByTid` 以 `tid` 去重——中繼 metadata 與 P2P 位元組**任一先到都只產生一則**
+  檔案訊息。訊息 id＝metadata 事件 id（送達/已讀回條對得上，G3）；`file.id`＝tid（進度/位元組關聯）。
+  - `sendFile`：位元組走 P2P（不變）＋另發 `wrapFileMessage` 中繼訊息＋持久化 outgoing 檔案訊息。
+  - `receiveDm` 檔案分支：建 metadata-only 訊息（`sent=0`＝在另一台）＋回送已送達回條（G3）。
+  - `onFileBytes` 事件：位元組到本機時交 App 另存；`setFileSavedPath` 回填 `savedPath` 並持久化。
+- **儲存（`packages/engine/storage`）**：`StoredMessage.file`＝`StoredFileMeta`（`tid/name/size/mime/savedPath?`，
+  **無位元組**）；新增 `AppStorage.setFileSavedPath`（Memory/Local/Tauri 三實作）。
+- **UI（`apps/desktop`）**：`native/save-file.ts`——Tauri 走 Rust `save_file`（rfd 原生「另存新檔」＋`fs::write`，
+  回傳路徑）、瀏覽器退回下載；檔案卡片顯示「已儲存於 {路徑}」/「📍 檔案在你另一台裝置」/「已接收（未儲存）」。
+- **測試**：core（metadata 往返、內層不外洩、`ReceivedFile.id`）、engine（送檔另發 metadata＋雙方持久化、
+  metadata-only 收斂、`setFileSavedPath` 持久化）。
+- G1 收斂如決議：沒拿到位元組的裝置**知道有檔案**但**無法自取**（不採中繼備援），UI 提示需請對方重送。

@@ -139,6 +139,10 @@ export class TauriStorage implements AppStorage {
     this.mem.setMessageStatus(contactPubkey, messageId, status);
     this.persist();
   }
+  setFileSavedPath(contactPubkey: string, messageId: string, savedPath: string): void {
+    this.mem.setFileSavedPath(contactPubkey, messageId, savedPath);
+    this.persist();
+  }
   addReaction(reaction: StoredReaction): void {
     this.mem.addReaction(reaction);
     this.persist();

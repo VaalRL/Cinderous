@@ -4,7 +4,7 @@ import { getEventHash } from "./event.js";
 import { generateSecretKey, getPublicKey } from "./keys.js";
 import { encryptDM } from "./nip44.js";
 import { finalizeEvent } from "./sign.js";
-import { messageExpiry, relayHintOf, unwrapMessage, wrapMessage } from "./giftwrap.js";
+import { messageExpiry, parseFileMeta, relayHintOf, unwrapMessage, wrapFileMessage, wrapMessage } from "./giftwrap.js";
 
 const aliceSk = generateSecretKey();
 const alicePk = getPublicKey(aliceSk);
@@ -75,6 +75,36 @@ describe("NIP-17/59 Gift Wrap 離線私訊", () => {
     const wrap = wrapMessage("for bob", aliceSk, bobPk);
     const eveSk = generateSecretKey();
     expect(() => unwrapMessage(wrap, eveSk)).toThrow();
+  });
+
+  describe("檔案 metadata 訊息（ADR-0093）", () => {
+    const meta = { tid: "f123_0", name: "報告.pdf", size: 20480, mime: "application/pdf" };
+
+    it("收件端可從加密內層還原檔案 metadata（tid/name/size/mime）", () => {
+      const wrap = wrapFileMessage(aliceSk, bobPk, meta, { now: 1_700_000_000 });
+      const { sender, rumor } = unwrapMessage(wrap, bobSk);
+      expect(sender).toBe(alicePk);
+      expect(parseFileMeta(rumor)).toEqual(meta);
+    });
+
+    it("外層為 kind 1059、帶 #p 收件人；metadata 不外洩（中繼看不到檔名/tid）", () => {
+      const wrap = wrapFileMessage(aliceSk, bobPk, meta);
+      expect(wrap.kind).toBe(KIND.OFFLINE_DM_GIFT_WRAP);
+      expect(wrap.tags).toContainEqual(["p", bobPk]);
+      expect(JSON.stringify(wrap.tags)).not.toContain("報告.pdf");
+      expect(JSON.stringify(wrap.tags)).not.toContain(meta.tid);
+    });
+
+    it("relay hint 隨檔案訊息寫進內層、外層不可見", () => {
+      const wrap = wrapFileMessage(aliceSk, bobPk, meta, { relayHint: "wss://home" });
+      expect(JSON.stringify(wrap.tags)).not.toContain("wss://home");
+      expect(relayHintOf(unwrapMessage(wrap, bobSk).rumor)).toBe("wss://home");
+    });
+
+    it("一般文字訊息 parseFileMeta 為 null（非檔案訊息不誤判）", () => {
+      const { rumor } = unwrapMessage(wrapMessage("只是文字", aliceSk, bobPk), bobSk);
+      expect(parseFileMeta(rumor)).toBeNull();
+    });
   });
 
   it("偽造寄件人（rumor 作者 ≠ seal 簽章者）會被拒", () => {

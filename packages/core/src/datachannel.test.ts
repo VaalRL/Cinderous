@@ -41,6 +41,7 @@ describe("Data Channel — 檔案分塊與重組", () => {
     for (const m of encodeFile(file, "id1", 1024)) rx.receive(m);
     expect(onFile).toHaveBeenCalledTimes(1);
     const got = onFile.mock.calls[0]![0];
+    expect(got.id).toBe("id1"); // 傳輸 id 帶出，供關聯中繼 metadata（ADR-0093）
     expect(got.name).toBe("a.bin");
     expect(eq(got.bytes, file.bytes)).toBe(true);
   });

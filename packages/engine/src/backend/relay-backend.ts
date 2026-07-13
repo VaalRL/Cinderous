@@ -51,6 +51,8 @@ import {
   wrapGroupControl,
   wrapGroupMessage,
   wrapMessage,
+  wrapFileMessage,
+  parseFileMeta,
   wrapReaction,
   wrapReceipt,
   receiptOf,
@@ -69,6 +71,7 @@ import {
   type ReceiptType,
   type PresenceState,
   type PubkeyHex,
+  type ReceivedFile,
   type RelayClientHandlers,
   type RelayListDoc,
   type Rumor,
@@ -79,10 +82,11 @@ import { WebRtcCall } from "./webrtc-call.js";
 import { WebRtcTransfer } from "./webrtc.js";
 import { buildSnapshotContent, mergeSnapshotContent, parseSnapshotContent } from "../storage/cloud-snapshot.js";
 import { getDeviceId } from "../storage/device-id.js";
-import type { AppStorage } from "../storage/types.js";
+import type { AppStorage, MessageStatus, StoredMessage } from "../storage/types.js";
 import type {
   ChatBackend,
   ChatBackendEvents,
+  ChatMessage,
   ConnectionState,
   Contact,
   Self,
@@ -100,6 +104,38 @@ const PRESENCE_TIMEOUT_MS = 90_000; // 3× 心跳（30s）：容忍偶發丟包/
 const nowSec = () => Math.floor(Date.now() / 1000);
 
 const shortNpub = (npub: string) => `${npub.slice(0, 12)}…`;
+
+/**
+ * 持久化訊息 → UI 訊息映射（含檔案附件，ADR-0093）。檔案訊息不含位元組：
+ * `sent`＝已送出（outgoing）或已存本機（有 savedPath）時為 size，否則 0（metadata-only，
+ * 例：位元組落在另一台裝置）；`url` 於重載後永遠沒有（App 不保管位元組）。
+ */
+function storedToChat(m: StoredMessage): ChatMessage {
+  return {
+    id: m.id,
+    outgoing: m.outgoing,
+    text: m.text,
+    at: m.at,
+    ...(m.sender !== undefined ? { sender: m.sender } : {}),
+    ...(m.expiresAt !== undefined ? { expiresAt: m.expiresAt } : {}),
+    ...(m.mentionsMe ? { mentionsMe: true } : {}),
+    ...(m.replyTo !== undefined ? { replyTo: m.replyTo } : {}),
+    ...(m.status !== undefined ? { status: m.status } : {}),
+    ...(m.file
+      ? {
+          file: {
+            id: m.file.tid,
+            name: m.file.name,
+            mime: m.file.mime,
+            size: m.file.size,
+            sent: m.outgoing || m.file.savedPath ? m.file.size : 0,
+            incoming: !m.outgoing,
+            ...(m.file.savedPath ? { savedPath: m.file.savedPath } : {}),
+          },
+        }
+      : {}),
+  };
+}
 
 /**
  * 建立一個已接好收發的 RelayClient（真實 WebSocket 或測試替身）。
@@ -293,6 +329,9 @@ export class RelayChatBackend implements ChatBackend {
   private readReceipts = false;
   // 訊息去重（審查 P1-4）：有界，逐出最舊；儲存層與 UI 層另有去重兜底。
   private readonly seenMsg = new BoundedSet<string>(8192, 4096);
+  /** 檔案訊息關聯（ADR-0093）：傳輸 id → {對話, 訊息 id}；用來把 P2P 位元組與中繼 metadata
+   *  對到同一則檔案訊息（避免收到 metadata 又收到位元組時重出兩則）。本 session 記憶體狀態。 */
+  private readonly fileMsgByTid = new Map<string, { contact: PubkeyHex; msgId: string }>();
   private contacts: { pubkey: PubkeyHex; name: string; relayUrl?: string }[];
   private blocked: { pubkey: PubkeyHex; name: string }[];
   private groups: Group[];
@@ -383,7 +422,7 @@ export class RelayChatBackend implements ChatBackend {
       onIncoming: (peer, file) => {
         if (this.isBlocked(peer)) return;
         this.ensureContact(peer);
-        this.handlers?.onFileReceived?.(peer, file);
+        this.onFileBytes(peer, file);
       },
       onTyping: (peer) => {
         if (!this.isBlocked(peer)) this.handlers?.onTyping(peer);
@@ -436,17 +475,7 @@ export class RelayChatBackend implements ChatBackend {
       const msgs = this.storage.loadMessages(c.pubkey);
       if (msgs.length === 0) continue;
       for (const m of msgs) this.seenMsg.add(m.id);
-      handlers.onHistory?.(
-        c.pubkey,
-        msgs.map((m) => ({
-          id: m.id,
-          outgoing: m.outgoing,
-          text: m.text,
-          at: m.at,
-          ...(m.expiresAt !== undefined ? { expiresAt: m.expiresAt } : {}),
-          ...(m.replyTo !== undefined ? { replyTo: m.replyTo } : {}),
-        })),
-      );
+      handlers.onHistory?.(c.pubkey, msgs.map(storedToChat));
     }
     // 回放持久化的回應（並標記已見，避免 relay 重送時重複處理）
     for (const r of this.storage.loadReactions()) {
@@ -463,19 +492,7 @@ export class RelayChatBackend implements ChatBackend {
       const msgs = this.storage.loadMessages(g.id);
       if (msgs.length === 0) continue;
       for (const m of msgs) this.seenMsg.add(m.id);
-      handlers.onHistory?.(
-        g.id,
-        msgs.map((m) => ({
-          id: m.id,
-          outgoing: m.outgoing,
-          text: m.text,
-          at: m.at,
-          ...(m.sender !== undefined ? { sender: m.sender } : {}),
-          ...(m.expiresAt !== undefined ? { expiresAt: m.expiresAt } : {}),
-          ...(m.mentionsMe ? { mentionsMe: true } : {}),
-          ...(m.replyTo !== undefined ? { replyTo: m.replyTo } : {}),
-        })),
-      );
+      handlers.onHistory?.(g.id, msgs.map(storedToChat));
     }
     this.emitBlocked();
   }
@@ -869,6 +886,17 @@ export class RelayChatBackend implements ChatBackend {
       }
       // 尚未送過自己的個人檔給對方（例如對方單向加我）→ 回送一次，讓對方也學到我的暱稱。
       if (!this.profileSentTo.has(sender)) this.sendProfileTo(sender);
+      return;
+    }
+
+    const fileMeta = parseFileMeta(rumor);
+    if (fileMeta) {
+      // 檔案 metadata（ADR-0093）：讓收件人**所有裝置**都知道有檔案；位元組另走 P2P。
+      // 以 tid 去重（位元組可能已先到並建了訊息）；仍回送已送達回條讓 sender 有投遞可見度（G3）。
+      if (!this.fileMsgByTid.has(fileMeta.tid)) {
+        this.ensureFileMessage(sender, fileMeta, { msgId: event.id, outgoing: false, sent: 0 });
+      }
+      this.publishReliable(wrapReceipt("delivered", this.sk, sender, event.id));
       return;
     }
 
@@ -1319,18 +1347,7 @@ export class RelayChatBackend implements ChatBackend {
     for (const convo of convos) {
       const msgs = this.storage.loadMessages(convo);
       for (const m of msgs) this.seenMsg.add(m.id);
-      this.handlers?.onHistory?.(
-        convo,
-        msgs.map((m) => ({
-          id: m.id,
-          outgoing: m.outgoing,
-          text: m.text,
-          at: m.at,
-          ...(m.sender !== undefined ? { sender: m.sender } : {}),
-          ...(m.expiresAt !== undefined ? { expiresAt: m.expiresAt } : {}),
-          ...(m.replyTo !== undefined ? { replyTo: m.replyTo } : {}),
-        })),
-      );
+      this.handlers?.onHistory?.(convo, msgs.map(storedToChat));
     }
   }
 
@@ -1451,7 +1468,71 @@ export class RelayChatBackend implements ChatBackend {
   }
 
   sendFile(to: PubkeyHex, file: OutgoingFile): string {
-    return this.transfer.sendFile(to, file);
+    // 位元組走 P2P（不變）；另發一則加密 metadata 訊息讓對方所有裝置都知道有檔案（ADR-0093）。
+    const tid = this.transfer.sendFile(to, file);
+    const meta = { tid, name: file.name, size: file.bytes.length, mime: file.mime };
+    const evt = wrapFileMessage(this.sk, to, meta, this.homeUrl ? { relayHint: this.homeUrl } : {});
+    this.seenMsg.add(evt.id);
+    // 訊息 id＝metadata 事件 id（供送達/已讀回條對得上，G3）；file.id＝tid（供進度/位元組關聯）。
+    this.ensureFileMessage(to, meta, { msgId: evt.id, outgoing: true, sent: 0, status: "sending" });
+    this.awaitingSent.set(evt.id, to);
+    this.publishReliable(evt);
+    return tid;
+  }
+
+  /**
+   * 建立（或取回）一則檔案訊息（ADR-0093）：以 `tid` 去重——中繼 metadata 與 P2P 位元組
+   * 任一先到都只產生一則訊息。持久化僅存 metadata（無位元組），並 emit 給 UI。回傳訊息 id。
+   */
+  private ensureFileMessage(
+    contact: PubkeyHex,
+    meta: { tid: string; name: string; size: number; mime: string },
+    opts: { msgId: string; outgoing: boolean; sent: number; status?: MessageStatus },
+  ): string {
+    const existing = this.fileMsgByTid.get(meta.tid);
+    if (existing) return existing.msgId;
+    const at = Date.now();
+    const stored: StoredMessage = {
+      id: opts.msgId,
+      contact,
+      outgoing: opts.outgoing,
+      text: "",
+      at,
+      file: { tid: meta.tid, name: meta.name, size: meta.size, mime: meta.mime },
+      ...(opts.status ? { status: opts.status } : {}),
+    };
+    this.storage.appendMessage(stored);
+    this.fileMsgByTid.set(meta.tid, { contact, msgId: opts.msgId });
+    this.handlers?.onMessage(contact, {
+      id: opts.msgId,
+      outgoing: opts.outgoing,
+      text: "",
+      at,
+      file: { id: meta.tid, name: meta.name, mime: meta.mime, size: meta.size, sent: opts.sent, incoming: !opts.outgoing },
+      ...(opts.status ? { status: opts.status } : {}),
+    });
+    return opts.msgId;
+  }
+
+  /** 收到 P2P 檔案位元組（ADR-0093）：關聯到檔案訊息（位元組可能早於 metadata），交 App 另存。 */
+  private onFileBytes(peer: PubkeyHex, file: ReceivedFile): void {
+    const existing = this.fileMsgByTid.get(file.id);
+    const msgId = existing?.msgId ?? `bf-${file.id}`;
+    if (!existing) {
+      // 位元組先到：以位元組自帶的 metadata 先建一則（sent=size＝位元組已在本機）。
+      this.ensureFileMessage(
+        peer,
+        { tid: file.id, name: file.name, size: file.bytes.length, mime: file.mime },
+        { msgId, outgoing: false, sent: file.bytes.length },
+      );
+    }
+    // 交 App：跳「另存新檔」對話框、寫入使用者選定路徑後以 setFileSavedPath 回填（App 不保管位元組）。
+    this.handlers?.onFileBytes?.(peer, msgId, file);
+  }
+
+  /** 回填某檔案訊息收檔後的本機儲存路徑（ADR-0093）：App 另存完成後呼叫，持久化路徑。 */
+  setFileSavedPath(contact: PubkeyHex, messageId: string, savedPath: string): void {
+    this.storage.setFileSavedPath(contact, messageId, savedPath);
   }
 
   /**

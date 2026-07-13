@@ -341,6 +341,10 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
 .filecard__bar span { display: block; height: 100%; background: var(--accent); transition: width .12s linear; }
 .filecard__dl { font-size: 11px; color: var(--accent); text-decoration: none; }
 .filecard__dl:hover { text-decoration: underline; }
+/* 收檔另存後的儲存路徑（ADR-0093）：可換行、可選取、灰階弱化。 */
+.filecard__path { font-size: 10px; color: var(--muted); margin-top: 3px; word-break: break-all; user-select: text; }
+/* 「檔案在你另一台裝置」/「已接收（未儲存）」提示。 */
+.filecard__note { font-size: 10px; color: var(--muted); margin-top: 3px; font-style: italic; }
 
 /* 貼圖 */
 .stickerpick { padding: 6px 8px; background: var(--panel); border-top: 1px solid var(--border); }

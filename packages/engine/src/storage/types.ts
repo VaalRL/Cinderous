@@ -42,6 +42,22 @@ export interface StoredMessage {
   replyTo?: string;
   /** 送達/已讀狀態（自己送出的訊息才有意義；ADR-0058）。 */
   status?: MessageStatus;
+  /**
+   * 檔案附件（ADR-0093）：僅持久化 metadata，**不存位元組**。位元組走 P2P；收到後由使用者
+   * 另存至選定路徑（`savedPath`）——App 不保管檔案本體。`savedPath` 為裝置本地語意，不跨裝置同步。
+   */
+  file?: StoredFileMeta;
+}
+
+/** 持久化的檔案附件 metadata（ADR-0093）：無位元組、無縮圖。 */
+export interface StoredFileMeta {
+  /** P2P 傳輸關聯 id（對應收發雙方的位元組傳輸與 metadata 訊息）。 */
+  tid: string;
+  name: string;
+  size: number;
+  mime: string;
+  /** 使用者選定的本機儲存路徑（收檔另存後才有；瀏覽器下載無法得知則省略）。 */
+  savedPath?: string;
 }
 
 export interface StoredGroup {
@@ -95,6 +111,8 @@ export interface AppStorage {
   appendMessage(message: StoredMessage): void;
   /** 只往前推進某訊息的送達/已讀狀態（ADR-0058）；訊息不存在或狀態不前進則忽略。 */
   setMessageStatus(contactPubkey: string, messageId: string, status: MessageStatus): void;
+  /** 記錄某檔案訊息收檔後的本機儲存路徑（ADR-0093）；訊息不存在或無 file 則忽略。 */
+  setFileSavedPath(contactPubkey: string, messageId: string, savedPath: string): void;
   loadReactions(): StoredReaction[];
   addReaction(reaction: StoredReaction): void;
   /** 標記某訊息為已收回（NIP-09）。 */

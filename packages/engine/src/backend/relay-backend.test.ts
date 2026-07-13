@@ -1,6 +1,6 @@
 import { applyRosterRotations, generateSecretKey, getPublicKey, type NostrEvent, npubEncode, nsecEncode, signOrgRoster, wrapGroupControl, wrapGroupMessage } from "@cinder/core";
 import { createInMemoryRelayNetwork } from "@cinder/relay";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryStorage } from "../storage/memory.js";
 import type { ChatBackendEvents, ChatMessage } from "./types.js";
 import { RelayChatBackend } from "./relay-backend.js";
@@ -834,6 +834,99 @@ describe("顯示名稱個人檔（ADR-0061，加密廣播）", () => {
     // B 自動加入 A 並學到「Alice」、回送個人檔 → A 也學到「Bob」
     expect(storeB.loadContacts().find((c) => c.pubkey === a.self.pubkey)?.name).toBe("Alice");
     expect(storeA.loadContacts().find((c) => c.pubkey === b.self.pubkey)?.name).toBe("Bob");
+    a.stop();
+    b.stop();
+  });
+});
+
+describe("檔案投遞與另存（ADR-0093）", () => {
+  // 最小 RTCPeerConnection 樁：讓 sendFile 的 P2P 建連不拋錯。本測試只驗**中繼 metadata** 流程，
+  // 不驗實際 P2P 位元組傳輸（node 無真實 WebRTC）——故收件端會停在「metadata-only／在另一台裝置」。
+  class FakeDataChannel {
+    readyState = "connecting";
+    binaryType = "";
+    onmessage: unknown = null;
+    onopen: unknown = null;
+    onerror: unknown = null;
+    send(): void {}
+    close(): void {}
+  }
+  class FakePeerConnection {
+    onicecandidate: unknown = null;
+    onconnectionstatechange: unknown = null;
+    ondatachannel: unknown = null;
+    connectionState = "new";
+    createDataChannel(): FakeDataChannel {
+      return new FakeDataChannel();
+    }
+    async createOffer(): Promise<{ type: string; sdp: string }> {
+      return { type: "offer", sdp: "" };
+    }
+    async createAnswer(): Promise<{ type: string; sdp: string }> {
+      return { type: "answer", sdp: "" };
+    }
+    async setLocalDescription(): Promise<void> {}
+    async setRemoteDescription(): Promise<void> {}
+    async addIceCandidate(): Promise<void> {}
+    close(): void {}
+  }
+  beforeEach(() => vi.stubGlobal("RTCPeerConnection", FakePeerConnection));
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("送檔另發加密 metadata 訊息：對方裝置知道有檔案（G1），雙方持久化 file metadata（無位元組）", () => {
+    const net = createInMemoryRelayNetwork();
+    const storeA = new MemoryStorage();
+    const storeB = new MemoryStorage();
+    const a = new RelayChatBackend(storeA, (h) => net.connect("a", h), "Alice");
+    const b = new RelayChatBackend(storeB, (h) => net.connect("b", h), "Bob");
+    const aMsgs: ChatMessage[] = [];
+    const bMsgs: ChatMessage[] = [];
+    const bBytes: { messageId: string; name: string }[] = [];
+    a.start({ ...noop, onMessage: (_pk, m) => aMsgs.push(m) });
+    b.start({
+      ...noop,
+      onMessage: (_pk, m) => bMsgs.push(m),
+      onFileBytes: (_pk, id, f) => bBytes.push({ messageId: id, name: f.name }),
+    });
+
+    a.addContact(b.selfNpub);
+    const tid = a.sendFile(b.self.pubkey, { name: "report.pdf", mime: "application/pdf", bytes: new Uint8Array([1, 2, 3, 4]) });
+
+    // 送出端：emit + 持久化 outgoing 檔案訊息（file.id=tid、無文字）。
+    const aFile = aMsgs.find((m) => m.file);
+    expect(aFile?.file).toMatchObject({ id: tid, name: "report.pdf", size: 4, incoming: false });
+    expect(aFile?.text).toBe("");
+    const aStored = storeA.loadMessages(b.self.pubkey).find((m) => m.file);
+    expect(aStored?.file).toMatchObject({ tid, name: "report.pdf", size: 4, mime: "application/pdf" });
+
+    // 收件端：B 收到加密 metadata → 知道有檔案（G1）；P2P 位元組未達 → sent=0（在另一台裝置）。
+    const bFile = bMsgs.find((m) => m.file);
+    expect(bFile?.file).toMatchObject({ name: "report.pdf", size: 4, incoming: true, sent: 0 });
+    const bStored = storeB.loadMessages(a.self.pubkey).find((m) => m.file);
+    expect(bStored?.file).toMatchObject({ tid, name: "report.pdf", size: 4 });
+    expect(bStored?.file?.savedPath).toBeUndefined();
+    expect(bBytes).toHaveLength(0); // 位元組未經 P2P 到達，onFileBytes 不觸發
+    // 中繼看不到檔名（metadata 在加密內層）——比照一般訊息，此處僅確認 B 端解密後才有。
+    a.stop();
+    b.stop();
+  });
+
+  it("setFileSavedPath：回填收檔路徑並持久化（重載後仍見路徑）", () => {
+    const net = createInMemoryRelayNetwork();
+    const storeB = new MemoryStorage();
+    const a = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("a", h), "Alice");
+    const b = new RelayChatBackend(storeB, (h) => net.connect("b", h), "Bob");
+    const bMsgs: ChatMessage[] = [];
+    a.start(noop);
+    b.start({ ...noop, onMessage: (_pk, m) => bMsgs.push(m) });
+
+    a.addContact(b.selfNpub);
+    a.sendFile(b.self.pubkey, { name: "photo.jpg", mime: "image/jpeg", bytes: new Uint8Array([9, 9]) });
+    const bFile = bMsgs.find((m) => m.file);
+    expect(bFile).toBeDefined();
+
+    b.setFileSavedPath(a.self.pubkey, bFile!.id, "/home/bob/photo.jpg");
+    expect(storeB.loadMessages(a.self.pubkey).find((m) => m.file)?.file?.savedPath).toBe("/home/bob/photo.jpg");
     a.stop();
     b.stop();
   });

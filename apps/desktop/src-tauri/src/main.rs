@@ -472,6 +472,21 @@ async fn ai_models(provider: String, endpoint: String) -> Result<Vec<String>, St
     Ok(names)
 }
 
+// ── 收檔另存 IPC（ADR-0093）：位元組交給 OS 檔案系統，App 不保管檔案本體 ──────────────
+
+/// 收檔另存：開原生「另存新檔」對話框讓使用者選位置並寫入位元組；取消回 `None`。
+/// 回傳使用者選定的路徑供 UI 顯示。位元組由前端經 IPC 傳入（收自 P2P，不落 App 儲存）。
+#[tauri::command]
+fn save_file(name: String, bytes: Vec<u8>) -> Result<Option<String>, String> {
+    match rfd::FileDialog::new().set_file_name(&name).save_file() {
+        Some(path) => {
+            std::fs::write(&path, &bytes).map_err(|e| e.to_string())?;
+            Ok(Some(path.to_string_lossy().into_owned()))
+        }
+        None => Ok(None),
+    }
+}
+
 fn main() {
     tauri::Builder::default()
         // 桌面原生通知（ADR-0076）：可靠系統 toast、點擊 action 回跳；瀏覽器路徑另走 Web Notification。
@@ -539,7 +554,8 @@ fn main() {
             ai_available,
             ai_models,
             ai_set_key,
-            ai_has_key
+            ai_has_key,
+            save_file
         ])
         .run(tauri::generate_context!())
         .expect("執行 Tauri 應用程式時發生錯誤");

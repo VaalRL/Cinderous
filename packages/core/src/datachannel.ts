@@ -57,6 +57,8 @@ export interface OutgoingFile {
 }
 
 export interface ReceivedFile {
+  /** 傳輸 id（= 送出端 file-begin 的 id）；供關聯中繼 metadata 訊息與此 P2P 位元組（ADR-0093）。 */
+  id: string;
   name: string;
   mime: string;
   bytes: Uint8Array;
@@ -240,6 +242,6 @@ export class DataChannelReceiver {
       bytes.set(chunk, offset);
       offset += chunk.length;
     }
-    this.handlers.onFile?.({ name: partial.meta.name, mime: partial.meta.mime, bytes });
+    this.handlers.onFile?.({ id, name: partial.meta.name, mime: partial.meta.mime, bytes });
   }
 }
