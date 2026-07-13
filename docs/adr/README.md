@@ -120,3 +120,4 @@
 | [0103](./0103-native-file-picker-sender-path.md) | 送出端改走原生選檔對話框以取得原檔路徑（補完 0102：自己傳的圖也看得到原圖） | 已接受 |
 | [0104](./0104-native-file-drop.md) | 原生檔案拖放（Tauri onDragDropEvent）＋修好「打包後拖放根本沒作用」；拖放也取得真實路徑 | 已接受 |
 | [0105](./0105-retire-native-backend-dead-code.md) | 退役原生後端死碼（0019 背景連線／0020 SQLite）＋讓 cargo test 真的測到出貨的密碼學 | 已接受 |
+| [0106](./0106-webview-throttling-measurement.md) | 實測：隱藏視窗的 webview 不會被節流（心跳全速）→ 推翻「引擎下沉 Rust」的主要理由，決策不下沉 | 已接受 |
