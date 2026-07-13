@@ -239,7 +239,7 @@ describe("RelayChatBackend（真實後端 + 持久化）", () => {
     const davePk = getPublicKey(daveSk);
     const fake = { id: gid, name: "x", admin: davePk, members: [davePk, b.self.pubkey] };
     const daveClient = net.connect("dave", { onEvent: () => {} });
-    for (const evt of wrapGroupMessage("惡意群訊", daveSk, davePk, fake)) daveClient.publish(evt);
+    for (const evt of wrapGroupMessage("惡意群訊", daveSk, davePk, fake).events) daveClient.publish(evt);
 
     // 合法成員 Alice 的群訊仍正常送達
     a.sendGroupMessage(gid, "正常");
@@ -836,6 +836,85 @@ describe("顯示名稱個人檔（ADR-0061，加密廣播）", () => {
     expect(storeA.loadContacts().find((c) => c.pubkey === b.self.pubkey)?.name).toBe("Bob");
     a.stop();
     b.stop();
+  });
+});
+
+describe("群組送達/已讀分級（ADR-0095）", () => {
+  it("小群（≤10）：成員收到群訊後回送達回條，發訊者記錄「誰送達」（每成員回條表）", () => {
+    const net = createInMemoryRelayNetwork();
+    const storeA = new MemoryStorage();
+    const a = new RelayChatBackend(storeA, (h) => net.connect("a", h), "Alice");
+    const b = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("b", h), "Bob");
+    const c = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("c", h), "Carol");
+    const bGroups: string[] = [];
+    const aReceipts: { messageId: string; receipts: Record<string, string> }[] = [];
+    a.start({ ...noop, onMessageReceipts: (_g, messageId, receipts) => aReceipts.push({ messageId, receipts }) });
+    b.start({ ...noop, onGroups: (gs) => bGroups.push(...gs.map((g) => g.id)) });
+    c.start(noop);
+
+    a.createGroup("小群", [b.self.pubkey, c.self.pubkey]); // 3 人＝名單制
+    const gid = bGroups[0]!;
+    a.sendGroupMessage(gid, "嗨大家");
+
+    // Bob、Carol 各自回一則送達回條 → Alice 端記錄兩位成員都已送達。
+    const stored = storeA.loadMessages(gid).find((m) => m.outgoing);
+    expect(stored?.receipts?.[b.self.pubkey]).toBe("delivered");
+    expect(stored?.receipts?.[c.self.pubkey]).toBe("delivered");
+    expect(aReceipts.length).toBeGreaterThan(0); // UI 有收到更新
+
+    a.stop();
+    b.stop();
+    c.stop();
+  });
+
+  it("群訊 id 跨成員一致：收件端存的 id＝發訊者存的 id（回條才對得回來）", () => {
+    const net = createInMemoryRelayNetwork();
+    const storeA = new MemoryStorage();
+    const storeB = new MemoryStorage();
+    const a = new RelayChatBackend(storeA, (h) => net.connect("a", h), "Alice");
+    const b = new RelayChatBackend(storeB, (h) => net.connect("b", h), "Bob");
+    const bGroups: string[] = [];
+    a.start(noop);
+    b.start({ ...noop, onGroups: (gs) => bGroups.push(...gs.map((g) => g.id)) });
+
+    a.createGroup("兩人群", [b.self.pubkey]);
+    const gid = bGroups[0]!;
+    a.sendGroupMessage(gid, "同一則");
+
+    const aId = storeA.loadMessages(gid).find((m) => m.outgoing)?.id;
+    const bId = storeB.loadMessages(gid).find((m) => !m.outgoing)?.id;
+    expect(aId).toBeDefined();
+    expect(bId).toBe(aId); // 內層 rumor id（ADR-0095）
+
+    a.stop();
+    b.stop();
+  });
+
+  it("大群（>10）：完全不記——成員不回送達回條，發訊者沒有任何每成員回條", () => {
+    const net = createInMemoryRelayNetwork();
+    const storeA = new MemoryStorage();
+    const a = new RelayChatBackend(storeA, (h) => net.connect("a", h), "Alice");
+    // 11 人群（含自己）→ mode = off
+    const members: RelayChatBackend[] = [];
+    for (let i = 0; i < 10; i++) {
+      members.push(new RelayChatBackend(new MemoryStorage(), (h) => net.connect(`m${i}`, h), `M${i}`));
+    }
+    const firstGroups: string[] = [];
+    a.start(noop);
+    members.forEach((m, i) =>
+      m.start(i === 0 ? { ...noop, onGroups: (gs) => firstGroups.push(...gs.map((g) => g.id)) } : noop),
+    );
+
+    a.createGroup("大群", members.map((m) => m.self.pubkey));
+    const gid = firstGroups[0]!;
+    a.sendGroupMessage(gid, "公告");
+
+    const stored = storeA.loadMessages(gid).find((m) => m.outgoing);
+    expect(stored?.text).toBe("公告"); // 訊息本身照常送達
+    expect(stored?.receipts).toBeUndefined(); // 但完全不記回條（連送達都不送）
+
+    a.stop();
+    members.forEach((m) => m.stop());
   });
 });
 

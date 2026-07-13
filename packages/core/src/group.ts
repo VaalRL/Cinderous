@@ -7,10 +7,10 @@
 
 import { bytesToHex, randomBytes } from "@noble/hashes/utils";
 import { KIND } from "./constants.js";
-import type { NostrEvent } from "./event.js";
-import type { PubkeyHex, SecretKey } from "./keys.js";
+import { getEventHash, type NostrEvent } from "./event.js";
+import { getPublicKey, type PubkeyHex, type SecretKey } from "./keys.js";
 import { mentionTags } from "./mention.js";
-import type { Rumor } from "./nip59.js";
+import type { Rumor, RumorInput } from "./nip59.js";
 import { sealAndWrap } from "./nip59.js";
 import { replyTag } from "./thread.js";
 
@@ -57,6 +57,28 @@ export function groupTarget(rumor: Rumor): string | undefined {
   return rumor.tags.find((t) => t[0] === "g")?.[1];
 }
 
+/**
+ * 群組送達/已讀回條分級（ADR-0095）。回條是 fan-in 成本：一則群訊每位成員各回一則**儲存型**
+ * 回條給發訊者（≈ 每則訊息的中繼事件數翻倍，且積在收件箱 7 天拖慢重連），總量隨 N² 成長；
+ * 名單在大群也失去可讀性。故依成員數分級：
+ *
+ * - `list`（≤5）：名單制——記錄每位成員的送達/已讀，可顯示「誰已讀」。
+ * - `count`（6–10）：計數制——同樣收回條，但只顯示「已讀 M/N」，不列名（降低噪音與觀感暴露）。
+ * - `off`（>10）：**完全不記**——不送送達、也不送已讀回條，零額外流量。
+ */
+export type GroupReceiptMode = "list" | "count" | "off";
+/** 名單制上限（含）：成員數 ≤ 此值可顯示「誰已讀」。 */
+export const GROUP_RECEIPT_LIST_MAX = 5;
+/** 計數制上限（含）：成員數 ≤ 此值仍收回條（只顯示數字）；超過即完全不記。 */
+export const GROUP_RECEIPT_COUNT_MAX = 10;
+
+/** 依群組成員數（含自己）決定回條模式。 */
+export function groupReceiptMode(memberCount: number): GroupReceiptMode {
+  if (memberCount <= GROUP_RECEIPT_LIST_MAX) return "list";
+  if (memberCount <= GROUP_RECEIPT_COUNT_MAX) return "count";
+  return "off";
+}
+
 function others(members: PubkeyHex[], self: PubkeyHex): PubkeyHex[] {
   return members.filter((m) => m !== self);
 }
@@ -90,7 +112,11 @@ function wrapFor(
 
 /**
  * 將一則群訊扇出為多個 Gift Wrap（每位其他成員一個）。rumor 為 kind 14 + `g` tag。
- * `expiresAt`（unix 秒）設定時為限時群訊（寫入 rumor 內層 NIP-40）。
+ *
+ * 回傳的 `id` 是**內層 rumor 的 id**——因為 rumor（kind/時間/tags/內容/作者）對每位收件人
+ * 完全相同，其雜湊也相同，故是**跨成員一致**的群訊識別（外層 wrap id 每人不同，不可用）。
+ * 收件端由 `openWrap` 取得同一個 rumor.id（並已核對雜湊），雙方才對得起來——送達/已讀回條
+ * 與回應/引用都以此為鍵（ADR-0095）。
  */
 export function wrapGroupMessage(
   text: string,
@@ -98,16 +124,31 @@ export function wrapGroupMessage(
   senderPk: PubkeyHex,
   group: Group,
   opts: { now?: number; relayHint?: string; mentions?: PubkeyHex[]; replyTo?: string } = {},
-): NostrEvent[] {
+): { id: string; events: NostrEvent[] } {
   const nowSec = opts.now ?? Math.floor(Date.now() / 1000);
-  const rumor = {
+  // rumor 只建一次（與收件人無關），確保每位成員收到的 rumor.id 相同。
+  const input: RumorInput = {
     kind: KIND.CHAT,
+    created_at: nowSec,
+    tags: [
+      ["g", group.id],
+      ...(opts.relayHint ? [["relay", opts.relayHint]] : []),
+      ...(opts.mentions && opts.mentions.length > 0 ? mentionTags(opts.mentions) : []),
+      ...(opts.replyTo ? [replyTag(opts.replyTo)] : []),
+    ],
     content: text,
-    groupId: group.id,
-    ...(opts.mentions && opts.mentions.length > 0 ? { mentions: opts.mentions } : {}),
-    ...(opts.replyTo ? { replyTo: opts.replyTo } : {}),
   };
-  return others(group.members, senderPk).map((pk) => wrapFor(pk, rumor, senderSk, nowSec, opts.relayHint));
+  const id = getEventHash({ ...input, pubkey: getPublicKey(senderSk) });
+  const events = others(group.members, senderPk).map((pk) =>
+    sealAndWrap(input, senderSk, pk, {
+      kind: KIND.OFFLINE_DM_GIFT_WRAP,
+      tags: [
+        ["p", pk],
+        ["expiration", String(nowSec + DEFAULT_TTL_SECONDS)],
+      ],
+    }),
+  );
+  return { id, events };
 }
 
 /** 將群組控制訊息扇出給指定收件人（各一個 Gift Wrap）。 */

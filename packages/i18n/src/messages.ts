@@ -100,9 +100,15 @@ export interface Messages {
   status_busy: string;
   status_offline: string;
   msgStatus_sending: string;
+  /** 傳送失敗（外送匣重試耗盡/被拒收，ADR-0095）。 */
+  msgStatus_failed: string;
   msgStatus_sent: string;
   msgStatus_delivered: string;
   msgStatus_read: string;
+  /** 群組名單制已讀（≤5 人，ADR-0095）：`{names}`。 */
+  readBy_list: string;
+  /** 群組計數制已讀（6–10 人，ADR-0095）：`{count}`/`{total}`。 */
+  readBy_count: string;
   settings_readReceipts: string;
   settings_readReceiptsHint: string;
   // 保留上限與導出（ADR-0094）
@@ -506,9 +512,12 @@ const zhHant: Messages = {
   status_busy: "忙碌",
   status_offline: "顯示為離線（隱身）",
   msgStatus_sending: "傳送中",
+  msgStatus_failed: "傳送失敗",
   msgStatus_sent: "已送出",
   msgStatus_delivered: "已送達",
   msgStatus_read: "已讀",
+  readBy_list: "已讀：{names}",
+  readBy_count: "已讀 {count}/{total}",
   settings_readReceipts: "已讀回條",
   settings_readReceiptsHint: "開啟後，你讀取訊息會通知對方；關閉則不送、也不顯示對方的已讀（互惠）。",
   settings_retention: "訊息保留上限",
@@ -908,9 +917,12 @@ const en: Messages = {
   status_busy: "Busy",
   status_offline: "Appear offline",
   msgStatus_sending: "Sending",
+  msgStatus_failed: "Failed to send",
   msgStatus_sent: "Sent",
   msgStatus_delivered: "Delivered",
   msgStatus_read: "Read",
+  readBy_list: "Read by {names}",
+  readBy_count: "Read {count}/{total}",
   settings_readReceipts: "Read receipts",
   settings_readReceiptsHint: "When on, others are told when you read their messages; off means you neither send yours nor see theirs (reciprocal).",
   settings_retention: "Message retention",

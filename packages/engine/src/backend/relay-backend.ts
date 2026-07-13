@@ -11,6 +11,7 @@ import {
   encodePresence,
   finalizeEvent,
   groupTarget,
+  groupReceiptMode,
   generateSecretKey,
   getPublicKey,
   isMentioned,
@@ -121,6 +122,7 @@ function storedToChat(m: StoredMessage): ChatMessage {
     ...(m.mentionsMe ? { mentionsMe: true } : {}),
     ...(m.replyTo !== undefined ? { replyTo: m.replyTo } : {}),
     ...(m.status !== undefined ? { status: m.status } : {}),
+    ...(m.receipts ? { receipts: { ...m.receipts } } : {}), // 群組每成員回條（ADR-0095）
     ...(m.file
       ? {
           file: {
@@ -323,8 +325,9 @@ export class RelayChatBackend implements ChatBackend {
   // 送達/已讀回條（ADR-0058）。
   /** 已送出、待 relay OK 的訊息 id → 收件人（供 OK 後標 sent）。 */
   private readonly awaitingSent = new Map<string, PubkeyHex>();
-  /** 每對話已送出的最新「已讀」水位訊息 id（避免重複送已讀回條）。 */
-  private readonly lastReadSent = new Map<PubkeyHex, string>();
+  /** 已送出的最新「已讀」水位訊息 id（避免重複送已讀回條）。
+   *  鍵：1:1 為對方 pubkey；群組為 `<groupId>:<發訊者pubkey>`（每位發訊者各一條水位，ADR-0095）。 */
+  private readonly lastReadSent = new Map<string, string>();
   /** 已讀回條開關（opt-in，預設關；關閉時不送也不顯示他人已讀——互惠）。 */
   private readReceipts = false;
   // 訊息去重（審查 P1-4）：有界，逐出最舊；儲存層與 UI 層另有去重兜底。
@@ -332,6 +335,8 @@ export class RelayChatBackend implements ChatBackend {
   /** 檔案訊息關聯（ADR-0093）：傳輸 id → {對話, 訊息 id}；用來把 P2P 位元組與中繼 metadata
    *  對到同一則檔案訊息（避免收到 metadata 又收到位元組時重出兩則）。本 session 記憶體狀態。 */
   private readonly fileMsgByTid = new Map<string, { contact: PubkeyHex; msgId: string }>();
+  /** 群訊扇出追蹤（ADR-0095）：每個 wrap 的 event id → 該群訊的送出狀態（多 wrap 共用一個 state）。 */
+  private readonly fanout = new Map<string, { convo: string; messageId: string; pending: number; ok: boolean }>();
   private contacts: { pubkey: PubkeyHex; name: string; relayUrl?: string }[];
   private blocked: { pubkey: PubkeyHex; name: string }[];
   private groups: Group[];
@@ -397,8 +402,9 @@ export class RelayChatBackend implements ChatBackend {
       onDrop: (evt, reason) => {
         // 快照發佈失敗（拒收/重試耗盡）→ 清節流記錄讓 30 分後重試（審查修正 #5）。
         if (evt.kind === SNAPSHOT_KIND) this.clearSnapshotThrottle();
-        // 明確拒收或重試耗盡：目前記錄告警（未來可接 UI「未送達」提示）。
+        // 明確拒收或重試耗盡 → 標記該訊息為傳送失敗（ADR-0095：UI 顯示紅色重試圖示）。
         console.warn(`[outbox] 事件 ${evt.id.slice(0, 8)}… 未送達：${reason}`);
+        this.markFailed(evt.id);
       },
     });
     this.client = connector(
@@ -845,9 +851,11 @@ export class RelayChatBackend implements ChatBackend {
     const { sender, rumor } = opened;
     if (this.isBlocked(sender)) return;
 
+    // 群組路由僅限「群訊/群控」——群組**回條**也帶 `g` tag（ADR-0095），必須落到下方回條處理，
+    // 不能被這裡吞掉（否則發訊者永遠收不到群組送達/已讀）。
     const groupId = groupTarget(rumor);
-    if (groupId) {
-      this.receiveGroup(event.id, sender, rumor, groupId);
+    if (groupId && (rumor.kind === KIND.CHAT || rumor.kind === KIND.GROUP_CONTROL)) {
+      this.receiveGroup(sender, rumor, groupId);
       return;
     }
 
@@ -872,7 +880,8 @@ export class RelayChatBackend implements ChatBackend {
 
     const receipt = receiptOf(rumor);
     if (receipt) {
-      this.applyReceipt(sender, receipt.messageId, receipt.type); // ADR-0058：標記自己訊息的送達/已讀
+      // ADR-0058：標記自己訊息的送達/已讀；帶 groupId 者為群組回條（ADR-0095）。
+      this.applyReceipt(sender, receipt.messageId, receipt.type, receipt.groupId);
       return;
     }
 
@@ -913,8 +922,8 @@ export class RelayChatBackend implements ChatBackend {
     this.publishReliable(wrapReceipt("delivered", this.sk, sender, event.id)); // ADR-0058 Tier 2：已送達回條
   }
 
-  /** 處理帶 `g` tag 的群組訊息/控制。 */
-  private receiveGroup(eventId: string, sender: PubkeyHex, rumor: Rumor, groupId: string): void {
+  /** 處理帶 `g` tag 的群組訊息/控制。訊息識別用 rumor.id（跨成員一致，ADR-0095）。 */
+  private receiveGroup(sender: PubkeyHex, rumor: Rumor, groupId: string): void {
     this.learnRelayHint(sender, rumor); // 僅更新既有聯絡人；陌生成員不會被灌入（ADR-0036）
     if (rumor.kind === KIND.GROUP_CONTROL) {
       const control = parseGroupControl(rumor);
@@ -936,9 +945,16 @@ export class RelayChatBackend implements ChatBackend {
       ...(mine ? { mentionsMe: true } : {}),
       ...(replyTo !== undefined ? { replyTo } : {}),
     };
-    const message = { id: eventId, contact: groupId, outgoing: false, text: rumor.content, at: Date.now(), ...extra };
+    // 群訊識別用**內層 rumor.id**（跨成員一致、openWrap 已驗雜湊）；外層 wrap id 每人不同，
+    // 拿來當 id 會讓回條/引用對不回發訊者（ADR-0095 修正；`eventId` 僅用於 wrap 去重）。
+    const id = rumor.id;
+    const message = { id, contact: groupId, outgoing: false, text: rumor.content, at: Date.now(), ...extra };
     this.storage.appendMessage(message);
-    this.handlers?.onMessage(groupId, { id: eventId, outgoing: false, text: rumor.content, at: message.at, ...extra });
+    this.handlers?.onMessage(groupId, { id, outgoing: false, text: rumor.content, at: message.at, ...extra });
+    // 分級送達回條（ADR-0095）：小群（≤GROUP_RECEIPT_COUNT_MAX）才回；大群完全不記（零額外流量）。
+    if (groupReceiptMode(g.members.length) !== "off") {
+      this.publishReliable(wrapReceipt("delivered", this.sk, sender, id, { groupId }));
+    }
   }
 
   private applyControl(from: PubkeyHex, control: GroupControl): void {
@@ -1417,17 +1433,54 @@ export class RelayChatBackend implements ChatBackend {
     this.publishReliable(buildSnapshotPurge(this.sk, deviceId));
   }
 
-  /** Tier 1（ADR-0058）：relay 接受某訊息＝已送中繼，標 sent 並通知 UI。 */
-  private markSent(eventId: string): void {
-    const contact = this.awaitingSent.get(eventId);
-    if (!contact) return;
-    this.awaitingSent.delete(eventId);
-    this.storage.setMessageStatus(contact, eventId, "sent");
-    this.handlers?.onMessageStatus?.(contact, eventId, "sent");
+  /** 寫入並廣播訊息狀態（只前進，由儲存層守門）。 */
+  private setMsgStatus(convo: string, messageId: string, status: MessageStatus): void {
+    this.storage.setMessageStatus(convo, messageId, status);
+    this.handlers?.onMessageStatus?.(convo, messageId, status);
   }
 
-  /** 套用收到的送達/已讀回條到自己送出的訊息（ADR-0058）。 */
-  private applyReceipt(from: PubkeyHex, messageId: string, type: ReceiptType): void {
+  /** Tier 1（ADR-0058）：relay 接受某事件＝已送中繼。1:1 直接標；群訊走扇出（任一 OK 即 sent）。 */
+  private markSent(eventId: string): void {
+    const contact = this.awaitingSent.get(eventId);
+    if (contact) {
+      this.awaitingSent.delete(eventId);
+      this.setMsgStatus(contact, eventId, "sent");
+      return;
+    }
+    const fan = this.fanout.get(eventId);
+    if (!fan) return;
+    this.fanout.delete(eventId);
+    fan.pending -= 1;
+    if (fan.ok) return;
+    fan.ok = true; // 任一 wrap 進了中繼即視為已送出
+    this.setMsgStatus(fan.convo, fan.messageId, "sent");
+  }
+
+  /**
+   * 送出失敗（ADR-0095）：外送匣重試耗盡或被明確拒收。1:1 直接標 failed；
+   * 群訊需**所有** wrap 都放棄且無任一成功才算失敗（部分成員送達仍算送出）。
+   */
+  private markFailed(eventId: string): void {
+    const contact = this.awaitingSent.get(eventId);
+    if (contact) {
+      this.awaitingSent.delete(eventId);
+      this.setMsgStatus(contact, eventId, "failed");
+      return;
+    }
+    const fan = this.fanout.get(eventId);
+    if (!fan) return;
+    this.fanout.delete(eventId);
+    fan.pending -= 1;
+    if (fan.ok || fan.pending > 0) return; // 已有成功、或還有 wrap 在途 → 先不判失敗
+    this.setMsgStatus(fan.convo, fan.messageId, "failed");
+  }
+
+  /** 套用收到的送達/已讀回條到自己送出的訊息（ADR-0058；群組見 ADR-0095）。 */
+  private applyReceipt(from: PubkeyHex, messageId: string, type: ReceiptType, groupId?: string): void {
+    if (groupId) {
+      this.applyGroupReceipt(from, messageId, type, groupId);
+      return;
+    }
     if (type === "read") {
       if (!this.readReceipts) return; // 互惠：自己關閉已讀就不顯示他人已讀
       // 水位：把該對話中、時間不晚於目標訊息的自己訊息全標為已讀。
@@ -1435,23 +1488,65 @@ export class RelayChatBackend implements ChatBackend {
       const upto = msgs.find((m) => m.id === messageId)?.at ?? Infinity;
       for (const m of msgs) {
         if (!m.outgoing || m.at > upto || m.status === "read") continue;
-        this.storage.setMessageStatus(from, m.id, "read");
-        this.handlers?.onMessageStatus?.(from, m.id, "read");
+        this.setMsgStatus(from, m.id, "read");
       }
       return;
     }
-    this.storage.setMessageStatus(from, messageId, "delivered");
-    this.handlers?.onMessageStatus?.(from, messageId, "delivered");
+    this.setMsgStatus(from, messageId, "delivered");
   }
 
-  /** 開啟對話時呼叫（ADR-0058 Tier 3）：啟用已讀回條時，送「已讀到最新」水位回條。 */
-  markRead(contact: PubkeyHex): void {
+  /**
+   * 群組回條（ADR-0095）：記在該訊息的**每成員回條表**（誰送達/誰已讀），而非單一 scalar。
+   * 大群（mode off）直接丟棄——我們本來就不送、也不該接受別人塞進來的回條。
+   * 已讀仍受互惠開關約束（自己關已讀就不收別人的已讀）。已讀採水位語意（含更早的自己訊息）。
+   */
+  private applyGroupReceipt(from: PubkeyHex, messageId: string, type: ReceiptType, groupId: string): void {
+    const group = this.groups.find((g) => g.id === groupId);
+    if (!group) return;
+    if (groupReceiptMode(group.members.length) === "off") return; // 大群不記
+    if (!group.members.includes(from)) return; // 非成員的回條不收
+    if (type === "read" && !this.readReceipts) return; // 互惠
+
+    const msgs = this.storage.loadMessages(groupId);
+    const upto = msgs.find((m) => m.id === messageId)?.at ?? Infinity;
+    for (const m of msgs) {
+      // 送達只標該則；已讀採水位（把不晚於目標的自己訊息一併標為此成員已讀）。
+      if (!m.outgoing) continue;
+      if (type === "delivered" ? m.id !== messageId : m.at > upto) continue;
+      const receipts = this.storage.setMessageReceipt(groupId, m.id, from, type);
+      if (receipts) this.handlers?.onMessageReceipts?.(groupId, m.id, receipts);
+    }
+  }
+
+  /**
+   * 開啟對話時呼叫（ADR-0058 Tier 3）：啟用已讀回條時送「已讀到最新」水位回條。
+   * 群組（ADR-0095）：小群才送——且回條要**分別送給每位發訊者**（群訊來自多人），
+   * 每人各一則指向「他最新那則」的水位回條；大群完全不送。
+   */
+  markRead(convo: PubkeyHex): void {
     if (!this.readReceipts) return;
-    const incoming = this.storage.loadMessages(contact).filter((m) => !m.outgoing);
+    const group = this.groups.find((g) => g.id === convo);
+    if (group) {
+      if (groupReceiptMode(group.members.length) === "off") return; // 大群不記
+      // 每位發訊者的最新一則＝送給他的已讀水位。
+      const latestBy = new Map<PubkeyHex, string>();
+      for (const m of this.storage.loadMessages(convo)) {
+        if (m.outgoing || !m.sender || m.sender === this.self.pubkey) continue;
+        latestBy.set(m.sender, m.id);
+      }
+      for (const [author, msgId] of latestBy) {
+        const key = `${convo}:${author}`;
+        if (this.lastReadSent.get(key) === msgId) continue; // 已送過同一水位
+        this.lastReadSent.set(key, msgId);
+        this.publishReliable(wrapReceipt("read", this.sk, author, msgId, { groupId: convo }));
+      }
+      return;
+    }
+    const incoming = this.storage.loadMessages(convo).filter((m) => !m.outgoing);
     const latest = incoming[incoming.length - 1];
-    if (!latest || this.lastReadSent.get(contact) === latest.id) return; // 無收訊或已送過同一水位
-    this.lastReadSent.set(contact, latest.id);
-    this.publishReliable(wrapReceipt("read", this.sk, contact, latest.id));
+    if (!latest || this.lastReadSent.get(convo) === latest.id) return; // 無收訊或已送過同一水位
+    this.lastReadSent.set(convo, latest.id);
+    this.publishReliable(wrapReceipt("read", this.sk, convo, latest.id));
   }
 
   /** 設定已讀回條開關（opt-in + 互惠；ADR-0058）。 */
@@ -1586,18 +1681,34 @@ export class RelayChatBackend implements ChatBackend {
     if (!canPostToGroup(group, this.self.pubkey)) return; // 公告群僅管理者可發（ADR-0049）
     // 只保留確實在群內的提及對象（避免對非成員扇出 p-tag）。
     const validMentions = mentions?.filter((pk) => group.members.includes(pk)) ?? [];
-    const evts = wrapGroupMessage(text, this.sk, this.self.pubkey, group, {
+    // id＝內層 rumor id：**跨成員一致**（外層 wrap id 每人不同），送達/已讀回條才對得回來（ADR-0095）。
+    const { id, events } = wrapGroupMessage(text, this.sk, this.self.pubkey, group, {
       ...(this.homeUrl ? { relayHint: this.homeUrl } : {}),
       ...(validMentions.length > 0 ? { mentions: validMentions } : {}),
       ...(replyTo ? { replyTo } : {}),
     });
-    for (const evt of evts) this.publishReliable(evt);
-    const id = evts[0]?.id ?? `g-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     this.seenMsg.add(id);
     const extra = { sender: this.self.pubkey, ...(replyTo ? { replyTo } : {}) };
-    const message = { id, contact: groupId, outgoing: true, text, at: Date.now(), ...extra };
+    const status = "sending" as const;
+    const message = { id, contact: groupId, outgoing: true, text, at: Date.now(), status, ...extra };
     this.storage.appendMessage(message);
-    this.handlers?.onMessage(groupId, { id, outgoing: true, text, at: message.at, ...extra });
+    this.handlers?.onMessage(groupId, { id, outgoing: true, text, at: message.at, status, ...extra });
+    // 扇出腿的送出狀態（ADR-0095）：任一 wrap 被中繼接受＝sent；全部放棄＝failed。
+    this.trackFanout(groupId, id, events);
+    for (const evt of events) this.publishReliable(evt);
+  }
+
+  /**
+   * 追蹤群訊扇出的送出狀態（ADR-0095）：把每個 wrap 的 event id 對回同一則群訊。
+   * 任一 OK → `sent`（樂觀：至少進了中繼）；全部放棄 → `failed`。
+   */
+  private trackFanout(convo: string, messageId: string, events: NostrEvent[]): void {
+    if (events.length === 0) {
+      this.setMsgStatus(convo, messageId, "failed"); // 無其他成員可送＝送不出去
+      return;
+    }
+    const state = { convo, messageId, pending: events.length, ok: false };
+    for (const evt of events) this.fanout.set(evt.id, state);
   }
 
   leaveGroup(groupId: string): void {

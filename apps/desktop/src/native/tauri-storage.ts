@@ -153,6 +153,16 @@ export class TauriStorage implements AppStorage {
     this.mem.setFileSavedPath(contactPubkey, messageId, savedPath);
     this.persist();
   }
+  setMessageReceipt(
+    convoKey: string,
+    messageId: string,
+    member: string,
+    type: "delivered" | "read",
+  ): Record<string, "delivered" | "read"> | undefined {
+    const next = this.mem.setMessageReceipt(convoKey, messageId, member, type);
+    if (next) this.persist();
+    return next;
+  }
   addReaction(reaction: StoredReaction): void {
     this.mem.addReaction(reaction);
     this.persist();

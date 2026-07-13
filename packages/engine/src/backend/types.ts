@@ -78,8 +78,13 @@ export interface ChatMessage {
   replyTo?: string;
   /** 檔案附件（有值時此訊息為檔案而非文字）。 */
   file?: ChatFile;
-  /** 送達/已讀狀態（自己送出的訊息才有意義；ADR-0058）。 */
+  /** 送達/已讀狀態（自己送出的訊息才有意義；ADR-0058/0095）。 */
   status?: MessageStatus;
+  /**
+   * 群組每成員回條（ADR-0095）：成員 pubkey → delivered/read。僅自己送出的小群訊息才有。
+   * 名單制（≤5 人）用來顯示「誰已讀」；計數制（6–10 人）用來算「已讀 M/N」；大群不記錄。
+   */
+  receipts?: Record<string, "delivered" | "read">;
 }
 
 export interface ChatBackendEvents {
@@ -100,8 +105,13 @@ export interface ChatBackendEvents {
   onReaction?(messageId: string, emoji: string, mine: boolean): void;
   /** 某訊息被收回（NIP-09），應顯示為「已收回」。 */
   onUnsend?(messageId: string): void;
-  /** 自己送出的某訊息送達/已讀狀態更新（ADR-0058）。 */
+  /** 自己送出的某訊息送達/已讀狀態更新（ADR-0058；含 `failed`，ADR-0095）。 */
   onMessageStatus?(contact: PubkeyHex, messageId: string, status: MessageStatus): void;
+  /**
+   * 群組某訊息的每成員回條更新（ADR-0095）：`receipts` 為成員 pubkey → delivered/read 的完整表。
+   * 僅小群（≤10 人）會觸發；大群完全不記錄。
+   */
+  onMessageReceipts?(groupId: string, messageId: string, receipts: Record<string, "delivered" | "read">): void;
   /** 封鎖名單有更新。 */
   onBlocked?(blocked: BlockedContact[]): void;
   /** 與中繼站的連線狀態改變。 */

@@ -1,4 +1,4 @@
-import { contentHash, parseMentions, REACTION_EMOJIS } from "@cinder/core";
+import { contentHash, groupReceiptMode, parseMentions, REACTION_EMOJIS } from "@cinder/core";
 import { type MouseEvent as ReactMouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "../i18n.js";
 import type { CallMedia, MentionCandidate } from "@cinder/core";
@@ -62,11 +62,24 @@ import { applyEmoticons } from "./emoticons.js";
 import { avatarColor, EMOTICONS, initial } from "./util.js";
 import { EditableAvatar, usePersonalizeTick } from "./Avatar.js";
 import { ChatBgPicker } from "./ChatBgPicker.js";
+import { MsgStatusIcon } from "./MsgStatusIcon.js";
 import { chatBgCss, getChatBg, getConvoSize, setConvoSize } from "./personalize.js";
 
-/** 送達/已讀狀態的 i18n 標籤（ADR-0058）。 */
+/** 群組已讀呈現（ADR-0095）：`list`＝顯示誰已讀（≤5 人）；`count`＝只顯示 M/N（6–10 人）。 */
+interface GroupRead {
+  mode: "list" | "count";
+  /** 已讀人數。 */
+  count: number;
+  /** 其他成員總數（不含自己）。 */
+  total: number;
+  /** 已讀者顯示名（名單制才用）。 */
+  names: string[];
+}
+
+/** 送達/已讀狀態的 i18n 標籤（ADR-0058／0095）。 */
 const MSG_STATUS_KEY: Record<MessageStatus, MessageKey> = {
   sending: "msgStatus_sending",
+  failed: "msgStatus_failed",
   sent: "msgStatus_sent",
   delivered: "msgStatus_delivered",
   read: "msgStatus_read",
@@ -265,6 +278,28 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
   const shown = hiddenCount > 0 ? channel.slice(hiddenCount) : channel;
   // 擁有中的自製貼圖 id 集合：整個訊息列共用一份（不再每則訊息各建一個 Set）。
   const ownedIds = new Set(library.map((s) => s.id));
+
+  /**
+   * 群組已讀呈現（ADR-0095）：依成員數分級——≤5 名單制（顯示誰已讀）、6–10 計數制（已讀 M/N）、
+   * >10 完全不記（回 undefined，不顯示）。只對自己送出的訊息有意義。
+   */
+  const groupReadOf = (m: ChatMessage): GroupRead | undefined => {
+    const members = props.groupMembers;
+    if (!m.outgoing || !members) return undefined; // 非群組或非自己送出
+    const total = members.length - 1; // 其他成員數（不含自己）
+    if (total <= 0) return undefined;
+    const mode = groupReceiptMode(members.length);
+    if (mode === "off") return undefined; // 大群不記
+    const readers = Object.entries(m.receipts ?? {})
+      .filter(([, v]) => v === "read")
+      .map(([pk]) => pk);
+    return {
+      mode,
+      total,
+      count: readers.length,
+      names: readers.map((pk) => props.senderName?.(pk) ?? `${pk.slice(0, 8)}…`),
+    };
+  };
 
   // 相簿：本對話中收發過、可顯示的圖片。
   const images = messages
@@ -607,6 +642,7 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
               replyCount={counts.get(m.id) ?? 0}
               onOpenThread={props.readOnly ? undefined : () => openThread(m.id)}
               onExpand={() => openDetail(m.id)}
+              groupRead={groupReadOf(m)}
             />
           ))}
         </div>
@@ -1306,6 +1342,7 @@ function MessageLine({
   onOpenThread,
   onExpand,
   expanded = false,
+  groupRead,
 }: {
   message: ChatMessage;
   who: string;
@@ -1325,6 +1362,8 @@ function MessageLine({
   onExpand?: (() => void) | undefined;
   /** 於詳情面板中渲染時為 true：不截斷、顯示完整內文。 */
   expanded?: boolean;
+  /** 群組已讀（ADR-0095）：名單制/計數制；大群或非群組為 undefined（不顯示）。 */
+  groupRead?: GroupRead | undefined;
 }): JSX.Element {
   const { t } = useI18n();
   const [picking, setPicking] = useState(false);
@@ -1364,7 +1403,18 @@ function MessageLine({
           title={t(MSG_STATUS_KEY[message.status])}
           aria-label={t(MSG_STATUS_KEY[message.status])}
         >
-          {message.status === "sending" ? "🕓" : message.status === "sent" ? "✓" : "✓✓"}
+          <MsgStatusIcon status={message.status} />
+        </span>
+      ) : null}
+      {message.outgoing && groupRead && groupRead.count > 0 ? (
+        // 名單制（≤5 人）列出誰已讀；計數制（6–10 人）只給 M/N。大群不會走到這（groupRead 為 undefined）。
+        <span
+          className="readby"
+          title={groupRead.mode === "list" ? groupRead.names.join("、") : undefined}
+        >
+          {groupRead.mode === "list"
+            ? t("readBy_list", { names: groupRead.names.join("、") })
+            : t("readBy_count", { count: String(groupRead.count), total: String(groupRead.total) })}
         </span>
       ) : null}
       {message.mentionsMe ? (

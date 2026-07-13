@@ -29,6 +29,16 @@ const STATUS_KEY: Record<Status, MessageKey> = {
 
 const shell = StyleSheet.create({ root: { flex: 1 } });
 
+// 已讀回條（ADR-0058）：opt-in＋互惠——關閉則不送、也不顯示對方的已讀（故 tick 最多到已送達）。
+const READ_RECEIPTS_KEY = "nb.readReceipts";
+function readReadReceipts(): boolean {
+  try {
+    return localStorage.getItem(READ_RECEIPTS_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
 // 每對話保留上限（ADR-0094）：裝置本地、不同步；0＝無上限（預設）。
 const RETENTION_KEY = "nb.retentionCap";
 function readRetentionCap(): number {
@@ -83,6 +93,7 @@ export function MobileApp({
   const [selfNsec, setSelfNsec] = useState("");
   const [invisible, setInvisible] = useState(false);
   const [retentionCap, setRetentionCapState] = useState<number>(() => readRetentionCap());
+  const [readReceipts, setReadReceiptsState] = useState<boolean>(() => readReadReceipts());
   const backendRef = useRef<ChatBackend | null>(null);
   const storeRef = useRef<AppStorage | null>(null);
   const screenRef = useRef(screen);
@@ -122,9 +133,30 @@ export function MobileApp({
         const viewing = screenRef.current === "conversation" && activeIdRef.current === pk;
         if (!m.outgoing && !viewing) setUnread((u) => ({ ...u, [pk]: (u[pk] ?? 0) + 1 }));
       },
+      // 送出狀態（ADR-0095）：與桌面同一套（傳送中/失敗/已送出/已送達/已讀）→ 氣泡旁圖示。
+      onMessageStatus: (pk, messageId, status) =>
+        setConvos((c) => {
+          const cur = c[pk];
+          if (!cur) return c;
+          let changed = false;
+          const next = cur.map((m) => {
+            if (m.id !== messageId || m.status === status) return m;
+            changed = true;
+            return { ...m, status };
+          });
+          return changed ? { ...c, [pk]: next } : c;
+        }),
+      // 群組每成員回條（ADR-0095）：小群才有；先接進狀態供之後渲染「誰已讀／M/N」。
+      onMessageReceipts: (groupId, messageId, receipts) =>
+        setConvos((c) => {
+          const cur = c[groupId];
+          if (!cur) return c;
+          return { ...c, [groupId]: cur.map((m) => (m.id === messageId ? { ...m, receipts } : m)) };
+        }),
       onTyping: () => {},
       onNudge: () => {},
     });
+    backend.setReadReceipts?.(readReceipts); // ADR-0058：互惠開關（關＝不送也不顯示對方已讀）
     setTab("chats");
     setScreen("main");
   };
@@ -133,6 +165,7 @@ export function MobileApp({
     setActiveId(id);
     setUnread((u) => (u[id] ? { ...u, [id]: 0 } : u));
     setScreen("conversation");
+    backendRef.current?.markRead?.(id); // ADR-0058 Tier 3：開對話＝送已讀水位（未開啟則後端自行忽略）
   };
   const back = (): void => {
     setScreen("main");
@@ -153,6 +186,16 @@ export function MobileApp({
   const toggleInvisible = (v: boolean): void => {
     setInvisible(v);
     backendRef.current?.setInvisible?.(v);
+  };
+  // 已讀回條開關（ADR-0058）：寫入偏好並即時推到後端。
+  const toggleReadReceipts = (v: boolean): void => {
+    setReadReceiptsState(v);
+    try {
+      localStorage.setItem(READ_RECEIPTS_KEY, v ? "1" : "0");
+    } catch {
+      /* 忽略 */
+    }
+    backendRef.current?.setReadReceipts?.(v);
   };
   // 保留上限（ADR-0094）：寫入偏好、即時套用到當前身分的儲存。
   const changeRetention = (n: number): void => {
@@ -245,7 +288,15 @@ export function MobileApp({
           onAccent={setAccent}
           invisible={invisible}
           onInvisible={toggleInvisible}
-          {...(relayUrl ? { retention: retentionCap, onRetention: changeRetention, onExport: exportAll } : {})}
+          {...(relayUrl
+            ? {
+                retention: retentionCap,
+                onRetention: changeRetention,
+                onExport: exportAll,
+                readReceipts,
+                onReadReceipts: toggleReadReceipts,
+              }
+            : {})}
           onLogout={logout}
         />
       )}

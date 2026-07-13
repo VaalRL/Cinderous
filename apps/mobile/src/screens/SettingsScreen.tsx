@@ -53,6 +53,8 @@ export function SettingsScreen({
   retention,
   onRetention,
   onExport,
+  readReceipts,
+  onReadReceipts,
   onLogout,
 }: {
   selfName: string;
@@ -73,6 +75,9 @@ export function SettingsScreen({
   onRetention?: (n: number) => void;
   /** 導出全部紀錄（ADR-0094）。 */
   onExport?: () => void;
+  /** 已讀回條（ADR-0058）：opt-in＋互惠；關閉則不送、也不顯示對方已讀。 */
+  readReceipts?: boolean;
+  onReadReceipts?: (v: boolean) => void;
   onLogout: () => void;
 }): JSX.Element {
   const tk = useMemo(() => resolveTheme({ theme, accent }), [theme, accent]);
@@ -158,6 +163,31 @@ export function SettingsScreen({
             </Text>
           </Pressable>
         </View>
+
+        {/* 已讀回條（ADR-0058）：互惠——關閉則不送也不顯示對方已讀 */}
+        {onReadReceipts ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>{t("settings_readReceipts")}</Text>
+            <Text style={styles.label}>{t("settings_readReceiptsHint")}</Text>
+            <Pressable
+              accessibilityRole="button"
+              onPress={() => onReadReceipts(!readReceipts)}
+              style={[
+                styles.seg,
+                {
+                  alignSelf: "flex-start",
+                  borderColor: readReceipts ? tk.accent : tk.border,
+                  backgroundColor: readReceipts ? tk.accent : tk.field,
+                },
+              ]}
+            >
+              <Text style={[styles.segText, { color: readReceipts ? "#ffffff" : tk.ink }]}>
+                {t("settings_readReceipts")}
+                {readReceipts ? " ✓" : ""}
+              </Text>
+            </Pressable>
+          </View>
+        ) : null}
 
         {/* 訊息保留上限（ADR-0094） */}
         {onRetention ? (

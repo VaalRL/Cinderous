@@ -109,3 +109,4 @@
 | [0092](./0092-node-membership-self-report-and-conformance-audit.md) | 節點成員自報＋一致性稽核＋簽章可驗證記錄（申請/審查/稽核介面化） | 已接受 |
 | [0093](./0093-multi-device-delivery-and-file-persistence.md) | 多設備即時投遞與檔案接收：檔案 metadata 中繼化＋位元組 P2P＋收檔另存至使用者選定路徑 | 已接受 |
 | [0094](./0094-retention-limit-and-plaintext-export.md) | 本地紀錄保留上限（可設定、預設無上限）與明文紀錄導出（TXT/MD/JSON、範圍可選） | 已接受 |
+| [0095](./0095-group-receipts-and-message-status-icons.md) | 群組送達/已讀分級（≤5 名單／6–10 計數／>10 不記）＋failed 狀態與眼睛圖示語言＋行動端狀態同步 | 已接受 |

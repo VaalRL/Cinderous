@@ -3,6 +3,7 @@ import { KIND } from "./constants.js";
 import {
   applyGroupControl,
   canPostToGroup,
+  groupReceiptMode,
   groupTarget,
   newGroupId,
   parseGroupControl,
@@ -27,7 +28,7 @@ const group = (): Group => ({ id: newGroupId(), name: "好友", admin: alicePk, 
 describe("群組訊息扇出（M9，Gift-Wrap 成對）", () => {
   it("對每位其他成員各扇出一個 Gift Wrap，收件端還原 kind 14 + g tag", () => {
     const g = group();
-    const events = wrapGroupMessage("嗨大家", aliceSk, alicePk, g);
+    const { events } = wrapGroupMessage("嗨大家", aliceSk, alicePk, g);
     expect(events.length).toBe(2); // Bob、Carol（排除自己）
 
     const asBob = openWrap(events[0]!, bobSk);
@@ -43,7 +44,7 @@ describe("群組訊息扇出（M9，Gift-Wrap 成對）", () => {
 
   it("提及（ADR-0050）：mentions 寫進加密 rumor 內層 p-tag，收端可判定被提及", () => {
     const g = group();
-    const events = wrapGroupMessage("@Bob 看這個", aliceSk, alicePk, g, { mentions: [bobPk] });
+    const { events } = wrapGroupMessage("@Bob 看這個", aliceSk, alicePk, g, { mentions: [bobPk] });
     const asBob = openWrap(events[0]!, bobSk);
     expect(isMentioned(asBob.rumor, bobPk)).toBe(true);
     const asCarol = openWrap(events[1]!, carolSk);
@@ -53,26 +54,49 @@ describe("群組訊息扇出（M9，Gift-Wrap 成對）", () => {
 
   it("對話串（ADR-0051）：replyTo 寫進加密 rumor 內層 reply e-tag，收端可讀串根", () => {
     const g = group();
-    const events = wrapGroupMessage("我覺得可行", aliceSk, alicePk, g, { replyTo: "root-msg" });
+    const { events } = wrapGroupMessage("我覺得可行", aliceSk, alicePk, g, { replyTo: "root-msg" });
     const asBob = openWrap(events[0]!, bobSk);
     expect(threadRoot(asBob.rumor)).toBe("root-msg");
   });
 
   it("外層作者非寄件人（隱藏群組社交圖譜）", () => {
     const g = group();
-    const [evt] = wrapGroupMessage("hi", aliceSk, alicePk, g);
+    const [evt] = wrapGroupMessage("hi", aliceSk, alicePk, g).events;
     expect(evt!.kind).toBe(KIND.OFFLINE_DM_GIFT_WRAP);
     expect(evt!.pubkey).not.toBe(alicePk);
+  });
+
+  it("群訊 id 跨成員一致（ADR-0095）：每位收件人解出的 rumor.id 相同＝回傳的 id，外層 wrap id 則各不同", () => {
+    const g = group();
+    const { id, events } = wrapGroupMessage("同一則", aliceSk, alicePk, g);
+    const asBob = openWrap(events[0]!, bobSk);
+    const asCarol = openWrap(events[1]!, carolSk);
+    // 內層 rumor id：發訊者回傳值＝兩位收件人解出的值（送達/已讀回條才對得回來）
+    expect(asBob.rumor.id).toBe(id);
+    expect(asCarol.rumor.id).toBe(id);
+    // 外層 wrap id 每人不同（一次性金鑰＋各自密文）→ 不可當群訊識別
+    expect(events[0]!.id).not.toBe(events[1]!.id);
   });
 
   it("移除成員後不再扇出給他（即時、免 rekey）", () => {
     const g = group();
     const removed: Group = { ...g, members: [alicePk, bobPk] };
-    const events = wrapGroupMessage("秘密", aliceSk, alicePk, removed);
+    const { events } = wrapGroupMessage("秘密", aliceSk, alicePk, removed);
     expect(events.length).toBe(1);
     expect(openWrap(events[0]!, bobSk).rumor.content).toBe("秘密");
     // Carol 已不在成員，沒有屬於她的 wrap
     expect(() => openWrap(events[0]!, carolSk)).toThrow();
+  });
+});
+
+describe("群組回條分級（ADR-0095）", () => {
+  it("≤5 人＝名單制、6–10 人＝計數制、>10 人＝完全不記", () => {
+    expect(groupReceiptMode(2)).toBe("list");
+    expect(groupReceiptMode(5)).toBe("list"); // 邊界：含 5
+    expect(groupReceiptMode(6)).toBe("count"); // 邊界：6 起改計數
+    expect(groupReceiptMode(10)).toBe("count"); // 邊界：含 10
+    expect(groupReceiptMode(11)).toBe("off"); // 邊界：11 起完全不記（連送達都不送）
+    expect(groupReceiptMode(50)).toBe("off");
   });
 });
 
@@ -84,7 +108,7 @@ describe("群訊 relay hint（ADR-0036）", () => {
     const bobPk = getPublicKey(bobSk);
     const group = { id: "g1", name: "測試群", admin: alicePk, members: [alicePk, bobPk] };
 
-    const [msgWrap] = wrapGroupMessage("群訊", aliceSk, alicePk, group, { relayHint: "wss://x" });
+    const [msgWrap] = wrapGroupMessage("群訊", aliceSk, alicePk, group, { relayHint: "wss://x" }).events;
     expect(JSON.stringify(msgWrap!.tags)).not.toContain("wss://x");
     const opened = openWrap(msgWrap!, bobSk);
     expect(opened.rumor.tags).toContainEqual(["relay", "wss://x"]);

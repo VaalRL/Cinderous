@@ -1,4 +1,5 @@
 import {
+  advanceReceipt,
   type AppStorage,
   MESSAGE_STATUS_RANK,
   type MessageStatus,
@@ -192,6 +193,21 @@ export class LocalStorage implements AppStorage {
     if (!msg?.file) return;
     msg.file = { ...msg.file, savedPath };
     write(this.k("msgs." + contactPubkey), list);
+  }
+  setMessageReceipt(
+    convoKey: string,
+    messageId: string,
+    member: string,
+    type: "delivered" | "read",
+  ): Record<string, "delivered" | "read"> | undefined {
+    const list = this.loadMessages(convoKey);
+    const msg = list.find((m) => m.id === messageId);
+    if (!msg) return undefined;
+    const next = advanceReceipt(msg.receipts, member, type);
+    if (!next) return undefined;
+    msg.receipts = next;
+    write(this.k("msgs." + convoKey), list);
+    return { ...next };
   }
   loadReactions(): StoredReaction[] {
     return read<StoredReaction[]>(this.k("reactions"), []);

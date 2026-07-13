@@ -20,11 +20,24 @@ export interface StoredContact {
   relayUrl?: string;
 }
 
-/** 送出訊息的送達狀態（ADR-0058）：送出中→已送中繼→已送達裝置→已讀。 */
-export type MessageStatus = "sending" | "sent" | "delivered" | "read";
+/**
+ * 送出訊息的狀態（ADR-0058／0095）：送出中→（失敗）→已送中繼→已送達裝置→已讀。
+ * `failed`＝外送匣重試耗盡或被明確拒收（ADR-0095）。
+ */
+export type MessageStatus = "sending" | "failed" | "sent" | "delivered" | "read";
 
-/** 狀態前進順序；回條只能往前推進、不得倒退（避免 read 被較晚到的 delivered 蓋掉）。 */
-export const MESSAGE_STATUS_RANK: Record<MessageStatus, number> = { sending: 0, sent: 1, delivered: 2, read: 3 };
+/**
+ * 狀態前進順序；只能往前推進、不得倒退（避免 read 被較晚到的 delivered 蓋掉）。
+ * `failed` 排在 `sending` 之後、`sent` 之前——所以「傳送中→失敗」可推進，而失敗後若延遲
+ * 送達成功仍能推進到 `sent`；反之較晚到的 `failed` 不會覆蓋已成功的 `sent`（ADR-0095）。
+ */
+export const MESSAGE_STATUS_RANK: Record<MessageStatus, number> = {
+  sending: 0,
+  failed: 1,
+  sent: 2,
+  delivered: 3,
+  read: 4,
+};
 
 export interface StoredMessage {
   id: string;
@@ -47,6 +60,12 @@ export interface StoredMessage {
    * 另存至選定路徑（`savedPath`）——App 不保管檔案本體。`savedPath` 為裝置本地語意，不跨裝置同步。
    */
   file?: StoredFileMeta;
+  /**
+   * 群組每成員回條（ADR-0095）：成員 pubkey → 該成員對此訊息的最高狀態（delivered/read）。
+   * 僅自己送出的**小群**訊息才有（成員數 ≤ `GROUP_RECEIPT_COUNT_MAX`）；大群不記錄（連送達都不送）。
+   * 名單制（≤5）用它顯示「誰已讀」；計數制（6–10）用它算「已讀 M/N」。
+   */
+  receipts?: Record<string, "delivered" | "read">;
 }
 
 /** 持久化的檔案附件 metadata（ADR-0093）：無位元組、無縮圖。 */
@@ -58,6 +77,20 @@ export interface StoredFileMeta {
   mime: string;
   /** 使用者選定的本機儲存路徑（收檔另存後才有；瀏覽器下載無法得知則省略）。 */
   savedPath?: string;
+}
+
+/**
+ * 群組回條只前進（delivered→read，不倒退、不重複）（ADR-0095）。
+ * 無變更回 `undefined`；有變更回新的回條表（不就地改，供儲存層決定是否寫回）。
+ */
+export function advanceReceipt(
+  current: Record<string, "delivered" | "read"> | undefined,
+  member: string,
+  type: "delivered" | "read",
+): Record<string, "delivered" | "read"> | undefined {
+  const prev = current?.[member];
+  if (prev === type || (prev === "read" && type === "delivered")) return undefined;
+  return { ...(current ?? {}), [member]: type };
 }
 
 export interface StoredGroup {
@@ -113,6 +146,16 @@ export interface AppStorage {
   setMessageStatus(contactPubkey: string, messageId: string, status: MessageStatus): void;
   /** 記錄某檔案訊息收檔後的本機儲存路徑（ADR-0093）；訊息不存在或無 file 則忽略。 */
   setFileSavedPath(contactPubkey: string, messageId: string, savedPath: string): void;
+  /**
+   * 記錄群組某成員對某訊息的回條（ADR-0095）；只前進（delivered→read，不倒退）。
+   * 訊息不存在則忽略。回傳更新後的回條表（供 UI 立即渲染）；無變更回 undefined。
+   */
+  setMessageReceipt(
+    convoKey: string,
+    messageId: string,
+    member: string,
+    type: "delivered" | "read",
+  ): Record<string, "delivered" | "read"> | undefined;
   /** 設定每對話保留上限（ADR-0094）；`0`＝無上限。變更後即時對既有對話套用逐出。 */
   setMaxPerConvo(max: number): void;
   loadReactions(): StoredReaction[];

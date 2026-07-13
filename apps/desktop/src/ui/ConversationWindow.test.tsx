@@ -102,22 +102,34 @@ describe("ConversationWindow 訊息列視窗化（P0-3）", () => {
   });
 });
 
-describe("ConversationWindow 送達/已讀狀態勾（ADR-0058）", () => {
+describe("ConversationWindow 送出狀態圖示（ADR-0058／0095 眼睛語言）", () => {
   const out = (status: MessageStatus): ChatMessage => ({ id: "x", outgoing: true, text: "hi", at: 1, status });
 
-  it("已讀渲染 ✓✓ 與 tick--read", () => {
+  it("已讀＝張開眼（有瞳孔）＋ tick--read（主色）＋較粗線", () => {
     const html = render([out("read")]);
     expect(html).toContain("tick--read");
-    expect(html).toContain("✓✓");
+    expect(html).toContain("<circle"); // 瞳孔＝眼睛張開
+    expect(html).toContain('stroke-width="1.9"'); // 「粗體」
   });
 
-  it("已送出渲染單勾、非 read 色", () => {
-    const html = render([out("sent")]);
-    expect(html).toContain("tick--sent");
+  it("已送達＝半開眼（有瞳孔、灰）；已送出＝閉眼（無瞳孔）", () => {
+    const delivered = render([out("delivered")]);
+    expect(delivered).toContain("tick--delivered");
+    expect(delivered).toContain("<circle"); // 半開＝仍有瞳孔
+    expect(delivered).not.toContain("tick--read");
+
+    const sent = render([out("sent")]);
+    expect(sent).toContain("tick--sent");
+    expect(sent).not.toContain("<circle"); // 閉眼＝沒有瞳孔
+  });
+
+  it("傳送失敗＝紅色重試圖示（tick--failed）", () => {
+    const html = render([out("failed")]);
+    expect(html).toContain("tick--failed");
     expect(html).not.toContain("tick--read");
   });
 
-  it("對方訊息（incoming）不顯示狀態勾", () => {
+  it("對方訊息（incoming）不顯示狀態圖示", () => {
     const html = render([{ id: "y", outgoing: false, text: "hi", at: 1, status: "read" }]);
     expect(html).not.toContain("tick--");
   });

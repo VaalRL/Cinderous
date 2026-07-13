@@ -20,7 +20,7 @@ export function wrapReceipt(
   senderSk: SecretKey,
   recipientPk: PubkeyHex,
   targetEventId: string,
-  opts: { now?: number } = {},
+  opts: { now?: number; groupId?: string } = {},
 ): NostrEvent {
   const nowSec = opts.now ?? Math.floor(Date.now() / 1000);
   return sealAndWrap(
@@ -30,6 +30,9 @@ export function wrapReceipt(
       tags: [
         ["e", targetEventId],
         ["receipt", type],
+        // 群組回條（ADR-0095）：標出所屬群，讓原發訊者知道要更新哪個對話的哪一則。
+        // 在加密 rumor 內層，中繼看不到。
+        ...(opts.groupId ? [["g", opts.groupId]] : []),
       ],
       content: "",
     },
@@ -45,11 +48,12 @@ export function wrapReceipt(
   );
 }
 
-/** 從回條 rumor 取出類型與目標訊息 id；非回條或缺 tag 回 undefined。 */
-export function receiptOf(rumor: Rumor): { type: ReceiptType; messageId: string } | undefined {
+/** 從回條 rumor 取出類型、目標訊息 id 與（群組回條的）群組 id；非回條或缺 tag 回 undefined。 */
+export function receiptOf(rumor: Rumor): { type: ReceiptType; messageId: string; groupId?: string } | undefined {
   if (rumor.kind !== KIND.RECEIPT) return undefined;
   const messageId = rumor.tags.find((t) => t[0] === "e")?.[1];
   const type = rumor.tags.find((t) => t[0] === "receipt")?.[1];
   if (!messageId || (type !== "delivered" && type !== "read")) return undefined;
-  return { type, messageId };
+  const groupId = rumor.tags.find((t) => t[0] === "g")?.[1];
+  return { type, messageId, ...(groupId ? { groupId } : {}) };
 }

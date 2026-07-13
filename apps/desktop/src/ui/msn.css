@@ -617,8 +617,12 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
 .line.in .who { color: var(--in-name); }
 .line .time { color: var(--muted); font-size: 10px; margin-left: 6px; }
 /* 送達/已讀狀態勾（ADR-0058）。 */
-.tick { font-size: 10px; color: var(--muted); margin-left: 4px; letter-spacing: -1px; }
-.tick--read { color: var(--accent); font-weight: 700; }
+/* 訊息狀態圖示（ADR-0095）：SVG 走 currentColor——沙漏/閉眼/半開眼＝灰、張開眼＝主色、失敗＝紅。 */
+.tick { display: inline-flex; align-items: center; color: var(--muted); margin-left: 4px; vertical-align: middle; }
+.tick--read { color: var(--accent); }
+.tick--failed { color: #dc2626; }
+/* 群組已讀（名單制/計數制）。 */
+.readby { font-size: 10px; color: var(--muted); margin-left: 5px; vertical-align: middle; }
 .line .text { display: block; margin-top: 1px; white-space: pre-wrap; word-break: break-word; }
 .line.mention { background: var(--mention-bg, rgba(255,196,0,.12)); border-left: 3px solid var(--accent); border-radius: 4px; padding: 2px 6px; margin-left: -6px; }
 .mention-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 15px; height: 15px; margin-left: 6px; padding: 0 3px; border-radius: 8px; background: var(--accent); color: #fff; font-size: 10px; font-weight: 700; }
