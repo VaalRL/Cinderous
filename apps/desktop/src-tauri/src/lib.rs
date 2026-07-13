@@ -1,21 +1,19 @@
-//! Cinder 桌面原生橋的可測邏輯。
+//! Cinder 桌面原生服務（ADR-0105）。
 //!
-//! 目前提供與平台無關的 relay 重連退避；完整 Tauri 整合（背景 WebSocket
-//! 長連線、OS 金鑰安全儲存、IPC）將在具 Tauri 工具鏈的環境擴充。
+//! 這個 crate 的定位是**為 TypeScript 引擎提供原生能力**，而不是重新實作它：
+//!   - `encstore`：加密儲存 blob（AES-256-GCM，ADR-0054）
+//!   - `passlock`：本地密碼 KEK 包裹＋忘記密碼救援（Argon2id，ADR-0067/0073）
+//!   - `keyvault`：OS 金鑰庫（ADR-0053）
+//!
+//! 中繼站連線、Gift Wrap 加密、群組、WebRTC、狀態機等**一律留在 `packages/engine`（TS）**
+//! ——那是單一真實來源。原本 Phase B3 的「原生背景連線＋原生 ChatBackend」（ADR-0019）
+//! 與 B4 的「SQLite 持久化」（ADR-0020）已於 ADR-0105 退役：前者假設**單一** relay 連線，
+//! 而引擎早已改為多中繼連線池（ADR-0034）；後者被加密 blob（ADR-0054）取代。
+//! 「關窗仍在線」實際上是靠 `main.rs` 的系統匣隱藏（webview 續存）達成的。
 
 #[cfg(feature = "encstore")]
 pub mod encstore;
-pub mod ipc;
 #[cfg(feature = "keyring")]
 pub mod keyvault;
-#[cfg(feature = "net")]
-pub mod net;
 #[cfg(feature = "passlock")]
 pub mod passlock;
-pub mod reconnect;
-pub mod session;
-#[cfg(any(feature = "persistence", feature = "sqlcipher"))]
-pub mod storage;
-
-pub use reconnect::{Backoff, ConnectionState};
-pub use session::{Action, Session};

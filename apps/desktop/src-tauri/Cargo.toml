@@ -21,33 +21,29 @@ path = "src/main.rs"
 required-features = ["tauri-app"]
 
 [features]
+# 預設：出貨的純密碼學模組（ADR-0105）。
+# 過去 default 是空的 → `cargo test` 只測到 ipc/session/reconnect 這些**死碼**，
+# 而真正出貨的 encstore/passlock **一次都沒被編譯、沒被測過**。現在把它們設為預設，
+# CI 的 `cargo test` 才是在測會出貨的東西。
+default = ["passlock"] # passlock 已含 encstore
+
 # 完整 Tauri 桌面二進位（需 Tauri 工具鏈與 webkit2gtk 等系統庫）。
-tauri-app = ["dep:tauri", "dep:tauri-plugin-notification", "dep:tokio", "dep:tauri-build", "dep:reqwest", "dep:rfd", "keyring", "encstore", "passlock"]
-# OS 金鑰庫（B5，ADR-0053）：私鑰託管於作業系統安全儲存。可獨立測試（會存取真實金鑰庫）。
+tauri-app = ["dep:tauri", "dep:tauri-plugin-notification", "dep:tauri-build", "dep:reqwest", "dep:rfd", "keyring", "encstore", "passlock"]
+# OS 金鑰庫（B5，ADR-0053）：私鑰託管於作業系統安全儲存。
+# **不放進 default**：其測試會存取真實 OS 金鑰庫，在 CI 容器裡不可用。
 keyring = ["dep:keyring"]
 # 加密儲存 blob（B2 儲存基質，ADR-0054）：AES-256-GCM（純 Rust，免 OpenSSL/Perl）。純函式可測。
 encstore = ["dep:aes-gcm", "dep:base64"]
 # 本地密碼（H4，ADR-0067）＋忘記密碼救援（ADR-0073）：Argon2id KEK 包裹 nsec＋db 金鑰；
 # db 金鑰另以 nsec 衍生金鑰（sha2 域分隔）雙重包裹供救援。AEAD 重用 encstore。純函式可測。
 passlock = ["dep:argon2", "dep:sha2", "encstore"]
-# 背景 WebSocket 連線執行期（tokio + tungstenite）。可獨立於 GUI 建置/測試，
-# 但拉入 async I/O 相依，故預設關閉以維持精簡的 `cargo test`。
-net = ["dep:tokio", "dep:tokio-tungstenite", "dep:futures-util"]
-# 原生持久化（bundled SQLite，供開發/測試）。以 `PRAGMA key` 支援加密；正式版
-# 改用 `sqlcipher` feature（整庫 SQLCipher 加密）。兩者互斥，勿同時啟用。
-persistence = ["dep:rusqlite", "rusqlite/bundled"]
-sqlcipher = ["dep:rusqlite", "rusqlite/bundled-sqlcipher-vendored-openssl"]
 
 [dependencies]
-serde = { version = "1", features = ["derive"] }
+serde = { version = "1", features = ["derive"] } # passlock::Blob 用 derive 序列化
 serde_json = "1"
 tauri = { version = "2", optional = true, features = ["tray-icon"] }
 # 桌面原生通知（ADR-0076）：可靠系統 toast＋點擊 action，取代打包後不穩的 webview Notification。
 tauri-plugin-notification = { version = "2", optional = true }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "time", "net"], optional = true }
-tokio-tungstenite = { version = "0.24", features = ["rustls-tls-webpki-roots"], optional = true }
-futures-util = { version = "0.3", optional = true }
-rusqlite = { version = "0.32", optional = true }
 keyring = { version = "3", optional = true, features = ["windows-native", "apple-native", "sync-secret-service"] }
 aes-gcm = { version = "0.10", optional = true, features = ["getrandom"] }
 base64 = { version = "0.22", optional = true }

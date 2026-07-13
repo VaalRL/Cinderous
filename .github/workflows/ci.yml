@@ -24,10 +24,14 @@ jobs:
       - run: pnpm --filter @cinder/desktop build
 
   rust:
-    name: Rust（cargo test）
+    name: Rust（cargo test — 出貨密碼學）
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      # default feature 現為 `passlock`（含 encstore），故這行測的是**真正會出貨**的
+      # 加密儲存與本地密碼/救援（ADR-0105）。在此之前 default 是空的，`cargo test`
+      # 只跑到 ipc/session/reconnect 那些從未出貨的死碼——13 個真測試一次都沒跑過。
+      # `keyring` 不入 default：其測試會存取真實 OS 金鑰庫，CI 容器裡不可用。
       - run: cargo test
         working-directory: apps/desktop/src-tauri

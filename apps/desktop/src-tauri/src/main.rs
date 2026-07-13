@@ -10,11 +10,10 @@
 //! 需以 `--features tauri-app` 在具 Tauri 工具鏈與 webkit2gtk 的環境建置。
 
 use cinder_desktop::encstore;
-use cinder_desktop::ipc::{BridgeEvent, ConnectionState, EVENT_CHANNEL};
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    Emitter, Manager, WindowEvent,
+    Manager, WindowEvent,
 };
 
 /// 顯示並聚焦主視窗（系統匣點擊/選單用）。
@@ -552,13 +551,8 @@ fn main() {
                 })
                 .build(app)?;
 
-            // 啟動時向 webview 廣播一次連線狀態（示範單一事件通道；
-            // 之後由原生 relay 引擎於狀態變化時持續 emit）。
-            let handle = app.handle().clone();
-            handle.emit(
-                EVENT_CHANNEL,
-                BridgeEvent::Connection { state: ConnectionState::Connecting },
-            )?;
+            // 註：這裡曾有一個 BridgeEvent 示範 emit（原生 ChatBackend 的殘留）——
+            // 前端從未 listen 該通道，已隨 ADR-0105 一併移除。
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
