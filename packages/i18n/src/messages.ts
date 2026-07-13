@@ -58,6 +58,20 @@ export interface Messages {
   mobileChats_addPlaceholder: string;
   mobileChats_addBtn: string;
   mobileChats_myNpub: string;
+  // ── 底部分頁＋設定（ADR-0087）──
+  mobileTab_chats: string;
+  mobileTab_contacts: string;
+  mobileTab_settings: string;
+  mobileSettings_appearance: string;
+  mobileSettings_theme: string;
+  mobileSettings_light: string;
+  mobileSettings_dark: string;
+  mobileSettings_accent: string;
+  mobileSettings_language: string;
+  mobileSettings_relay: string;
+  mobileSettings_relayDemo: string;
+  mobileSettings_logout: string;
+  mobileContacts_empty: string;
   // ── 新增身分小視窗（ADR-0045；D 補 i18n）──
   addId_title: string;
   addId_close: string;
@@ -428,6 +442,19 @@ const zhHant: Messages = {
   mobileChats_addPlaceholder: "貼上好友的 npub…",
   mobileChats_addBtn: "加入",
   mobileChats_myNpub: "你的 npub（分享給朋友加你）",
+  mobileTab_chats: "聊天",
+  mobileTab_contacts: "聯絡人",
+  mobileTab_settings: "設定",
+  mobileSettings_appearance: "外觀",
+  mobileSettings_theme: "主題",
+  mobileSettings_light: "淺色",
+  mobileSettings_dark: "深色",
+  mobileSettings_accent: "主色",
+  mobileSettings_language: "語言",
+  mobileSettings_relay: "中繼站",
+  mobileSettings_relayDemo: "示範模式（不連真實網路）",
+  mobileSettings_logout: "登出",
+  mobileContacts_empty: "還沒有聯絡人。到聊天分頁按「＋」貼 npub 加好友。",
   addId_title: "新增身分",
   addId_close: "關閉",
   addId_relay: "relay 網址（wss://…）",
@@ -797,6 +824,19 @@ const en: Messages = {
   mobileChats_addPlaceholder: "Paste a friend's npub…",
   mobileChats_addBtn: "Add",
   mobileChats_myNpub: "Your npub (share it so friends can add you)",
+  mobileTab_chats: "Chats",
+  mobileTab_contacts: "Contacts",
+  mobileTab_settings: "Settings",
+  mobileSettings_appearance: "Appearance",
+  mobileSettings_theme: "Theme",
+  mobileSettings_light: "Light",
+  mobileSettings_dark: "Dark",
+  mobileSettings_accent: "Accent",
+  mobileSettings_language: "Language",
+  mobileSettings_relay: "Relay",
+  mobileSettings_relayDemo: "Demo mode (offline)",
+  mobileSettings_logout: "Log out",
+  mobileContacts_empty: "No contacts yet. On the Chats tab tap “+” to add a friend by npub.",
   addId_title: "Add identity",
   addId_close: "Close",
   addId_relay: "Relay URL (wss://…)",

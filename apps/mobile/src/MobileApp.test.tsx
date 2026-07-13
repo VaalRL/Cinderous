@@ -3,16 +3,48 @@ import { describe, expect, it } from "vitest";
 import type { ChatMessage } from "@cinder/engine";
 import type { ChatListEntry } from "./chat-list.js";
 import { MobileApp } from "./MobileApp.js";
+import { BottomTabs } from "./screens/BottomTabs.js";
 import { ChatsListScreen } from "./screens/ChatsListScreen.js";
 import { ConversationScreen } from "./screens/ConversationScreen.js";
+import { SettingsScreen } from "./screens/SettingsScreen.js";
 
 // 互動（點擊/送出/接後端）在 renderToStaticMarkup 下不跑；排序邏輯由 chat-list.test 把關，
 // 此處確保 app 殼與兩個新畫面在深色＋自訂色下靜態渲染出關鍵結構（ADR-0085）。
 
 describe("行動端 app 殼與畫面（ADR-0085）", () => {
   it("MobileApp 初始渲染登入畫面（SSR 下 effect 不跑）", () => {
-    const html = renderToStaticMarkup(<MobileApp locale="zh-Hant" theme="dark" accent="#2f6cd6" />);
+    const html = renderToStaticMarkup(<MobileApp initialLocale="zh-Hant" initialTheme="dark" initialAccent="#2f6cd6" />);
     expect(html).toContain("用私鑰登入"); // mobileSignIn_title
+  });
+
+  it("BottomTabs：三分頁標籤＋未讀總數徽章（ADR-0087）", () => {
+    const html = renderToStaticMarkup(<BottomTabs active="chats" onSelect={() => {}} unreadTotal={5} locale="zh-Hant" />);
+    expect(html).toContain("聊天");
+    expect(html).toContain("聯絡人");
+    expect(html).toContain("設定");
+    expect(html).toContain("5"); // 未讀徽章
+  });
+
+  it("SettingsScreen：身分備份、外觀、登出（ADR-0087）", () => {
+    const html = renderToStaticMarkup(
+      <SettingsScreen
+        selfName="夜"
+        selfNpub="npub1abc"
+        selfNsec="nsec1xyz"
+        relayUrl="wss://r.example"
+        theme="light"
+        onTheme={() => {}}
+        locale="zh-Hant"
+        onLocale={() => {}}
+        accent={null}
+        onAccent={() => {}}
+        onLogout={() => {}}
+      />,
+    );
+    expect(html).toContain("身分備份"); // settings_identityBackup
+    expect(html).toContain("外觀"); // mobileSettings_appearance
+    expect(html).toContain("登出"); // mobileSettings_logout
+    expect(html).toContain("wss://r.example"); // relay 顯示
   });
 
   it("ChatsListScreen：LINE/Signal 風格列——名稱、最後訊息、未讀徽章、標題", () => {

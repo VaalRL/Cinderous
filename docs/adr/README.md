@@ -101,3 +101,4 @@
 | [0084](./0084-code-identifier-naming.md) | 程式碼識別字命名：行動端 i18n 前綴一致化，其餘刻意保留 | 已接受 |
 | [0085](./0085-mobile-app-shell-navigation.md) | 行動端 app 殼與導覽：聊天清單（最近互動排序）＋對話（LINE/Signal 風格） | 已接受 |
 | [0086](./0086-mobile-real-relay-backend.md) | 行動端接真實 relay：RelayChatBackend＋加好友（npub） | 已接受 |
+| [0087](./0087-mobile-bottom-tabs.md) | 行動端底部分頁：聊天／聯絡人／設定 | 已接受 |

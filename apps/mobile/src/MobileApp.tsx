@@ -1,20 +1,23 @@
-// 行動端 app 殼與導覽（ADR-0085）：把登入／聊天清單／對話串成一個可用 app（參考 LINE/Signal 流程）。
-// 登入後接 @cinder/engine 的 ChatBackend（此處用示範後端 createDemoChat，接記憶體 relay＋機器人），
-// onContacts/onMessage/onHistory/onGroups → 狀態；點清單開對話、送訊走 backend.sendMessage。
-// 正式版把 createDemoChat 換成注入 RelayChatBackend＋原生安全儲存即可（同一套 UI）。
+// 行動端 app 殼與導覽（ADR-0085/0086/0087）：登入→底部分頁（聊天／聯絡人／設定）→點擊開對話（push）。
+// 接 @cinder/engine 的 ChatBackend（示範或真實 relay，見 backend.ts）；主題/主色/語言由本殼掌管，
+// 設定分頁即時切換。正式版把後端換成注入 RelayChatBackend＋原生安全儲存即可（同一套 UI）。
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChatBackend, ChatMessage, Contact, Group, Status } from "@cinder/engine";
 import { type Locale, type MessageKey, translate } from "@cinder/i18n";
 import type { Theme } from "@cinder/theme";
+import { StyleSheet, View } from "react-native-web";
 import type { MobileIdentity } from "./auth.js";
 import { createBackend } from "./backend.js";
 import { chatList } from "./chat-list.js";
+import { BottomTabs, type Tab } from "./screens/BottomTabs.js";
 import { ChatsListScreen } from "./screens/ChatsListScreen.js";
+import { ContactListScreen, type MobileContact } from "./screens/ContactListScreen.js";
 import { ConversationScreen } from "./screens/ConversationScreen.js";
 import { NsecSignInScreen } from "./screens/NsecSignInScreen.js";
 import { PairImportScreen } from "./screens/PairImportScreen.js";
+import { SettingsScreen } from "./screens/SettingsScreen.js";
 
-type Screen = "signin" | "pair" | "chats" | "conversation";
+type Screen = "signin" | "pair" | "main" | "conversation";
 
 const STATUS_KEY: Record<Status, MessageKey> = {
   online: "status_online",
@@ -23,30 +26,35 @@ const STATUS_KEY: Record<Status, MessageKey> = {
   offline: "status_offline",
 };
 
+const shell = StyleSheet.create({ root: { flex: 1 } });
+
 export function MobileApp({
   relayUrl = null,
-  locale = "zh-Hant",
-  theme = "light",
-  accent = null,
-  accent2 = null,
+  initialTheme = "light",
+  initialLocale = "zh-Hant",
+  initialAccent = null,
 }: {
-  /** 真實中繼站網址（wss://…）；null＝示範後端（記憶體 relay＋機器人，ADR-0086）。 */
+  /** 真實中繼站網址（wss://…）；null＝示範後端（ADR-0086）。 */
   relayUrl?: string | null;
-  locale?: Locale;
-  theme?: Theme;
-  accent?: string | null;
-  accent2?: string | null;
+  initialTheme?: Theme;
+  initialLocale?: Locale;
+  initialAccent?: string | null;
 }): JSX.Element {
   const [screen, setScreen] = useState<Screen>("signin");
+  const [tab, setTab] = useState<Tab>("chats");
+  const [theme, setTheme] = useState<Theme>(initialTheme);
+  const [locale, setLocale] = useState<Locale>(initialLocale);
+  const [accent, setAccent] = useState<string | null>(initialAccent);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
   const [convos, setConvos] = useState<Record<string, ChatMessage[]>>({});
   const [unread, setUnread] = useState<Record<string, number>>({});
   const [activeId, setActiveId] = useState<string | null>(null);
+  const [selfPubkey, setSelfPubkey] = useState("");
   const [selfName, setSelfName] = useState("");
   const [selfNpub, setSelfNpub] = useState("");
+  const [selfNsec, setSelfNsec] = useState("");
   const backendRef = useRef<ChatBackend | null>(null);
-  // 供 onMessage 閉包判斷「此對話是否正在看」以決定要不要累未讀。
   const screenRef = useRef(screen);
   screenRef.current = screen;
   const activeIdRef = useRef(activeId);
@@ -54,14 +62,20 @@ export function MobileApp({
 
   useEffect(() => () => backendRef.current?.stop(), []);
 
-  const themeProps = { locale, theme, accent, accent2 } as const;
+  const themeProps = { locale, theme, accent } as const;
 
   const handleSignIn = (identity: MobileIdentity): void => {
     backendRef.current?.stop();
     const backend = createBackend(identity, relayUrl);
     backendRef.current = backend;
+    setSelfPubkey(identity.pubkey);
     setSelfName(identity.name);
-    setSelfNpub(backend.selfNpub ?? "");
+    setSelfNpub(identity.npub);
+    setSelfNsec(identity.nsec);
+    setContacts([]);
+    setGroups([]);
+    setConvos({});
+    setUnread({});
     backend.start({
       onContacts: setContacts,
       onGroups: setGroups,
@@ -78,7 +92,8 @@ export function MobileApp({
       onTyping: () => {},
       onNudge: () => {},
     });
-    setScreen("chats");
+    setTab("chats");
+    setScreen("main");
   };
 
   const openConvo = (id: string): void => {
@@ -87,7 +102,14 @@ export function MobileApp({
     setScreen("conversation");
   };
   const back = (): void => {
-    setScreen("chats");
+    setScreen("main");
+    setActiveId(null);
+  };
+  const logout = (): void => {
+    backendRef.current?.stop();
+    backendRef.current = null;
+    setScreen("signin");
+    setTab("chats");
     setActiveId(null);
   };
   const send = (text: string): void => {
@@ -95,9 +117,14 @@ export function MobileApp({
   };
   const addContact = (npub: string): void => backendRef.current?.addContact?.(npub.trim());
   const nameFor = (pk: string): string =>
-    pk === backendRef.current?.self.pubkey ? selfName : contacts.find((c) => c.pubkey === pk)?.name ?? `${pk.slice(0, 8)}…`;
+    pk === selfPubkey ? selfName : contacts.find((c) => c.pubkey === pk)?.name ?? `${pk.slice(0, 8)}…`;
 
   const entries = useMemo(() => chatList(contacts, groups, convos, unread), [contacts, groups, convos, unread]);
+  const unreadTotal = useMemo(() => Object.values(unread).reduce((a, b) => a + b, 0), [unread]);
+  const mobileContacts = useMemo<MobileContact[]>(
+    () => contacts.map((c) => ({ pubkey: c.pubkey, name: c.name, status: c.status })),
+    [contacts],
+  );
 
   if (screen === "signin") {
     return <NsecSignInScreen onSignIn={handleSignIn} onUsePairing={() => setScreen("pair")} {...themeProps} />;
@@ -132,13 +159,35 @@ export function MobileApp({
       />
     );
   }
-  // 加好友/自己 npub 僅在真實 relay 模式提供（示範後端無 addContact、npub 為隨機）。
+
+  // 主畫面：分頁內容 + 底部分頁列。
   return (
-    <ChatsListScreen
-      entries={entries}
-      onOpen={openConvo}
-      {...(relayUrl ? { onAddContact: addContact, selfNpub } : {})}
-      {...themeProps}
-    />
+    <View style={shell.root}>
+      {tab === "chats" ? (
+        <ChatsListScreen
+          entries={entries}
+          onOpen={openConvo}
+          {...(relayUrl ? { onAddContact: addContact, selfNpub } : {})}
+          {...themeProps}
+        />
+      ) : tab === "contacts" ? (
+        <ContactListScreen selfPubkey={selfPubkey} selfName={selfName} contacts={mobileContacts} onOpen={openConvo} {...themeProps} />
+      ) : (
+        <SettingsScreen
+          selfName={selfName}
+          selfNpub={selfNpub}
+          selfNsec={selfNsec}
+          relayUrl={relayUrl}
+          theme={theme}
+          onTheme={setTheme}
+          locale={locale}
+          onLocale={setLocale}
+          accent={accent}
+          onAccent={setAccent}
+          onLogout={logout}
+        />
+      )}
+      <BottomTabs active={tab} onSelect={setTab} unreadTotal={unreadTotal} {...themeProps} />
+    </View>
   );
 }

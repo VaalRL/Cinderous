@@ -10,7 +10,7 @@ import { useMemo } from "react";
 import { npubEncode } from "@cinder/core";
 import { type Locale, type MessageKey, translate } from "@cinder/i18n";
 import { resolveTheme, STATUS_COLORS, type Theme, type ThemeTokens } from "@cinder/theme";
-import { StyleSheet, Text, View } from "react-native-web";
+import { Pressable, StyleSheet, Text, View } from "react-native-web";
 
 export type MobileStatus = "online" | "away" | "busy" | "offline";
 export interface MobileContact {
@@ -47,9 +47,10 @@ function makeStyles(tk: ThemeTokens) {
     meName: { fontWeight: "700", fontSize: 16, color: tk.ink },
     meNpub: { fontSize: 11, color: tk.muted },
     section: { paddingHorizontal: 10, paddingTop: 8, paddingBottom: 2, fontSize: 11, fontWeight: "700", color: tk.accent },
-    row: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 6, paddingHorizontal: 12 },
+    row: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 8, paddingHorizontal: 12 },
     dot: { width: 9, height: 9, borderRadius: 5 },
     name: { fontSize: 14, color: tk.ink },
+    empty: { padding: 28, textAlign: "center", color: tk.muted, fontSize: 13, lineHeight: 20 },
   });
 }
 
@@ -57,6 +58,7 @@ export function ContactListScreen({
   selfPubkey,
   selfName,
   contacts,
+  onOpen,
   locale = "zh-Hant",
   theme = "light",
   accent = null,
@@ -65,6 +67,8 @@ export function ContactListScreen({
   selfPubkey: string;
   selfName: string;
   contacts: MobileContact[];
+  /** 點某聯絡人開對話（傳 pubkey）；未提供＝不可點（純顯示）。 */
+  onOpen?: (pubkey: string) => void;
   locale?: Locale;
   /** 深淺主題（與桌面共用，ADR-0080）。 */
   theme?: Theme;
@@ -80,19 +84,23 @@ export function ContactListScreen({
         <Text style={styles.meName}>{selfName}</Text>
         <Text style={styles.meNpub}>{shortNpub(npubEncode(selfPubkey))}</Text>
       </View>
-      {groupByStatus(contacts).map((sec) => (
-        <View key={sec.status}>
-          <Text style={styles.section}>
-            {translate(locale, STATUS_KEY[sec.status])}（{sec.contacts.length}）
-          </Text>
-          {sec.contacts.map((c) => (
-            <View key={c.pubkey} style={styles.row}>
-              <View style={[styles.dot, { backgroundColor: STATUS_COLORS[c.status] }]} />
-              <Text style={styles.name}>{c.name}</Text>
-            </View>
-          ))}
-        </View>
-      ))}
+      {contacts.length === 0 ? (
+        <Text style={styles.empty}>{translate(locale, "mobileContacts_empty")}</Text>
+      ) : (
+        groupByStatus(contacts).map((sec) => (
+          <View key={sec.status}>
+            <Text style={styles.section}>
+              {translate(locale, STATUS_KEY[sec.status])}（{sec.contacts.length}）
+            </Text>
+            {sec.contacts.map((c) => (
+              <Pressable key={c.pubkey} style={styles.row} accessibilityRole="button" onPress={() => onOpen?.(c.pubkey)}>
+                <View style={[styles.dot, { backgroundColor: STATUS_COLORS[c.status] }]} />
+                <Text style={styles.name}>{c.name}</Text>
+              </Pressable>
+            ))}
+          </View>
+        ))
+      )}
     </View>
   );
 }
