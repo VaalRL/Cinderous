@@ -3,6 +3,7 @@
 // 底部輸入列（輸入框＋送出）。色彩吃 @cinder/theme。訊息與送出由呼叫端注入（接 ChatBackend）。
 import { useMemo, useState } from "react";
 import { calcPreview, groupReceiptMode } from "@cinder/core";
+import type { CallMedia } from "@cinder/core";
 import type { ChatMessage, MessageStatus } from "@cinder/engine";
 import { type Locale, type MessageKey, translate } from "@cinder/i18n";
 import { resolveTheme, type Theme, type ThemeTokens } from "@cinder/theme";
@@ -33,6 +34,9 @@ function makeStyles(tk: ThemeTokens) {
     },
     back: { paddingHorizontal: 6, paddingVertical: 2 },
     backText: { fontSize: 26, color: tk.accent, lineHeight: 26 },
+    headText: { flex: 1 },
+    callBtn: { paddingHorizontal: 6, paddingVertical: 4 },
+    callIcon: { fontSize: 18 },
     headTitle: { fontSize: 16, fontWeight: "700", color: tk.ink },
     headSub: { fontSize: 11, color: tk.muted },
     list: { flex: 1 },
@@ -100,6 +104,7 @@ export function ConversationScreen({
   groupMembers,
   onSend,
   onSendFile,
+  onStartCall,
   onBack,
   locale = "zh-Hant",
   theme = "light",
@@ -116,6 +121,8 @@ export function ConversationScreen({
   groupMembers?: string[];
   /** 傳送檔案（ADR-0100）；未提供則不顯示 📎（如示範模式）。 */
   onSendFile?: () => void;
+  /** 發起通話（ADR-0101）；未提供則不顯示通話鈕（示範模式／平台無 WebRTC）。 */
+  onStartCall?: (media: CallMedia) => void;
   onSend: (text: string) => void;
   onBack: () => void;
   locale?: Locale;
@@ -178,10 +185,31 @@ export function ConversationScreen({
         <Pressable style={styles.back} accessibilityRole="button" aria-label={t("mobileConvo_back")} onPress={onBack}>
           <Text style={styles.backText}>‹</Text>
         </Pressable>
-        <View>
+        <View style={styles.headText}>
           <Text style={styles.headTitle}>{name}</Text>
           {subtitle ? <Text style={styles.headSub}>{subtitle}</Text> : null}
         </View>
+        {/* 通話（ADR-0101）：媒體全程 P2P，不經中繼。群組暫不支援（1:1 才顯示）。 */}
+        {onStartCall && !groupMembers ? (
+          <>
+            <Pressable
+              style={styles.callBtn}
+              accessibilityRole="button"
+              aria-label={t("call_audio")}
+              onPress={() => onStartCall("audio")}
+            >
+              <Text style={styles.callIcon}>📞</Text>
+            </Pressable>
+            <Pressable
+              style={styles.callBtn}
+              accessibilityRole="button"
+              aria-label={t("call_video")}
+              onPress={() => onStartCall("video")}
+            >
+              <Text style={styles.callIcon}>📹</Text>
+            </Pressable>
+          </>
+        ) : null}
       </View>
 
       <ScrollView style={styles.list} contentContainerStyle={styles.listInner}>

@@ -4,7 +4,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { AppStorage, ChatBackend, ChatMessage, CloudSyncMode, Contact, Group, Status } from "@cinder/engine";
 import { exportExtension, exportMime, type ExportFormat, exportRecords, getDeviceId, LocalStorage } from "@cinder/engine";
+import type { CallMedia, CallState } from "@cinder/core";
 import { pickFile, saveFile } from "./native/files.js";
+import { hasCallSupport } from "./native/call-media.js";
+import { CallScreen } from "./screens/CallScreen.js";
 import { type Locale, type MessageKey, translate } from "@cinder/i18n";
 import type { Theme } from "@cinder/theme";
 import { StyleSheet, View } from "react-native-web";
@@ -107,6 +110,12 @@ export function MobileApp({
   const [retentionCap, setRetentionCapState] = useState<number>(() => readRetentionCap());
   const [readReceipts, setReadReceiptsState] = useState<boolean>(() => readReadReceipts());
   const [cloudSync, setCloudSyncState] = useState<CloudSyncMode>(() => readCloudSync());
+  // 通話（ADR-0101）：媒體全程 P2P，不經中繼。
+  const [callPeer, setCallPeer] = useState<string | null>(null);
+  const [callState, setCallState] = useState<CallState>("idle");
+  const [callMedia, setCallMedia] = useState<CallMedia | null>(null);
+  const [localStream, setLocalStream] = useState<MediaStream | null>(null);
+  const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const backendRef = useRef<ChatBackend | null>(null);
   const storeRef = useRef<AppStorage | null>(null);
   const screenRef = useRef(screen);
@@ -187,6 +196,20 @@ export function MobileApp({
       onCloudSyncMode: (mode) => {
         if (readCloudSync() === "off") changeCloudSync(mode);
       },
+      // 通話狀態與串流（ADR-0101）：來電自動開通話畫面。
+      onCallState: (peer, state, media) => {
+        setCallState(state);
+        setCallMedia(media);
+        if (state === "idle" || state === "ended") {
+          setCallPeer(null);
+          setLocalStream(null);
+          setRemoteStream(null);
+        } else {
+          setCallPeer(peer);
+        }
+      },
+      onCallLocalStream: setLocalStream,
+      onCallRemoteStream: setRemoteStream,
       onTyping: () => {},
       onNudge: () => {},
     });
@@ -229,6 +252,12 @@ export function MobileApp({
     void pickFile().then((f) => {
       if (f) b.sendFile?.(pk, f);
     });
+  };
+
+  // 通話（ADR-0101）：發起／接聽／拒接／掛斷。
+  const startCall = (media: CallMedia): void => {
+    const pk = activeIdRef.current;
+    if (pk) backendRef.current?.startCall?.(pk, media);
   };
 
   // 加密雲端備份（ADR-0071）：關閉時必須立即 purge——「已關閉」要即刻為真。
@@ -283,6 +312,24 @@ export function MobileApp({
     [contacts],
   );
 
+  // 通話覆蓋層（ADR-0101）：來電/通話中一律蓋在最上層，不論當下在哪個畫面。
+  const inCall = callState !== "idle" && callState !== "ended";
+  const callOverlay = inCall ? (
+    <CallScreen
+      peerName={callPeer ? nameFor(callPeer) : ""}
+      state={callState}
+      media={callMedia}
+      localStream={localStream}
+      remoteStream={remoteStream}
+      onAccept={() => backendRef.current?.acceptCall?.()}
+      onReject={() => backendRef.current?.rejectCall?.()}
+      onHangup={() => backendRef.current?.hangupCall?.()}
+      locale={locale}
+      theme={theme}
+      accent={accent}
+    />
+  ) : null;
+
   if (screen === "signin") {
     return <NsecSignInScreen onSignIn={handleSignIn} onUsePairing={() => setScreen("pair")} {...themeProps} />;
   }
@@ -308,17 +355,23 @@ export function MobileApp({
     const groupProps = group ? { nameFor, groupMembers: group.members } : {};
     // 檔案：真實 relay 才有 P2P 傳輸（示範後端無 sendFile）。
     const fileProps = backendRef.current?.sendFile ? { onSendFile: sendFileFromPicker } : {};
+    // 通話：需真實後端＋平台具備 WebRTC（ADR-0101）。
+    const callProps = backendRef.current?.startCall && hasCallSupport() ? { onStartCall: startCall } : {};
     return (
-      <ConversationScreen
-        name={group?.name ?? contact?.name ?? activeId}
-        messages={convos[activeId] ?? []}
-        onSend={send}
-        onBack={back}
-        {...(subtitle ? { subtitle } : {})}
-        {...groupProps}
-        {...fileProps}
-        {...themeProps}
-      />
+      <View style={shell.root}>
+        <ConversationScreen
+          name={group?.name ?? contact?.name ?? activeId}
+          messages={convos[activeId] ?? []}
+          onSend={send}
+          onBack={back}
+          {...(subtitle ? { subtitle } : {})}
+          {...groupProps}
+          {...fileProps}
+          {...callProps}
+          {...themeProps}
+        />
+        {callOverlay}
+      </View>
     );
   }
 
@@ -363,6 +416,7 @@ export function MobileApp({
         />
       )}
       <BottomTabs active={tab} onSelect={setTab} unreadTotal={unreadTotal} {...themeProps} />
+      {callOverlay}
     </View>
   );
 }
