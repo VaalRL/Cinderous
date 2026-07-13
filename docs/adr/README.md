@@ -107,3 +107,4 @@
 | [0090](./0090-official-website-donation-and-fund-transparency.md) | 官方網站、官方捐款與資金透明度（靜態站＋簽章 JSON runway） | 已接受 |
 | [0091](./0091-forward-secrecy-mls-upgrade-design.md) | 前向保密升級：統一採 MLS（含正常使用者可靠性護欄） | 已棄用（暫緩未採納，維持 0028） |
 | [0092](./0092-node-membership-self-report-and-conformance-audit.md) | 節點成員自報＋一致性稽核＋簽章可驗證記錄（申請/審查/稽核介面化） | 已接受 |
+| [0093](./0093-multi-device-delivery-and-file-persistence.md) | 多設備即時投遞與檔案持久化：檔案 metadata 中繼化＋位元組備援＋本地存檔 | 提議中（草案） |
