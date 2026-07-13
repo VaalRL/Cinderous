@@ -1,6 +1,6 @@
 import { listEntries, weightedOrder } from "@cinder/core";
 import { useEffect, useRef, useState } from "react";
-import { ANCHOR_RELAYS } from "../bootstrap-config.js";
+import { ANCHOR_RELAYS } from "@cinder/engine";
 import { useI18n } from "../i18n.js";
 import { CinderMark } from "./Brand.js";
 import { TitleControls } from "./TitleControls.js";

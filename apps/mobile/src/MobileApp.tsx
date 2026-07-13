@@ -2,8 +2,9 @@
 // 接 @cinder/engine 的 ChatBackend（示範或真實 relay，見 backend.ts）；主題/主色/語言由本殼掌管，
 // 設定分頁即時切換。正式版把後端換成注入 RelayChatBackend＋原生安全儲存即可（同一套 UI）。
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { AppStorage, ChatBackend, ChatMessage, Contact, Group, Status } from "@cinder/engine";
-import { exportExtension, exportMime, type ExportFormat, exportRecords, LocalStorage } from "@cinder/engine";
+import type { AppStorage, ChatBackend, ChatMessage, CloudSyncMode, Contact, Group, Status } from "@cinder/engine";
+import { exportExtension, exportMime, type ExportFormat, exportRecords, getDeviceId, LocalStorage } from "@cinder/engine";
+import { pickFile, saveFile } from "./native/files.js";
 import { type Locale, type MessageKey, translate } from "@cinder/i18n";
 import type { Theme } from "@cinder/theme";
 import { StyleSheet, View } from "react-native-web";
@@ -28,6 +29,17 @@ const STATUS_KEY: Record<Status, MessageKey> = {
 };
 
 const shell = StyleSheet.create({ root: { flex: 1 } });
+
+// 加密雲端備份（ADR-0071）：裝置本地偏好；off／basic／full。
+const CLOUD_SYNC_KEY = "nb.cloudSync";
+function readCloudSync(): CloudSyncMode {
+  try {
+    const v = localStorage.getItem(CLOUD_SYNC_KEY);
+    return v === "basic" || v === "full" ? v : "off";
+  } catch {
+    return "off";
+  }
+}
 
 // 已讀回條（ADR-0058）：opt-in＋互惠——關閉則不送、也不顯示對方的已讀（故 tick 最多到已送達）。
 const READ_RECEIPTS_KEY = "nb.readReceipts";
@@ -94,6 +106,7 @@ export function MobileApp({
   const [invisible, setInvisible] = useState(false);
   const [retentionCap, setRetentionCapState] = useState<number>(() => readRetentionCap());
   const [readReceipts, setReadReceiptsState] = useState<boolean>(() => readReadReceipts());
+  const [cloudSync, setCloudSyncState] = useState<CloudSyncMode>(() => readCloudSync());
   const backendRef = useRef<ChatBackend | null>(null);
   const storeRef = useRef<AppStorage | null>(null);
   const screenRef = useRef(screen);
@@ -110,7 +123,8 @@ export function MobileApp({
     // ADR-0094：真實 relay 用外部持有的儲存（供保留上限/導出）；示範模式無持久化。
     const store = relayUrl ? new LocalStorage(identity.pubkey, readRetentionCap()) : null;
     storeRef.current = store;
-    const backend = createBackend(identity, relayUrl, store ?? undefined);
+    // ADR-0100：帶上錨點/簽章清單（backend.ts 內）與加密雲端備份模式。
+    const backend = createBackend(identity, relayUrl, { store: store ?? undefined, cloudSync });
     backendRef.current = backend;
     setSelfPubkey(identity.pubkey);
     setSelfName(identity.name);
@@ -153,6 +167,26 @@ export function MobileApp({
           if (!cur) return c;
           return { ...c, [groupId]: cur.map((m) => (m.id === messageId ? { ...m, receipts } : m)) };
         }),
+      // 收到檔案位元組（ADR-0093）：另存到裝置，App 不保管本體；訊息本身由 backend 建好。
+      onFileBytes: (pk, messageId, file) => {
+        const url = saveFile(file.name, file.mime, file.bytes);
+        setConvos((c) => {
+          const cur = c[pk];
+          if (!cur) return c;
+          return {
+            ...c,
+            [pk]: cur.map((m) =>
+              m.id === messageId && m.file
+                ? { ...m, file: { ...m.file, sent: file.bytes.length, ...(url ? { url } : {}) } }
+                : m,
+            ),
+          };
+        });
+      },
+      // ADR-0071：還原時採用快照傳播的備份模式（僅本機從未設定時）。
+      onCloudSyncMode: (mode) => {
+        if (readCloudSync() === "off") changeCloudSync(mode);
+      },
       onTyping: () => {},
       onNudge: () => {},
     });
@@ -187,6 +221,27 @@ export function MobileApp({
     setInvisible(v);
     backendRef.current?.setInvisible?.(v);
   };
+  // 送出檔案（ADR-0093/0100）：選檔 → P2P 位元組＋中繼 metadata；訊息由 backend 建立。
+  const sendFileFromPicker = (): void => {
+    const b = backendRef.current;
+    const pk = activeIdRef.current;
+    if (!b?.sendFile || !pk) return;
+    void pickFile().then((f) => {
+      if (f) b.sendFile?.(pk, f);
+    });
+  };
+
+  // 加密雲端備份（ADR-0071）：關閉時必須立即 purge——「已關閉」要即刻為真。
+  const changeCloudSync = (mode: CloudSyncMode): void => {
+    setCloudSyncState(mode);
+    try {
+      localStorage.setItem(CLOUD_SYNC_KEY, mode);
+    } catch {
+      /* 忽略 */
+    }
+    if (mode === "off") backendRef.current?.purgeCloudSnapshot?.(getDeviceId());
+  };
+
   // 已讀回條開關（ADR-0058）：寫入偏好並即時推到後端。
   const toggleReadReceipts = (v: boolean): void => {
     setReadReceiptsState(v);
@@ -251,6 +306,8 @@ export function MobileApp({
         : undefined;
     // 群組另傳成員名解析＋成員清單：供已讀分級（≤5 名單、6–10 計數、>10 不顯示，ADR-0095）。
     const groupProps = group ? { nameFor, groupMembers: group.members } : {};
+    // 檔案：真實 relay 才有 P2P 傳輸（示範後端無 sendFile）。
+    const fileProps = backendRef.current?.sendFile ? { onSendFile: sendFileFromPicker } : {};
     return (
       <ConversationScreen
         name={group?.name ?? contact?.name ?? activeId}
@@ -259,6 +316,7 @@ export function MobileApp({
         onBack={back}
         {...(subtitle ? { subtitle } : {})}
         {...groupProps}
+        {...fileProps}
         {...themeProps}
       />
     );
@@ -297,6 +355,8 @@ export function MobileApp({
                 onExport: exportAll,
                 readReceipts,
                 onReadReceipts: toggleReadReceipts,
+                cloudSync,
+                onCloudSync: changeCloudSync,
               }
             : {})}
           onLogout={logout}

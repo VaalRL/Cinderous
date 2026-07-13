@@ -114,3 +114,4 @@
 | [0097](./0097-inline-math-preview-and-calc-panel.md) | 對話算式預覽：composer 即時預覽＋右欄計算機（純本地純函式、禁用 eval、保守觸發） | 已接受 |
 | [0098](./0098-cli-and-ai-mcp-boundaries.md) | 無頭 CLI（無狀態：不留私鑰/明文歷史）＋AI/MCP 接取邊界（致命三角、只提議不直送、雲端 LLM 預設關） | 已接受 |
 | [0099](./0099-replaceable-events-and-kind-collision-fix.md) | 中繼站實作 NIP-01 可取代事件（收斂 0035：清單不再囤積）＋修正 kind 10038 撞號 | 已接受 |
+| [0100](./0100-mobile-parity-anchors-cloud-files.md) | 行動端補齊：錨點/簽章清單、加密雲端備份、檔案傳輸（收斂 0086）＋引導設定移入 engine（SSOT） | 已接受 |

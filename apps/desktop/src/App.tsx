@@ -69,7 +69,7 @@ import {
   withoutLabel,
   withPinned,
 } from "./ui/group-labels.js";
-import { ANCHOR_RELAYS, MAINTAINER_PUBKEY } from "./bootstrap-config.js";
+import { ANCHOR_RELAYS, MAINTAINER_PUBKEY } from "@cinder/engine";
 import { initIdle, reduceIdle, type IdleState } from "./ui/idle-status.js";
 import { createRinger, createRingback, playChime } from "./ui/ringtone.js";
 import { CallWindow } from "./ui/CallWindow.js";

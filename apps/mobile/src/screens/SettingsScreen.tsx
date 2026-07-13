@@ -1,6 +1,7 @@
 // 行動端設定分頁（ADR-0087）：身分備份（npub/nsec）、外觀（主題/主色/語言）、中繼站、登出。
 // 主題/主色/語言由 MobileApp 掌管、經 callback 即時切換；色彩吃 @cinder/theme。
 import { useMemo, useState } from "react";
+import type { CloudSyncMode } from "@cinder/engine";
 import { type Locale, type MessageKey, translate } from "@cinder/i18n";
 import { resolveTheme, type Theme, type ThemeTokens } from "@cinder/theme";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native-web";
@@ -55,6 +56,8 @@ export function SettingsScreen({
   onExport,
   readReceipts,
   onReadReceipts,
+  cloudSync,
+  onCloudSync,
   onLogout,
 }: {
   selfName: string;
@@ -78,6 +81,9 @@ export function SettingsScreen({
   /** 已讀回條（ADR-0058）：opt-in＋互惠；關閉則不送、也不顯示對方已讀。 */
   readReceipts?: boolean;
   onReadReceipts?: (v: boolean) => void;
+  /** 加密雲端備份（ADR-0071）：off／basic（不含訊息）／full（含訊息）。 */
+  cloudSync?: CloudSyncMode;
+  onCloudSync?: (mode: CloudSyncMode) => void;
   onLogout: () => void;
 }): JSX.Element {
   const tk = useMemo(() => resolveTheme({ theme, accent }), [theme, accent]);
@@ -186,6 +192,27 @@ export function SettingsScreen({
                 {readReceipts ? " ✓" : ""}
               </Text>
             </Pressable>
+          </View>
+        ) : null}
+
+        {/* 加密雲端備份（ADR-0071）：密文上中繼，換機可還原 */}
+        {onCloudSync ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>{t("settings_cloud")}</Text>
+            <Text style={styles.label}>{t("settings_cloudHint")}</Text>
+            <View style={[styles.rowSeg, { flexWrap: "wrap" }]}>
+              {(["off", "basic", "full"] as CloudSyncMode[]).map((m) => (
+                <Pressable key={m} style={seg(cloudSync === m)} accessibilityRole="button" onPress={() => onCloudSync(m)}>
+                  <Text style={segTxt(cloudSync === m)}>
+                    {m === "off"
+                      ? t("settings_cloudOff")
+                      : m === "basic"
+                        ? t("settings_cloudBasic")
+                        : t("settings_cloudFull")}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
           </View>
         ) : null}
 

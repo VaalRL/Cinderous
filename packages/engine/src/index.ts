@@ -15,6 +15,7 @@ export * from "./backend/webrtc-call.js";
 export * from "./backend/pairing-session.js";
 export * from "./backend/pairing-transport.js";
 // ── 本機儲存抽象與實作 ──
+export * from "./bootstrap-config.js";
 export * from "./storage/types.js";
 export * from "./storage/local.js";
 export * from "./storage/memory.js";

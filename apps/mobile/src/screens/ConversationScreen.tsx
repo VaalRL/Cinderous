@@ -62,6 +62,9 @@ function makeStyles(tk: ThemeTokens) {
       borderColor: tk.accent,
       backgroundColor: tk.field,
     },
+    attach: { paddingHorizontal: 6, paddingVertical: 6 },
+    attachText: { fontSize: 20 },
+    fileMeta: { fontSize: 11, marginTop: 2 },
     calcchipEq: { fontSize: 12, color: tk.muted },
     calcchipVal: { fontSize: 13, fontWeight: "700", color: tk.accent },
     composer: {
@@ -96,6 +99,7 @@ export function ConversationScreen({
   nameFor,
   groupMembers,
   onSend,
+  onSendFile,
   onBack,
   locale = "zh-Hant",
   theme = "light",
@@ -110,6 +114,8 @@ export function ConversationScreen({
   nameFor?: (pubkey: string) => string;
   /** 群組成員 pubkey（含自己）；提供即為群組，用來決定已讀呈現分級（ADR-0095）。 */
   groupMembers?: string[];
+  /** 傳送檔案（ADR-0100）；未提供則不顯示 📎（如示範模式）。 */
+  onSendFile?: () => void;
   onSend: (text: string) => void;
   onBack: () => void;
   locale?: Locale;
@@ -142,6 +148,19 @@ export function ConversationScreen({
       ? t("readBy_list", { names: readers.map((pk) => nameFor?.(pk) ?? `${pk.slice(0, 8)}…`).join("、") })
       : t("readBy_count", { count: readers.length, total });
   };
+  /**
+   * 檔案訊息的附註（ADR-0093 語意，與桌面一致）：
+   * 已存路徑 → 顯示路徑；只有 metadata（位元組落在另一台）→ 提示；否則顯示大小。
+   */
+  const fileNote = (m: ChatMessage): string => {
+    const f = m.file;
+    if (!f) return "";
+    const size = f.size < 1024 ? `${f.size} B` : f.size < 1048576 ? `${(f.size / 1024).toFixed(1)} KB` : `${(f.size / 1048576).toFixed(1)} MB`;
+    if (f.savedPath) return `${t("file_saved")}：${f.savedPath}`;
+    if (!m.outgoing && !f.url && f.sent < f.size) return `📍 ${t("file_onOtherDevice")}`;
+    return size;
+  };
+
   const [draft, setDraft] = useState("");
   // 算式預覽（ADR-0097）：純函式判定草稿是否為算式；不是就回 null（不顯示）。
   const calc = calcPreview(draft);
@@ -173,6 +192,11 @@ export function ConversationScreen({
               <Text style={m.outgoing ? styles.textMine : styles.textTheir}>
                 {m.file ? `📎 ${m.file.name}` : m.text}
               </Text>
+              {m.file ? (
+                <Text style={[styles.fileMeta, { color: m.outgoing ? "#ffffffcc" : tk.muted }]}>
+                  {fileNote(m)}
+                </Text>
+              ) : null}
             </View>
             {/* 送出狀態（ADR-0095）：與桌面同一套——沙漏／閉眼／半開眼／張開眼（主色）／紅色重試。
                 群組另依分級顯示「誰已讀」（≤5）或「已讀 M/N」（6–10）；大群不顯示。 */}
@@ -204,6 +228,12 @@ export function ConversationScreen({
       ) : null}
 
       <View style={styles.composer}>
+        {/* 傳送檔案（ADR-0093/0100）：位元組走 P2P、metadata 走中繼。 */}
+        {onSendFile ? (
+          <Pressable style={styles.attach} accessibilityRole="button" aria-label={t("convo_attach")} onPress={onSendFile}>
+            <Text style={styles.attachText}>📎</Text>
+          </Pressable>
+        ) : null}
         <TextInput
           style={styles.input}
           value={draft}
