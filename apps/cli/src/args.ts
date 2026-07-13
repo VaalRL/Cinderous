@@ -13,7 +13,7 @@ export type NsecSource = { kind: "file"; path: string } | { kind: "stdin" } | { 
 
 export type Command =
   | { cmd: "help" }
-  | { cmd: "whoami"; nsec: NsecSource }
+  | { cmd: "whoami"; nsec: NsecSource; hex: boolean }
   | { cmd: "send"; nsec: NsecSource; relay: string; to: string; text: string }
   | { cmd: "listen"; nsec: NsecSource; relay: string };
 
@@ -70,7 +70,8 @@ export function parseArgs(argv: string[], env: Record<string, string | undefined
 
   switch (sub) {
     case "whoami":
-      return { cmd: "whoami", nsec: resolveNsecSource(argv, env) };
+      // --hex：印 64 字元 hex 公鑰（MAINTAINER_PUBKEY 要的格式，ADR-0039）；預設印 npub。
+      return { cmd: "whoami", nsec: resolveNsecSource(argv, env), hex: argv.includes("--hex") };
 
     case "send": {
       const to = positional[1];
@@ -92,7 +93,7 @@ export function parseArgs(argv: string[], env: Record<string, string | undefined
 export const HELP = `Cinder CLI（ADR-0098）——無狀態的無頭收發工具。
 
 用法：
-  cinder whoami                        顯示自己的 npub
+  cinder whoami [--hex]                顯示自己的 npub（--hex 改印 64 字元 hex 公鑰）
   cinder send <npub> <訊息…>            送出一則加密訊息
   cinder listen                        持續印出收到的訊息（JSON Lines）
 

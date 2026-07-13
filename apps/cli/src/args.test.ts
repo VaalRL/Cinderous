@@ -11,7 +11,11 @@ describe("CLI 參數解析（ADR-0098）", () => {
   });
 
   it("whoami：只需金鑰（純本機，不連線）", () => {
-    expect(parseArgs(["whoami", ...F])).toEqual({ cmd: "whoami", nsec: { kind: "file", path: "/k/nsec" } });
+    expect(parseArgs(["whoami", ...F])).toEqual({
+      cmd: "whoami",
+      nsec: { kind: "file", path: "/k/nsec" },
+      hex: false,
+    });
   });
 
   it("send：收件人＋訊息；訊息可為多個未加引號的詞", () => {
@@ -67,5 +71,16 @@ describe("私鑰來源決策（ADR-0098：優先安全的來源）", () => {
 
   it("完全沒有金鑰來源 → 報錯（不去猜、不去翻使用者的檔案）", () => {
     expect(() => resolveNsecSource([], {})).toThrow(ArgError);
+  });
+});
+
+describe("whoami --hex（ADR-0039 維護者公鑰取值）", () => {
+  it("預設印 npub；--hex 改印 hex 公鑰", () => {
+    const a = parseArgs(["whoami", ...F]);
+    if (a.cmd !== "whoami") throw new Error("expected whoami");
+    expect(a.hex).toBe(false);
+    const b = parseArgs(["whoami", "--hex", ...F]);
+    if (b.cmd !== "whoami") throw new Error("expected whoami");
+    expect(b.hex).toBe(true);
   });
 });

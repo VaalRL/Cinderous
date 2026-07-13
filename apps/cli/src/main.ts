@@ -53,8 +53,9 @@ async function run(cmd: Command): Promise<number> {
   if (!nsec.startsWith("nsec1")) throw new ArgError("私鑰格式不正確（應為 nsec1…）");
 
   if (cmd.cmd === "whoami") {
-    // 純本機：不連線、不外送任何東西。
-    console.log(npubEncode(getPublicKey(nsecDecode(nsec))));
+    // 純本機：不連線、不外送任何東西。私鑰只在記憶體、絕不輸出。
+    const pubkey = getPublicKey(nsecDecode(nsec));
+    console.log(cmd.hex ? pubkey : npubEncode(pubkey)); // --hex 供 MAINTAINER_PUBKEY 使用
     return 0;
   }
 
