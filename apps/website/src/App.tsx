@@ -1,18 +1,20 @@
 import { useEffect, useState } from "react";
 import type { Locale } from "@cinder/i18n";
-import { resolveTheme, type Theme } from "@cinder/theme";
+import type { Theme } from "@cinder/theme";
 import { CinderMark } from "./Brand.js";
 import { useCopy } from "./copy.js";
+import { Download } from "./pages/Download.js";
 import { Home } from "./pages/Home.js";
+import { Node } from "./pages/Node.js";
 import { Transparency } from "./pages/Transparency.js";
 
 export const GITHUB_URL = "https://github.com/VaalRL/Nostr-buddy";
 
-type View = "home" | "transparency";
+type View = "home" | "download" | "node" | "transparency";
 
 function initialTheme(): Theme {
   if (typeof window !== "undefined" && window.matchMedia?.("(prefers-color-scheme: dark)").matches) return "dark";
-  return "light";
+  return "dark"; // 夜森林為預設身分；使用者仍可切白日
 }
 
 export function App(): JSX.Element {
@@ -21,56 +23,54 @@ export function App(): JSX.Element {
   const [locale, setLocale] = useState<Locale>("zh-Hant");
   const c = useCopy(locale);
 
-  // 主題色吃 @cinder/theme（與 app 同 SSOT），映射為 CSS 變數供 styles.css。
   useEffect(() => {
-    const tk = resolveTheme({ theme });
-    const root = document.documentElement;
-    const vars: Record<string, string> = {
-      "--bg": tk.bgB,
-      "--ink": tk.ink,
-      "--muted": tk.muted,
-      "--accent": tk.accent,
-      "--panel": tk.panel,
-      "--surface": tk.surface2,
-      "--border": tk.border,
-    };
-    for (const [k, v] of Object.entries(vars)) root.style.setProperty(k, v);
+    document.documentElement.dataset.theme = theme;
     document.documentElement.lang = locale;
   }, [theme, locale]);
+
+  const link = (v: View, label: string) => (
+    <button type="button" className={`nav__link${view === v ? " on" : ""}`} onClick={() => setView(v)}>
+      {label}
+    </button>
+  );
 
   return (
     <>
       <nav className="nav">
         <div className="nav__inner">
-          <span className="nav__brand">
-            <CinderMark size={26} /> Cinder
-          </span>
-          <span className="nav__spacer" />
-          <button type="button" className={`nav__link${view === "home" ? " on" : ""}`} onClick={() => setView("home")}>
-            {c.nav_home}
-          </button>
           <button
             type="button"
-            className={`nav__link${view === "transparency" ? " on" : ""}`}
-            onClick={() => setView("transparency")}
+            className="nav__brand"
+            style={{ background: "none", border: "none", cursor: "pointer", color: "inherit" }}
+            onClick={() => setView("home")}
           >
-            {c.nav_transparency}
+            <CinderMark size={28} theme={theme} /> Cinder
           </button>
+          <span className="nav__spacer" />
+          {link("home", c.nav_home)}
+          {link("node", c.nav_node)}
+          {link("transparency", c.nav_transparency)}
           <button type="button" className="nav__toggle" onClick={() => setLocale(locale === "zh-Hant" ? "en" : "zh-Hant")}>
             {locale === "zh-Hant" ? "EN" : "繁中"}
           </button>
-          <button
-            type="button"
-            className="nav__toggle"
-            aria-label="theme"
-            onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-          >
+          <button type="button" className="nav__toggle" aria-label="theme" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
             {theme === "dark" ? "☀" : "☾"}
+          </button>
+          <button type="button" className="nav__cta" onClick={() => setView("download")}>
+            {c.nav_download}
           </button>
         </div>
       </nav>
 
-      {view === "home" ? <Home c={c} /> : <Transparency c={c} />}
+      {view === "home" ? (
+        <Home c={c} theme={theme} onNode={() => setView("node")} onDownload={() => setView("download")} />
+      ) : view === "download" ? (
+        <Download c={c} onNode={() => setView("node")} />
+      ) : view === "node" ? (
+        <Node c={c} />
+      ) : (
+        <Transparency c={c} />
+      )}
 
       <footer className="footer">
         <div className="wrap">{c.footer_privacy}</div>

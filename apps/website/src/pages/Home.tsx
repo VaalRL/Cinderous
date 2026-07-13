@@ -1,9 +1,20 @@
+import type { Theme } from "@cinder/theme";
 import type { Copy } from "../copy.js";
 import { CinderMark } from "../Brand.js";
 import { OFFICIAL_DONATIONS } from "../donations.js";
 import { GITHUB_URL } from "../App.js";
 
-export function Home({ c }: { c: Copy }): JSX.Element {
+export function Home({
+  c,
+  theme,
+  onNode,
+  onDownload,
+}: {
+  c: Copy;
+  theme: Theme;
+  onNode: () => void;
+  onDownload: () => void;
+}): JSX.Element {
   const features = [
     { t: c.feat_e2e_t, b: c.feat_e2e_b },
     { t: c.feat_decentral_t, b: c.feat_decentral_b },
@@ -15,14 +26,15 @@ export function Home({ c }: { c: Copy }): JSX.Element {
       <header className="hero">
         <div className="wrap">
           <div className="hero__mark">
-            <CinderMark size={72} />
+            <CinderMark size={84} theme={theme} />
           </div>
+          <div className="eyebrow">{c.hero_eyebrow}</div>
           <h1>{c.hero_title}</h1>
-          <p>{c.hero_subtitle}</p>
+          <p className="hero__sub">{c.hero_subtitle}</p>
           <div className="cta">
-            <a className="btn btn--primary" href={`${GITHUB_URL}/releases`} target="_blank" rel="noreferrer">
+            <button type="button" className="btn btn--primary" onClick={onDownload}>
               {c.hero_download}
-            </a>
+            </button>
             <a className="btn" href={GITHUB_URL} target="_blank" rel="noreferrer">
               {c.hero_github}
             </a>
@@ -36,6 +48,7 @@ export function Home({ c }: { c: Copy }): JSX.Element {
           <div className="grid">
             {features.map((f) => (
               <div className="card" key={f.t}>
+                <div className="card__ember" />
                 <h3>{f.t}</h3>
                 <p>{f.b}</p>
               </div>
@@ -46,21 +59,18 @@ export function Home({ c }: { c: Copy }): JSX.Element {
 
       <section className="sec">
         <div className="wrap">
-          <h2>{c.download_title}</h2>
-          <p className="hint">{c.download_desktop}</p>
-          <p className="hint">{c.download_mobile}</p>
-          <div className="cta" style={{ justifyContent: "flex-start", marginTop: 12 }}>
-            <a className="btn btn--primary" href={`${GITHUB_URL}/releases`} target="_blank" rel="noreferrer">
-              {c.download_releases}
-            </a>
-          </div>
+          <h2>{c.node_title}</h2>
+          <p className="sec__lead">{c.node_intro}</p>
+          <button type="button" className="btn" onClick={onNode}>
+            {c.nav_node} →
+          </button>
         </div>
       </section>
 
       <section className="sec">
         <div className="wrap">
           <h2>{c.donate_title}</h2>
-          <p className="hint">{c.donate_intro}</p>
+          <p className="sec__lead">{c.donate_intro}</p>
           <div className="chips">
             {OFFICIAL_DONATIONS.map((d) => (
               <a className="btn" key={d.channel} href={d.url} target="_blank" rel="noreferrer">
@@ -68,7 +78,7 @@ export function Home({ c }: { c: Copy }): JSX.Element {
               </a>
             ))}
           </div>
-          <p className="hint" style={{ marginTop: 12 }}>
+          <p className="hint" style={{ marginTop: 14 }}>
             {c.donate_disclaimer}
           </p>
         </div>
