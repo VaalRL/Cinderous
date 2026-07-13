@@ -38,6 +38,8 @@ describe("行動端 app 殼與畫面（ADR-0085）", () => {
         onLocale={() => {}}
         accent={null}
         onAccent={() => {}}
+        invisible={false}
+        onInvisible={() => {}}
         onLogout={() => {}}
       />,
     );

@@ -54,6 +54,7 @@ export function MobileApp({
   const [selfName, setSelfName] = useState("");
   const [selfNpub, setSelfNpub] = useState("");
   const [selfNsec, setSelfNsec] = useState("");
+  const [invisible, setInvisible] = useState(false);
   const backendRef = useRef<ChatBackend | null>(null);
   const screenRef = useRef(screen);
   screenRef.current = screen;
@@ -111,11 +112,16 @@ export function MobileApp({
     setScreen("signin");
     setTab("chats");
     setActiveId(null);
+    setInvisible(false);
   };
   const send = (text: string): void => {
     if (activeId) backendRef.current?.sendMessage(activeId, text);
   };
   const addContact = (npub: string): void => backendRef.current?.addContact?.(npub.trim());
+  const toggleInvisible = (v: boolean): void => {
+    setInvisible(v);
+    backendRef.current?.setInvisible?.(v);
+  };
   const nameFor = (pk: string): string =>
     pk === selfPubkey ? selfName : contacts.find((c) => c.pubkey === pk)?.name ?? `${pk.slice(0, 8)}…`;
 
@@ -184,6 +190,8 @@ export function MobileApp({
           onLocale={setLocale}
           accent={accent}
           onAccent={setAccent}
+          invisible={invisible}
+          onInvisible={toggleInvisible}
           onLogout={logout}
         />
       )}

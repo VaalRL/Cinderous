@@ -105,6 +105,8 @@ export interface Messages {
   msgStatus_read: string;
   settings_readReceipts: string;
   settings_readReceiptsHint: string;
+  settings_invisible: string;
+  settings_invisibleHint: string;
   ai_stylePolite: string;
   ai_styleConcise: string;
   ai_styleGrammar: string;
@@ -487,6 +489,8 @@ const zhHant: Messages = {
   msgStatus_read: "已讀",
   settings_readReceipts: "已讀回條",
   settings_readReceiptsHint: "開啟後，你讀取訊息會通知對方；關閉則不送、也不顯示對方的已讀（互惠）。",
+  settings_invisible: "隱身",
+  settings_invisibleHint: "開啟後完全不廣播在線狀態（中繼站與聯絡人皆顯示你離線），但仍可正常收發訊息。",
   ai_stylePolite: "更客氣",
   ai_styleConcise: "更精簡",
   ai_styleGrammar: "修正錯字",
@@ -869,6 +873,8 @@ const en: Messages = {
   msgStatus_read: "Read",
   settings_readReceipts: "Read receipts",
   settings_readReceiptsHint: "When on, others are told when you read their messages; off means you neither send yours nor see theirs (reciprocal).",
+  settings_invisible: "Invisible",
+  settings_invisibleHint: "When on, your presence is never broadcast (relay and contacts both see you offline), but you can still send and receive normally.",
   ai_stylePolite: "More polite",
   ai_styleConcise: "More concise",
   ai_styleGrammar: "Fix grammar",

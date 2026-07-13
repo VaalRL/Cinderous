@@ -51,6 +51,9 @@ export interface SettingsPanelProps {
   onToggleNotifyHidePreview?: () => void;
   readReceipts?: boolean;
   onToggleReadReceipts?: () => void;
+  /** 隱身（ADR-0088）：停止一切在線廣播（relay＋P2P）；未提供則不顯示該區塊。 */
+  invisible?: boolean;
+  onToggleInvisible?: () => void;
   /** 本機 AI 改寫設定（ADR-0060）；未提供則不顯示該區塊。 */
   ollama?: OllamaSettingsValue;
   onOllamaChange?: (next: OllamaSettingsValue) => void;
@@ -707,6 +710,15 @@ export function SettingsPanel(props: SettingsPanelProps): JSX.Element {
                   onChange={props.onToggleReadReceipts}
                 />
                 <span>{t("settings_readReceiptsHint")}</span>
+              </label>
+            </section>
+          ) : null}
+          {props.onToggleInvisible ? (
+            <section className="settings__sec">
+              <h4>{t("settings_invisible")}</h4>
+              <label className="settings__toggle">
+                <input type="checkbox" checked={props.invisible ?? false} onChange={props.onToggleInvisible} />
+                <span>{t("settings_invisibleHint")}</span>
               </label>
             </section>
           ) : null}

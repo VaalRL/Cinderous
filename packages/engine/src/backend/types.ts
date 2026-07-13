@@ -139,6 +139,8 @@ export interface ChatBackend {
   readonly self: Self;
   start(handlers: ChatBackendEvents): void;
   setStatus(status: Status, message?: string): void;
+  /** 隱身（ADR-0088）：開＝停止一切在線廣播（relay＋P2P），仍正常收發。僅真實 relay 後端支援。 */
+  setInvisible?(invisible: boolean): void;
   setNowPlaying(text: string): void;
   /**
    * 送出訊息；`ttlSeconds` 設定時為限時訊息（閱後即焚，NIP-40 短期過期）；

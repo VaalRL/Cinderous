@@ -100,6 +100,7 @@ const NOTIFY_KEY = "nb.notify";
 const NOTIFY_SOUND_KEY = "nb.notifySound";
 const NOTIFY_PREVIEW_KEY = "nb.notifyHidePreview";
 const READ_RECEIPTS_KEY = "nb.readReceipts";
+const INVISIBLE_KEY = "nb.invisible";
 const OLLAMA_KEY = "nb.ollama";
 
 /** 本機 AI 改寫設定（ADR-0060）；`enabled` 開啟才在 composer 顯示 ✨。 */
@@ -305,6 +306,13 @@ export function App(): JSX.Element {
       return false;
     }
   });
+  const [invisible, setInvisible] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(INVISIBLE_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
   const [ollama, setOllama] = useState<OllamaState>(() => {
     try {
       const raw = localStorage.getItem(OLLAMA_KEY);
@@ -368,6 +376,10 @@ export function App(): JSX.Element {
   useEffect(() => {
     backend?.setReadReceipts?.(readReceipts);
   }, [backend, readReceipts]);
+  // 隱身開關同步到後端（ADR-0088）；後端重建或開關變動時皆推送。
+  useEffect(() => {
+    backend?.setInvisible?.(invisible);
+  }, [backend, invisible]);
   /** 作用中身分的儲存實例（D4a 配對匯出用；示範模式為 null）。 */
   const storageRef = useRef<AppStorage | null>(null);
   const selfRef = useRef<Self | null>(self);
@@ -969,6 +981,16 @@ export function App(): JSX.Element {
     }
   };
 
+  const toggleInvisible = () => {
+    const next = !invisible;
+    setInvisible(next);
+    try {
+      localStorage.setItem(INVISIBLE_KEY, next ? "1" : "0");
+    } catch {
+      /* 忽略 */
+    }
+  };
+
   const toggleNotifications = () => {
     if (notify) {
       setNotify(false);
@@ -1323,6 +1345,8 @@ export function App(): JSX.Element {
           onToggleNotifyHidePreview={toggleNotifyHidePreview}
           readReceipts={readReceipts}
           onToggleReadReceipts={toggleReadReceipts}
+          invisible={invisible}
+          onToggleInvisible={toggleInvisible}
           ollama={ollama}
           onOllamaChange={updateOllama}
           onClose={() => setSettingsOpen(false)}

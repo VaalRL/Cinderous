@@ -48,6 +48,8 @@ export function SettingsScreen({
   onLocale,
   accent,
   onAccent,
+  invisible,
+  onInvisible,
   onLogout,
 }: {
   selfName: string;
@@ -60,6 +62,9 @@ export function SettingsScreen({
   onLocale: (l: Locale) => void;
   accent: string | null;
   onAccent: (hex: string | null) => void;
+  /** 隱身（ADR-0088）：停止一切在線廣播。 */
+  invisible: boolean;
+  onInvisible: (v: boolean) => void;
   onLogout: () => void;
 }): JSX.Element {
   const tk = useMemo(() => resolveTheme({ theme, accent }), [theme, accent]);
@@ -128,6 +133,22 @@ export function SettingsScreen({
               <Text style={segTxt(locale === "en")}>EN</Text>
             </Pressable>
           </View>
+        </View>
+
+        {/* 隱私：隱身 */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>{t("settings_invisible")}</Text>
+          <Text style={styles.label}>{t("settings_invisibleHint")}</Text>
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => onInvisible(!invisible)}
+            style={[styles.seg, { alignSelf: "flex-start", borderColor: invisible ? tk.accent : tk.border, backgroundColor: invisible ? tk.accent : tk.field }]}
+          >
+            <Text style={[styles.segText, { color: invisible ? "#ffffff" : tk.ink }]}>
+              {t("settings_invisible")}
+              {invisible ? " ✓" : ""}
+            </Text>
+          </Pressable>
         </View>
 
         {/* 中繼站 */}

@@ -2,6 +2,7 @@ import {
   CandidateBatch,
   createSignal,
   DataChannelReceiver,
+  encodeDcPresence,
   encodeFile,
   encodeTyping,
   readSignal,
@@ -27,6 +28,8 @@ export interface TransferHandlers {
   onIncoming: (peer: PubkeyHex, file: ReceivedFile) => void;
   /** 經 P2P 通道收到「正在輸入中」（F5 卸載）。 */
   onTyping?: (peer: PubkeyHex) => void;
+  /** 經 P2P 通道收到對方在線狀態（ADR-0088 (e)：心跳卸載中繼）。 */
+  onPresence?: (peer: PubkeyHex, p: { s: string; m: string; np: string }) => void;
   /** 錯誤（傳輸失敗、對方不可達等）。 */
   onError: (peer: PubkeyHex, reason: string) => void;
 }
@@ -84,6 +87,22 @@ export class WebRtcTransfer {
       return true;
     }
     return false;
+  }
+
+  /** 若 P2P 通道已開，經其送出在線狀態並回傳 true（ADR-0088：心跳卸載中繼）；否則 false。 */
+  sendPresence(peerPk: PubkeyHex, p: { s: string; m: string; np: string }): boolean {
+    const peer = this.peers.get(peerPk);
+    if (peer?.dc && peer.dc.readyState === "open") {
+      peer.dc.send(encodeDcPresence(p.s, p.m, p.np));
+      return true;
+    }
+    return false;
+  }
+
+  /** 與對方是否有活的 P2P 資料通道（供心跳抑制判斷，ADR-0088）。 */
+  hasOpenChannel(peerPk: PubkeyHex): boolean {
+    const peer = this.peers.get(peerPk);
+    return !!(peer?.dc && peer.dc.readyState === "open");
   }
 
   /** 傳送一個檔案給對方，回傳此傳輸的 id（供 UI 追蹤進度）。 */
@@ -146,6 +165,7 @@ export class WebRtcTransfer {
       rx: new DataChannelReceiver({
         onFile: (file) => this.handlers.onIncoming(peerPk, file),
         onTyping: () => this.handlers.onTyping?.(peerPk),
+        onPresence: (p) => this.handlers.onPresence?.(peerPk, p),
         onError: (reason) => this.handlers.onError(peerPk, reason),
       }),
       hasRemote: false,

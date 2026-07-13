@@ -282,6 +282,8 @@ export class RelayChatBackend implements ChatBackend {
   private readonly presence = new PresenceTracker();
   private readonly statuses = new Map<PubkeyHex, PresencePayload>();
   private nowPlaying = "";
+  /** 隱身（ADR-0088 (d)）：完全不廣播心跳（對 relay 與聯絡人皆顯示離線），但仍正常收發。 */
+  private invisible = false;
   // 送達/已讀回條（ADR-0058）。
   /** 已送出、待 relay OK 的訊息 id → 收件人（供 OK 後標 sent）。 */
   private readonly awaitingSent = new Map<string, PubkeyHex>();
@@ -385,6 +387,12 @@ export class RelayChatBackend implements ChatBackend {
       },
       onTyping: (peer) => {
         if (!this.isBlocked(peer)) this.handlers?.onTyping(peer);
+      },
+      onPresence: (peer, p) => {
+        // ADR-0088 (e)：P2P 收到的在線狀態與 relay 心跳同源處理（同一 60s 判離線狀態機，避免雙來源閃爍）。
+        if (this.isBlocked(peer)) return;
+        this.presence.observe(peer, nowSec());
+        this.statuses.set(peer, { s: p.s as PresenceState, m: p.m, np: p.np });
       },
       onError: (peer, reason) => this.handlers?.onFileError?.(peer, reason),
       },
@@ -730,12 +738,20 @@ export class RelayChatBackend implements ChatBackend {
   }
 
   private beat(): void {
-    if (this.self.status === "offline") return;
+    // 隱身（ADR-0088 (d)）或離線：完全不廣播在線信標（對方靠 60s 判離線）。
+    if (this.invisible || this.self.status === "offline") return;
     const payload: PresencePayload = {
       s: this.self.status as PresenceState,
       m: this.self.statusMessage,
       np: this.nowPlaying,
     };
+    // (e) P2P 卸載：對已開資料通道的聯絡人，在線狀態直送資料通道、不經 relay（複用 F5 模式）。
+    let allP2P = this.contacts.length > 0;
+    for (const c of this.contacts) {
+      if (!this.transfer.sendPresence(c.pubkey, { s: payload.s, m: payload.m, np: payload.np })) allP2P = false;
+    }
+    // 心跳抑制（ADR-0088 (e)）：僅當所有聯絡人都有活的 P2P 通道時，才不再經 relay 明簽廣播在線。
+    if (allP2P) return;
     const evt = createHeartbeat(this.sk, { status: encodePresence(payload) });
     // 心跳發到 pool 中所有 relay：對方未記錄我的 relay 也看得到我在線（ADR-0034）。
     this.client.publish(evt);
@@ -1193,6 +1209,12 @@ export class RelayChatBackend implements ChatBackend {
     this.self.status = status;
     if (message !== undefined) this.self.statusMessage = message;
     if (status !== "offline") this.beat();
+  }
+
+  /** 隱身開關（ADR-0088 (d)）：開＝停止一切在線廣播（relay＋P2P），仍正常收發；關＝立即復出廣播。 */
+  setInvisible(invisible: boolean): void {
+    this.invisible = invisible;
+    if (!invisible) this.beat();
   }
 
   setNowPlaying(text: string): void {

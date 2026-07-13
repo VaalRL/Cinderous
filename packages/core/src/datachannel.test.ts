@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { DataChannelReceiver, decodeFileChunk, encodeFile, encodeFileChunk, encodeNudge, encodeTyping } from "./datachannel.js";
+import { DataChannelReceiver, decodeFileChunk, encodeDcPresence, encodeFile, encodeFileChunk, encodeNudge, encodeTyping } from "./datachannel.js";
 
 function bytes(...n: number[]): Uint8Array {
   return new Uint8Array(n);
@@ -21,6 +21,15 @@ describe("Data Channel — 輸入中（F5 卸載）", () => {
     const rx = new DataChannelReceiver({ onTyping });
     rx.receive(encodeTyping());
     expect(onTyping).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("Data Channel — 在線狀態（ADR-0088 (e) 心跳卸載）", () => {
+  it("編碼並接收 presence（帶 s/m/np）", () => {
+    const onPresence = vi.fn();
+    const rx = new DataChannelReceiver({ onPresence });
+    rx.receive(encodeDcPresence("online", "在忙", "Daft Punk"));
+    expect(onPresence).toHaveBeenCalledWith({ s: "online", m: "在忙", np: "Daft Punk" });
   });
 });
 

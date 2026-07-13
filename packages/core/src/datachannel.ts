@@ -7,6 +7,7 @@ import { utf8ToBytes } from "@noble/hashes/utils";
 export type DataMessage =
   | { t: "nudge" }
   | { t: "typing" }
+  | { t: "presence"; s: string; m: string; np: string }
   | { t: "file-begin"; id: string; name: string; mime: string; size: number; chunks: number };
 
 /** 資料通道可能收到的原始資料（控制為字串、檔案分塊為二進位）。 */
@@ -73,6 +74,11 @@ export function encodeTyping(): string {
   return JSON.stringify({ t: "typing" } satisfies DataMessage);
 }
 
+/** 編碼一則在線狀態訊息（ADR-0088：P2P 通道可用時把心跳卸載中繼，不再明簽廣播上線）。 */
+export function encodeDcPresence(s: string, m: string, np: string): string {
+  return JSON.stringify({ t: "presence", s, m, np } satisfies DataMessage);
+}
+
 /**
  * 將檔案編碼為一連串資料通道訊息：一則 `file-begin` 後接 N 則 `file-chunk`。
  * 不受中繼站 JSON 大小限制，速度僅受雙方頻寬影響。
@@ -103,6 +109,8 @@ export function encodeFile(
 export interface DataChannelHandlers {
   onNudge?: () => void;
   onTyping?: () => void;
+  /** 經 P2P 通道收到對方在線狀態（ADR-0088 (e)：心跳卸載中繼）。 */
+  onPresence?: (p: { s: string; m: string; np: string }) => void;
   onFile?: (file: ReceivedFile) => void;
   onError?: (reason: string) => void;
 }
@@ -169,6 +177,9 @@ export class DataChannelReceiver {
         return;
       case "typing":
         this.handlers.onTyping?.();
+        return;
+      case "presence":
+        this.handlers.onPresence?.({ s: msg.s, m: msg.m, np: msg.np });
         return;
       case "file-begin":
         if (msg.size < 0 || msg.chunks < 0 || msg.size > this.maxFileSize || msg.chunks > this.maxChunks) {
