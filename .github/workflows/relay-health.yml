@@ -35,14 +35,15 @@ jobs:
           MAINTAINER_NSEC: ${{ secrets.MAINTAINER_NSEC }}
         run: pnpm --filter @cinder/relay bootstrap:run
 
-      - name: 提交清單變更（若有）
+      - name: 提交清單與一致性/uptime 記錄變更（若有）
         run: |
-          if [ -n "$(git status --porcelain relay/bootstrap/relays.json)" ]; then
+          # relays.json＝簽章清單來源；health-history.json＝跨執行的滾動 uptime（ADR-0092 分級收錄依據）。
+          if [ -n "$(git status --porcelain relay/bootstrap/relays.json relay/bootstrap/health-history.json)" ]; then
             git config user.name "relay-health-bot"
             git config user.email "bot@users.noreply.github.com"
-            git add relay/bootstrap/relays.json
-            git commit -m "chore(relay): 自動更新引導 relay 清單健康狀態"
+            git add relay/bootstrap/relays.json relay/bootstrap/health-history.json
+            git commit -m "chore(relay): 自動更新引導 relay 清單健康狀態與 uptime 記錄"
             git push
           else
-            echo "清單無變化，略過提交。"
+            echo "清單與記錄無變化，略過提交。"
           fi
