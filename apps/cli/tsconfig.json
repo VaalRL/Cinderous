@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "./src",
+    "outDir": "./dist",
+    "types": ["node"],
+    "lib": ["ES2022", "DOM"],
+    "noEmit": true
+  },
+  "comment": "lib 含 DOM 只為取得 WebSocket 型別（Node 22 有全域 WebSocket 實作）；實際不碰 DOM。",
+  "include": ["src/**/*.ts"]
+}

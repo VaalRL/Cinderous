@@ -8,6 +8,28 @@ importers:
 
   .: {}
 
+  apps/cli:
+    dependencies:
+      '@cinder/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@cinder/engine':
+        specifier: workspace:*
+        version: link:../../packages/engine
+    devDependencies:
+      '@types/node':
+        specifier: ^22.10.2
+        version: 22.20.0
+      esbuild:
+        specifier: ^0.24.0
+        version: 0.24.2
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@22.20.0)(terser@5.49.0)
+
   apps/desktop:
     dependencies:
       '@cinder/core':

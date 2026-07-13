@@ -1,5 +1,6 @@
 packages:
   - "packages/*"
+  - "apps/cli"
   - "apps/desktop"
   - "apps/mobile"
   - "apps/website"
