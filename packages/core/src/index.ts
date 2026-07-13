@@ -12,6 +12,7 @@ export * from "./typing.js";
 export * from "./music.js";
 export * from "./nip44.js";
 export * from "./nip59.js";
+export * from "./calc.js";
 export * from "./giftwrap.js";
 export * from "./mention.js";
 export * from "./thread.js";

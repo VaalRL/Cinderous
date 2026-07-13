@@ -111,3 +111,4 @@
 | [0094](./0094-retention-limit-and-plaintext-export.md) | 本地紀錄保留上限（可設定、預設無上限）與明文紀錄導出（TXT/MD/JSON、範圍可選） | 已接受 |
 | [0095](./0095-group-receipts-and-message-status-icons.md) | 群組送達/已讀分級（≤5 名單／6–10 計數／>10 不記）＋failed 狀態與眼睛圖示語言＋行動端狀態同步 | 已接受 |
 | [0096](./0096-mobile-vector-icons-react-native-svg.md) | 行動端向量圖示改採 react-native-svg＋web 端解析設定；補行動端群組已讀 UI（收斂 0095 後續） | 已接受 |
+| [0097](./0097-inline-math-preview-and-calc-panel.md) | 對話算式預覽：composer 即時預覽＋右欄計算機（純本地純函式、禁用 eval、保守觸發） | 已接受 |

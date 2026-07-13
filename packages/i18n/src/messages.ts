@@ -109,6 +109,14 @@ export interface Messages {
   readBy_list: string;
   /** 群組計數制已讀（6–10 人，ADR-0095）：`{count}`/`{total}`。 */
   readBy_count: string;
+  // 算式預覽與右欄計算機（ADR-0097）
+  aux_tabCalc: string;
+  calc_placeholder: string;
+  calc_hint: string;
+  calc_notExpr: string;
+  calc_insertExpr: string;
+  calc_insertResult: string;
+  calc_insertHint: string;
   settings_readReceipts: string;
   settings_readReceiptsHint: string;
   // 保留上限與導出（ADR-0094）
@@ -518,6 +526,13 @@ const zhHant: Messages = {
   msgStatus_read: "已讀",
   readBy_list: "已讀：{names}",
   readBy_count: "已讀 {count}/{total}",
+  aux_tabCalc: "計算",
+  calc_placeholder: "輸入算式，例如 (12+8)*3",
+  calc_hint: "在此計算，不會動到你的對話草稿；算完可自行選擇插入。",
+  calc_notExpr: "這看起來不是算式。",
+  calc_insertExpr: "插入算式與答案",
+  calc_insertResult: "只插入答案",
+  calc_insertHint: "點一下把「= 答案」加到訊息",
   settings_readReceipts: "已讀回條",
   settings_readReceiptsHint: "開啟後，你讀取訊息會通知對方；關閉則不送、也不顯示對方的已讀（互惠）。",
   settings_retention: "訊息保留上限",
@@ -923,6 +938,13 @@ const en: Messages = {
   msgStatus_read: "Read",
   readBy_list: "Read by {names}",
   readBy_count: "Read {count}/{total}",
+  aux_tabCalc: "Calc",
+  calc_placeholder: "Type an expression, e.g. (12+8)*3",
+  calc_hint: "Scratch calculator — it won't touch your draft. Insert the answer only if you want to.",
+  calc_notExpr: "That doesn't look like an expression.",
+  calc_insertExpr: "Insert expression and answer",
+  calc_insertResult: "Insert answer only",
+  calc_insertHint: "Click to append “= answer” to your message",
   settings_readReceipts: "Read receipts",
   settings_readReceiptsHint: "When on, others are told when you read their messages; off means you neither send yours nor see theirs (reciprocal).",
   settings_retention: "Message retention",

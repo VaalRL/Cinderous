@@ -315,6 +315,8 @@ export function App(): JSX.Element {
   const [pairPhase, setPairPhase] = useState<PairPhase | null>(null);
   const pairDecision = useRef<((ok: boolean) => void) | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // 右欄計算機 → 主對話框的單向插入指令（ADR-0097）：nonce 變動即觸發，不接管草稿狀態。
+  const [pendingInsert, setPendingInsert] = useState<{ convo: string; text: string; nonce: number } | null>(null);
   // 明文紀錄導出（ADR-0094）：null＝關；[]＝全部；[keys]＝預選某對話。
   const [exportPreselect, setExportPreselect] = useState<string[] | null>(null);
   const setExportOpen = (open: boolean) => setExportPreselect(open ? [] : null);
@@ -1304,7 +1306,19 @@ export function App(): JSX.Element {
       </div>
       {layout === "modern" ? (
         <aside className="deckwrap deckwrap--right" data-testid="deck-right">
-          <DeckRight activeId={activeConvo} self={self} contacts={contacts} groups={groups} convos={convos} />
+          <DeckRight
+            activeId={activeConvo}
+            self={self}
+            contacts={contacts}
+            groups={groups}
+            convos={convos}
+            {...(activeConvo
+              ? {
+                  onInsert: (text: string) =>
+                    setPendingInsert({ convo: activeConvo, text, nonce: Date.now() }),
+                }
+              : {})}
+          />
         </aside>
       ) : null}
       {settingsOpen ? (
@@ -1532,6 +1546,7 @@ export function App(): JSX.Element {
                   }
                 : {})}
               {...(storageRef.current ? { onExport: () => setExportPreselect([pk]) } : {})}
+              {...(pendingInsert?.convo === pk ? { insert: { text: pendingInsert.text, nonce: pendingInsert.nonce } } : {})}
               onClose={() => closeConvo(pk)}
             />
             </div>
@@ -1589,6 +1604,7 @@ export function App(): JSX.Element {
             }}
             onNudge={() => activeBackend.sendNudge(pk)}
             {...(storageRef.current ? { onExport: () => setExportPreselect([pk]) } : {})}
+            {...(pendingInsert?.convo === pk ? { insert: { text: pendingInsert.text, nonce: pendingInsert.nonce } } : {})}
             onClose={() => closeConvo(pk)}
           />
           </div>

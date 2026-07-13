@@ -2,7 +2,7 @@
 // 頂部返回列（‹ 返回＋名稱＋副標）、訊息氣泡（自己靠右主色、對方靠左淺底；群組顯示發送者名）、
 // 底部輸入列（輸入框＋送出）。色彩吃 @cinder/theme。訊息與送出由呼叫端注入（接 ChatBackend）。
 import { useMemo, useState } from "react";
-import { groupReceiptMode } from "@cinder/core";
+import { calcPreview, groupReceiptMode } from "@cinder/core";
 import type { ChatMessage, MessageStatus } from "@cinder/engine";
 import { type Locale, type MessageKey, translate } from "@cinder/i18n";
 import { resolveTheme, type Theme, type ThemeTokens } from "@cinder/theme";
@@ -47,6 +47,23 @@ function makeStyles(tk: ThemeTokens) {
     textTheir: { color: tk.ink, fontSize: 14 },
     status: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 2, marginRight: 4 },
     readby: { fontSize: 10, color: tk.muted },
+    // 算式預覽 chip（ADR-0097）
+    calcchip: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+      alignSelf: "flex-start",
+      marginHorizontal: 10,
+      marginBottom: 4,
+      paddingVertical: 4,
+      paddingHorizontal: 10,
+      borderRadius: 999,
+      borderWidth: 1,
+      borderColor: tk.accent,
+      backgroundColor: tk.field,
+    },
+    calcchipEq: { fontSize: 12, color: tk.muted },
+    calcchipVal: { fontSize: 13, fontWeight: "700", color: tk.accent },
     composer: {
       flexDirection: "row",
       alignItems: "center",
@@ -126,6 +143,8 @@ export function ConversationScreen({
       : t("readBy_count", { count: readers.length, total });
   };
   const [draft, setDraft] = useState("");
+  // 算式預覽（ADR-0097）：純函式判定草稿是否為算式；不是就回 null（不顯示）。
+  const calc = calcPreview(draft);
 
   const submit = (): void => {
     const text = draft.trim();
@@ -170,6 +189,19 @@ export function ConversationScreen({
           </View>
         ))}
       </ScrollView>
+
+      {/* 算式即時預覽（ADR-0097）：純本地計算，草稿不外流；點一下把「= 答案」加到草稿。 */}
+      {calc ? (
+        <Pressable
+          style={styles.calcchip}
+          accessibilityRole="button"
+          aria-label={t("calc_insertHint")}
+          onPress={() => setDraft((prev) => `${prev.trimEnd()} = ${calc.result}`)}
+        >
+          <Text style={styles.calcchipEq}>=</Text>
+          <Text style={styles.calcchipVal}>{calc.result}</Text>
+        </Pressable>
+      ) : null}
 
       <View style={styles.composer}>
         <TextInput

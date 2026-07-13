@@ -1,11 +1,67 @@
 import { useState } from "react";
+import { calcPreview } from "@cinder/core";
 import type { ChatMessage, Contact, Group, Self, Status } from "@cinder/engine";
 import type { MessageKey } from "@cinder/i18n";
 import { useI18n } from "../i18n.js";
 import { Avatar } from "./Avatar.js";
 import { replyCounts } from "./thread-util.js";
 
-type AuxTab = "info" | "members" | "media" | "threads";
+type AuxTab = "info" | "members" | "media" | "threads" | "calc";
+
+/**
+ * 右欄計算機（ADR-0097）：**自己的輸入框**，不碰主對話框草稿。純本地計算（禁用 eval），
+ * 算完可選擇「插入」回主對話框——不會偷改你正在打的內容。
+ */
+function CalcPanel({ onInsert }: { onInsert?: ((text: string) => void) | undefined }): JSX.Element {
+  const { t } = useI18n();
+  const [input, setInput] = useState("");
+  const calc = calcPreview(input);
+  return (
+    <div className="daux__calc">
+      <input
+        className="daux__calcin"
+        data-testid="aux-calc-input"
+        value={input}
+        onChange={(e) => setInput(e.target.value)}
+        placeholder={t("calc_placeholder")}
+        aria-label={t("aux_tabCalc")}
+      />
+      {calc ? (
+        <>
+          <div className="daux__calcout" data-testid="aux-calc-result">
+            <span className="daux__calcexpr">{calc.expr}</span>
+            <span className="daux__calceq">=</span>
+            <b className="daux__calcval">{calc.result}</b>
+          </div>
+          {onInsert ? (
+            <div className="daux__calcbtns">
+              <button
+                type="button"
+                className="daux__calcbtn"
+                data-testid="aux-calc-insert"
+                onClick={() => onInsert(`${calc.expr} = ${calc.result}`)}
+              >
+                {t("calc_insertExpr")}
+              </button>
+              <button
+                type="button"
+                className="daux__calcbtn"
+                data-testid="aux-calc-insert-result"
+                onClick={() => onInsert(calc.result)}
+              >
+                {t("calc_insertResult")}
+              </button>
+            </div>
+          ) : null}
+        </>
+      ) : input.trim() ? (
+        <div className="daux__calchint">{t("calc_notExpr")}</div>
+      ) : (
+        <div className="daux__calchint">{t("calc_hint")}</div>
+      )}
+    </div>
+  );
+}
 
 const STATUS_LABEL: Record<Status, MessageKey> = {
   online: "status_online",
@@ -20,6 +76,8 @@ export interface DeckRightProps {
   contacts: Contact[];
   groups: Group[];
   convos: Record<string, ChatMessage[]>;
+  /** 把右欄計算機的結果插入主對話框草稿（ADR-0097）；未提供則不顯示插入鈕。 */
+  onInsert?: (text: string) => void;
 }
 
 /** 三欄右側欄：對話輔助區（ADR-0079 Q4）。四分頁從當前對話資料衍生；深度操作為後續擴充。 */
@@ -44,6 +102,7 @@ export function DeckRight(props: DeckRightProps): JSX.Element {
     { key: "threads", label: t("aux_tabThreads"), count: threadRoots.length },
     { key: "members", label: t("aux_tabMembers"), count: members.length },
     { key: "media", label: t("aux_tabMedia"), count: images.length },
+    { key: "calc", label: t("aux_tabCalc") },
     { key: "info", label: t("aux_tabInfo") },
   ];
 
@@ -124,6 +183,9 @@ export function DeckRight(props: DeckRightProps): JSX.Element {
             </div>
           )
         ) : null}
+
+        {/* 算式計算機（ADR-0097）：右欄自有輸入框，算完自行決定要不要插回主對話框。 */}
+        {tab === "calc" ? <CalcPanel onInsert={props.onInsert} /> : null}
       </div>
     </div>
   );

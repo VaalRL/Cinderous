@@ -1,4 +1,4 @@
-import { contentHash, groupReceiptMode, parseMentions, REACTION_EMOJIS } from "@cinder/core";
+import { calcPreview, contentHash, groupReceiptMode, parseMentions, REACTION_EMOJIS } from "@cinder/core";
 import { type MouseEvent as ReactMouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "../i18n.js";
 import type { CallMedia, MentionCandidate } from "@cinder/core";
@@ -123,6 +123,11 @@ export interface ConversationProps {
   onLeaveGroup?: () => void;
   /** 導出此對話紀錄（ADR-0094）；未提供則不顯示。 */
   onExport?: () => void;
+  /**
+   * 外部插入文字到草稿（ADR-0097 右欄計算機）：`nonce` 變動時把 `text` 附加到 composer。
+   * 用單向指令而非把草稿狀態上提，避免動到既有 composer 狀態機（@提及建議、串內 composer 等）。
+   */
+  insert?: { text: string; nonce: number };
   /** 群組成員清單（提供即顯示 👥 成員管理入口，M9）。 */
   groupMembers?: MentionCandidate[];
   /** 自己是否為群組管理者（可增/移成員）。 */
@@ -278,6 +283,20 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
   const shown = hiddenCount > 0 ? channel.slice(hiddenCount) : channel;
   // 擁有中的自製貼圖 id 集合：整個訊息列共用一份（不再每則訊息各建一個 Set）。
   const ownedIds = new Set(library.map((s) => s.id));
+
+  // 算式預覽（ADR-0097）：純函式判定草稿是否為算式；不是就回 null（不顯示）。
+  const calc = calcPreview(text);
+
+  // 右欄計算機的「插入」（ADR-0097）：以 nonce 變化為訊號，把文字附加到草稿（不接管草稿狀態）。
+  const insertNonce = props.insert?.nonce;
+  useEffect(() => {
+    const ins = props.insert;
+    if (!ins || !ins.text) return;
+    setText((prev) => (prev.trim() ? `${prev.trimEnd()} ${ins.text}` : ins.text));
+    composerRef.current?.focus();
+    // 只在 nonce 變動時觸發（同一段文字可重複插入）。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [insertNonce]);
 
   /**
    * 群組已讀呈現（ADR-0095）：依成員數分級——≤5 名單制（顯示誰已讀）、6–10 計數制（已讀 M/N）、
@@ -961,6 +980,21 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
         </div>
       ) : null}
 
+      {/* 算式即時預覽（ADR-0097）：純本地計算，草稿不外流。點擊把「= 結果」附加到草稿。 */}
+      {!props.readOnly && calc ? (
+        <button
+          className="calcchip"
+          data-testid="calc-chip"
+          title={t("calc_insertHint")}
+          onClick={() => {
+            setText((prev) => `${prev.trimEnd()} = ${calc.result}`);
+            composerRef.current?.focus();
+          }}
+        >
+          <span className="calcchip__eq">=</span>
+          <span className="calcchip__val">{calc.result}</span>
+        </button>
+      ) : null}
       {props.readOnly ? (
         <div className="composer composer--ro" data-testid="announce-readonly">📢 公告頻道（唯讀，僅管理者可發布）</div>
       ) : (

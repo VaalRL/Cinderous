@@ -623,6 +623,39 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
 .tick--failed { color: #dc2626; }
 /* 群組已讀（名單制/計數制）。 */
 .readby { font-size: 10px; color: var(--muted); margin-left: 5px; vertical-align: middle; }
+
+/* 算式即時預覽 chip（ADR-0097）：composer 上方，點擊插入「= 答案」。 */
+.calcchip {
+  display: flex; align-items: center; gap: 6px; align-self: flex-start;
+  margin: 0 8px 4px; padding: 3px 10px; border-radius: 999px; cursor: pointer;
+  border: 1px solid var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent);
+  font-size: 12px; color: var(--ink);
+}
+.calcchip:hover { background: color-mix(in srgb, var(--accent) 22%, transparent); }
+.calcchip__eq { color: var(--muted); }
+.calcchip__val { font-weight: 700; font-variant-numeric: tabular-nums; }
+
+/* 右欄計算機（ADR-0097）。 */
+.daux__calc { display: flex; flex-direction: column; gap: 8px; padding: 10px; }
+.daux__calcin {
+  width: 100%; box-sizing: border-box; padding: 7px 10px; font-size: 13px;
+  border: 1px solid var(--border); border-radius: 8px; background: var(--field); color: var(--ink);
+}
+.daux__calcout {
+  display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap;
+  padding: 8px 10px; border-radius: 8px; background: var(--border);
+  font-size: 13px; font-variant-numeric: tabular-nums;
+}
+.daux__calcexpr { color: var(--muted); word-break: break-all; }
+.daux__calceq { color: var(--muted); }
+.daux__calcval { font-size: 15px; color: var(--accent); }
+.daux__calcbtns { display: flex; gap: 6px; flex-wrap: wrap; }
+.daux__calcbtn {
+  font-size: 11px; padding: 5px 10px; border-radius: 6px; cursor: pointer;
+  border: 1px solid var(--border); background: none; color: var(--ink);
+}
+.daux__calcbtn:hover { border-color: var(--accent); color: var(--accent); }
+.daux__calchint { font-size: 11px; color: var(--muted); line-height: 1.5; }
 .line .text { display: block; margin-top: 1px; white-space: pre-wrap; word-break: break-word; }
 .line.mention { background: var(--mention-bg, rgba(255,196,0,.12)); border-left: 3px solid var(--accent); border-radius: 4px; padding: 2px 6px; margin-left: -6px; }
 .mention-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 15px; height: 15px; margin-left: 6px; padding: 0 3px; border-radius: 8px; background: var(--accent); color: #fff; font-size: 10px; font-weight: 700; }
