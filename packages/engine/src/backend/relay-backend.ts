@@ -1563,7 +1563,7 @@ export class RelayChatBackend implements ChatBackend {
     this.handlers?.onUnsend?.(messageId);
   }
 
-  sendFile(to: PubkeyHex, file: OutgoingFile, thumb?: string): string {
+  sendFile(to: PubkeyHex, file: OutgoingFile, opts: { thumb?: string; savedPath?: string } = {}): string {
     // 位元組走 P2P（不變）；另發一則加密 metadata 訊息讓對方所有裝置都知道有檔案（ADR-0093）。
     // `thumb` 只存在本機（ADR-0102）——**不進 metadata 訊息、不上中繼**；對方自己從位元組產生。
     const tid = this.transfer.sendFile(to, file);
@@ -1572,7 +1572,9 @@ export class RelayChatBackend implements ChatBackend {
     this.seenMsg.add(evt.id);
     // 訊息 id＝metadata 事件 id（供送達/已讀回條對得上，G3）；file.id＝tid（供進度/位元組關聯）。
     this.ensureFileMessage(to, meta, { msgId: evt.id, outgoing: true, sent: 0, status: "sending" });
-    if (thumb) this.setFileThumb(to, evt.id, thumb);
+    if (opts.thumb) this.setFileThumb(to, evt.id, opts.thumb);
+    // 送出端原檔路徑（ADR-0103）：原生選檔才有；讓自己送出的圖片重載後也讀得回原圖。
+    if (opts.savedPath) this.storage.setFileSavedPath(to, evt.id, opts.savedPath);
     this.awaitingSent.set(evt.id, to);
     this.publishReliable(evt);
     return tid;

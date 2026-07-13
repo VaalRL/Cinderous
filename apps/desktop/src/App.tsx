@@ -21,7 +21,7 @@ import { BrowserChatBackend } from "@cinder/engine";
 import { normalizeRelayUrl, RelayChatBackend, webSocketConnector } from "@cinder/engine";
 import { getKeyVault } from "./native/keyvault.js";
 import { getNotifier, onNotificationClick } from "./native/notify.js";
-import { saveIncomingFile, saveTextFile } from "./native/save-file.js";
+import { pickFileToSend, saveIncomingFile, saveTextFile } from "./native/save-file.js";
 import { makeThumbnail } from "./ui/thumbnail.js";
 import { useI18n } from "./i18n.js";
 import { type Layout, useLayout } from "./layout.js";
@@ -1142,18 +1142,35 @@ export function App(): JSX.Element {
     forget(pk);
   };
 
-  const sendFile = async (pk: string, f: File) => {
+  /** 送出一個檔案。`savedPath` 只有原生選檔拿得到（ADR-0103）；瀏覽器 <input> 沒有。 */
+  const sendFileBytes = async (pk: string, name: string, mime: string, bytes: Uint8Array, savedPath?: string) => {
     if (!activeBackend.sendFile) return;
-    const bytes = new Uint8Array(await f.arrayBuffer());
-    const mime = f.type || "application/octet-stream";
     // 圖片縮圖（ADR-0102）：只存本機、不進 metadata 訊息、不上中繼。非圖片回 null。
     const thumb = await makeThumbnail(bytes, mime);
     // backend 擁有檔案訊息（ADR-0093）：sendFile 會同步 emit onMessage（file.id＝傳輸 id）。
-    const tid = activeBackend.sendFile(pk, { name: f.name, mime, bytes }, thumb ?? undefined);
+    const tid = activeBackend.sendFile(pk, { name, mime, bytes }, {
+      ...(thumb ? { thumb } : {}),
+      ...(savedPath ? { savedPath } : {}),
+    });
     // 本機保留 blob URL：送出端也能重播/下載（語音訊息尤其需要）。以傳輸 id 併入剛 emit 的那則。
-    const url = URL.createObjectURL(f);
-    setConvos((prev) => patchFileByTid(prev, pk, tid, { url }));
+    const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: mime }));
+    setConvos((prev) =>
+      patchFileByTid(prev, pk, tid, { url, ...(savedPath ? { savedPath } : {}) }),
+    );
     setOpen((prev) => (prev.includes(pk) ? prev : [...prev, pk]));
+  };
+
+  /** 瀏覽器 <input type=file> / 拖放路徑：拿不到完整路徑（瀏覽器安全限制）。 */
+  const sendFile = async (pk: string, f: File) => {
+    const bytes = new Uint8Array(await f.arrayBuffer());
+    await sendFileBytes(pk, f.name, f.type || "application/octet-stream", bytes);
+  };
+
+  /** Tauri 原生選檔（ADR-0103）：**拿得到完整路徑** → 自己送出的圖片重載後也能看原圖。 */
+  const attachFile = async (pk: string) => {
+    const picked = await pickFileToSend();
+    if (!picked) return; // 取消，或非 Tauri（呼叫端會退回 <input>）
+    await sendFileBytes(pk, picked.name, picked.mime, picked.bytes, picked.path);
   };
 
   // 明文紀錄導出（ADR-0094）：每個所選格式各產一份，經 save_file（Tauri）／下載（瀏覽器）寫出本機。
@@ -1577,7 +1594,13 @@ export function App(): JSX.Element {
           : {};
         // 企業政策（ADR-0048）：停用檔案/通話時不傳對應 handler → UI 隱藏。
         const fileProps =
-          activeBackend.sendFile && !policy.disableFiles ? { onSendFile: (f: File) => sendFile(pk, f) } : {};
+          activeBackend.sendFile && !policy.disableFiles
+            ? {
+                onSendFile: (f: File) => sendFile(pk, f),
+                // ADR-0103：Tauri 走原生選檔（有路徑）；瀏覽器沒有此 prop → 退回 <input type=file>。
+                ...(isTauri() ? { onAttach: () => void attachFile(pk) } : {}),
+              }
+            : {};
         const callProps =
           activeBackend.startCall && !policy.disableCalls
             ? { onStartCall: (media: CallMedia) => activeBackend.startCall!(pk, media) }

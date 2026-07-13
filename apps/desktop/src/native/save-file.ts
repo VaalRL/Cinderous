@@ -39,6 +39,55 @@ export async function saveTextFile(name: string, mime: string, text: string): Pr
   return browserDownload(name, mime, bytes);
 }
 
+/** 由副檔名猜 mime（原生選檔只給路徑，沒有 File 物件的 `type`）。 */
+const MIME_BY_EXT: Record<string, string> = {
+  png: "image/png",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  webp: "image/webp",
+  bmp: "image/bmp",
+  pdf: "application/pdf",
+  txt: "text/plain",
+  md: "text/markdown",
+  json: "application/json",
+  zip: "application/zip",
+  mp3: "audio/mpeg",
+  m4a: "audio/mp4",
+  wav: "audio/wav",
+  webm: "audio/webm",
+  mp4: "video/mp4",
+};
+function mimeOf(name: string): string {
+  const ext = name.split(".").pop()?.toLowerCase() ?? "";
+  return MIME_BY_EXT[ext] ?? "application/octet-stream";
+}
+
+/** 送出端選檔的結果（ADR-0103）：**含原檔路徑**。 */
+export interface PickedFile {
+  path: string;
+  name: string;
+  mime: string;
+  bytes: Uint8Array;
+}
+
+/**
+ * 以**原生選檔對話框**挑要送出的檔案（ADR-0103）——這是拿得到**完整路徑**的唯一方式：
+ * 瀏覽器的 `<input type=file>` 基於安全**不給**完整路徑，所以送出端一直沒有 `savedPath`，
+ * 導致自己送出的圖片重載後只剩縮圖、看不了原圖。
+ *
+ * 非 Tauri（瀏覽器）回 null，由呼叫端退回 `<input type=file>`（照舊，只是沒有路徑）。
+ */
+export async function pickFileToSend(): Promise<PickedFile | null> {
+  if (!isTauri()) return null;
+  const path = await invoke<string | null>("pick_existing_file", { name: "" });
+  if (!path) return null;
+  const bytes = await invoke<number[] | null>("read_saved_file", { path });
+  if (!bytes) return null;
+  const name = path.split(/[\\/]/).pop() || "file";
+  return { path, name, mime: mimeOf(name), bytes: new Uint8Array(bytes) };
+}
+
 /** 讀回原檔的結果（ADR-0102）。 */
 export type ReadOriginalResult =
   | { ok: true; url: string }

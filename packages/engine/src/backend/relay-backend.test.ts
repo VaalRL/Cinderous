@@ -990,6 +990,44 @@ describe("檔案投遞與另存（ADR-0093）", () => {
     b.stop();
   });
 
+  it("送出端原檔路徑（ADR-0103）：原生選檔帶入 savedPath → 自己送出的圖片重載後也讀得回原圖", () => {
+    const net = createInMemoryRelayNetwork();
+    const storeA = new MemoryStorage();
+    const a = new RelayChatBackend(storeA, (h) => net.connect("a", h), "Alice");
+    const b = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("b", h), "Bob");
+    a.start(noop);
+    b.start(noop);
+    a.addContact(b.selfNpub);
+
+    a.sendFile(
+      b.self.pubkey,
+      { name: "cat.png", mime: "image/png", bytes: new Uint8Array([1, 2]) },
+      { thumb: "data:image/jpeg;base64,AAAA", savedPath: "D:/圖片/cat.png" },
+    );
+
+    const sent = storeA.loadMessages(b.self.pubkey).find((m) => m.outgoing && m.file);
+    expect(sent?.file?.savedPath).toBe("D:/圖片/cat.png"); // 過去送出端永遠沒有路徑
+    expect(sent?.file?.thumb).toBe("data:image/jpeg;base64,AAAA");
+    a.stop();
+    b.stop();
+  });
+
+  it("瀏覽器路徑（無 savedPath）：仍正常送出，只是沒有原檔路徑", () => {
+    const net = createInMemoryRelayNetwork();
+    const storeA = new MemoryStorage();
+    const a = new RelayChatBackend(storeA, (h) => net.connect("a", h), "Alice");
+    const b = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("b", h), "Bob");
+    a.start(noop);
+    b.start(noop);
+    a.addContact(b.selfNpub);
+    a.sendFile(b.self.pubkey, { name: "x.bin", mime: "application/octet-stream", bytes: new Uint8Array([9]) });
+    const sent = storeA.loadMessages(b.self.pubkey).find((m) => m.outgoing && m.file);
+    expect(sent?.file?.name).toBe("x.bin");
+    expect(sent?.file?.savedPath).toBeUndefined();
+    a.stop();
+    b.stop();
+  });
+
   it("setFileSavedPath：回填收檔路徑並持久化（重載後仍見路徑）", () => {
     const net = createInMemoryRelayNetwork();
     const storeB = new MemoryStorage();

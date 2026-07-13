@@ -117,3 +117,4 @@
 | [0100](./0100-mobile-parity-anchors-cloud-files.md) | 行動端補齊：錨點/簽章清單、加密雲端備份、檔案傳輸（收斂 0086）＋引導設定移入 engine（SSOT） | 已接受 |
 | [0101](./0101-mobile-calls.md) | 行動端通話（語音/視訊）：媒體平台縫（<video> 收斂於單一檔）＋react-native-webrtc 移植路徑 | 已接受 |
 | [0102](./0102-image-thumbnails-and-relocate-original.md) | 圖片跨 session：持久化縮圖＋從 savedPath 讀回原圖＋原檔搬走可重新指定（收斂 0023） | 已接受 |
+| [0103](./0103-native-file-picker-sender-path.md) | 送出端改走原生選檔對話框以取得原檔路徑（補完 0102：自己傳的圖也看得到原圖） | 已接受 |

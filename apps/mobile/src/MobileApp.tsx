@@ -266,7 +266,8 @@ export function MobileApp({
     void pickFile().then(async (f) => {
       if (!f) return;
       const thumb = await makeThumbnail(f.bytes, f.mime); // ADR-0102：只存本機、不外送
-      b.sendFile?.(pk, f, thumb ?? undefined);
+      // 行動端目前用 DOM <input>（無完整路徑）→ 不帶 savedPath；真 RN 的 document picker 會給 URI（ADR-0103）。
+      b.sendFile?.(pk, f, thumb ? { thumb } : {});
     });
   };
 

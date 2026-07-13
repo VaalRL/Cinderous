@@ -208,6 +208,11 @@ export interface ConversationProps {
   onMarkRead?: () => void;
   /** 以 P2P 傳送檔案（未提供則不顯示檔案功能）。 */
   onSendFile?: (file: File) => void;
+  /**
+   * 以**原生選檔對話框**挑檔（ADR-0103）；提供時 📎 走這條（拿得到完整路徑）。
+   * 未提供（瀏覽器）則退回 `<input type=file>`——那條路拿不到路徑，是瀏覽器的安全限制。
+   */
+  onAttach?: () => void;
   /** 發起語音/視訊通話（未提供則不顯示通話按鈕）。 */
   onStartCall?: (media: CallMedia) => void;
   /** 群組模式：以發送者公鑰解析顯示暱稱（提供即為群組視窗）。 */
@@ -793,7 +798,13 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
         </button>
         {props.onSendFile ? (
           <>
-            <button className="tool" title={t("file_attach")} onClick={() => fileRef.current?.click()}>📎</button>
+            <button
+              className="tool"
+              title={t("file_attach")}
+              onClick={() => (props.onAttach ? props.onAttach() : fileRef.current?.click())}
+            >
+              📎
+            </button>
             <input
               ref={fileRef}
               type="file"

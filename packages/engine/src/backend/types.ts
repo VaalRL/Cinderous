@@ -179,9 +179,12 @@ export interface ChatBackend {
   setReadReceipts?(enabled: boolean): void;
   /**
    * 以 WebRTC P2P 傳送檔案（不經中繼），回傳追蹤用的傳輸 id。
-   * `thumb`（ADR-0102）：圖片的縮圖 data URL——由前端產生（需 canvas），持久化供跨 session 顯示。
+   *
+   * `opts.thumb`（ADR-0102）：圖片縮圖 data URL——前端產生（需 canvas），只存本機、不外送。
+   * `opts.savedPath`（ADR-0103）：**送出端原檔的本機路徑**。只有原生選檔對話框拿得到
+   * （瀏覽器 `<input type=file>` 基於安全不給完整路徑）；有了它，自己送出的圖片重載後也能看原圖。
    */
-  sendFile?(to: PubkeyHex, file: OutgoingFile, thumb?: string): string;
+  sendFile?(to: PubkeyHex, file: OutgoingFile, opts?: { thumb?: string; savedPath?: string }): string;
   /** 記錄某圖片訊息的縮圖（ADR-0102）：收檔端產生縮圖後回填。 */
   setFileThumb?(contact: PubkeyHex, messageId: string, thumb: string): void;
   /** 回填某檔案訊息收檔後的本機儲存路徑（ADR-0093）：App 另存完成後呼叫以持久化路徑。 */
