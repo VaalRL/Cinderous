@@ -105,6 +105,22 @@ export interface Messages {
   msgStatus_read: string;
   settings_readReceipts: string;
   settings_readReceiptsHint: string;
+  // 保留上限與導出（ADR-0094）
+  settings_retention: string;
+  settings_retentionHint: string;
+  retention_unlimited: string;
+  retention_custom: string;
+  settings_storageFull: string;
+  settings_export: string;
+  settings_exportHint: string;
+  export_title: string;
+  export_warning: string;
+  export_scope: string;
+  export_selectAll: string;
+  export_format: string;
+  export_run: string;
+  export_this: string;
+  export_empty: string;
   settings_invisible: string;
   settings_invisibleHint: string;
   ai_stylePolite: string;
@@ -495,6 +511,21 @@ const zhHant: Messages = {
   msgStatus_read: "已讀",
   settings_readReceipts: "已讀回條",
   settings_readReceiptsHint: "開啟後，你讀取訊息會通知對方；關閉則不送、也不顯示對方的已讀（互惠）。",
+  settings_retention: "訊息保留上限",
+  settings_retentionHint: "每個對話在本機最多保留幾則；超過即刪最舊。預設無上限（不替你刪）。瀏覽器版空間有限，無上限可能撞配額。",
+  retention_unlimited: "無上限",
+  retention_custom: "自訂",
+  settings_storageFull: "⚠ 本機儲存空間已滿，新訊息可能未保存。建議設一個保留上限，或改用桌面版。",
+  settings_export: "導出紀錄",
+  settings_exportHint: "把對話紀錄導出成明文檔案（備份/存證）。",
+  export_title: "導出對話紀錄",
+  export_warning: "⚠ 導出的是明文，離開裝置加密保護。請自行妥善保管，勿外流。",
+  export_scope: "範圍",
+  export_selectAll: "全選",
+  export_format: "格式",
+  export_run: "導出",
+  export_this: "導出此對話",
+  export_empty: "沒有可導出的對話。",
   settings_invisible: "隱身",
   settings_invisibleHint: "開啟後完全不廣播在線狀態（中繼站與聯絡人皆顯示你離線），但仍可正常收發訊息。",
   ai_stylePolite: "更客氣",
@@ -882,6 +913,21 @@ const en: Messages = {
   msgStatus_read: "Read",
   settings_readReceipts: "Read receipts",
   settings_readReceiptsHint: "When on, others are told when you read their messages; off means you neither send yours nor see theirs (reciprocal).",
+  settings_retention: "Message retention",
+  settings_retentionHint: "How many messages to keep locally per conversation; oldest are dropped beyond it. Default is unlimited (nothing deleted for you). Browser storage is limited, so unlimited may hit the quota.",
+  retention_unlimited: "Unlimited",
+  retention_custom: "Custom",
+  settings_storageFull: "⚠ Local storage is full; new messages may not be saved. Consider setting a retention limit, or use the desktop app.",
+  settings_export: "Export records",
+  settings_exportHint: "Export conversation records to a plaintext file (backup / archive).",
+  export_title: "Export conversations",
+  export_warning: "⚠ Exports are plaintext, outside the device's encryption. Keep them safe and do not share.",
+  export_scope: "Scope",
+  export_selectAll: "Select all",
+  export_format: "Format",
+  export_run: "Export",
+  export_this: "Export this conversation",
+  export_empty: "No conversations to export.",
   settings_invisible: "Invisible",
   settings_invisibleHint: "When on, your presence is never broadcast (relay and contacts both see you offline), but you can still send and receive normally.",
   ai_stylePolite: "More polite",

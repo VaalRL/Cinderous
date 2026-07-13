@@ -113,6 +113,8 @@ export interface AppStorage {
   setMessageStatus(contactPubkey: string, messageId: string, status: MessageStatus): void;
   /** 記錄某檔案訊息收檔後的本機儲存路徑（ADR-0093）；訊息不存在或無 file 則忽略。 */
   setFileSavedPath(contactPubkey: string, messageId: string, savedPath: string): void;
+  /** 設定每對話保留上限（ADR-0094）；`0`＝無上限。變更後即時對既有對話套用逐出。 */
+  setMaxPerConvo(max: number): void;
   loadReactions(): StoredReaction[];
   addReaction(reaction: StoredReaction): void;
   /** 標記某訊息為已收回（NIP-09）。 */

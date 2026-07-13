@@ -108,3 +108,4 @@
 | [0091](./0091-forward-secrecy-mls-upgrade-design.md) | 前向保密升級：統一採 MLS（含正常使用者可靠性護欄） | 已棄用（暫緩未採納，維持 0028） |
 | [0092](./0092-node-membership-self-report-and-conformance-audit.md) | 節點成員自報＋一致性稽核＋簽章可驗證記錄（申請/審查/稽核介面化） | 已接受 |
 | [0093](./0093-multi-device-delivery-and-file-persistence.md) | 多設備即時投遞與檔案接收：檔案 metadata 中繼化＋位元組 P2P＋收檔另存至使用者選定路徑 | 已接受 |
+| [0094](./0094-retention-limit-and-plaintext-export.md) | 本地紀錄保留上限（可設定、預設無上限）與明文紀錄導出（TXT/MD/JSON、範圍可選） | 已接受 |

@@ -26,6 +26,21 @@ export async function saveIncomingFile(name: string, mime: string, bytes: Uint8A
     return savedPath ? { savedPath } : {};
   }
   // 瀏覽器後備：以 <a download> 觸發瀏覽器下載（路徑由瀏覽器決定、不可知）。
+  return browserDownload(name, mime, bytes);
+}
+
+/** 導出文字紀錄另存（ADR-0094）：Tauri 跳原生另存、瀏覽器下載。回傳路徑（Tauri）或 url（瀏覽器）。 */
+export async function saveTextFile(name: string, mime: string, text: string): Promise<SaveResult> {
+  const bytes = new TextEncoder().encode(text);
+  if (isTauri()) {
+    const savedPath = await invoke<string | null>("save_file", { name, bytes: Array.from(bytes) });
+    return savedPath ? { savedPath } : {};
+  }
+  return browserDownload(name, mime, bytes);
+}
+
+/** 瀏覽器下載共用：以 <a download> 觸發，回傳可再下載的物件 URL。 */
+function browserDownload(name: string, mime: string, bytes: Uint8Array): SaveResult {
   const blob = new Blob([bytes as BlobPart], { type: mime || "application/octet-stream" });
   const url = URL.createObjectURL(blob);
   if (typeof document !== "undefined") {

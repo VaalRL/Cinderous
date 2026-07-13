@@ -108,6 +108,8 @@ export interface ConversationProps {
   senderName?: (pubkey: string) => string;
   /** 離開群組（群組視窗才提供）。 */
   onLeaveGroup?: () => void;
+  /** 導出此對話紀錄（ADR-0094）；未提供則不顯示。 */
+  onExport?: () => void;
   /** 群組成員清單（提供即顯示 👥 成員管理入口，M9）。 */
   groupMembers?: MentionCandidate[];
   /** 自己是否為群組管理者（可增/移成員）。 */
@@ -536,6 +538,17 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
             onClick={props.onLeaveGroup}
           >
             ⎋
+          </span>
+        ) : null}
+        {props.onExport ? (
+          <span
+            className="win__btn"
+            role="button"
+            title={t("export_this")}
+            data-testid="export-convo"
+            onClick={props.onExport}
+          >
+            📤
           </span>
         ) : null}
         <ChatBgPicker pubkey={contact.pubkey} />

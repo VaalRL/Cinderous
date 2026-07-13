@@ -51,6 +51,10 @@ export interface SettingsPanelProps {
   onToggleNotifyHidePreview?: () => void;
   readReceipts?: boolean;
   onToggleReadReceipts?: () => void;
+  /** 訊息保留上限（ADR-0094）；未提供則不顯示。`cap` 0＝無上限。 */
+  retention?: { cap: number; onChange: (n: number) => void; full: boolean };
+  /** 導出紀錄（ADR-0094）；未提供則不顯示。 */
+  onExport?: () => void;
   /** 隱身（ADR-0088）：停止一切在線廣播（relay＋P2P）；未提供則不顯示該區塊。 */
   invisible?: boolean;
   onToggleInvisible?: () => void;
@@ -722,12 +726,66 @@ export function SettingsPanel(props: SettingsPanelProps): JSX.Element {
               </label>
             </section>
           ) : null}
+          {props.retention ? <RetentionSettings {...props.retention} /> : null}
+          {props.onExport ? (
+            <section className="settings__sec">
+              <h4>{t("settings_export")}</h4>
+              <p className="settings__hint">{t("settings_exportHint")}</p>
+              <button className="retention__opt" onClick={props.onExport}>{t("export_title")}…</button>
+            </section>
+          ) : null}
           {props.ollama && props.onOllamaChange ? (
             <OllamaSettings value={props.ollama} onChange={props.onOllamaChange} />
           ) : null}
         </div>
       </div>
     </div>
+  );
+}
+
+const RETENTION_PRESETS = [0, 1000, 5000, 10000];
+
+/** 訊息保留上限設定（ADR-0094）：預設無上限（0）；預設值或自訂 N；滿載時提示。 */
+function RetentionSettings({ cap, onChange, full }: { cap: number; onChange: (n: number) => void; full: boolean }): JSX.Element {
+  const { t } = useI18n();
+  const isPreset = RETENTION_PRESETS.includes(cap);
+  const [customOpen, setCustomOpen] = useState<boolean>(!isPreset && cap > 0);
+  return (
+    <section className="settings__sec">
+      <h4>{t("settings_retention")}</h4>
+      <p className="settings__hint">{t("settings_retentionHint")}</p>
+      <div className="retention__row">
+        {RETENTION_PRESETS.map((n) => (
+          <button
+            key={n}
+            className={`retention__opt${!customOpen && cap === n ? " on" : ""}`}
+            onClick={() => {
+              setCustomOpen(false);
+              onChange(n);
+            }}
+          >
+            {n === 0 ? t("retention_unlimited") : n.toLocaleString()}
+          </button>
+        ))}
+        <button className={`retention__opt${customOpen ? " on" : ""}`} onClick={() => setCustomOpen(true)}>
+          {t("retention_custom")}
+        </button>
+        {customOpen ? (
+          <input
+            className="retention__custom"
+            type="number"
+            min={0}
+            defaultValue={cap > 0 && !isPreset ? cap : ""}
+            placeholder="1000"
+            onChange={(e) => {
+              const v = parseInt(e.target.value, 10);
+              if (Number.isFinite(v) && v >= 0) onChange(v);
+            }}
+          />
+        ) : null}
+      </div>
+      {full ? <div className="retention__full">{t("settings_storageFull")}</div> : null}
+    </section>
   );
 }
 

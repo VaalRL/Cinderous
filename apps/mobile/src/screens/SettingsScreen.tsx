@@ -50,6 +50,9 @@ export function SettingsScreen({
   onAccent,
   invisible,
   onInvisible,
+  retention,
+  onRetention,
+  onExport,
   onLogout,
 }: {
   selfName: string;
@@ -65,6 +68,11 @@ export function SettingsScreen({
   /** 隱身（ADR-0088）：停止一切在線廣播。 */
   invisible: boolean;
   onInvisible: (v: boolean) => void;
+  /** 每對話保留上限（ADR-0094）；0＝無上限。未提供則不顯示。 */
+  retention?: number;
+  onRetention?: (n: number) => void;
+  /** 導出全部紀錄（ADR-0094）。 */
+  onExport?: () => void;
   onLogout: () => void;
 }): JSX.Element {
   const tk = useMemo(() => resolveTheme({ theme, accent }), [theme, accent]);
@@ -150,6 +158,36 @@ export function SettingsScreen({
             </Text>
           </Pressable>
         </View>
+
+        {/* 訊息保留上限（ADR-0094） */}
+        {onRetention ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>{t("settings_retention")}</Text>
+            <Text style={styles.label}>{t("settings_retentionHint")}</Text>
+            <View style={[styles.rowSeg, { flexWrap: "wrap" }]}>
+              {[0, 1000, 5000, 10000].map((n) => (
+                <Pressable key={n} style={seg(retention === n)} accessibilityRole="button" onPress={() => onRetention(n)}>
+                  <Text style={segTxt(retention === n)}>{n === 0 ? t("retention_unlimited") : String(n)}</Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+        ) : null}
+
+        {/* 明文紀錄導出（ADR-0094） */}
+        {onExport ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>{t("settings_export")}</Text>
+            <Text style={styles.label}>{t("export_warning")}</Text>
+            <Pressable
+              accessibilityRole="button"
+              onPress={onExport}
+              style={[styles.seg, { alignSelf: "flex-start", borderColor: tk.border, backgroundColor: tk.field }]}
+            >
+              <Text style={[styles.segText, { color: tk.ink }]}>{t("export_run")}</Text>
+            </Pressable>
+          </View>
+        ) : null}
 
         {/* 中繼站 */}
         <View style={styles.section}>

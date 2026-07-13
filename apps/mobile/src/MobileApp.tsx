@@ -2,7 +2,8 @@
 // 接 @cinder/engine 的 ChatBackend（示範或真實 relay，見 backend.ts）；主題/主色/語言由本殼掌管，
 // 設定分頁即時切換。正式版把後端換成注入 RelayChatBackend＋原生安全儲存即可（同一套 UI）。
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { ChatBackend, ChatMessage, Contact, Group, Status } from "@cinder/engine";
+import type { AppStorage, ChatBackend, ChatMessage, Contact, Group, Status } from "@cinder/engine";
+import { exportExtension, exportMime, type ExportFormat, exportRecords, LocalStorage } from "@cinder/engine";
 import { type Locale, type MessageKey, translate } from "@cinder/i18n";
 import type { Theme } from "@cinder/theme";
 import { StyleSheet, View } from "react-native-web";
@@ -27,6 +28,32 @@ const STATUS_KEY: Record<Status, MessageKey> = {
 };
 
 const shell = StyleSheet.create({ root: { flex: 1 } });
+
+// 每對話保留上限（ADR-0094）：裝置本地、不同步；0＝無上限（預設）。
+const RETENTION_KEY = "nb.retentionCap";
+function readRetentionCap(): number {
+  try {
+    return Math.max(0, parseInt(localStorage.getItem(RETENTION_KEY) ?? "0", 10) || 0);
+  } catch {
+    return 0;
+  }
+}
+
+/** 導出文字檔（明文，ADR-0094）：RN-web 以瀏覽器下載。 */
+function downloadText(name: string, mime: string, text: string): void {
+  try {
+    const blob = new Blob([text], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  } catch {
+    /* 忽略（無 DOM 環境） */
+  }
+}
 
 export function MobileApp({
   relayUrl = null,
@@ -55,7 +82,9 @@ export function MobileApp({
   const [selfNpub, setSelfNpub] = useState("");
   const [selfNsec, setSelfNsec] = useState("");
   const [invisible, setInvisible] = useState(false);
+  const [retentionCap, setRetentionCapState] = useState<number>(() => readRetentionCap());
   const backendRef = useRef<ChatBackend | null>(null);
+  const storeRef = useRef<AppStorage | null>(null);
   const screenRef = useRef(screen);
   screenRef.current = screen;
   const activeIdRef = useRef(activeId);
@@ -67,7 +96,10 @@ export function MobileApp({
 
   const handleSignIn = (identity: MobileIdentity): void => {
     backendRef.current?.stop();
-    const backend = createBackend(identity, relayUrl);
+    // ADR-0094：真實 relay 用外部持有的儲存（供保留上限/導出）；示範模式無持久化。
+    const store = relayUrl ? new LocalStorage(identity.pubkey, readRetentionCap()) : null;
+    storeRef.current = store;
+    const backend = createBackend(identity, relayUrl, store ?? undefined);
     backendRef.current = backend;
     setSelfPubkey(identity.pubkey);
     setSelfName(identity.name);
@@ -121,6 +153,27 @@ export function MobileApp({
   const toggleInvisible = (v: boolean): void => {
     setInvisible(v);
     backendRef.current?.setInvisible?.(v);
+  };
+  // 保留上限（ADR-0094）：寫入偏好、即時套用到當前身分的儲存。
+  const changeRetention = (n: number): void => {
+    const v = Math.max(0, Math.floor(n));
+    try {
+      localStorage.setItem(RETENTION_KEY, String(v));
+    } catch {
+      /* 忽略 */
+    }
+    setRetentionCapState(v);
+    storeRef.current?.setMaxPerConvo(v);
+  };
+  // 明文紀錄導出（ADR-0094）：導出全部對話，三種格式各下載一份（RN-web）。
+  const exportAll = (): void => {
+    const storage = storeRef.current;
+    if (!storage) return;
+    const stamp = new Date().toISOString().slice(0, 10);
+    for (const fmt of ["txt", "md", "json"] as ExportFormat[]) {
+      const text = exportRecords(storage, fmt, { selfLabel: selfName || "我", now: Date.now() });
+      downloadText(`cinder-紀錄-${stamp}.${exportExtension(fmt)}`, exportMime(fmt), text);
+    }
   };
   const nameFor = (pk: string): string =>
     pk === selfPubkey ? selfName : contacts.find((c) => c.pubkey === pk)?.name ?? `${pk.slice(0, 8)}…`;
@@ -192,6 +245,7 @@ export function MobileApp({
           onAccent={setAccent}
           invisible={invisible}
           onInvisible={toggleInvisible}
+          {...(relayUrl ? { retention: retentionCap, onRetention: changeRetention, onExport: exportAll } : {})}
           onLogout={logout}
         />
       )}

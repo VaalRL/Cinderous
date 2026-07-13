@@ -346,6 +346,32 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
 /* 「檔案在你另一台裝置」/「已接收（未儲存）」提示。 */
 .filecard__note { font-size: 10px; color: var(--muted); margin-top: 3px; font-style: italic; }
 
+/* 明文紀錄導出（ADR-0094）。 */
+.export__title { margin: 0 0 8px; font-size: 15px; }
+.export__warn { font-size: 12px; color: #b45309; background: rgba(245,158,11,.12); border-radius: 6px; padding: 8px 10px; margin: 0 0 12px; }
+.export__empty { font-size: 13px; color: var(--muted); }
+.export__sect { margin-bottom: 12px; }
+.export__head { display: flex; justify-content: space-between; align-items: center; font-size: 12px; font-weight: 600; color: var(--muted); margin-bottom: 6px; }
+.export__all { font-size: 11px; color: var(--accent); background: none; border: none; cursor: pointer; padding: 0; }
+.export__list { max-height: 220px; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px; }
+.export__row { display: flex; align-items: center; gap: 8px; padding: 6px 10px; font-size: 13px; cursor: pointer; }
+.export__row:hover { background: var(--border); }
+.export__ic { font-size: 13px; }
+.export__name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.export__fmts { display: flex; gap: 14px; }
+.export__fmt { display: flex; align-items: center; gap: 5px; font-size: 13px; cursor: pointer; }
+.export__actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+.export__cancel, .export__go { font-size: 13px; padding: 6px 14px; border-radius: 6px; border: 1px solid var(--border); cursor: pointer; }
+.export__go { background: var(--accent); color: #fff; border-color: var(--accent); }
+.export__go:disabled { opacity: .5; cursor: default; }
+
+/* 保留上限設定（ADR-0094）。 */
+.retention__row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 6px; }
+.retention__opt { font-size: 12px; padding: 4px 10px; border-radius: 6px; border: 1px solid var(--border); background: none; cursor: pointer; color: var(--ink); }
+.retention__opt.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+.retention__custom { width: 90px; font-size: 12px; padding: 4px 8px; border-radius: 6px; border: 1px solid var(--border); }
+.retention__full { font-size: 12px; color: #b45309; margin-top: 6px; }
+
 /* 貼圖 */
 .stickerpick { padding: 6px 8px; background: var(--panel); border-top: 1px solid var(--border); }
 .stickerpick__tabs { display: flex; gap: 4px; padding-bottom: 6px; border-bottom: 1px solid var(--border); margin-bottom: 6px; overflow-x: auto; }

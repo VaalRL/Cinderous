@@ -52,8 +52,16 @@ describe("MemoryStorage", () => {
     expect(s.loadDeleted()).toEqual(["m2"]);
   });
 
-  it("每對話訊息上限：超過即逐出最舊、保留最近（P0-1）", () => {
-    const s = new MemoryStorage();
+  it("預設無上限（ADR-0094）：不逐出、全部保留", () => {
+    const s = new MemoryStorage(); // 預設 0＝無上限
+    for (let i = 0; i < MESSAGES_PER_CONVO + 50; i++) {
+      s.appendMessage({ id: `m${i}`, contact: "aa", outgoing: true, text: "x", at: i });
+    }
+    expect(s.loadMessages("aa").length).toBe(MESSAGES_PER_CONVO + 50);
+  });
+
+  it("有限模式：超過設定上限即逐出最舊、保留最近（P0-1／ADR-0094）", () => {
+    const s = new MemoryStorage(MESSAGES_PER_CONVO);
     for (let i = 0; i < MESSAGES_PER_CONVO + 5; i++) {
       s.appendMessage({ id: `m${i}`, contact: "aa", outgoing: true, text: "x", at: i });
     }
@@ -61,6 +69,16 @@ describe("MemoryStorage", () => {
     expect(ids.length).toBe(MESSAGES_PER_CONVO);
     expect(ids[0]).toBe("m5"); // m0..m4 被逐出
     expect(ids[ids.length - 1]).toBe(`m${MESSAGES_PER_CONVO + 4}`);
+  });
+
+  it("setMaxPerConvo：調小上限即時逐出既有；調回 0 之後不再逐出", () => {
+    const s = new MemoryStorage(); // 無上限
+    for (let i = 0; i < 20; i++) s.appendMessage({ id: `m${i}`, contact: "aa", outgoing: true, text: "x", at: i });
+    s.setMaxPerConvo(5); // 立即逐出到剩 5 最新
+    expect(s.loadMessages("aa").map((m) => m.id)).toEqual(["m15", "m16", "m17", "m18", "m19"]);
+    s.setMaxPerConvo(0); // 回無上限：不再逐出，之後可累積
+    for (let i = 20; i < 30; i++) s.appendMessage({ id: `m${i}`, contact: "aa", outgoing: true, text: "x", at: i });
+    expect(s.loadMessages("aa").length).toBe(15);
   });
 
   it("remapContact（ADR-0052）：搬移對話歷史、去重、按時間排序、移除舊聯絡人", () => {

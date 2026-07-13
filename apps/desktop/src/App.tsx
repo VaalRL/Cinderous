@@ -21,7 +21,7 @@ import { BrowserChatBackend } from "@cinder/engine";
 import { normalizeRelayUrl, RelayChatBackend, webSocketConnector } from "@cinder/engine";
 import { getKeyVault } from "./native/keyvault.js";
 import { getNotifier, onNotificationClick } from "./native/notify.js";
-import { saveIncomingFile } from "./native/save-file.js";
+import { saveIncomingFile, saveTextFile } from "./native/save-file.js";
 import { useI18n } from "./i18n.js";
 import { type Layout, useLayout } from "./layout.js";
 import { isWrappedValue, passChange, passDisable, passEnable, passLock, passRescue, passUnlock } from "./native/passlock.js";
@@ -54,7 +54,7 @@ import type {
   Self,
   Status,
 } from "@cinder/engine";
-import { LocalStorage } from "@cinder/engine";
+import { LocalStorage, onStorageQuota, exportRecords, exportExtension, exportMime, type ExportFormat } from "@cinder/engine";
 import { TauriStorage } from "./native/tauri-storage.js";
 import type { AppStorage } from "@cinder/engine";
 import { cleanOnPasteEnabled, setCleanOnPasteEnabled } from "./ui/url-hygiene.js";
@@ -89,6 +89,7 @@ import { createPairingOffer, runPairSource, runPairTarget, webRtcPairTransport }
 import { applyPairBundle } from "@cinder/engine";
 import { PairDeviceModal, type PairPhase } from "./ui/PairDeviceModal.js";
 import { SettingsPanel } from "./ui/SettingsPanel.js";
+import { ExportModal, type ExportConvoItem } from "./ui/ExportModal.js";
 import { RELAY_URL_KEY, SignIn } from "./ui/SignIn.js";
 import { RESCUE_RESET_OK, UnlockScreen } from "./ui/UnlockScreen.js";
 import { SummaryModal } from "./ui/SummaryModal.js";
@@ -104,6 +105,15 @@ const NOTIFY_PREVIEW_KEY = "nb.notifyHidePreview";
 const READ_RECEIPTS_KEY = "nb.readReceipts";
 const INVISIBLE_KEY = "nb.invisible";
 const OLLAMA_KEY = "nb.ollama";
+// 每對話保留上限（ADR-0094）：裝置本地、不同步；`0`＝無上限（預設）。
+const RETENTION_KEY = "nb.retentionCap";
+function readRetentionCap(): number {
+  try {
+    return Math.max(0, parseInt(localStorage.getItem(RETENTION_KEY) ?? "0", 10) || 0);
+  } catch {
+    return 0;
+  }
+}
 
 /** 本機 AI 改寫設定（ADR-0060）；`enabled` 開啟才在 composer 顯示 ✨。 */
 interface OllamaState extends OllamaConfig {
@@ -305,6 +315,9 @@ export function App(): JSX.Element {
   const [pairPhase, setPairPhase] = useState<PairPhase | null>(null);
   const pairDecision = useRef<((ok: boolean) => void) | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // 明文紀錄導出（ADR-0094）：null＝關；[]＝全部；[keys]＝預選某對話。
+  const [exportPreselect, setExportPreselect] = useState<string[] | null>(null);
+  const setExportOpen = (open: boolean) => setExportPreselect(open ? [] : null);
   const [addIdOpen, setAddIdOpen] = useState(false);
   const [rosterOpen, setRosterOpen] = useState(false);
   const [policy, setPolicy] = useState<OrgPolicy>({});
@@ -343,6 +356,19 @@ export function App(): JSX.Element {
       return false;
     }
   });
+  // 每對話保留上限（ADR-0094）：0＝無上限（預設）。
+  const [retentionCap, setRetentionCapState] = useState<number>(() => readRetentionCap());
+  const [storageFull, setStorageFull] = useState<boolean>(false);
+  const setRetentionCap = (n: number): void => {
+    const v = Math.max(0, Math.floor(n));
+    try {
+      localStorage.setItem(RETENTION_KEY, String(v));
+    } catch {
+      /* 忽略 */
+    }
+    setRetentionCapState(v);
+    if (v > 0) setStorageFull(false); // 設有限上限＝逐出釋放空間，清除滿載警告（若仍不足，下次寫入失敗會再現）
+  };
   const [ollama, setOllama] = useState<OllamaState>(() => {
     try {
       const raw = localStorage.getItem(OLLAMA_KEY);
@@ -410,6 +436,15 @@ export function App(): JSX.Element {
   useEffect(() => {
     backend?.setInvisible?.(invisible);
   }, [backend, invisible]);
+  // 每對話保留上限（ADR-0094）：後端重建或設定變動時，套用到當前身分的儲存（0＝無上限）。
+  useEffect(() => {
+    storageRef.current?.setMaxPerConvo(retentionCap);
+  }, [backend, retentionCap]);
+  // 無上限保留下 localStorage 撞配額時，提醒使用者（ADR-0094）。
+  useEffect(() => {
+    onStorageQuota(() => setStorageFull(true));
+    return () => onStorageQuota(undefined);
+  }, []);
   /** 作用中身分的儲存實例（D4a 配對匯出用；示範模式為 null）。 */
   const storageRef = useRef<AppStorage | null>(null);
   const selfRef = useRef<Self | null>(self);
@@ -449,9 +484,10 @@ export function App(): JSX.Element {
           }
         }
         if (cancelled) return;
-        // 配對匯出（D4a）需與後端同一份儲存；非 Tauri 走 LocalStorage 同命名空間。
-        storageRef.current = storage ?? (active.relayUrl ? new LocalStorage(active.namespace) : null);
-        const b = buildBackend(active, override, storage);
+        // 配對匯出（D4a）與保留上限（ADR-0094）需與後端**同一份**儲存；非 Tauri 走 LocalStorage 同命名空間。
+        const store: AppStorage | undefined = storage ?? (active.relayUrl ? new LocalStorage(active.namespace) : undefined);
+        storageRef.current = store ?? null;
+        const b = buildBackend(active, override, store);
         setConn(active.relayUrl ? "connecting" : "online");
         setSelf({ ...b.self });
         setBackend(b);
@@ -746,6 +782,7 @@ export function App(): JSX.Element {
   const enterWithNsec = async (p: Profile, nsec: string): Promise<boolean> => {
     const ts = new TauriStorage(p.namespace);
     await ts.hydrate();
+    storageRef.current = ts; // ADR-0094：讓保留上限與導出用到後端同一份儲存
     const b = buildBackend(p, nsec, ts);
     setConn(p.relayUrl ? "connecting" : "online");
     setSelf({ ...b.self });
@@ -825,9 +862,12 @@ export function App(): JSX.Element {
       await getKeyVault().setKey(getPublicKey(sk), nsec);
       const ts = new TauriStorage(first.namespace);
       await ts.hydrate(); // 首個身分：空
+      storageRef.current = ts; // ADR-0094：與後端同一份儲存
       b = buildBackend(first, nsec, ts);
     } else {
-      b = buildBackend(first); // 瀏覽器：後端自動產生 nsec 存 localStorage（既有行為）
+      const ls = new LocalStorage(first.namespace);
+      storageRef.current = ls; // ADR-0094：與後端同一份儲存
+      b = buildBackend(first, undefined, ls); // 瀏覽器：後端自動產生 nsec 存 localStorage（既有行為）
     }
     const profile: Profile = { pubkey: b.self.pubkey, name, relayUrl, enterprise: false, namespace: "" };
     const next = upsertProfile(profilesState, profile);
@@ -1104,6 +1144,20 @@ export function App(): JSX.Element {
     setOpen((prev) => (prev.includes(pk) ? prev : [...prev, pk]));
   };
 
+  // 明文紀錄導出（ADR-0094）：每個所選格式各產一份，經 save_file（Tauri）／下載（瀏覽器）寫出本機。
+  const doExport = async (keys: string[], formats: ExportFormat[]): Promise<void> => {
+    const storage = storageRef.current;
+    if (!storage) return;
+    const selfLabel = selfRef.current?.name ?? "我";
+    const stamp = new Date().toISOString().slice(0, 10);
+    setExportPreselect(null);
+    for (const fmt of formats) {
+      const text = exportRecords(storage, fmt, { keys, selfLabel, now: Date.now() });
+      // eslint-disable-next-line no-await-in-loop -- 逐一另存對話框需序列化，避免多框同時彈出
+      await saveTextFile(`cinder-紀錄-${stamp}.${exportExtension(fmt)}`, exportMime(fmt), text);
+    }
+  };
+
   // 跨身分互加防呆（ADR-0055）：加自己任一身分（作用中或其他 profile）都會把分身連結給
   // 中繼站、破壞區隔，故從介面擋下（丟 "self-identity" 讓 AddContact 顯示明確訊息）。
   const addContactGuarded = (input: string): void => {
@@ -1374,7 +1428,28 @@ export function App(): JSX.Element {
           onToggleInvisible={toggleInvisible}
           ollama={ollama}
           onOllamaChange={updateOllama}
+          {...(storageRef.current
+            ? {
+                retention: { cap: retentionCap, onChange: setRetentionCap, full: storageFull },
+                onExport: () => setExportOpen(true),
+              }
+            : {})}
           onClose={() => setSettingsOpen(false)}
+        />
+      ) : null}
+      {exportPreselect !== null ? (
+        <ExportModal
+          conversations={Object.keys(convos)
+            .filter((k) => (convos[k]?.length ?? 0) > 0)
+            .map((k): ExportConvoItem => {
+              const g = groups.find((gr) => gr.id === k);
+              if (g) return { key: k, name: g.name, kind: "group" };
+              const c = contacts.find((ct) => ct.pubkey === k);
+              return { key: k, name: c?.name ?? `${k.slice(0, 12)}…`, kind: "contact" };
+            })}
+          {...(exportPreselect.length > 0 ? { initialKeys: exportPreselect } : {})}
+          onExport={(keys, formats) => void doExport(keys, formats)}
+          onClose={() => setExportPreselect(null)}
         />
       ) : null}
       {summary ? (
@@ -1456,6 +1531,7 @@ export function App(): JSX.Element {
                     },
                   }
                 : {})}
+              {...(storageRef.current ? { onExport: () => setExportPreselect([pk]) } : {})}
               onClose={() => closeConvo(pk)}
             />
             </div>
@@ -1512,6 +1588,7 @@ export function App(): JSX.Element {
               activeBackend.sendTyping(pk);
             }}
             onNudge={() => activeBackend.sendNudge(pk)}
+            {...(storageRef.current ? { onExport: () => setExportPreselect([pk]) } : {})}
             onClose={() => closeConvo(pk)}
           />
           </div>

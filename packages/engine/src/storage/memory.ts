@@ -2,7 +2,6 @@ import {
   type AppStorage,
   MESSAGE_STATUS_RANK,
   type MessageStatus,
-  MESSAGES_PER_CONVO,
   type StorageSnapshot,
   type StoredBootstrapList,
   type StoredContact,
@@ -21,6 +20,25 @@ export class MemoryStorage implements AppStorage {
   private readonly deleted = new Set<string>();
   private blocked: StoredContact[] = [];
   private groups: StoredGroup[] = [];
+  /** 每對話持久化上限（ADR-0094）；`0`＝無上限（預設，不逐出）。 */
+  private maxPerConvo: number;
+
+  constructor(maxPerConvo = 0) {
+    this.maxPerConvo = Math.max(0, Math.floor(maxPerConvo));
+  }
+
+  /** 每對話保留上限（ADR-0094）：`0`＝無上限。變更後即時對所有對話套用逐出。 */
+  setMaxPerConvo(max: number): void {
+    this.maxPerConvo = Math.max(0, Math.floor(max));
+    if (this.maxPerConvo > 0) for (const list of this.messages.values()) this.cap(list);
+  }
+
+  /** 依上限逐出最舊（`0`＝無上限、不動）。 */
+  private cap(list: StoredMessage[]): void {
+    if (this.maxPerConvo > 0 && list.length > this.maxPerConvo) {
+      list.splice(0, list.length - this.maxPerConvo);
+    }
+  }
 
   loadIdentity(): StoredIdentity | null {
     return this.identity;
@@ -64,7 +82,7 @@ export class MemoryStorage implements AppStorage {
       const seen = new Set(dest.map((m) => m.id));
       for (const m of moved) if (!seen.has(m.id)) dest.push(m);
       dest.sort((a, b) => a.at - b.at);
-      if (dest.length > MESSAGES_PER_CONVO) dest.splice(0, dest.length - MESSAGES_PER_CONVO);
+      this.cap(dest);
       this.messages.set(to, dest);
     }
     this.messages.delete(from);
@@ -102,7 +120,7 @@ export class MemoryStorage implements AppStorage {
     const list = this.messages.get(message.contact) ?? [];
     if (list.some((m) => m.id === message.id)) return;
     list.push(message);
-    if (list.length > MESSAGES_PER_CONVO) list.splice(0, list.length - MESSAGES_PER_CONVO); // 逐出最舊（P0-1）
+    this.cap(list); // ADR-0094：有限模式逐出最舊；預設無上限不動
     this.messages.set(message.contact, list);
   }
   setMessageStatus(contactPubkey: string, messageId: string, status: MessageStatus): void {

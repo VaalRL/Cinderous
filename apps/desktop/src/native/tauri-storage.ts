@@ -30,14 +30,24 @@ export const tauriStoreIo: StoreIo = {
 const SAVE_DEBOUNCE_MS = 250;
 
 export class TauriStorage implements AppStorage {
-  private readonly mem = new MemoryStorage();
+  private readonly mem: MemoryStorage;
   private saveTimer: ReturnType<typeof setTimeout> | undefined;
   private pending = false;
 
   constructor(
     private readonly namespace: string,
     private readonly io: StoreIo = tauriStoreIo,
-  ) {}
+    /** 每對話保留上限（ADR-0094）；`0`＝無上限（預設）。 */
+    maxPerConvo = 0,
+  ) {
+    this.mem = new MemoryStorage(maxPerConvo);
+  }
+
+  /** 每對話保留上限（ADR-0094）：委派記憶體層並持久化（逐出後的結果需寫回加密 blob）。 */
+  setMaxPerConvo(max: number): void {
+    this.mem.setMaxPerConvo(max);
+    this.persist();
+  }
 
   /** 開機一次：從加密 blob 載入既有狀態（建後端前呼叫）。 */
   async hydrate(): Promise<void> {

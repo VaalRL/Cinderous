@@ -23,5 +23,6 @@ export * from "./storage/profiles.js";
 export * from "./storage/cloud-snapshot.js";
 export * from "./storage/pair-bundle.js";
 export * from "./storage/device-id.js";
+export * from "./storage/export.js";
 // ── 前端擴充縫（K4 實驗性；僅註冊機制，第三方載入待 ADR）──
 export * from "./extensions.js";

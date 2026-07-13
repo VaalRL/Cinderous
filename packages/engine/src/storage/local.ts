@@ -2,7 +2,6 @@ import {
   type AppStorage,
   MESSAGE_STATUS_RANK,
   type MessageStatus,
-  MESSAGES_PER_CONVO,
   type StoredBootstrapList,
   type StoredContact,
   type StoredGroup,
@@ -10,6 +9,12 @@ import {
   type StoredMessage,
   type StoredReaction,
 } from "./types.js";
+
+/** localStorage 配額已滿的回呼（ADR-0094）：讓 UI 能在無上限保留撞到配額時提醒使用者。 */
+let quotaHandler: ((key: string) => void) | undefined;
+export function onStorageQuota(fn: ((key: string) => void) | undefined): void {
+  quotaHandler = fn;
+}
 
 function read<T>(key: string, fallback: T): T {
   try {
@@ -24,9 +29,10 @@ function write(key: string, value: unknown): void {
   try {
     localStorage.setItem(key, JSON.stringify(value));
   } catch (e) {
-    // 配額爆掉不再靜默：至少回報（審查 P0-1）。每對話上限已先做逐出以降低發生機率。
+    // 配額爆掉不再靜默：至少回報（審查 P0-1）。無上限保留（ADR-0094）下更可能發生 → 另通知 UI。
     const quota = e instanceof DOMException && (e.name === "QuotaExceededError" || e.code === 22);
     console.warn(quota ? `[storage] localStorage 配額已滿，寫入 ${key} 失敗（資料可能未保存）` : e);
+    if (quota) quotaHandler?.(key);
   }
 }
 
@@ -40,11 +46,36 @@ function write(key: string, value: unknown): void {
  */
 export class LocalStorage implements AppStorage {
   private readonly prefix: string;
-  constructor(namespace = "") {
+  /** 每對話持久化上限（ADR-0094）；`0`＝無上限（預設，不逐出）。 */
+  private maxPerConvo: number;
+  constructor(namespace = "", maxPerConvo = 0) {
     this.prefix = namespace ? `nb.${namespace}.` : "nb.";
+    this.maxPerConvo = Math.max(0, Math.floor(maxPerConvo));
   }
   private k(suffix: string): string {
     return this.prefix + suffix;
+  }
+
+  /** 每對話保留上限（ADR-0094）：`0`＝無上限。變更後即時對所有對話套用逐出。 */
+  setMaxPerConvo(max: number): void {
+    this.maxPerConvo = Math.max(0, Math.floor(max));
+    if (this.maxPerConvo <= 0) return;
+    for (const c of this.loadContacts()) this.capKey("msgs." + c.pubkey);
+    for (const g of this.loadGroups()) this.capKey("msgs." + g.id);
+  }
+  /** 依上限逐出某對話最舊並寫回（僅在有限模式且確實超量時寫）。 */
+  private capKey(suffix: string): void {
+    const list = read<StoredMessage[]>(this.k(suffix), []);
+    if (this.maxPerConvo > 0 && list.length > this.maxPerConvo) {
+      list.splice(0, list.length - this.maxPerConvo);
+      write(this.k(suffix), list);
+    }
+  }
+  /** 依上限逐出最舊（`0`＝無上限、不動）。 */
+  private cap(list: StoredMessage[]): void {
+    if (this.maxPerConvo > 0 && list.length > this.maxPerConvo) {
+      list.splice(0, list.length - this.maxPerConvo);
+    }
   }
 
   loadIdentity(): StoredIdentity | null {
@@ -99,7 +130,7 @@ export class LocalStorage implements AppStorage {
       const seen = new Set(dest.map((m) => m.id));
       for (const m of moved) if (!seen.has(m.id)) dest.push(m);
       dest.sort((a, b) => a.at - b.at);
-      if (dest.length > MESSAGES_PER_CONVO) dest.splice(0, dest.length - MESSAGES_PER_CONVO);
+      this.cap(dest); // ADR-0094：有限模式逐出；預設無上限不動
       write(this.k("msgs." + to), dest);
     }
     try {
@@ -144,7 +175,7 @@ export class LocalStorage implements AppStorage {
     const list = this.loadMessages(message.contact);
     if (list.some((m) => m.id === message.id)) return;
     list.push(message);
-    if (list.length > MESSAGES_PER_CONVO) list.splice(0, list.length - MESSAGES_PER_CONVO); // 逐出最舊（P0-1）
+    this.cap(list); // ADR-0094：有限模式逐出最舊；預設無上限不動
     write(this.k("msgs." + message.contact), list);
   }
   setMessageStatus(contactPubkey: string, messageId: string, status: MessageStatus): void {
