@@ -84,6 +84,10 @@ h1, h2, h3 { text-wrap: balance; }
 .sec h2 { font-size: 30px; margin: 0 0 8px; letter-spacing: -0.5px; }
 .sec__lead { color: var(--muted); font-size: 16px; max-width: 680px; margin: 0 0 26px; }
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 16px; }
+.grid--4 { grid-template-columns: repeat(4, 1fr); }
+
+/* 訊息傳遞機制圖 */
+.diagram { background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 24px 18px 18px; box-shadow: 0 8px 30px var(--glow); }
 .card { background: var(--panel); border: 1px solid var(--border); border-radius: 16px; padding: 20px; }
 .card__ember { width: 34px; height: 34px; border-radius: 10px; background: radial-gradient(circle at 40% 35%, var(--amber), var(--ember)); margin-bottom: 12px; box-shadow: 0 4px 14px var(--glow); }
 .card h3 { margin: 0 0 6px; font-size: 17px; }
@@ -116,12 +120,18 @@ th { color: var(--muted); font-weight: 600; background: var(--surface); }
 /* ── Footer ── */
 .footer { border-top: 1px solid var(--border); padding: 34px 0; color: var(--muted); font-size: 13.5px; text-align: center; background: var(--bg2); }
 
+@media (max-width: 860px) {
+  .grid--4 { grid-template-columns: repeat(2, 1fr); }
+}
 @media (max-width: 640px) {
   .hero { padding: 60px 0 48px; }
   .hero h1 { font-size: 46px; }
   .hero__sub { font-size: 17px; }
   .nav__inner { flex-wrap: wrap; }
   .sec h2 { font-size: 25px; }
+}
+@media (max-width: 440px) {
+  .grid--4 { grid-template-columns: 1fr; }
 }
 @media (prefers-reduced-motion: no-preference) {
   .card__ember, .runway { transition: transform 0.2s ease; }

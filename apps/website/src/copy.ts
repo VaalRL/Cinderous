@@ -7,7 +7,6 @@ export interface Copy {
   nav_download: string;
   nav_node: string;
   nav_transparency: string;
-  hero_eyebrow: string;
   hero_title: string;
   hero_subtitle: string;
   hero_download: string;
@@ -21,6 +20,14 @@ export interface Copy {
   feat_local_b: string;
   feat_free_t: string;
   feat_free_b: string;
+  how_title: string;
+  how_lead: string;
+  fd_alice: string;
+  fd_bob: string;
+  fd_relay: string;
+  fd_relay_note: string;
+  fd_encrypt: string;
+  fd_p2p: string;
   download_title: string;
   download_desktop: string;
   download_mobile: string;
@@ -62,7 +69,6 @@ const zhHant: Copy = {
   nav_download: "下載",
   nav_node: "建立節點",
   nav_transparency: "透明度",
-  hero_eyebrow: "圍著營火",
   hero_title: "Cinder",
   hero_subtitle:
     "像夜裡森林深處的一簇營火——只有你邀來的人圍坐。開源、永久免費、端到端加密的去中心化即時通。",
@@ -77,6 +83,15 @@ const zhHant: Copy = {
   feat_local_b: "私鑰與資料留在你的裝置。明文永不上雲，設備全毀即帳號終止——沒有可被傳喚的資料庫。",
   feat_free_t: "開源・永久免費",
   feat_free_b: "AGPL-3.0 授權，程式碼公開可稽核。沒有廣告、沒有帳號販售、沒有中心化營利。",
+  how_title: "訊息怎麼傳？",
+  how_lead:
+    "你送出的每則訊息，先在你的裝置上以 Gift Wrap 加密；中繼站只轉發密文——看不到內容，也看不到寄件者。即時互動（檔案、在線、輸入中）另走 WebRTC P2P，直接點對點、完全不經中繼。",
+  fd_alice: "你",
+  fd_bob: "好友",
+  fd_relay: "中繼站 Relay",
+  fd_relay_note: "只轉發密文·看不到內容與寄件者",
+  fd_encrypt: "🔒 Gift Wrap 密文（NIP-17/44/59）",
+  fd_p2p: "WebRTC P2P — 檔案／在線／輸入中，不經中繼",
   download_title: "下載",
   download_desktop: "桌面版（Windows／macOS／Linux）由 GitHub Releases 發佈。",
   download_mobile: "行動版開發中（Phase D）。",
@@ -122,7 +137,6 @@ const en: Copy = {
   nav_download: "Download",
   nav_node: "Run a node",
   nav_transparency: "Transparency",
-  hero_eyebrow: "Around the fire",
   hero_title: "Cinder",
   hero_subtitle:
     "Like a small campfire deep in a night forest — only the people you invite sit around it. An open-source, forever-free, end-to-end encrypted decentralized messenger.",
@@ -139,6 +153,15 @@ const en: Copy = {
     "Your keys and data stay on your device. Plaintext never touches the cloud; lose all devices and the account ends — no database to subpoena.",
   feat_free_t: "Open source, forever free",
   feat_free_b: "AGPL-3.0 licensed, fully auditable. No ads, no selling accounts, no centralized monetization.",
+  how_title: "How a message travels",
+  how_lead:
+    "Every message is Gift-Wrap encrypted on your device first; relays only forward ciphertext — they see neither the content nor the sender. Real-time bits (files, presence, typing) go over WebRTC P2P, straight peer-to-peer, bypassing relays entirely.",
+  fd_alice: "You",
+  fd_bob: "Friend",
+  fd_relay: "Relay",
+  fd_relay_note: "Forwards ciphertext only · no content, no sender",
+  fd_encrypt: "🔒 Gift Wrap ciphertext (NIP-17/44/59)",
+  fd_p2p: "WebRTC P2P — files / presence / typing, no relay",
   download_title: "Download",
   download_desktop: "Desktop (Windows / macOS / Linux) is published via GitHub Releases.",
   download_mobile: "Mobile is in development (Phase D).",

@@ -1,6 +1,7 @@
 import type { Theme } from "@cinder/theme";
 import type { Copy } from "../copy.js";
 import { CinderMark } from "../Brand.js";
+import { FlowDiagram } from "../FlowDiagram.js";
 import { OFFICIAL_DONATIONS } from "../donations.js";
 import { GITHUB_URL } from "../App.js";
 
@@ -28,7 +29,6 @@ export function Home({
           <div className="hero__mark">
             <CinderMark size={84} theme={theme} />
           </div>
-          <div className="eyebrow">{c.hero_eyebrow}</div>
           <h1>{c.hero_title}</h1>
           <p className="hero__sub">{c.hero_subtitle}</p>
           <div className="cta">
@@ -45,7 +45,7 @@ export function Home({
       <section className="sec">
         <div className="wrap">
           <h2>{c.features_title}</h2>
-          <div className="grid">
+          <div className="grid grid--4">
             {features.map((f) => (
               <div className="card" key={f.t}>
                 <div className="card__ember" />
@@ -54,6 +54,14 @@ export function Home({
               </div>
             ))}
           </div>
+        </div>
+      </section>
+
+      <section className="sec">
+        <div className="wrap">
+          <h2>{c.how_title}</h2>
+          <p className="sec__lead">{c.how_lead}</p>
+          <FlowDiagram c={c} />
         </div>
       </section>
 
