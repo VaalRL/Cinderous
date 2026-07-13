@@ -8,8 +8,14 @@ import type { NostrEvent } from "./event.js";
 import type { PubkeyHex, SecretKey } from "./keys.js";
 import { finalizeEvent, verifyEvent } from "./sign.js";
 
-/** 節點自報事件 kind（營運者自簽；可替換型 10xxx）。 */
-export const NODE_ATTEST_KIND = 10038;
+/**
+ * 節點自報事件 kind（營運者自簽；NIP-01 可取代區間 10000–19999）。
+ *
+ * ⚠ 原為 10038——**與 `ORG_ROSTER_KIND` 撞號**。在可取代語意下（ADR-0035），同一把金鑰的
+ * 節點自報會**直接覆蓋掉組織名冊**（每 (kind, pubkey) 只留一顆）。故改為 10039。
+ * 此時尚無第三方節點（生產 relays.json 為空），無資料遷移問題。
+ */
+export const NODE_ATTEST_KIND = 10039;
 
 /** 營運者對節點的自我宣告（＝申請書）。 */
 export interface CinderNodeDeclaration {

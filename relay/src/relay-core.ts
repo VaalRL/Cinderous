@@ -1,6 +1,6 @@
 import { AUTH_KIND, authChallengeOf, verifyEvent, type NostrEvent } from "@cinder/core";
 import { matchFilter } from "./filters.js";
-import { isAddressableKind, type OfflineStore } from "./message-store.js";
+import { isAddressableKind, isReplaceableOrAddressable, type OfflineStore } from "./message-store.js";
 import {
   parseClientMessage,
   type RelayFilter,
@@ -322,10 +322,12 @@ export class RelayCore {
       if (minPow > 0 && leadingZeroBits(event.id) < minPow) {
         return [{ to: connId, message: ["OK", event.id, false, `pow: 需要難度 ${minPow}`] }];
       }
-      if (isAddressableKind(event.kind)) {
-        // ADR-0071 快照：取代語意＋配額；遭拒＝OK false（不扇出）。
+      if (isReplaceableOrAddressable(event.kind)) {
+        // 取代語意（ADR-0035 可取代／0071 可尋址）：每 (kind, pubkey, d) 只留最新一顆。
+        // 沒有這條，relay 清單（10037）這類事件會不斷累積——cron 每小時發一次，
+        // 客戶端每次連線就得下載上百份重複。遭拒＝OK false（不扇出）。
         if (this.opts.store && !this.opts.store.putAddressable(event, this.now())) {
-          return [{ to: connId, message: ["OK", event.id, false, "blocked: 可尋址事件遭拒（配額/大小/較舊）"] }];
+          return [{ to: connId, message: ["OK", event.id, false, "blocked: 取代事件遭拒（配額/大小/較舊）"] }];
         }
       } else {
         this.opts.store?.put(event, this.now());

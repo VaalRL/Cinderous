@@ -12,6 +12,7 @@ import {
   type MessageStoreOptions,
   type OfflineStore,
   recipientsOf,
+  shouldReplace,
 } from "./message-store.js";
 import type { RelayFilter } from "./protocol.js";
 
@@ -87,16 +88,21 @@ export class SqlMessageStore implements OfflineStore {
     return true;
   }
 
-  /** 寫入可尋址事件（取代語意＋配額；ADR-0071）。行為對齊記憶體版。 */
+  /** 寫入可取代／可尋址事件（取代語意＋配額；ADR-0035／0071）。行為對齊記憶體版。 */
   putAddressable(event: NostrEvent, nowSec: number): boolean {
-    const d = dTagOf(event);
+    const d = dTagOf(event); // 可取代事件無 `d` → 空字串 → 每 (kind,pubkey) 只留一顆
     const existing = this.sql(
-      `SELECT created_at FROM addressable WHERE kind = ? AND pubkey = ? AND d = ?`,
+      `SELECT id, created_at FROM addressable WHERE kind = ? AND pubkey = ? AND d = ?`,
       event.kind,
       event.pubkey,
       d,
     );
-    if (existing[0] && (existing[0].created_at as number) > event.created_at) return false; // 只留最新
+    const prev = existing[0];
+    if (prev) {
+      // NIP-01 決勝：較新者勝；同時則保留 id 字典序較小者（各中繼站收斂到同一顆）。
+      const prevEvent = { id: prev.id as string, created_at: prev.created_at as number } as NostrEvent;
+      if (!shouldReplace(prevEvent, event)) return false;
+    }
     if (event.content === "") {
       // purge：關閉備份時「已關閉」必須立即為真（ADR-0071）。
       this.sql(`DELETE FROM addressable WHERE kind = ? AND pubkey = ? AND d = ?`, event.kind, event.pubkey, d);

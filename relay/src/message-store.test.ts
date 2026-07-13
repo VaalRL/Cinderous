@@ -154,3 +154,52 @@ describe("可尋址事件（NIP-33，ADR-0071 快照）", () => {
     expect(store.query({ kinds: [30078], authors: [author] }, 1000)).toHaveLength(0);
   });
 });
+
+describe("可取代事件（NIP-01 10000–19999；ADR-0035）", () => {
+  const maintainerSk = generateSecretKey();
+  const maintainer = getPublicKey(maintainerSk);
+  /** 簽章 relay 清單（kind 10037）——health-check cron 每小時發佈一次。 */
+  const relayList = (createdAt: number, content = "list", sk = maintainerSk): NostrEvent =>
+    finalizeEvent({ kind: 10037, created_at: createdAt, tags: [], content }, sk);
+
+  it("取代語意：每 (kind, pubkey) 只留最新一顆——cron 連發不再累積", () => {
+    const store = new MessageStore();
+    // 模擬 cron 每小時發佈 24 次（過去這會囤 24 份重複）。
+    for (let h = 0; h < 24; h += 1) {
+      expect(store.putAddressable(relayList(1000 + h * 3600, `list-${h}`), 1000 + h * 3600)).toBe(true);
+    }
+    const got = store.query({ kinds: [10037], authors: [maintainer] }, 1000);
+    expect(got.length).toBe(1); // ← 這正是修的東西：只剩最新一顆
+    expect(got[0]?.content).toBe("list-23");
+  });
+
+  it("較舊的清單不覆蓋較新的（重放舊事件無效）", () => {
+    const store = new MessageStore();
+    expect(store.putAddressable(relayList(2000, "new"), 2000)).toBe(true);
+    expect(store.putAddressable(relayList(1000, "old"), 2000)).toBe(false); // 拒收
+    expect(store.query({ kinds: [10037] }, 2000)[0]?.content).toBe("new");
+  });
+
+  it("NIP-01 決勝：created_at 相同時保留 id 字典序較小者（各中繼站收斂到同一顆）", () => {
+    const a = relayList(1000, "A");
+    const b = relayList(1000, "B");
+    const [lo, hi] = a.id < b.id ? [a, b] : [b, a];
+    // 不論送入順序，最後留下的都是 id 較小者。
+    const s1 = new MessageStore();
+    s1.putAddressable(lo, 1000);
+    s1.putAddressable(hi, 1000);
+    expect(s1.query({ kinds: [10037] }, 1000)[0]?.id).toBe(lo.id);
+    const s2 = new MessageStore();
+    s2.putAddressable(hi, 1000);
+    s2.putAddressable(lo, 1000);
+    expect(s2.query({ kinds: [10037] }, 1000)[0]?.id).toBe(lo.id);
+  });
+
+  it("不同作者各留一顆（取代是 per-pubkey，不是全域）", () => {
+    const store = new MessageStore();
+    const otherSk = generateSecretKey();
+    store.putAddressable(relayList(1000, "mine"), 1000);
+    store.putAddressable(relayList(1000, "theirs", otherSk), 1000);
+    expect(store.query({ kinds: [10037] }, 1000).length).toBe(2);
+  });
+});

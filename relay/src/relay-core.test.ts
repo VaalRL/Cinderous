@@ -425,7 +425,7 @@ describe("RelayCore — 可尋址快照（NIP-33，ADR-0071）", () => {
     const sixth = snapshot(sk, { d: "dev6" });
     expect(core.handle("c", EVENT(sixth))).toContainEqual({
       to: "c",
-      message: ["OK", sixth.id, false, "blocked: 可尋址事件遭拒（配額/大小/較舊）"],
+      message: ["OK", sixth.id, false, "blocked: 取代事件遭拒（配額/大小/較舊）"],
     });
   });
 
@@ -454,5 +454,34 @@ describe("RelayCore — 可尋址快照（NIP-33，ADR-0071）", () => {
     // Alice 本人可讀回
     const mine = core.handle("alice", REQ("m", { kinds: [30078], authors: [alicePk] }));
     expect(mine.filter((o) => o.message[0] === "EVENT")).toHaveLength(1);
+  });
+});
+
+describe("RelayCore — 可取代事件（NIP-01，ADR-0035）", () => {
+  const maintainerSk = generateSecretKey();
+  const maintainer = getPublicKey(maintainerSk);
+  const list = (createdAt: number, content: string): NostrEvent =>
+    finalizeEvent({ kind: 10037, created_at: createdAt, tags: [], content }, maintainerSk);
+
+  it("cron 連發 relay 清單只留最新一顆；新客戶端 REQ 只收到一份（不再下載上百份重複）", () => {
+    const core = new RelayCore({ store: new MessageStore() });
+    core.connect("pub");
+    for (let h = 0; h < 24; h += 1) core.handle("pub", JSON.stringify(["EVENT", list(1000 + h * 3600, `v${h}`)]));
+
+    core.connect("client");
+    const out = core.handle("client", JSON.stringify(["REQ", "relaylist", { kinds: [10037], authors: [maintainer] }]));
+    const events = out.filter((o) => o.message[0] === "EVENT");
+    expect(events.length).toBe(1); // ← 修好的行為（過去會是 24）
+    expect((events[0]!.message[2] as NostrEvent).content).toBe("v23");
+  });
+
+  it("可取代事件是**公開**的：不像快照被限制只回作者本人（清單必須人人收得到）", () => {
+    const core = new RelayCore({ store: new MessageStore() });
+    core.connect("pub");
+    core.connect("sub");
+    // 別人先訂閱，維護者才發佈 → 即時扇出應送達訂閱者（非作者）。
+    core.handle("sub", JSON.stringify(["REQ", "rl", { kinds: [10037] }]));
+    const out = core.handle("pub", JSON.stringify(["EVENT", list(2000, "public")]));
+    expect(out.some((o) => o.to === "sub" && o.message[0] === "EVENT")).toBe(true);
   });
 });
