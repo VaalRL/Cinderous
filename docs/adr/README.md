@@ -102,3 +102,7 @@
 | [0085](./0085-mobile-app-shell-navigation.md) | 行動端 app 殼與導覽：聊天清單（最近互動排序）＋對話（LINE/Signal 風格） | 已接受 |
 | [0086](./0086-mobile-real-relay-backend.md) | 行動端接真實 relay：RelayChatBackend＋加好友（npub） | 已接受 |
 | [0087](./0087-mobile-bottom-tabs.md) | 行動端底部分頁：聊天／聯絡人／設定 | 已接受 |
+| [0088](./0088-presence-metadata-minimization-jitter-and-p2p-offload.md) | 元資料最小化（第一階段）：在線 jitter/隱身＋心跳 P2P 卸載 | 已接受 |
+| [0089](./0089-relay-operator-donation-entry.md) | Relay 營運者贊助入口（NIP-11 擴充＋桌面角落卡＋純導流） | 已接受 |
+| [0090](./0090-official-website-donation-and-fund-transparency.md) | 官方網站、官方捐款與資金透明度（靜態站＋簽章 JSON runway） | 已接受 |
+| [0091](./0091-forward-secrecy-mls-upgrade-design.md) | 前向保密升級：統一採 MLS（含正常使用者可靠性護欄） | 已棄用（暫緩未採納，維持 0028） |
