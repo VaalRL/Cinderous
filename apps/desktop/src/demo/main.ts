@@ -1,13 +1,15 @@
 import {
   createHeartbeat,
+  createNudge,
   createTyping,
   decodePresence,
   encodePresence,
-  finalizeEvent,
   generateSecretKey,
   getPublicKey,
   KIND,
   PresenceTracker,
+  openWrap,
+  readNudge,
   TypingTracker,
   unwrapMessage,
   wrapMessage,
@@ -18,7 +20,6 @@ import {
 } from "@cinder/core";
 import { createInMemoryRelayNetwork, MessageStore } from "@cinder/relay";
 
-const NUDGE_KIND = 20100;
 const DEMO_PRESENCE_TIMEOUT_MS = 5_000;
 const HEARTBEAT_EVERY_MS = 2_000;
 const nowSec = () => Math.floor(Date.now() / 1000);
@@ -74,8 +75,9 @@ class DemoPeer {
   private subscribeAll(): void {
     // F5：music 併入 presence 心跳，不再單獨訂閱。
     this.client.subscribe("presence", [{ kinds: [KIND.HEARTBEAT], authors: [this.friendPk] }]);
-    this.client.subscribe("typing", [{ kinds: [KIND.TYPING], authors: [this.friendPk], "#p": [this.pk] }]);
-    this.client.subscribe("nudge", [{ kinds: [NUDGE_KIND], authors: [this.friendPk], "#p": [this.pk] }]);
+    // ADR-0120：typing/nudge 已 NIP-59 封裝 → 外層作者是臨時金鑰，`authors:` 永遠不會命中。
+    this.client.subscribe("typing", [{ kinds: [KIND.TYPING], "#p": [this.pk] }]);
+    this.client.subscribe("nudge", [{ kinds: [KIND.NUDGE], "#p": [this.pk] }]);
     this.client.subscribe("dm", [{ kinds: [KIND.OFFLINE_DM_GIFT_WRAP], "#p": [this.pk] }]);
   }
 
@@ -108,11 +110,15 @@ class DemoPeer {
         this.presence.observe(event.pubkey, event.created_at);
         this.remoteNp = decodePresence(event.content).np; // 好友的音樂併在心跳中
         return;
-      case KIND.TYPING:
-        this.typing.observe(event.pubkey, event.created_at);
+      // ADR-0120：真實寄件人在 seal 裡；**時間戳也要用 rumor 的**——外層的 `created_at` 被
+      // `jitteredPast()` 隨機往前推了最多 2 天（隱私設計），拿它比逾時，指示燈永遠不會亮。
+      case KIND.TYPING: {
+        const { sender, rumor } = openWrap(event, this.sk);
+        if (sender === this.friendPk) this.typing.observe(sender, rumor.created_at);
         return;
-      case NUDGE_KIND:
-        this.shake();
+      }
+      case KIND.NUDGE:
+        if (readNudge(event, this.sk) === this.friendPk) this.shake();
         return;
       case KIND.OFFLINE_DM_GIFT_WRAP: {
         if (this.shownDm.has(event.id)) return;
@@ -159,9 +165,7 @@ class DemoPeer {
   }
 
   nudge(): void {
-    this.client.publish(
-      finalizeEvent({ kind: NUDGE_KIND, created_at: nowSec(), tags: [["p", this.friendPk]], content: "nudge" }, this.sk),
-    );
+    this.client.publish(createNudge(this.sk, this.friendPk));
     this.sys("你送出一個 Nudge");
   }
 

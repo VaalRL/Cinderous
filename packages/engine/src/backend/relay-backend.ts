@@ -5,11 +5,11 @@ import {
   canPostToGroup,
   CALL_SIGNAL_KIND,
   createHeartbeat,
+  createNudge,
   createTyping,
   decodePresence,
   deletionTarget,
   encodePresence,
-  finalizeEvent,
   type Filter,
   groupTarget,
   groupReceiptMode,
@@ -79,6 +79,8 @@ import {
   type ReceiptType,
   type PresenceState,
   type PubkeyHex,
+  readNudge,
+  readTyping,
   type ReceivedFile,
   type RelayClientHandlers,
   type RelayListDoc,
@@ -101,7 +103,6 @@ import type {
   Status,
 } from "./types.js";
 
-const NUDGE_KIND = 20100;
 /** pool relay 連續離線超過此時間即標記 hint 可能陳舊（ADR-0036）。 */
 export const RELAY_STALE_MS = 5 * 60_000;
 /** 主路由離線時的冗餘廣播座數上限（ADR-0039）。 */
@@ -668,8 +669,15 @@ export class RelayChatBackend implements ChatBackend {
     const filters: Filter[] = [
       // F5：presence 心跳已彙整音樂狀態（np），不再單獨訂閱 MUSIC。
       { kinds: [KIND.HEARTBEAT], authors },
-      { kinds: [KIND.TYPING], authors: all, "#p": me },
-      { kinds: [NUDGE_KIND], authors: all, "#p": me },
+      // ADR-0120：typing/nudge 已 NIP-59 封裝 → 外層作者是**一次性臨時金鑰**，`authors: all`
+      // 永遠不會命中。改為只靠 `#p`（與 Gift Wrap 收件箱同形）。
+      //
+      // 🔴 副作用：過去是這個 `authors` 過濾器在擋陌生人。拿掉之後**任何人都能對你發 nudge**
+      // （而 nudge 會震動裝置、跳通知）→ 把關移到 `senderOfSealed()`，見該處。
+      //
+      // 附帶好處：這兩個 REQ 不再把整份聯絡人清單交給中繼。
+      { kinds: [KIND.TYPING], "#p": me },
+      { kinds: [KIND.NUDGE], "#p": me },
       { kinds: [KIND.OFFLINE_DM_GIFT_WRAP], "#p": me, ...this.inboxSince(url) },
       // 自己的雲端快照（ADR-0071 J3）：接收合併恆開——換機還原不需任何前置設定。
       { kinds: [SNAPSHOT_KIND], authors: me },
@@ -951,12 +959,16 @@ export class RelayChatBackend implements ChatBackend {
         }
         return;
       }
-      case KIND.TYPING:
-        this.handlers?.onTyping(event.pubkey);
+      case KIND.TYPING: {
+        const sender = this.senderOfSealed(event, readTyping);
+        if (sender) this.handlers?.onTyping(sender);
         return;
-      case NUDGE_KIND:
-        this.handlers?.onNudge(event.pubkey);
+      }
+      case KIND.NUDGE: {
+        const sender = this.senderOfSealed(event, readNudge);
+        if (sender) this.handlers?.onNudge(sender);
         return;
+      }
       case KIND.OFFLINE_DM_GIFT_WRAP:
         this.receiveDm(event);
         return;
@@ -967,6 +979,35 @@ export class RelayChatBackend implements ChatBackend {
         this.transfer.onSignalEvent(event);
         return;
     }
+  }
+
+  /**
+   * 解出封裝 ephemeral 事件（typing / nudge）的**真實寄件人**，並把關（ADR-0120）。
+   *
+   * ## 🔴 這裡的把關比封裝本身更容易被漏掉
+   *
+   * 封裝之後訂閱過濾器不能再帶 `authors`（外層作者是臨時金鑰）。而**過去正是那個
+   * `authors: [聯絡人們]` 在擋陌生人**——拿掉它以後，任何人都能對你發 nudge，
+   * 而 nudge 會**震動裝置、跳通知**。那是現成的騷擾管道。
+   *
+   * 漏掉這道把關不會有任何錯誤訊息，只是變得可被騷擾——所以有測試釘住。
+   *
+   * `read` 失敗＝舊版明文格式（未封裝）。**只收不發**（ADR-0120 決策 5）：收下不會讓自己
+   * 洩漏任何東西，只是讓還沒更新的對方能繼續顯示打字狀態。所有客戶端更新後即可移除此退路。
+   */
+  private senderOfSealed(
+    event: NostrEvent,
+    read: (e: NostrEvent, sk: SecretKey) => PubkeyHex,
+  ): PubkeyHex | undefined {
+    let sender: PubkeyHex;
+    try {
+      sender = read(event, this.sk);
+    } catch {
+      sender = event.pubkey; // 過渡：舊版明文格式
+    }
+    if (this.isBlocked(sender)) return undefined;
+    if (!this.contacts.some((c) => c.pubkey === sender)) return undefined; // 陌生人不得觸發 typing/nudge
+    return sender;
   }
 
   private receiveDm(event: NostrEvent): void {
@@ -2153,9 +2194,7 @@ export class RelayChatBackend implements ChatBackend {
   }
 
   sendNudge(to: PubkeyHex): void {
-    this.publishAddressed(
-      finalizeEvent({ kind: NUDGE_KIND, created_at: nowSec(), tags: [["p", to]], content: "nudge" }, this.sk),
-    );
+    this.publishAddressed(createNudge(this.sk, to)); // ADR-0120：封裝，不再用真名廣播指名事件
   }
 
   stop(): void {

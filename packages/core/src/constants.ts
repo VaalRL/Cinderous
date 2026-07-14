@@ -16,10 +16,12 @@ export const KIND = {
   OFFLINE_DM_GIFT_WRAP: 1059,
   /** 好友上線/離線心跳（Ephemeral）。 */
   HEARTBEAT: 20000,
-  /** 正在輸入中（Ephemeral）。 */
+  /** 正在輸入中（Ephemeral；**NIP-59 封裝**，ADR-0120）。 */
   TYPING: 20001,
   /** 正在聆聽音樂（Ephemeral）。 */
   MUSIC: 20002,
+  /** 敲一下（Ephemeral；**NIP-59 封裝**，ADR-0120）。原本在兩個 backend 各自 `const` 一份。 */
+  NUDGE: 20100,
 } as const;
 
 /** 引導 relay 清單事件（ADR-0039，維護者簽章、可取代）。 */

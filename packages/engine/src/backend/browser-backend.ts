@@ -1,9 +1,9 @@
 import {
   createHeartbeat,
+  createNudge,
   createTyping,
   decodePresence,
   encodePresence,
-  finalizeEvent,
   generateSecretKey,
   getPublicKey,
   KIND,
@@ -15,13 +15,14 @@ import {
   type PresencePayload,
   type PresenceState,
   type PubkeyHex,
+  readNudge,
+  readTyping,
   type RelayClient,
   type SecretKey,
 } from "@cinder/core";
 import { createInMemoryRelayNetwork, MessageStore } from "@cinder/relay";
 import type { ChatBackend, ChatBackendEvents, ChatMessage, Contact, Self, Status } from "./types.js";
 
-const NUDGE_KIND = 20100;
 const HEARTBEAT_MS = 2_000;
 const PRESENCE_TIMEOUT_MS = 6_000;
 const nowSec = () => Math.floor(Date.now() / 1000);
@@ -113,14 +114,14 @@ export class BrowserChatBackend implements ChatBackend {
 
     // F5：presence 心跳已彙整音樂（np），不再單獨訂閱/發送 MUSIC。
     this.client.subscribe("presence", [{ kinds: [KIND.HEARTBEAT], authors: botPks }]);
-    this.client.subscribe("typing", [{ kinds: [KIND.TYPING], authors: botPks, "#p": [this.self.pubkey] }]);
-    this.client.subscribe("nudge", [{ kinds: [NUDGE_KIND], authors: botPks, "#p": [this.self.pubkey] }]);
+    this.client.subscribe("typing", [{ kinds: [KIND.TYPING], "#p": [this.self.pubkey] }]);
+    this.client.subscribe("nudge", [{ kinds: [KIND.NUDGE], "#p": [this.self.pubkey] }]);
     this.client.subscribe("dm", [{ kinds: [KIND.OFFLINE_DM_GIFT_WRAP], "#p": [this.self.pubkey] }]);
 
     // 各 bot 上線、訂閱自己的 DM
     for (const { peer, def, client } of this.bots) {
       client.subscribe("dm", [{ kinds: [KIND.OFFLINE_DM_GIFT_WRAP], "#p": [peer.pk] }]);
-      client.subscribe("nudge", [{ kinds: [NUDGE_KIND], authors: [this.self.pubkey], "#p": [peer.pk] }]);
+      client.subscribe("nudge", [{ kinds: [KIND.NUDGE], "#p": [peer.pk] }]);
       client.publish(createHeartbeat(peer.sk, { status: botPresence(def) }));
     }
 
@@ -152,11 +153,12 @@ export class BrowserChatBackend implements ChatBackend {
         this.presence.observe(event.pubkey, event.created_at);
         this.statuses.set(event.pubkey, decodePresence(event.content));
         return;
+      // ADR-0120：typing/nudge 已封裝 → 外層作者是臨時金鑰，真實寄件人在 seal 裡。
       case KIND.TYPING:
-        this.handlers?.onTyping(event.pubkey);
+        this.handlers?.onTyping(readTyping(event, this.selfSk));
         return;
-      case NUDGE_KIND:
-        this.handlers?.onNudge(event.pubkey);
+      case KIND.NUDGE:
+        this.handlers?.onNudge(readNudge(event, this.selfSk));
         return;
       case KIND.OFFLINE_DM_GIFT_WRAP:
         this.receiveDm(event);
@@ -188,15 +190,8 @@ export class BrowserChatBackend implements ChatBackend {
     const botClient = this.bots.find((b) => b.peer.pk === peer.pk)!.client;
 
     // 被戳就回戳，讓使用者也能看到震動效果
-    if (event.kind === NUDGE_KIND) {
-      setTimeout(() => {
-        botClient.publish(
-          finalizeEvent(
-            { kind: NUDGE_KIND, created_at: nowSec(), tags: [["p", this.self.pubkey]], content: "nudge" },
-            peer.sk,
-          ),
-        );
-      }, 700);
+    if (event.kind === KIND.NUDGE) {
+      setTimeout(() => botClient.publish(createNudge(peer.sk, this.self.pubkey)), 700);
       return;
     }
 
@@ -304,9 +299,7 @@ export class BrowserChatBackend implements ChatBackend {
   }
 
   sendNudge(to: PubkeyHex): void {
-    this.client.publish(
-      finalizeEvent({ kind: NUDGE_KIND, created_at: nowSec(), tags: [["p", to]], content: "nudge" }, this.selfSk),
-    );
+    this.client.publish(createNudge(this.selfSk, to));
   }
 
   stop(): void {

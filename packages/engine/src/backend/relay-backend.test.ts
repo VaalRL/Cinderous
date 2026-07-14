@@ -1644,3 +1644,101 @@ describe("健檢修正（ADR-0119）", () => {
     b.stop();
   });
 });
+
+describe("typing／nudge 封裝（ADR-0120）", () => {
+  it("端到端：typing 與 nudge 仍然收得到（封裝不能把功能弄壞）", () => {
+    const net = createInMemoryRelayNetwork();
+    const typing: string[] = [];
+    const nudged: string[] = [];
+    const a = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("a", h), "Alice");
+    const b = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("b", h), "Bob");
+    a.start(noop);
+    b.start({ ...noop, onTyping: (pk) => typing.push(pk), onNudge: (pk) => nudged.push(pk) });
+    a.addContact(b.selfNpub);
+    b.addContact(a.selfNpub); // Bob 也要認得 Alice，否則會被「只收聯絡人」的把關擋下
+
+    a.sendTyping(b.self.pubkey);
+    a.sendNudge(b.self.pubkey);
+
+    expect(typing).toEqual([a.self.pubkey]); // 解出來的是**真實**寄件人，不是外層臨時金鑰
+    expect(nudged).toEqual([a.self.pubkey]);
+    a.stop();
+    b.stop();
+  });
+
+  it("🔴 **中繼看不到寄件人**——線上流量裡不含 Alice 的 pubkey", () => {
+    const net = createInMemoryRelayNetwork();
+    const seen: NostrEvent[] = [];
+    // 攔在 client.publish：這就是**真正上線的位元組**，中繼看到什麼、這裡就是什麼。
+    const wiretap = (h: RelayClientHandlers): CloseableRelayClient => {
+      const c = net.connect("a", h) as CloseableRelayClient;
+      const publish = c.publish.bind(c);
+      c.publish = (e: NostrEvent) => {
+        seen.push(e);
+        publish(e);
+      };
+      return c;
+    };
+    const a = new RelayChatBackend(new MemoryStorage(), wiretap, "Alice");
+    const b = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("b", h), "Bob");
+    a.start(noop);
+    b.start(noop);
+    a.addContact(b.selfNpub);
+    seen.length = 0; // 忽略連線時的心跳與個人檔
+
+    a.sendTyping(b.self.pubkey);
+    a.sendNudge(b.self.pubkey);
+
+    const evts = seen.filter((e) => e.kind === KIND.TYPING || e.kind === KIND.NUDGE);
+    expect(evts).toHaveLength(2);
+    for (const e of evts) {
+      // 修正前：`e.pubkey === a.self.pubkey`，收件人在 tag 裡——一條已簽章、有時間戳的有向邊。
+      // 中繼把它和兩秒後那則寄給 Bob 的 kind 1059 一關聯，就反推出 Gift Wrap 的寄件人。
+      expect(e.pubkey).not.toBe(a.self.pubkey);
+      expect(JSON.stringify(e)).not.toContain(a.self.pubkey);
+      expect(e.tags).toContainEqual(["p", b.self.pubkey]); // 收件人仍明文——與 1059 一致
+    }
+    a.stop();
+    b.stop();
+  });
+
+  it("🔴 **陌生人的 nudge 要丟掉**——過去是 `authors:` 過濾器在擋，拿掉後只剩程式碼把關", () => {
+    const net = createInMemoryRelayNetwork();
+    const nudged: string[] = [];
+    const typing: string[] = [];
+    const victim = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("v", h), "Victim");
+    const stranger = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("s", h), "Stranger");
+    victim.start({ ...noop, onNudge: (pk) => nudged.push(pk), onTyping: (pk) => typing.push(pk) });
+    stranger.start(noop);
+
+    // 直接對著 pubkey 開炮——不先加好友、不先傳訊。這正是騷擾者會做的事：
+    // 掃到一個 pubkey 就狂發 nudge（震動裝置、跳通知）。
+    //
+    // 封裝前，`authors: [聯絡人們]` 這個過濾器讓這種攻擊在**中繼端**就被丟掉。封裝後外層作者
+    // 是臨時金鑰，過濾器不能再帶 authors → 這一層防護只剩客戶端的 `senderOfSealed()`。
+    stranger.sendNudge(victim.self.pubkey);
+    stranger.sendTyping(victim.self.pubkey);
+
+    expect(nudged).toEqual([]);
+    expect(typing).toEqual([]);
+    victim.stop();
+    stranger.stop();
+  });
+
+  it("封鎖的人 nudge 不到你", () => {
+    const net = createInMemoryRelayNetwork();
+    const nudged: string[] = [];
+    const me = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("m", h), "Me");
+    const jerk = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("j", h), "Jerk");
+    me.start({ ...noop, onNudge: (pk) => nudged.push(pk) });
+    jerk.start(noop);
+    me.addContact(jerk.selfNpub);
+    jerk.addContact(me.selfNpub);
+    me.blockContact(jerk.self.pubkey);
+
+    jerk.sendNudge(me.self.pubkey);
+    expect(nudged).toEqual([]);
+    me.stop();
+    jerk.stop();
+  });
+});
