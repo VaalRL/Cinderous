@@ -1,14 +1,34 @@
-// 本地密碼（H4，ADR-0067）：前端薄橋——Argon2id KDF 與包裹/解包全在原生層
-// （src-tauri passlock.rs），密碼經 IPC 送入、金鑰只在原生記憶體。
+// 本地密碼（H4，ADR-0067）：前端薄橋。
 //
-// 瀏覽器環境不提供此功能：瀏覽器路徑本就無 OS 金鑰庫（ADR-0053 後備為
-// localStorage），假裝有密碼保護會是 ADR-0067 否決的「假安全感」。
+// - **Tauri**：Argon2id KDF 與包裹/解包在原生層（`src-tauri/passlock.rs`），密碼經 IPC 送入。
+// - **瀏覽器**（ADR-0112）：同一套 Argon2id（`@noble/hashes`，參數與 Rust 版一致），在 JS 內執行。
+//
+// ADR-0067 原本以「假安全感」為由不在瀏覽器提供密碼保護。**那個推論是錯的**：
+// 不提供的結果不是「誠實」，而是 **nsec 明文躺在 localStorage**。
+// Argon2id 包裹在瀏覽器提供的是**與桌面相同**的靜態保護——KEK 由密碼導出、從不落盤。
+// 它擋不住頁面內的惡意 JS，但桌面的 webview 同樣擋不住；差別只在 OS 帳號那道邊界。
+// ADR-0112 修正這一點。
 
+import { isWrapped, unwrapSecret, wrapSecret } from "@cinder/core";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 
-/** 本地密碼功能是否可用（僅 Tauri：KDF 在原生層執行）。 */
+import { browserKeyVault } from "./keyvault.js";
+
+/** 本地密碼功能是否可用。瀏覽器亦可（ADR-0112：Argon2id 在 JS 執行）。 */
 export function passwordLockAvailable(): boolean {
-  return isTauri();
+  return true;
+}
+
+/** 瀏覽器：以密碼包裹 nsec 並落盤（金鑰庫只收包裹過的值，見 `keyvault.ts`）。 */
+export async function browserPassEnable(pubkey: string, nsec: string, password: string): Promise<void> {
+  await browserKeyVault.setKey(pubkey, wrapSecret(password, nsec));
+}
+
+/** 瀏覽器：以密碼解開 nsec；密碼錯誤/遭竄改回 null。 */
+export async function browserPassUnlock(pubkey: string, password: string): Promise<string | null> {
+  const blob = await browserKeyVault.getKey(pubkey);
+  if (!blob || !isWrapped(blob)) return null;
+  return unwrapSecret(password, blob);
 }
 
 /**

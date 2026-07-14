@@ -7,6 +7,7 @@
 // 以 pubkey 為鍵，支援多身分（ADR-0045）。介面為 async——原生 IPC 天生非同步；
 // 上層在開機時一次載入後交給同步引擎（見 App 開機流程）。
 
+import { isWrapped } from "@cinder/core";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 
 /** 私鑰保管庫：以 pubkey 存取該身分的 nsec。 */
@@ -16,11 +17,30 @@ export interface KeyVault {
   deleteKey(pubkey: string): Promise<void>;
 }
 
-/** 瀏覽器/開發後備：nsec 存 localStorage（維持既有行為）。 */
 const LS_PREFIX = "nb.key.";
 
+/**
+ * 瀏覽器後備（ADR-0112）：**nsec 絕不明文落盤**。
+ *
+ * 過去這裡直接 `localStorage.setItem(nsec)`——私鑰明文躺在磁碟上。那讓 ADR-0112 的儲存加密
+ * 變成演戲（資料金鑰由 nsec 導出，而 nsec 就在旁邊）。
+ *
+ * 現在只接受 **Argon2id 密碼包裹的 blob**（`wrapSecret`）。收到明文 → **拒絕落盤**
+ * ——這是強制點，不是建議：呼叫端若忘了包裹，資料不會被寫出去，而不是靜默地明文寫出去。
+ * 不設密碼的使用者 → 不持久化，每次重新輸入 nsec（＝行動端現況，安全）。
+ */
 export const browserKeyVault: KeyVault = {
   async setKey(pubkey, nsec) {
+    if (!isWrapped(nsec)) {
+      // 明文私鑰不得落盤（ADR-0112 紅線）。順手清掉可能殘留的舊明文條目。
+      try {
+        localStorage.removeItem(LS_PREFIX + pubkey);
+      } catch {
+        /* 忽略 */
+      }
+      console.warn("[keyvault] 瀏覽器不接受明文 nsec 落盤（ADR-0112）；未設密碼＝不持久化");
+      return;
+    }
     try {
       localStorage.setItem(LS_PREFIX + pubkey, nsec);
     } catch {

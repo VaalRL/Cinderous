@@ -26,6 +26,8 @@ export * from "./group.js";
 export * from "./datachannel.js";
 export * from "./connection.js";
 export * from "./pairing.js";
+export * from "./at-rest.js";
+export * from "./passlock-web.js";
 export * from "./snapshot.js";
 export * from "./happy-eyeballs.js";
 export * from "./sync.js";

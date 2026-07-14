@@ -1,3 +1,5 @@
+import { deriveStorageKey, openValue, sealValue } from "@cinder/core";
+
 import { ArchiveWriter, type MessageArchive } from "./archive.js";
 import { MemoryStorage } from "./memory.js";
 import type {
@@ -18,18 +20,28 @@ export function onStorageQuota(fn: ((key: string) => void) | undefined): void {
   quotaHandler = fn;
 }
 
-function read<T>(key: string, fallback: T): T {
+/**
+ * 讀一個值。`dek` 存在時解密（ADR-0112）。
+ *
+ * **舊的明文值仍讀得出來**（`openValue` 對無前綴者原樣回傳）——否則升級等於把所有人的資料
+ * 變成亂碼。下次寫入時會自動轉成密文。
+ */
+function read<T>(key: string, fallback: T, dek?: Uint8Array): T {
   try {
     const raw = localStorage.getItem(key);
-    return raw ? (JSON.parse(raw) as T) : fallback;
+    if (!raw) return fallback;
+    const plain = dek ? openValue(dek, raw) : raw;
+    if (plain === null) return fallback; // 密文解不開（錯鑰/竄改）→ 不可當明文用
+    return JSON.parse(plain) as T;
   } catch {
     return fallback;
   }
 }
 
-function write(key: string, value: unknown): void {
+function write(key: string, value: unknown, dek?: Uint8Array): void {
   try {
-    localStorage.setItem(key, JSON.stringify(value));
+    const json = JSON.stringify(value);
+    localStorage.setItem(key, dek ? sealValue(dek, json) : json);
   } catch (e) {
     // 配額爆掉不再靜默：至少回報（審查 P0-1）。無上限保留（ADR-0094）下更可能發生 → 另通知 UI。
     const quota = e instanceof DOMException && (e.name === "QuotaExceededError" || e.code === 22);
@@ -60,13 +72,28 @@ export class LocalStorage implements AppStorage {
   private writer: ArchiveWriter | undefined;
   private archive: MessageArchive | undefined;
 
+  /**
+   * 靜態加密金鑰（ADR-0112）：由 nsec 導出。**未提供＝明文**（舊行為）。
+   *
+   * 注意：這個加密只有在 **nsec 不明文落盤**時才是真的——見 `at-rest.ts` 與 `passlock-web.ts`。
+   */
+  private readonly dek: Uint8Array | undefined;
+
   constructor(
     private readonly namespace = "",
     /** 每對話保留上限（ADR-0094）；`0`＝無上限（預設）。 */
     maxPerConvo = 0,
+    /** 使用者私鑰（ADR-0112）：提供則靜態加密；省略則沿用明文（相容既有呼叫）。 */
+    secretKey?: Uint8Array,
   ) {
+    this.dek = secretKey ? deriveStorageKey(secretKey) : undefined;
     this.mem = new MemoryStorage(maxPerConvo);
     this.mem.importSnapshot(this.readSnapshot());
+  }
+
+  /** 已導出的儲存金鑰（供 OPFS 封存共用同一把，ADR-0112）。 */
+  storageKey(): Uint8Array | undefined {
+    return this.dek;
   }
 
   /**
@@ -106,39 +133,39 @@ export class LocalStorage implements AppStorage {
 
   /** 開機一次：把 localStorage 的全部狀態讀進記憶體（索引在 importSnapshot 內一次建好）。 */
   private readSnapshot(): StorageSnapshot {
-    const contacts = read<StoredContact[]>(this.k("contacts"), []);
-    const groups = read<StoredGroup[]>(this.k("groups"), []);
+    const contacts = read<StoredContact[]>(this.k("contacts"), [], this.dek);
+    const groups = read<StoredGroup[]>(this.k("groups"), [], this.dek);
     const messages: Record<string, StoredMessage[]> = {};
     for (const convo of this.convoKeys(contacts, groups)) {
-      messages[convo] = read<StoredMessage[]>(this.k(MSGS + convo), []);
+      messages[convo] = read<StoredMessage[]>(this.k(MSGS + convo), [], this.dek);
     }
     return {
-      identity: read<StoredIdentity | null>(this.k("identity"), null),
+      identity: read<StoredIdentity | null>(this.k("identity"), null, this.dek),
       contacts,
-      blocked: read<StoredContact[]>(this.k("blocked"), []),
+      blocked: read<StoredContact[]>(this.k("blocked"), [], this.dek),
       messages,
-      reactions: read<StoredReaction[]>(this.k("reactions"), []),
-      deleted: read<string[]>(this.k("deleted"), []),
+      reactions: read<StoredReaction[]>(this.k("reactions"), [], this.dek),
+      deleted: read<string[]>(this.k("deleted"), [], this.dek),
       groups,
-      bootstrapList: read<StoredBootstrapList | null>(this.k("bootstrapList"), null),
-      readAt: read<Record<string, number>>(this.k("readAt"), {}),
+      bootstrapList: read<StoredBootstrapList | null>(this.k("bootstrapList"), null, this.dek),
+      readAt: read<Record<string, number>>(this.k("readAt"), {}, this.dek),
     };
   }
 
   /** 把某對話寫回（唯一會隨歷史長度成長的寫入；只碰被改動的那一個對話）。 */
   private writeConvo(convo: string): void {
-    write(this.k(MSGS + convo), this.mem.loadMessages(convo));
+    write(this.k(MSGS + convo), this.mem.loadMessages(convo), this.dek);
   }
   private writeContacts(): void {
-    write(this.k("contacts"), this.mem.loadContacts());
+    write(this.k("contacts"), this.mem.loadContacts(), this.dek);
   }
   private writeGroups(): void {
-    write(this.k("groups"), this.mem.loadGroups());
+    write(this.k("groups"), this.mem.loadGroups(), this.dek);
   }
   /** 移除聯絡人/群組會連帶清掉其訊息的孤兒 reactions/deleted（見 MemoryStorage.pruneOrphans）。 */
   private writeOrphanSweep(): void {
-    write(this.k("reactions"), this.mem.loadReactions());
-    write(this.k("deleted"), this.mem.loadDeleted());
+    write(this.k("reactions"), this.mem.loadReactions(), this.dek);
+    write(this.k("deleted"), this.mem.loadDeleted(), this.dek);
   }
 
   loadIdentity(): StoredIdentity | null {
@@ -146,7 +173,7 @@ export class LocalStorage implements AppStorage {
   }
   saveIdentity(identity: StoredIdentity): void {
     this.mem.saveIdentity(identity);
-    write(this.k("identity"), identity);
+    write(this.k("identity"), identity, this.dek);
   }
   loadContacts(): StoredContact[] {
     return this.mem.loadContacts();
@@ -184,12 +211,12 @@ export class LocalStorage implements AppStorage {
     this.writeContacts();
     localStorage.removeItem(this.k(MSGS + contact.pubkey));
     this.writeOrphanSweep();
-    write(this.k("blocked"), this.mem.loadBlocked());
+    write(this.k("blocked"), this.mem.loadBlocked(), this.dek);
     void this.archive?.remove(contact.pubkey);
   }
   unblockContact(pubkey: string): void {
     this.mem.unblockContact(pubkey);
-    write(this.k("blocked"), this.mem.loadBlocked());
+    write(this.k("blocked"), this.mem.loadBlocked(), this.dek);
   }
   loadBlocked(): StoredContact[] {
     return this.mem.loadBlocked();
@@ -251,18 +278,18 @@ export class LocalStorage implements AppStorage {
   }
   setReadAt(convoKey: string, at: number): void {
     this.mem.setReadAt(convoKey, at);
-    write(this.k("readAt"), this.mem.loadReadAt());
+    write(this.k("readAt"), this.mem.loadReadAt(), this.dek);
   }
   loadReactions(): StoredReaction[] {
     return this.mem.loadReactions();
   }
   addReaction(reaction: StoredReaction): void {
     this.mem.addReaction(reaction);
-    write(this.k("reactions"), this.mem.loadReactions());
+    write(this.k("reactions"), this.mem.loadReactions(), this.dek);
   }
   markDeleted(messageId: string): void {
     this.mem.markDeleted(messageId);
-    write(this.k("deleted"), this.mem.loadDeleted());
+    write(this.k("deleted"), this.mem.loadDeleted(), this.dek);
   }
   loadDeleted(): string[] {
     return this.mem.loadDeleted();
@@ -286,7 +313,7 @@ export class LocalStorage implements AppStorage {
   }
   saveBootstrapList(list: StoredBootstrapList): void {
     this.mem.saveBootstrapList(list);
-    write(this.k("bootstrapList"), list);
+    write(this.k("bootstrapList"), list, this.dek);
   }
   exportSnapshot(): StorageSnapshot {
     return this.mem.exportSnapshot();
@@ -295,7 +322,7 @@ export class LocalStorage implements AppStorage {
     this.mem.importSnapshot(s);
     for (const [key, value] of Object.entries(this.mem.exportSnapshot())) {
       if (key === "messages") continue;
-      write(this.k(key), value);
+      write(this.k(key), value, this.dek);
     }
     for (const convo of Object.keys(s.messages)) this.writeConvo(convo);
   }

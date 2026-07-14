@@ -26,7 +26,16 @@ import { onNativeFileDrop } from "./native/file-drop.js";
 import { makeThumbnail } from "./ui/thumbnail.js";
 import { useI18n } from "./i18n.js";
 import { type Layout, useLayout } from "./layout.js";
-import { isWrappedValue, passChange, passDisable, passEnable, passLock, passRescue, passUnlock } from "./native/passlock.js";
+import {
+  browserPassUnlock,
+  isWrappedValue,
+  passChange,
+  passDisable,
+  passEnable,
+  passLock,
+  passRescue,
+  passUnlock,
+} from "./native/passlock.js";
 import {
   activeDrain,
   activeProfile,
@@ -200,6 +209,15 @@ function normalizeAdminPubkey(input: string): string | undefined {
   return undefined;
 }
 
+/** 解 nsec，失敗回 undefined（不讓一個壞掉的 nsec 讓整個登入炸掉）。 */
+function safeNsecDecode(nsec: string): Uint8Array | undefined {
+  try {
+    return nsecDecode(nsec);
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * 依身分設定檔建立後端（ADR-0045）。工作身分（enterprise）鎖定單座：不給
  * connectorFor/anchors/onHomeSwitched → 不漫遊、不遞補；個人身分走開放模式。
@@ -207,10 +225,13 @@ function normalizeAdminPubkey(input: string): string | undefined {
  */
 function buildBackend(p: Profile, nsecOverride?: string, storage?: AppStorage): ChatBackend {
   if (!p.relayUrl) return new BrowserChatBackend(p.name);
-  const store = storage ?? new LocalStorage(p.namespace);
+  // 瀏覽器退路（非 Tauri）：localStorage 靜態加密，資料金鑰由 nsec 導出（ADR-0112）。
+  // 有了「nsec 絕不明文落盤」（見 keyvault.ts）這個加密才是真的，不是演戲。
+  const sk = !storage && nsecOverride ? safeNsecDecode(nsecOverride) : undefined;
+  const store = storage ?? new LocalStorage(p.namespace, 0, sk);
   if (!storage) {
-    // 瀏覽器退路（非 Tauri）：封存走 OPFS。非同步掛上——掛上前不會裁切熱區，故安全（ADR-0111）。
-    void openOpfsArchive(p.namespace).then((a) => {
+    // 封存走 OPFS，塊檔以同一把金鑰加密（ADR-0111/0112）。非同步掛上——掛上前不會裁切熱區。
+    void openOpfsArchive(p.namespace, (store as LocalStorage).storageKey()).then((a) => {
       if (a) store.attachArchive?.(a);
     });
   }
@@ -857,6 +878,11 @@ export function App(): JSX.Element {
     const p = lockedProfile;
     if (!p) return false;
     try {
+      if (!isTauri()) {
+        // 瀏覽器（ADR-0112）：Argon2id 在 JS 解包（參數與原生版一致）。
+        const nsec = await browserPassUnlock(p.pubkey, password);
+        return nsec ? await enterWithNsec(p, nsec) : false;
+      }
       return await enterWithNsec(p, await passUnlock(p.namespace, p.pubkey, password));
     } catch {
       return false;
@@ -1054,7 +1080,10 @@ export function App(): JSX.Element {
     if (isTauri()) {
       await getKeyVault().setKey(pubkey, nsecEncode(sk)); // B5：私鑰 → OS 金鑰庫，不落 localStorage
     } else {
-      new LocalStorage(pubkey).saveIdentity({ nsec: nsecEncode(sk), name }); // 瀏覽器：既有行為
+      // 瀏覽器（ADR-0112）：**nsec 絕不明文落盤**。過去這裡直接寫 localStorage——
+      // 那讓靜態加密變成演戲（資料金鑰由 nsec 導出，而 nsec 就躺在旁邊）。
+      // 現在只存名稱；nsec 留在記憶體。要「記住我」須在設定裡啟用本地密碼（Argon2id 包裹）。
+      new LocalStorage(pubkey).saveIdentity({ nsec: "", name });
     }
     const admin = enterprise && opts.adminPubkey?.trim() ? normalizeAdminPubkey(opts.adminPubkey.trim()) : undefined;
     const profile: Profile = { pubkey, name, relayUrl, enterprise, namespace: pubkey, ...(admin ? { adminPubkey: admin } : {}) };

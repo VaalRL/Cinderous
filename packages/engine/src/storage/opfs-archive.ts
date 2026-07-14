@@ -8,10 +8,12 @@
 // OPFS 走 Storage API 配額（通常是可用磁碟的一大部分）。這正是封存必須換基質的理由：
 // 把舊訊息從 `msgs.bob` 搬到 `archive.bob`（同在 localStorage）**完全不解決問題**。
 //
-// **加密**：OPFS 是明文。這與本平台的現況一致（localStorage 本來就是明文），故不構成
-// 新的暴露面；但這是既有的不一致，應另立 ADR 處理（桌面走加密檔，見 `TauriArchive`）。
+// **加密**（ADR-0112）：塊檔以 AES-256-GCM 加密，金鑰由 nsec 導出（與 localStorage 同一把）。
+// 未提供金鑰時退回明文——但那條路只該出現在「使用者根本沒有 nsec」的情境。
 //
 // 移植到真正的 React Native 時換掉本檔即可（expo-file-system），介面不變。
+
+import { openValue, sealValue } from "@cinder/core";
 
 import type { MessageArchive } from "./archive.js";
 import type { StoredMessage } from "./types.js";
@@ -37,20 +39,24 @@ export function hasOpfs(): boolean {
  * 「先寫封存 → 成功後裁切熱區」；若封存是個靜默的 no-op，熱區仍會被裁切 → **永久遺失**。
  * 回 `null` 讓呼叫端不掛封存 → 不裁切 → 熱區無上限（退回舊行為，但資料完好）。
  */
-export async function openOpfsArchive(namespace: string): Promise<MessageArchive | null> {
+export async function openOpfsArchive(namespace: string, storageKey?: Uint8Array): Promise<MessageArchive | null> {
   if (!hasOpfs()) return null;
   try {
     const root = await navigator.storage.getDirectory();
     const app = await root.getDirectoryHandle(ROOT, { create: true });
     const dir = await app.getDirectoryHandle(namespace || "legacy", { create: true });
-    return new OpfsArchive(dir as DirHandle);
+    return new OpfsArchive(dir as DirHandle, storageKey);
   } catch {
     return null; // 私密模式／配額拒絕等 → 寧可不封存，也不冒遺失風險
   }
 }
 
 class OpfsArchive implements MessageArchive {
-  constructor(private readonly dir: DirHandle) {}
+  constructor(
+    private readonly dir: DirHandle,
+    /** 靜態加密金鑰（ADR-0112）：與 localStorage 同一把（皆由 nsec 導出）。 */
+    private readonly dek: Uint8Array | undefined,
+  ) {}
 
   private name(convo: string, seq: number): string {
     return `${convo}.${seq}${SUFFIX}`;
@@ -60,7 +66,8 @@ class OpfsArchive implements MessageArchive {
     const seq = await this.chunkCount(convo); // seq 取自現有塊數 → 天然遞增
     const file = await this.dir.getFileHandle(this.name(convo, seq), { create: true });
     const writable = await file.createWritable();
-    await writable.write(JSON.stringify(messages));
+    const json = JSON.stringify(messages);
+    await writable.write(this.dek ? sealValue(this.dek, json) : json); // ADR-0112
     await writable.close();
   }
 
@@ -78,7 +85,11 @@ class OpfsArchive implements MessageArchive {
   async loadChunk(convo: string, seq: number): Promise<StoredMessage[]> {
     try {
       const file = await this.dir.getFileHandle(this.name(convo, seq));
-      return JSON.parse(await (await file.getFile()).text()) as StoredMessage[];
+      const raw = await (await file.getFile()).text();
+      // 舊的明文塊仍讀得出來（`openValue` 對無前綴者原樣回傳）——升級不能讓既有封存變亂碼。
+      const json = this.dek ? openValue(this.dek, raw) : raw;
+      if (json === null) return []; // 密文解不開（錯鑰/竄改）
+      return JSON.parse(json) as StoredMessage[];
     } catch {
       return []; // 不存在或單一塊毀損 → 不拖垮其餘塊
     }

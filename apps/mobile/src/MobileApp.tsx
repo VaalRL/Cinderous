@@ -12,6 +12,7 @@ import {
   LocalStorage,
   openOpfsArchive,
 } from "@cinder/engine";
+import { nsecDecode } from "@cinder/core";
 import type { CallMedia, CallState } from "@cinder/core";
 import { makeThumbnail, pickFile, saveFile } from "./native/files.js";
 import { hasCallSupport } from "./native/call-media.js";
@@ -141,11 +142,17 @@ export function MobileApp({
   const handleSignIn = (identity: MobileIdentity): void => {
     backendRef.current?.stop();
     // ADR-0094：真實 relay 用外部持有的儲存（供保留上限/導出）；示範模式無持久化。
-    const store = relayUrl ? new LocalStorage(identity.pubkey, readRetentionCap()) : null;
+    // ADR-0112：靜態加密——資料金鑰由 nsec 導出。行動端**從不持久化 nsec**（每次輸入），
+    // 所以金鑰不在磁碟上 → localStorage/OPFS 上的訊息**真的**解不開。
+    const sk = nsecDecode(identity.nsec);
+    const store = relayUrl ? new LocalStorage(identity.pubkey, readRetentionCap(), sk) : null;
     storeRef.current = store;
     // ADR-0111：封存走 OPFS（webview 沒有檔案系統；OPFS 的配額與 localStorage 是不同的池子）。
     // 非同步掛上——掛上前不會裁切熱區，故安全；不支援 OPFS 時不掛（熱區無上限，資料完好）。
-    if (store) void openOpfsArchive(identity.pubkey).then((a) => a && store.attachArchive?.(a));
+    // 封存塊以同一把金鑰加密（ADR-0112）。
+    if (store) {
+      void openOpfsArchive(identity.pubkey, store.storageKey()).then((a) => a && store.attachArchive?.(a));
+    }
     // ADR-0100：帶上錨點/簽章清單（backend.ts 內）與加密雲端備份模式。
     const backend = createBackend(identity, relayUrl, { store: store ?? undefined, cloudSync });
     backendRef.current = backend;

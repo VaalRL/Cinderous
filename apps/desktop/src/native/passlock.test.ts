@@ -2,8 +2,12 @@ import { describe, expect, it } from "vitest";
 import { isWrappedValue, passwordLockAvailable } from "./passlock.js";
 
 describe("本地密碼前端橋（ADR-0067）", () => {
-  it("非 Tauri 環境不提供本地密碼（無假安全感）", () => {
-    expect(passwordLockAvailable()).toBe(false);
+  it("**瀏覽器也提供本地密碼**（ADR-0112 推翻 ADR-0067 的「假安全感」推論）", () => {
+    // 舊決策：瀏覽器無 OS 金鑰庫 → 提供密碼保護是「假安全感」→ 不提供。
+    // 但**不提供的結果不是誠實，而是 nsec 明文躺在 localStorage**。
+    // Argon2id 包裹在瀏覽器提供的是與桌面**相同**的靜態保護（KEK 由密碼導出、從不落盤）；
+    // 它擋不住頁面內的惡意 JS——但桌面的 webview 同樣擋不住。
+    expect(passwordLockAvailable()).toBe(true);
   });
 
   it("isWrappedValue（審查修正 #3）：認得包裹 blob；nsec/b64/備份碼信封不誤判", () => {
