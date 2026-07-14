@@ -57,6 +57,7 @@ import { getDeviceId } from "@cinder/engine";
 import type { CloudSyncMode } from "@cinder/engine";
 import type {
   BlockedContact,
+  ContactRequest,
   ChatBackend,
   ChatFile,
   ChatMessage,
@@ -309,6 +310,8 @@ export function App(): JSX.Element {
   const [unsent, setUnsent] = useState<Set<string>>(new Set());
   const [expired, setExpired] = useState<Set<string>>(new Set());
   const [blocked, setBlocked] = useState<BlockedContact[]>([]);
+  /** 訊息請求（ADR-0121）：陌生人傳來訊息但尚未接受。**不是聯絡人**。 */
+  const [requests, setRequests] = useState<ContactRequest[]>([]);
   const [unread, setUnread] = useState<Record<string, number>>({});
   /** 有封存的對話（ADR-0111）：只有真的有封存才顯示「歷史紀錄」入口。 */
   const [archived, setArchived] = useState<Record<string, number>>({});
@@ -446,6 +449,8 @@ export function App(): JSX.Element {
   contactsRef.current = contacts;
   const groupsRef = useRef(groups);
   groupsRef.current = groups;
+  const requestsRef = useRef(requests);
+  requestsRef.current = requests;
   const tRef = useRef(t);
   tRef.current = t;
   // 三欄可視性（ADR-0079）：讓 onMessage/visibilitychange 這類閉包 handler 讀到當前佈局與作用中分頁。
@@ -566,11 +571,14 @@ export function App(): JSX.Element {
           if (cur.some((m) => m.id === msg.id)) return prev;
           return { ...prev, [pk]: [...cur, msg] };
         });
-        setOpen((prev) => (prev.includes(pk) ? prev : [...prev, pk]));
+        // 訊息請求（ADR-0121）：**不自動開窗、不跳通知**。它只出現在聯絡人清單上方的請求區，
+        // 由使用者決定要不要接受。自動開窗等於讓陌生人強制彈出視窗——那就是騷擾。
+        const isRequest = requestsRef.current.some((r) => r.pubkey === pk);
+        if (!isRequest) setOpen((prev) => (prev.includes(pk) ? prev : [...prev, pk]));
         // 未讀徽章：由後端從儲存推導（ADR-0108），UI 不再自行 +1。若該對話當下**看得到**，
         // 就立刻推進已讀水位（三欄背景分頁也算看不到，ADR-0079 修正）。
         // 桌面通知仍僅在整個視窗未聚焦時彈出（視窗聚焦時以未讀徽章提示即可，不打擾）。
-        if (!msg.outgoing) {
+        if (!msg.outgoing && !isRequest) {
           const hidden = typeof document !== "undefined" && document.hidden;
           if (convoVisibleIn(layoutRef.current, activeConvoRef.current, pk, hidden)) {
             backend.clearUnread?.(pk);
@@ -631,6 +639,7 @@ export function App(): JSX.Element {
           return changed ? { ...prev, [pk]: next } : prev;
         }),
       onBlocked: setBlocked,
+      onRequests: setRequests, // ADR-0121
       onConnection: setConn,
       onRelayPool: setRelays,
       onPolicy: setPolicy,
@@ -1341,6 +1350,30 @@ export function App(): JSX.Element {
       ? { onUnblockContact: (pk: string) => activeBackend.unblockContact!(pk) }
       : {}),
     blocked,
+    // 訊息請求（ADR-0121）
+    requests,
+    ...(activeBackend.acceptRequest
+      ? {
+          onAcceptRequest: (pk: string) => {
+            activeBackend.acceptRequest?.(pk);
+            setOpen((prev) => (prev.includes(pk) ? prev : [...prev, pk])); // 接受了就開窗
+          },
+        }
+      : {}),
+    ...(activeBackend.declineRequest
+      ? {
+          onDeclineRequest: (pk: string) => {
+            activeBackend.declineRequest?.(pk);
+            setOpen((prev) => prev.filter((k) => k !== pk));
+            setConvos((prev) => {
+              const { [pk]: _drop, ...rest } = prev;
+              return rest;
+            });
+          },
+        }
+      : {}),
+    // 預覽請求裡的訊息：**只開窗，不接受**——對方不會收到已讀回條（他不是聯絡人）。
+    onOpenRequest: (pk: string) => setOpen((prev) => (prev.includes(pk) ? prev : [...prev, pk])),
   };
   const updatePrefs = (next: GroupPrefsMap) => {
     setGroupPrefs(next);

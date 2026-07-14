@@ -1,13 +1,13 @@
 import type { MessageKey } from "@cinder/i18n";
 import { Fragment, useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n.js";
-import type { BlockedContact, ConnectionState, Contact, Group, Self, Status } from "@cinder/engine";
+import type { BlockedContact, ConnectionState, Contact, ContactRequest, Group, Self, Status } from "@cinder/engine";
 import { qrDataUri } from "../qr.js";
 import { CinderMascot } from "./Brand.js";
 import { hasRichStatus, renderStatus } from "./status-text.js";
 import { TitleControls } from "./TitleControls.js";
 import { avatarColor, initial } from "./util.js";
-import { EditableAvatar } from "./Avatar.js";
+import { Avatar, EditableAvatar } from "./Avatar.js";
 
 const STATUS_KEY: Record<Status, MessageKey> = {
   online: "status_online",
@@ -51,6 +51,18 @@ export interface ContactListProps {
   onUnblockContact?: (pubkey: string) => void;
   /** 已封鎖名單。 */
   blocked?: BlockedContact[];
+  /**
+   * 訊息請求（ADR-0121）：陌生人傳訊息給你，但你還沒接受。
+   *
+   * **他們不是聯絡人**——不跳通知、不能 nudge 你、看不到你的上線狀態。
+   */
+  requests?: ContactRequest[];
+  /** 接受請求 → 變成聯絡人。 */
+  onAcceptRequest?: (pubkey: string) => void;
+  /** 刪除請求（連同他傳來的訊息）；不封鎖，他還能再傳。 */
+  onDeclineRequest?: (pubkey: string) => void;
+  /** 預覽請求裡的訊息（只讀，不接受）。 */
+  onOpenRequest?: (pubkey: string) => void;
   /** 開啟設定面板。 */
   onOpenSettings?: () => void;
   /** 設定自己的音樂狀態（分享正在聽的音樂）。 */
@@ -155,6 +167,7 @@ export function ContactListWindow(props: ContactListProps): JSX.Element {
   );
   const [groupModal, setGroupModal] = useState(false);
   const groups = props.groups ?? [];
+  const requests = props.requests ?? [];
 
   return (
     <div className="win contacts">
@@ -226,6 +239,55 @@ export function ContactListWindow(props: ContactListProps): JSX.Element {
           placeholder={t("contact_addPlaceholder")}
           addLabel={t("contact_add")}
         />
+      ) : null}
+
+      {/* 訊息請求（ADR-0121）：放在名冊**之前**——這是需要你裁示的東西，不該被埋在清單裡。 */}
+      {requests.length > 0 ? (
+        <div className="requests" data-testid="requests">
+          <div className="group group--requests">
+            <span>
+              {t("request_section")}（{requests.length}）
+            </span>
+          </div>
+          <div className="requests__hint">{t("request_hint")}</div>
+          {requests.map((r) => (
+            <div className="request" key={r.pubkey} data-testid={`request-${r.pubkey}`}>
+              <Avatar id={r.pubkey} name={r.name} />
+              <button
+                type="button"
+                className="request__name"
+                title={t("request_preview")}
+                onClick={() => props.onOpenRequest?.(r.pubkey)}
+              >
+                {r.name}
+              </button>
+              <button
+                type="button"
+                className="request__ok"
+                data-testid={`request-accept-${r.pubkey}`}
+                onClick={() => props.onAcceptRequest?.(r.pubkey)}
+              >
+                {t("request_accept")}
+              </button>
+              <button
+                type="button"
+                className="request__no"
+                data-testid={`request-decline-${r.pubkey}`}
+                onClick={() => props.onDeclineRequest?.(r.pubkey)}
+              >
+                {t("request_decline")}
+              </button>
+              <button
+                type="button"
+                className="request__block"
+                data-testid={`request-block-${r.pubkey}`}
+                onClick={() => props.onBlockContact?.(r.pubkey)}
+              >
+                {t("contact_block")}
+              </button>
+            </div>
+          ))}
+        </div>
       ) : null}
 
       <div className="roster">

@@ -36,6 +36,8 @@ export class MemoryStorage implements AppStorage {
   private reactions: StoredReaction[] = [];
   private readonly deleted = new Set<string>();
   private blocked: StoredContact[] = [];
+  /** 訊息請求（ADR-0121）：陌生人傳來的訊息，等使用者裁示。 */
+  private requests: StoredContact[] = [];
   private groups: StoredGroup[] = [];
   /** 已讀水位（ADR-0108）：對話 → 已讀到的最新訊息時間（毫秒）。 */
   private readonly readAt = new Map<string, number>();
@@ -128,6 +130,14 @@ export class MemoryStorage implements AppStorage {
     this.contacts.push(contact);
   }
   updateContactRelay(pubkey: string, relayUrl: string | undefined): void {
+    // 請求區的人也要記 hint（ADR-0121）——否則你「接受」他之後，回信只能走 home relay，
+    // 而他可能在別座中繼上（ADR-0035 的自動學習就白學了）。
+    const put = (c: StoredContact): StoredContact => {
+      if (c.pubkey !== pubkey) return c;
+      const { relayUrl: _drop, ...rest } = c;
+      return relayUrl ? { ...rest, relayUrl } : rest;
+    };
+    this.requests = this.requests.map(put);
     this.contacts = this.contacts.map((c) => {
       if (c.pubkey !== pubkey) return c;
       const { relayUrl: _drop, ...rest } = c;
@@ -136,6 +146,9 @@ export class MemoryStorage implements AppStorage {
   }
   updateContactName(pubkey: string, name: string): void {
     this.contacts = this.contacts.map((c) => (c.pubkey === pubkey ? { ...c, name } : c));
+    // 請求區的人也要更新（ADR-0121）——否則請求清單裡只看得到 `npub1abc…`，
+    // 使用者無從判斷要不要接受。
+    this.requests = this.requests.map((r) => (r.pubkey === pubkey ? { ...r, name } : r));
   }
   removeContact(pubkey: string): void {
     const ids = new Set(this.convos.get(pubkey)?.byId.keys() ?? []);
@@ -172,7 +185,17 @@ export class MemoryStorage implements AppStorage {
   }
   blockContact(contact: StoredContact): void {
     this.removeContact(contact.pubkey);
+    this.removeRequest(contact.pubkey); // 封鎖一個請求者＝連請求一起消失（ADR-0121）
     if (!this.blocked.some((b) => b.pubkey === contact.pubkey)) this.blocked.push(contact);
+  }
+  addRequest(contact: StoredContact): void {
+    if (!this.requests.some((r) => r.pubkey === contact.pubkey)) this.requests.push(contact);
+  }
+  removeRequest(pubkey: string): void {
+    this.requests = this.requests.filter((r) => r.pubkey !== pubkey);
+  }
+  loadRequests(): StoredContact[] {
+    return [...this.requests];
   }
   unblockContact(pubkey: string): void {
     this.blocked = this.blocked.filter((b) => b.pubkey !== pubkey);
@@ -313,6 +336,7 @@ export class MemoryStorage implements AppStorage {
       identity: this.identity,
       contacts: [...this.contacts],
       blocked: [...this.blocked],
+      requests: [...this.requests],
       messages,
       reactions: [...this.reactions],
       deleted: [...this.deleted],
@@ -327,6 +351,7 @@ export class MemoryStorage implements AppStorage {
     this.identity = s.identity;
     this.contacts = [...s.contacts];
     this.blocked = [...s.blocked];
+    this.requests = [...(s.requests ?? [])]; // 舊快照沒有 requests（ADR-0121）
     this.convos.clear();
     for (const [k, v] of Object.entries(s.messages)) {
       // 匯入即建索引（ADR-0110）：一次 O(n) 建好，之後所有查找 O(1)。

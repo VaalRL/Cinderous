@@ -307,6 +307,19 @@ export class TauriStorage implements AppStorage {
     this.mem.unblockContact(pubkey);
     this.persist(META);
   }
+
+  // 訊息請求（ADR-0121）。`metaOf()` ＝ 快照扣掉 messages → requests 自動落在 meta 部位。
+  addRequest(contact: StoredContact): void {
+    this.mem.addRequest(contact);
+    this.persist(META);
+  }
+  removeRequest(pubkey: string): void {
+    this.mem.removeRequest(pubkey);
+    this.persist(META);
+  }
+  loadRequests(): StoredContact[] {
+    return this.mem.loadRequests();
+  }
   appendMessage(message: StoredMessage): void {
     this.mem.appendMessage(message);
     this.persist(MSGS + message.contact);

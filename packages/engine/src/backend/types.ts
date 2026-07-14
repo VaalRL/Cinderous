@@ -43,6 +43,16 @@ export interface BlockedContact {
   name: string;
 }
 
+/**
+ * 訊息請求（ADR-0121）：陌生人傳訊息給你，但你還沒接受。
+ *
+ * **他不是聯絡人**——不跳通知、不能 nudge 你（震動）、看不到你的上線狀態、拿不到你的個人檔。
+ */
+export interface ContactRequest {
+  pubkey: PubkeyHex;
+  name: string;
+}
+
 /** 對話中的檔案附件（P2P 傳輸）。 */
 export interface ChatFile {
   /** 傳輸 id（送出端用來對應進度）。 */
@@ -123,6 +133,8 @@ export interface ChatBackendEvents {
   onMessageReceipts?(groupId: string, messageId: string, receipts: Record<string, "delivered" | "read">): void;
   /** 封鎖名單有更新。 */
   onBlocked?(blocked: BlockedContact[]): void;
+  /** 訊息請求清單變動（ADR-0121）。UI 以此決定「不通知、不放進主對話清單」。 */
+  onRequests?(requests: ContactRequest[]): void;
   /** 與中繼站的連線狀態改變。 */
   onConnection?(state: ConnectionState): void;
   /** Relay pool（home + 外部座）各自的連線狀態；`stale`＝連續離線過久，hint 可能過期（ADR-0034/0036）。 */
@@ -236,6 +248,10 @@ export interface ChatBackend {
   blockContact?(pubkey: PubkeyHex): void;
   /** 解除封鎖。 */
   unblockContact?(pubkey: PubkeyHex): void;
+  /** 接受訊息請求（ADR-0121）：請求 → 聯絡人。 */
+  acceptRequest?(pubkey: PubkeyHex): void;
+  /** 刪除訊息請求（ADR-0121）：連同他傳來的訊息一起清掉；不封鎖。 */
+  declineRequest?(pubkey: PubkeyHex): void;
   /** 清除指向某座 relay 的聯絡人 hint 並釋放連線（ADR-0036）。 */
   clearRelayHint?(url: string): void;
   /** 確認保留某座 stale relay（重置離線計時、暫時隱藏警告，ADR-0036）。 */

@@ -8,6 +8,8 @@ declare module "react-native-web" {
   export interface ViewProps {
     style?: Style;
     children?: ReactNode;
+    /** 測試選取器（RN-web 會轉成 data-testid）。UI 測試一律斷言 testID，不斷言 class。 */
+    testID?: string;
   }
   export interface TextProps {
     style?: Style;

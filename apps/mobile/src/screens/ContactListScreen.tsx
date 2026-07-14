@@ -55,6 +55,15 @@ function makeStyles(tk: ThemeTokens) {
     blockedName: { flex: 1, fontSize: 14, color: tk.muted },
     blockBtn: { marginLeft: "auto", borderWidth: 1, borderColor: tk.accent, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 2 },
     blockText: { fontSize: 11, color: tk.accent },
+    // 訊息請求（ADR-0121）：警示色，因為它需要使用者做決定。
+    reqSection: { fontSize: 11, fontWeight: "700", color: "#b45309", paddingHorizontal: 12, paddingTop: 10 },
+    reqHint: { fontSize: 10, lineHeight: 15, color: tk.muted, paddingHorizontal: 12, paddingBottom: 6 },
+    reqRow: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 5 },
+    reqNameBox: { flex: 1, minWidth: 0 },
+    reqOk: { backgroundColor: tk.accent, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 3 },
+    reqOkText: { fontSize: 11, fontWeight: "700", color: "#ffffff" },
+    reqNo: { borderWidth: 1, borderColor: tk.border, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 3 },
+    reqNoText: { fontSize: 11, color: tk.muted },
   });
 }
 
@@ -66,6 +75,9 @@ export function ContactListScreen({
   onBlock,
   blocked,
   onUnblock,
+  requests = [],
+  onAcceptRequest,
+  onDeclineRequest,
   locale = "zh-Hant",
   theme = "light",
   accent = null,
@@ -82,6 +94,15 @@ export function ContactListScreen({
   blocked?: { pubkey: string; name: string }[];
   /** 解除封鎖。 */
   onUnblock?: (pubkey: string) => void;
+  /**
+   * 訊息請求（ADR-0121）：陌生人傳訊息給你但你還沒接受。
+   *
+   * **他們不是聯絡人**——不跳通知、不能敲你、看不到你的上線狀態、也收不到已讀回條。
+   */
+  requests?: { pubkey: string; name: string }[];
+  onAcceptRequest?: (pubkey: string) => void;
+  /** 刪除請求（連同他傳來的訊息）；不封鎖，他還能再傳。 */
+  onDeclineRequest?: (pubkey: string) => void;
   locale?: Locale;
   /** 深淺主題（與桌面共用，ADR-0080）。 */
   theme?: Theme;
@@ -100,6 +121,39 @@ export function ContactListScreen({
         <Text style={styles.meName}>{selfName}</Text>
         <Text style={styles.meNpub}>{shortNpub(npubEncode(selfPubkey))}</Text>
       </View>
+      {/* 訊息請求（ADR-0121）：放在名冊**之前**——這是需要你裁示的東西，不該被埋在清單裡。 */}
+      {requests.length > 0 ? (
+        <View testID="requests">
+          <Text style={styles.reqSection}>
+            {t("request_section")}（{requests.length}）
+          </Text>
+          <Text style={styles.reqHint}>{t("request_hint")}</Text>
+          {requests.map((r) => (
+            <View key={r.pubkey} style={styles.reqRow}>
+              <Pressable style={styles.reqNameBox} accessibilityRole="button" onPress={() => onOpen?.(r.pubkey)}>
+                <Text style={styles.name}>{r.name}</Text>
+              </Pressable>
+              <Pressable
+                style={styles.reqOk}
+                accessibilityRole="button"
+                testID={`request-accept-${r.pubkey}`}
+                onPress={() => onAcceptRequest?.(r.pubkey)}
+              >
+                <Text style={styles.reqOkText}>{t("request_accept")}</Text>
+              </Pressable>
+              <Pressable
+                style={styles.reqNo}
+                accessibilityRole="button"
+                testID={`request-decline-${r.pubkey}`}
+                onPress={() => onDeclineRequest?.(r.pubkey)}
+              >
+                <Text style={styles.reqNoText}>{t("request_decline")}</Text>
+              </Pressable>
+            </View>
+          ))}
+        </View>
+      ) : null}
+
       {contacts.length === 0 ? (
         <Text style={styles.empty}>{translate(locale, "mobileContacts_empty")}</Text>
       ) : (

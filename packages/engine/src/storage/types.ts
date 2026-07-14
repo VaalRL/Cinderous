@@ -171,6 +171,16 @@ export interface AppStorage {
   unblockContact(pubkey: string): void;
   /** 已封鎖的身分清單。 */
   loadBlocked(): StoredContact[];
+  /**
+   * 訊息請求（ADR-0121）：陌生人傳訊息給你 → 進這裡，**不是**聯絡人清單。
+   *
+   * 在你按下「接受」之前，對方不是聯絡人 → 不跳通知、不能 nudge 你、不訂閱他的上線狀態。
+   */
+  addRequest(contact: StoredContact): void;
+  /** 移除一筆訊息請求（接受或刪除時）。 */
+  removeRequest(pubkey: string): void;
+  /** 待處理的訊息請求。 */
+  loadRequests(): StoredContact[];
   loadMessages(contactPubkey: string): StoredMessage[];
   appendMessage(message: StoredMessage): void;
   /** 只往前推進某訊息的送達/已讀狀態（ADR-0058）；訊息不存在或狀態不前進則忽略。 */
@@ -260,6 +270,8 @@ export interface StorageSnapshot {
   identity: StoredIdentity | null;
   contacts: StoredContact[];
   blocked: StoredContact[];
+  /** 訊息請求（ADR-0121）；舊快照沒有這個欄位 → 匯入時須容忍 `undefined`（退回 `[]`）。 */
+  requests?: StoredContact[];
   messages: Record<string, StoredMessage[]>;
   reactions: StoredReaction[];
   deleted: string[];

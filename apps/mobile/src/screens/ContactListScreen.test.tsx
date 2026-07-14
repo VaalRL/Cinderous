@@ -80,3 +80,32 @@ describe("封鎖（行動端）", () => {
     expect(html).toContain("Unblock");
   });
 });
+
+describe("行動端訊息請求區（ADR-0121）", () => {
+  const requests = [{ pubkey: "zz", name: "小明" }];
+  const render = (extra: Record<string, unknown>) =>
+    renderToStaticMarkup(
+      <ContactListScreen selfPubkey={"aa".repeat(32)} selfName="我" contacts={[]} {...extra} />,
+    );
+
+  it("沒有請求時完全不顯示", () => {
+    expect(render({})).not.toContain('data-testid="requests"');
+  });
+
+  it("顯示請求者與接受／刪除（testID 斷言——RN-web 的 class 名不可靠）", () => {
+    const html = render({ requests, onAcceptRequest: () => {}, onDeclineRequest: () => {} });
+    expect(html).toContain('data-testid="requests"');
+    expect(html).toContain('data-testid="request-accept-zz"');
+    expect(html).toContain('data-testid="request-decline-zz"');
+    expect(html).toContain("小明");
+  });
+
+  it("說明接受前對方能做什麼（使用者要能判斷風險）", () => {
+    expect(render({ requests })).toContain("不會跳通知");
+  });
+
+  it("請求者不混進聯絡人名冊", () => {
+    const html = render({ requests, contacts: [] });
+    expect(html.split("小明")).toHaveLength(2);
+  });
+});

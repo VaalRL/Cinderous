@@ -8,7 +8,7 @@ import { type CloseableRelayClient, RelayChatBackend } from "./relay-backend.js"
 const noop: ChatBackendEvents = { onContacts() {}, onMessage() {}, onTyping() {}, onNudge() {} };
 
 describe("RelayChatBackend（真實後端 + 持久化）", () => {
-  it("兩端經 relay 對話，收件端自動加入寄件人、雙方持久化", () => {
+  it("兩端經 relay 對話，收件端把寄件人放進**訊息請求**（ADR-0121）、雙方持久化", () => {
     const net = createInMemoryRelayNetwork();
     const storeA = new MemoryStorage();
     const storeB = new MemoryStorage();
@@ -26,8 +26,10 @@ describe("RelayChatBackend（真實後端 + 持久化）", () => {
     expect(bIncoming.map((m) => m.text)).toContain("嗨 Bob");
     // A 端持久化 outgoing
     expect(storeA.loadMessages(b.self.pubkey).map((m) => m.text)).toEqual(["嗨 Bob"]);
-    // B 自動加入 A 為聯絡人並持久化 incoming
-    expect(storeB.loadContacts().map((c) => c.pubkey)).toContain(a.self.pubkey);
+    // ADR-0121：B 沒加過 A → A 進**請求區**，不是聯絡人清單（過去是自動加為聯絡人）。
+    // 訊息本身照收並持久化——Nostr 上擋不掉，只是由使用者決定要不要理。
+    expect(storeB.loadContacts()).toEqual([]);
+    expect(storeB.loadRequests().map((c) => c.pubkey)).toContain(a.self.pubkey);
     expect(storeB.loadMessages(a.self.pubkey).map((m) => m.text)).toEqual(["嗨 Bob"]);
 
     a.stop();
@@ -625,6 +627,7 @@ describe("送達/已讀回條（ADR-0058）", () => {
     b.setReadReceipts?.(true);
     a.addContact(b.selfNpub);
     a.sendMessage(b.self.pubkey, "hi");
+    b.acceptRequest?.(a.self.pubkey); // ADR-0121：請求區的訊息不送已讀回條，接受後才送
     b.markRead?.(a.self.pubkey);
     expect(storeA.loadMessages(b.self.pubkey)[0]?.status).toBe("read");
     a.stop();
@@ -822,7 +825,7 @@ describe("加密雲端快照（ADR-0071）", () => {
 });
 
 describe("顯示名稱個人檔（ADR-0061，加密廣播）", () => {
-  it("單向加好友即互換個人檔：雙方顯示對方自選暱稱（非 npub）", () => {
+  it("單向加好友＝一則帶暱稱的請求；**B 接受後才回送個人檔**（ADR-0121）", () => {
     const net = createInMemoryRelayNetwork();
     const storeA = new MemoryStorage();
     const storeB = new MemoryStorage();
@@ -831,7 +834,17 @@ describe("顯示名稱個人檔（ADR-0061，加密廣播）", () => {
     a.start(noop);
     b.start(noop);
     a.addContact(b.selfNpub); // 只有 A 主動加 B
-    // B 自動加入 A 並學到「Alice」、回送個人檔 → A 也學到「Bob」
+
+    // B 學到「Alice」這個名字——但她停在**請求區**，還不是聯絡人。
+    expect(storeB.loadContacts()).toEqual([]);
+    expect(storeB.loadRequests().find((c) => c.pubkey === a.self.pubkey)?.name).toBe("Alice");
+
+    // 而且 B **不回送**自己的個人檔：對還沒接受的陌生人回送，等於向他確認
+    // 「這把金鑰是活的、有人在線上」——那正是垃圾訊息發送者最想要的回饋。
+    expect(storeA.loadContacts().find((c) => c.pubkey === b.self.pubkey)?.name).not.toBe("Bob");
+
+    // 接受之後才互換（ADR-0061 的效果回來了）。
+    b.acceptRequest(a.self.pubkey);
     expect(storeB.loadContacts().find((c) => c.pubkey === a.self.pubkey)?.name).toBe("Alice");
     expect(storeA.loadContacts().find((c) => c.pubkey === b.self.pubkey)?.name).toBe("Bob");
     a.stop();
@@ -1271,6 +1284,7 @@ describe("已讀水位的本機持久化（ADR-0108）", () => {
     bob.start(noop);
 
     bob.addContact(a1.selfNpub);
+    a1.acceptRequest(bob.self.pubkey); // ADR-0121：請求區的訊息不點亮未讀徽章，接受後才算
     bob.sendMessage(a1.self.pubkey, "在嗎");
     bob.sendMessage(a1.self.pubkey, "？");
     expect(unread[bob.self.pubkey]).toBe(2);
@@ -1298,6 +1312,7 @@ describe("已讀水位的本機持久化（ADR-0108）", () => {
     bob.start(noop);
 
     bob.addContact(a1.selfNpub);
+    a1.acceptRequest(bob.self.pubkey); // ADR-0121：接受後未讀才算數
     bob.sendMessage(a1.self.pubkey, "嗨");
     expect(unread[bob.self.pubkey]).toBe(1);
 
@@ -1325,6 +1340,7 @@ describe("已讀水位的本機持久化（ADR-0108）", () => {
     bob.start(noop);
 
     bob.addContact(a.selfNpub);
+    a.acceptRequest(bob.self.pubkey); // ADR-0121：接受後未讀才算數
     bob.sendMessage(a.self.pubkey, "嗨");
     expect(unread[bob.self.pubkey]).toBe(1);
 
@@ -1432,7 +1448,8 @@ describe("中繼流量削減（ADR-0109）", () => {
     const b = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("b", h), "Bob");
     a.start(noop);
     b.start(noop);
-    a.addContact(b.selfNpub); // 送個人檔 → Bob 也自動把 Alice 加為聯絡人（ADR-0061）
+    a.addContact(b.selfNpub); // 送個人檔 → Alice 落在 Bob 的請求區（ADR-0121）
+    b.acceptRequest(a.self.pubkey); // 接受後才訂閱彼此的心跳（請求者看不到你的上線狀態）
 
     const hbA = spy(net, { kinds: [KIND.HEARTBEAT], authors: [a.self.pubkey] });
     const hbB = spy(net, { kinds: [KIND.HEARTBEAT], authors: [b.self.pubkey] });
@@ -1740,5 +1757,219 @@ describe("typing／nudge 封裝（ADR-0120）", () => {
     expect(nudged).toEqual([]);
     me.stop();
     jerk.stop();
+  });
+});
+
+describe("訊息請求（ADR-0121）", () => {
+  /** 陌生人（我從沒加過）直接對著我的 pubkey 發訊息。 */
+  const strangerSends = (text = "哈囉，我是陌生人") => {
+    const net = createInMemoryRelayNetwork();
+    const sv = new MemoryStorage();
+    const msgs: string[] = [];
+    const requests: { pubkey: string; name: string }[][] = [];
+    const nudged: string[] = [];
+    const typed: string[] = [];
+    const me = new RelayChatBackend(sv, (h) => net.connect("me", h), "我");
+    const stranger = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("x", h), "陌生人");
+    me.start({
+      ...noop,
+      onMessage: (_c, m) => msgs.push(m.text),
+      onRequests: (r) => requests.push(r),
+      onNudge: (pk) => nudged.push(pk),
+      onTyping: (pk) => typed.push(pk),
+    });
+    stranger.start(noop);
+    stranger.sendMessage(me.self.pubkey, text);
+    return { me, stranger, sv, msgs, requests, nudged, typed };
+  };
+
+  it("🔴 陌生人的訊息**不會**讓他變成聯絡人——他停在請求區", () => {
+    const { me, stranger, sv, msgs, requests } = strangerSends();
+
+    // 修正前：`ensureContact(sender)` 讓他直接進聯絡人清單。沒有任何確認步驟——
+    // 「好友請求」這個概念在專案裡根本不存在。
+    expect(sv.loadContacts()).toEqual([]);
+    expect(sv.loadRequests().map((r) => r.pubkey)).toEqual([stranger.self.pubkey]);
+    expect(requests[requests.length - 1]?.map((r) => r.pubkey)).toEqual([stranger.self.pubkey]);
+
+    // 訊息本身照收——Nostr 上擋不掉（中繼一定會轉發指名你的 1059），
+    // 只是它歸在請求區，由使用者決定要不要理。
+    expect(msgs).toEqual(["哈囉，我是陌生人"]);
+    expect(sv.loadMessages(stranger.self.pubkey)).toHaveLength(1);
+    me.stop();
+    stranger.stop();
+  });
+
+  it("🔴 **請求者不能 nudge 你**——這正是 ADR-0120 那道把關被繞過的路", () => {
+    const { me, stranger, nudged, typed } = strangerSends();
+
+    // ADR-0120 的把關是「只收聯絡人的 nudge/typing」。但在此之前，只要先傳一則訊息就會
+    // 自動變成聯絡人 → 把關形同虛設。現在他停在請求區＝**不是聯絡人** → 真的擋住了。
+    stranger.sendNudge(me.self.pubkey);
+    stranger.sendTyping(me.self.pubkey);
+
+    expect(nudged).toEqual([]);
+    expect(typed).toEqual([]);
+    me.stop();
+    stranger.stop();
+  });
+
+  it("**不回送個人檔給請求者**——那等於向垃圾訊息發送者確認「這把金鑰是活的」", () => {
+    const net = createInMemoryRelayNetwork();
+    const learned: { pubkey: string; name: string }[][] = [];
+    const me = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("me", h), "我");
+    const stranger = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("x", h), "垃圾");
+    me.start(noop);
+    stranger.start({ ...noop, onContacts: (cs) => learned.push(cs.map((c) => ({ pubkey: c.pubkey, name: c.name }))) });
+
+    stranger.addContact(me.selfNpub); // 單方面加我 → 送出他的個人檔（ADR-0061）
+    // 我不該回送我的暱稱 → 他的聯絡人清單裡我仍是 npub 縮寫，學不到「我」這個名字。
+    const last = learned[learned.length - 1] ?? [];
+    expect(last.find((c) => c.pubkey === me.self.pubkey)?.name).not.toBe("我");
+    me.stop();
+    stranger.stop();
+  });
+
+  it("接受請求 → 變成聯絡人，此後 nudge、上線狀態、通知都通了", () => {
+    const { me, stranger, sv, nudged } = strangerSends();
+
+    me.acceptRequest(stranger.self.pubkey);
+
+    expect(sv.loadRequests()).toEqual([]);
+    expect(sv.loadContacts().map((c) => c.pubkey)).toEqual([stranger.self.pubkey]);
+    expect(sv.loadMessages(stranger.self.pubkey)).toHaveLength(1); // 訊息保留
+
+    stranger.sendNudge(me.self.pubkey);
+    expect(nudged).toEqual([stranger.self.pubkey]); // 現在收得到了
+    me.stop();
+    stranger.stop();
+  });
+
+  it("刪除請求 → 請求與他傳來的訊息一起清掉（但不封鎖，他還能再傳）", () => {
+    const { me, stranger, sv } = strangerSends();
+
+    me.declineRequest(stranger.self.pubkey);
+
+    expect(sv.loadRequests()).toEqual([]);
+    expect(sv.loadContacts()).toEqual([]);
+    expect(sv.loadMessages(stranger.self.pubkey)).toEqual([]);
+    expect(sv.loadBlocked()).toEqual([]); // 刪除 ≠ 封鎖
+    me.stop();
+    stranger.stop();
+  });
+
+  it("封鎖請求者 → 請求消失，且進封鎖名單", () => {
+    const { me, stranger, sv } = strangerSends();
+
+    me.blockContact(stranger.self.pubkey);
+
+    expect(sv.loadRequests()).toEqual([]);
+    expect(sv.loadBlocked().map((b) => b.pubkey)).toEqual([stranger.self.pubkey]);
+    me.stop();
+    stranger.stop();
+  });
+
+  it("**我主動加的好友**傳訊息 → 直接是聯絡人，不會掉進請求區", () => {
+    const net = createInMemoryRelayNetwork();
+    const sv = new MemoryStorage();
+    const me = new RelayChatBackend(sv, (h) => net.connect("me", h), "我");
+    const friend = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("f", h), "朋友");
+    me.start(noop);
+    friend.start(noop);
+    me.addContact(friend.selfNpub); // 我主動加的
+    friend.sendMessage(me.self.pubkey, "嗨");
+
+    expect(sv.loadRequests()).toEqual([]);
+    expect(sv.loadContacts().map((c) => c.pubkey)).toEqual([friend.self.pubkey]);
+    me.stop();
+    friend.stop();
+  });
+
+  it("**對方「把你加為好友」本身就是一則請求**——而且請求區顯示他自選的暱稱", () => {
+    const net = createInMemoryRelayNetwork();
+    const sv = new MemoryStorage();
+    const me = new RelayChatBackend(sv, (h) => net.connect("me", h), "我");
+    const stranger = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("x", h), "小明");
+    me.start(noop);
+    stranger.start(noop);
+
+    // 「把你加為好友」＝送一份自己的個人檔給你（ADR-0061）。那份個人檔就是請求的載體：
+    // 你會在請求區看到「小明」，而不是 `npub1abc…`——否則你根本無從判斷要不要接受。
+    stranger.addContact(me.selfNpub);
+
+    expect(sv.loadContacts()).toEqual([]); // 他還不是我的聯絡人
+    expect(sv.loadRequests().map((r) => r.name)).toEqual(["小明"]);
+    me.stop();
+    stranger.stop();
+  });
+
+  it("重載後請求區還在（持久化 ＋ 開機時 emit）", () => {
+    const { me, stranger, sv } = strangerSends();
+    me.stop();
+
+    const requests: { pubkey: string; name: string }[][] = [];
+    const net2 = createInMemoryRelayNetwork();
+    const again = new RelayChatBackend(sv, (h) => net2.connect("me", h), "我");
+    again.start({ ...noop, onRequests: (r) => requests.push(r) });
+
+    expect(requests[0]?.map((r) => r.pubkey)).toEqual([stranger.self.pubkey]);
+    again.stop();
+    stranger.stop();
+  });
+});
+
+describe("訊息請求：不給垃圾訊息發送者任何回饋（ADR-0121）", () => {
+  it("🔴 預覽請求裡的訊息**不送已讀回條**——那等於回報「這個 npub 是活的」", () => {
+    const net = createInMemoryRelayNetwork();
+    const reads: string[] = [];
+    const me = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("me", h), "我");
+    const spammer = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("s", h), "垃圾");
+    me.start(noop);
+    spammer.start({ ...noop, onMessageStatus: (_c, id, st) => reads.push(`${id}:${st}`) });
+    me.setReadReceipts(true); // 就算開了回條也一樣
+    spammer.setReadReceipts(true); // 而且他也開了（ADR-0058 的互惠條件成立）→ 他看得到才對
+
+    spammer.sendMessage(me.self.pubkey, "點這個連結");
+    me.markRead(spammer.self.pubkey); // 使用者點開請求看了一眼
+
+    expect(reads.filter((r) => r.endsWith(":read"))).toEqual([]);
+    me.stop();
+    spammer.stop();
+  });
+
+  it("接受之後，已讀回條才會送出（功能沒被弄壞）", () => {
+    const net = createInMemoryRelayNetwork();
+    const reads: string[] = [];
+    const me = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("me", h), "我");
+    const friend = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("f", h), "朋友");
+    me.start(noop);
+    friend.start({ ...noop, onMessageStatus: (_c, id, st) => reads.push(`${id}:${st}`) });
+    me.setReadReceipts(true);
+    friend.setReadReceipts(true);
+
+    friend.sendMessage(me.self.pubkey, "嗨");
+    me.acceptRequest(friend.self.pubkey);
+    me.markRead(friend.self.pubkey);
+
+    expect(reads.filter((r) => r.endsWith(":read"))).toHaveLength(1);
+    me.stop();
+    friend.stop();
+  });
+
+  it("**主動回覆一個請求＝接受他**（不然你在跟一個「請求」聊天）", () => {
+    const net = createInMemoryRelayNetwork();
+    const sv = new MemoryStorage();
+    const me = new RelayChatBackend(sv, (h) => net.connect("me", h), "我");
+    const stranger = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("x", h), "陌生人");
+    me.start(noop);
+    stranger.start(noop);
+    stranger.sendMessage(me.self.pubkey, "哈囉");
+
+    me.sendMessage(stranger.self.pubkey, "你是誰？");
+
+    expect(sv.loadRequests()).toEqual([]);
+    expect(sv.loadContacts().map((c) => c.pubkey)).toEqual([stranger.self.pubkey]);
+    me.stop();
+    stranger.stop();
   });
 });

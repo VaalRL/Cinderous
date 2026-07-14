@@ -22,7 +22,7 @@ import {
   webSocketConnector,
 } from "@cinder/engine";
 import { notifier, onNotifyClick } from "./native/notify.js";
-import type { BlockedContact } from "@cinder/engine";
+import type { BlockedContact, ContactRequest } from "@cinder/engine";
 import type { CallMedia, CallState } from "@cinder/core";
 import { makeThumbnail, pickFile, saveFile } from "./native/files.js";
 import { hasCallSupport } from "./native/call-media.js";
@@ -156,6 +156,8 @@ export function MobileApp({
   const [unsent, setUnsent] = useState<Set<string>>(new Set());
   /** 封鎖名單：被封鎖者的訊息不再收，且移出聯絡人。 */
   const [blocked, setBlocked] = useState<BlockedContact[]>([]);
+  /** 訊息請求（ADR-0121）：陌生人傳來訊息但尚未接受。**不是聯絡人**。 */
+  const [requests, setRequests] = useState<ContactRequest[]>([]);
   /** 通知（ADR-0116）：預設關（需使用者明確授權）。 */
   const [notify, setNotifyState] = useState(() => {
     try {
@@ -199,6 +201,8 @@ export function MobileApp({
   notifyRef.current = notify;
   const notifyHideRef = useRef(notifyHide);
   notifyHideRef.current = notifyHide;
+  const requestsRef = useRef(requests);
+  requestsRef.current = requests;
   const contactsRef = useRef(contacts);
   contactsRef.current = contacts;
   const groupsRef = useRef(groups);
@@ -264,6 +268,7 @@ export function MobileApp({
     setReactions({});
     setUnsent(new Set());
     setBlocked([]);
+    setRequests([]);
     setUnread({});
     backend.start({
       onContacts: setContacts,
@@ -279,7 +284,9 @@ export function MobileApp({
         const viewing = screenRef.current === "conversation" && activeIdRef.current === pk;
         if (!m.outgoing && viewing) backend.clearUnread?.(pk);
         // 通知（ADR-0116）：**只在他人訊息、且 App 在背景**時跳——正在看就別打擾。
-        if (!m.outgoing && !viewing && notifyRef.current && typeof document !== "undefined" && document.hidden) {
+        // 訊息請求（ADR-0121）**一律不跳通知**：讓陌生人能推播到你的鎖定畫面，那就是騷擾。
+        const isRequest = requestsRef.current.some((r) => r.pubkey === pk);
+        if (!m.outgoing && !viewing && !isRequest && notifyRef.current && typeof document !== "undefined" && document.hidden) {
           const group = groupsRef.current.find((g) => g.id === pk);
           const nameOf = (k: string): string =>
             groupsRef.current.find((g) => g.id === k)?.name ??
@@ -314,6 +321,7 @@ export function MobileApp({
           return next;
         }),
       onBlocked: setBlocked,
+      onRequests: setRequests, // ADR-0121
       // 送出狀態（ADR-0095）：與桌面同一套（傳送中/失敗/已送出/已送達/已讀）→ 氣泡旁圖示。
       onMessageStatus: (pk, messageId, status) =>
         setConvos((c) => {
@@ -779,6 +787,15 @@ export function MobileApp({
           onBlock={block}
           blocked={blocked}
           onUnblock={unblock}
+          requests={requests}
+          onAcceptRequest={(pk) => backendRef.current?.acceptRequest?.(pk)}
+          onDeclineRequest={(pk) => {
+            backendRef.current?.declineRequest?.(pk);
+            setConvos((c) => {
+              const { [pk]: _drop, ...rest } = c;
+              return rest;
+            });
+          }}
           {...themeProps}
         />
       ) : (

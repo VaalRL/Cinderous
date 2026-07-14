@@ -199,15 +199,21 @@ describe("跨中繼通訊：Relay Pool 與收件人路由（ADR-0034）", () => 
     a.addContact(`${b.selfNpub}@wss://y`);
     a.sendMessage(b.self.pubkey, "帶 hint 的來訊");
 
-    // Bob 被自動加入 Alice 且從加密 rumor 學到她的 relay
-    expect(storeB.loadContacts().find((c) => c.pubkey === a.self.pubkey)?.relayUrl).toBe("wss://x");
+    // ADR-0121：Alice 不在 Bob 的聯絡人裡 → 她停在**請求區**（不再自動變成聯絡人）。
+    // 但 relay hint 照樣要學起來——否則 Bob 一按「接受」，回信只能走 home relay。
+    expect(storeB.loadContacts()).toEqual([]);
+    expect(storeB.loadRequests().find((c) => c.pubkey === a.self.pubkey)?.relayUrl).toBe("wss://x");
 
-    // 回程：直達 X（不再退回 Bob 的 home Y）
+    // 回程：直達 X（不再退回 Bob 的 home Y）。
+    // `sendMessage` 對請求者＝**主動回覆＝接受**（ADR-0121），hint 隨之帶進聯絡人。
     const dmToAOnX = spy(netX, { kinds: [KIND.OFFLINE_DM_GIFT_WRAP], "#p": [a.self.pubkey] });
     const dmToAOnY = spy(netY, { kinds: [KIND.OFFLINE_DM_GIFT_WRAP], "#p": [a.self.pubkey] });
     b.sendMessage(a.self.pubkey, "自癒後的回程");
+    expect(storeB.loadContacts().find((c) => c.pubkey === a.self.pubkey)?.relayUrl).toBe("wss://x");
     expect(aIncoming.map((m) => m.text)).toContain("自癒後的回程");
-    expect(dmToAOnX).toHaveLength(1);
+    // 2 顆：接受請求時送出的個人檔（ADR-0061）＋ 訊息本身。重點是**都走 X**——
+    // 一顆都沒退回 Bob 的 home Y。
+    expect(dmToAOnX).toHaveLength(2);
     expect(dmToAOnY).toHaveLength(0);
     a.stop();
     b.stop();
@@ -227,11 +233,15 @@ describe("跨中繼通訊：Relay Pool 與收件人路由（ADR-0034）", () => 
     a.start(noop);
     b.start(noop);
 
-    a.addContact(`${b.selfNpub}@wss://y`); // 只觸發個人檔互換，不送任何訊息
+    a.addContact(`${b.selfNpub}@wss://y`); // 只送出個人檔，不送任何訊息
 
-    const bobSeesAlice = storeB.loadContacts().find((c) => c.pubkey === a.self.pubkey);
+    // ADR-0121：Alice 單方面加了 Bob → 在 Bob 眼中這是一則**訊息請求**（那份個人檔就是請求本身），
+    // 不是自動成立的聯絡人。但暱稱與路由照樣學起來——否則請求區只看得到 `npub1abc…`，
+    // 而且一按接受就找不到回信的路。
+    expect(storeB.loadContacts()).toEqual([]);
+    const bobSeesAlice = storeB.loadRequests().find((c) => c.pubkey === a.self.pubkey);
     expect(bobSeesAlice?.name).toBe("Alice"); // 既有 ADR-0061：學到暱稱
-    expect(bobSeesAlice?.relayUrl).toBe("wss://x"); // 新：個人檔本身就帶路由
+    expect(bobSeesAlice?.relayUrl).toBe("wss://x"); // ADR-0066 H1：個人檔本身就帶路由
     a.stop();
     b.stop();
   });
@@ -261,6 +271,9 @@ describe("跨中繼通訊：Relay Pool 與收件人路由（ADR-0034）", () => 
     a1.start(noop);
     b.start(noop);
     a1.addContact(`${b.selfNpub}@wss://y`);
+    // ADR-0121：Alice 先落在 Bob 的請求區；Bob 接受後才是雙向的聯絡人
+    //（開機廣播只發給聯絡人——這正是搬家自癒的前提）。
+    b.acceptRequest(a1.self.pubkey);
     expect(storeB.loadContacts().find((c) => c.pubkey === a1.self.pubkey)?.relayUrl).toBe("wss://x");
     a1.stop();
 

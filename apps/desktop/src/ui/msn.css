@@ -802,3 +802,24 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
 .hist__msg--out { background: rgba(127,127,127,.12); }
 .hist__meta { font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; }
 .hist__text { user-select: text; word-break: break-word; }
+
+/* 訊息請求（ADR-0121）：陌生人傳來的訊息停在這裡，等使用者裁示。
+   刻意放在名冊**之上**並用警示色描邊——這是需要決定的東西，不該被埋進聯絡人清單裡。 */
+.requests { background: var(--panel); border-bottom: 1px solid var(--border); }
+.group--requests { color: #b45309; }
+.requests__hint { padding: 0 10px 6px; font-size: 10px; line-height: 1.5; color: var(--muted); }
+.request { display: flex; gap: 6px; align-items: center; padding: 4px 10px 6px; }
+.request__name {
+  flex: 1; min-width: 0; text-align: left; font-size: 13px; font-weight: 600; color: var(--ink);
+  background: none; border: 0; cursor: pointer; padding: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.request__name:hover { text-decoration: underline; }
+.request__ok, .request__no, .request__block {
+  font-size: 10px; padding: 2px 7px; border-radius: 5px; cursor: pointer; border: 1px solid var(--border);
+  background: var(--field); color: var(--muted);
+}
+.request__ok { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
+.request__ok:hover { filter: brightness(1.08); }
+.request__no:hover, .request__block:hover { background: var(--hover); color: var(--ink); }
+.request__block { color: #e5484d; }

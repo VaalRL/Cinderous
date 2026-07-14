@@ -143,6 +143,7 @@ export class LocalStorage implements AppStorage {
       identity: read<StoredIdentity | null>(this.k("identity"), null, this.dek),
       contacts,
       blocked: read<StoredContact[]>(this.k("blocked"), [], this.dek),
+      requests: read<StoredContact[]>(this.k("requests"), [], this.dek), // ADR-0121
       messages,
       reactions: read<StoredReaction[]>(this.k("reactions"), [], this.dek),
       deleted: read<string[]>(this.k("deleted"), [], this.dek),
@@ -185,10 +186,12 @@ export class LocalStorage implements AppStorage {
   updateContactRelay(pubkey: string, relayUrl: string | undefined): void {
     this.mem.updateContactRelay(pubkey, relayUrl);
     this.writeContacts();
+    this.writeRequests(); // 請求區也記 hint（ADR-0121）
   }
   updateContactName(pubkey: string, name: string): void {
     this.mem.updateContactName(pubkey, name);
     this.writeContacts();
+    this.writeRequests(); // 請求區的顯示名也會被更新（ADR-0121）
   }
   removeContact(pubkey: string): void {
     this.mem.removeContact(pubkey);
@@ -212,7 +215,24 @@ export class LocalStorage implements AppStorage {
     localStorage.removeItem(this.k(MSGS + contact.pubkey));
     this.writeOrphanSweep();
     write(this.k("blocked"), this.mem.loadBlocked(), this.dek);
+    this.writeRequests(); // 封鎖請求者＝連請求一起清（ADR-0121）
     void this.archive?.remove(contact.pubkey);
+  }
+
+  // ── 訊息請求（ADR-0121）────────────────────────────────────────────────
+  private writeRequests(): void {
+    write(this.k("requests"), this.mem.loadRequests(), this.dek);
+  }
+  addRequest(contact: StoredContact): void {
+    this.mem.addRequest(contact);
+    this.writeRequests();
+  }
+  removeRequest(pubkey: string): void {
+    this.mem.removeRequest(pubkey);
+    this.writeRequests();
+  }
+  loadRequests(): StoredContact[] {
+    return this.mem.loadRequests();
   }
   unblockContact(pubkey: string): void {
     this.mem.unblockContact(pubkey);

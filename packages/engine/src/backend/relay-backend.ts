@@ -384,6 +384,8 @@ export class RelayChatBackend implements ChatBackend {
   private readonly inboxWatermark = new Map<string, number>();
   private contacts: { pubkey: PubkeyHex; name: string; relayUrl?: string }[];
   private blocked: { pubkey: PubkeyHex; name: string }[];
+  /** 訊息請求（ADR-0121）：陌生人傳來訊息但你還沒接受。**不是聯絡人。** */
+  private requests: { pubkey: PubkeyHex; name: string; relayUrl?: string }[];
   private groups: Group[];
   private readonly transfer: WebRtcTransfer;
   private readonly call: WebRtcCall;
@@ -441,6 +443,7 @@ export class RelayChatBackend implements ChatBackend {
     this.selfNsec = identity.nsec;
     this.contacts = storage.loadContacts();
     this.blocked = storage.loadBlocked();
+    this.requests = storage.loadRequests();
     this.groups = storage.loadGroups();
     this.outbox = new Outbox({
       send: (evt) => this.publishAddressed(evt),
@@ -472,7 +475,8 @@ export class RelayChatBackend implements ChatBackend {
       onOutgoingProgress: (peer, id, sent, total) => this.handlers?.onFileProgress?.(peer, id, sent, total),
       onIncoming: (peer, file) => {
         if (this.isBlocked(peer)) return;
-        this.ensureContact(peer);
+        this.ensureKnown(peer); // ADR-0121：陌生人傳檔同樣只進請求區
+
         this.onFileBytes(peer, file);
       },
       onTyping: (peer) => {
@@ -554,6 +558,7 @@ export class RelayChatBackend implements ChatBackend {
       handlers.onHistory?.(g.id, msgs.map(storedToChat));
     }
     this.emitBlocked();
+    this.emitRequests(); // ADR-0121：重載後請求區仍在
     // ADR-0108：未讀由儲存推導 → 重新載入後徽章仍在。開機時全量重算一次（ADR-0110：僅此一次）。
     this.recountAllUnread();
     this.emitUnread();
@@ -1044,7 +1049,12 @@ export class RelayChatBackend implements ChatBackend {
     // `convo` 可能為 null：回應／收回／回條以 `e` tag 指定目標訊息，與對話無關，故不帶 `to`。
     // 它們必須在下方**先**處理完；只有真正要建立訊息的分支（檔案/文字）才強制要有 convo。
     const convo = selfCopy ? selfCopyTarget(rumor) : sender;
-    if (convo) this.ensureContact(convo);
+    // 自封副本＝**我**發給某人的訊息回到我的另一台裝置 → 那個人是我主動聯絡的 → 真聯絡人。
+    // 別人發來的 → 走 `ensureKnown()`：不認識就進「訊息請求」，不是聯絡人清單（ADR-0121）。
+    if (convo) {
+      if (selfCopy) this.ensureContact(convo);
+      else this.ensureKnown(convo);
+    }
     if (!selfCopy) this.learnRelayHint(sender, rumor);
 
     if (rumor.kind === KIND.REACTION) {
@@ -1073,14 +1083,22 @@ export class RelayChatBackend implements ChatBackend {
 
     const profileName = parseProfile(rumor);
     if (profileName) {
-      // ADR-0061：以對方自選暱稱更新聯絡人顯示名稱（僅在變動時）。
-      if (profileName !== this.contacts.find((c) => c.pubkey === sender)?.name) {
+      // ADR-0061：以對方自選暱稱更新顯示名稱（僅在變動時）。
+      // **請求區的人也算**（ADR-0121）：否則請求清單只看得到 `npub1abc…`，使用者無從判斷；
+      // 而且 `acceptRequest()` 會把那個陳舊的縮寫帶進聯絡人。
+      const known =
+        this.contacts.find((c) => c.pubkey === sender) ?? this.requests.find((r) => r.pubkey === sender);
+      if (known && profileName !== known.name) {
         this.storage.updateContactName(sender, profileName);
         this.contacts = this.storage.loadContacts();
+        this.requests = this.storage.loadRequests();
         this.emitContacts();
+        this.emitRequests();
       }
       // 尚未送過自己的個人檔給對方（例如對方單向加我）→ 回送一次，讓對方也學到我的暱稱。
-      if (!this.profileSentTo.has(sender)) this.sendProfileTo(sender);
+      // **但只回給真正的聯絡人**（ADR-0121）：對還在請求區的陌生人回送，等於向他確認
+      // 「這把金鑰是活的、有人在線上」——那是垃圾訊息發送者最想要的回饋。
+      if (this.isContact(sender) && !this.profileSentTo.has(sender)) this.sendProfileTo(sender);
       return;
     }
 
@@ -1257,11 +1275,64 @@ export class RelayChatBackend implements ChatBackend {
     if (url === undefined) return; // 無 hint 或非法：不動現有值
     // 與自己 home 相同時存為「無 hint」（路由等價）。
     const next = url !== this.homeUrl ? url : undefined;
-    const contact = this.contacts.find((c) => c.pubkey === sender);
-    if (!contact || contact.relayUrl === next) return;
+    // **請求區的人也要學 hint**（ADR-0121）：他們是「還沒接受的陌生人」，但你一旦按下接受，
+    // 回信就得直達他所在的中繼。這個 hint 只在 rumor（已解密的內層）裡，錯過就沒有第二次。
+    const known = this.contacts.find((c) => c.pubkey === sender) ?? this.requests.find((r) => r.pubkey === sender);
+    if (!known || known.relayUrl === next) return;
     this.storage.updateContactRelay(sender, next);
     this.contacts = this.storage.loadContacts();
+    this.requests = this.storage.loadRequests();
     this.resubscribe();
+  }
+
+  private isContact(pubkey: PubkeyHex): boolean {
+    return this.contacts.some((c) => c.pubkey === pubkey);
+  }
+
+  /**
+   * 有人從外部聯絡我（訊息、傳檔）——**不認識就進「訊息請求」，不是聯絡人清單**（ADR-0121）。
+   *
+   * 過去這裡直接 `ensureContact()`：任何知道你 npub 的人傳一則訊息，就**自動成為你的聯絡人**
+   * ——會跳通知、能 nudge 你（震動）、能看到你的上線狀態。沒有任何確認步驟，因為
+   * 「好友請求」這個概念在專案裡根本不存在。
+   *
+   * 現在他停在請求區：**不跳通知、不能 nudge、不訂閱他的上線狀態、不回送我的個人檔**。
+   * 訊息照收（Nostr 上擋不掉——中繼一定會轉發指名你的 1059），但由你決定要不要理他。
+   */
+  private ensureKnown(pubkey: PubkeyHex): void {
+    if (this.isBlocked(pubkey) || this.isContact(pubkey)) return;
+    if (this.requests.some((r) => r.pubkey === pubkey)) return;
+    this.storage.addRequest({ pubkey, name: shortNpub(npubEncode(pubkey)) });
+    this.requests = this.storage.loadRequests();
+    this.emitRequests();
+  }
+
+  /** 接受訊息請求（ADR-0121）：請求 → 聯絡人。此後才會通知、才收得到 nudge、才看得到上線狀態。 */
+  acceptRequest(pubkey: PubkeyHex): void {
+    const req = this.requests.find((r) => r.pubkey === pubkey);
+    if (!req || this.isBlocked(pubkey)) return;
+    this.storage.removeRequest(pubkey);
+    // 把請求期間學到的 relay hint（ADR-0035）一起帶過來——否則回信只會走 home relay。
+    this.storage.addContact({ pubkey, name: req.name, ...(req.relayUrl ? { relayUrl: req.relayUrl } : {}) });
+    this.requests = this.storage.loadRequests();
+    this.contacts = this.storage.loadContacts();
+    this.resubscribe(); // 現在才訂閱他的上線心跳
+    this.recountUnread(pubkey); // 接受後未讀才算數（請求期間刻意不點亮徽章）
+    this.emitRequests();
+    this.emitContacts();
+    this.sendProfileTo(pubkey); // ADR-0061：接受了才把自己的暱稱給他
+  }
+
+  /** 刪除訊息請求（ADR-0121）：連同他傳來的訊息一起清掉。不封鎖——他還能再傳一次。 */
+  declineRequest(pubkey: PubkeyHex): void {
+    this.storage.removeRequest(pubkey);
+    this.storage.removeContact(pubkey); // 不是聯絡人 → 這裡的作用是**清掉他的訊息與封存**
+    this.requests = this.storage.loadRequests();
+    this.emitRequests();
+  }
+
+  private emitRequests(): void {
+    this.handlers?.onRequests?.(this.requests.map((r) => ({ pubkey: r.pubkey, name: r.name })));
   }
 
   private ensureContact(pubkey: PubkeyHex): void {
@@ -1301,12 +1372,15 @@ export class RelayChatBackend implements ChatBackend {
   }
 
   blockContact(pubkey: PubkeyHex): void {
-    const existing = this.contacts.find((c) => c.pubkey === pubkey);
+    const existing =
+      this.contacts.find((c) => c.pubkey === pubkey) ?? this.requests.find((r) => r.pubkey === pubkey);
     const name = existing?.name ?? shortNpub(npubEncode(pubkey));
-    this.storage.blockContact({ pubkey, name });
+    this.storage.blockContact({ pubkey, name }); // 也會清掉請求（ADR-0121）
     this.statuses.delete(pubkey);
     this.blocked = this.storage.loadBlocked();
     this.contacts = this.storage.loadContacts();
+    this.requests = this.storage.loadRequests();
+    this.emitRequests();
     this.resubscribe();
     this.emitContacts();
     this.emitBlocked();
@@ -1533,6 +1607,9 @@ export class RelayChatBackend implements ChatBackend {
   }
 
   sendMessage(to: PubkeyHex, text: string, ttlSeconds?: number, mentions?: PubkeyHex[], replyTo?: string): void {
+    // 你主動回覆一個請求＝你接受了他（ADR-0121）。不接受就送訊息會很怪：對方在你的清單裡
+    // 永遠是「請求」，你卻在跟他聊天。**主動聯絡的人就是聯絡人。**
+    if (this.requests.some((r) => r.pubkey === to)) this.acceptRequest(to);
     // 送出時間固定一次（ADR-0108）：同一個值既寫進 rumor.created_at、也當本機 `at`。
     // 否則發送裝置存毫秒 `Date.now()`、其他裝置存 `created_at * 1000`（秒截斷），
     // 同一則訊息會差最多 999ms → 已讀水位比較就不精確了。
@@ -1851,6 +1928,10 @@ export class RelayChatBackend implements ChatBackend {
   /** 收到一則他人訊息：未讀 +1、推進最新收訊時間（O(1)，ADR-0110）。 */
   private bumpUnread(convo: string, at: number): void {
     if (at > (this.lastIncomingAt.get(convo) ?? 0)) this.lastIncomingAt.set(convo, at);
+    // 訊息請求**不點亮未讀徽章**（ADR-0121）：徽章和通知是同一條注意力管道，
+    // 陌生人不該碰得到。他的存在由「請求區」呈現，那裡有你要做的決定。
+    // （`recountAllUnread()` 只掃聯絡人與群組 → 重載後本來就不會算他；兩邊要一致。）
+    if (this.requests.some((r) => r.pubkey === convo)) return;
     if (at <= (this.storage.loadReadAt()[convo] ?? 0)) return; // 晚到的舊訊息：水位之下＝已讀
     this.unread.set(convo, (this.unread.get(convo) ?? 0) + 1);
     this.emitUnread();
@@ -1879,6 +1960,9 @@ export class RelayChatBackend implements ChatBackend {
   markRead(convo: PubkeyHex): void {
     this.clearUnread(convo); // 本機水位一律推進（ADR-0108）——與下方的回條設定無關
     if (!this.readReceipts) return; // 已讀回條：opt-in（ADR-0058 互惠）
+    // 🔴 請求區的訊息**絕不送已讀回條**（ADR-0121）：那等於向垃圾訊息發送者回報
+    // 「這個 npub 是活的、有人真的讀了」——那正是他最想要的東西。看，但不要回話。
+    if (this.requests.some((r) => r.pubkey === convo)) return;
     const group = this.groups.find((g) => g.id === convo);
     if (group) {
       if (groupReceiptMode(group.members.length) === "off") return; // 大群不記

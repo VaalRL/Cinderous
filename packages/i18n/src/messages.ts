@@ -91,6 +91,12 @@ export interface Messages {
   contact_addInvalid: string;
   contact_remove: string;
   contact_block: string;
+  /** 訊息請求（ADR-0121）。 */
+  request_section: string;
+  request_hint: string;
+  request_accept: string;
+  request_decline: string;
+  request_preview: string;
   contact_unblock: string;
   contact_removeConfirm: string;
   contact_blockConfirm: string;
@@ -558,6 +564,11 @@ const zhHant: Messages = {
   contact_addInvalid: "無效的 npub",
   contact_remove: "刪除",
   contact_block: "封鎖",
+  request_section: "訊息請求",
+  request_hint: "這些人不在你的聯絡人裡。接受之前，他們不會跳通知、不能敲你、也看不到你的上線狀態。",
+  request_accept: "接受",
+  request_decline: "刪除",
+  request_preview: "查看訊息（不會通知對方）",
   contact_unblock: "解除封鎖",
   contact_removeConfirm: "確定要刪除 {name} 並清除對話紀錄嗎？",
   contact_blockConfirm: "確定要封鎖 {name}？將移出清單並忽略其後續訊息。",
@@ -1007,6 +1018,11 @@ const en: Messages = {
   contact_addInvalid: "Invalid npub",
   contact_remove: "Delete",
   contact_block: "Block",
+  request_section: "Message requests",
+  request_hint: "These people aren't in your contacts. Until you accept, they can't notify you, nudge you, or see when you're online.",
+  request_accept: "Accept",
+  request_decline: "Delete",
+  request_preview: "Read messages (they won't be told)",
   contact_unblock: "Unblock",
   contact_removeConfirm: "Delete {name} and clear the conversation history?",
   contact_blockConfirm: "Block {name}? They'll be removed and their future messages ignored.",
