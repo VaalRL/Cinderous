@@ -6,11 +6,16 @@
 //  - 只做文字（走中繼）。檔案/通話需要 WebRTC，Node 無瀏覽器環境 → 不支援。
 //  - listen 會拿到中繼站仍保存的近期收件匣（kind 1059，NIP-40 約 7 天）＋連線期間的新訊息。
 
-import { readFileSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
 import { getPublicKey, npubDecode, npubEncode, nsecDecode } from "@cinder/core";
 import { MemoryStorage, RelayChatBackend, webSocketConnector } from "@cinder/engine";
 import type { ChatBackendEvents } from "@cinder/engine";
 import { ArgError, HELP, parseArgs, type Command, type NsecSource } from "./args.js";
+import { HOST, portBusyMessage, startServer } from "./serve.js";
 
 /** 讀出私鑰（不回顯、不落地）。env 來源會警告。 */
 function loadNsec(src: NsecSource): string {
@@ -43,11 +48,71 @@ const noopEvents: ChatBackendEvents = {
   onNudge() {},
 };
 
+/** 已建置的桌面 App（瀏覽器版）。從 CLI 自身位置推出，`--dir` 可覆寫。 */
+function defaultStaticDir(): string {
+  // 打包後在 apps/cli/dist/cinder.js → ../../desktop/dist
+  return resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "desktop", "dist");
+}
+
+/** 以平台原生方式開瀏覽器。失敗不致命（使用者可自己貼網址）。 */
+function openBrowser(url: string): void {
+  const [cmd, args] =
+    process.platform === "win32"
+      ? ["cmd", ["/c", "start", "", url]]
+      : process.platform === "darwin"
+        ? ["open", [url]]
+        : ["xdg-open", [url]];
+  try {
+    spawn(cmd, args, { stdio: "ignore", detached: true }).unref();
+  } catch {
+    /* 開不起來就算了——網址已經印出來了 */
+  }
+}
+
+/** 本地啟動器（ADR-0113）：服務靜態 App、開瀏覽器，然後常駐。 */
+async function serve(cmd: Extract<Command, { cmd: "serve" }>): Promise<number> {
+  const root = cmd.dir ? resolve(cmd.dir) : defaultStaticDir();
+  if (!existsSync(join(root, "index.html"))) {
+    console.error(`找不到已建置的 App：${root}`);
+    console.error("請先建置（在 repo 根目錄執行 `pnpm build`），或以 --dir 指定路徑。");
+    return 1;
+  }
+
+  try {
+    await startServer({ root, port: cmd.port });
+  } catch (e) {
+    // 撞埠**絕不自動換一個**（ADR-0113）：那會「成功啟動」卻把使用者帶進空白的 App。
+    if ((e as NodeJS.ErrnoException).code === "EADDRINUSE") {
+      console.error(portBusyMessage(cmd.port));
+      return 1;
+    }
+    throw e;
+  }
+
+  const url = `http://${HOST}:${cmd.port}/`;
+  console.log(`Cinder 本地版：${url}`);
+  console.log(`  資源目錄：${root}`);
+  console.log("");
+  // 誠實告知兩個瀏覽器版特有的取捨（ADR-0113）。
+  console.log("注意：");
+  console.log(`  · 網址（origin）就是資料的身分——換 port 會看不到既有訊息（它們還在 :${cmd.port} 底下）。`);
+  console.log("  · 分頁切到背景時瀏覽器會節流計時器：送訊可能延遲（收訊不受影響）。桌面版無此問題。");
+  console.log("");
+  console.log("Ctrl+C 結束。");
+  if (cmd.open) openBrowser(url);
+
+  await new Promise(() => {}); // 常駐
+  return 0;
+}
+
 async function run(cmd: Command): Promise<number> {
   if (cmd.cmd === "help") {
     console.log(HELP);
     return 0;
   }
+
+  // serve **不需要私鑰**：它只送靜態資源，私鑰全程在瀏覽器裡。必須在 loadNsec 之前分派。
+  if (cmd.cmd === "serve") return await serve(cmd);
 
   const nsec = loadNsec(cmd.nsec);
   if (!nsec.startsWith("nsec1")) throw new ArgError("私鑰格式不正確（應為 nsec1…）");

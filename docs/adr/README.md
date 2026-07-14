@@ -127,3 +127,4 @@
 | [0110](./0110-long-conversation-hot-paths.md) | 長對話熱路徑：id 索引（O(n²)→O(n)）、批次回條（3.5s→18ms）、增量未讀、分部位持久化 | 已接受 |
 | [0111](./0111-message-archive.md) | 訊息封存（冷熱分離）：熱區 5,000 則、更舊者移入加密塊檔／OPFS；把 N 綁住，並修好 0094 的資料遺失 | 已接受 |
 | [0112](./0112-web-at-rest-encryption.md) | 網頁/行動端靜態加密（DEK=HKDF(nsec)）＋**nsec 不再明文落盤**；推翻 0067 的「瀏覽器＝假安全感」 | 已接受 |
+| [0113](./0113-local-launcher.md) | 本地啟動器 `cinder serve`：固定 port（origin ＝ 資料的身分）、撞埠不自動換、路徑穿越防護 | 已接受 |

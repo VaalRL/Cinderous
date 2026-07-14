@@ -8,6 +8,15 @@
 /** 生產中繼站預設值（可由 --relay 或 CINDER_RELAY 覆寫）。 */
 export const DEFAULT_RELAY = "wss://cinder-relay.whoami885.workers.dev";
 
+/**
+ * 本地啟動器的預設 port（ADR-0113）。**固定**——`localStorage`／OPFS 都以 origin 為鍵，
+ * 換 port 等於換一個 App，使用者的資料會「憑空消失」。刻意避開常見開發 port（3000/5173/8080）。
+ *
+ * 放在這裡（而非 `serve.ts`）是為了讓 `args.ts` 維持**純函式、零 I/O**：serve 會拉進
+ * `node:http`／`node:fs`，不該被參數解析的測試連帶拖進來。
+ */
+export const DEFAULT_PORT = 7847;
+
 /** 私鑰來源；`env` 視為最不安全（會發出警告）。 */
 export type NsecSource = { kind: "file"; path: string } | { kind: "stdin" } | { kind: "env" };
 
@@ -15,12 +24,17 @@ export type Command =
   | { cmd: "help" }
   | { cmd: "whoami"; nsec: NsecSource; hex: boolean }
   | { cmd: "send"; nsec: NsecSource; relay: string; to: string; text: string }
-  | { cmd: "listen"; nsec: NsecSource; relay: string };
+  | { cmd: "listen"; nsec: NsecSource; relay: string }
+  /**
+   * 本地啟動器（ADR-0113）：服務已建置的靜態 App 並開瀏覽器。
+   * **不需要私鑰**——私鑰在瀏覽器裡，不經過 CLI。
+   */
+  | { cmd: "serve"; port: number; dir: string | undefined; open: boolean };
 
 export class ArgError extends Error {}
 
 /** 帶值的旗標（其後一個 token 是值，不可被當成位置參數）。 */
-const VALUE_FLAGS = new Set(["nsec-file", "relay"]);
+const VALUE_FLAGS = new Set(["nsec-file", "relay", "port", "dir"]);
 
 /** 取一個帶值的旗標（`--k v`）；沒有則回 undefined。 */
 function flag(argv: string[], name: string): string | undefined {
@@ -85,17 +99,31 @@ export function parseArgs(argv: string[], env: Record<string, string | undefined
     case "listen":
       return { cmd: "listen", nsec: resolveNsecSource(argv, env), relay };
 
+    case "serve": {
+      // serve **不解析私鑰**：本地啟動器只送靜態資源，私鑰全程在瀏覽器裡。
+      const raw = flag(argv, "port");
+      const port = raw === undefined ? DEFAULT_PORT : Number(raw);
+      if (!Number.isInteger(port) || port < 1 || port > 65535) throw new ArgError(`--port 不是合法的 port：${raw}`);
+      return { cmd: "serve", port, dir: flag(argv, "dir"), open: !argv.includes("--no-open") };
+    }
+
     default:
-      throw new ArgError(`未知指令：${sub}（可用：whoami / send / listen）`);
+      throw new ArgError(`未知指令：${sub}（可用：whoami / send / listen / serve）`);
   }
 }
 
-export const HELP = `Cinder CLI（ADR-0098）——無狀態的無頭收發工具。
+export const HELP = `Cinder CLI——無狀態的無頭收發工具（ADR-0098）＋本地啟動器（ADR-0113）。
 
 用法：
+  cinder serve [--port N] [--dir P]    本地啟動瀏覽器版（預設 http://127.0.0.1:${DEFAULT_PORT}/）
   cinder whoami [--hex]                顯示自己的 npub（--hex 改印 64 字元 hex 公鑰）
   cinder send <npub> <訊息…>            送出一則加密訊息
   cinder listen                        持續印出收到的訊息（JSON Lines）
+
+serve（不需要私鑰——私鑰全程在瀏覽器裡）：
+  --port <N>                           **會換掉 origin**：既有訊息/封存在原本的 port 底下才讀得到
+  --dir <路徑>                          靜態資源目錄（預設為已建置的桌面 App）
+  --no-open                            不自動開瀏覽器
 
 私鑰來源（擇一；CLI 絕不儲存、絕不輸出私鑰）：
   --nsec-file <路徑>                    從檔案讀（建議；請自行設好權限）

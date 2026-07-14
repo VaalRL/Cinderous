@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ArgError, DEFAULT_RELAY, parseArgs, resolveNsecSource } from "./args.js";
+import { ArgError, DEFAULT_RELAY, parseArgs, resolveNsecSource, DEFAULT_PORT } from "./args.js";
 
 const F = ["--nsec-file", "/k/nsec"]; // 最短的合法金鑰來源
 
@@ -82,5 +82,36 @@ describe("whoami --hex（ADR-0039 維護者公鑰取值）", () => {
     const b = parseArgs(["whoami", "--hex", ...F]);
     if (b.cmd !== "whoami") throw new Error("expected whoami");
     expect(b.hex).toBe(true);
+  });
+});
+
+describe("serve（本地啟動器，ADR-0113）", () => {
+  it("預設 port 固定、預設開瀏覽器", () => {
+    expect(parseArgs(["serve"])).toEqual({ cmd: "serve", port: DEFAULT_PORT, dir: undefined, open: true });
+  });
+
+  it("**不解析私鑰**：serve 沒有 nsec 來源也不該報錯（私鑰在瀏覽器裡，不經過 CLI）", () => {
+    expect(() => parseArgs(["serve"], {})).not.toThrow();
+    expect(parseArgs(["serve"])).not.toHaveProperty("nsec");
+  });
+
+  it("--port / --dir / --no-open", () => {
+    expect(parseArgs(["serve", "--port", "9000", "--dir", "/x/dist", "--no-open"])).toEqual({
+      cmd: "serve",
+      port: 9000,
+      dir: "/x/dist",
+      open: false,
+    });
+  });
+
+  it("非法 port 直接拒絕（不要靜默退回預設，那會換掉 origin）", () => {
+    expect(() => parseArgs(["serve", "--port", "abc"])).toThrow(ArgError);
+    expect(() => parseArgs(["serve", "--port", "0"])).toThrow(ArgError);
+    expect(() => parseArgs(["serve", "--port", "70000"])).toThrow(ArgError);
+  });
+
+  it("--dir 的值不會被當成位置參數（同 ADR-0098 的 VALUE_FLAGS 修正）", () => {
+    const cmd = parseArgs(["serve", "--dir", "/x/dist"]);
+    expect(cmd.cmd).toBe("serve");
   });
 });
