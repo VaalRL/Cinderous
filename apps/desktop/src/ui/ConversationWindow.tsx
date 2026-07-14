@@ -223,6 +223,8 @@ export interface ConversationProps {
   onLeaveGroup?: () => void;
   /** 導出此對話紀錄（ADR-0094）；未提供則不顯示。 */
   onExport?: () => void;
+  /** 開啟歷史紀錄（ADR-0111）：只有該對話真的有封存時才傳入。 */
+  onHistory?: () => void;
   /** 使用者重新指定原圖位置後回寫 savedPath（ADR-0102）。 */
   onFileRelocated?: (messageId: string, newPath: string) => void;
   /**
@@ -701,6 +703,17 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
             onClick={props.onLeaveGroup}
           >
             ⎋
+          </span>
+        ) : null}
+        {props.onHistory ? (
+          <span
+            className="win__btn"
+            role="button"
+            title={t("history_open")}
+            data-testid="open-history"
+            onClick={props.onHistory}
+          >
+            🗄
           </span>
         ) : null}
         {props.onExport ? (

@@ -791,3 +791,14 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
 
 @keyframes nudge { 0%,100%{transform:translate(0,0)} 15%{transform:translate(-8px,5px)} 30%{transform:translate(8px,-5px)} 45%{transform:translate(-7px,-4px)} 60%{transform:translate(7px,4px)} 75%{transform:translate(-4px,2px)} }
 .nudging { animation: nudge 0.55s ease; }
+
+/* 歷史紀錄（ADR-0111）：讀封存的舊訊息。主視窗只讀熱區，這裡才碰封存（非同步、分頁）。 */
+.hist { position: fixed; right: 24px; bottom: 24px; width: 380px; max-height: 60vh; display: flex; flex-direction: column; z-index: 40; }
+.hist__body { overflow-y: auto; padding: 8px 10px; display: flex; flex-direction: column; gap: 6px; }
+.hist__empty { font-size: 13px; color: var(--muted); text-align: center; margin: 12px 0; }
+.hist__more { align-self: center; font-size: 12px; color: var(--accent); background: none; border: 1px solid var(--accent); border-radius: 999px; padding: 3px 12px; cursor: pointer; }
+.hist__more:disabled { opacity: .5; cursor: default; }
+.hist__msg { display: flex; flex-direction: column; gap: 1px; font-size: 12px; padding: 4px 6px; border-radius: 6px; background: rgba(127,127,127,.06); }
+.hist__msg--out { background: rgba(127,127,127,.12); }
+.hist__meta { font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.hist__text { user-select: text; word-break: break-word; }

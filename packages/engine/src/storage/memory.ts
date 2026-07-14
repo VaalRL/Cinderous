@@ -13,6 +13,8 @@ import {
   type StoredReaction,
 } from "./types.js";
 
+import { ArchiveWriter, type MessageArchive } from "./archive.js";
+
 /**
  * 一個對話的訊息（ADR-0110）：陣列（保序）＋ id→訊息的索引。
  *
@@ -37,6 +39,14 @@ export class MemoryStorage implements AppStorage {
   private groups: StoredGroup[] = [];
   /** 已讀水位（ADR-0108）：對話 → 已讀到的最新訊息時間（毫秒）。 */
   private readonly readAt = new Map<string, number>();
+  /**
+   * 封存（ADR-0111）。**只有掛上後熱區才會被裁切**——沒有封存就不裁切。
+   *
+   * 註：`LocalStorage`／`TauriStorage` 委派本類別，但它們**各自持有自己的 writer**
+   * （因為裁切後還要落地）。它們不會呼叫這裡的 `attachArchive`，故不會重複搬移。
+   */
+  private writer: ArchiveWriter | undefined;
+  private archive: MessageArchive | undefined;
   /** 每對話持久化上限（ADR-0094）；`0`＝無上限（預設，不逐出）。 */
   private maxPerConvo: number;
 
@@ -64,6 +74,17 @@ export class MemoryStorage implements AppStorage {
   private reindex(convo: Convo): void {
     convo.byId.clear();
     for (const m of convo.list) convo.byId.set(m.id, m);
+  }
+
+  attachArchive(archive: MessageArchive): void {
+    this.archive = archive;
+    this.writer = new ArchiveWriter(this, archive, () => {}); // 純記憶體：裁切後無需落地
+  }
+  archiveOf(): MessageArchive | undefined {
+    return this.archive;
+  }
+  async flushArchive(): Promise<void> {
+    await this.writer?.flush();
   }
 
   loadReadAt(): Record<string, number> {
@@ -111,6 +132,7 @@ export class MemoryStorage implements AppStorage {
     this.contacts = this.contacts.filter((c) => c.pubkey !== pubkey);
     this.convos.delete(pubkey);
     this.pruneOrphans(ids); // 審查 P1-5
+    void this.archive?.remove(pubkey); // 封存也要清（ADR-0111）
   }
   private pruneOrphans(messageIds: Set<string>): void {
     if (messageIds.size === 0) return;
@@ -151,12 +173,23 @@ export class MemoryStorage implements AppStorage {
   loadMessages(contactPubkey: string): StoredMessage[] {
     return [...(this.convos.get(contactPubkey)?.list ?? [])];
   }
+  /** 最舊的 n 則（不移除）——供封存搬移「先寫後裁」的第一步（ADR-0111）。 */
+  oldest(contactPubkey: string, n: number): StoredMessage[] {
+    return (this.convos.get(contactPubkey)?.list ?? []).slice(0, n);
+  }
+  /** 裁掉最舊的 n 則（**封存寫入成功後**才呼叫，ADR-0111）；索引同步移除。 */
+  trimOldest(contactPubkey: string, n: number): void {
+    const convo = this.convos.get(contactPubkey);
+    if (!convo || n <= 0) return;
+    for (const m of convo.list.splice(0, n)) convo.byId.delete(m.id);
+  }
   appendMessage(message: StoredMessage): void {
     const convo = this.convo(message.contact);
     if (convo.byId.has(message.id)) return; // O(1) 去重（ADR-0110；原為 O(n) 線性掃描）
     convo.list.push(message);
     convo.byId.set(message.id, message);
     this.cap(convo); // ADR-0094：有限模式逐出最舊；預設無上限不動
+    this.writer?.schedule(message.contact); // ADR-0111：溢出滿一塊才搬進封存
   }
   setMessageStatus(contactPubkey: string, messageId: string, status: MessageStatus): void {
     const msg = this.convos.get(contactPubkey)?.byId.get(messageId); // O(1)（ADR-0110）

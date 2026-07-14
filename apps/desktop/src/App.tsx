@@ -18,7 +18,7 @@ import {
 import { isTauri } from "@tauri-apps/api/core";
 import { useEffect, useRef, useState } from "react";
 import { BrowserChatBackend } from "@cinder/engine";
-import { normalizeRelayUrl, RelayChatBackend, webSocketConnector } from "@cinder/engine";
+import { normalizeRelayUrl, openOpfsArchive, RelayChatBackend, webSocketConnector } from "@cinder/engine";
 import { getKeyVault } from "./native/keyvault.js";
 import { getNotifier, onNotificationClick } from "./native/notify.js";
 import { pickFileToSend, readFileAtPath, saveIncomingFile, saveTextFile } from "./native/save-file.js";
@@ -57,6 +57,8 @@ import type {
   Status,
 } from "@cinder/engine";
 import { LocalStorage, onStorageQuota, exportRecords, exportExtension, exportMime, type ExportFormat } from "@cinder/engine";
+import { TauriArchive } from "./native/tauri-archive.js";
+import { HistoryWindow } from "./ui/HistoryWindow.js";
 import { TauriStorage } from "./native/tauri-storage.js";
 import type { AppStorage } from "@cinder/engine";
 import { cleanOnPasteEnabled, setCleanOnPasteEnabled } from "./ui/url-hygiene.js";
@@ -206,6 +208,12 @@ function normalizeAdminPubkey(input: string): string | undefined {
 function buildBackend(p: Profile, nsecOverride?: string, storage?: AppStorage): ChatBackend {
   if (!p.relayUrl) return new BrowserChatBackend(p.name);
   const store = storage ?? new LocalStorage(p.namespace);
+  if (!storage) {
+    // 瀏覽器退路（非 Tauri）：封存走 OPFS。非同步掛上——掛上前不會裁切熱區，故安全（ADR-0111）。
+    void openOpfsArchive(p.namespace).then((a) => {
+      if (a) store.attachArchive?.(a);
+    });
+  }
   const drain = activeDrain(p, Date.now()); // 搬家排水（ADR-0066 H3）：未到期才多訂舊站
   // 加密雲端快照（ADR-0071）：使用者開啟才發佈；企業政策 disableCloudBackup 由後端於名冊採用時再擋。
   const cloud =
@@ -295,6 +303,9 @@ export function App(): JSX.Element {
   const [expired, setExpired] = useState<Set<string>>(new Set());
   const [blocked, setBlocked] = useState<BlockedContact[]>([]);
   const [unread, setUnread] = useState<Record<string, number>>({});
+  /** 有封存的對話（ADR-0111）：只有真的有封存才顯示「歷史紀錄」入口。 */
+  const [archived, setArchived] = useState<Record<string, number>>({});
+  const [historyOf, setHistoryOf] = useState<string | null>(null);
   const [conn, setConn] = useState<ConnectionState>("online");
   const [relays, setRelays] = useState<{ url: string; state: ConnectionState; home: boolean; stale: boolean }[]>([]);
   const [cleanPaste, setCleanPaste] = useState<boolean>(() => cleanOnPasteEnabled());
@@ -502,6 +513,7 @@ export function App(): JSX.Element {
           // B2（ADR-0054）：從加密 blob 載入狀態；B5：私鑰自 OS 金鑰庫載入。
           const ts = new TauriStorage(active.namespace);
           await ts.hydrate();
+          ts.attachArchive(new TauriArchive(active.namespace)); // ADR-0111：加密塊檔封存
           storage = ts;
           override = await loadNsecFromVault(active);
           // 審查修正 #3：金鑰庫是密碼包裹密文但 locked 旗標遺失（設定檔毀損/重建）——
@@ -831,6 +843,7 @@ export function App(): JSX.Element {
   const enterWithNsec = async (p: Profile, nsec: string): Promise<boolean> => {
     const ts = new TauriStorage(p.namespace);
     await ts.hydrate();
+    ts.attachArchive(new TauriArchive(p.namespace)); // ADR-0111
     storageRef.current = ts; // ADR-0094：讓保留上限與導出用到後端同一份儲存
     const b = buildBackend(p, nsec, ts);
     setConn(p.relayUrl ? "connecting" : "online");
@@ -1072,6 +1085,9 @@ export function App(): JSX.Element {
   // 供側欄雙擊（openChat）與分頁列點擊（DeckTabs）共用，避免只設 activeConvo 卻漏清未讀。
   const activateConvo = (pk: string) => {
     setActiveConvo(pk);
+    // ADR-0111：查這個對話有沒有封存（決定要不要顯示「歷史紀錄」入口）。非同步、不擋主視窗。
+    const arch = storageRef.current?.archiveOf?.();
+    if (arch) void arch.chunkCount(pk).then((n) => setArchived((a) => (a[pk] === n ? a : { ...a, [pk]: n })));
     // 視窗隱藏時：只推進本機水位（清紅點），**不**送已讀回條——沒真的看到就不該告訴對方（ADR-0108）。
     if (typeof document !== "undefined" && document.hidden) activeBackend.clearUnread?.(pk);
     else activeBackend.markRead?.(pk); // 看得到 → 水位 ＋ 回條（若開啟）
@@ -1232,7 +1248,8 @@ export function App(): JSX.Element {
     const stamp = new Date().toISOString().slice(0, 10);
     setExportPreselect(null);
     for (const fmt of formats) {
-      const text = exportRecords(storage, fmt, { keys, selfLabel, now: Date.now() });
+      // eslint-disable-next-line no-await-in-loop -- 匯出需讀封存（非同步）；且逐一另存對話框需序列化
+      const text = await exportRecords(storage, fmt, { keys, selfLabel, now: Date.now() });
       // eslint-disable-next-line no-await-in-loop -- 逐一另存對話框需序列化，避免多框同時彈出
       await saveTextFile(`cinder-紀錄-${stamp}.${exportExtension(fmt)}`, exportMime(fmt), text);
     }
@@ -1529,6 +1546,19 @@ export function App(): JSX.Element {
           onClose={() => setSettingsOpen(false)}
         />
       ) : null}
+      {historyOf !== null && storageRef.current?.archiveOf?.() ? (
+        <HistoryWindow
+          convo={historyOf}
+          name={
+            groups.find((g) => g.id === historyOf)?.name ??
+            contacts.find((c) => c.pubkey === historyOf)?.name ??
+            `${historyOf.slice(0, 12)}…`
+          }
+          archive={storageRef.current.archiveOf()!}
+          selfLabel={self.name || "我"}
+          onClose={() => setHistoryOf(null)}
+        />
+      ) : null}
       {exportPreselect !== null ? (
         <ExportModal
           conversations={Object.keys(convos)
@@ -1624,6 +1654,7 @@ export function App(): JSX.Element {
                   }
                 : {})}
               {...(storageRef.current ? { onExport: () => setExportPreselect([pk]) } : {})}
+            {...((archived[pk] ?? 0) > 0 ? { onHistory: () => setHistoryOf(pk) } : {})}
             {...(dropTarget === pk ? { dropActive: true } : {})}
               {...(dropTarget === pk ? { dropActive: true } : {})}
               {...(pendingInsert?.convo === pk ? { insert: { text: pendingInsert.text, nonce: pendingInsert.nonce } } : {})}

@@ -204,6 +204,107 @@ fn store_save_part(
     std::fs::write(dir.join(format!("{part}.enc")), ciphertext).map_err(|e| e.to_string())
 }
 
+// ── 訊息封存（ADR-0111）────────────────────────────────────────────────
+//
+// 冷資料（超出熱區的舊訊息）以**加密塊檔**落地：`<store>/<ns>/archive/<convo>.<seq>.enc`。
+//
+// 為什麼是檔案而不是 IndexedDB：桌面的儲存**本來就是加密的**（encstore，AES-256-GCM）。
+// 封存改走 IndexedDB 會是**明文**——那是靜態加密的**默默降級**。用檔案則直接沿用同一把
+// db 金鑰與同一套加密，零新機制。
+//
+// 注意：`archive/` 是 `<ns>/` 下的**子目錄**，而 `store_load_parts` 只收 `.enc` 副檔名的
+// **檔案**（目錄無副檔名 → 自然跳過）——開機時不會把封存一起載入，這正是重點。
+
+/// 某命名空間的封存目錄：`<store>/<ns>/archive/`。
+fn archive_dir(app: &tauri::AppHandle, namespace: &str) -> Result<std::path::PathBuf, String> {
+    let dir = part_dir(app, namespace)?.join("archive");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir)
+}
+
+/// 封存某對話的一個塊（加密）。
+#[tauri::command]
+fn archive_append(
+    app: tauri::AppHandle,
+    namespace: String,
+    convo: String,
+    seq: u32,
+    json: String,
+) -> Result<(), String> {
+    if !valid_part(&convo) {
+        return Err("非法對話鍵".into());
+    }
+    let dir = archive_dir(&app, &namespace)?;
+    let key = db_key(&namespace)?;
+    let ciphertext = encstore::encrypt(&key, json.as_bytes()).map_err(|e| e.to_string())?;
+    std::fs::write(dir.join(format!("{convo}.{seq}.enc")), ciphertext).map_err(|e| e.to_string())
+}
+
+/// 某對話的封存塊數（= 最大 seq + 1；無封存回 0）。
+#[tauri::command]
+fn archive_count(app: tauri::AppHandle, namespace: String, convo: String) -> Result<u32, String> {
+    if !valid_part(&convo) {
+        return Err("非法對話鍵".into());
+    }
+    let dir = archive_dir(&app, &namespace)?;
+    let prefix = format!("{convo}.");
+    let mut max: i64 = -1;
+    for entry in std::fs::read_dir(&dir).map_err(|e| e.to_string())?.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else { continue };
+        let Some(rest) = name.strip_prefix(&prefix).and_then(|r| r.strip_suffix(".enc")) else {
+            continue;
+        };
+        if let Ok(seq) = rest.parse::<i64>() {
+            if seq > max {
+                max = seq;
+            }
+        }
+    }
+    Ok((max + 1) as u32)
+}
+
+/// 讀某對話的第 `seq` 塊（解密）；不存在或毀損回 `None`。
+#[tauri::command]
+fn archive_load(
+    app: tauri::AppHandle,
+    namespace: String,
+    convo: String,
+    seq: u32,
+) -> Result<Option<String>, String> {
+    if !valid_part(&convo) {
+        return Err("非法對話鍵".into());
+    }
+    let path = archive_dir(&app, &namespace)?.join(format!("{convo}.{seq}.enc"));
+    let data = match std::fs::read(&path) {
+        Ok(d) => d,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(e) => return Err(e.to_string()),
+    };
+    let key = db_key(&namespace)?;
+    // 單一塊毀損不該讓整個歷史打不開 → 回 None，其餘塊仍可讀。
+    let Ok(plain) = encstore::decrypt(&key, &data) else { return Ok(None) };
+    Ok(String::from_utf8(plain).ok())
+}
+
+/// 移除某對話的**全部**封存塊（刪好友/封鎖/退群）。
+#[tauri::command]
+fn archive_remove(app: tauri::AppHandle, namespace: String, convo: String) -> Result<(), String> {
+    if !valid_part(&convo) {
+        return Err("非法對話鍵".into());
+    }
+    let dir = archive_dir(&app, &namespace)?;
+    let prefix = format!("{convo}.");
+    for entry in std::fs::read_dir(&dir).map_err(|e| e.to_string())?.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else { continue };
+        if name.starts_with(&prefix) && name.ends_with(".enc") {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+    Ok(())
+}
+
 /// 刪除單一部位（對話被移除時）。不存在視為成功。
 #[tauri::command]
 fn store_remove_part(app: tauri::AppHandle, namespace: String, part: String) -> Result<(), String> {
@@ -660,6 +761,10 @@ fn main() {
             store_load_parts,
             store_save_part,
             store_remove_part,
+            archive_append,
+            archive_count,
+            archive_load,
+            archive_remove,
             store_save,
             pass_status,
             pass_enable,

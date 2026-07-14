@@ -3,7 +3,15 @@
 // 設定分頁即時切換。正式版把後端換成注入 RelayChatBackend＋原生安全儲存即可（同一套 UI）。
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { AppStorage, ChatBackend, ChatMessage, CloudSyncMode, Contact, Group, Status } from "@cinder/engine";
-import { exportExtension, exportMime, type ExportFormat, exportRecords, getDeviceId, LocalStorage } from "@cinder/engine";
+import {
+  exportExtension,
+  exportMime,
+  type ExportFormat,
+  exportRecords,
+  getDeviceId,
+  LocalStorage,
+  openOpfsArchive,
+} from "@cinder/engine";
 import type { CallMedia, CallState } from "@cinder/core";
 import { makeThumbnail, pickFile, saveFile } from "./native/files.js";
 import { hasCallSupport } from "./native/call-media.js";
@@ -132,6 +140,9 @@ export function MobileApp({
     // ADR-0094：真實 relay 用外部持有的儲存（供保留上限/導出）；示範模式無持久化。
     const store = relayUrl ? new LocalStorage(identity.pubkey, readRetentionCap()) : null;
     storeRef.current = store;
+    // ADR-0111：封存走 OPFS（webview 沒有檔案系統；OPFS 的配額與 localStorage 是不同的池子）。
+    // 非同步掛上——掛上前不會裁切熱區，故安全；不支援 OPFS 時不掛（熱區無上限，資料完好）。
+    if (store) void openOpfsArchive(identity.pubkey).then((a) => a && store.attachArchive?.(a));
     // ADR-0100：帶上錨點/簽章清單（backend.ts 內）與加密雲端備份模式。
     const backend = createBackend(identity, relayUrl, { store: store ?? undefined, cloudSync });
     backendRef.current = backend;
@@ -314,12 +325,14 @@ export function MobileApp({
     storeRef.current?.setMaxPerConvo(v);
   };
   // 明文紀錄導出（ADR-0094）：導出全部對話，三種格式各下載一份（RN-web）。
-  const exportAll = (): void => {
+  // 非同步：必須讀封存（ADR-0111），否則會靜默漏掉所有被封存的舊訊息。
+  const exportAll = async (): Promise<void> => {
     const storage = storeRef.current;
     if (!storage) return;
     const stamp = new Date().toISOString().slice(0, 10);
     for (const fmt of ["txt", "md", "json"] as ExportFormat[]) {
-      const text = exportRecords(storage, fmt, { selfLabel: selfName || "我", now: Date.now() });
+      // eslint-disable-next-line no-await-in-loop -- 匯出需讀封存（非同步，ADR-0111）
+      const text = await exportRecords(storage, fmt, { selfLabel: selfName || "我", now: Date.now() });
       downloadText(`cinder-紀錄-${stamp}.${exportExtension(fmt)}`, exportMime(fmt), text);
     }
   };

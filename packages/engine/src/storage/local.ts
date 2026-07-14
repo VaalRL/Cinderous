@@ -1,3 +1,4 @@
+import { ArchiveWriter, type MessageArchive } from "./archive.js";
 import { MemoryStorage } from "./memory.js";
 import type {
   AppStorage,
@@ -55,6 +56,9 @@ const MSGS = "msgs.";
  */
 export class LocalStorage implements AppStorage {
   private readonly mem: MemoryStorage;
+  /** 封存（ADR-0111）：超出熱區的舊訊息移入，而非刪除。未掛＝熱區無上限（不裁切）。 */
+  private writer: ArchiveWriter | undefined;
+  private archive: MessageArchive | undefined;
 
   constructor(
     private readonly namespace = "",
@@ -63,6 +67,22 @@ export class LocalStorage implements AppStorage {
   ) {
     this.mem = new MemoryStorage(maxPerConvo);
     this.mem.importSnapshot(this.readSnapshot());
+  }
+
+  /**
+   * 掛上封存（ADR-0111）。**只有掛上後熱區才會被裁切**——沒有封存就不裁切，
+   * 絕不讓「封存不可用」變成「訊息被刪掉」。
+   */
+  attachArchive(archive: MessageArchive): void {
+    this.archive = archive;
+    this.writer = new ArchiveWriter(this.mem, archive, (convo) => this.writeConvo(convo));
+  }
+  archiveOf(): MessageArchive | undefined {
+    return this.archive;
+  }
+  /** 等待在途的封存搬移完成（關閉前／測試）。 */
+  async flushArchive(): Promise<void> {
+    await this.writer?.flush();
   }
 
   private k(suffix: string): string {
@@ -148,6 +168,7 @@ export class LocalStorage implements AppStorage {
     this.writeContacts();
     localStorage.removeItem(this.k(MSGS + pubkey));
     this.writeOrphanSweep();
+    void this.archive?.remove(pubkey); // 封存也要清（ADR-0111），否則刪好友卻留下歷史
   }
   remapContact(from: string, to: string): void {
     this.mem.remapContact(from, to);
@@ -164,6 +185,7 @@ export class LocalStorage implements AppStorage {
     localStorage.removeItem(this.k(MSGS + contact.pubkey));
     this.writeOrphanSweep();
     write(this.k("blocked"), this.mem.loadBlocked());
+    void this.archive?.remove(contact.pubkey);
   }
   unblockContact(pubkey: string): void {
     this.mem.unblockContact(pubkey);
@@ -178,6 +200,7 @@ export class LocalStorage implements AppStorage {
   appendMessage(message: StoredMessage): void {
     this.mem.appendMessage(message);
     this.writeConvo(message.contact);
+    this.writer?.schedule(message.contact); // 溢出滿一塊才搬（ADR-0111）
   }
   setMessageStatus(contactPubkey: string, messageId: string, status: MessageStatus): void {
     this.mem.setMessageStatus(contactPubkey, messageId, status);
@@ -256,6 +279,7 @@ export class LocalStorage implements AppStorage {
     this.writeGroups();
     localStorage.removeItem(this.k(MSGS + id));
     this.writeOrphanSweep();
+    void this.archive?.remove(id);
   }
   loadBootstrapList(): StoredBootstrapList | null {
     return this.mem.loadBootstrapList();

@@ -1,5 +1,7 @@
 /** 本機持久化的資料型別（身分、聯絡人、訊息）。 */
 
+import type { MessageArchive } from "./archive.js";
+
 /**
  * 每對話持久化訊息上限（審查 P0-1）：超過即逐出最舊，避免單一對話的 JSON
  * 陣列無限膨脹撐爆 localStorage 配額（比照中繼站的每收件人上限）。視窗化已讓
@@ -208,6 +210,16 @@ export interface AppStorage {
   ): Map<string, Record<string, "delivered" | "read">>;
   /** 設定每對話保留上限（ADR-0094）；`0`＝無上限。變更後即時對既有對話套用逐出。 */
   setMaxPerConvo(max: number): void;
+  /**
+   * 掛上訊息封存（ADR-0111）：超出熱區上限的舊訊息**移入封存**，而非刪除。
+   *
+   * **只有掛上後熱區才會被裁切。** 沒有封存就不裁切——絕不讓「封存不可用」變成「訊息被刪掉」。
+   */
+  attachArchive?(archive: MessageArchive): void;
+  /** 已掛上的封存（歷史紀錄 UI 與匯出用）；未掛回 undefined。 */
+  archiveOf?(): MessageArchive | undefined;
+  /** 等待在途的封存搬移完成（關閉前／測試）。 */
+  flushArchive?(): Promise<void>;
   /**
    * 已讀水位（ADR-0108）：對話 → 我已讀到的最新訊息時間（毫秒）。未出現＝未讀過任何訊息。
    * 未讀數由此推導（`!outgoing && at > readAt` 的則數），不是記憶體計數器 → 重載後仍在。

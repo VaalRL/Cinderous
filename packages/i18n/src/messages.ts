@@ -140,6 +140,12 @@ export interface Messages {
   export_format: string;
   export_run: string;
   export_this: string;
+  /** 歷史紀錄（ADR-0111）：讀封存的舊訊息。 */
+  history_title: string;
+  history_open: string;
+  history_older: string;
+  history_loading: string;
+  history_empty: string;
   export_empty: string;
   settings_invisible: string;
   settings_invisibleHint: string;
@@ -559,6 +565,11 @@ const zhHant: Messages = {
   export_format: "格式",
   export_run: "導出",
   export_this: "導出此對話",
+  history_title: "歷史紀錄",
+  history_open: "歷史紀錄（封存的舊訊息）",
+  history_older: "載入更早",
+  history_loading: "載入中…",
+  history_empty: "沒有封存的訊息",
   export_empty: "沒有可導出的對話。",
   settings_invisible: "隱身",
   settings_invisibleHint: "開啟後完全不廣播在線狀態（中繼站與聯絡人皆顯示你離線），但仍可正常收發訊息。",
@@ -975,6 +986,11 @@ const en: Messages = {
   export_format: "Format",
   export_run: "Export",
   export_this: "Export this conversation",
+  history_title: "History",
+  history_open: "History (archived messages)",
+  history_older: "Load older",
+  history_loading: "Loading…",
+  history_empty: "No archived messages",
   export_empty: "No conversations to export.",
   settings_invisible: "Invisible",
   settings_invisibleHint: "When on, your presence is never broadcast (relay and contacts both see you offline), but you can still send and receive normally.",
