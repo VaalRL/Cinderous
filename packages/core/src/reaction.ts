@@ -19,7 +19,8 @@ export const REACTION_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🎉"
 export function wrapReaction(
   emoji: string,
   senderSk: SecretKey,
-  recipientPk: PubkeyHex,
+  /** 收件人；群組傳成員清單（扇出），1:1 傳單一 pubkey。 */
+  recipients: PubkeyHex | PubkeyHex[],
   targetEventId: string,
   opts: { now?: number } = {},
 ): WrappedMessage {
@@ -27,7 +28,7 @@ export function wrapReaction(
   return wrapForBoth(
     { kind: KIND.REACTION, created_at: nowSec, tags: [["e", targetEventId]], content: emoji },
     senderSk,
-    recipientPk,
+    recipients,
     nowSec + DEFAULT_TTL_SECONDS,
   );
 }

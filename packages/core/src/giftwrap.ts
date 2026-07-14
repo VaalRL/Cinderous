@@ -49,7 +49,12 @@ export function selfCopyTarget(rumor: Rumor): PubkeyHex | null {
 export function wrapForBoth(
   input: RumorInput,
   senderSk: SecretKey,
-  recipientPk: PubkeyHex,
+  /**
+   * 收件人。**可以是多位**——群組的回應/收回必須扇給每位成員（群組**無共用金鑰**，ADR-0027）。
+   * 過去這裡只收單一 pubkey，於是 UI 把 `groupId` 直接丟進來 → NIP-44 加密拋
+   * `second arg must be public key` → **群組裡按回應或收回訊息直接爆**（ADR-0119）。
+   */
+  recipients: PubkeyHex | PubkeyHex[],
   outerExpiration: number,
 ): WrappedMessage {
   const senderPk = getPublicKey(senderSk);
@@ -62,7 +67,8 @@ export function wrapForBoth(
         ["expiration", String(outerExpiration)],
       ],
     });
-  return { id, events: [wrapFor(recipientPk)], selfCopy: wrapFor(senderPk) };
+  const to = Array.isArray(recipients) ? recipients : [recipients];
+  return { id, events: to.map(wrapFor), selfCopy: wrapFor(senderPk) };
 }
 
 export interface UnwrappedMessage {

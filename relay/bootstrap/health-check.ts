@@ -149,7 +149,7 @@ async function main(): Promise<void> {
 
   if (changed) {
     writeFileSync(LIST_PATH, `${JSON.stringify(next, null, 2)}\n`);
-    console.log(`更新清單：${healthy.length} 座健康、${nextEntries.length - healthy.length} 座已退役。`);
+    console.log(`更新清單：${relays.length} 座健康、${nextEntries.length - relays.length} 座已退役。`);
   } else {
     console.log("清單無變化。");
   }

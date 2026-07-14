@@ -1,9 +1,9 @@
-import { applyRosterRotations, generateSecretKey, KIND, getPublicKey, type NostrEvent, npubEncode, nsecEncode, signOrgRoster, wrapGroupControl, wrapGroupMessage, wrapMessage, wrapReceipt } from "@cinder/core";
+import { KIND, RelayClient, applyRosterRotations, generateSecretKey, getPublicKey, npubEncode, nsecEncode, signOrgRoster, type NostrEvent, type RelayClientHandlers, wrapGroupControl, wrapGroupMessage, wrapMessage, wrapReceipt } from "@cinder/core";
 import { createInMemoryRelayNetwork } from "@cinder/relay";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryStorage } from "../storage/memory.js";
 import type { ChatBackendEvents, ChatMessage } from "./types.js";
-import { RelayChatBackend } from "./relay-backend.js";
+import { type CloseableRelayClient, RelayChatBackend } from "./relay-backend.js";
 
 const noop: ChatBackendEvents = { onContacts() {}, onMessage() {}, onTyping() {}, onNudge() {} };
 
@@ -1571,6 +1571,75 @@ describe("群訊必須走 sendGroupMessage（不是 sendMessage）", () => {
     expect(() => a.sendMessage(gid, "會爆")).toThrow();
     expect(() => a.sendGroupMessage(gid, "正常送出")).not.toThrow();
 
+    a.stop();
+    b.stop();
+  });
+});
+
+describe("健檢修正（ADR-0119）", () => {
+  it("**群組上的 emoji 回應與收回不再拋錯**，且其他成員真的收得到", () => {
+    const net = createInMemoryRelayNetwork();
+    const sa = new MemoryStorage();
+    const a = new RelayChatBackend(sa, (h) => net.connect("a", h), "Alice");
+    const reacted: string[] = [];
+    const unsent: string[] = [];
+    const b = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("b", h), "Bob");
+    a.start(noop);
+    b.start({ ...noop, onReaction: (id, e) => reacted.push(`${id}:${e}`), onUnsend: (id) => unsent.push(id) });
+    a.addContact(b.selfNpub);
+    a.createGroup("專案群", [b.self.pubkey]);
+    const gid = sa.loadGroups()[0]!.id;
+    a.sendGroupMessage(gid, "訊息");
+    const mid = sa.loadMessages(gid)[0]!.id;
+
+    // 修正前：groupId（32 字元）被當成 pubkey（64 字元）丟進 NIP-44 → `second arg must be
+    // public key`。桌面與行動端**都會爆**。群組無共用金鑰 → 正確做法是扇給每位成員。
+    expect(() => a.sendReaction(gid, mid, "👍")).not.toThrow();
+    expect(() => a.unsendMessage(gid, mid)).not.toThrow();
+    expect(reacted).toEqual([`${mid}:👍`]);
+    expect(unsent).toEqual([mid]);
+
+    a.stop();
+    b.stop();
+  });
+
+  it("**`stop()` 要關閉所有中繼連線**——否則登出後那些 socket 會永遠自動重連", () => {
+    const closed: string[] = [];
+    const make = (url: string) => (h: RelayClientHandlers): CloseableRelayClient => {
+      const c: CloseableRelayClient = new RelayClient({ send: () => {} }, h);
+      c.close = () => closed.push(url);
+      return c;
+    };
+    const a = new RelayChatBackend(new MemoryStorage(), make("home"), "Alice", {
+      relayUrl: "wss://home",
+      connectorFor: (url: string) => make(url),
+    });
+    a.start(noop);
+    a.addContact(`${npubEncode(getPublicKey(generateSecretKey()))}@wss://other`);
+    a.stop();
+
+    // `close()` 是**唯一**會設 `stopped = true`（停止重連）的地方。
+    expect(closed).toContain("home");
+    expect(closed).toContain("wss://other");
+  });
+
+  it("在線判定用**對方自報的心跳節奏**——閒置聯絡人（5 分鐘一次）不該被判離線", () => {
+    const net = createInMemoryRelayNetwork();
+    const contacts: { pubkey: string; status: string }[][] = [];
+    const a = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("a", h), "Alice");
+    const b = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("b", h), "Bob");
+    a.start({ ...noop, onContacts: (cs) => contacts.push(cs.map((c) => ({ pubkey: c.pubkey, status: c.status }))) });
+    b.start(noop);
+    a.addContact(b.selfNpub);
+    b.setStatus("online"); // Bob 發心跳（自報節奏）
+    // 收到心跳不會立刻 emitContacts（在線圓點只在 renderTimer 週期更新）→ 用一個會觸發
+    // emitContacts 的動作把當下狀態逼出來。
+    a.addContact(npubEncode(getPublicKey(generateSecretKey())));
+
+    // 修正前：硬比 90 秒（＝3× 舊的 30 秒心跳）。ADR-0109 後閒置者每 300 秒才發一次
+    // → 90 秒的窗會讓他每 5 分鐘只亮 90 秒，一直閃。
+    const last = contacts[contacts.length - 1]!;
+    expect(last.find((c) => c.pubkey === b.self.pubkey)?.status).toBe("online");
     a.stop();
     b.stop();
   });

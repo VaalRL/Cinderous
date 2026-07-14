@@ -96,7 +96,17 @@ export class MemoryStorage implements AppStorage {
     if (at > (this.readAt.get(convoKey) ?? 0)) this.readAt.set(convoKey, at);
   }
 
-  /** 依上限逐出最舊（`0`＝無上限、不動）；索引同步移除，否則會留下指向已逐出訊息的幽靈條目。 */
+  /**
+   * 依**使用者設定的保留上限**（ADR-0094）逐出最舊；`0`＝無上限（預設）。索引同步移除。
+   *
+   * **這裡的刪除是刻意的**——保留上限的語意就是「我只要留 N 則」（使用者為了省空間而設）。
+   * 它與 ADR-0111 的**熱區上限**（`HOT_CAP`，內部、恆開、超出者**封存**而非刪除）是**兩回事**。
+   *
+   * ⚠️ 已知不一致（ADR-0119 記錄）：ADR-0111 的敘述「修好 ADR-0094 的資料遺失」**說過頭了**
+   * ——它只讓**熱區溢出**改走封存，使用者設的保留上限仍然是**真的刪除**（如其所願），
+   * 而且**不會連帶清理封存**，所以它其實**沒有真的限制住總儲存量**。
+   * 這個語意衝突（「省空間」vs「別刪我的歷史」）需要另立 ADR 釐清，本次不改行為。
+   */
   private cap(convo: Convo): void {
     if (this.maxPerConvo > 0 && convo.list.length > this.maxPerConvo) {
       const evicted = convo.list.splice(0, convo.list.length - this.maxPerConvo);

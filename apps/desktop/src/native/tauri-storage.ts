@@ -37,6 +37,17 @@ export const tauriStoreIo: StoreIo = {
 };
 
 const SAVE_DEBOUNCE_MS = 250;
+/** 寫入失敗後的重試間隔（ADR-0119）。 */
+const RETRY_DELAY_MS = 3_000;
+
+/**
+ * 持久化失敗的回呼（ADR-0119）：讓 UI 能提醒使用者「資料沒存進去」。
+ * 比照 `local.ts` 的 `onStorageQuota`——磁碟滿/權限錯誤不該是靜默的。
+ */
+let storeFailureHandler: (() => void) | undefined;
+export function onStoreFailure(fn: (() => void) | undefined): void {
+  storeFailureHandler = fn;
+}
 
 /** 非訊息狀態（身分/聯絡人/群組/回應…）合為一個部位——它們都很小。 */
 const META = "meta";
@@ -143,12 +154,14 @@ export class TauriStorage implements AppStorage {
   }
 
   /** 立即持久化（取消防抖、馬上寫），供關閉前 flush 減少末段資料遺失。 */
-  async flush(): Promise<void> {
+  /** 立即持久化。回傳是否全部成功（失敗的部位仍在 `dirty`，會被重試）。 */
+  async flush(): Promise<boolean> {
     if (this.saveTimer) {
       clearTimeout(this.saveTimer);
       this.saveTimer = undefined;
     }
     await this.writeDirty();
+    return this.dirty.size === 0;
   }
 
   /**
@@ -178,20 +191,48 @@ export class TauriStorage implements AppStorage {
     }, SAVE_DEBOUNCE_MS);
   }
 
+  /**
+   * 寫出待寫部位。
+   *
+   * **寫入失敗不得靜默遺失**（ADR-0119）。舊版在寫入**之前**就 `dirty.clear()`，而呼叫端是
+   * `void this.writeDirty()`（無 catch）——磁碟滿／IPC 失敗時：待寫集合已清空、迴圈在第一個
+   * 失敗處中斷（連帶丟掉後面所有部位）、無重試、無通知。**使用者以為訊息存了，重開就沒了。**
+   *
+   * 現在：逐部位 try/catch；失敗的**放回 dirty**、排程重試、並通知 UI（比照 `local.ts` 對
+   * `QuotaExceededError` 的處理）。一個部位失敗不影響其他部位。
+   */
   private async writeDirty(): Promise<void> {
     const parts = [...this.dirty];
     this.dirty.clear();
     const snap = this.mem.exportSnapshot();
+    let failed = false;
     for (const part of parts) {
-      if (part === META) {
-        await this.io.savePart(this.namespace, META, JSON.stringify(metaOf(snap)));
-        continue;
+      try {
+        if (part === META) {
+          await this.io.savePart(this.namespace, META, JSON.stringify(metaOf(snap)));
+          continue;
+        }
+        const convo = part.slice(MSGS.length);
+        const msgs = snap.messages[convo];
+        // 對話已被移除（封鎖/刪好友/退群）→ 刪掉它的部位檔，別留下孤兒。
+        if (!msgs) await this.io.removePart(this.namespace, part);
+        else await this.io.savePart(this.namespace, part, JSON.stringify(msgs));
+      } catch (e) {
+        // 放回待寫集合：資料仍在記憶體，下一次 flush 會再試。**絕不當作已寫入。**
+        this.dirty.add(part);
+        failed = true;
+        console.warn(`[storage] 部位 ${part} 寫入失敗（將重試）：`, e);
       }
-      const convo = part.slice(MSGS.length);
-      const msgs = snap.messages[convo];
-      // 對話已被移除（封鎖/刪好友/退群）→ 刪掉它的部位檔，別留下孤兒。
-      if (!msgs) await this.io.removePart(this.namespace, part);
-      else await this.io.savePart(this.namespace, part, JSON.stringify(msgs));
+    }
+    if (failed) {
+      storeFailureHandler?.();
+      // 重排一次重試（指數退避交給呼叫端的下一次 persist；這裡只保證不會就此遺忘）。
+      if (!this.saveTimer) {
+        this.saveTimer = setTimeout(() => {
+          this.saveTimer = undefined;
+          void this.writeDirty();
+        }, RETRY_DELAY_MS);
+      }
     }
   }
 

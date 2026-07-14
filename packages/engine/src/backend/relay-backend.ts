@@ -298,7 +298,7 @@ export class RelayChatBackend implements ChatBackend {
     return this.homeUrl ? `${this.selfNpub}@${this.homeUrl}` : this.selfNpub;
   }
   private readonly sk: SecretKey;
-  private readonly client: RelayClient;
+  private readonly client: CloseableRelayClient;
   /** `this.client` 實際連往的 URL（不變）；home 遞補時 effective home 才變。 */
   private readonly originalHomeUrl: string | undefined;
   /** 目前 effective home（ADR-0039 可自動遞補）。 */
@@ -1448,8 +1448,11 @@ export class RelayChatBackend implements ChatBackend {
     if (!this.handlers) return;
     const now = Date.now();
     const contacts: Contact[] = this.contacts.map((c) => {
-      const seen = this.presence.lastSeenAt(c.pubkey);
-      const online = seen !== undefined && now - seen <= PRESENCE_TIMEOUT_MS;
+      // ADR-0119 修正：改用 `statusOf()`（容忍窗＝2.5 × 對方**自報**的心跳節奏，ADR-0109）。
+      // 舊版硬比 90 秒（＝3× 舊的 30 秒心跳）——但 ADR-0109 之後閒置聯絡人每 **300 秒**才發一次
+      // 心跳，90 秒的窗會把「在線但閒置」的人判成離線（每 5 分鐘只亮 90 秒，一直閃）。
+      // 引擎當時還自相矛盾：決定我方心跳快慢的 `anyContactOnline()` 用的是正確的 statusOf()。
+      const online = this.presence.statusOf(c.pubkey, now) === "online";
       const payload = this.statuses.get(c.pubkey);
       return {
         pubkey: c.pubkey,
@@ -1514,8 +1517,24 @@ export class RelayChatBackend implements ChatBackend {
     this.publishWrapped(to, id, wrapped);
   }
 
+  /**
+   * 把對話鍵解析成**收件人清單**（ADR-0119）。
+   *
+   * `groupId` **不是 pubkey**（16 bytes hex vs 32）。過去 `sendReaction`／`unsendMessage`
+   * 直接把對話鍵當 pubkey 丟進 NIP-44 → **群組裡按回應或收回訊息直接拋錯**（桌面與行動端皆然）。
+   * 群組**無共用金鑰**（ADR-0027），所以正確做法是**扇給每位其他成員**——與群訊同一套。
+   */
+  private recipientsOf(convo: string): PubkeyHex[] | null {
+    const group = this.groups.find((g) => g.id === convo);
+    if (!group) return [convo]; // 1:1
+    const others = group.members.filter((m) => m !== this.self.pubkey);
+    return others.length > 0 ? others : null; // 空群：沒有人可送
+  }
+
   sendReaction(to: PubkeyHex, messageId: string, emoji: string): void {
-    const wrapped = wrapReaction(emoji, this.sk, to, messageId);
+    const recipients = this.recipientsOf(to);
+    if (!recipients) return;
+    const wrapped = wrapReaction(emoji, this.sk, recipients, messageId);
     // 回應不追蹤送出狀態（無 tick）→ 直接送；含自封副本讓自己的其他裝置也看得到（ADR-0107）。
     for (const evt of wrapped.events) this.publishReliable(evt);
     this.publishReliable(wrapped.selfCopy);
@@ -1849,7 +1868,14 @@ export class RelayChatBackend implements ChatBackend {
   }
 
   unsendMessage(to: PubkeyHex, messageId: string): void {
-    const wrapped = wrapDeletion(this.sk, to, messageId);
+    const recipients = this.recipientsOf(to);
+    if (!recipients) {
+      // 空群仍要在本機收回（否則使用者按了收回卻什麼都沒發生）。
+      this.storage.markDeleted(messageId);
+      this.handlers?.onUnsend?.(messageId);
+      return;
+    }
+    const wrapped = wrapDeletion(this.sk, recipients, messageId);
     // 自封副本是**必要**的（ADR-0107）：否則在手機收回的訊息，仍留在自己的電腦上。
     for (const evt of wrapped.events) this.publishReliable(evt);
     this.publishReliable(wrapped.selfCopy);
@@ -2141,6 +2167,12 @@ export class RelayChatBackend implements ChatBackend {
     this.outbox.clear();
     this.transfer.close();
     this.call.close();
+    // **關閉所有中繼連線**（ADR-0119）。舊版只清計時器、不關 socket——而 `close()` 是**唯一**
+    // 會設 `stopped = true` 的地方，於是登出/切換身分後那些 WebSocket 會**永遠自動重連**。
+    // 行動端每次登入都先 `stop()` 再建新後端 → 孤兒 socket 隨身分切換累積。
+    this.client.close?.();
+    for (const client of this.relayPool.values()) client.close?.();
+    this.relayPool.clear();
     this.handlers = null;
   }
 }

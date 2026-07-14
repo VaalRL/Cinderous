@@ -15,7 +15,8 @@ const DEFAULT_TTL_SECONDS = 7 * DAY_SECONDS;
  */
 export function wrapDeletion(
   senderSk: SecretKey,
-  recipientPk: PubkeyHex,
+  /** 收件人；群組傳成員清單（扇出），1:1 傳單一 pubkey。 */
+  recipients: PubkeyHex | PubkeyHex[],
   targetEventId: string,
   opts: { now?: number } = {},
 ): WrappedMessage {
@@ -23,7 +24,7 @@ export function wrapDeletion(
   return wrapForBoth(
     { kind: KIND.DELETE, created_at: nowSec, tags: [["e", targetEventId]], content: "" },
     senderSk,
-    recipientPk,
+    recipients,
     nowSec + DEFAULT_TTL_SECONDS,
   );
 }

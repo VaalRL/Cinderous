@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { StorageSnapshot } from "@cinder/engine";
-import { type StoreIo, TauriStorage } from "./tauri-storage.js";
+import { onStoreFailure, type StoreIo, TauriStorage } from "./tauri-storage.js";
 
 /**
  * 記憶體 fake IO：模擬 Rust 的加密落地。
@@ -176,5 +176,78 @@ describe("分部位持久化（ADR-0110）", () => {
     s.removeContact("bob");
     await s.flush();
     expect(parts.has("ns|msgs.bob")).toBe(false);
+  });
+});
+
+describe("寫入失敗（ADR-0119）", () => {
+  const msg = (id: string, contact: string) => ({ id, contact, outgoing: false, text: id, at: 1 });
+
+  it("**寫失敗的部位要留在待寫佇列**——不能當作已寫入", async () => {
+    const { io, parts } = fakeIo();
+    let fail = true;
+    const flaky: StoreIo = {
+      ...io,
+      savePart: async (ns, part, json) => {
+        // 磁碟滿／權限／檔案鎖定——都會讓這裡拋錯。
+        if (fail && part.startsWith("msgs.")) throw new Error("disk full");
+        await io.savePart(ns, part, json);
+      },
+    };
+
+    const s = new TauriStorage("ns", flaky);
+    await s.hydrate();
+    s.addContact({ pubkey: "bob", name: "Bob" });
+    s.appendMessage(msg("m1", "bob"));
+
+    // 修正前：`dirty.clear()` 在寫入**之前**就無條件執行 → 拋錯後那個部位再也不會被重寫。
+    // 使用者以為訊息存好了；下次開 App 整段對話不見，而且**沒有任何錯誤訊息**。
+    expect(await s.flush()).toBe(false);
+    expect(parts.has("ns|msgs.bob")).toBe(false);
+
+    // 待寫佇列還記得它 → 下一次 flush（或 3 秒後的自動重試）就補寫成功。
+    fail = false;
+    expect(await s.flush()).toBe(true);
+    expect(parts.has("ns|msgs.bob")).toBe(true);
+    expect(JSON.parse(parts.get("ns|msgs.bob") ?? "[]")).toHaveLength(1);
+  });
+
+  it("寫入失敗要**通知使用者**（靜默失敗＝使用者不知道資料沒存到）", async () => {
+    const { io } = fakeIo();
+    const dead: StoreIo = { ...io, savePart: async () => Promise.reject(new Error("disk full")) };
+    let alerts = 0;
+    onStoreFailure(() => {
+      alerts += 1;
+    });
+
+    const s = new TauriStorage("ns", dead);
+    await s.hydrate();
+    s.addContact({ pubkey: "bob", name: "Bob" });
+    await s.flush();
+
+    expect(alerts).toBeGreaterThan(0);
+    onStoreFailure(undefined);
+  });
+
+  it("**其他部位不受牽連**——一個部位寫失敗，其餘照樣落地", async () => {
+    const { io, parts } = fakeIo();
+    const flaky: StoreIo = {
+      ...io,
+      savePart: async (ns, part, json) => {
+        if (part === "msgs.bob") throw new Error("disk full");
+        await io.savePart(ns, part, json);
+      },
+    };
+
+    const s = new TauriStorage("ns", flaky);
+    await s.hydrate();
+    s.addContact({ pubkey: "bob", name: "Bob" });
+    s.addContact({ pubkey: "carol", name: "Carol" });
+    s.appendMessage(msg("m1", "bob"));
+    s.appendMessage(msg("m2", "carol"));
+    await s.flush();
+
+    expect(parts.has("ns|msgs.bob")).toBe(false); // 失敗的
+    expect(parts.has("ns|msgs.carol")).toBe(true); // 沒被牽連
+    expect(parts.has("ns|meta")).toBe(true);
   });
 });

@@ -17,6 +17,10 @@ use tauri::{
 };
 
 /// 顯示並聚焦主視窗（系統匣點擊/選單用）。
+// 檔案安全原語（ADR-0119）：檔名白名單、原子寫入、毀損隔離。**住在 lib**，因為這個 bin
+// target 需要 `tauri-app` feature，`cargo test` 永遠編不到它——安全關鍵的東西不能沒測試。
+use cinder_desktop::partfile::{atomic_write, quarantine, valid_part};
+
 fn show_main(app: &tauri::AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.show();
@@ -120,7 +124,7 @@ fn store_save(app: tauri::AppHandle, namespace: String, json: String) -> Result<
     let path = store_path(&app, &namespace)?;
     let key = db_key(&namespace)?;
     let ciphertext = encstore::encrypt(&key, json.as_bytes()).map_err(|e| e.to_string())?;
-    std::fs::write(&path, ciphertext).map_err(|e| e.to_string())
+    atomic_write(&path, &ciphertext)
 }
 
 // ── 分部位持久化（ADR-0110）──────────────────────────────────────────────
@@ -130,17 +134,6 @@ fn store_save(app: tauri::AppHandle, namespace: String, json: String) -> Result<
 //
 // 改為逐部位：`meta`（身分/聯絡人/群組…）與每個對話各一個檔，只重寫**變動的**部位。
 // 成本降為 O(該對話)，與總歷史長度無關。
-
-/// 部位檔名白名單：對話鍵是 pubkey hex 或群組 id（皆為 hex），不該出現路徑字元。
-/// 拒絕其餘輸入以杜絕路徑穿越（`..`、`/`、`\`）。
-fn valid_part(part: &str) -> bool {
-    !part.is_empty()
-        && part.len() <= 128
-        && part
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_')
-        && !part.contains("..")
-}
 
 /// 某命名空間的部位目錄：`<app_data>/store/<namespace|legacy>/`。
 fn part_dir(app: &tauri::AppHandle, namespace: &str) -> Result<std::path::PathBuf, String> {
@@ -179,9 +172,16 @@ fn store_load_parts(
         }
         let Some(part) = path.file_stem().and_then(|s| s.to_str()) else { continue };
         let data = std::fs::read(&path).map_err(|e| e.to_string())?;
-        // 單一部位毀損不該讓整個載入失敗（其餘部位仍可用）。
-        let Ok(plain) = encstore::decrypt(&key, &data) else { continue };
-        let Ok(json) = String::from_utf8(plain) else { continue };
+        // 單一部位毀損不該讓整個載入失敗（其餘部位仍可用）——但**也不能靜默丟棄**：
+        // 下一次寫入會用「只剩新資料」的內容覆蓋它。隔離起來（改名 .corrupt），資料還有救。
+        let Ok(plain) = encstore::decrypt(&key, &data) else {
+            quarantine(&path);
+            continue;
+        };
+        let Ok(json) = String::from_utf8(plain) else {
+            quarantine(&path);
+            continue;
+        };
         out.insert(part.to_string(), json);
     }
     Ok(out)
@@ -201,7 +201,7 @@ fn store_save_part(
     let dir = part_dir(&app, &namespace)?;
     let key = db_key(&namespace)?;
     let ciphertext = encstore::encrypt(&key, json.as_bytes()).map_err(|e| e.to_string())?;
-    std::fs::write(dir.join(format!("{part}.enc")), ciphertext).map_err(|e| e.to_string())
+    atomic_write(&dir.join(format!("{part}.enc")), &ciphertext)
 }
 
 // ── 訊息封存（ADR-0111）────────────────────────────────────────────────
@@ -237,7 +237,7 @@ fn archive_append(
     let dir = archive_dir(&app, &namespace)?;
     let key = db_key(&namespace)?;
     let ciphertext = encstore::encrypt(&key, json.as_bytes()).map_err(|e| e.to_string())?;
-    std::fs::write(dir.join(format!("{convo}.{seq}.enc")), ciphertext).map_err(|e| e.to_string())
+    atomic_write(&dir.join(format!("{convo}.{seq}.enc")), &ciphertext)
 }
 
 /// 某對話的封存塊數（= 最大 seq + 1；無封存回 0）。
@@ -282,8 +282,11 @@ fn archive_load(
         Err(e) => return Err(e.to_string()),
     };
     let key = db_key(&namespace)?;
-    // 單一塊毀損不該讓整個歷史打不開 → 回 None，其餘塊仍可讀。
-    let Ok(plain) = encstore::decrypt(&key, &data) else { return Ok(None) };
+    // 單一塊毀損不該讓整個歷史打不開 → 回 None，其餘塊仍可讀。隔離起來別讓它被覆蓋。
+    let Ok(plain) = encstore::decrypt(&key, &data) else {
+        quarantine(&path);
+        return Ok(None);
+    };
     Ok(String::from_utf8(plain).ok())
 }
 
@@ -785,3 +788,4 @@ fn main() {
         .run(tauri::generate_context!())
         .expect("執行 Tauri 應用程式時發生錯誤");
 }
+

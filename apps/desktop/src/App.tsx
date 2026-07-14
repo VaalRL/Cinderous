@@ -18,7 +18,9 @@ import {
 import { isTauri } from "@tauri-apps/api/core";
 import { useEffect, useRef, useState } from "react";
 import { BrowserChatBackend } from "@cinder/engine";
-import { normalizeRelayUrl, openOpfsArchive, RelayChatBackend, webSocketConnector } from "@cinder/engine";
+import { normalizeRelayUrl, RelayChatBackend, webSocketConnector } from "@cinder/engine";
+import { browserStore } from "./native/browser-store.js";
+import { safeNsecDecode } from "./nsec.js";
 import { getKeyVault } from "./native/keyvault.js";
 import { getNotifier, onNotificationClick } from "./native/notify.js";
 import { pickFileToSend, readFileAtPath, saveIncomingFile, saveTextFile } from "./native/save-file.js";
@@ -209,15 +211,6 @@ function normalizeAdminPubkey(input: string): string | undefined {
   return undefined;
 }
 
-/** 解 nsec，失敗回 undefined（不讓一個壞掉的 nsec 讓整個登入炸掉）。 */
-function safeNsecDecode(nsec: string): Uint8Array | undefined {
-  try {
-    return nsecDecode(nsec);
-  } catch {
-    return undefined;
-  }
-}
-
 /**
  * 依身分設定檔建立後端（ADR-0045）。工作身分（enterprise）鎖定單座：不給
  * connectorFor/anchors/onHomeSwitched → 不漫遊、不遞補；個人身分走開放模式。
@@ -225,16 +218,9 @@ function safeNsecDecode(nsec: string): Uint8Array | undefined {
  */
 function buildBackend(p: Profile, nsecOverride?: string, storage?: AppStorage): ChatBackend {
   if (!p.relayUrl) return new BrowserChatBackend(p.name);
-  // 瀏覽器退路（非 Tauri）：localStorage 靜態加密，資料金鑰由 nsec 導出（ADR-0112）。
-  // 有了「nsec 絕不明文落盤」（見 keyvault.ts）這個加密才是真的，不是演戲。
-  const sk = !storage && nsecOverride ? safeNsecDecode(nsecOverride) : undefined;
-  const store = storage ?? new LocalStorage(p.namespace, 0, sk);
-  if (!storage) {
-    // 封存走 OPFS，塊檔以同一把金鑰加密（ADR-0111/0112）。非同步掛上——掛上前不會裁切熱區。
-    void openOpfsArchive(p.namespace, (store as LocalStorage).storageKey()).then((a) => {
-      if (a) store.attachArchive?.(a);
-    });
-  }
+  // 儲存一律由呼叫端提供（ADR-0119）：過去這裡會自己 `new LocalStorage(...)` 當退路，
+  // 而呼叫端**也**各自建一份不帶金鑰的——結果真正被用的是沒加密的那份。單一來源見 `browserStore()`。
+  const store = storage ?? browserStore(p.namespace, nsecOverride);
   const drain = activeDrain(p, Date.now()); // 搬家排水（ADR-0066 H3）：未到期才多訂舊站
   // 加密雲端快照（ADR-0071）：使用者開啟才發佈；企業政策 disableCloudBackup 由後端於名冊採用時再擋。
   const cloud =
@@ -550,7 +536,10 @@ export function App(): JSX.Element {
         }
         if (cancelled) return;
         // 配對匯出（D4a）與保留上限（ADR-0094）需與後端**同一份**儲存；非 Tauri 走 LocalStorage 同命名空間。
-        const store: AppStorage | undefined = storage ?? (active.relayUrl ? new LocalStorage(active.namespace) : undefined);
+        // **必須把 sk 傳進去**（ADR-0119 修正）：舊版 `new LocalStorage(ns)` 不帶金鑰 → `dek` 為
+        // undefined → ADR-0112 的靜態加密在整條瀏覽器路徑上是**死碼**，訊息/聯絡人全部明文落盤。
+        const store: AppStorage | undefined =
+          storage ?? (active.relayUrl ? browserStore(active.namespace, override) : undefined);
         storageRef.current = store ?? null;
         const b = buildBackend(active, override, store);
         setConn(active.relayUrl ? "connecting" : "online");
@@ -862,11 +851,19 @@ export function App(): JSX.Element {
   // 解鎖（H4）：驗密碼→取回 nsec 與 db 金鑰（原生快取）→照常建後端。
   // 以取得的 nsec 建後端並進入（解鎖與救援共用）。
   const enterWithNsec = async (p: Profile, nsec: string): Promise<boolean> => {
-    const ts = new TauriStorage(p.namespace);
-    await ts.hydrate();
-    ts.attachArchive(new TauriArchive(p.namespace)); // ADR-0111
-    storageRef.current = ts; // ADR-0094：讓保留上限與導出用到後端同一份儲存
-    const b = buildBackend(p, nsec, ts);
+    // ADR-0119 修正：舊版**無條件** `new TauriStorage()`——在瀏覽器 `invoke()` 必然 reject，
+    // 於是 ADR-0112 才剛加的「瀏覽器本地密碼解鎖」**永遠打不開**。必須分流。
+    let store: AppStorage;
+    if (isTauri()) {
+      const ts = new TauriStorage(p.namespace);
+      await ts.hydrate();
+      ts.attachArchive(new TauriArchive(p.namespace)); // ADR-0111
+      store = ts;
+    } else {
+      store = browserStore(p.namespace, nsec); // 以解出的 nsec 導出 DEK（ADR-0112）
+    }
+    storageRef.current = store; // ADR-0094：讓保留上限與導出用到後端同一份儲存
+    const b = buildBackend(p, nsec, store);
     setConn(p.relayUrl ? "connecting" : "online");
     setSelf({ ...b.self });
     setBackend(b);
@@ -953,9 +950,18 @@ export function App(): JSX.Element {
       storageRef.current = ts; // ADR-0094：與後端同一份儲存
       b = buildBackend(first, nsec, ts);
     } else {
-      const ls = new LocalStorage(first.namespace);
+      // 瀏覽器（ADR-0119 修正）：**絕不讓後端自己產生 nsec 並存進 localStorage**。
+      // 舊版 `buildBackend(first, undefined, ls)` 不帶 nsecOverride → 後端 `generateSecretKey()` ＋
+      // `storage.saveIdentity()` → **私鑰明文寫進 localStorage**（keyvault 的「拒收明文」守衛
+      // 完全繞過，因為這條路根本不經過 keyvault）。ADR-0112 的紅線在這裡破了一個大洞。
+      //
+      // 現在：在這裡產生 nsec，交給 `buildBackend` 當 override（後端不會落地它），
+      // 並以它導出 DEK 加密 localStorage。nsec 只留在記憶體——要「記住我」須另設本地密碼。
+      const genNsec = nsecEncode(generateSecretKey());
+      const ls = browserStore(first.namespace, genNsec);
       storageRef.current = ls; // ADR-0094：與後端同一份儲存
-      b = buildBackend(first, undefined, ls); // 瀏覽器：後端自動產生 nsec 存 localStorage（既有行為）
+      b = buildBackend(first, genNsec, ls);
+      ls.saveIdentity({ nsec: "", name }); // 只存名稱；私鑰不落地
     }
     const profile: Profile = { pubkey: b.self.pubkey, name, relayUrl, enterprise: false, namespace: "" };
     const next = upsertProfile(profilesState, profile);
@@ -1040,8 +1046,12 @@ export function App(): JSX.Element {
       applyPairBundle(ts, bundle);
       await ts.flush(); // 重載前確保加密 blob 落地
     } else {
-      const ls = new LocalStorage(namespace);
+      // ADR-0119 修正：瀏覽器必須以 nsec 導出的 DEK 加密（否則捆包裡的**真實 nsec** 與全部歷史
+      // 都明文落盤）。這是 ADR-0118 修好捆包身分後**才暴露出來**的迴歸——在那之前捆包根本沒有
+      // nsec，所以從未真的洩漏過。
+      const ls = browserStore(namespace, nsec);
       applyPairBundle(ls, bundle);
+      ls.saveIdentity({ nsec: "", name }); // 私鑰不落地；要「記住我」須另設本地密碼
     }
     const profile: Profile = {
       pubkey,
@@ -1084,23 +1094,39 @@ export function App(): JSX.Element {
     opts: { nsec?: string | undefined; adminPubkey?: string | undefined } = {},
   ) => {
     const sk = opts.nsec?.trim() ? nsecDecode(opts.nsec.trim()) : generateSecretKey();
+    const nsec = nsecEncode(sk);
     const pubkey = getPublicKey(sk);
-    if (isTauri()) {
-      await getKeyVault().setKey(pubkey, nsecEncode(sk)); // B5：私鑰 → OS 金鑰庫，不落 localStorage
-    } else {
-      // 瀏覽器（ADR-0112）：**nsec 絕不明文落盤**。過去這裡直接寫 localStorage——
-      // 那讓靜態加密變成演戲（資料金鑰由 nsec 導出，而 nsec 就躺在旁邊）。
-      // 現在只存名稱；nsec 留在記憶體。要「記住我」須在設定裡啟用本地密碼（Argon2id 包裹）。
-      new LocalStorage(pubkey).saveIdentity({ nsec: "", name });
-    }
     const admin = enterprise && opts.adminPubkey?.trim() ? normalizeAdminPubkey(opts.adminPubkey.trim()) : undefined;
     const profile: Profile = { pubkey, name, relayUrl, enterprise, namespace: pubkey, ...(admin ? { adminPubkey: admin } : {}) };
-    saveProfiles(upsertProfile(profilesState, profile));
-    try {
-      location.reload();
-    } catch {
-      /* 忽略 */
+    const next = upsertProfile(profilesState, profile);
+    saveProfiles(next);
+
+    if (isTauri()) {
+      await getKeyVault().setKey(pubkey, nsec); // B5：私鑰 → OS 金鑰庫，不落 localStorage
+      // 金鑰庫記得住 → 重載後 `keyOf()` 取得回來。
+      try {
+        location.reload();
+      } catch {
+        /* 忽略 */
+      }
+      return;
     }
+
+    // 瀏覽器（ADR-0119 修正）——**這裡曾經會造出一個永遠打不開的身分**：
+    //
+    // ADR-0112 立下「nsec 絕不明文落盤」之後，這條路變成「產生 sk → 只存名字 → `location.reload()`」。
+    // 而 `sk` 只活在這個函式的作用域裡：**重載後它就消失了**。使用者若是「新產生」身分（而非匯入），
+    // 他從頭到尾**沒看過那把 nsec**，重載後系統卻要他貼上 nsec 才能進去——
+    // **他剛建立了一個自己永遠進不去的身分，而且它還是當前作用中的設定檔。**
+    //
+    // 桌面沒事（nsec 進了 OS 金鑰庫，重載後撈得回來）。壞的只有瀏覽器。
+    //
+    // 修法是**不要重載**：nsec 就在手上，直接原地換後端（和首次登入、解鎖走同一條路）。
+    // `setBackend()` 的 effect 會自動 stop 舊後端、start 新的。
+    setProfilesState(next);
+    await enterWithNsec(profile, nsec);
+    // 只存名稱（供身分清單顯示）；私鑰不落地。要「記住我」須在設定裡啟用本地密碼（Argon2id 包裹）。
+    storageRef.current?.saveIdentity({ nsec: "", name });
   };
 
   // H4（ADR-0067）：作用中身分已上鎖→解鎖畫面（不落 SignIn，避免誤建新身分）。
