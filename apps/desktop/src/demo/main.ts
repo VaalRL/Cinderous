@@ -139,7 +139,8 @@ class DemoPeer {
   sendDm(): void {
     const text = this.dom.input.value.trim();
     if (!text) return;
-    this.client.publish(wrapMessage(text, this.sk, this.friendPk));
+    // 示範腳本為單機（無多裝置）→ 不送自封副本（ADR-0107），只送給對方那份。
+    for (const evt of wrapMessage(text, this.sk, this.friendPk).events) this.client.publish(evt);
     this.addMsg(`你：${text}`, "out");
     this.dom.input.value = "";
   }

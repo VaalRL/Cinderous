@@ -42,6 +42,23 @@ describe("群組訊息扇出（M9，Gift-Wrap 成對）", () => {
     expect(openWrap(events[1]!, carolSk).rumor.content).toBe("嗨大家");
   });
 
+  it("自封副本（ADR-0107）：群訊也送自己一份——否則自己的另一台裝置看不到自己發的群訊", () => {
+    const g = group();
+    const w = wrapGroupMessage("嗨大家", aliceSk, alicePk, g);
+    // 扇出腿仍只給「其他」成員（送出狀態的判準不變）；自封副本另計。
+    expect(w.events.length).toBe(2);
+    expect(w.selfCopy.tags).toContainEqual(["p", alicePk]);
+
+    const asAlice = openWrap(w.selfCopy, aliceSk); // Alice 的另一台裝置
+    expect(asAlice.sender).toBe(alicePk); // 寄件人是自己 → 收端判為自封副本（標 outgoing）
+    expect(asAlice.rumor.content).toBe("嗨大家");
+    expect(groupTarget(asAlice.rumor)).toBe(g.id); // 由 g tag 歸檔，不需 `to` 標記
+
+    // 關鍵：自封副本與成員收到的是**同一個 rumor** → 同一個 id → 回條/回應對得起來。
+    expect(asAlice.rumor.id).toBe(openWrap(w.events[0]!, bobSk).rumor.id);
+    expect(asAlice.rumor.id).toBe(w.id);
+  });
+
   it("提及（ADR-0050）：mentions 寫進加密 rumor 內層 p-tag，收端可判定被提及", () => {
     const g = group();
     const { events } = wrapGroupMessage("@Bob 看這個", aliceSk, alicePk, g, { mentions: [bobPk] });

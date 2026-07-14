@@ -1,13 +1,69 @@
+import { getEventHash } from "nostr-tools/pure";
+
 import { KIND } from "./constants.js";
 import type { NostrEvent } from "./event.js";
-import type { PubkeyHex, SecretKey } from "./keys.js";
+import { getPublicKey, type PubkeyHex, type SecretKey } from "./keys.js";
 import { mentionTags } from "./mention.js";
-import { openWrap, sealAndWrap, type Rumor } from "./nip59.js";
+import { openWrap, sealAndWrap, type Rumor, type RumorInput } from "./nip59.js";
 import { replyTag } from "./thread.js";
 
 const KIND_CHAT = 14;
 const DAY_SECONDS = 86_400;
 const DEFAULT_TTL_SECONDS = 7 * DAY_SECONDS;
+
+/**
+ * 收件人標記（ADR-0107）：寫在 **rumor 內層**，供**自封副本**抵達自己的其他裝置時，
+ * 判斷這則訊息原本是發給誰的（否則無從歸檔到正確對話）。
+ *
+ * **不可用 `p` tag**：`mentionedPubkeys()` 會把 rumor 內所有 `p` tag 當成 @提及
+ * （見 `mention.ts`），用了會讓每則訊息都「提及」收件人。
+ */
+const TO_TAG = "to";
+
+/**
+ * 一則訊息包出來的所有 Gift Wrap（ADR-0107）。
+ *
+ * - `id`：**內層 rumor 的 id**。這是訊息的正典 id——它對「給對方的 wrap」與「自封副本」
+ *   是**同一個**（外層 wrap id 則各不相同），因此也是三方（發送裝置、自己的其他裝置、
+ *   收件人）唯一能共同指涉的識別。回條／回應／收回一律以此為 target。
+ * - `events`：**定址給對方**的 wrap（1:1 為一顆；群訊為每位其他成員一顆）。送出狀態只追蹤這些。
+ * - `selfCopy`：**定址給自己**的 wrap，讓自己的其他裝置也收得到。best-effort，不計入送出狀態。
+ */
+export interface WrappedMessage {
+  id: string;
+  events: NostrEvent[];
+  selfCopy: NostrEvent;
+}
+
+/** 讀出 rumor 內層的收件人標記（ADR-0107）；群訊與非 1:1 訊息回傳 null。 */
+export function selfCopyTarget(rumor: Rumor): PubkeyHex | null {
+  return rumor.tags.find((t) => t[0] === TO_TAG)?.[1] ?? null;
+}
+
+/**
+ * 把**同一個 rumor** 包給「對方」與「自己」兩份（ADR-0107 決策 1）。
+ *
+ * rumor 只建一次 → 兩份 wrap 的內層 rumor 完全相同 → `rumor.id` 相同。
+ * 外層 `p` tag 各自指向該 wrap 真正的收件人（自封副本即自己），這樣它才會落進自己的收件箱。
+ */
+export function wrapForBoth(
+  input: RumorInput,
+  senderSk: SecretKey,
+  recipientPk: PubkeyHex,
+  outerExpiration: number,
+): WrappedMessage {
+  const senderPk = getPublicKey(senderSk);
+  const id = getEventHash({ ...input, pubkey: senderPk });
+  const wrapFor = (pk: PubkeyHex): NostrEvent =>
+    sealAndWrap(input, senderSk, pk, {
+      kind: KIND.OFFLINE_DM_GIFT_WRAP,
+      tags: [
+        ["p", pk],
+        ["expiration", String(outerExpiration)],
+      ],
+    });
+  return { id, events: [wrapFor(recipientPk)], selfCopy: wrapFor(senderPk) };
+}
 
 export interface UnwrappedMessage {
   /** 經身分驗證的寄件人公鑰。 */
@@ -46,26 +102,21 @@ export function wrapMessage(
   senderSk: SecretKey,
   recipientPk: PubkeyHex,
   opts: WrapOptions = {},
-): NostrEvent {
+): WrappedMessage {
   const nowSec = opts.now ?? Math.floor(Date.now() / 1000);
   const outerExpiration = opts.expiration ?? opts.disappearAt ?? nowSec + DEFAULT_TTL_SECONDS;
   const rumorTags: string[][] = [
+    [TO_TAG, recipientPk],
     ...(opts.disappearAt !== undefined ? [["expiration", String(opts.disappearAt)]] : []),
     ...(opts.relayHint ? [["relay", opts.relayHint]] : []),
     ...(opts.mentions && opts.mentions.length > 0 ? mentionTags(opts.mentions) : []),
     ...(opts.replyTo ? [replyTag(opts.replyTo)] : []),
   ];
-  return sealAndWrap(
+  return wrapForBoth(
     { kind: KIND_CHAT, created_at: nowSec, tags: rumorTags, content },
     senderSk,
     recipientPk,
-    {
-      kind: KIND.OFFLINE_DM_GIFT_WRAP,
-      tags: [
-        ["p", recipientPk],
-        ["expiration", String(outerExpiration)],
-      ],
-    },
+    outerExpiration,
   );
 }
 
@@ -88,24 +139,19 @@ export function wrapFileMessage(
   recipientPk: PubkeyHex,
   meta: FileMeta,
   opts: { now?: number; expiration?: number; relayHint?: string } = {},
-): NostrEvent {
+): WrappedMessage {
   const nowSec = opts.now ?? Math.floor(Date.now() / 1000);
   const outerExpiration = opts.expiration ?? nowSec + DEFAULT_TTL_SECONDS;
   const rumorTags: string[][] = [
+    [TO_TAG, recipientPk],
     ["file", meta.tid, meta.name, String(meta.size), meta.mime],
     ...(opts.relayHint ? [["relay", opts.relayHint]] : []),
   ];
-  return sealAndWrap(
+  return wrapForBoth(
     { kind: KIND_CHAT, created_at: nowSec, tags: rumorTags, content: "" },
     senderSk,
     recipientPk,
-    {
-      kind: KIND.OFFLINE_DM_GIFT_WRAP,
-      tags: [
-        ["p", recipientPk],
-        ["expiration", String(outerExpiration)],
-      ],
-    },
+    outerExpiration,
   );
 }
 

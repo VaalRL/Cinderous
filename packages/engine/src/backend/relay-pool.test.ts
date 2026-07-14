@@ -135,7 +135,7 @@ describe("跨中繼通訊：Relay Pool 與收件人路由（ADR-0034）", () => 
 
     // 第三方把「同一個」給 Alice 的 wrap 各發一次到 X 與 Y
     const senderSk = (b as unknown as { sk: Uint8Array }).sk;
-    const wrap = wrapMessage("雙路送達", senderSk, a.self.pubkey);
+    const wrap = wrapMessage("雙路送達", senderSk, a.self.pubkey).events[0]!;
     const pubX = netX.connect("dup-x", {});
     const pubY = netY.connect("dup-y", {});
     pubX.publish(wrap);

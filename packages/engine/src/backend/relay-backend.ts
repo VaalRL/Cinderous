@@ -48,6 +48,8 @@ import {
   SDP_SIGNAL_KIND,
   threadRoot,
   unwrapMessage,
+  selfCopyTarget,
+  type WrappedMessage,
   wrapDeletion,
   wrapGroupControl,
   wrapGroupMessage,
@@ -324,8 +326,15 @@ export class RelayChatBackend implements ChatBackend {
   /** 隱身（ADR-0088 (d)）：完全不廣播心跳（對 relay 與聯絡人皆顯示離線），但仍正常收發。 */
   private invisible = false;
   // 送達/已讀回條（ADR-0058）。
-  /** 已送出、待 relay OK 的訊息 id → 收件人（供 OK 後標 sent）。 */
-  private readonly awaitingSent = new Map<string, PubkeyHex>();
+  /**
+   * 早到的回條（ADR-0107）：訊息 id → 尚未套用的回條們。
+   *
+   * NIP-59 的 `jitteredPast()` 把外層 wrap 的 `created_at` **隨機往前推**（隱私設計），
+   * 所以中繼回放的順序是亂的——**對方的回條可能比我的自封副本更早抵達我的另一台裝置**。
+   * 若直接丟棄，那則訊息會永遠卡在 `sent`，即使早已送達/已讀。故先暫存，待該訊息（自封副本）
+   * 抵達時原樣重放。群組回條逐成員，故存整筆回條而非單一狀態。
+   */
+  private readonly pendingReceipts = new Map<string, { from: PubkeyHex; type: ReceiptType; groupId?: string }[]>();
   /** 已送出的最新「已讀」水位訊息 id（避免重複送已讀回條）。
    *  鍵：1:1 為對方 pubkey；群組為 `<groupId>:<發訊者pubkey>`（每位發訊者各一條水位，ADR-0095）。 */
   private readonly lastReadSent = new Map<string, string>();
@@ -841,8 +850,6 @@ export class RelayChatBackend implements ChatBackend {
   }
 
   private receiveDm(event: NostrEvent): void {
-    if (this.seenMsg.has(event.id)) return;
-    this.seenMsg.add(event.id);
     let opened;
     try {
       opened = unwrapMessage(event, this.sk);
@@ -850,7 +857,17 @@ export class RelayChatBackend implements ChatBackend {
       return;
     }
     const { sender, rumor } = opened;
-    if (this.isBlocked(sender)) return;
+
+    // 以 **rumor.id** 去重（ADR-0107），不是外層 wrap id：給對方的那份與自封副本是兩顆
+    // 不同的 wrap，但內層 rumor 相同。發送裝置送出時已把 rumor.id 記進 seenMsg，
+    // 自己的自封副本回流時便在此自然丟棄——無需特例。
+    // （同一顆外層事件的跨中繼重複，已由 onEvent 的 seenEvt 擋掉。）
+    if (this.seenMsg.has(rumor.id)) return;
+    this.seenMsg.add(rumor.id);
+
+    /** 自封副本：這是**我自己**發出的訊息，經中繼回到我的另一台裝置（ADR-0107）。 */
+    const selfCopy = sender === this.self.pubkey;
+    if (!selfCopy && this.isBlocked(sender)) return;
 
     // 群組路由僅限「群訊/群控」——群組**回條**也帶 `g` tag（ADR-0095），必須落到下方回條處理，
     // 不能被這裡吞掉（否則發訊者永遠收不到群組送達/已讀）。
@@ -860,14 +877,21 @@ export class RelayChatBackend implements ChatBackend {
       return;
     }
 
-    this.ensureContact(sender);
-    this.learnRelayHint(sender, rumor);
+    // 自封副本的「對話」是**收件人**（rumor 內層 `to` tag），不是寄件人（寄件人就是我自己）。
+    // 絕不可 ensureContact(自己)——那會在聯絡人清單裡生出一個「我」。
+    //
+    // `convo` 可能為 null：回應／收回／回條以 `e` tag 指定目標訊息，與對話無關，故不帶 `to`。
+    // 它們必須在下方**先**處理完；只有真正要建立訊息的分支（檔案/文字）才強制要有 convo。
+    const convo = selfCopy ? selfCopyTarget(rumor) : sender;
+    if (convo) this.ensureContact(convo);
+    if (!selfCopy) this.learnRelayHint(sender, rumor);
 
     if (rumor.kind === KIND.REACTION) {
       const target = reactionTarget(rumor);
       if (!target) return;
-      this.storage.addReaction({ id: event.id, messageId: target, emoji: rumor.content, mine: false });
-      this.handlers?.onReaction?.(target, rumor.content, false);
+      // 自封副本＝我自己按的回應（在另一台裝置上按的）→ mine。
+      this.storage.addReaction({ id: rumor.id, messageId: target, emoji: rumor.content, mine: selfCopy });
+      this.handlers?.onReaction?.(target, rumor.content, selfCopy);
       return;
     }
 
@@ -899,14 +923,26 @@ export class RelayChatBackend implements ChatBackend {
       return;
     }
 
+    // 以下分支要建立訊息 → 必須知道歸屬哪個對話。
+    // 自封副本卻無 `to` 標記＝舊格式或損壞，無從歸檔（ADR-0107）。
+    if (!convo) return;
+
     const fileMeta = parseFileMeta(rumor);
     if (fileMeta) {
       // 檔案 metadata（ADR-0093）：讓收件人**所有裝置**都知道有檔案；位元組另走 P2P。
       // 以 tid 去重（位元組可能已先到並建了訊息）；仍回送已送達回條讓 sender 有投遞可見度（G3）。
+      // 自封副本 → 我的另一台裝置：看得到 metadata，但**沒有位元組、也沒有縮圖**
+      //（位元組只走 P2P 到對方；縮圖是本機產物）——ADR-0093/0107 的刻意取捨。
       if (!this.fileMsgByTid.has(fileMeta.tid)) {
-        this.ensureFileMessage(sender, fileMeta, { msgId: event.id, outgoing: false, sent: 0 });
+        this.ensureFileMessage(convo, fileMeta, {
+          msgId: rumor.id,
+          outgoing: selfCopy,
+          sent: 0,
+          ...(selfCopy ? { status: "sent" as const } : {}),
+        });
+        if (selfCopy) this.applyPendingReceipts(rumor.id);
       }
-      this.publishReliable(wrapReceipt("delivered", this.sk, sender, event.id));
+      if (!selfCopy) this.publishReliable(wrapReceipt("delivered", this.sk, sender, rumor.id));
       return;
     }
 
@@ -917,10 +953,55 @@ export class RelayChatBackend implements ChatBackend {
       ...(expiresAt !== undefined ? { expiresAt } : {}),
       ...(replyTo !== undefined ? { replyTo } : {}),
     };
-    const message = { id: event.id, contact: sender, outgoing: false, text: rumor.content, at: Date.now(), ...extra };
+    // 自封副本＝我在另一台裝置發的訊息 → outgoing，狀態 `sent`（它確實已進中繼）。
+    // 之後對方的回條本來就定址給我 → **我的每一台裝置都收得到** → 狀態自動收斂為送達/已讀。
+    const status = selfCopy ? ("sent" as const) : undefined;
+    const message = {
+      id: rumor.id,
+      contact: convo,
+      outgoing: selfCopy,
+      text: rumor.content,
+      at: Date.now(),
+      ...(status ? { status } : {}),
+      ...extra,
+    };
     this.storage.appendMessage(message);
-    this.handlers?.onMessage(sender, { id: message.id, outgoing: false, text: rumor.content, at: message.at, ...extra });
-    this.publishReliable(wrapReceipt("delivered", this.sk, sender, event.id)); // ADR-0058 Tier 2：已送達回條
+    this.handlers?.onMessage(convo, {
+      id: rumor.id,
+      outgoing: selfCopy,
+      text: rumor.content,
+      at: message.at,
+      ...(status ? { status } : {}),
+      ...extra,
+    });
+    if (selfCopy) {
+      this.applyPendingReceipts(rumor.id); // 回條若比自封副本先到，在此補套用（ADR-0107）
+      return; // 不對自己回送已送達回條
+    }
+    this.publishReliable(wrapReceipt("delivered", this.sk, sender, rumor.id)); // ADR-0058 Tier 2：已送達回條
+  }
+
+  /**
+   * 暫存一筆「早到的回條」（ADR-0107）：目標訊息尚未抵達本機（自封副本還在路上）。
+   * 有界（Map 保序 → 逐出最舊）：對永不抵達的目標（例如超過 7 天 TTL、或惡意灌入）不無限成長。
+   */
+  private deferReceipt(messageId: string, from: PubkeyHex, type: ReceiptType, groupId?: string): void {
+    const queue = this.pendingReceipts.get(messageId) ?? [];
+    queue.push({ from, type, ...(groupId ? { groupId } : {}) });
+    this.pendingReceipts.set(messageId, queue);
+    while (this.pendingReceipts.size > 1024) {
+      const oldest = this.pendingReceipts.keys().next().value;
+      if (oldest === undefined) break;
+      this.pendingReceipts.delete(oldest);
+    }
+  }
+
+  /** 重放先前暫存的「早到回條」（ADR-0107）：自封副本抵達後，才有訊息可標。 */
+  private applyPendingReceipts(messageId: string): void {
+    const queue = this.pendingReceipts.get(messageId);
+    if (!queue) return;
+    this.pendingReceipts.delete(messageId); // 先刪再放，避免重放時又被 defer 回去
+    for (const r of queue) this.applyReceipt(r.from, messageId, r.type, r.groupId);
   }
 
   /** 處理帶 `g` tag 的群組訊息/控制。訊息識別用 rumor.id（跨成員一致，ADR-0095）。 */
@@ -949,9 +1030,24 @@ export class RelayChatBackend implements ChatBackend {
     // 群訊識別用**內層 rumor.id**（跨成員一致、openWrap 已驗雜湊）；外層 wrap id 每人不同，
     // 拿來當 id 會讓回條/引用對不回發訊者（ADR-0095 修正；`eventId` 僅用於 wrap 去重）。
     const id = rumor.id;
-    const message = { id, contact: groupId, outgoing: false, text: rumor.content, at: Date.now(), ...extra };
-    this.storage.appendMessage(message);
-    this.handlers?.onMessage(groupId, { id, outgoing: false, text: rumor.content, at: message.at, ...extra });
+    // 自封副本＝我在另一台裝置發的群訊（ADR-0107）：群訊原本只扇出給**其他**成員，
+    // 於是自己的另一台裝置看不到自己發的群訊。標為 outgoing/`sent`，且不對自己回條。
+    const selfCopy = sender === this.self.pubkey;
+    const status = selfCopy ? ("sent" as const) : undefined;
+    const body = {
+      id,
+      outgoing: selfCopy,
+      text: rumor.content,
+      at: Date.now(),
+      ...(status ? { status } : {}),
+      ...extra,
+    };
+    this.storage.appendMessage({ ...body, contact: groupId });
+    this.handlers?.onMessage(groupId, body);
+    if (selfCopy) {
+      this.applyPendingReceipts(id); // 其他成員的回條可能比自封副本先到
+      return;
+    }
     // 分級送達回條（ADR-0095）：小群（≤GROUP_RECEIPT_COUNT_MAX）才回；大群完全不記（零額外流量）。
     if (groupReceiptMode(g.members.length) !== "off") {
       this.publishReliable(wrapReceipt("delivered", this.sk, sender, id, { groupId }));
@@ -1270,30 +1366,32 @@ export class RelayChatBackend implements ChatBackend {
 
   sendMessage(to: PubkeyHex, text: string, ttlSeconds?: number, mentions?: PubkeyHex[], replyTo?: string): void {
     const disappearAt = ttlSeconds ? nowSec() + ttlSeconds : undefined;
-    const evt = wrapMessage(text, this.sk, to, {
+    const wrapped = wrapMessage(text, this.sk, to, {
       ...(disappearAt !== undefined ? { disappearAt } : {}),
       ...(this.homeUrl ? { relayHint: this.homeUrl } : {}),
       ...(mentions && mentions.length > 0 ? { mentions } : {}),
       ...(replyTo ? { replyTo } : {}),
     });
+    const id = wrapped.id; // 內層 rumor id（ADR-0107）：對方與自己的其他裝置都指涉同一則
     const extra = {
       ...(disappearAt !== undefined ? { expiresAt: disappearAt * 1000 } : {}),
       ...(replyTo ? { replyTo } : {}),
     };
-    const message = { id: evt.id, contact: to, outgoing: true, text, at: Date.now(), status: "sending" as const, ...extra };
-    this.seenMsg.add(evt.id);
+    const message = { id, contact: to, outgoing: true, text, at: Date.now(), status: "sending" as const, ...extra };
+    this.seenMsg.add(id); // 自封副本回流到本機時據此丟棄（ADR-0107）
     this.storage.appendMessage(message);
-    this.handlers?.onMessage(to, { id: evt.id, outgoing: true, text, at: message.at, status: "sending" as const, ...extra });
+    this.handlers?.onMessage(to, { id, outgoing: true, text, at: message.at, status: "sending" as const, ...extra });
     // 先存後送：確保同步（測試網路）回來的 OK/回條找得到已存訊息才更新狀態（ADR-0058）。
-    this.awaitingSent.set(evt.id, to);
-    this.publishReliable(evt);
+    this.publishWrapped(to, id, wrapped);
   }
 
   sendReaction(to: PubkeyHex, messageId: string, emoji: string): void {
-    const evt = wrapReaction(emoji, this.sk, to, messageId);
-    this.publishReliable(evt);
-    this.seenMsg.add(evt.id);
-    this.storage.addReaction({ id: evt.id, messageId, emoji, mine: true });
+    const wrapped = wrapReaction(emoji, this.sk, to, messageId);
+    // 回應不追蹤送出狀態（無 tick）→ 直接送；含自封副本讓自己的其他裝置也看得到（ADR-0107）。
+    for (const evt of wrapped.events) this.publishReliable(evt);
+    this.publishReliable(wrapped.selfCopy);
+    this.seenMsg.add(wrapped.id);
+    this.storage.addReaction({ id: wrapped.id, messageId, emoji, mine: true });
     this.handlers?.onReaction?.(messageId, emoji, true);
   }
 
@@ -1440,14 +1538,11 @@ export class RelayChatBackend implements ChatBackend {
     this.handlers?.onMessageStatus?.(convo, messageId, status);
   }
 
-  /** Tier 1（ADR-0058）：relay 接受某事件＝已送中繼。1:1 直接標；群訊走扇出（任一 OK 即 sent）。 */
+  /**
+   * Tier 1（ADR-0058）：relay 接受某事件＝已送中繼。1:1 與群訊都走扇出（任一 OK 即 sent）。
+   * **自封副本不在 `fanout` 裡**（ADR-0107）——它成功與否不影響狀態。
+   */
   private markSent(eventId: string): void {
-    const contact = this.awaitingSent.get(eventId);
-    if (contact) {
-      this.awaitingSent.delete(eventId);
-      this.setMsgStatus(contact, eventId, "sent");
-      return;
-    }
     const fan = this.fanout.get(eventId);
     if (!fan) return;
     this.fanout.delete(eventId);
@@ -1458,16 +1553,10 @@ export class RelayChatBackend implements ChatBackend {
   }
 
   /**
-   * 送出失敗（ADR-0095）：外送匣重試耗盡或被明確拒收。1:1 直接標 failed；
-   * 群訊需**所有** wrap 都放棄且無任一成功才算失敗（部分成員送達仍算送出）。
+   * 送出失敗（ADR-0095）：外送匣重試耗盡或被明確拒收。需**所有**（定址給對方的）wrap
+   * 都放棄且無任一成功才算失敗——群訊部分成員送達仍算送出；1:1 只有一顆，語意等同直接標 failed。
    */
   private markFailed(eventId: string): void {
-    const contact = this.awaitingSent.get(eventId);
-    if (contact) {
-      this.awaitingSent.delete(eventId);
-      this.setMsgStatus(contact, eventId, "failed");
-      return;
-    }
     const fan = this.fanout.get(eventId);
     if (!fan) return;
     this.fanout.delete(eventId);
@@ -1486,11 +1575,20 @@ export class RelayChatBackend implements ChatBackend {
       if (!this.readReceipts) return; // 互惠：自己關閉已讀就不顯示他人已讀
       // 水位：把該對話中、時間不晚於目標訊息的自己訊息全標為已讀。
       const msgs = this.storage.loadMessages(from);
-      const upto = msgs.find((m) => m.id === messageId)?.at ?? Infinity;
+      const target = msgs.find((m) => m.id === messageId);
+      if (!target) {
+        this.deferReceipt(messageId, from, "read"); // 回條早於自封副本（ADR-0107）
+        return;
+      }
       for (const m of msgs) {
-        if (!m.outgoing || m.at > upto || m.status === "read") continue;
+        if (!m.outgoing || m.at > target.at || m.status === "read") continue;
         this.setMsgStatus(from, m.id, "read");
       }
+      return;
+    }
+    // 目標訊息尚未抵達本機（自封副本可能還在路上——中繼回放順序是亂的）→ 暫存，稍後重放。
+    if (!this.storage.loadMessages(from).some((m) => m.id === messageId)) {
+      this.deferReceipt(messageId, from, "delivered");
       return;
     }
     this.setMsgStatus(from, messageId, "delivered");
@@ -1509,11 +1607,16 @@ export class RelayChatBackend implements ChatBackend {
     if (type === "read" && !this.readReceipts) return; // 互惠
 
     const msgs = this.storage.loadMessages(groupId);
-    const upto = msgs.find((m) => m.id === messageId)?.at ?? Infinity;
+    const target = msgs.find((m) => m.id === messageId);
+    // 目標群訊尚未抵達本機（自封副本還在路上）→ 暫存，待它抵達時重放（ADR-0107）。
+    if (!target) {
+      this.deferReceipt(messageId, from, type, groupId);
+      return;
+    }
     for (const m of msgs) {
       // 送達只標該則；已讀採水位（把不晚於目標的自己訊息一併標為此成員已讀）。
       if (!m.outgoing) continue;
-      if (type === "delivered" ? m.id !== messageId : m.at > upto) continue;
+      if (type === "delivered" ? m.id !== messageId : m.at > target.at) continue;
       const receipts = this.storage.setMessageReceipt(groupId, m.id, from, type);
       if (receipts) this.handlers?.onMessageReceipts?.(groupId, m.id, receipts);
     }
@@ -1556,9 +1659,11 @@ export class RelayChatBackend implements ChatBackend {
   }
 
   unsendMessage(to: PubkeyHex, messageId: string): void {
-    const evt = wrapDeletion(this.sk, to, messageId);
-    this.publishReliable(evt);
-    this.seenMsg.add(evt.id);
+    const wrapped = wrapDeletion(this.sk, to, messageId);
+    // 自封副本是**必要**的（ADR-0107）：否則在手機收回的訊息，仍留在自己的電腦上。
+    for (const evt of wrapped.events) this.publishReliable(evt);
+    this.publishReliable(wrapped.selfCopy);
+    this.seenMsg.add(wrapped.id);
     this.storage.markDeleted(messageId);
     this.handlers?.onUnsend?.(messageId);
   }
@@ -1568,15 +1673,15 @@ export class RelayChatBackend implements ChatBackend {
     // `thumb` 只存在本機（ADR-0102）——**不進 metadata 訊息、不上中繼**；對方自己從位元組產生。
     const tid = this.transfer.sendFile(to, file);
     const meta = { tid, name: file.name, size: file.bytes.length, mime: file.mime };
-    const evt = wrapFileMessage(this.sk, to, meta, this.homeUrl ? { relayHint: this.homeUrl } : {});
-    this.seenMsg.add(evt.id);
-    // 訊息 id＝metadata 事件 id（供送達/已讀回條對得上，G3）；file.id＝tid（供進度/位元組關聯）。
-    this.ensureFileMessage(to, meta, { msgId: evt.id, outgoing: true, sent: 0, status: "sending" });
-    if (opts.thumb) this.setFileThumb(to, evt.id, opts.thumb);
+    const wrapped = wrapFileMessage(this.sk, to, meta, this.homeUrl ? { relayHint: this.homeUrl } : {});
+    const id = wrapped.id;
+    this.seenMsg.add(id);
+    // 訊息 id＝metadata 的 rumor id（ADR-0107，供回條與自己的其他裝置對得上）；file.id＝tid。
+    this.ensureFileMessage(to, meta, { msgId: id, outgoing: true, sent: 0, status: "sending" });
+    if (opts.thumb) this.setFileThumb(to, id, opts.thumb);
     // 送出端原檔路徑（ADR-0103）：原生選檔才有；讓自己送出的圖片重載後也讀得回原圖。
-    if (opts.savedPath) this.storage.setFileSavedPath(to, evt.id, opts.savedPath);
-    this.awaitingSent.set(evt.id, to);
-    this.publishReliable(evt);
+    if (opts.savedPath) this.storage.setFileSavedPath(to, id, opts.savedPath);
+    this.publishWrapped(to, id, wrapped);
     return tid;
   }
 
@@ -1680,9 +1785,7 @@ export class RelayChatBackend implements ChatBackend {
       admin: group.admin,
       members,
     };
-    const recipients = members.filter((m) => m !== this.self.pubkey);
-    const hint = this.homeUrl ? { relayHint: this.homeUrl } : {};
-    for (const evt of wrapGroupControl(control, this.sk, recipients, hint)) this.publishReliable(evt);
+    this.publishControl(control, members.filter((m) => m !== this.self.pubkey));
     this.emitGroups();
   }
 
@@ -1693,25 +1796,56 @@ export class RelayChatBackend implements ChatBackend {
     // 只保留確實在群內的提及對象（避免對非成員扇出 p-tag）。
     const validMentions = mentions?.filter((pk) => group.members.includes(pk)) ?? [];
     // id＝內層 rumor id：**跨成員一致**（外層 wrap id 每人不同），送達/已讀回條才對得回來（ADR-0095）。
-    const { id, events } = wrapGroupMessage(text, this.sk, this.self.pubkey, group, {
+    const wrapped = wrapGroupMessage(text, this.sk, this.self.pubkey, group, {
       ...(this.homeUrl ? { relayHint: this.homeUrl } : {}),
       ...(validMentions.length > 0 ? { mentions: validMentions } : {}),
       ...(replyTo ? { replyTo } : {}),
     });
-    this.seenMsg.add(id);
+    this.seenMsg.add(wrapped.id);
+    const id = wrapped.id;
     const extra = { sender: this.self.pubkey, ...(replyTo ? { replyTo } : {}) };
     const status = "sending" as const;
     const message = { id, contact: groupId, outgoing: true, text, at: Date.now(), status, ...extra };
     this.storage.appendMessage(message);
     this.handlers?.onMessage(groupId, { id, outgoing: true, text, at: message.at, status, ...extra });
-    // 扇出腿的送出狀態（ADR-0095）：任一 wrap 被中繼接受＝sent；全部放棄＝failed。
-    this.trackFanout(groupId, id, events);
-    for (const evt of events) this.publishReliable(evt);
+    // 扇出腿計狀態（ADR-0095）；另含一份自封副本讓自己的其他裝置也看得到（ADR-0107）。
+    this.publishWrapped(groupId, id, wrapped);
   }
 
   /**
-   * 追蹤群訊扇出的送出狀態（ADR-0095）：把每個 wrap 的 event id 對回同一則群訊。
+   * 群控扇出（ADR-0107）：收件人一律**外加自己**。
+   *
+   * 沒有這一步，自己的其他裝置**不知道群組存在**——`receiveGroup` 會以「未知群組」丟棄
+   * 群訊的自封副本，讓群訊自封形同無效（群控只發給成員，從不含自己）。
+   *
+   * 另一台裝置由 `applyControl` 以 `from = 自己` 處理，語意自然正確：建群時 admin 就是自己；
+   * 離群 → 那台也離群；增/刪成員 → 那台同步收斂。皆為冪等。
+   */
+  private publishControl(control: GroupControl, recipients: PubkeyHex[]): void {
+    const hint = this.homeUrl ? { relayHint: this.homeUrl } : {};
+    for (const evt of wrapGroupControl(control, this.sk, [...recipients, this.self.pubkey], hint)) {
+      this.publishReliable(evt);
+    }
+  }
+
+  /**
+   * 送出一則訊息的全部 Gift Wrap（ADR-0107）。
+   *
+   * 送出狀態**只追蹤定址給對方的 wrap**（`events`）：`sent` 的語意是「已進中繼、在往對方的路上」。
+   * 若把自封副本也算進去，會出現「只有自封副本成功、給對方的那份失敗」卻標成 `sent` 的謊報。
+   * 自封副本因此是 best-effort——它的 event id 不在 `fanout` 裡，放棄時 `markFailed` 找不到、
+   * 自然不影響狀態。
+   */
+  private publishWrapped(convo: string, messageId: string, wrapped: WrappedMessage): void {
+    this.trackFanout(convo, messageId, wrapped.events);
+    for (const evt of wrapped.events) this.publishReliable(evt);
+    this.publishReliable(wrapped.selfCopy);
+  }
+
+  /**
+   * 追蹤扇出的送出狀態（ADR-0095）：把每個 wrap 的 event id 對回同一則訊息。
    * 任一 OK → `sent`（樂觀：至少進了中繼）；全部放棄 → `failed`。
+   * 1:1 亦走此路（events 長度為 1），與群訊語意相同。
    */
   private trackFanout(convo: string, messageId: string, events: NostrEvent[]): void {
     if (events.length === 0) {
@@ -1725,11 +1859,8 @@ export class RelayChatBackend implements ChatBackend {
   leaveGroup(groupId: string): void {
     const group = this.groups.find((g) => g.id === groupId);
     if (!group) return;
-    const recipients = group.members.filter((m) => m !== this.self.pubkey);
-    const leaveHint = this.homeUrl ? { relayHint: this.homeUrl } : {};
-    for (const evt of wrapGroupControl({ type: "group-leave", id: groupId }, this.sk, recipients, leaveHint)) {
-      this.publishReliable(evt);
-    }
+    // 含自己（ADR-0107）：在一台裝置離群 → 自己的其他裝置也離群。
+    this.publishControl({ type: "group-leave", id: groupId }, group.members.filter((m) => m !== this.self.pubkey));
     this.storage.removeGroup(groupId);
     this.groups = this.storage.loadGroups();
     this.emitGroups();
@@ -1746,11 +1877,12 @@ export class RelayChatBackend implements ChatBackend {
     this.groups = this.storage.loadGroups();
     this.ensureContact(pubkey);
     const hint = this.homeUrl ? { relayHint: this.homeUrl } : {};
-    const existing = group.members.filter((m) => m !== this.self.pubkey);
-    for (const evt of wrapGroupControl({ type: "group-add", id: groupId, member: pubkey }, this.sk, existing, hint)) {
-      this.publishReliable(evt);
-    }
-    // 新成員尚無此群，送 group-create 讓其實例化（帶完整成員清單）。
+    // 既有成員 ＋ 自己的其他裝置（ADR-0107）收 group-add。
+    this.publishControl(
+      { type: "group-add", id: groupId, member: pubkey },
+      group.members.filter((m) => m !== this.self.pubkey),
+    );
+    // 新成員尚無此群，送 group-create 讓其實例化（帶完整成員清單）。不含自己：我已有此群。
     const create: GroupControl = { type: "group-create", id: groupId, name: group.name, admin: this.self.pubkey, members };
     for (const evt of wrapGroupControl(create, this.sk, [pubkey], hint)) this.publishReliable(evt);
     this.emitGroups();
@@ -1766,11 +1898,11 @@ export class RelayChatBackend implements ChatBackend {
     const members = group.members.filter((m) => m !== pubkey);
     this.storage.saveGroup({ ...group, members });
     this.groups = this.storage.loadGroups();
-    const hint = this.homeUrl ? { relayHint: this.homeUrl } : {};
-    const recipients = group.members.filter((m) => m !== this.self.pubkey); // 含被移除者，令其客戶端退群
-    for (const evt of wrapGroupControl({ type: "group-remove", id: groupId, member: pubkey }, this.sk, recipients, hint)) {
-      this.publishReliable(evt);
-    }
+    // 收件人含被移除者（令其客戶端退群）與自己的其他裝置（ADR-0107）。
+    this.publishControl(
+      { type: "group-remove", id: groupId, member: pubkey },
+      group.members.filter((m) => m !== this.self.pubkey),
+    );
     this.emitGroups();
   }
 

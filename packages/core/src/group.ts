@@ -8,6 +8,7 @@
 import { bytesToHex, randomBytes } from "@noble/hashes/utils";
 import { KIND } from "./constants.js";
 import { getEventHash, type NostrEvent } from "./event.js";
+import type { WrappedMessage } from "./giftwrap.js";
 import { getPublicKey, type PubkeyHex, type SecretKey } from "./keys.js";
 import { mentionTags } from "./mention.js";
 import type { Rumor, RumorInput } from "./nip59.js";
@@ -117,6 +118,10 @@ function wrapFor(
  * 完全相同，其雜湊也相同，故是**跨成員一致**的群訊識別（外層 wrap id 每人不同，不可用）。
  * 收件端由 `openWrap` 取得同一個 rumor.id（並已核對雜湊），雙方才對得起來——送達/已讀回條
  * 與回應/引用都以此為鍵（ADR-0095）。
+ *
+ * `selfCopy` 是**定址給自己**的那一份（ADR-0107）：群訊原本只扇出給**其他**成員，
+ * 於是自己在另一台裝置上看不到自己發的群訊。自封副本補上這個洞；它不計入送出狀態
+ * （`events` 才是「送得出去」的判準）。
  */
 export function wrapGroupMessage(
   text: string,
@@ -124,7 +129,7 @@ export function wrapGroupMessage(
   senderPk: PubkeyHex,
   group: Group,
   opts: { now?: number; relayHint?: string; mentions?: PubkeyHex[]; replyTo?: string } = {},
-): { id: string; events: NostrEvent[] } {
+): WrappedMessage {
   const nowSec = opts.now ?? Math.floor(Date.now() / 1000);
   // rumor 只建一次（與收件人無關），確保每位成員收到的 rumor.id 相同。
   const input: RumorInput = {
@@ -139,16 +144,15 @@ export function wrapGroupMessage(
     content: text,
   };
   const id = getEventHash({ ...input, pubkey: getPublicKey(senderSk) });
-  const events = others(group.members, senderPk).map((pk) =>
+  const wrapFor = (pk: PubkeyHex): NostrEvent =>
     sealAndWrap(input, senderSk, pk, {
       kind: KIND.OFFLINE_DM_GIFT_WRAP,
       tags: [
         ["p", pk],
         ["expiration", String(nowSec + DEFAULT_TTL_SECONDS)],
       ],
-    }),
-  );
-  return { id, events };
+    });
+  return { id, events: others(group.members, senderPk).map(wrapFor), selfCopy: wrapFor(senderPk) };
 }
 
 /** 將群組控制訊息扇出給指定收件人（各一個 Gift Wrap）。 */

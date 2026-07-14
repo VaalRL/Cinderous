@@ -214,7 +214,7 @@ export class BrowserChatBackend implements ChatBackend {
     // 先顯示「正在輸入中」，再回覆
     botClient.publish(createTyping(peer.sk, this.self.pubkey));
     setTimeout(() => {
-      botClient.publish(wrapMessage(def.reply(text), peer.sk, this.self.pubkey));
+      for (const evt of wrapMessage(def.reply(text), peer.sk, this.self.pubkey).events) botClient.publish(evt);
     }, 900);
   }
 
@@ -255,10 +255,11 @@ export class BrowserChatBackend implements ChatBackend {
 
   sendMessage(to: PubkeyHex, text: string, ttlSeconds?: number): void {
     const disappearAt = ttlSeconds ? nowSec() + ttlSeconds : undefined;
-    const evt = wrapMessage(text, this.selfSk, to, disappearAt !== undefined ? { disappearAt } : {});
-    this.client.publish(evt);
+    const wrapped = wrapMessage(text, this.selfSk, to, disappearAt !== undefined ? { disappearAt } : {});
+    // 示範後端為單機（echo bot、無回條、無多裝置）→ 不送自封副本（ADR-0107），只送給對方那份。
+    for (const evt of wrapped.events) this.client.publish(evt);
     const extra = disappearAt !== undefined ? { expiresAt: disappearAt * 1000 } : {};
-    this.handlers?.onMessage(to, { id: evt.id, outgoing: true, text, at: Date.now(), ...extra });
+    this.handlers?.onMessage(to, { id: wrapped.id, outgoing: true, text, at: Date.now(), ...extra });
   }
 
   sendReaction(_to: PubkeyHex, messageId: string, emoji: string): void {

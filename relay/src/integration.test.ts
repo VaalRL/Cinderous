@@ -53,7 +53,8 @@ describe("端到端：離線 Gift Wrap 留言", () => {
 
     // Bob 不在線；Alice 送出 Gift Wrap → 由 relay 持久化
     const alice = net.connect("alice");
-    alice.publish(wrapMessage("離線留言測試 🕊️", aliceSk, bobPk, { now }));
+    // 只發「給 Bob」那一份；自封副本（ADR-0107）定址給 Alice 自己，不會出現在 Bob 的收件箱。
+    alice.publish(wrapMessage("離線留言測試 🕊️", aliceSk, bobPk, { now }).events[0]!);
 
     // Bob 稍後上線，訂閱自己的 Gift Wrap
     const got: NostrEvent[] = [];

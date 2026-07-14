@@ -1,4 +1,4 @@
-import { applyRosterRotations, generateSecretKey, getPublicKey, type NostrEvent, npubEncode, nsecEncode, signOrgRoster, wrapGroupControl, wrapGroupMessage } from "@cinder/core";
+import { applyRosterRotations, generateSecretKey, getPublicKey, type NostrEvent, npubEncode, nsecEncode, signOrgRoster, wrapGroupControl, wrapGroupMessage, wrapMessage, wrapReceipt } from "@cinder/core";
 import { createInMemoryRelayNetwork } from "@cinder/relay";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryStorage } from "../storage/memory.js";
@@ -1046,5 +1046,213 @@ describe("檔案投遞與另存（ADR-0093）", () => {
     expect(storeB.loadMessages(a.self.pubkey).find((m) => m.file)?.file?.savedPath).toBe("/home/bob/photo.jpg");
     a.stop();
     b.stop();
+  });
+});
+
+describe("自封副本：多裝置對話完整性（ADR-0107）", () => {
+  /** 同一把 nsec、兩個 storage ＝ 同一個人的兩台裝置（例如手機與電腦）。 */
+  function twoDevices(net: ReturnType<typeof createInMemoryRelayNetwork>, sk: Uint8Array) {
+    const mk = (id: string) => {
+      const store = new MemoryStorage();
+      store.saveIdentity({ nsec: nsecEncode(sk), name: "Alice" });
+      return { store, be: new RelayChatBackend(store, (h) => net.connect(id, h), "Alice") };
+    };
+    return { d1: mk("alice-phone"), d2: mk("alice-desktop") };
+  }
+
+  it("我在手機發的訊息，電腦也看得到（這正是 ADR-0107 要修的破損）", () => {
+    const net = createInMemoryRelayNetwork();
+    const aliceSk = generateSecretKey();
+    const { d1, d2 } = twoDevices(net, aliceSk);
+    const bob = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("bob", h), "Bob");
+    d1.be.start(noop);
+    d2.be.start(noop);
+    bob.start(noop);
+
+    d1.be.addContact(bob.selfNpub);
+    d1.be.sendMessage(bob.self.pubkey, "我在手機上打的");
+
+    // 修復前：電腦端這裡是空的（訊息定址給 Bob，永遠不會進 Alice 的收件箱）。
+    const onDesktop = d2.store.loadMessages(bob.self.pubkey);
+    expect(onDesktop.map((m) => m.text)).toEqual(["我在手機上打的"]);
+    expect(onDesktop[0]!.outgoing).toBe(true); // 是「我發的」，不是「收到的」
+    // 兩台裝置指涉同一則訊息（同一個 rumor.id）→ 回條/回應/收回才對得起來。
+    expect(onDesktop[0]!.id).toBe(d1.store.loadMessages(bob.self.pubkey)[0]!.id);
+
+    d1.be.stop();
+    d2.be.stop();
+    bob.stop();
+  });
+
+  it("對話在兩台裝置上都完整（來訊 + 自己發的都在）", () => {
+    const net = createInMemoryRelayNetwork();
+    const { d1, d2 } = twoDevices(net, generateSecretKey());
+    const bob = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("bob", h), "Bob");
+    d1.be.start(noop);
+    d2.be.start(noop);
+    bob.start(noop);
+
+    d1.be.addContact(bob.selfNpub);
+    d1.be.sendMessage(bob.self.pubkey, "在嗎");
+    bob.sendMessage(d1.be.self.pubkey, "在");
+    d2.be.sendMessage(bob.self.pubkey, "那我從電腦回你"); // 換一台裝置繼續講
+
+    const expected = ["在嗎", "在", "那我從電腦回你"];
+    expect(d1.store.loadMessages(bob.self.pubkey).map((m) => m.text)).toEqual(expected);
+    expect(d2.store.loadMessages(bob.self.pubkey).map((m) => m.text)).toEqual(expected);
+
+    d1.be.stop();
+    d2.be.stop();
+    bob.stop();
+  });
+
+  it("發送裝置收到自己的自封副本會丟棄（不重複顯示）", () => {
+    const net = createInMemoryRelayNetwork();
+    const { d1 } = twoDevices(net, generateSecretKey());
+    const bob = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("bob", h), "Bob");
+    const seen: ChatMessage[] = [];
+    d1.be.start({ ...noop, onMessage: (_pk, m) => seen.push(m) });
+    bob.start(noop);
+
+    d1.be.addContact(bob.selfNpub);
+    d1.be.sendMessage(bob.self.pubkey, "只該出現一次");
+
+    // 自封副本也定址給自己 → 會回流到發送裝置；以 rumor.id 去重丟棄。
+    expect(seen.filter((m) => m.text === "只該出現一次")).toHaveLength(1);
+    expect(d1.store.loadMessages(bob.self.pubkey)).toHaveLength(1);
+
+    d1.be.stop();
+    bob.stop();
+  });
+
+  it("收到自封副本不會把「自己」加成聯絡人，而是學到收件人", () => {
+    const net = createInMemoryRelayNetwork();
+    const { d1, d2 } = twoDevices(net, generateSecretKey());
+    const bob = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("bob", h), "Bob");
+    d1.be.start(noop);
+    d2.be.start(noop);
+    bob.start(noop);
+
+    d1.be.addContact(bob.selfNpub); // 只有手機加了 Bob
+    d1.be.sendMessage(bob.self.pubkey, "嗨");
+
+    const onDesktop = d2.store.loadContacts().map((c) => c.pubkey);
+    expect(onDesktop).not.toContain(d2.be.self.pubkey); // 絕不可把自己列為聯絡人
+    expect(onDesktop).toContain(bob.self.pubkey); // 電腦順帶學到這個聯絡人
+
+    d1.be.stop();
+    d2.be.stop();
+    bob.stop();
+  });
+
+  it("狀態自動收斂：Bob 回送達 → 兩台裝置都標 delivered（回條本來就定址給我）", () => {
+    const net = createInMemoryRelayNetwork();
+    const { d1, d2 } = twoDevices(net, generateSecretKey());
+    const bob = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("bob", h), "Bob");
+    d1.be.start(noop);
+    d2.be.start(noop);
+    bob.start(noop);
+
+    d1.be.addContact(bob.selfNpub);
+    d1.be.sendMessage(bob.self.pubkey, "收到請回");
+
+    // 這是 rumor.id 統一的紅利：不必為「狀態」另建同步機制。
+    expect(d1.store.loadMessages(bob.self.pubkey)[0]!.status).toBe("delivered");
+    expect(d2.store.loadMessages(bob.self.pubkey)[0]!.status).toBe("delivered");
+
+    d1.be.stop();
+    d2.be.stop();
+    bob.stop();
+  });
+
+  it("在手機收回，電腦上也會消失（隱私不變式，非便利功能）", () => {
+    const net = createInMemoryRelayNetwork();
+    const { d1, d2 } = twoDevices(net, generateSecretKey());
+    const bob = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("bob", h), "Bob");
+    d1.be.start(noop);
+    d2.be.start(noop);
+    bob.start(noop);
+
+    d1.be.addContact(bob.selfNpub);
+    d1.be.sendMessage(bob.self.pubkey, "說錯話了");
+    const id = d1.store.loadMessages(bob.self.pubkey)[0]!.id;
+    d1.be.unsendMessage(bob.self.pubkey, id);
+
+    expect(d1.store.loadDeleted()).toContain(id);
+    expect(d2.store.loadDeleted()).toContain(id); // 不可留在自己的另一台裝置上
+    d1.be.stop();
+    d2.be.stop();
+    bob.stop();
+  });
+
+  it("在手機按的回應，電腦上顯示為「我按的」（mine）", () => {
+    const net = createInMemoryRelayNetwork();
+    const { d1, d2 } = twoDevices(net, generateSecretKey());
+    const bob = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("bob", h), "Bob");
+    d1.be.start(noop);
+    d2.be.start(noop);
+    bob.start(noop);
+
+    bob.addContact(d1.be.selfNpub);
+    bob.sendMessage(d1.be.self.pubkey, "看這個");
+    const id = d1.store.loadMessages(bob.self.pubkey)[0]!.id;
+    d1.be.sendReaction(bob.self.pubkey, id, "🎉");
+
+    const onDesktop = d2.store.loadReactions().filter((r) => r.messageId === id);
+    expect(onDesktop.map((r) => r.emoji)).toEqual(["🎉"]);
+    expect(onDesktop[0]!.mine).toBe(true); // 是我按的，不是 Bob 按的
+
+    d1.be.stop();
+    d2.be.stop();
+    bob.stop();
+  });
+
+  it("群訊也有自封副本：在手機發的群訊，電腦看得到（標 outgoing）", () => {
+    const net = createInMemoryRelayNetwork();
+    const { d1, d2 } = twoDevices(net, generateSecretKey());
+    const bob = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("bob", h), "Bob");
+    d1.be.start(noop);
+    d2.be.start(noop);
+    bob.start(noop);
+
+    d1.be.addContact(bob.selfNpub);
+    d1.be.createGroup("專案群", [bob.self.pubkey]);
+    const gid = d1.store.loadGroups()[0]!.id;
+
+    // 群控也自封（ADR-0107）：否則電腦端根本不知道這個群存在，群訊自封副本會被
+    // receiveGroup 以「未知群組」丟棄——群訊自封形同無效。
+    expect(d2.store.loadGroups().map((g) => g.id)).toEqual([gid]);
+    expect(d2.store.loadGroups()[0]!.admin).toBe(d1.be.self.pubkey); // 管理者仍是我
+
+    d1.be.sendGroupMessage(gid, "大家好");
+
+    // 群訊原本只扇出給**其他**成員 → 自己的另一台裝置本來看不到自己發的群訊。
+    const onDesktop = d2.store.loadMessages(gid);
+    expect(onDesktop.map((m) => m.text)).toEqual(["大家好"]);
+    expect(onDesktop[0]!.outgoing).toBe(true);
+
+    d1.be.stop();
+    d2.be.stop();
+    bob.stop();
+  });
+
+  it("早到的回條：中繼回放順序是亂的（NIP-59 時戳抖動）——回條先到仍不會漏標", () => {
+    const net = createInMemoryRelayNetwork();
+    const aliceSk = generateSecretKey();
+    const bobSk = generateSecretKey();
+    const bobPk = getPublicKey(bobSk);
+    const { d2 } = twoDevices(net, aliceSk); // 只開電腦；手機的送出以原始事件模擬
+    d2.be.start(noop);
+
+    const w = wrapMessage("在手機發的", aliceSk, bobPk);
+    const receipt = wrapReceipt("delivered", bobSk, getPublicKey(aliceSk), w.id);
+    const pub = net.connect("raw", {});
+
+    pub.publish(receipt); // ← 回條**先**到（目標訊息還不在本機）
+    pub.publish(w.selfCopy); // ← 自封副本後到
+
+    // 若不緩衝早到的回條，這則會永遠卡在 sent。
+    expect(d2.store.loadMessages(bobPk)[0]!.status).toBe("delivered");
+    d2.be.stop();
   });
 });
