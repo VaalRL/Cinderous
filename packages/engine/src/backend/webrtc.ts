@@ -28,8 +28,11 @@ export interface TransferHandlers {
   onIncoming: (peer: PubkeyHex, file: ReceivedFile) => void;
   /** 經 P2P 通道收到「正在輸入中」（F5 卸載）。 */
   onTyping?: (peer: PubkeyHex) => void;
-  /** 經 P2P 通道收到對方在線狀態（ADR-0088 (e)：心跳卸載中繼）。 */
-  onPresence?: (peer: PubkeyHex, p: { s: string; m: string; np: string }) => void;
+  /**
+   * 經 P2P 通道收到對方在線狀態（ADR-0088 (e)：心跳卸載中繼）。
+   * `hb`＝對方自報的信標節奏（毫秒，ADR-0109）；缺少則收端退回預設容忍窗（相容舊版）。
+   */
+  onPresence?: (peer: PubkeyHex, p: { s: string; m: string; np: string; hb?: number }) => void;
   /** 錯誤（傳輸失敗、對方不可達等）。 */
   onError: (peer: PubkeyHex, reason: string) => void;
 }
@@ -89,11 +92,16 @@ export class WebRtcTransfer {
     return false;
   }
 
-  /** 若 P2P 通道已開，經其送出在線狀態並回傳 true（ADR-0088：心跳卸載中繼）；否則 false。 */
-  sendPresence(peerPk: PubkeyHex, p: { s: string; m: string; np: string }): boolean {
+  /**
+   * 若 P2P 通道已開，經其送出在線狀態並回傳 true（ADR-0088：心跳卸載中繼）；否則 false。
+   *
+   * `hb`＝自報的信標節奏（ADR-0109）。**必須帶**：這條訊息是由 `beat()` 送出的，節奏與心跳
+   * 相同——閒置時每 5 分鐘才一則。收端若用固定的短窗判離線，會把在線的人誤判為離線。
+   */
+  sendPresence(peerPk: PubkeyHex, p: { s: string; m: string; np: string; hb?: number }): boolean {
     const peer = this.peers.get(peerPk);
     if (peer?.dc && peer.dc.readyState === "open") {
-      peer.dc.send(encodeDcPresence(p.s, p.m, p.np));
+      peer.dc.send(encodeDcPresence(p.s, p.m, p.np, p.hb));
       return true;
     }
     return false;

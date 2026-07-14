@@ -468,10 +468,18 @@ export class RelayChatBackend implements ChatBackend {
         if (!this.isBlocked(peer)) this.handlers?.onTyping(peer);
       },
       onPresence: (peer, p) => {
-        // ADR-0088 (e)：P2P 收到的在線狀態與 relay 心跳同源處理（同一 60s 判離線狀態機，避免雙來源閃爍）。
+        // ADR-0088 (e)：P2P 收到的在線狀態與 relay 心跳**同源處理**（同一套判離線狀態機，
+        // 避免雙來源閃爍）。同源就必須**同樣完整**——ADR-0109 的兩件事這裡都要有：
+        //   1. 自報節奏（`p.hb`）→ 容忍窗依對方節奏算，否則閒置者（5 分鐘一則）被誤判離線；
+        //   2. IDLE→ACTIVE 的喚醒補發 → 否則「唯一在線的聯絡人只走 P2P」時我永遠不會加速。
         if (this.isBlocked(peer)) return;
-        this.presence.observe(peer, nowSec());
+        const wasIdle = !this.anyContactOnline();
+        this.presence.observe(peer, nowSec(), p.hb);
         this.statuses.set(peer, { s: p.s as PresenceState, m: p.m, np: p.np });
+        if (wasIdle && this.anyContactOnline()) {
+          this.beat();
+          this.scheduleBeat();
+        }
       },
       onError: (peer, reason) => this.handlers?.onFileError?.(peer, reason),
       },
@@ -835,9 +843,14 @@ export class RelayChatBackend implements ChatBackend {
       np: this.nowPlaying,
     };
     // (e) P2P 卸載：對已開資料通道的聯絡人，在線狀態直送資料通道、不經 relay（複用 F5 模式）。
+    // `hb` 自報節奏（ADR-0109）：這條訊息的節奏＝心跳節奏（本函式就是被 beat 排程呼叫的），
+    // 閒置時每 5 分鐘才一則。不帶節奏的話，收端會用固定短窗把在線的我判成離線——而 `allP2P`
+    // 時**完全不發 relay 心跳**，P2P 是唯一信號，漏掉就真的看不見了。
+    const cadenceMs = this.beatInterval();
     let allP2P = this.contacts.length > 0;
     for (const c of this.contacts) {
-      if (!this.transfer.sendPresence(c.pubkey, { s: payload.s, m: payload.m, np: payload.np })) allP2P = false;
+      const sent = this.transfer.sendPresence(c.pubkey, { s: payload.s, m: payload.m, np: payload.np, hb: cadenceMs });
+      if (!sent) allP2P = false;
     }
     // 心跳抑制（ADR-0088 (e)）：僅當所有聯絡人都有活的 P2P 通道時，才不再經 relay 明簽廣播在線。
     if (allP2P) return;

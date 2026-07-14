@@ -7,7 +7,12 @@ import { utf8ToBytes } from "@noble/hashes/utils";
 export type DataMessage =
   | { t: "nudge" }
   | { t: "typing" }
-  | { t: "presence"; s: string; m: string; np: string }
+  /**
+   * `hb`：發送端自報的在線信標節奏（毫秒，ADR-0109）。**必要**——P2P 在線狀態是由 `beat()`
+   * 送出的，節奏與心跳相同；閒置時每 5 分鐘才一則。收端若用固定的短窗判離線，會把
+   * 「在線但閒置」的人誤判為離線。相容舊版：缺此欄位則退回預設容忍窗。
+   */
+  | { t: "presence"; s: string; m: string; np: string; hb?: number }
   | { t: "file-begin"; id: string; name: string; mime: string; size: number; chunks: number };
 
 /** 資料通道可能收到的原始資料（控制為字串、檔案分塊為二進位）。 */
@@ -76,9 +81,18 @@ export function encodeTyping(): string {
   return JSON.stringify({ t: "typing" } satisfies DataMessage);
 }
 
-/** 編碼一則在線狀態訊息（ADR-0088：P2P 通道可用時把心跳卸載中繼，不再明簽廣播上線）。 */
-export function encodeDcPresence(s: string, m: string, np: string): string {
-  return JSON.stringify({ t: "presence", s, m, np } satisfies DataMessage);
+/**
+ * 編碼一則在線狀態訊息（ADR-0088：P2P 通道可用時把心跳卸載中繼，不再明簽廣播上線）。
+ * `cadenceMs`＝自報的信標節奏（ADR-0109）；省略則收端退回預設容忍窗（相容舊版）。
+ */
+export function encodeDcPresence(s: string, m: string, np: string, cadenceMs?: number): string {
+  return JSON.stringify({
+    t: "presence",
+    s,
+    m,
+    np,
+    ...(cadenceMs !== undefined ? { hb: cadenceMs } : {}),
+  } satisfies DataMessage);
 }
 
 /**
@@ -112,7 +126,7 @@ export interface DataChannelHandlers {
   onNudge?: () => void;
   onTyping?: () => void;
   /** 經 P2P 通道收到對方在線狀態（ADR-0088 (e)：心跳卸載中繼）。 */
-  onPresence?: (p: { s: string; m: string; np: string }) => void;
+  onPresence?: (p: { s: string; m: string; np: string; hb?: number }) => void;
   onFile?: (file: ReceivedFile) => void;
   onError?: (reason: string) => void;
 }
@@ -181,7 +195,7 @@ export class DataChannelReceiver {
         this.handlers.onTyping?.();
         return;
       case "presence":
-        this.handlers.onPresence?.({ s: msg.s, m: msg.m, np: msg.np });
+        this.handlers.onPresence?.({ s: msg.s, m: msg.m, np: msg.np, ...(msg.hb !== undefined ? { hb: msg.hb } : {}) });
         return;
       case "file-begin":
         if (msg.size < 0 || msg.chunks < 0 || msg.size > this.maxFileSize || msg.chunks > this.maxChunks) {

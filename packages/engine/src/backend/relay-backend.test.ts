@@ -1467,6 +1467,26 @@ describe("中繼流量削減（ADR-0109）", () => {
     b.stop();
   });
 
+  it("**P2P 卸載路徑同樣自報節奏**：allP2P 時完全不發 relay 心跳，P2P 是唯一信號——漏掉節奏就會被誤判離線", () => {
+    const net = createInMemoryRelayNetwork();
+    const a = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("a", h), "Alice");
+    a.start(noop);
+    a.addContact(npubEncode(getPublicKey(generateSecretKey())));
+
+    // 攔截 P2P 傳輸層：模擬「通道已開」，記錄送出的在線狀態 payload。
+    const sent: { hb?: number }[] = [];
+    const transfer = (a as unknown as { transfer: { sendPresence: unknown } }).transfer;
+    transfer.sendPresence = (_pk: string, p: { hb?: number }) => {
+      sent.push(p);
+      return true; // 通道已開 → allP2P → beat() 不會再發 relay 心跳
+    };
+    (a as unknown as { beat: () => void }).beat();
+
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.hb).toBe(300_000); // 沒有聯絡人在線 → IDLE 節奏，必須如實自報
+    a.stop();
+  });
+
   it("訂閱合併為單一 REQ（原本 9 個）——每次重連省 8 個中繼 request", () => {
     const reqs: unknown[][] = [];
     const net = createInMemoryRelayNetwork();

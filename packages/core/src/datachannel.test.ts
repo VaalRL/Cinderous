@@ -129,3 +129,20 @@ describe("Data Channel — 資源上限（防 OOM/洩漏）", () => {
     expect(onError).toHaveBeenCalledWith(expect.stringContaining("上限"));
   });
 });
+
+describe("P2P 在線狀態自報節奏（ADR-0109）", () => {
+  it("帶上 hb（毫秒），收端原樣讀回", () => {
+    let got: { s: string; m: string; np: string; hb?: number } | undefined;
+    const rx = new DataChannelReceiver({ onPresence: (p) => (got = p) });
+    rx.receive(encodeDcPresence("online", "", "", 300_000));
+    expect(got).toEqual({ s: "online", m: "", np: "", hb: 300_000 });
+  });
+
+  it("未帶 hb（舊版對端）→ 讀回 undefined，收端退回預設容忍窗（不可直接判離線）", () => {
+    let got: { s: string; m: string; np: string; hb?: number } | undefined;
+    const rx = new DataChannelReceiver({ onPresence: (p) => (got = p) });
+    rx.receive(encodeDcPresence("online", "", ""));
+    expect(got?.hb).toBeUndefined();
+    expect(got?.s).toBe("online");
+  });
+});
