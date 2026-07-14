@@ -2,6 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { ChatsListScreen } from "./ChatsListScreen.js";
 import { ConversationScreen } from "./ConversationScreen.js";
+import { SettingsScreen } from "./SettingsScreen.js";
 
 const contacts = [
   { pubkey: "pk_bob", name: "Bob" },
@@ -75,5 +76,43 @@ describe("行動端敲一下與上線狀態（ADR-0114）", () => {
 
   it("未提供 onNudge（示範模式）→ 不顯示", () => {
     expect(renderToStaticMarkup(<ConversationScreen {...base} />)).not.toContain('data-testid="nudge"');
+  });
+});
+
+describe("行動端通知設定（ADR-0116）", () => {
+  const base = {
+    selfName: "我",
+    selfNpub: "npub1x",
+    selfNsec: "nsec1x",
+    relayUrl: "wss://r",
+    theme: "light" as const,
+    onTheme: () => {},
+    locale: "en" as const,
+    onLocale: () => {},
+    accent: null,
+    onAccent: () => {},
+    invisible: false,
+    onInvisible: () => {},
+    onLogout: () => {},
+  };
+
+  it("未提供 onNotify（示範模式）→ 不顯示通知設定", () => {
+    const html = renderToStaticMarkup(<SettingsScreen {...base} />);
+    expect(html).not.toContain('data-testid="notify-toggle"');
+  });
+
+  it("通知關閉時**不顯示「隱藏預覽」**（沒有通知就沒有預覽可隱藏）", () => {
+    const html = renderToStaticMarkup(
+      <SettingsScreen {...base} notify={false} onNotify={() => {}} onNotifyHidePreview={() => {}} />,
+    );
+    expect(html).toContain('data-testid="notify-toggle"');
+    expect(html).not.toContain('data-testid="notify-hide-toggle"');
+  });
+
+  it("通知開啟 → 出現「隱藏預覽」（通知會落到鎖定畫面，那是非加密表面）", () => {
+    const html = renderToStaticMarkup(
+      <SettingsScreen {...base} notify onNotify={() => {}} onNotifyHidePreview={() => {}} />,
+    );
+    expect(html).toContain('data-testid="notify-hide-toggle"');
   });
 });

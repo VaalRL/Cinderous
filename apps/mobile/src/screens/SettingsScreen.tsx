@@ -60,6 +60,10 @@ export function SettingsScreen({
   onInvisible,
   status,
   onStatus,
+  notify,
+  onNotify,
+  notifyHidePreview,
+  onNotifyHidePreview,
   retention,
   onRetention,
   onExport,
@@ -85,6 +89,12 @@ export function SettingsScreen({
   /** 上線狀態（ADR-0114）：online/away/busy。未提供則不顯示（示範模式）。 */
   status?: Status;
   onStatus?: (s: Status) => void;
+  /** 通知（ADR-0116）。未提供則不顯示（示範模式）。 */
+  notify?: boolean;
+  onNotify?: (v: boolean) => void;
+  /** 隱藏預覽：通知只說「有新訊息」，不把明文推到鎖定畫面。 */
+  notifyHidePreview?: boolean;
+  onNotifyHidePreview?: (v: boolean) => void;
   /** 每對話保留上限（ADR-0094）；0＝無上限。未提供則不顯示。 */
   retention?: number;
   onRetention?: (n: number) => void;
@@ -183,6 +193,51 @@ export function SettingsScreen({
                 </Pressable>
               ))}
             </View>
+          </View>
+        ) : null}
+
+        {/* 通知（ADR-0116）：預設關；開啟時才向瀏覽器要權限（必須在使用者手勢裡）。 */}
+        {onNotify ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>{t("settings_notifications")}</Text>
+            <Pressable
+              accessibilityRole="button"
+              testID="notify-toggle"
+              onPress={() => onNotify(!notify)}
+              style={[
+                styles.seg,
+                { alignSelf: "flex-start", borderColor: notify ? tk.accent : tk.border, backgroundColor: notify ? tk.accent : tk.field },
+              ]}
+            >
+              <Text style={[styles.segText, { color: notify ? "#ffffff" : tk.ink }]}>
+                {t("settings_notifications")}
+                {notify ? " ✓" : ""}
+              </Text>
+            </Pressable>
+            {/* 通知會出現在鎖定畫面／通知中心——那是裝置的「非加密表面」。 */}
+            {notify && onNotifyHidePreview ? (
+              <>
+                <Text style={styles.label}>{t("settings_notifyHidePreview")}</Text>
+                <Pressable
+                  accessibilityRole="button"
+                  testID="notify-hide-toggle"
+                  onPress={() => onNotifyHidePreview(!notifyHidePreview)}
+                  style={[
+                    styles.seg,
+                    {
+                      alignSelf: "flex-start",
+                      borderColor: notifyHidePreview ? tk.accent : tk.border,
+                      backgroundColor: notifyHidePreview ? tk.accent : tk.field,
+                    },
+                  ]}
+                >
+                  <Text style={[styles.segText, { color: notifyHidePreview ? "#ffffff" : tk.ink }]}>
+                    {t("settings_notifyHidePreview")}
+                    {notifyHidePreview ? " ✓" : ""}
+                  </Text>
+                </Pressable>
+              </>
+            ) : null}
           </View>
         ) : null}
 

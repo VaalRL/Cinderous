@@ -13,6 +13,8 @@ import {
   openOpfsArchive,
 } from "@cinder/engine";
 import { nsecDecode } from "@cinder/core";
+import { notificationFor } from "@cinder/engine";
+import { notifier, onNotifyClick } from "./native/notify.js";
 import type { BlockedContact } from "@cinder/engine";
 import type { CallMedia, CallState } from "@cinder/core";
 import { makeThumbnail, pickFile, saveFile } from "./native/files.js";
@@ -46,6 +48,9 @@ const shell = StyleSheet.create({ root: { flex: 1 } });
 
 // 加密雲端備份（ADR-0071）：裝置本地偏好；off／basic／full。
 const CLOUD_SYNC_KEY = "nb.cloudSync";
+/** 通知設定（ADR-0116）：開關與「隱藏預覽」。 */
+const NOTIFY_KEY = "nb.notify";
+const NOTIFY_HIDE_KEY = "nb.notifyHidePreview";
 function readCloudSync(): CloudSyncMode {
   try {
     const v = localStorage.getItem(CLOUD_SYNC_KEY);
@@ -120,6 +125,22 @@ export function MobileApp({
   const [unsent, setUnsent] = useState<Set<string>>(new Set());
   /** 封鎖名單：被封鎖者的訊息不再收，且移出聯絡人。 */
   const [blocked, setBlocked] = useState<BlockedContact[]>([]);
+  /** 通知（ADR-0116）：預設關（需使用者明確授權）。 */
+  const [notify, setNotifyState] = useState(() => {
+    try {
+      return localStorage.getItem(NOTIFY_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
+  /** 隱藏預覽（ADR-0076）：通知只說「有新訊息」，不把明文推到鎖定畫面。 */
+  const [notifyHide, setNotifyHideState] = useState(() => {
+    try {
+      return localStorage.getItem(NOTIFY_HIDE_KEY) === "1";
+    } catch {
+      return false;
+    }
+  });
   const [activeId, setActiveId] = useState<string | null>(null);
   const [selfPubkey, setSelfPubkey] = useState("");
   const [selfName, setSelfName] = useState("");
@@ -141,6 +162,18 @@ export function MobileApp({
   screenRef.current = screen;
   const activeIdRef = useRef(activeId);
   activeIdRef.current = activeId;
+  // 通知內容需最新的聯絡人/群組/語言與子設定；onMessage 的閉包依 [backend]，故以 ref 取現值
+  //（與桌面同一個坑，ADR-0076）。
+  const notifyRef = useRef(notify);
+  notifyRef.current = notify;
+  const notifyHideRef = useRef(notifyHide);
+  notifyHideRef.current = notifyHide;
+  const contactsRef = useRef(contacts);
+  contactsRef.current = contacts;
+  const groupsRef = useRef(groups);
+  groupsRef.current = groups;
+  const localeRef = useRef(locale);
+  localeRef.current = locale;
 
   useEffect(() => () => backendRef.current?.stop(), []);
 
@@ -187,6 +220,25 @@ export function MobileApp({
         // 未讀由後端從儲存推導（ADR-0108）；正在看這個對話 → 立刻推進已讀水位（不留紅點）。
         const viewing = screenRef.current === "conversation" && activeIdRef.current === pk;
         if (!m.outgoing && viewing) backend.clearUnread?.(pk);
+        // 通知（ADR-0116）：**只在他人訊息、且 App 在背景**時跳——正在看就別打擾。
+        if (!m.outgoing && !viewing && notifyRef.current && typeof document !== "undefined" && document.hidden) {
+          const group = groupsRef.current.find((g) => g.id === pk);
+          const nameOf = (k: string): string =>
+            groupsRef.current.find((g) => g.id === k)?.name ??
+            contactsRef.current.find((c) => c.pubkey === k)?.name ??
+            `${k.slice(0, 8)}…`;
+          void notifier.notify(
+            notificationFor({
+              convo: pk,
+              convoName: nameOf(pk),
+              text: m.file ? `📎 ${m.file.name}` : m.text,
+              // 群訊前綴發送者名（否則群裡誰說的都分不出來）。
+              ...(group && m.sender ? { senderName: nameOf(m.sender) } : {}),
+              hidePreview: notifyHideRef.current,
+              newMessageLabel: translate(localeRef.current, "notify_newMessage"),
+            }),
+          );
+        }
       },
       // 未讀（ADR-0108）：重新載入後徽章仍在（過去是記憶體計數器，重載歸零）。
       onUnread: setUnread,
@@ -304,6 +356,9 @@ export function MobileApp({
     setActiveId(null);
     setInvisible(false);
   };
+  // 通知點擊（ADR-0116）：開啟該對話。掛載一次即可。
+  useEffect(() => onNotifyClick((convo) => convo && openConvo(convo)), []); // eslint-disable-line react-hooks/exhaustive-deps
+
   /** 目前開啟的對話是不是群組。 */
   const isGroup = (id: string): boolean => groups.some((g) => g.id === id);
 
@@ -347,6 +402,28 @@ export function MobileApp({
     setSelfStatus(v);
     backendRef.current?.setStatus(v);
   };
+  /**
+   * 通知開關（ADR-0116）。**權限必須在使用者手勢裡請求**——瀏覽器會拒絕非手勢的
+   * `Notification.requestPermission()`。使用者拒絕授權 → 開關不打開（不假裝成功）。
+   */
+  const setNotify = async (v: boolean): Promise<void> => {
+    if (v && !(await notifier.ensurePermission())) return; // 拒絕授權 → 維持關閉
+    setNotifyState(v);
+    try {
+      localStorage.setItem(NOTIFY_KEY, v ? "1" : "0");
+    } catch {
+      /* 忽略 */
+    }
+  };
+  const setNotifyHide = (v: boolean): void => {
+    setNotifyHideState(v);
+    try {
+      localStorage.setItem(NOTIFY_HIDE_KEY, v ? "1" : "0");
+    } catch {
+      /* 忽略 */
+    }
+  };
+
   const toggleInvisible = (v: boolean): void => {
     setInvisible(v);
     backendRef.current?.setInvisible?.(v);
@@ -573,6 +650,10 @@ export function MobileApp({
             ? {
                 status: selfStatus,
                 onStatus: changeStatus,
+                notify,
+                onNotify: (v: boolean) => void setNotify(v),
+                notifyHidePreview: notifyHide,
+                onNotifyHidePreview: setNotifyHide,
                 retention: retentionCap,
                 onRetention: changeRetention,
                 onExport: exportAll,

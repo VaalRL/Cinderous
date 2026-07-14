@@ -130,3 +130,4 @@
 | [0113](./0113-local-launcher.md) | 本地啟動器 `cinder serve`：固定 port（origin ＝ 資料的身分）、撞埠不自動換、路徑穿越防護 | 已接受 |
 | [0114](./0114-mobile-parity-messaging.md) | 行動端對齊（一）：修好群訊（點進群組送訊會爆）＋補上收回／emoji 回應／封鎖 | 已接受 |
 | [0115](./0115-mobile-parity-groups.md) | 行動端對齊（二）：建立群組與成員管理、敲一下（可發）、上線狀態 | 已接受 |
+| [0116](./0116-mobile-notifications.md) | 行動端通知（＋隱藏預覽的隱私開關）；Web Notification 基質收斂為單一來源；不做推播 | 已接受 |
