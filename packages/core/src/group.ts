@@ -8,7 +8,7 @@
 import { bytesToHex, randomBytes } from "@noble/hashes/utils";
 import { KIND } from "./constants.js";
 import { getEventHash, type NostrEvent } from "./event.js";
-import type { WrappedMessage } from "./giftwrap.js";
+import type { FileMeta, WrappedMessage } from "./giftwrap.js";
 import { getPublicKey, type PubkeyHex, type SecretKey } from "./keys.js";
 import { mentionTags } from "./mention.js";
 import type { Rumor, RumorInput } from "./nip59.js";
@@ -123,6 +123,29 @@ function wrapFor(
  * 於是自己在另一台裝置上看不到自己發的群訊。自封副本補上這個洞；它不計入送出狀態
  * （`events` 才是「送得出去」的判準）。
  */
+/**
+ * 把一則群組 rumor 扇給每位成員（各一個 Gift Wrap）＋一份自封副本。
+ *
+ * **群組沒有共用金鑰**（ADR-0027：NIP-17 的固有代價）——所以「送給群組」在協定層根本不存在，
+ * 只有「分別送給每一位成員」。任何以 `convo` 為參數的送出路徑，都必須先問「這是群組嗎」。
+ * （這個 bug 已經以同一個形狀出現過三次：ADR-0114 送訊、0119 回應/收回、0124 傳檔。）
+ *
+ * rumor **只建一次**（與收件人無關）→ `rumor.id` 跨成員一致 → 回條（ADR-0095）與自封副本
+ * （ADR-0107）才對得回同一則訊息。
+ */
+function fanOutGroupRumor(input: RumorInput, senderSk: SecretKey, senderPk: PubkeyHex, group: Group): WrappedMessage {
+  const id = getEventHash({ ...input, pubkey: getPublicKey(senderSk) });
+  const wrapFor = (pk: PubkeyHex): NostrEvent =>
+    sealAndWrap(input, senderSk, pk, {
+      kind: KIND.OFFLINE_DM_GIFT_WRAP,
+      tags: [
+        ["p", pk],
+        ["expiration", String(input.created_at + DEFAULT_TTL_SECONDS)],
+      ],
+    });
+  return { id, events: others(group.members, senderPk).map(wrapFor), selfCopy: wrapFor(senderPk) };
+}
+
 export function wrapGroupMessage(
   text: string,
   senderSk: SecretKey,
@@ -131,7 +154,6 @@ export function wrapGroupMessage(
   opts: { now?: number; relayHint?: string; mentions?: PubkeyHex[]; replyTo?: string } = {},
 ): WrappedMessage {
   const nowSec = opts.now ?? Math.floor(Date.now() / 1000);
-  // rumor 只建一次（與收件人無關），確保每位成員收到的 rumor.id 相同。
   const input: RumorInput = {
     kind: KIND.CHAT,
     created_at: nowSec,
@@ -143,16 +165,34 @@ export function wrapGroupMessage(
     ],
     content: text,
   };
-  const id = getEventHash({ ...input, pubkey: getPublicKey(senderSk) });
-  const wrapFor = (pk: PubkeyHex): NostrEvent =>
-    sealAndWrap(input, senderSk, pk, {
-      kind: KIND.OFFLINE_DM_GIFT_WRAP,
-      tags: [
-        ["p", pk],
-        ["expiration", String(nowSec + DEFAULT_TTL_SECONDS)],
-      ],
-    });
-  return { id, events: others(group.members, senderPk).map(wrapFor), selfCopy: wrapFor(senderPk) };
+  return fanOutGroupRumor(input, senderSk, senderPk, group);
+}
+
+/**
+ * 群組檔案訊息（ADR-0124）：只帶 **metadata**（名稱/大小/類型/tid），**位元組另走 P2P**
+ * ——明文不上中繼（ADR-0093 的分工）。
+ *
+ * 與 1:1 的 `wrapFileMessage()` 差別只在：對話鍵是 `g` tag（群組）而不是 `to` tag（收件人）。
+ */
+export function wrapGroupFile(
+  meta: FileMeta,
+  senderSk: SecretKey,
+  senderPk: PubkeyHex,
+  group: Group,
+  opts: { now?: number; relayHint?: string } = {},
+): WrappedMessage {
+  const nowSec = opts.now ?? Math.floor(Date.now() / 1000);
+  const input: RumorInput = {
+    kind: KIND.CHAT,
+    created_at: nowSec,
+    tags: [
+      ["g", group.id],
+      ["file", meta.tid, meta.name, String(meta.size), meta.mime],
+      ...(opts.relayHint ? [["relay", opts.relayHint]] : []),
+    ],
+    content: "",
+  };
+  return fanOutGroupRumor(input, senderSk, senderPk, group);
 }
 
 /** 將群組控制訊息扇出給指定收件人（各一個 Gift Wrap）。 */

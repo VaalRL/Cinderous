@@ -114,8 +114,19 @@ export class WebRtcTransfer {
   }
 
   /** 傳送一個檔案給對方，回傳此傳輸的 id（供 UI 追蹤進度）。 */
-  sendFile(peerPk: PubkeyHex, file: OutgoingFile): string {
-    const id = `f${Date.now()}_${this.seq++}`;
+  /** 產生一個傳輸 id。群組傳檔（ADR-0124）先產一個，再讓每位成員**共用**它。 */
+  newTransferId(): string {
+    return `f${Date.now()}_${this.seq++}`;
+  }
+
+  /**
+   * @param tid 外部指定的傳輸 id（ADR-0124 群組傳檔）。
+   *
+   * **群組的每位成員必須共用同一個 tid**：metadata 只有一個（rumor 跨成員共用），
+   * 若每條 P2P 各自產 id，收件端就對不回同一則訊息——位元組到了，卻不知道它屬於哪一則。
+   */
+  sendFile(peerPk: PubkeyHex, file: OutgoingFile, tid?: string): string {
+    const id = tid ?? this.newTransferId();
     const peer = this.ensurePeer(peerPk);
     peer.outbox.push({ id, file });
     if (peer.dc && peer.dc.readyState === "open") {

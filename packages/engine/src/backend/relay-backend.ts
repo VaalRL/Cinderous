@@ -60,6 +60,7 @@ import {
   wrapGroupMessage,
   wrapMessage,
   wrapFileMessage,
+  wrapGroupFile,
   parseFileMeta,
   wrapReaction,
   wrapReceipt,
@@ -1229,6 +1230,22 @@ export class RelayChatBackend implements ChatBackend {
     const g = this.groups.find((gr) => gr.id === groupId);
     if (!g) return; // 未知群組（尚未被加入）
     if (!canPostToGroup(g, sender)) return; // 非成員/公告群非管理者不得發訊（ADR-0049）
+    // 群組檔案（ADR-0124）：kind CHAT ＋ `g` tag ＋ `file` tag。位元組另走 P2P；
+    // 這則 metadata 只是讓每位成員（的每一台裝置）都知道「有這個檔案」——與 1:1 同一套。
+    const fileMeta = parseFileMeta(rumor);
+    if (fileMeta) {
+      const selfCopyFile = sender === this.self.pubkey;
+      this.ensureFileMessage(groupId, fileMeta, {
+        msgId: rumor.id,
+        outgoing: selfCopyFile,
+        sent: 0,
+        at: msgTime(rumor), // ADR-0108：送出時間，非下載時間
+        sender,
+        ...(selfCopyFile ? { status: "sent" as const } : {}),
+      });
+      return;
+    }
+
     const expirySec = messageExpiry(rumor);
     const expiresAt = expirySec !== undefined ? expirySec * 1000 : undefined;
     const mine = isMentioned(rumor, this.self.pubkey); // @提及我（ADR-0050）
@@ -2040,6 +2057,12 @@ export class RelayChatBackend implements ChatBackend {
   }
 
   sendFile(to: PubkeyHex, file: OutgoingFile, opts: { thumb?: string; savedPath?: string } = {}): string {
+    // 🔴 群組（ADR-0124）：`to` 是 groupId（32 字元），不是 pubkey（64 字元）。
+    // 直接往下走會把它丟進 NIP-44 → `second arg must be public key`，**當場爆炸**。
+    // 而 UI 從來沒擋過群組裡的 📎，所以這是使用者點得到的路徑。
+    const group = this.groups.find((g) => g.id === to);
+    if (group) return this.sendGroupFile(group, file, opts);
+
     // 位元組走 P2P（不變）；另發一則加密 metadata 訊息讓對方所有裝置都知道有檔案（ADR-0093）。
     // `thumb` 只存在本機（ADR-0102）——**不進 metadata 訊息、不上中繼**；對方自己從位元組產生。
     const tid = this.transfer.sendFile(to, file);
@@ -2057,6 +2080,47 @@ export class RelayChatBackend implements ChatBackend {
     return tid;
   }
 
+  /**
+   * 群組傳檔（ADR-0124）：**metadata 扇給每位成員、位元組對每位成員各走一條 P2P**。
+   *
+   * 群組沒有共用金鑰（ADR-0027），所以「送給群組」在協定層不存在——只有「分別送給每一位」。
+   * 而位元組**必須送 N 份**：P2P 沒有群播，明文又不能上中繼。這是隱私的代價。
+   */
+  private sendGroupFile(
+    group: Group,
+    file: OutgoingFile,
+    opts: { thumb?: string; savedPath?: string } = {},
+  ): string {
+    if (!canPostToGroup(group, this.self.pubkey)) return ""; // 公告群僅管理者可發（ADR-0049）
+    const members = group.members.filter((m) => m !== this.self.pubkey);
+
+    // **所有成員共用同一個 tid**：metadata 只有一個（rumor 跨成員共用），若每條 P2P 各自產 id，
+    // 收件端就對不回同一則訊息——位元組到了，卻不知道它屬於哪一則。
+    const tid = this.transfer.newTransferId();
+    for (const m of members) this.transfer.sendFile(m, file, tid);
+
+    const meta = { tid, name: file.name, size: file.bytes.length, mime: file.mime };
+    const now = nowSec();
+    const wrapped = wrapGroupFile(meta, this.sk, this.self.pubkey, group, {
+      now,
+      ...(this.homeUrl ? { relayHint: this.homeUrl } : {}),
+    });
+    const id = wrapped.id;
+    this.seenMsg.add(id);
+    this.ensureFileMessage(group.id, meta, {
+      msgId: id,
+      outgoing: true,
+      sent: 0,
+      status: "sending",
+      at: now * 1000,
+      sender: this.self.pubkey, // 群訊要知道誰發的
+    });
+    if (opts.thumb) this.setFileThumb(group.id, id, opts.thumb);
+    if (opts.savedPath) this.storage.setFileSavedPath(group.id, id, opts.savedPath);
+    this.publishWrapped(group.id, id, wrapped);
+    return tid;
+  }
+
   /** 回填某圖片訊息的縮圖（ADR-0102）：由前端產生（需 canvas），只存本機、不外送。 */
   setFileThumb(contact: PubkeyHex, messageId: string, thumb: string): void {
     this.storage.setFileThumb(contact, messageId, thumb);
@@ -2070,7 +2134,15 @@ export class RelayChatBackend implements ChatBackend {
   private ensureFileMessage(
     contact: PubkeyHex,
     meta: { tid: string; name: string; size: number; mime: string },
-    opts: { msgId: string; outgoing: boolean; sent: number; status?: MessageStatus; at?: number },
+    opts: {
+      msgId: string;
+      outgoing: boolean;
+      sent: number;
+      status?: MessageStatus;
+      at?: number;
+      /** 群組檔案（ADR-0124）：發送者 pubkey——否則群裡分不出是誰傳的。 */
+      sender?: PubkeyHex;
+    },
   ): string {
     const existing = this.fileMsgByTid.get(meta.tid);
     if (existing) return existing.msgId;
@@ -2085,6 +2157,7 @@ export class RelayChatBackend implements ChatBackend {
       at,
       file: { tid: meta.tid, name: meta.name, size: meta.size, mime: meta.mime },
       ...(opts.status ? { status: opts.status } : {}),
+      ...(opts.sender ? { sender: opts.sender } : {}), // 群組檔案（ADR-0124）
     };
     this.storage.appendMessage(stored);
     this.fileMsgByTid.set(meta.tid, { contact, msgId: opts.msgId });
@@ -2093,6 +2166,7 @@ export class RelayChatBackend implements ChatBackend {
       outgoing: opts.outgoing,
       text: "",
       at,
+      ...(opts.sender ? { sender: opts.sender } : {}), // 群組檔案（ADR-0124）
       file: { id: meta.tid, name: meta.name, mime: meta.mime, size: meta.size, sent: opts.sent, incoming: !opts.outgoing },
       ...(opts.status ? { status: opts.status } : {}),
     });
@@ -2112,7 +2186,12 @@ export class RelayChatBackend implements ChatBackend {
       );
     }
     // 交 App：跳「另存新檔」對話框、寫入使用者選定路徑後以 setFileSavedPath 回填（App 不保管位元組）。
-    this.handlers?.onFileBytes?.(peer, msgId, file);
+    //
+    // 🔴 第一個參數是**對話鍵**，不是 peer（ADR-0124）。App 拿它當 convo 用
+    //（`patchFileByMsgId(prev, pk, …)`、`setFileThumb(pk, …)`），介面上它也叫 `contact`。
+    // 1:1 時 peer 就是對話鍵，所以一直沒事；但**群組檔案的對話鍵是 groupId**——傳 peer
+    // 會讓收到的位元組被寫進「跟那位成員的 1:1 對話」，而不是群組裡。
+    this.handlers?.onFileBytes?.(existing?.contact ?? peer, msgId, file);
   }
 
   /** 回填某檔案訊息收檔後的本機儲存路徑（ADR-0093）：App 另存完成後呼叫，持久化路徑。 */

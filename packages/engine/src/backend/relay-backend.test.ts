@@ -1065,6 +1065,71 @@ describe("檔案投遞與另存（ADR-0093）", () => {
     a.stop();
     b.stop();
   });
+
+  it("🔴 **群組傳檔不再爆炸**（ADR-0124）：metadata 扇給每位成員，落在群組對話裡", () => {
+    const net = createInMemoryRelayNetwork();
+    const sa = new MemoryStorage();
+    const sb = new MemoryStorage();
+    const a = new RelayChatBackend(sa, (h) => net.connect("a", h), "Alice");
+    const b = new RelayChatBackend(sb, (h) => net.connect("b", h), "Bob");
+    const bMsgs: { convo: string; m: ChatMessage }[] = [];
+    a.start(noop);
+    b.start({ ...noop, onMessage: (convo, m) => bMsgs.push({ convo, m }) });
+    a.addContact(b.selfNpub);
+    b.addContact(a.selfNpub);
+    a.createGroup("專案群", [b.self.pubkey]);
+    const gid = sa.loadGroups()[0]!.id;
+
+    // 修正前：`to` 是 groupId（32 字元）→ 丟進 NIP-44 → `second arg must be public key`。
+    // 而 UI 從來沒擋過群組裡的 📎，所以這是使用者點得到的路徑。
+    let tid = "";
+    expect(() => {
+      tid = a.sendFile(gid, { name: "spec.pdf", mime: "application/pdf", bytes: new Uint8Array([1, 2, 3, 4]) });
+    }).not.toThrow();
+    expect(tid).toBeTruthy();
+
+    // 送出端：檔案訊息落在**群組**對話裡，且知道是誰發的。
+    const aStored = sa.loadMessages(gid).find((m) => m.file);
+    expect(aStored?.file).toMatchObject({ tid, name: "spec.pdf", size: 4 });
+    expect(aStored?.sender).toBe(a.self.pubkey);
+
+    // 收件端：Bob 收到 metadata，且它歸在**群組**（不是跟 Alice 的 1:1）。
+    const got = bMsgs.find((x) => x.m.file);
+    expect(got?.convo).toBe(gid);
+    expect(got?.m.file).toMatchObject({ id: tid, name: "spec.pdf", incoming: true });
+    expect(got?.m.sender).toBe(a.self.pubkey);
+    expect(sb.loadMessages(gid).find((m) => m.file)?.file?.tid).toBe(tid);
+    // 位元組不進中繼——metadata 只帶名稱/大小/類型（ADR-0093 的分工）。
+    expect(sb.loadMessages(a.self.pubkey)).toEqual([]); // 沒有跑進 1:1 對話
+    a.stop();
+    b.stop();
+  });
+
+  it("群組的每位成員**共用同一個 tid**（否則位元組對不回同一則訊息）", () => {
+    const net = createInMemoryRelayNetwork();
+    const sa = new MemoryStorage();
+    const sb = new MemoryStorage();
+    const sc = new MemoryStorage();
+    const a = new RelayChatBackend(sa, (h) => net.connect("a", h), "Alice");
+    const b = new RelayChatBackend(sb, (h) => net.connect("b", h), "Bob");
+    const c = new RelayChatBackend(sc, (h) => net.connect("c", h), "Carol");
+    a.start(noop);
+    b.start(noop);
+    c.start(noop);
+    a.addContact(b.selfNpub);
+    a.addContact(c.selfNpub);
+    a.createGroup("三人群", [b.self.pubkey, c.self.pubkey]);
+    const gid = sa.loadGroups()[0]!.id;
+
+    const tid = a.sendFile(gid, { name: "x.bin", mime: "application/octet-stream", bytes: new Uint8Array([9]) });
+
+    // rumor 跨成員共用 → 兩人看到的 tid 必須相同，也必須等於送出端的。
+    expect(sb.loadMessages(gid).find((m) => m.file)?.file?.tid).toBe(tid);
+    expect(sc.loadMessages(gid).find((m) => m.file)?.file?.tid).toBe(tid);
+    a.stop();
+    b.stop();
+    c.stop();
+  });
 });
 
 describe("自封副本：多裝置對話完整性（ADR-0107）", () => {

@@ -138,3 +138,4 @@
 | [0121](./0121-message-requests.md) | **訊息請求**：陌生人的訊息不再自動讓他變成聯絡人——在你接受前，他碰不到通知、未讀徽章、自動開窗、nudge、typing、上線狀態、個人檔、已讀回條 | 已接受 |
 | [0122](./0122-browser-identity-persistence.md) | **瀏覽器版重載會把你換成另一個人**——身分不得被靜默替換（`expectPubkey` 守衛）＋接上一直是死碼的瀏覽器本地密碼 | 已接受 |
 | [0123](./0123-relay-scoped-subscriptions.md) | **中繼訂閱必須具名**——`{kinds:[20000]}` 這種無 scope 的 filter 可一次收割全站線上名冊；順帶修好「一致性探測不做 AUTH → 每次 cron 都把自己的中繼判成不存活」 | 已接受 |
+| [0124](./0124-group-file-transfer.md) | **群組傳檔**：metadata 扇給每位成員（共用 rumor 與 tid）、位元組各自 P2P；順帶修正 `onFileBytes` 回報 peer 而非對話鍵 | 已接受 |
