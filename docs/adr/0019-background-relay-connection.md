@@ -1,6 +1,9 @@
 # 0019. 背景長連線：政策驅動器 + I/O 執行期（Phase B3）
 
-- 狀態：已接受
+- 狀態：**被取代 by [0105](./0105-retire-native-backend-dead-code.md)**（原生實作已退役）
+  - 本 ADR 的 `net.rs`／`session.rs` 已刪除：它假設**單一** relay 連線，而引擎早已改為多中繼連線池（ADR-0034）。
+  - 其功能目標「關窗仍在線」由 `main.rs` 的系統匣隱藏（webview 續存）達成；
+    並經 [0106](./0106-webview-throttling-measurement.md) **實測確認心跳未被節流**（隱藏 412 秒，30s 心跳誤差 ±17ms）。
 - 日期：2026-07-01
 - 相關文件：docs/ROADMAP.md（Phase B3）；docs/adr/0016（前端重連）、docs/adr/0018（Tauri 殼）
 

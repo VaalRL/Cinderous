@@ -33,13 +33,13 @@
 | [0016](./0016-relay-reconnect-and-connection-status.md) | 中繼站自動重連與連線狀態（Phase A5） | 已接受 |
 | [0017](./0017-webrtc-file-transfer.md) | WebRTC P2P 檔案傳輸整合（Phase A4） | 已接受 |
 | [0018](./0018-tauri-desktop-shell.md) | Tauri 桌面殼與 IPC 契約（Phase B1/B2） | 已接受 |
-| [0019](./0019-background-relay-connection.md) | 背景長連線：政策驅動器 + I/O 執行期（Phase B3） | 已接受 |
-| [0020](./0020-native-persistence-sqlite-sqlcipher.md) | 原生持久化：SQLite / SQLCipher（Phase B4） | 已接受 |
+| [0019](./0019-background-relay-connection.md) | 背景長連線：政策驅動器 + I/O 執行期（Phase B3） | **被取代 by 0105**（原生實作已退役；目標由系統匣達成，0106 實測無節流） |
+| [0020](./0020-native-persistence-sqlite-sqlcipher.md) | 原生持久化：SQLite / SQLCipher（Phase B4） | **被取代 by 0054**（加密 blob）；死碼由 0105 移除 |
 | [0021](./0021-stickers.md) | 貼圖（Stickers，M7） | 已接受 |
 | [0022](./0022-voice-messages.md) | 語音訊息（Voice Messages，M7） | 已接受 |
-| [0023](./0023-media-album.md) | 媒體相簿（Album，M7） | 已接受 |
+| [0023](./0023-media-album.md) | 媒體相簿（Album，M7） | 已接受（⚠ 內文的「跨 session 需 B4 SQLite」已作廢 → 由 **0102** 以縮圖重新設計） |
 | [0024](./0024-qr-add-friend.md) | QR 加好友：npub QR 產生（M9） | 已接受 |
-| [0025](./0025-call-signaling.md) | 語音/視訊通話信令核心（M8） | 已接受 |
+| [0025](./0025-call-signaling.md) | 語音/視訊通話信令核心（M8） | 已接受（⚠ 內文的「尚未接 RTCPeerConnection/通話 UI」已過時——桌面早已實作，行動端見 **0101**） |
 | [0026](./0026-call-runtime-ui.md) | 通話執行期與 UI（M8） | 已接受 |
 | [0027](./0027-group-encryption.md) | 群組聊天加密方案（M9） | 已接受 |
 | [0028](./0028-forward-secrecy.md) | 前向保密：維持靜態金鑰、FS/PCS 交由未來 MLS（F2） | 已接受 |
@@ -49,7 +49,7 @@
 | [0032](./0032-custom-stickers.md) | 自製貼圖：內容隨訊息、SVG 統一表示、點擊即擁有 | 已接受 |
 | [0033](./0033-sticker-editor.md) | 貼圖編輯器：筆劃模型序列化為 SVG path（桌面優先） | 已接受 |
 | [0034](./0034-multi-relay-routing.md) | 跨中繼通訊：客戶端 Relay Pool 與收件人路由 | 已接受 |
-| [0035](./0035-relay-hint-learning.md) | Relay hint 自動學習：帶內加密 hint（否決 NIP-65） | 已接受 |
+| [0035](./0035-relay-hint-learning.md) | Relay hint 自動學習：帶內加密 hint（否決 NIP-65） | 已接受（其「可取代事件未實作」已由 **0099** 收斂） |
 | [0036](./0036-relay-hint-staleness.md) | Hint 陳舊偵測與離線回退；群訊 rumor 帶 hint | 已接受 |
 | [0037](./0037-sticker-text-triggers.md) | 文字觸發貼圖：composer 尾端比對 + 建議列（Tab 送出） | 已接受 |
 | [0038](./0038-url-hygiene.md) | 網址衛生：貼上清除追蹤參數 + 本地啟發式高風險警告 | 已接受 |
@@ -59,7 +59,7 @@
 | [0042](./0042-custom-sticker-limits.md) | 自製貼圖容量與規格限制（標籤上限 + 現有 SVG 上限盤點） | 已接受 |
 | [0043](./0043-animated-sticker-norms.md) | 自製動態貼圖規範（借鏡 LINE：reduced-motion 護欄 + 維持 SVG/上限） | 已接受 |
 | [0044](./0044-enterprise-closed-relay.md) | 企業模式：封閉 allowlist 中繼 + 自架單節點 | 已接受 |
-| [0045](./0045-multi-identity-profiles.md) | 單一 App 多身分並存與切換（工作＋個人） | 已接受 |
+| [0045](./0045-multi-identity-profiles.md) | 單一 App 多身分並存與切換（工作＋個人） | 已接受（⚠ 內文的「nsec 應改存 OS 金鑰庫」已由 **0053** 完成） |
 | [0046](./0046-enterprise-membership-and-boundary.md) | 企業成員判定與對外通訊邊界（威脅模型） | 已接受 |
 | [0047](./0047-enterprise-provisioning-roster.md) | 企業佈建與組織通訊錄（管理者簽章名冊） | 已接受 |
 | [0048](./0048-enterprise-policy-and-turn.md) | 企業政策開關與強制 TURN（relay allowedKinds + 名冊政策） | 已接受 |
@@ -100,7 +100,7 @@
 | [0083](./0083-drain-fully-internal.md) | 舊站排水完全內部化（移除所有 UI，機制不變） | 已接受 |
 | [0084](./0084-code-identifier-naming.md) | 程式碼識別字命名：行動端 i18n 前綴一致化，其餘刻意保留 | 已接受 |
 | [0085](./0085-mobile-app-shell-navigation.md) | 行動端 app 殼與導覽：聊天清單（最近互動排序）＋對話（LINE/Signal 風格） | 已接受 |
-| [0086](./0086-mobile-real-relay-backend.md) | 行動端接真實 relay：RelayChatBackend＋加好友（npub） | 已接受 |
+| [0086](./0086-mobile-real-relay-backend.md) | 行動端接真實 relay：RelayChatBackend＋加好友（npub） | 已接受（其列出的四項落差已由 **0100／0101** 全數補齊） |
 | [0087](./0087-mobile-bottom-tabs.md) | 行動端底部分頁：聊天／聯絡人／設定 | 已接受 |
 | [0088](./0088-presence-metadata-minimization-jitter-and-p2p-offload.md) | 元資料最小化（第一階段）：在線 jitter/隱身＋心跳 P2P 卸載 | 已接受 |
 | [0089](./0089-relay-operator-donation-entry.md) | Relay 營運者贊助入口（NIP-11 擴充＋桌面角落卡＋純導流） | 已接受 |

@@ -1,6 +1,8 @@
 # 0020. 原生持久化：SQLite / SQLCipher（Phase B4）
 
-- 狀態：已接受
+- 狀態：**被取代 by [0054](./0054-encrypted-storage-substrate-aes-gcm.md)**（改用 AES-256-GCM 加密 blob）；
+  死碼已由 [0105](./0105-retire-native-backend-dead-code.md) 移除
+  - 本 ADR 的 SQLite/SQLCipher **從未被建置**（`rusqlite` 與 `persistence`/`sqlcipher` feature 皆已刪除）。
 - 日期：2026-07-01
 - 相關文件：docs/ROADMAP.md（Phase B4）；docs/adr/0018（Tauri 殼）；前端 A2 localStorage 層
 
