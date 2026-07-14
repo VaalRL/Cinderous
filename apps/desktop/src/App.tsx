@@ -435,6 +435,11 @@ export function App(): JSX.Element {
   layoutRef.current = layout;
   const activeConvoRef = useRef(activeConvo);
   activeConvoRef.current = activeConvo;
+  // 供 visibilitychange 等 `[]` 依賴的 handler 讀到當前後端與開啟中的對話（ADR-0108）。
+  const backendRef = useRef(backend);
+  backendRef.current = backend;
+  const openRef = useRef(open);
+  openRef.current = open;
   // 已讀回條開關同步到後端（ADR-0058）；後端重建或開關變動時皆推送。
   useEffect(() => {
     backend?.setReadReceipts?.(readReceipts);
@@ -540,12 +545,13 @@ export function App(): JSX.Element {
           return { ...prev, [pk]: [...cur, msg] };
         });
         setOpen((prev) => (prev.includes(pk) ? prev : [...prev, pk]));
-        // 未讀徽章：收到他人訊息、且該對話當下看不到時累加（三欄背景分頁也算看不到，ADR-0079 修正）。
+        // 未讀徽章：由後端從儲存推導（ADR-0108），UI 不再自行 +1。若該對話當下**看得到**，
+        // 就立刻推進已讀水位（三欄背景分頁也算看不到，ADR-0079 修正）。
         // 桌面通知仍僅在整個視窗未聚焦時彈出（視窗聚焦時以未讀徽章提示即可，不打擾）。
         if (!msg.outgoing) {
           const hidden = typeof document !== "undefined" && document.hidden;
-          if (!convoVisibleIn(layoutRef.current, activeConvoRef.current, pk, hidden)) {
-            setUnread((u) => ({ ...u, [pk]: (u[pk] ?? 0) + 1 }));
+          if (convoVisibleIn(layoutRef.current, activeConvoRef.current, pk, hidden)) {
+            backend.clearUnread?.(pk);
           }
           if (hidden && notifyRef.current) {
             // 標題＝該對話（群組/聯絡人）顯示名；隱藏預覽時只顯示提示語，
@@ -588,6 +594,8 @@ export function App(): JSX.Element {
           next.add(messageId);
           return next;
         }),
+      // 未讀由後端從儲存推導（ADR-0108）——重新載入後徽章仍在（過去是記憶體計數器，重載歸零）。
+      onUnread: setUnread,
       onMessageStatus: (pk, messageId, status) =>
         setConvos((prev) => {
           const cur = prev[pk];
@@ -735,15 +743,22 @@ export function App(): JSX.Element {
     return () => clearInterval(timer);
   }, [convos]);
 
-  // 視窗重新聚焦時清未讀：經典＝全部可見故全清；三欄＝只有 active 分頁可見，只清它（ADR-0079 修正）。
+  // 視窗重新聚焦時清未讀：經典＝所有**開啟中**的對話都看得到故全清；三欄＝只有 active 分頁可見，
+  // 只清它（ADR-0079 修正）。改推進本機已讀水位（ADR-0108）→ 重載後不會又冒出來。
+  //
+  // 註：舊版經典佈局是 `setUnread({})`——把**每一個**對話（含從沒開過的）都清成 0。
+  // 那本來就是 bug，而水位一旦持久化就會變成永久的（那些訊息再也不亮紅點），故一併修正為
+  // 只清開啟中的對話。
   useEffect(() => {
     const onVisible = () => {
       if (document.hidden) return;
+      const b = backendRef.current;
+      if (!b) return;
       if (layoutRef.current === "modern") {
         const a = activeConvoRef.current;
-        if (a) setUnread((u) => (u[a] ? { ...u, [a]: 0 } : u));
+        if (a) b.clearUnread?.(a);
       } else {
-        setUnread({});
+        for (const pk of openRef.current) b.clearUnread?.(pk);
       }
     };
     document.addEventListener("visibilitychange", onVisible);
@@ -756,7 +771,7 @@ export function App(): JSX.Element {
       if (!convo) return;
       setOpen((prev) => (prev.includes(convo) ? [...prev.filter((x) => x !== convo), convo] : [...prev, convo]));
       setActiveConvo(convo);
-      setUnread((u) => (u[convo] ? { ...u, [convo]: 0 } : u));
+      backendRef.current?.clearUnread?.(convo); // 推進本機水位（ADR-0108）；回條交由視窗可見時的 onMarkRead
     });
   }, []);
 
@@ -1057,8 +1072,9 @@ export function App(): JSX.Element {
   // 供側欄雙擊（openChat）與分頁列點擊（DeckTabs）共用，避免只設 activeConvo 卻漏清未讀。
   const activateConvo = (pk: string) => {
     setActiveConvo(pk);
-    setUnread((u) => (u[pk] ? { ...u, [pk]: 0 } : u));
-    if (typeof document === "undefined" || !document.hidden) activeBackend.markRead?.(pk);
+    // 視窗隱藏時：只推進本機水位（清紅點），**不**送已讀回條——沒真的看到就不該告訴對方（ADR-0108）。
+    if (typeof document !== "undefined" && document.hidden) activeBackend.clearUnread?.(pk);
+    else activeBackend.markRead?.(pk); // 看得到 → 水位 ＋ 回條（若開啟）
   };
   const openChat = (pk: string) => {
     setOpen((prev) => (prev.includes(pk) ? prev : [...prev, pk]));

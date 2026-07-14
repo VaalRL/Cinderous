@@ -175,6 +175,14 @@ export class TauriStorage implements AppStorage {
     this.mem.markDeleted(messageId);
     this.persist();
   }
+  loadReadAt(): Record<string, number> {
+    return this.mem.loadReadAt();
+  }
+  /** 已讀水位（ADR-0108）：必須落地——否則重啟後未讀又全部冒出來，等於沒做。 */
+  setReadAt(convoKey: string, at: number): void {
+    this.mem.setReadAt(convoKey, at);
+    this.persist();
+  }
   saveGroup(group: StoredGroup): void {
     this.mem.saveGroup(group);
     this.persist();

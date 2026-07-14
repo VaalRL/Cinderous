@@ -110,6 +110,13 @@ export interface ChatBackendEvents {
   /** 自己送出的某訊息送達/已讀狀態更新（ADR-0058；含 `failed`，ADR-0095）。 */
   onMessageStatus?(contact: PubkeyHex, messageId: string, status: MessageStatus): void;
   /**
+   * 未讀數更新（ADR-0108）：對話 → 未讀則數（僅含 > 0 者）。
+   *
+   * 由**儲存推導**（已讀水位之後的收訊則數），不是 UI 自行 +1／歸零的記憶體計數器
+   * ——所以重新載入後未讀仍在。開機載入歷史後、收到新訊息時、水位推進時各發一次。
+   */
+  onUnread?(counts: Record<string, number>): void;
+  /**
    * 群組某訊息的每成員回條更新（ADR-0095）：`receipts` 為成員 pubkey → delivered/read 的完整表。
    * 僅小群（≤10 人）會觸發；大群完全不記錄。
    */
@@ -173,8 +180,18 @@ export interface ChatBackend {
   sendReaction?(to: PubkeyHex, messageId: string, emoji: string): void;
   /** 收回（刪除）自己送出的某訊息（NIP-09）。 */
   unsendMessage?(to: PubkeyHex, messageId: string): void;
-  /** 開啟對話時呼叫：若啟用已讀回條則送出「已讀到最新」水位（ADR-0058 Tier 3）。 */
+  /**
+   * 使用者**看到**了這個對話：推進本機已讀水位（ADR-0108）**並**送出已讀回條
+   * （僅在回條開啟時；ADR-0058 Tier 3）。
+   */
   markRead?(contact: PubkeyHex): void;
+  /**
+   * 清除某對話的未讀＝**只**推進本機已讀水位（ADR-0108），**不**告訴對方。
+   *
+   * 用於「清掉紅點但不算真的看到」的情境（例如視窗隱藏時切換分頁）。與 `markRead` 的差別
+   * 純粹是隱私：本機記得讀到哪是 UX（永遠有效）；告訴對方我讀了是隱私選擇（opt-in）。
+   */
+  clearUnread?(convo: string): void;
   /** 設定已讀回條開關（opt-in + 互惠；ADR-0058）。 */
   setReadReceipts?(enabled: boolean): void;
   /**

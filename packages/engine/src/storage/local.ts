@@ -236,6 +236,16 @@ export class LocalStorage implements AppStorage {
   loadDeleted(): string[] {
     return read<string[]>(this.k("deleted"), []);
   }
+  loadReadAt(): Record<string, number> {
+    return read<Record<string, number>>(this.k("readAt"), {});
+  }
+  /** 推進已讀水位（ADR-0108）：單調遞增，倒退忽略。 */
+  setReadAt(convoKey: string, at: number): void {
+    const all = this.loadReadAt();
+    if (at <= (all[convoKey] ?? 0)) return;
+    all[convoKey] = at;
+    write(this.k("readAt"), all);
+  }
   loadGroups(): StoredGroup[] {
     return read<StoredGroup[]>(this.k("groups"), []);
   }

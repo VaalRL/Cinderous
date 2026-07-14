@@ -122,3 +122,4 @@
 | [0105](./0105-retire-native-backend-dead-code.md) | 退役原生後端死碼（0019 背景連線／0020 SQLite）＋讓 cargo test 真的測到出貨的密碼學 | 已接受 |
 | [0106](./0106-webview-throttling-measurement.md) | 實測：隱藏視窗的 webview 不會被節流（心跳全速）→ 推翻「引擎下沉 Rust」的主要理由，決策不下沉 | 已接受 |
 | [0107](./0107-nip17-self-copy.md) | NIP-17 自封副本：自己發的訊息也包一份給自己 → 多裝置對話完整；訊息 id 統一為 rumor.id | 已接受 |
+| [0108](./0108-read-watermark-local.md) | 已讀水位本機持久化（未讀不再重載歸零）＋訊息時間改用 rumor.created_at（修正順序錯亂） | 已接受 |

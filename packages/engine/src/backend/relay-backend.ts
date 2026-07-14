@@ -113,6 +113,21 @@ const shortNpub = (npub: string) => `${npub.slice(0, 12)}…`;
  * `sent`＝已送出（outgoing）或已存本機（有 savedPath）時為 size，否則 0（metadata-only，
  * 例：位元組落在另一台裝置）；`url` 於重載後永遠沒有（App 不保管位元組）。
  */
+/**
+ * 訊息時間（ADR-0108）：採**發送者宣告的送出時間**（`rumor.created_at`，經 rumor 雜湊驗證，
+ * 中繼改不了），而非接收端的 `Date.now()`（下載時間）。
+ *
+ * 用下載時間會壞掉：離線一天後上線，中繼把整天的留言一次回放 → 每則都被蓋上「現在」，
+ * 時間全錯；而 NIP-59 的 `jitteredPast()` 又把**外層**時戳隨機往前推，回放順序本就不是送出
+ * 順序 → 顯示順序＝到達順序＝隨機。ADR-0107 之後更糟：兩台裝置的下載時間必然不同，
+ * 同一個對話在手機與電腦上會長得不一樣。也因此，下載時間根本無法當跨裝置的已讀水位鍵。
+ *
+ * 箝制未來時戳：壞掉或惡意的時鐘不得把訊息永遠釘在對話頂端。
+ */
+function msgTime(rumor: Rumor): number {
+  return Math.min(rumor.created_at * 1000, Date.now());
+}
+
 function storedToChat(m: StoredMessage): ChatMessage {
   return {
     id: m.id,
@@ -511,6 +526,7 @@ export class RelayChatBackend implements ChatBackend {
       handlers.onHistory?.(g.id, msgs.map(storedToChat));
     }
     this.emitBlocked();
+    this.emitUnread(); // ADR-0108：未讀由儲存推導 → 重新載入後徽章仍在
   }
 
   /** 聯絡人某 relay hint 是否屬於外部 relay（非 home）。 */
@@ -938,9 +954,11 @@ export class RelayChatBackend implements ChatBackend {
           msgId: rumor.id,
           outgoing: selfCopy,
           sent: 0,
+          at: msgTime(rumor), // ADR-0108
           ...(selfCopy ? { status: "sent" as const } : {}),
         });
         if (selfCopy) this.applyPendingReceipts(rumor.id);
+        if (!selfCopy) this.emitUnread();
       }
       if (!selfCopy) this.publishReliable(wrapReceipt("delivered", this.sk, sender, rumor.id));
       return;
@@ -961,7 +979,7 @@ export class RelayChatBackend implements ChatBackend {
       contact: convo,
       outgoing: selfCopy,
       text: rumor.content,
-      at: Date.now(),
+      at: msgTime(rumor), // ADR-0108：送出時間，非下載時間
       ...(status ? { status } : {}),
       ...extra,
     };
@@ -974,6 +992,7 @@ export class RelayChatBackend implements ChatBackend {
       ...(status ? { status } : {}),
       ...extra,
     });
+    if (!selfCopy) this.emitUnread(); // 新收訊 → 未讀數由儲存重算（ADR-0108）
     if (selfCopy) {
       this.applyPendingReceipts(rumor.id); // 回條若比自封副本先到，在此補套用（ADR-0107）
       return; // 不對自己回送已送達回條
@@ -1038,12 +1057,13 @@ export class RelayChatBackend implements ChatBackend {
       id,
       outgoing: selfCopy,
       text: rumor.content,
-      at: Date.now(),
+      at: msgTime(rumor), // ADR-0108：送出時間，非下載時間
       ...(status ? { status } : {}),
       ...extra,
     };
     this.storage.appendMessage({ ...body, contact: groupId });
     this.handlers?.onMessage(groupId, body);
+    if (!selfCopy) this.emitUnread(); // 新收訊 → 未讀數由儲存重算（ADR-0108）
     if (selfCopy) {
       this.applyPendingReceipts(id); // 其他成員的回條可能比自封副本先到
       return;
@@ -1365,8 +1385,13 @@ export class RelayChatBackend implements ChatBackend {
   }
 
   sendMessage(to: PubkeyHex, text: string, ttlSeconds?: number, mentions?: PubkeyHex[], replyTo?: string): void {
-    const disappearAt = ttlSeconds ? nowSec() + ttlSeconds : undefined;
+    // 送出時間固定一次（ADR-0108）：同一個值既寫進 rumor.created_at、也當本機 `at`。
+    // 否則發送裝置存毫秒 `Date.now()`、其他裝置存 `created_at * 1000`（秒截斷），
+    // 同一則訊息會差最多 999ms → 已讀水位比較就不精確了。
+    const now = nowSec();
+    const disappearAt = ttlSeconds ? now + ttlSeconds : undefined;
     const wrapped = wrapMessage(text, this.sk, to, {
+      now,
       ...(disappearAt !== undefined ? { disappearAt } : {}),
       ...(this.homeUrl ? { relayHint: this.homeUrl } : {}),
       ...(mentions && mentions.length > 0 ? { mentions } : {}),
@@ -1377,7 +1402,7 @@ export class RelayChatBackend implements ChatBackend {
       ...(disappearAt !== undefined ? { expiresAt: disappearAt * 1000 } : {}),
       ...(replyTo ? { replyTo } : {}),
     };
-    const message = { id, contact: to, outgoing: true, text, at: Date.now(), status: "sending" as const, ...extra };
+    const message = { id, contact: to, outgoing: true, text, at: now * 1000, status: "sending" as const, ...extra };
     this.seenMsg.add(id); // 自封副本回流到本機時據此丟棄（ADR-0107）
     this.storage.appendMessage(message);
     this.handlers?.onMessage(to, { id, outgoing: true, text, at: message.at, status: "sending" as const, ...extra });
@@ -1627,8 +1652,45 @@ export class RelayChatBackend implements ChatBackend {
    * 群組（ADR-0095）：小群才送——且回條要**分別送給每位發訊者**（群訊來自多人），
    * 每人各一則指向「他最新那則」的水位回條；大群完全不送。
    */
+  /**
+   * 未讀數（ADR-0108）：由**儲存推導**——每個對話中，時間晚於已讀水位的收訊則數。
+   * 不是記憶體計數器，所以重新載入後仍在（這正是本 ADR 的目的）。
+   */
+  private unreadCounts(): Record<string, number> {
+    const readAt = this.storage.loadReadAt();
+    const counts: Record<string, number> = {};
+    const convos = [...this.contacts.map((c) => c.pubkey), ...this.groups.map((g) => g.id)];
+    for (const convo of convos) {
+      const mark = readAt[convo] ?? 0;
+      const n = this.storage.loadMessages(convo).filter((m) => !m.outgoing && m.at > mark).length;
+      if (n > 0) counts[convo] = n;
+    }
+    return counts;
+  }
+
+  private emitUnread(): void {
+    this.handlers?.onUnread?.(this.unreadCounts());
+  }
+
+  /**
+   * 清除某對話的未讀＝推進本機已讀水位（ADR-0108）。
+   *
+   * **一律持久化，與「是否送已讀回條」無關。** 這兩件事不同：已讀回條是**隱私選擇**
+   * （告訴對方我讀了，opt-in 預設關）；本機水位是 **UX**（記得自己讀到哪，應永遠有效）。
+   * 若把水位掛在 `markRead()` 上，大多數使用者（回條關閉）的未讀狀態就永遠不會被保存。
+   */
+  clearUnread(convo: string): void {
+    const msgs = this.storage.loadMessages(convo);
+    let latest = 0;
+    for (const m of msgs) if (!m.outgoing && m.at > latest) latest = m.at;
+    if (latest === 0) return; // 無收訊 → 沒有水位可推進
+    this.storage.setReadAt(convo, latest); // 單調遞增，倒退忽略
+    this.emitUnread();
+  }
+
   markRead(convo: PubkeyHex): void {
-    if (!this.readReceipts) return;
+    this.clearUnread(convo); // 本機水位一律推進（ADR-0108）——與下方的回條設定無關
+    if (!this.readReceipts) return; // 已讀回條：opt-in（ADR-0058 互惠）
     const group = this.groups.find((g) => g.id === convo);
     if (group) {
       if (groupReceiptMode(group.members.length) === "off") return; // 大群不記
@@ -1673,11 +1735,12 @@ export class RelayChatBackend implements ChatBackend {
     // `thumb` 只存在本機（ADR-0102）——**不進 metadata 訊息、不上中繼**；對方自己從位元組產生。
     const tid = this.transfer.sendFile(to, file);
     const meta = { tid, name: file.name, size: file.bytes.length, mime: file.mime };
-    const wrapped = wrapFileMessage(this.sk, to, meta, this.homeUrl ? { relayHint: this.homeUrl } : {});
+    const now = nowSec(); // 同一個送出時間寫進 rumor 也當本機 `at`（ADR-0108）
+    const wrapped = wrapFileMessage(this.sk, to, meta, { now, ...(this.homeUrl ? { relayHint: this.homeUrl } : {}) });
     const id = wrapped.id;
     this.seenMsg.add(id);
     // 訊息 id＝metadata 的 rumor id（ADR-0107，供回條與自己的其他裝置對得上）；file.id＝tid。
-    this.ensureFileMessage(to, meta, { msgId: id, outgoing: true, sent: 0, status: "sending" });
+    this.ensureFileMessage(to, meta, { msgId: id, outgoing: true, sent: 0, status: "sending", at: now * 1000 });
     if (opts.thumb) this.setFileThumb(to, id, opts.thumb);
     // 送出端原檔路徑（ADR-0103）：原生選檔才有；讓自己送出的圖片重載後也讀得回原圖。
     if (opts.savedPath) this.storage.setFileSavedPath(to, id, opts.savedPath);
@@ -1698,11 +1761,13 @@ export class RelayChatBackend implements ChatBackend {
   private ensureFileMessage(
     contact: PubkeyHex,
     meta: { tid: string; name: string; size: number; mime: string },
-    opts: { msgId: string; outgoing: boolean; sent: number; status?: MessageStatus },
+    opts: { msgId: string; outgoing: boolean; sent: number; status?: MessageStatus; at?: number },
   ): string {
     const existing = this.fileMsgByTid.get(meta.tid);
     if (existing) return existing.msgId;
-    const at = Date.now();
+    // ADR-0108：時間取自 metadata 的 rumor（送出時間）。位元組先於 metadata 抵達時無 rumor
+    // 可依（P2P 直連，本來就是即時的）→ 退回本機時間。
+    const at = opts.at ?? Date.now();
     const stored: StoredMessage = {
       id: opts.msgId,
       contact,
@@ -1796,7 +1861,9 @@ export class RelayChatBackend implements ChatBackend {
     // 只保留確實在群內的提及對象（避免對非成員扇出 p-tag）。
     const validMentions = mentions?.filter((pk) => group.members.includes(pk)) ?? [];
     // id＝內層 rumor id：**跨成員一致**（外層 wrap id 每人不同），送達/已讀回條才對得回來（ADR-0095）。
+    const now = nowSec(); // 同一個送出時間寫進 rumor 也當本機 `at`（ADR-0108）
     const wrapped = wrapGroupMessage(text, this.sk, this.self.pubkey, group, {
+      now,
       ...(this.homeUrl ? { relayHint: this.homeUrl } : {}),
       ...(validMentions.length > 0 ? { mentions: validMentions } : {}),
       ...(replyTo ? { replyTo } : {}),
@@ -1805,7 +1872,7 @@ export class RelayChatBackend implements ChatBackend {
     const id = wrapped.id;
     const extra = { sender: this.self.pubkey, ...(replyTo ? { replyTo } : {}) };
     const status = "sending" as const;
-    const message = { id, contact: groupId, outgoing: true, text, at: Date.now(), status, ...extra };
+    const message = { id, contact: groupId, outgoing: true, text, at: now * 1000, status, ...extra };
     this.storage.appendMessage(message);
     this.handlers?.onMessage(groupId, { id, outgoing: true, text, at: message.at, status, ...extra });
     // 扇出腿計狀態（ADR-0095）；另含一份自封副本讓自己的其他裝置也看得到（ADR-0107）。

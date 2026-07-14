@@ -1256,3 +1256,151 @@ describe("自封副本：多裝置對話完整性（ADR-0107）", () => {
     d2.be.stop();
   });
 });
+
+describe("已讀水位的本機持久化（ADR-0108）", () => {
+  it("**未讀在重新載入後仍在**——這正是本 ADR 要修的破損", () => {
+    const net = createInMemoryRelayNetwork();
+    const store = new MemoryStorage();
+    const sk = generateSecretKey();
+    store.saveIdentity({ nsec: nsecEncode(sk), name: "Alice" });
+
+    const a1 = new RelayChatBackend(store, (h) => net.connect("a1", h), "Alice");
+    const bob = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("bob", h), "Bob");
+    let unread: Record<string, number> = {};
+    a1.start({ ...noop, onUnread: (u) => (unread = u) });
+    bob.start(noop);
+
+    bob.addContact(a1.selfNpub);
+    bob.sendMessage(a1.self.pubkey, "在嗎");
+    bob.sendMessage(a1.self.pubkey, "？");
+    expect(unread[bob.self.pubkey]).toBe(2);
+    a1.stop();
+
+    // 關掉 App 再開（同一個 storage）：過去 unread 只是 React state → 重載歸零。
+    unread = {};
+    const a2 = new RelayChatBackend(store, (h) => net.connect("a2", h), "Alice");
+    a2.start({ ...noop, onUnread: (u) => (unread = u) });
+    expect(unread[bob.self.pubkey]).toBe(2); // 紅點還在
+    a2.stop();
+    bob.stop();
+  });
+
+  it("開對話推進水位 → 未讀歸零，且重新載入後仍是零", () => {
+    const net = createInMemoryRelayNetwork();
+    const store = new MemoryStorage();
+    const sk = generateSecretKey();
+    store.saveIdentity({ nsec: nsecEncode(sk), name: "Alice" });
+
+    const a1 = new RelayChatBackend(store, (h) => net.connect("a1", h), "Alice");
+    const bob = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("bob", h), "Bob");
+    let unread: Record<string, number> = {};
+    a1.start({ ...noop, onUnread: (u) => (unread = u) });
+    bob.start(noop);
+
+    bob.addContact(a1.selfNpub);
+    bob.sendMessage(a1.self.pubkey, "嗨");
+    expect(unread[bob.self.pubkey]).toBe(1);
+
+    a1.clearUnread(bob.self.pubkey);
+    expect(unread[bob.self.pubkey]).toBeUndefined(); // 只回報 > 0 者
+    a1.stop();
+
+    unread = { sentinel: 1 };
+    const a2 = new RelayChatBackend(store, (h) => net.connect("a2", h), "Alice");
+    a2.start({ ...noop, onUnread: (u) => (unread = u) });
+    expect(unread[bob.self.pubkey]).toBeUndefined(); // 水位已落地 → 不會又冒出來
+    a2.stop();
+    bob.stop();
+  });
+
+  it("**水位與已讀回條解耦**：回條預設關閉，但本機水位仍必須推進", () => {
+    const net = createInMemoryRelayNetwork();
+    const store = new MemoryStorage();
+    const sk = generateSecretKey();
+    store.saveIdentity({ nsec: nsecEncode(sk), name: "Alice" });
+    const a = new RelayChatBackend(store, (h) => net.connect("a", h), "Alice");
+    const bob = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("bob", h), "Bob");
+    let unread: Record<string, number> = {};
+    a.start({ ...noop, onUnread: (u) => (unread = u) });
+    bob.start(noop);
+
+    bob.addContact(a.selfNpub);
+    bob.sendMessage(a.self.pubkey, "嗨");
+    expect(unread[bob.self.pubkey]).toBe(1);
+
+    // readReceipts 預設 false。舊版 markRead() 第一行就 `if (!this.readReceipts) return;`
+    // → 水位永遠不會被保存。已讀回條是**隱私選擇**；記得自己讀到哪是 **UX**，兩者不可綁一起。
+    a.markRead(bob.self.pubkey);
+    expect(store.loadReadAt()[bob.self.pubkey]).toBeGreaterThan(0);
+    expect(unread[bob.self.pubkey]).toBeUndefined();
+
+    a.stop();
+    bob.stop();
+  });
+
+  it("訊息時間採**送出時間**（rumor.created_at），不是下載時間", () => {
+    const net = createInMemoryRelayNetwork();
+    const store = new MemoryStorage();
+    const aliceSk = generateSecretKey();
+    store.saveIdentity({ nsec: nsecEncode(aliceSk), name: "Alice" });
+    const a = new RelayChatBackend(store, (h) => net.connect("a", h), "Alice");
+    a.start(noop);
+
+    // 模擬「離線一天後補收」：這則是一小時前送出的，現在才抵達。
+    const bobSk = generateSecretKey();
+    const sentAt = Math.floor(Date.now() / 1000) - 3600;
+    const w = wrapMessage("一小時前送的", bobSk, getPublicKey(aliceSk), { now: sentAt });
+    net.connect("raw", {}).publish(w.events[0]!);
+
+    const msg = store.loadMessages(getPublicKey(bobSk))[0]!;
+    // 用 Date.now() 會把它蓋成「現在」→ 時間全錯、順序被壓平、且兩台裝置各不相同。
+    expect(msg.at).toBe(sentAt * 1000);
+    a.stop();
+  });
+
+  it("箝制未來時戳：壞掉/惡意的時鐘不得把訊息永遠釘在對話頂端", () => {
+    const net = createInMemoryRelayNetwork();
+    const store = new MemoryStorage();
+    const aliceSk = generateSecretKey();
+    store.saveIdentity({ nsec: nsecEncode(aliceSk), name: "Alice" });
+    const a = new RelayChatBackend(store, (h) => net.connect("a", h), "Alice");
+    a.start(noop);
+
+    const bobSk = generateSecretKey();
+    const future = Math.floor(Date.now() / 1000) + 86_400 * 365; // 宣稱一年後送出
+    const w = wrapMessage("我來自未來", bobSk, getPublicKey(aliceSk), { now: future });
+    net.connect("raw", {}).publish(w.events[0]!);
+
+    const msg = store.loadMessages(getPublicKey(bobSk))[0]!;
+    expect(msg.at).toBeLessThanOrEqual(Date.now()); // 箝制到「現在」
+    a.stop();
+  });
+
+  it("兩台裝置對同一則訊息算出**相同**的時間（水位才可跨裝置比較）", () => {
+    const net = createInMemoryRelayNetwork();
+    const aliceSk = generateSecretKey();
+    const mk = (id: string) => {
+      const store = new MemoryStorage();
+      store.saveIdentity({ nsec: nsecEncode(aliceSk), name: "Alice" });
+      const be = new RelayChatBackend(store, (h) => net.connect(id, h), "Alice");
+      be.start(noop);
+      return { store, be };
+    };
+    const phone = mk("phone");
+    const desktop = mk("desktop");
+    const bob = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("bob", h), "Bob");
+    bob.start(noop);
+
+    phone.be.addContact(bob.selfNpub);
+    phone.be.sendMessage(bob.self.pubkey, "我發的"); // 自封副本 → 電腦也收到（ADR-0107）
+    bob.sendMessage(phone.be.self.pubkey, "我回的");
+
+    const onPhone = phone.store.loadMessages(bob.self.pubkey).map((m) => m.at);
+    const onDesktop = desktop.store.loadMessages(bob.self.pubkey).map((m) => m.at);
+    expect(onDesktop).toEqual(onPhone); // 同一組時間戳 → 順序一致、水位可比
+
+    phone.be.stop();
+    desktop.be.stop();
+    bob.stop();
+  });
+});

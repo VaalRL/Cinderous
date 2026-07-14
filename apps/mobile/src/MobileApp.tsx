@@ -153,9 +153,12 @@ export function MobileApp({
           if (cur.some((x) => x.id === m.id)) return c;
           return { ...c, [pk]: [...cur, m] };
         });
+        // 未讀由後端從儲存推導（ADR-0108）；正在看這個對話 → 立刻推進已讀水位（不留紅點）。
         const viewing = screenRef.current === "conversation" && activeIdRef.current === pk;
-        if (!m.outgoing && !viewing) setUnread((u) => ({ ...u, [pk]: (u[pk] ?? 0) + 1 }));
+        if (!m.outgoing && viewing) backend.clearUnread?.(pk);
       },
+      // 未讀（ADR-0108）：重新載入後徽章仍在（過去是記憶體計數器，重載歸零）。
+      onUnread: setUnread,
       // 送出狀態（ADR-0095）：與桌面同一套（傳送中/失敗/已送出/已送達/已讀）→ 氣泡旁圖示。
       onMessageStatus: (pk, messageId, status) =>
         setConvos((c) => {
@@ -234,9 +237,10 @@ export function MobileApp({
 
   const openConvo = (id: string): void => {
     setActiveId(id);
-    setUnread((u) => (u[id] ? { ...u, [id]: 0 } : u));
     setScreen("conversation");
-    backendRef.current?.markRead?.(id); // ADR-0058 Tier 3：開對話＝送已讀水位（未開啟則後端自行忽略）
+    // 開對話＝真的看到了：推進本機已讀水位（ADR-0108，一律持久化）＋送已讀回條（ADR-0058 Tier 3，
+    // 僅在回條開啟時）。未讀徽章由後端的 onUnread 推回，UI 不再自行歸零。
+    backendRef.current?.markRead?.(id);
   };
   const back = (): void => {
     setScreen("main");

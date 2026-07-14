@@ -124,3 +124,39 @@ describe("MemoryStorage", () => {
     expect(s.loadBlocked()).toEqual([]);
   });
 });
+
+describe("已讀水位（ADR-0108）", () => {
+  it("預設為空；設定後可讀回", () => {
+    const s = new MemoryStorage();
+    expect(s.loadReadAt()).toEqual({});
+    s.setReadAt("bob", 1000);
+    expect(s.loadReadAt()).toEqual({ bob: 1000 });
+  });
+
+  it("**單調遞增**：倒退的水位一律忽略（否則已讀過的訊息會再冒出紅點）", () => {
+    const s = new MemoryStorage();
+    s.setReadAt("bob", 5000);
+    s.setReadAt("bob", 3000); // 倒退 → 忽略
+    expect(s.loadReadAt()["bob"]).toBe(5000);
+    s.setReadAt("bob", 7000); // 前進 → 採用
+    expect(s.loadReadAt()["bob"]).toBe(7000);
+  });
+
+  it("水位隨快照往返（配對搬家換機時帶得走已讀狀態）", () => {
+    const a = new MemoryStorage();
+    a.setReadAt("bob", 1234);
+    a.setReadAt("group-1", 5678);
+    const b = new MemoryStorage();
+    b.importSnapshot(a.exportSnapshot());
+    expect(b.loadReadAt()).toEqual({ bob: 1234, "group-1": 5678 });
+  });
+
+  it("匯入**舊快照**（沒有 readAt 欄位）不會炸，水位退回空", () => {
+    const s = new MemoryStorage();
+    s.setReadAt("bob", 999);
+    const legacy = { ...s.exportSnapshot() };
+    delete (legacy as { readAt?: unknown }).readAt; // 模擬 ADR-0108 之前存下的快照
+    expect(() => s.importSnapshot(legacy)).not.toThrow();
+    expect(s.loadReadAt()).toEqual({});
+  });
+});

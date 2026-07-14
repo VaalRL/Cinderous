@@ -22,6 +22,8 @@ export class MemoryStorage implements AppStorage {
   private readonly deleted = new Set<string>();
   private blocked: StoredContact[] = [];
   private groups: StoredGroup[] = [];
+  /** 已讀水位（ADR-0108）：對話 → 已讀到的最新訊息時間（毫秒）。 */
+  private readonly readAt = new Map<string, number>();
   /** 每對話持久化上限（ADR-0094）；`0`＝無上限（預設，不逐出）。 */
   private maxPerConvo: number;
 
@@ -33,6 +35,15 @@ export class MemoryStorage implements AppStorage {
   setMaxPerConvo(max: number): void {
     this.maxPerConvo = Math.max(0, Math.floor(max));
     if (this.maxPerConvo > 0) for (const list of this.messages.values()) this.cap(list);
+  }
+
+  loadReadAt(): Record<string, number> {
+    return Object.fromEntries(this.readAt);
+  }
+
+  /** 推進已讀水位（ADR-0108）：單調遞增，倒退忽略。 */
+  setReadAt(convoKey: string, at: number): void {
+    if (at > (this.readAt.get(convoKey) ?? 0)) this.readAt.set(convoKey, at);
   }
 
   /** 依上限逐出最舊（`0`＝無上限、不動）。 */
@@ -203,6 +214,7 @@ export class MemoryStorage implements AppStorage {
       deleted: [...this.deleted],
       groups: this.groups.map((g) => ({ ...g, members: [...g.members] })),
       bootstrapList: this.bootstrapList,
+      readAt: Object.fromEntries(this.readAt), // ADR-0108
     };
   }
 
@@ -218,5 +230,7 @@ export class MemoryStorage implements AppStorage {
     for (const id of s.deleted) this.deleted.add(id);
     this.groups = s.groups.map((g) => ({ ...g, members: [...g.members] }));
     this.bootstrapList = s.bootstrapList;
+    this.readAt.clear();
+    for (const [k, v] of Object.entries(s.readAt ?? {})) this.readAt.set(k, v); // 舊快照無此欄位
   }
 }

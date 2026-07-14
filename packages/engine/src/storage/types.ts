@@ -189,6 +189,13 @@ export interface AppStorage {
   ): Record<string, "delivered" | "read"> | undefined;
   /** 設定每對話保留上限（ADR-0094）；`0`＝無上限。變更後即時對既有對話套用逐出。 */
   setMaxPerConvo(max: number): void;
+  /**
+   * 已讀水位（ADR-0108）：對話 → 我已讀到的最新訊息時間（毫秒）。未出現＝未讀過任何訊息。
+   * 未讀數由此推導（`!outgoing && at > readAt` 的則數），不是記憶體計數器 → 重載後仍在。
+   */
+  loadReadAt(): Record<string, number>;
+  /** 推進某對話的已讀水位（ADR-0108）；**單調遞增**，倒退則忽略。 */
+  setReadAt(convoKey: string, at: number): void;
   loadReactions(): StoredReaction[];
   addReaction(reaction: StoredReaction): void;
   /** 標記某訊息為已收回（NIP-09）。 */
@@ -227,4 +234,12 @@ export interface StorageSnapshot {
   deleted: string[];
   groups: StoredGroup[];
   bootstrapList: StoredBootstrapList | null;
+  /**
+   * 已讀水位（ADR-0108）：對話 → 已讀到的最新訊息時間（毫秒）。
+   *
+   * 舊快照沒有這個欄位 → 匯入時須容忍 `undefined`（退回 `{}`）。
+   * 隨**配對搬家**（ADR-0072）一起搬到新裝置是刻意的；但它**不會**進雲端快照
+   * ——那用的是另一個型別（`CloudSnapshotContent`），已讀狀態不上中繼（ADR-0108 明確劃線）。
+   */
+  readAt?: Record<string, number>;
 }
