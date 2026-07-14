@@ -1,5 +1,11 @@
 import { AUTH_KIND, authChallengeOf, verifyEvent, type NostrEvent } from "@cinder/core";
 import { matchFilter } from "./filters.js";
+
+/**
+ * 單一 filter 的 `authors` 上限（ADR-0123）：擋掉「用 `authors: [十萬把金鑰]` 枚舉全站」。
+ * 1024 遠大於任何真實聯絡人清單／組織名冊，也遠小於枚舉所需。
+ */
+const MAX_AUTHORS = 1024;
 import { isAddressableKind, isReplaceableOrAddressable, type OfflineStore } from "./message-store.js";
 import {
   parseClientMessage,
@@ -204,8 +210,15 @@ export class RelayCore {
         if (this.requireAuth && !this.isAuthed(connId)) {
           return this.authRequired(connId, ["CLOSED", msg.subId, "auth-required: 請先認證（NIP-42）"]);
         }
-        if (this.requireAuth && !this.inboxAllowed(connId, msg.filters)) {
-          return [{ to: connId, message: ["CLOSED", msg.subId, "restricted: 只能訂閱自己的收件匣"] }];
+        if (this.requireAuth && !this.scoped(connId, msg.filters)) {
+          // 訊息要**說得出原因**（ADR-0123）：沉默的空回應會讓實作者以為「這個中繼沒有資料」，
+          // 然後跑去別的地方找 bug。
+          return [
+            {
+              to: connId,
+              message: ["CLOSED", msg.subId, "restricted: 訂閱必須指定 #p（自己）或 authors（ADR-0123）"],
+            },
+          ];
         }
         return this.handleReq(connId, msg.subId, msg.filters);
       case "CLOSE": {
@@ -243,12 +256,54 @@ export class RelayCore {
     return out;
   }
 
-  /** 帶 `#p` 的 filter：其所有 `#p` 值須等於認證 pubkey（只能查自己的收件匣，ADR-0057）。 */
-  private inboxAllowed(connId: string, filters: RelayFilter[]): boolean {
+  /**
+   * 訂閱必須**具名**（ADR-0123）：帶 `#p`（等於自己）或帶非空且有界的 `authors`。
+   *
+   * ## 修正前的缺口
+   *
+   * 舊版只檢查「有 `#p` 的 filter」：
+   *
+   * ```ts
+   * const pValues = filter["#p"];
+   * if (pValues && pValues.length > 0 && !pValues.every((v) => v === self)) return false;
+   * ```
+   *
+   * **`pValues` 是 undefined 就直接放行。** 於是 `{"kinds":[20000]}`——沒有 `#p`、沒有
+   * `authors`——完全合法，任何通過 AUTH 的人（隨手產一把金鑰就能通過）都能拿到**全站每一則
+   * 心跳**：每個在線者的 pubkey、狀態訊息、正在聽什麼（ADR-0088 F5 把音樂併進了心跳）。
+   *
+   * 那不是「洩漏某個人的元資料」，是把整個使用者名冊連同即時線上狀態做成一支**消防水管**
+   * ——攻擊者不需要事先知道任何 pubkey。`{"kinds":[1059]}` 同理：拿不到明文，但拿得到
+   * 全站的收件人 p-tag 與時間分布（流量分析的完美輸入）。
+   *
+   * ## 為什麼可以直接擋掉
+   *
+   * 合法客戶端**從不**送這種 filter——引擎的 9 個 filter 全部帶 `#p` 或 `authors`。
+   * 一個不會影響任何合法用法的限制，就該加上去。
+   *
+   * 「具名」的意思是：**你得先知道要問誰**。這不是完美的隱私（仍可訂閱任何已知 pubkey 的
+   * 心跳——那是 Nostr 廣播式 presence 的固有性質，見 ADR-0120/0123 的已知限制），
+   * 但它把攻擊從「一鍵拿到整個名冊」降級為「一次問一個你已經知道的人」。
+   */
+  private scoped(connId: string, filters: RelayFilter[]): boolean {
     const self = this.authState.get(connId)?.pubkey;
     for (const filter of filters) {
       const pValues = filter["#p"];
-      if (pValues && pValues.length > 0 && !pValues.every((v) => v === self)) return false;
+      if (pValues && pValues.length > 0) {
+        if (!pValues.every((v) => v === self)) return false; // 只能查自己的收件匣（ADR-0057）
+        continue;
+      }
+      const authors = filter.authors;
+      // 該擋的是 `authors` **不存在**（＝不過濾作者＝全站）。
+      //
+      // `authors: []` 是**合法且無害的**：`matchFilter` 的 `!filter.authors.includes(pubkey)`
+      // 對空陣列恆為真 → 匹配不到任何事件。而引擎在「還沒有任何聯絡人」時送出的正是它
+      //（心跳訂閱的 authors 就是聯絡人清單）。把它當成消防水管擋下來，會讓新使用者
+      //**整個 REQ 被拒 → 什麼都收不到**。
+      if (!authors) return false; // ← 消防水管
+      // 也不准用 `authors: [十萬把金鑰]` 繞過——那等價於枚舉全站。
+      // 1024 遠大於任何真實聯絡人清單／組織名冊。
+      if (authors.length > MAX_AUTHORS) return false;
     }
     return true;
   }

@@ -1,0 +1,10 @@
+{
+  "$comment": "bootstrap/ 的型別檢查（ADR-0123）。過去 `bootstrap/` 不在任何 tsconfig 的 include 裡 → tsc 從沒檢查過它。ADR-0119 因此漏掉 health-check.ts 的一個未定義變數（中繼清單一變動 cron 就當掉）。這些是 node 腳本（非 Worker），故不載入 workers-types。",
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["node"],
+    "lib": ["ES2022", "DOM"]
+  },
+  "include": ["bootstrap/**/*.ts"]
+}

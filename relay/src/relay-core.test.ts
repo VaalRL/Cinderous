@@ -273,12 +273,18 @@ describe("RelayCore — NIP-42 AUTH（ADR-0057）", () => {
     });
   });
 
-  it("正確 AUTH → 認證成功，之後（非 #p）REQ 通過", () => {
+  it("正確 AUTH → 認證成功，之後**具名的** REQ 通過（ADR-0123）", () => {
     const core = authCore();
     core.connect("c");
-    const authEv = buildAuthEvent("chal-1", "wss://r", generateSecretKey());
+    const sk = generateSecretKey();
+    const self = getPublicKey(sk);
+    const authEv = buildAuthEvent("chal-1", "wss://r", sk);
     expect(core.handle("c", AUTHMSG(authEv))).toEqual([{ to: "c", message: ["OK", authEv.id, true, ""] }]);
-    expect(core.handle("c", REQ("s", { kinds: [1] }))).toContainEqual({ to: "c", message: ["EOSE", "s"] });
+    // 舊版這裡是 `{ kinds: [1] }`——**沒有 scope 也通過**。那正是 ADR-0123 移除的行為。
+    expect(core.handle("c", REQ("s", { kinds: [1], authors: [self] }))).toContainEqual({
+      to: "c",
+      message: ["EOSE", "s"],
+    });
   });
 
   it("挑戰不符的 AUTH 被拒", () => {
@@ -302,7 +308,7 @@ describe("RelayCore — NIP-42 AUTH（ADR-0057）", () => {
     const other = getPublicKey(generateSecretKey());
     expect(core.handle("c", REQ("other", { kinds: [1059], "#p": [other] }))).toContainEqual({
       to: "c",
-      message: ["CLOSED", "other", "restricted: 只能訂閱自己的收件匣"],
+      message: ["CLOSED", "other", "restricted: 訂閱必須指定 #p（自己）或 authors（ADR-0123）"],
     });
   });
 
@@ -331,8 +337,11 @@ describe("RelayCore — 休眠狀態還原（ADR-0059）", () => {
     // 模擬休眠喚醒：全新 core，只 rehydrate（不重連、不重認證）
     const core2 = new RelayCore({ requireAuth: true, authChallenge: () => "c2" });
     core2.rehydrate(snap);
-    // 認證已還原：REQ 不被擋 → EOSE
-    expect(core2.handle("c", REQ("probe", { kinds: [1] }))).toContainEqual({ to: "c", message: ["EOSE", "probe"] });
+    // 認證已還原：具名的 REQ 不被擋 → EOSE（ADR-0123：無 scope 的 filter 一律拒絕）
+    expect(core2.handle("c", REQ("probe", { kinds: [1], authors: [self] }))).toContainEqual({
+      to: "c",
+      message: ["EOSE", "probe"],
+    });
     // 訂閱已還原：另一連線發 #p:[self] 的 1059 → 扇出給還原的 "c/inbox"
     core2.connect("pub");
     core2.handle("pub", AUTHMSG(buildAuthEvent("c2", "wss://r", generateSecretKey())));
@@ -483,5 +492,94 @@ describe("RelayCore — 可取代事件（NIP-01，ADR-0035）", () => {
     core.handle("sub", JSON.stringify(["REQ", "rl", { kinds: [10037] }]));
     const out = core.handle("pub", JSON.stringify(["EVENT", list(2000, "public")]));
     expect(out.some((o) => o.to === "sub" && o.message[0] === "EVENT")).toBe(true);
+  });
+});
+
+describe("訂閱必須具名（ADR-0123）", () => {
+  const AUTHMSG = (e: NostrEvent) => JSON.stringify(["AUTH", e]);
+  const authed = () => {
+    const core = new RelayCore({ store: new MessageStore(), requireAuth: true, authChallenge: () => "chal-1" });
+    core.connect("c");
+    const sk = generateSecretKey();
+    core.handle("c", AUTHMSG(buildAuthEvent("chal-1", "wss://r", sk)));
+    return { core, self: getPublicKey(sk) };
+  };
+  const closed = (out: { message: unknown[] }[]) => out.some((o) => o.message[0] === "CLOSED");
+
+  it("🔴 **`{kinds:[20000]}` 是一支消防水管**——全站心跳、狀態訊息、正在聽什麼，一次收割", () => {
+    const { core } = authed();
+    // 舊版：`inboxAllowed` 只檢查「有 #p 的 filter」→ `#p` 是 undefined 就直接放行。
+    // 攻擊者不需要事先知道任何 pubkey——這正是質變所在。
+    expect(closed(core.handle("c", REQ("firehose", { kinds: [20000] })))).toBe(true);
+  });
+
+  it("🔴 `{kinds:[1059]}`：拿不到明文，但拿得到全站收件人 p-tag ＋ 時間分布（流量分析）", () => {
+    const { core } = authed();
+    expect(closed(core.handle("c", REQ("ta", { kinds: [1059] })))).toBe(true);
+  });
+
+  it("完全空的 filter（要全部）也擋", () => {
+    const { core } = authed();
+    expect(closed(core.handle("c", REQ("all", {})))).toBe(true);
+  });
+
+  it("**一組 filter 裡只要有一個沒 scope，整個 REQ 就被拒**（不能夾帶）", () => {
+    const { core, self } = authed();
+    const out = core.handle("c", JSON.stringify(["REQ", "mix", { kinds: [1059], "#p": [self] }, { kinds: [20000] }]));
+    expect(closed(out)).toBe(true);
+  });
+
+  it("`authors: [十萬把金鑰]` 不能拿來繞過（上限 1024）", () => {
+    const { core } = authed();
+    const many = Array.from({ length: 1025 }, () => getPublicKey(generateSecretKey()));
+    expect(closed(core.handle("c", REQ("enum", { kinds: [20000], authors: many })))).toBe(true);
+  });
+
+  it("**合法客戶端零影響**——引擎實際送出的每一個 filter 都通過", () => {
+    const { core, self } = authed();
+    const me = [self];
+    const contacts = [getPublicKey(generateSecretKey()), getPublicKey(generateSecretKey())];
+    const out = core.handle(
+      "c",
+      JSON.stringify([
+        "REQ",
+        "all",
+        { kinds: [20000], authors: contacts }, // 心跳（我的聯絡人）
+        { kinds: [20001], "#p": me }, // typing
+        { kinds: [20100], "#p": me }, // nudge
+        { kinds: [1059], "#p": me }, // 收件匣
+        { kinds: [30078], authors: me }, // 雲端快照
+        { kinds: [21000], "#p": me }, // WebRTC 信令
+        { kinds: [21002], "#p": me }, // 通話信令
+        { kinds: [10037], authors: [getPublicKey(generateSecretKey())] }, // 維護者清單
+      ]),
+    );
+    expect(closed(out)).toBe(false);
+    expect(out).toContainEqual({ to: "c", message: ["EOSE", "all"] });
+  });
+
+  it("拒絕時**說得出原因**（沉默的空回應會讓人跑去別的地方找 bug）", () => {
+    const { core } = authed();
+    const out = core.handle("c", REQ("x", { kinds: [20000] }));
+    expect(String(out[0]?.message[2])).toContain("authors");
+  });
+});
+
+describe("ADR-0123 的邊界：`authors: []` 必須放行", () => {
+  it("🔴 **還沒有任何聯絡人的新使用者**——心跳訂閱的 authors 就是空的，不能把他整個 REQ 拒掉", () => {
+    const core = new RelayCore({ store: new MessageStore(), requireAuth: true, authChallenge: () => "chal-1" });
+    core.connect("c");
+    const sk = generateSecretKey();
+    const self = getPublicKey(sk);
+    core.handle("c", JSON.stringify(["AUTH", buildAuthEvent("chal-1", "wss://r", sk)]));
+
+    // `matchFilter` 的 `!filter.authors.includes(pk)` 對空陣列恆為真 → 匹配不到任何事件。
+    // 它**不是**消防水管；該擋的是 `authors` 不存在（＝不過濾作者＝全站）。
+    const out = core.handle(
+      "c",
+      JSON.stringify(["REQ", "boot", { kinds: [20000], authors: [] }, { kinds: [1059], "#p": [self] }]),
+    );
+    expect(out.some((o) => o.message[0] === "CLOSED")).toBe(false);
+    expect(out).toContainEqual({ to: "c", message: ["EOSE", "boot"] });
   });
 });
