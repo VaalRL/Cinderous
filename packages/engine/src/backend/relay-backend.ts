@@ -366,6 +366,16 @@ export class RelayChatBackend implements ChatBackend {
   /** 群訊扇出追蹤（ADR-0095）：每個 wrap 的 event id → 該群訊的送出狀態（多 wrap 共用一個 state）。 */
   private readonly fanout = new Map<string, { convo: string; messageId: string; pending: number; ok: boolean }>();
   /**
+   * 未讀數（ADR-0110）：對話 → 未讀則數。**增量維護**，不是每收一則訊息就重掃全部歷史。
+   *
+   * ADR-0108 的初版實作在每一則收訊時重算「所有對話的所有訊息」——在 LocalStorage 下
+   * 等於重新解析每個對話的完整歷史（實測 5 萬則的對話光載入就 47ms）。開機時全量算一次，
+   * 之後收訊 +1、清未讀歸零，皆為 O(1)。
+   */
+  private readonly unread = new Map<string, number>();
+  /** 每個對話最新一則**他人**訊息的時間（ADR-0110）：讓 `clearUnread` 免掃全對話即可推進水位。 */
+  private readonly lastIncomingAt = new Map<string, number>();
+  /**
    * 收件箱水位（ADR-0109 S4）：中繼 URL → 該座送過的最大外層 `created_at`（秒）。
    * 供重連時做增量抓取（`since`）。逐中繼——不同中繼的事件集合不同，共用全域水位會漏事件。
    * 只在記憶體：session 內重連走增量，App 重啟仍全量抓一次。
@@ -543,7 +553,9 @@ export class RelayChatBackend implements ChatBackend {
       handlers.onHistory?.(g.id, msgs.map(storedToChat));
     }
     this.emitBlocked();
-    this.emitUnread(); // ADR-0108：未讀由儲存推導 → 重新載入後徽章仍在
+    // ADR-0108：未讀由儲存推導 → 重新載入後徽章仍在。開機時全量重算一次（ADR-0110：僅此一次）。
+    this.recountAllUnread();
+    this.emitUnread();
   }
 
   /** 聯絡人某 relay hint 是否屬於外部 relay（非 home）。 */
@@ -1050,7 +1062,7 @@ export class RelayChatBackend implements ChatBackend {
           ...(selfCopy ? { status: "sent" as const } : {}),
         });
         if (selfCopy) this.applyPendingReceipts(rumor.id);
-        if (!selfCopy) this.emitUnread();
+        if (!selfCopy) this.bumpUnread(convo, msgTime(rumor)); // O(1)（ADR-0110）
       }
       if (!selfCopy) this.publishReliable(wrapReceipt("delivered", this.sk, sender, rumor.id));
       return;
@@ -1084,7 +1096,7 @@ export class RelayChatBackend implements ChatBackend {
       ...(status ? { status } : {}),
       ...extra,
     });
-    if (!selfCopy) this.emitUnread(); // 新收訊 → 未讀數由儲存重算（ADR-0108）
+    if (!selfCopy) this.bumpUnread(convo, message.at); // 未讀 +1（O(1)，ADR-0110）
     if (selfCopy) {
       this.applyPendingReceipts(rumor.id); // 回條若比自封副本先到，在此補套用（ADR-0107）
       return; // 不對自己回送已送達回條
@@ -1155,7 +1167,7 @@ export class RelayChatBackend implements ChatBackend {
     };
     this.storage.appendMessage({ ...body, contact: groupId });
     this.handlers?.onMessage(groupId, body);
-    if (!selfCopy) this.emitUnread(); // 新收訊 → 未讀數由儲存重算（ADR-0108）
+    if (!selfCopy) this.bumpUnread(groupId, body.at); // 未讀 +1（O(1)，ADR-0110）
     if (selfCopy) {
       this.applyPendingReceipts(id); // 其他成員的回條可能比自封副本先到
       return;
@@ -1580,7 +1592,9 @@ export class RelayChatBackend implements ChatBackend {
       const msgs = this.storage.loadMessages(convo);
       for (const m of msgs) this.seenMsg.add(m.id);
       this.handlers?.onHistory?.(convo, msgs.map(storedToChat));
+      this.recountUnread(convo); // 快照注入了訊息 → 該對話的未讀需重算（ADR-0110）
     }
+    if (convos.length > 0) this.emitUnread();
   }
 
   private snapshotThrottleKey(deviceId: string): string {
@@ -1697,9 +1711,11 @@ export class RelayChatBackend implements ChatBackend {
         this.deferReceipt(messageId, from, "read"); // 回條早於自封副本（ADR-0107）
         return;
       }
-      for (const m of msgs) {
-        if (!m.outgoing || m.at > target.at || m.status === "read") continue;
-        this.setMsgStatus(from, m.id, "read");
+      // 水位＝把時間不晚於目標的自己訊息全標為已讀。**一次批次**（ADR-0110）：
+      // 逐則呼叫時，持久化層每則都要重寫整個對話 → O(k×n)（實測 5 萬則歷史下凍結 3.5 秒）。
+      const ids = msgs.filter((m) => m.outgoing && m.at <= target.at && m.status !== "read").map((m) => m.id);
+      for (const id of this.storage.setMessageStatusBulk(from, ids, "read")) {
+        this.handlers?.onMessageStatus?.(from, id, "read");
       }
       return;
     }
@@ -1730,12 +1746,13 @@ export class RelayChatBackend implements ChatBackend {
       this.deferReceipt(messageId, from, type, groupId);
       return;
     }
-    for (const m of msgs) {
-      // 送達只標該則；已讀採水位（把不晚於目標的自己訊息一併標為此成員已讀）。
-      if (!m.outgoing) continue;
-      if (type === "delivered" ? m.id !== messageId : m.at > target.at) continue;
-      const receipts = this.storage.setMessageReceipt(groupId, m.id, from, type);
-      if (receipts) this.handlers?.onMessageReceipts?.(groupId, m.id, receipts);
+    // 送達只標該則；已讀採水位（把不晚於目標的自己訊息一併標為此成員已讀）。
+    // 同樣走批次（ADR-0110）——群組水位逐則寫回一樣是 O(k×n)。
+    const ids = msgs
+      .filter((m) => m.outgoing && (type === "delivered" ? m.id === messageId : m.at <= target.at))
+      .map((m) => m.id);
+    for (const [id, receipts] of this.storage.setMessageReceiptBulk(groupId, ids, from, type)) {
+      this.handlers?.onMessageReceipts?.(groupId, id, receipts);
     }
   }
 
@@ -1745,23 +1762,42 @@ export class RelayChatBackend implements ChatBackend {
    * 每人各一則指向「他最新那則」的水位回條；大群完全不送。
    */
   /**
-   * 未讀數（ADR-0108）：由**儲存推導**——每個對話中，時間晚於已讀水位的收訊則數。
-   * 不是記憶體計數器，所以重新載入後仍在（這正是本 ADR 的目的）。
+   * 從儲存重算某個對話的未讀數與最新收訊時間（ADR-0108/0110）。
+   *
+   * 這是 **O(該對話長度)**，所以**只在必要時**呼叫：開機、快照合併、對話變動。
+   * 收訊的熱路徑走 {@link bumpUnread}（O(1)）——原本每收一則訊息就重掃**所有對話的所有訊息**
+   * （ADR-0108 的實作缺陷），在 LocalStorage 下等於重新解析每個對話的完整歷史。
    */
-  private unreadCounts(): Record<string, number> {
-    const readAt = this.storage.loadReadAt();
-    const counts: Record<string, number> = {};
-    const convos = [...this.contacts.map((c) => c.pubkey), ...this.groups.map((g) => g.id)];
-    for (const convo of convos) {
-      const mark = readAt[convo] ?? 0;
-      const n = this.storage.loadMessages(convo).filter((m) => !m.outgoing && m.at > mark).length;
-      if (n > 0) counts[convo] = n;
+  private recountUnread(convo: string): void {
+    const mark = this.storage.loadReadAt()[convo] ?? 0;
+    let unread = 0;
+    let latest = 0;
+    for (const m of this.storage.loadMessages(convo)) {
+      if (m.outgoing) continue;
+      if (m.at > latest) latest = m.at;
+      if (m.at > mark) unread += 1;
     }
-    return counts;
+    this.lastIncomingAt.set(convo, latest);
+    if (unread > 0) this.unread.set(convo, unread);
+    else this.unread.delete(convo);
+  }
+
+  /** 全量重算（僅開機與快照合併後）。 */
+  private recountAllUnread(): void {
+    for (const c of this.contacts) this.recountUnread(c.pubkey);
+    for (const g of this.groups) this.recountUnread(g.id);
+  }
+
+  /** 收到一則他人訊息：未讀 +1、推進最新收訊時間（O(1)，ADR-0110）。 */
+  private bumpUnread(convo: string, at: number): void {
+    if (at > (this.lastIncomingAt.get(convo) ?? 0)) this.lastIncomingAt.set(convo, at);
+    if (at <= (this.storage.loadReadAt()[convo] ?? 0)) return; // 晚到的舊訊息：水位之下＝已讀
+    this.unread.set(convo, (this.unread.get(convo) ?? 0) + 1);
+    this.emitUnread();
   }
 
   private emitUnread(): void {
-    this.handlers?.onUnread?.(this.unreadCounts());
+    this.handlers?.onUnread?.(Object.fromEntries(this.unread));
   }
 
   /**
@@ -1772,11 +1808,11 @@ export class RelayChatBackend implements ChatBackend {
    * 若把水位掛在 `markRead()` 上，大多數使用者（回條關閉）的未讀狀態就永遠不會被保存。
    */
   clearUnread(convo: string): void {
-    const msgs = this.storage.loadMessages(convo);
-    let latest = 0;
-    for (const m of msgs) if (!m.outgoing && m.at > latest) latest = m.at;
+    const latest = this.lastIncomingAt.get(convo) ?? 0; // 增量維護（ADR-0110）→ 免掃全對話
     if (latest === 0) return; // 無收訊 → 沒有水位可推進
     this.storage.setReadAt(convo, latest); // 單調遞增，倒退忽略
+    if (!this.unread.has(convo)) return;
+    this.unread.delete(convo);
     this.emitUnread();
   }
 

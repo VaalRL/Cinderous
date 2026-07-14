@@ -114,13 +114,108 @@ fn store_load(app: tauri::AppHandle, namespace: String) -> Result<Option<String>
     String::from_utf8(plain).map(Some).map_err(|e| e.to_string())
 }
 
-/// 加密並寫入某命名空間的狀態快照（JSON）。
+/// 加密並寫入某命名空間的狀態快照（JSON）。**僅供舊格式遷移**；日常寫入走 `store_save_part`。
 #[tauri::command]
 fn store_save(app: tauri::AppHandle, namespace: String, json: String) -> Result<(), String> {
     let path = store_path(&app, &namespace)?;
     let key = db_key(&namespace)?;
     let ciphertext = encstore::encrypt(&key, json.as_bytes()).map_err(|e| e.to_string())?;
     std::fs::write(&path, ciphertext).map_err(|e| e.to_string())
+}
+
+// ── 分部位持久化（ADR-0110）──────────────────────────────────────────────
+//
+// 舊做法把**整個**儲存序列化＋加密＋寫檔，每 250ms 一次。成本是 O(總量)：實測 10 萬則
+// 訊息＝每次 35ms 序列化 ＋ ~10MB 加密 ＋ ~10MB 寫檔——**只因為改了一則訊息的狀態**。
+//
+// 改為逐部位：`meta`（身分/聯絡人/群組…）與每個對話各一個檔，只重寫**變動的**部位。
+// 成本降為 O(該對話)，與總歷史長度無關。
+
+/// 部位檔名白名單：對話鍵是 pubkey hex 或群組 id（皆為 hex），不該出現路徑字元。
+/// 拒絕其餘輸入以杜絕路徑穿越（`..`、`/`、`\`）。
+fn valid_part(part: &str) -> bool {
+    !part.is_empty()
+        && part.len() <= 128
+        && part
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-' || c == '_')
+        && !part.contains("..")
+}
+
+/// 某命名空間的部位目錄：`<app_data>/store/<namespace|legacy>/`。
+fn part_dir(app: &tauri::AppHandle, namespace: &str) -> Result<std::path::PathBuf, String> {
+    let name = if namespace.is_empty() { "legacy" } else { namespace };
+    if !valid_part(name) {
+        return Err("非法 namespace".into());
+    }
+    let dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| e.to_string())?
+        .join("store")
+        .join(name);
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir)
+}
+
+/// 載入某命名空間的所有部位（part → 解密後的 JSON）。無目錄/無檔案回空表。
+#[tauri::command]
+fn store_load_parts(
+    app: tauri::AppHandle,
+    namespace: String,
+) -> Result<std::collections::HashMap<String, String>, String> {
+    let dir = part_dir(&app, &namespace)?;
+    let key = db_key(&namespace)?;
+    let mut out = std::collections::HashMap::new();
+    let entries = match std::fs::read_dir(&dir) {
+        Ok(e) => e,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(out),
+        Err(e) => return Err(e.to_string()),
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("enc") {
+            continue;
+        }
+        let Some(part) = path.file_stem().and_then(|s| s.to_str()) else { continue };
+        let data = std::fs::read(&path).map_err(|e| e.to_string())?;
+        // 單一部位毀損不該讓整個載入失敗（其餘部位仍可用）。
+        let Ok(plain) = encstore::decrypt(&key, &data) else { continue };
+        let Ok(json) = String::from_utf8(plain) else { continue };
+        out.insert(part.to_string(), json);
+    }
+    Ok(out)
+}
+
+/// 加密並寫入單一部位。
+#[tauri::command]
+fn store_save_part(
+    app: tauri::AppHandle,
+    namespace: String,
+    part: String,
+    json: String,
+) -> Result<(), String> {
+    if !valid_part(&part) {
+        return Err("非法部位名".into());
+    }
+    let dir = part_dir(&app, &namespace)?;
+    let key = db_key(&namespace)?;
+    let ciphertext = encstore::encrypt(&key, json.as_bytes()).map_err(|e| e.to_string())?;
+    std::fs::write(dir.join(format!("{part}.enc")), ciphertext).map_err(|e| e.to_string())
+}
+
+/// 刪除單一部位（對話被移除時）。不存在視為成功。
+#[tauri::command]
+fn store_remove_part(app: tauri::AppHandle, namespace: String, part: String) -> Result<(), String> {
+    if !valid_part(&part) {
+        return Err("非法部位名".into());
+    }
+    let path = part_dir(&app, &namespace)?.join(format!("{part}.enc"));
+    match std::fs::remove_file(&path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e.to_string()),
+    }
 }
 
 // ── H4 本地密碼 IPC（ADR-0067）：Argon2id KEK 包裹 nsec＋db 金鑰，取代金鑰庫明文條目 ──
@@ -562,6 +657,9 @@ fn main() {
             key_get,
             key_delete,
             store_load,
+            store_load_parts,
+            store_save_part,
+            store_remove_part,
             store_save,
             pass_status,
             pass_enable,

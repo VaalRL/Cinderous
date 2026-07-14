@@ -13,11 +13,24 @@ import {
   type StoredReaction,
 } from "./types.js";
 
+/**
+ * 一個對話的訊息（ADR-0110）：陣列（保序）＋ id→訊息的索引。
+ *
+ * 索引不是最佳化裝飾，是**必要**的：沒有它，`appendMessage` 的去重與
+ * `setMessageStatus`／`setFileThumb`／`setMessageReceipt` 的查找全都是 O(n) 線性掃描
+ * ——而它們都在收訊/回條的熱路徑上。實測 5 萬則的對話下，光是建置歷史就會退化成 O(n²)
+ * （跑到逾時）。兩者共用同一個訊息物件參考，就地改狀態即可，不需同步兩份資料。
+ */
+interface Convo {
+  list: StoredMessage[];
+  byId: Map<string, StoredMessage>;
+}
+
 /** 記憶體儲存（測試用；不持久）。 */
 export class MemoryStorage implements AppStorage {
   private identity: StoredIdentity | null = null;
   private contacts: StoredContact[] = [];
-  private readonly messages = new Map<string, StoredMessage[]>();
+  private readonly convos = new Map<string, Convo>();
   private reactions: StoredReaction[] = [];
   private readonly deleted = new Set<string>();
   private blocked: StoredContact[] = [];
@@ -34,7 +47,23 @@ export class MemoryStorage implements AppStorage {
   /** 每對話保留上限（ADR-0094）：`0`＝無上限。變更後即時對所有對話套用逐出。 */
   setMaxPerConvo(max: number): void {
     this.maxPerConvo = Math.max(0, Math.floor(max));
-    if (this.maxPerConvo > 0) for (const list of this.messages.values()) this.cap(list);
+    if (this.maxPerConvo > 0) for (const convo of this.convos.values()) this.cap(convo);
+  }
+
+  /** 取得（或建立）某對話的訊息容器。 */
+  private convo(key: string): Convo {
+    let c = this.convos.get(key);
+    if (!c) {
+      c = { list: [], byId: new Map() };
+      this.convos.set(key, c);
+    }
+    return c;
+  }
+
+  /** 由 list 重建 byId（僅在整批替換 list 後呼叫）。 */
+  private reindex(convo: Convo): void {
+    convo.byId.clear();
+    for (const m of convo.list) convo.byId.set(m.id, m);
   }
 
   loadReadAt(): Record<string, number> {
@@ -46,10 +75,11 @@ export class MemoryStorage implements AppStorage {
     if (at > (this.readAt.get(convoKey) ?? 0)) this.readAt.set(convoKey, at);
   }
 
-  /** 依上限逐出最舊（`0`＝無上限、不動）。 */
-  private cap(list: StoredMessage[]): void {
-    if (this.maxPerConvo > 0 && list.length > this.maxPerConvo) {
-      list.splice(0, list.length - this.maxPerConvo);
+  /** 依上限逐出最舊（`0`＝無上限、不動）；索引同步移除，否則會留下指向已逐出訊息的幽靈條目。 */
+  private cap(convo: Convo): void {
+    if (this.maxPerConvo > 0 && convo.list.length > this.maxPerConvo) {
+      const evicted = convo.list.splice(0, convo.list.length - this.maxPerConvo);
+      for (const m of evicted) convo.byId.delete(m.id);
     }
   }
 
@@ -77,9 +107,9 @@ export class MemoryStorage implements AppStorage {
     this.contacts = this.contacts.map((c) => (c.pubkey === pubkey ? { ...c, name } : c));
   }
   removeContact(pubkey: string): void {
-    const ids = new Set((this.messages.get(pubkey) ?? []).map((m) => m.id));
+    const ids = new Set(this.convos.get(pubkey)?.byId.keys() ?? []);
     this.contacts = this.contacts.filter((c) => c.pubkey !== pubkey);
-    this.messages.delete(pubkey);
+    this.convos.delete(pubkey);
     this.pruneOrphans(ids); // 審查 P1-5
   }
   private pruneOrphans(messageIds: Set<string>): void {
@@ -89,30 +119,22 @@ export class MemoryStorage implements AppStorage {
   }
   remapContact(from: string, to: string): void {
     if (from === to) return;
-    const moved = (this.messages.get(from) ?? []).map((m) => ({ ...m, contact: to }));
+    const moved = (this.convos.get(from)?.list ?? []).map((m) => ({ ...m, contact: to }));
     if (moved.length > 0) {
-      const dest = this.messages.get(to) ?? [];
-      const seen = new Set(dest.map((m) => m.id));
-      for (const m of moved) if (!seen.has(m.id)) dest.push(m);
-      dest.sort((a, b) => a.at - b.at);
+      const dest = this.convo(to);
+      for (const m of moved) if (!dest.byId.has(m.id)) dest.list.push(m);
+      dest.list.sort((a, b) => a.at - b.at);
+      this.reindex(dest);
       this.cap(dest);
-      this.messages.set(to, dest);
     }
-    this.messages.delete(from);
+    this.convos.delete(from);
     this.groups = this.groups.map((g) =>
       g.members.includes(from) ? { ...g, members: [...new Set(g.members.map((p) => (p === from ? to : p)))] } : g,
     );
     // 群訊發送者標籤 remap（ADR-0052）：群組歷史中舊 npub 的 sender 改寫為新 npub。
+    // 就地改寫（同一份物件也在 byId 裡），索引無須重建。
     for (const g of this.groups) {
-      const list = this.messages.get(g.id);
-      if (!list) continue;
-      let changed = false;
-      const rewritten = list.map((m) => {
-        if (m.sender !== from) return m;
-        changed = true;
-        return { ...m, sender: to };
-      });
-      if (changed) this.messages.set(g.id, rewritten);
+      for (const m of this.convos.get(g.id)?.list ?? []) if (m.sender === from) m.sender = to;
     }
     this.contacts = this.contacts.filter((c) => c.pubkey !== from);
   }
@@ -127,29 +149,49 @@ export class MemoryStorage implements AppStorage {
     return [...this.blocked];
   }
   loadMessages(contactPubkey: string): StoredMessage[] {
-    return [...(this.messages.get(contactPubkey) ?? [])];
+    return [...(this.convos.get(contactPubkey)?.list ?? [])];
   }
   appendMessage(message: StoredMessage): void {
-    const list = this.messages.get(message.contact) ?? [];
-    if (list.some((m) => m.id === message.id)) return;
-    list.push(message);
-    this.cap(list); // ADR-0094：有限模式逐出最舊；預設無上限不動
-    this.messages.set(message.contact, list);
+    const convo = this.convo(message.contact);
+    if (convo.byId.has(message.id)) return; // O(1) 去重（ADR-0110；原為 O(n) 線性掃描）
+    convo.list.push(message);
+    convo.byId.set(message.id, message);
+    this.cap(convo); // ADR-0094：有限模式逐出最舊；預設無上限不動
   }
   setMessageStatus(contactPubkey: string, messageId: string, status: MessageStatus): void {
-    const msg = this.messages.get(contactPubkey)?.find((m) => m.id === messageId);
+    const msg = this.convos.get(contactPubkey)?.byId.get(messageId); // O(1)（ADR-0110）
     if (!msg) return;
     if (MESSAGE_STATUS_RANK[status] <= MESSAGE_STATUS_RANK[msg.status ?? "sending"]) return; // 只前進
     msg.status = status;
   }
+  /**
+   * 批次推進多則訊息的狀態（ADR-0110）：**一次**呼叫涵蓋整個已讀水位。
+   *
+   * 過去已讀回條會對每一則未讀訊息各呼叫一次 `setMessageStatus`，而在持久化的儲存層裡
+   * 每一次都是「載入整個對話 → 改一則 → 寫回整個對話」→ **O(k×n)**。
+   * 實測 5 萬則歷史、50 則水位 = **3.5 秒主執行緒凍結**。回傳實際有前進的 id。
+   */
+  setMessageStatusBulk(contactPubkey: string, messageIds: string[], status: MessageStatus): string[] {
+    const convo = this.convos.get(contactPubkey);
+    if (!convo) return [];
+    const changed: string[] = [];
+    for (const id of messageIds) {
+      const msg = convo.byId.get(id);
+      if (!msg) continue;
+      if (MESSAGE_STATUS_RANK[status] <= MESSAGE_STATUS_RANK[msg.status ?? "sending"]) continue;
+      msg.status = status;
+      changed.push(id);
+    }
+    return changed;
+  }
   setFileSavedPath(contactPubkey: string, messageId: string, savedPath: string): void {
-    const msg = this.messages.get(contactPubkey)?.find((m) => m.id === messageId);
+    const msg = this.convos.get(contactPubkey)?.byId.get(messageId);
     if (!msg?.file) return;
     msg.file = { ...msg.file, savedPath };
   }
   setFileThumb(contactPubkey: string, messageId: string, thumb: string): void {
     if (thumb.length > THUMB_MAX_BYTES) return; // 超上限寧可不存（不讓儲存膨脹）
-    const msg = this.messages.get(contactPubkey)?.find((m) => m.id === messageId);
+    const msg = this.convos.get(contactPubkey)?.byId.get(messageId);
     if (!msg?.file) return;
     msg.file = { ...msg.file, thumb };
   }
@@ -159,12 +201,31 @@ export class MemoryStorage implements AppStorage {
     member: string,
     type: "delivered" | "read",
   ): Record<string, "delivered" | "read"> | undefined {
-    const msg = this.messages.get(convoKey)?.find((m) => m.id === messageId);
+    const msg = this.convos.get(convoKey)?.byId.get(messageId);
     if (!msg) return undefined;
     const next = advanceReceipt(msg.receipts, member, type);
     if (!next) return undefined;
     msg.receipts = next;
     return { ...next };
+  }
+  setMessageReceiptBulk(
+    convoKey: string,
+    messageIds: string[],
+    member: string,
+    type: "delivered" | "read",
+  ): Map<string, Record<string, "delivered" | "read">> {
+    const convo = this.convos.get(convoKey);
+    const out = new Map<string, Record<string, "delivered" | "read">>();
+    if (!convo) return out;
+    for (const id of messageIds) {
+      const msg = convo.byId.get(id);
+      if (!msg) continue;
+      const next = advanceReceipt(msg.receipts, member, type);
+      if (!next) continue;
+      msg.receipts = next;
+      out.set(id, { ...next });
+    }
+    return out;
   }
   loadReactions(): StoredReaction[] {
     return [...this.reactions];
@@ -188,9 +249,9 @@ export class MemoryStorage implements AppStorage {
     else this.groups.push(group);
   }
   removeGroup(id: string): void {
-    const ids = new Set((this.messages.get(id) ?? []).map((m) => m.id));
+    const ids = new Set(this.convos.get(id)?.byId.keys() ?? []);
     this.groups = this.groups.filter((g) => g.id !== id);
-    this.messages.delete(id);
+    this.convos.delete(id);
     this.pruneOrphans(ids); // 審查 P1-5
   }
   private bootstrapList: StoredBootstrapList | null = null;
@@ -204,7 +265,7 @@ export class MemoryStorage implements AppStorage {
   /** 匯出整包狀態快照（B2 加密儲存，ADR-0054）；深拷貝以免外部改動內部。 */
   exportSnapshot(): StorageSnapshot {
     const messages: Record<string, StoredMessage[]> = {};
-    for (const [k, v] of this.messages) messages[k] = [...v];
+    for (const [k, v] of this.convos) messages[k] = [...v.list];
     return {
       identity: this.identity,
       contacts: [...this.contacts],
@@ -223,8 +284,15 @@ export class MemoryStorage implements AppStorage {
     this.identity = s.identity;
     this.contacts = [...s.contacts];
     this.blocked = [...s.blocked];
-    this.messages.clear();
-    for (const [k, v] of Object.entries(s.messages)) this.messages.set(k, [...v]);
+    this.convos.clear();
+    for (const [k, v] of Object.entries(s.messages)) {
+      // 匯入即建索引（ADR-0110）：一次 O(n) 建好，之後所有查找 O(1)。
+      // 過去是逐則 appendMessage（每則 O(n) 去重）→ 整批匯入退化成 **O(n²)**：
+      // 實測 10 萬則跑到逾時（>2 分鐘）。配對搬家還原/快照合併都走這條路。
+      const convo: Convo = { list: [...v], byId: new Map() };
+      for (const m of convo.list) convo.byId.set(m.id, m);
+      this.convos.set(k, convo);
+    }
     this.reactions = [...s.reactions];
     this.deleted.clear();
     for (const id of s.deleted) this.deleted.add(id);

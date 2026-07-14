@@ -160,3 +160,44 @@ describe("已讀水位（ADR-0108）", () => {
     expect(s.loadReadAt()).toEqual({});
   });
 });
+
+describe("批次狀態/回條（ADR-0110）", () => {
+  const msg = (id: string, outgoing: boolean, at: number) => ({ id, contact: "bob", outgoing, text: id, at });
+
+  it("setMessageStatusBulk 只前進、回傳實際有變的 id", () => {
+    const s = new MemoryStorage();
+    s.appendMessage({ ...msg("a", true, 1), status: "sent" as const });
+    s.appendMessage({ ...msg("b", true, 2), status: "read" as const }); // 已是 read → 不倒退
+    s.appendMessage(msg("c", true, 3)); // 無狀態（sending）
+    const changed = s.setMessageStatusBulk("bob", ["a", "b", "c", "不存在"], "read");
+    expect(changed.sort()).toEqual(["a", "c"]);
+    expect(s.loadMessages("bob").map((m) => m.status)).toEqual(["read", "read", "read"]);
+  });
+
+  it("setMessageReceiptBulk 逐成員累積，回傳有更新者的完整回條表", () => {
+    const s = new MemoryStorage();
+    s.appendMessage({ ...msg("a", true, 1), contact: "g1" });
+    s.appendMessage({ ...msg("b", true, 2), contact: "g1" });
+    const out = s.setMessageReceiptBulk("g1", ["a", "b"], "carol", "delivered");
+    expect(out.get("a")).toEqual({ carol: "delivered" });
+    // 同一則再升級為 read（只前進）
+    const up = s.setMessageReceiptBulk("g1", ["a"], "carol", "read");
+    expect(up.get("a")).toEqual({ carol: "read" });
+    // 已是 read → 不再回報變更
+    expect(s.setMessageReceiptBulk("g1", ["a"], "carol", "delivered").size).toBe(0);
+  });
+
+  it("逐出（保留上限）必須同步清掉 id 索引——否則會留下指向已逐出訊息的幽靈", () => {
+    const s = new MemoryStorage(2);
+    s.appendMessage(msg("a", false, 1));
+    s.appendMessage(msg("b", false, 2));
+    s.appendMessage(msg("c", false, 3)); // a 被逐出
+    expect(s.loadMessages("bob").map((m) => m.id)).toEqual(["b", "c"]);
+    // 索引若沒清，setMessageStatus("a") 會改到一個已不在 list 裡的物件（靜默無效）
+    s.setMessageStatus("bob", "a", "read");
+    expect(s.loadMessages("bob").some((m) => m.id === "a")).toBe(false);
+    // 且被逐出的 id 可以重新加入（索引沒殘留就不會被誤判為重複）
+    s.appendMessage(msg("a", false, 4));
+    expect(s.loadMessages("bob").map((m) => m.id)).toEqual(["c", "a"]);
+  });
+});

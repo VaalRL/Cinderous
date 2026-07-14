@@ -173,6 +173,14 @@ export interface AppStorage {
   appendMessage(message: StoredMessage): void;
   /** 只往前推進某訊息的送達/已讀狀態（ADR-0058）；訊息不存在或狀態不前進則忽略。 */
   setMessageStatus(contactPubkey: string, messageId: string, status: MessageStatus): void;
+  /**
+   * 批次推進多則訊息的狀態（ADR-0110）：整個已讀水位**一次**完成，回傳實際有前進的 id。
+   *
+   * 已讀回條會把「時間不晚於目標」的自己訊息全標為已讀。逐則呼叫 `setMessageStatus` 時，
+   * 持久化的儲存層每一次都要「載入整個對話 → 改一則 → 寫回整個對話」→ **O(k×n)**。
+   * 實測 5 萬則歷史、50 則水位＝**3.5 秒主執行緒凍結**。
+   */
+  setMessageStatusBulk(contactPubkey: string, messageIds: string[], status: MessageStatus): string[];
   /** 記錄某檔案訊息收檔後的本機儲存路徑（ADR-0093）；訊息不存在或無 file 則忽略。 */
   setFileSavedPath(contactPubkey: string, messageId: string, savedPath: string): void;
   /** 記錄某圖片訊息的縮圖 data URL（ADR-0102）；超過上限或訊息不存在則忽略。 */
@@ -187,6 +195,17 @@ export interface AppStorage {
     member: string,
     type: "delivered" | "read",
   ): Record<string, "delivered" | "read"> | undefined;
+  /**
+   * 批次記錄多則群訊對某成員的回條（ADR-0110）：群組**已讀水位**一次完成。
+   * 與 {@link setMessageStatusBulk} 同理——逐則呼叫在持久化層是 O(k×n)。
+   * 回傳有更新者的 `id → 完整回條表`（供 UI 立即渲染）。
+   */
+  setMessageReceiptBulk(
+    convoKey: string,
+    messageIds: string[],
+    member: string,
+    type: "delivered" | "read",
+  ): Map<string, Record<string, "delivered" | "read">>;
   /** 設定每對話保留上限（ADR-0094）；`0`＝無上限。變更後即時對既有對話套用逐出。 */
   setMaxPerConvo(max: number): void;
   /**

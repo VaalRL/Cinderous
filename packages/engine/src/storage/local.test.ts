@@ -1,0 +1,79 @@
+import { beforeEach, describe, expect, it } from "vitest";
+import { LocalStorage } from "./local.js";
+
+/** 最小 localStorage 替身（含 `length`/`key(i)`，供 LocalStorage 掃描對話鍵）。 */
+const backing = new Map<string, string>();
+beforeEach(() => {
+  backing.clear();
+  (globalThis as { localStorage?: unknown }).localStorage = {
+    get length() {
+      return backing.size;
+    },
+    key: (i: number) => [...backing.keys()][i] ?? null,
+    getItem: (k: string) => backing.get(k) ?? null,
+    setItem: (k: string, v: string) => void backing.set(k, v),
+    removeItem: (k: string) => void backing.delete(k),
+  };
+});
+
+const msg = (id: string, at: number, outgoing = false) => ({ id, contact: "bob", outgoing, text: id, at });
+
+describe("LocalStorage（ADR-0110：狀態常駐記憶體 + 逐鍵寫回）", () => {
+  it("寫入落地 localStorage，且新實例（＝重新開機）讀得回來", () => {
+    const a = new LocalStorage("ns");
+    a.addContact({ pubkey: "bob", name: "Bob" });
+    a.appendMessage(msg("m1", 100));
+    a.setReadAt("bob", 100);
+
+    const b = new LocalStorage("ns"); // 重新開機
+    expect(b.loadContacts().map((c) => c.pubkey)).toEqual(["bob"]);
+    expect(b.loadMessages("bob").map((m) => m.id)).toEqual(["m1"]);
+    expect(b.loadReadAt()["bob"]).toBe(100);
+  });
+
+  it("開機時掃描既有的對話鍵——即使聯絡人清單為空也不會漏讀訊息", () => {
+    backing.set("nb.ns.msgs.bob", JSON.stringify([msg("m1", 1), msg("m2", 2)]));
+    const s = new LocalStorage("ns");
+    expect(s.loadMessages("bob").map((m) => m.id)).toEqual(["m1", "m2"]);
+  });
+
+  it("去重：同 id 重複 append 不會產生第二則", () => {
+    const s = new LocalStorage("ns");
+    s.appendMessage(msg("m1", 1));
+    s.appendMessage(msg("m1", 1));
+    expect(s.loadMessages("bob")).toHaveLength(1);
+  });
+
+  it("批次已讀水位：一次改完，且結果落地", () => {
+    const s = new LocalStorage("ns");
+    s.appendMessage({ ...msg("a", 1, true), status: "sent" as const });
+    s.appendMessage({ ...msg("b", 2, true), status: "sent" as const });
+    expect(s.setMessageStatusBulk("bob", ["a", "b"], "read").sort()).toEqual(["a", "b"]);
+    expect(new LocalStorage("ns").loadMessages("bob").map((m) => m.status)).toEqual(["read", "read"]);
+  });
+
+  it("保留上限（ADR-0094）：逐出結果必須落地，否則重載後又冒出來", () => {
+    const s = new LocalStorage("ns");
+    s.appendMessage(msg("a", 1));
+    s.appendMessage(msg("b", 2));
+    s.appendMessage(msg("c", 3));
+    s.setMaxPerConvo(2);
+    expect(new LocalStorage("ns").loadMessages("bob").map((m) => m.id)).toEqual(["b", "c"]);
+  });
+
+  it("移除聯絡人：連同其訊息鍵一起清掉（不留孤兒）", () => {
+    const s = new LocalStorage("ns");
+    s.addContact({ pubkey: "bob", name: "Bob" });
+    s.appendMessage(msg("m1", 1));
+    s.addReaction({ id: "r1", messageId: "m1", emoji: "👍", mine: true });
+    s.removeContact("bob");
+    expect(backing.has("nb.ns.msgs.bob")).toBe(false);
+    expect(new LocalStorage("ns").loadReactions()).toEqual([]); // 孤兒 reaction 一併清除
+  });
+
+  it("命名空間隔離：不同身分互不看見對方的訊息（ADR-0045）", () => {
+    const a = new LocalStorage("alice");
+    a.appendMessage(msg("m1", 1));
+    expect(new LocalStorage("carol").loadMessages("bob")).toEqual([]);
+  });
+});

@@ -1,15 +1,14 @@
-import {
-  advanceReceipt,
-  type AppStorage,
-  THUMB_MAX_BYTES,
-  MESSAGE_STATUS_RANK,
-  type MessageStatus,
-  type StoredBootstrapList,
-  type StoredContact,
-  type StoredGroup,
-  type StoredIdentity,
-  type StoredMessage,
-  type StoredReaction,
+import { MemoryStorage } from "./memory.js";
+import type {
+  AppStorage,
+  MessageStatus,
+  StorageSnapshot,
+  StoredBootstrapList,
+  StoredContact,
+  StoredGroup,
+  StoredIdentity,
+  StoredMessage,
+  StoredReaction,
 } from "./types.js";
 
 /** localStorage 配額已滿的回呼（ADR-0094）：讓 UI 能在無上限保留撞到配額時提醒使用者。 */
@@ -38,170 +37,165 @@ function write(key: string, value: unknown): void {
   }
 }
 
+const MSGS = "msgs.";
+
 /**
  * localStorage 儲存。身分/聯絡人/訊息以 JSON 存放。
  *
  * 多身分（ADR-0045）：以 `namespace`（通常為 pubkey）隔離各身分資料。
  * 空 namespace＝既有單一身分的舊鍵（`nb.<suffix>`，向後相容）；
  * 具名 namespace＝`nb.<namespace>.<suffix>`，各身分互不交雜。
- * 之後 Tauri 版以相同 {@link AppStorage} 介面換成原生 SQLite。
+ *
+ * **狀態常駐記憶體（ADR-0110）**：委派 {@link MemoryStorage}（其每對話持有 id 索引），
+ * 變更後只把**受影響的鍵**寫回 localStorage。
+ *
+ * 過去每個方法都「`JSON.parse` 整個對話 → 改一則 → `JSON.stringify` 寫回」：
+ * 實測 5 萬則的對話下，**收一則訊息要 47ms**、單則狀態更新 53ms，全部同步阻塞主執行緒。
+ * 現在讀取零解析、查找 O(1)，只剩寫回時的一次序列化。
  */
 export class LocalStorage implements AppStorage {
-  private readonly prefix: string;
-  /** 每對話持久化上限（ADR-0094）；`0`＝無上限（預設，不逐出）。 */
-  private maxPerConvo: number;
-  constructor(namespace = "", maxPerConvo = 0) {
-    this.prefix = namespace ? `nb.${namespace}.` : "nb.";
-    this.maxPerConvo = Math.max(0, Math.floor(maxPerConvo));
-  }
-  private k(suffix: string): string {
-    return this.prefix + suffix;
+  private readonly mem: MemoryStorage;
+
+  constructor(
+    private readonly namespace = "",
+    /** 每對話保留上限（ADR-0094）；`0`＝無上限（預設）。 */
+    maxPerConvo = 0,
+  ) {
+    this.mem = new MemoryStorage(maxPerConvo);
+    this.mem.importSnapshot(this.readSnapshot());
   }
 
-  /** 每對話保留上限（ADR-0094）：`0`＝無上限。變更後即時對所有對話套用逐出。 */
-  setMaxPerConvo(max: number): void {
-    this.maxPerConvo = Math.max(0, Math.floor(max));
-    if (this.maxPerConvo <= 0) return;
-    for (const c of this.loadContacts()) this.capKey("msgs." + c.pubkey);
-    for (const g of this.loadGroups()) this.capKey("msgs." + g.id);
+  private k(suffix: string): string {
+    return this.namespace ? `nb.${this.namespace}.${suffix}` : `nb.${suffix}`;
   }
-  /** 依上限逐出某對話最舊並寫回（僅在有限模式且確實超量時寫）。 */
-  private capKey(suffix: string): void {
-    const list = read<StoredMessage[]>(this.k(suffix), []);
-    if (this.maxPerConvo > 0 && list.length > this.maxPerConvo) {
-      list.splice(0, list.length - this.maxPerConvo);
-      write(this.k(suffix), list);
+
+  /** 本命名空間下所有已存在的對話鍵（掃 localStorage；不可靠時退回聯絡人＋群組）。 */
+  private convoKeys(contacts: StoredContact[], groups: StoredGroup[]): string[] {
+    const prefix = this.k(MSGS);
+    try {
+      const keys: string[] = [];
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        if (key?.startsWith(prefix)) keys.push(key.slice(prefix.length));
+      }
+      return keys;
+    } catch {
+      return [...contacts.map((c) => c.pubkey), ...groups.map((g) => g.id)];
     }
   }
-  /** 依上限逐出最舊（`0`＝無上限、不動）。 */
-  private cap(list: StoredMessage[]): void {
-    if (this.maxPerConvo > 0 && list.length > this.maxPerConvo) {
-      list.splice(0, list.length - this.maxPerConvo);
+
+  /** 開機一次：把 localStorage 的全部狀態讀進記憶體（索引在 importSnapshot 內一次建好）。 */
+  private readSnapshot(): StorageSnapshot {
+    const contacts = read<StoredContact[]>(this.k("contacts"), []);
+    const groups = read<StoredGroup[]>(this.k("groups"), []);
+    const messages: Record<string, StoredMessage[]> = {};
+    for (const convo of this.convoKeys(contacts, groups)) {
+      messages[convo] = read<StoredMessage[]>(this.k(MSGS + convo), []);
     }
+    return {
+      identity: read<StoredIdentity | null>(this.k("identity"), null),
+      contacts,
+      blocked: read<StoredContact[]>(this.k("blocked"), []),
+      messages,
+      reactions: read<StoredReaction[]>(this.k("reactions"), []),
+      deleted: read<string[]>(this.k("deleted"), []),
+      groups,
+      bootstrapList: read<StoredBootstrapList | null>(this.k("bootstrapList"), null),
+      readAt: read<Record<string, number>>(this.k("readAt"), {}),
+    };
+  }
+
+  /** 把某對話寫回（唯一會隨歷史長度成長的寫入；只碰被改動的那一個對話）。 */
+  private writeConvo(convo: string): void {
+    write(this.k(MSGS + convo), this.mem.loadMessages(convo));
+  }
+  private writeContacts(): void {
+    write(this.k("contacts"), this.mem.loadContacts());
+  }
+  private writeGroups(): void {
+    write(this.k("groups"), this.mem.loadGroups());
+  }
+  /** 移除聯絡人/群組會連帶清掉其訊息的孤兒 reactions/deleted（見 MemoryStorage.pruneOrphans）。 */
+  private writeOrphanSweep(): void {
+    write(this.k("reactions"), this.mem.loadReactions());
+    write(this.k("deleted"), this.mem.loadDeleted());
   }
 
   loadIdentity(): StoredIdentity | null {
-    return read<StoredIdentity | null>(this.k("identity"), null);
+    return this.mem.loadIdentity();
   }
   saveIdentity(identity: StoredIdentity): void {
+    this.mem.saveIdentity(identity);
     write(this.k("identity"), identity);
   }
   loadContacts(): StoredContact[] {
-    return read<StoredContact[]>(this.k("contacts"), []);
+    return this.mem.loadContacts();
   }
   addContact(contact: StoredContact): void {
-    const contacts = this.loadContacts();
-    if (contacts.some((c) => c.pubkey === contact.pubkey)) return;
-    contacts.push(contact);
-    write(this.k("contacts"), contacts);
+    this.mem.addContact(contact);
+    this.writeContacts();
   }
   updateContactRelay(pubkey: string, relayUrl: string | undefined): void {
-    write(
-      this.k("contacts"),
-      this.loadContacts().map((c) => {
-        if (c.pubkey !== pubkey) return c;
-        const { relayUrl: _drop, ...rest } = c;
-        return relayUrl ? { ...rest, relayUrl } : rest;
-      }),
-    );
+    this.mem.updateContactRelay(pubkey, relayUrl);
+    this.writeContacts();
   }
   updateContactName(pubkey: string, name: string): void {
-    write(this.k("contacts"), this.loadContacts().map((c) => (c.pubkey === pubkey ? { ...c, name } : c)));
+    this.mem.updateContactName(pubkey, name);
+    this.writeContacts();
   }
   removeContact(pubkey: string): void {
-    const ids = new Set(this.loadMessages(pubkey).map((m) => m.id));
-    write(this.k("contacts"), this.loadContacts().filter((c) => c.pubkey !== pubkey));
-    try {
-      localStorage.removeItem(this.k("msgs." + pubkey));
-    } catch {
-      /* 忽略 */
-    }
-    this.pruneOrphans(ids); // 清理該對話訊息的孤兒 reactions/deleted（審查 P1-5）
-  }
-  /** 移除一組 messageId 對應的孤兒回應與已收回標記（避免全域清單無限累積）。 */
-  private pruneOrphans(messageIds: Set<string>): void {
-    if (messageIds.size === 0) return;
-    write(this.k("reactions"), this.loadReactions().filter((r) => !messageIds.has(r.messageId)));
-    write(this.k("deleted"), this.loadDeleted().filter((id) => !messageIds.has(id)));
+    this.mem.removeContact(pubkey);
+    this.writeContacts();
+    localStorage.removeItem(this.k(MSGS + pubkey));
+    this.writeOrphanSweep();
   }
   remapContact(from: string, to: string): void {
-    if (from === to) return;
-    const moved = this.loadMessages(from).map((m) => ({ ...m, contact: to }));
-    if (moved.length > 0) {
-      const dest = this.loadMessages(to);
-      const seen = new Set(dest.map((m) => m.id));
-      for (const m of moved) if (!seen.has(m.id)) dest.push(m);
-      dest.sort((a, b) => a.at - b.at);
-      this.cap(dest); // ADR-0094：有限模式逐出；預設無上限不動
-      write(this.k("msgs." + to), dest);
-    }
-    try {
-      localStorage.removeItem(this.k("msgs." + from));
-    } catch {
-      /* 忽略 */
-    }
-    const groups = this.loadGroups().map((g) =>
-      g.members.includes(from) ? { ...g, members: [...new Set(g.members.map((p) => (p === from ? to : p)))] } : g,
-    );
-    write(this.k("groups"), groups);
-    // 群訊發送者標籤 remap（ADR-0052）：群組歷史中舊 npub 的 sender 改寫為新 npub。
-    for (const g of groups) {
-      const list = this.loadMessages(g.id);
-      let changed = false;
-      const rewritten = list.map((m) => {
-        if (m.sender !== from) return m;
-        changed = true;
-        return { ...m, sender: to };
-      });
-      if (changed) write(this.k("msgs." + g.id), rewritten);
-    }
-    write(this.k("contacts"), this.loadContacts().filter((c) => c.pubkey !== from));
+    this.mem.remapContact(from, to);
+    // 身分輪替會重寫對話歸屬與群訊 sender（ADR-0052）→ 影響面廣，整批寫回（極少發生）。
+    this.writeContacts();
+    this.writeGroups();
+    localStorage.removeItem(this.k(MSGS + from));
+    this.writeConvo(to);
+    for (const g of this.mem.loadGroups()) this.writeConvo(g.id);
   }
   blockContact(contact: StoredContact): void {
-    this.removeContact(contact.pubkey);
-    const blocked = this.loadBlocked();
-    if (blocked.some((b) => b.pubkey === contact.pubkey)) return;
-    blocked.push(contact);
-    write(this.k("blocked"), blocked);
+    this.mem.blockContact(contact);
+    this.writeContacts();
+    localStorage.removeItem(this.k(MSGS + contact.pubkey));
+    this.writeOrphanSweep();
+    write(this.k("blocked"), this.mem.loadBlocked());
   }
   unblockContact(pubkey: string): void {
-    write(this.k("blocked"), this.loadBlocked().filter((b) => b.pubkey !== pubkey));
+    this.mem.unblockContact(pubkey);
+    write(this.k("blocked"), this.mem.loadBlocked());
   }
   loadBlocked(): StoredContact[] {
-    return read<StoredContact[]>(this.k("blocked"), []);
+    return this.mem.loadBlocked();
   }
   loadMessages(contactPubkey: string): StoredMessage[] {
-    return read<StoredMessage[]>(this.k("msgs." + contactPubkey), []);
+    return this.mem.loadMessages(contactPubkey);
   }
   appendMessage(message: StoredMessage): void {
-    const list = this.loadMessages(message.contact);
-    if (list.some((m) => m.id === message.id)) return;
-    list.push(message);
-    this.cap(list); // ADR-0094：有限模式逐出最舊；預設無上限不動
-    write(this.k("msgs." + message.contact), list);
+    this.mem.appendMessage(message);
+    this.writeConvo(message.contact);
   }
   setMessageStatus(contactPubkey: string, messageId: string, status: MessageStatus): void {
-    const list = this.loadMessages(contactPubkey);
-    const msg = list.find((m) => m.id === messageId);
-    if (!msg) return;
-    if (MESSAGE_STATUS_RANK[status] <= MESSAGE_STATUS_RANK[msg.status ?? "sending"]) return; // 只前進
-    msg.status = status;
-    write(this.k("msgs." + contactPubkey), list);
+    this.mem.setMessageStatus(contactPubkey, messageId, status);
+    this.writeConvo(contactPubkey);
+  }
+  /** ADR-0110：整個已讀水位一次改完、**一次寫回**（原本每則各寫一次 → O(k×n)）。 */
+  setMessageStatusBulk(contactPubkey: string, messageIds: string[], status: MessageStatus): string[] {
+    const changed = this.mem.setMessageStatusBulk(contactPubkey, messageIds, status);
+    if (changed.length > 0) this.writeConvo(contactPubkey);
+    return changed;
   }
   setFileSavedPath(contactPubkey: string, messageId: string, savedPath: string): void {
-    const list = this.loadMessages(contactPubkey);
-    const msg = list.find((m) => m.id === messageId);
-    if (!msg?.file) return;
-    msg.file = { ...msg.file, savedPath };
-    write(this.k("msgs." + contactPubkey), list);
+    this.mem.setFileSavedPath(contactPubkey, messageId, savedPath);
+    this.writeConvo(contactPubkey);
   }
   setFileThumb(contactPubkey: string, messageId: string, thumb: string): void {
-    if (thumb.length > THUMB_MAX_BYTES) return; // 超上限寧可不存
-    const list = this.loadMessages(contactPubkey);
-    const msg = list.find((m) => m.id === messageId);
-    if (!msg?.file) return;
-    msg.file = { ...msg.file, thumb };
-    write(this.k("msgs." + contactPubkey), list);
+    this.mem.setFileThumb(contactPubkey, messageId, thumb);
+    this.writeConvo(contactPubkey);
   }
   setMessageReceipt(
     convoKey: string,
@@ -209,65 +203,76 @@ export class LocalStorage implements AppStorage {
     member: string,
     type: "delivered" | "read",
   ): Record<string, "delivered" | "read"> | undefined {
-    const list = this.loadMessages(convoKey);
-    const msg = list.find((m) => m.id === messageId);
-    if (!msg) return undefined;
-    const next = advanceReceipt(msg.receipts, member, type);
-    if (!next) return undefined;
-    msg.receipts = next;
-    write(this.k("msgs." + convoKey), list);
-    return { ...next };
+    const next = this.mem.setMessageReceipt(convoKey, messageId, member, type);
+    if (next) this.writeConvo(convoKey);
+    return next;
   }
-  loadReactions(): StoredReaction[] {
-    return read<StoredReaction[]>(this.k("reactions"), []);
+  /** ADR-0110：群組已讀水位一次改完、**一次寫回**。 */
+  setMessageReceiptBulk(
+    convoKey: string,
+    messageIds: string[],
+    member: string,
+    type: "delivered" | "read",
+  ): Map<string, Record<string, "delivered" | "read">> {
+    const out = this.mem.setMessageReceiptBulk(convoKey, messageIds, member, type);
+    if (out.size > 0) this.writeConvo(convoKey);
+    return out;
   }
-  addReaction(reaction: StoredReaction): void {
-    const list = this.loadReactions();
-    if (list.some((r) => r.id === reaction.id)) return;
-    list.push(reaction);
-    write(this.k("reactions"), list);
-  }
-  markDeleted(messageId: string): void {
-    const list = this.loadDeleted();
-    if (list.includes(messageId)) return;
-    list.push(messageId);
-    write(this.k("deleted"), list);
-  }
-  loadDeleted(): string[] {
-    return read<string[]>(this.k("deleted"), []);
+  setMaxPerConvo(max: number): void {
+    this.mem.setMaxPerConvo(max);
+    // 逐出結果需落地，否則重載後又冒出來。
+    for (const convo of Object.keys(this.mem.exportSnapshot().messages)) this.writeConvo(convo);
   }
   loadReadAt(): Record<string, number> {
-    return read<Record<string, number>>(this.k("readAt"), {});
+    return this.mem.loadReadAt();
   }
-  /** 推進已讀水位（ADR-0108）：單調遞增，倒退忽略。 */
   setReadAt(convoKey: string, at: number): void {
-    const all = this.loadReadAt();
-    if (at <= (all[convoKey] ?? 0)) return;
-    all[convoKey] = at;
-    write(this.k("readAt"), all);
+    this.mem.setReadAt(convoKey, at);
+    write(this.k("readAt"), this.mem.loadReadAt());
+  }
+  loadReactions(): StoredReaction[] {
+    return this.mem.loadReactions();
+  }
+  addReaction(reaction: StoredReaction): void {
+    this.mem.addReaction(reaction);
+    write(this.k("reactions"), this.mem.loadReactions());
+  }
+  markDeleted(messageId: string): void {
+    this.mem.markDeleted(messageId);
+    write(this.k("deleted"), this.mem.loadDeleted());
+  }
+  loadDeleted(): string[] {
+    return this.mem.loadDeleted();
   }
   loadGroups(): StoredGroup[] {
-    return read<StoredGroup[]>(this.k("groups"), []);
+    return this.mem.loadGroups();
   }
   saveGroup(group: StoredGroup): void {
-    const list = this.loadGroups().filter((g) => g.id !== group.id);
-    list.push(group);
-    write(this.k("groups"), list);
+    this.mem.saveGroup(group);
+    this.writeGroups();
   }
   removeGroup(id: string): void {
-    const ids = new Set(this.loadMessages(id).map((m) => m.id));
-    write(this.k("groups"), this.loadGroups().filter((g) => g.id !== id));
-    try {
-      localStorage.removeItem(this.k("msgs." + id));
-    } catch {
-      /* 忽略 */
-    }
-    this.pruneOrphans(ids); // 審查 P1-5
+    this.mem.removeGroup(id);
+    this.writeGroups();
+    localStorage.removeItem(this.k(MSGS + id));
+    this.writeOrphanSweep();
   }
   loadBootstrapList(): StoredBootstrapList | null {
-    return read<StoredBootstrapList | null>(this.k("bootstrapList"), null);
+    return this.mem.loadBootstrapList();
   }
-  saveBootstrapList(doc: StoredBootstrapList): void {
-    write(this.k("bootstrapList"), doc);
+  saveBootstrapList(list: StoredBootstrapList): void {
+    this.mem.saveBootstrapList(list);
+    write(this.k("bootstrapList"), list);
+  }
+  exportSnapshot(): StorageSnapshot {
+    return this.mem.exportSnapshot();
+  }
+  importSnapshot(s: StorageSnapshot): void {
+    this.mem.importSnapshot(s);
+    for (const [key, value] of Object.entries(this.mem.exportSnapshot())) {
+      if (key === "messages") continue;
+      write(this.k(key), value);
+    }
+    for (const convo of Object.keys(s.messages)) this.writeConvo(convo);
   }
 }
