@@ -111,9 +111,10 @@ describe("跨中繼通訊：Relay Pool 與收件人路由（ADR-0034）", () => 
     const hbOnY = spy(netY, { kinds: [KIND.HEARTBEAT], authors: [a.self.pubkey] });
     a.setStatus("online"); // 觸發即時心跳
 
-    expect(hbOnX).toHaveLength(1);
-    expect(hbOnY).toHaveLength(1);
-    expect(hbOnX[0]!.id).toBe(hbOnY[0]!.id); // 同一顆心跳扇出
+    // 每一顆心跳都同時出現在 X 與 Y（同一顆事件扇出）——這才是本測試要驗的性質。
+    // 不釘死顆數：ADR-0109 的喚醒握手會多補一顆（見「自適應心跳」的專屬測試）。
+    expect(hbOnX.length).toBeGreaterThanOrEqual(1);
+    expect(hbOnY.map((e) => e.id)).toEqual(hbOnX.map((e) => e.id));
     a.stop();
     b.stop();
   });

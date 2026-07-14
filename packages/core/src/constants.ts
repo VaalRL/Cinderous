@@ -31,11 +31,33 @@ export const ORG_ROSTER_KIND = 10038;
 /** WebRTC SDP 信令使用的 Ephemeral kind 區間（NIP-59 包封）。 */
 export const SDP_KIND_RANGE = { min: 21000, max: 21999 } as const;
 
-/** 心跳發送間隔（毫秒）。 */
-export const HEARTBEAT_INTERVAL_MS = 30_000;
+/**
+ * 心跳間隔（毫秒）——**自適應**（ADR-0109）。
+ *
+ * 心跳原本佔中繼 request 的 **92%**（30 秒固定 → 2,880 次/日/人），而其中絕大多數是在
+ * **對空氣廣播**：多數時間，使用者的聯絡人一個都不在線。
+ *
+ * - `ACTIVE`：有任一聯絡人在線。
+ * - `IDLE`：無人在線 → 放慢到 5 分鐘。
+ *
+ * **這不會讓「顯示上線」變慢**：收心跳不計中繼 request（中繼→客戶端免費），所以對方一連線
+ * 就會立刻發心跳、我免費收到，並在 IDLE→ACTIVE 的**轉換**時立刻補發一次 → 對方一個 RTT
+ * 內看到我。詳見 ADR-0109。
+ */
+export const HEARTBEAT_ACTIVE_MS = 60_000;
+export const HEARTBEAT_IDLE_MS = 300_000;
 
-/** 連續未收到心跳超過此時間（毫秒）即判定離線。 */
-export const OFFLINE_TIMEOUT_MS = 60_000;
+/**
+ * 判定離線的容忍窗＝ `2.5 × 對方自報的心跳間隔`（ADR-0109）。
+ *
+ * 必須依**對方自報的節奏**計算，不能用固定值：閒置者每 5 分鐘才發一次，用固定的短窗會把
+ * 「在線但閒置」的人誤判為離線（單向聯絡人時真的會發生——他加了我、我沒加他，我看不到他的
+ * 心跳所以保持 IDLE，但他一直在看我）。
+ */
+export const PRESENCE_TOLERANCE_FACTOR = 2.5;
+
+/** 對方未自報心跳節奏時（舊版客戶端）的容忍窗（毫秒）。 */
+export const OFFLINE_TIMEOUT_MS = 150_000;
 
 /** 收到「正在輸入中」後維持顯示的時間（毫秒），逾時即清除。 */
 export const TYPING_TIMEOUT_MS = 6_000;

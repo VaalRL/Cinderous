@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { KIND } from "./constants.js";
 import { generateSecretKey, getPublicKey } from "./keys.js";
-import { createHeartbeat } from "./heartbeat.js";
+import { createHeartbeat, heartbeatCadenceMs } from "./heartbeat.js";
 import { verifyEvent } from "./sign.js";
 
 describe("心跳事件建構（Kind 20000 / Ephemeral）", () => {
@@ -26,3 +26,26 @@ describe("心跳事件建構（Kind 20000 / Ephemeral）", () => {
     expect(hb.created_at).toBeLessThanOrEqual(before + 2);
   });
 });
+
+describe("心跳自報節奏（ADR-0109）", () => {
+  const sk = generateSecretKey();
+
+  it("帶上 hb tag（秒），可原樣讀回", () => {
+    const evt = createHeartbeat(sk, { cadenceMs: 300_000 });
+    expect(evt.tags).toContainEqual(["hb", "300"]);
+    expect(heartbeatCadenceMs(evt)).toBe(300_000);
+  });
+
+  it("未指定節奏 → 不加 tag；讀回 undefined（相容舊版客戶端）", () => {
+    const evt = createHeartbeat(sk);
+    expect(evt.tags).toEqual([]);
+    expect(heartbeatCadenceMs(evt)).toBeUndefined();
+  });
+
+  it("節奏損壞/非法 → 視為未自報（不可讓觀察端算出荒謬的容忍窗）", () => {
+    const evt = createHeartbeat(sk);
+    expect(heartbeatCadenceMs({ ...evt, tags: [["hb", "abc"]] })).toBeUndefined();
+    expect(heartbeatCadenceMs({ ...evt, tags: [["hb", "-5"]] })).toBeUndefined();
+    expect(heartbeatCadenceMs({ ...evt, tags: [["hb", "0"]] })).toBeUndefined();
+  });
+})

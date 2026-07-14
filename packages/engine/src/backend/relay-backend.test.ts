@@ -1,4 +1,4 @@
-import { applyRosterRotations, generateSecretKey, getPublicKey, type NostrEvent, npubEncode, nsecEncode, signOrgRoster, wrapGroupControl, wrapGroupMessage, wrapMessage, wrapReceipt } from "@cinder/core";
+import { applyRosterRotations, generateSecretKey, KIND, getPublicKey, type NostrEvent, npubEncode, nsecEncode, signOrgRoster, wrapGroupControl, wrapGroupMessage, wrapMessage, wrapReceipt } from "@cinder/core";
 import { createInMemoryRelayNetwork } from "@cinder/relay";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryStorage } from "../storage/memory.js";
@@ -1402,5 +1402,132 @@ describe("已讀水位的本機持久化（ADR-0108）", () => {
     phone.be.stop();
     desktop.be.stop();
     bob.stop();
+  });
+});
+
+describe("中繼流量削減（ADR-0109）", () => {
+  /** 側錄某座 relay 上符合 filter 的事件。 */
+  let spyN = 0;
+  function spy(net: ReturnType<typeof createInMemoryRelayNetwork>, filter: object): NostrEvent[] {
+    const got: NostrEvent[] = [];
+    net.connect(`spy-${spyN++}`, { onEvent: (_s, e) => got.push(e) }).subscribe("spy", [filter as never]);
+    return got;
+  }
+  const cadenceOf = (e: NostrEvent): string | undefined => e.tags.find((t) => t[0] === "hb")?.[1];
+
+  it("沒有聯絡人在線 → 心跳自報 5 分鐘（IDLE）：閒置時的心跳是在對空氣廣播", () => {
+    const net = createInMemoryRelayNetwork();
+    const a = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("a", h), "Alice");
+    const hb = spy(net, { kinds: [KIND.HEARTBEAT] });
+    a.start(noop); // start 一律立刻發一次心跳（喚醒機制的不變式）
+
+    expect(hb.length).toBeGreaterThanOrEqual(1);
+    expect(cadenceOf(hb[0]!)).toBe("300"); // IDLE
+    a.stop();
+  });
+
+  it("**喚醒握手**：對方一上線，雙方立刻補發心跳並切回 60 秒——「顯示上線」仍是即時的", () => {
+    const net = createInMemoryRelayNetwork();
+    const a = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("a", h), "Alice");
+    const b = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("b", h), "Bob");
+    a.start(noop);
+    b.start(noop);
+    a.addContact(b.selfNpub); // 送個人檔 → Bob 也自動把 Alice 加為聯絡人（ADR-0061）
+
+    const hbA = spy(net, { kinds: [KIND.HEARTBEAT], authors: [a.self.pubkey] });
+    const hbB = spy(net, { kinds: [KIND.HEARTBEAT], authors: [b.self.pubkey] });
+    a.setStatus("online"); // Alice 發一顆（此時她還沒看到 Bob → IDLE）
+
+    // Bob 收到 → 從閒置轉活躍 → 立刻補發（ACTIVE）；Alice 收到 Bob 的 → 也轉活躍 → 補發。
+    // 不比順序：同步的測試替身會在外層事件還在扇出時就把巢狀的握手心跳送達 spy
+    //（真 WebSocket 是有序非同步的）。要驗的是「雙方都切到了 ACTIVE」。
+    expect(hbB.map(cadenceOf)).toContain("60");
+    expect(hbA.map(cadenceOf)).toContain("60");
+    // 全部發生在同一個同步回合內——不需要等任何計時器，更不必等 5 分鐘。
+    a.stop();
+    b.stop();
+  });
+
+  it("**防風暴**：握手在一輪後停止——已是活躍就不再回發（否則兩端會互相觸發到爆）", () => {
+    const net = createInMemoryRelayNetwork();
+    const a = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("a", h), "Alice");
+    const b = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("b", h), "Bob");
+    a.start(noop);
+    b.start(noop);
+    a.addContact(b.selfNpub);
+
+    const hb = spy(net, { kinds: [KIND.HEARTBEAT] });
+    a.setStatus("online");
+    const afterHandshake = hb.length;
+
+    // 雙方都已是 ACTIVE：再發一顆不該再觸發任何補發（wasIdle === false）。
+    a.setStatus("online");
+    expect(hb.length).toBe(afterHandshake + 1); // 只有 Alice 自己那一顆，沒有連鎖
+    a.stop();
+    b.stop();
+  });
+
+  it("訂閱合併為單一 REQ（原本 9 個）——每次重連省 8 個中繼 request", () => {
+    const reqs: unknown[][] = [];
+    const net = createInMemoryRelayNetwork();
+    const a = new RelayChatBackend(
+      new MemoryStorage(),
+      (h) => {
+        const c = net.connect("a", h);
+        const orig = c.subscribe.bind(c);
+        c.subscribe = (subId: string, filters: unknown[]) => {
+          reqs.push(filters);
+          orig(subId, filters as never);
+        };
+        return c;
+      },
+      "Alice",
+    );
+    a.start(noop);
+
+    expect(reqs).toHaveLength(1); // 一個 REQ
+    expect(reqs[0]!.length).toBeGreaterThanOrEqual(7); // 內含全部 filter（OR 語意，中繼早已支援）
+    a.stop();
+  });
+
+  it("收件箱增量抓取的 since **退讓 2 天**——否則會漏掉時戳被 NIP-59 抖到過去的訊息", () => {
+    const net = createInMemoryRelayNetwork();
+    const store = new MemoryStorage();
+    const aliceSk = generateSecretKey();
+    store.saveIdentity({ nsec: nsecEncode(aliceSk), name: "Alice" });
+    const filtersOf: unknown[][] = [];
+    const a = new RelayChatBackend(
+      store,
+      (h) => {
+        const c = net.connect("a", h);
+        const orig = c.subscribe.bind(c);
+        c.subscribe = (subId: string, filters: unknown[]) => {
+          filtersOf.push(filters);
+          orig(subId, filters as never);
+        };
+        return c;
+      },
+      "Alice",
+      { relayUrl: "wss://home" },
+    );
+    a.start(noop);
+
+    // 首次連線：沒有水位 → 全量（無 since）
+    const dmFilter = (fs: unknown[]) => fs.find((f) => (f as { kinds?: number[] }).kinds?.[0] === 1059) as { since?: number };
+    expect(dmFilter(filtersOf[0]!).since).toBeUndefined();
+
+    // 收到一則訊息 → 水位前進
+    const bobSk = generateSecretKey();
+    const sentAt = Math.floor(Date.now() / 1000);
+    const w = wrapMessage("嗨", bobSk, getPublicKey(aliceSk), { now: sentAt });
+    net.connect("raw", {}).publish(w.events[0]!);
+
+    a.addContact(npubEncode(getPublicKey(bobSk))); // 觸發 resubscribe
+    const latest = dmFilter(filtersOf[filtersOf.length - 1]!);
+    expect(latest.since).toBeDefined();
+    // 水位（外層 created_at）減去整整 2 天的 NIP-59 抖動窗。
+    const outer = w.events[0]!.created_at;
+    expect(latest.since).toBe(outer - 2 * 86_400);
+    a.stop();
   });
 });

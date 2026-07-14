@@ -4,7 +4,14 @@ import { decryptDM, encryptDM } from "./nip44.js";
 import { finalizeEvent, verifyEvent } from "./sign.js";
 
 const KIND_SEAL = 13;
-const TIMESTAMP_JITTER_SECONDS = 2 * 86_400;
+/**
+ * NIP-59 外層時戳抖動窗（秒）：seal 與 wrap 的 `created_at` 會被隨機往前推最多這麼久，
+ * 以免中繼從時戳關聯出社交圖譜。
+ *
+ * **匯出是必要的**：收件箱增量抓取（`since`，ADR-0109）必須退讓這麼多，否則剛發出、
+ * 外層時戳卻落在兩天前的訊息會被濾掉而**靜默漏訊**。
+ */
+export const TIMESTAMP_JITTER_SECONDS = 2 * 86_400;
 
 /** 要被封裝的內層事件（未簽章）。 */
 export interface RumorInput {

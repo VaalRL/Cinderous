@@ -10,14 +10,19 @@ import {
   deletionTarget,
   encodePresence,
   finalizeEvent,
+  type Filter,
   groupTarget,
   groupReceiptMode,
   generateSecretKey,
   getPublicKey,
+  HEARTBEAT_ACTIVE_MS,
+  HEARTBEAT_IDLE_MS,
+  heartbeatCadenceMs,
   isMentioned,
   jitter,
   KIND,
   listEntries,
+  TIMESTAMP_JITTER_SECONDS,
   messageExpiry,
   npubDecode,
   npubEncode,
@@ -97,8 +102,6 @@ import type {
 } from "./types.js";
 
 const NUDGE_KIND = 20100;
-// 心跳間隔（ADR-0059）：30 秒——降低中繼站請求數/CPU；離線判定門檻同步放寬保留 3× 容忍。
-const HEARTBEAT_MS = 30_000;
 /** pool relay 連續離線超過此時間即標記 hint 可能陳舊（ADR-0036）。 */
 export const RELAY_STALE_MS = 5 * 60_000;
 /** 主路由離線時的冗餘廣播座數上限（ADR-0039）。 */
@@ -362,6 +365,12 @@ export class RelayChatBackend implements ChatBackend {
   private readonly fileMsgByTid = new Map<string, { contact: PubkeyHex; msgId: string }>();
   /** 群訊扇出追蹤（ADR-0095）：每個 wrap 的 event id → 該群訊的送出狀態（多 wrap 共用一個 state）。 */
   private readonly fanout = new Map<string, { convo: string; messageId: string; pending: number; ok: boolean }>();
+  /**
+   * 收件箱水位（ADR-0109 S4）：中繼 URL → 該座送過的最大外層 `created_at`（秒）。
+   * 供重連時做增量抓取（`since`）。逐中繼——不同中繼的事件集合不同，共用全域水位會漏事件。
+   * 只在記憶體：session 內重連走增量，App 重啟仍全量抓一次。
+   */
+  private readonly inboxWatermark = new Map<string, number>();
   private contacts: { pubkey: PubkeyHex; name: string; relayUrl?: string }[];
   private blocked: { pubkey: PubkeyHex; name: string }[];
   private groups: Group[];
@@ -434,7 +443,7 @@ export class RelayChatBackend implements ChatBackend {
     });
     this.client = connector(
       {
-        onEvent: (_sub, event) => this.onEvent(event),
+        onEvent: (_sub, event) => this.onEvent(event, this.homeUrl),
         onOk: (id, accepted, message) => {
           this.outbox.onOk(id, accepted, message);
           if (accepted) this.markSent(id); // Tier 1（ADR-0058）：relay 接受＝已送中繼
@@ -550,7 +559,7 @@ export class RelayChatBackend implements ChatBackend {
     if (!client) {
       client = this.connectorFor(url)(
         {
-          onEvent: (_sub, event) => this.onEvent(event),
+          onEvent: (_sub, event) => this.onEvent(event, url),
           // NIP-42 AUTH（ADR-0057）：外部 relay 的挑戰回應 + 認證後重掛該 relay 訂閱。
           authSigner: (challenge) => buildAuthEvent(challenge, url, this.sk),
           onAuthenticated: (client) => this.subscribeOn(client, url),
@@ -618,28 +627,59 @@ export class RelayChatBackend implements ChatBackend {
   }
 
   /** 對某個 relay 掛訂閱：完整收件箱 + 該 relay 上發心跳的聯絡人 presence。 */
+  /**
+   * 掛上這條連線的所有訂閱——**合併為單一 REQ**（ADR-0109 S3）。
+   *
+   * 過去是 9 個獨立的 REQ ＝ 每次（重）連線 9 個 DO request，而 `resubscribe()` 有 11 個
+   * 呼叫點（含每加一個聯絡人）。NIP-01 的 REQ 本來就吃多個 filter（OR 語意），而：
+   * - 本後端的 `onEvent` **完全忽略 subId**，一律依 `event.kind` 分派；
+   * - 從不註冊 `onEose`、從不 `unsubscribe`；
+   * - 中繼端 `buildEntry()` 已跨所有 filter 收集 kinds 建索引、`handleReq()` 已逐 filter
+   *   重播並以 event id 去重。
+   *
+   * 故合併是純客戶端改動，語意完全不變。
+   */
   private subscribeOn(client: RelayClient, url: string | undefined): void {
     const authors = this.contacts
       .filter((c) => (this.foreignUrlOf(c) ?? this.homeUrl) === url)
       .map((c) => c.pubkey);
-    // F5：presence 心跳已彙整音樂狀態（np），不再單獨訂閱 MUSIC。
-    client.subscribe("presence", [{ kinds: [KIND.HEARTBEAT], authors }]);
     const all = this.contacts.map((c) => c.pubkey);
-    client.subscribe("typing", [{ kinds: [KIND.TYPING], authors: all, "#p": [this.self.pubkey] }]);
-    client.subscribe("nudge", [{ kinds: [NUDGE_KIND], authors: all, "#p": [this.self.pubkey] }]);
-    client.subscribe("dm", [{ kinds: [KIND.OFFLINE_DM_GIFT_WRAP], "#p": [this.self.pubkey] }]);
-    // 自己的雲端快照（ADR-0071 J3）：接收合併恆開——換機還原不需任何前置設定。
-    client.subscribe("snap", [{ kinds: [SNAPSHOT_KIND], authors: [this.self.pubkey] }]);
-    client.subscribe("sig", [{ kinds: [SDP_SIGNAL_KIND], "#p": [this.self.pubkey] }]);
-    client.subscribe("call", [{ kinds: [CALL_SIGNAL_KIND], "#p": [this.self.pubkey] }]);
-    // 帶內引導清單（ADR-0039）：訂閱維護者簽章的 relay 清單事件。
-    if (this.maintainerPubkey) {
-      client.subscribe("relaylist", [{ kinds: [RELAY_LIST_KIND], authors: [this.maintainerPubkey] }]);
-    }
-    // 企業組織名冊（ADR-0047）：訂閱管理者簽章的名冊事件。
-    if (this.orgAdminPubkey) {
-      client.subscribe("orgroster", [{ kinds: [ORG_ROSTER_KIND], authors: [this.orgAdminPubkey] }]);
-    }
+    const me = [this.self.pubkey];
+    const filters: Filter[] = [
+      // F5：presence 心跳已彙整音樂狀態（np），不再單獨訂閱 MUSIC。
+      { kinds: [KIND.HEARTBEAT], authors },
+      { kinds: [KIND.TYPING], authors: all, "#p": me },
+      { kinds: [NUDGE_KIND], authors: all, "#p": me },
+      { kinds: [KIND.OFFLINE_DM_GIFT_WRAP], "#p": me, ...this.inboxSince(url) },
+      // 自己的雲端快照（ADR-0071 J3）：接收合併恆開——換機還原不需任何前置設定。
+      { kinds: [SNAPSHOT_KIND], authors: me },
+      { kinds: [SDP_SIGNAL_KIND], "#p": me },
+      { kinds: [CALL_SIGNAL_KIND], "#p": me },
+      // 帶內引導清單（ADR-0039）：訂閱維護者簽章的 relay 清單事件。
+      ...(this.maintainerPubkey ? [{ kinds: [RELAY_LIST_KIND], authors: [this.maintainerPubkey] }] : []),
+      // 企業組織名冊（ADR-0047）：訂閱管理者簽章的名冊事件。
+      ...(this.orgAdminPubkey ? [{ kinds: [ORG_ROSTER_KIND], authors: [this.orgAdminPubkey] }] : []),
+    ];
+    client.subscribe("all", filters);
+  }
+
+  /**
+   * 收件箱的增量抓取窗（ADR-0109 S4）：`since = 該中繼上收過的最大外層 created_at − 2 天`。
+   *
+   * **那個「− 2 天」不是保險，是必要的**：NIP-59 的 `jitteredPast()` 把 Gift Wrap 的**外層**
+   * `created_at` 隨機往前推最多 `TIMESTAMP_JITTER_SECONDS`（2 天，隱私設計）。所以剛發出的
+   * 訊息，其外層時戳可能落在兩天前——天真地用 `since = 上次連線時間` **會漏訊息**。
+   *
+   * 逐中繼追蹤（不同中繼的事件集合不同，共用全域水位會漏事件）。水位只在記憶體：session 內
+   * 的重連走增量，App 重啟仍全量抓一次（重連遠比重啟頻繁，效益已大半取得，且不必動儲存層）。
+   *
+   * 註：這**不省 request**（一個 REQ 就是一個 request，回幾筆不影響），省的是 rows read／
+   * DO duration／頻寬／啟動延遲——ADR-0107 讓收件箱翻倍後更有感。
+   */
+  private inboxSince(url: string | undefined): { since?: number } {
+    const seen = url !== undefined ? this.inboxWatermark.get(url) : undefined;
+    if (seen === undefined) return {}; // 沒水位（首次連上這座）→ 全量
+    return { since: seen - TIMESTAMP_JITTER_SECONDS };
   }
 
   private resubscribeRelay(url: string): void {
@@ -801,18 +841,42 @@ export class RelayChatBackend implements ChatBackend {
     }
     // 心跳抑制（ADR-0088 (e)）：僅當所有聯絡人都有活的 P2P 通道時，才不再經 relay 明簽廣播在線。
     if (allP2P) return;
-    const evt = createHeartbeat(this.sk, { status: encodePresence(payload) });
+    // 自報節奏（ADR-0109）：讓觀察端算出正確的容忍窗（2.5×），否則閒置者（5 分鐘一次）
+    // 會被用短窗誤判為離線。節奏本來就能從時戳觀察，明寫不構成新的元數據洩漏。
+    const evt = createHeartbeat(this.sk, { status: encodePresence(payload), cadenceMs: this.beatInterval() });
     // 心跳發到 pool 中所有 relay：對方未記錄我的 relay 也看得到我在線（ADR-0034）。
     this.client.publish(evt);
     for (const client of this.relayPool.values()) client.publish(evt);
   }
 
-  /** 以抖動間隔自我重排下一次心跳（F5：分散中繼負載）。 */
+  /** 是否有任一聯絡人在線（決定心跳快慢，ADR-0109）。 */
+  private anyContactOnline(): boolean {
+    const now = Date.now();
+    return this.contacts.some((c) => this.presence.statusOf(c.pubkey, now) === "online");
+  }
+
+  /**
+   * 目前的心跳節奏（ADR-0109）：有人在線 → 60 秒；沒人在線 → 5 分鐘。
+   *
+   * 閒置時的心跳是在**對空氣廣播**——這是中繼 request 的 92%，也是本專案免費額度的天花板。
+   */
+  private beatInterval(): number {
+    return this.anyContactOnline() ? HEARTBEAT_ACTIVE_MS : HEARTBEAT_IDLE_MS;
+  }
+
+  /**
+   * 以抖動間隔自我重排下一次心跳（F5：分散中繼負載）。
+   * 節奏每次重新計算（ADR-0109）：有人在線 60 秒、沒人在線 5 分鐘。
+   *
+   * **必須先清掉既有計時器**——IDLE→ACTIVE 轉換時會重新呼叫本函式，若不清除，
+   * 原本的閒置計時器會與新的快速計時器**並存**，變成兩條心跳鏈（成本不減反增）。
+   */
   private scheduleBeat(): void {
+    if (this.heartbeatTimer !== undefined) clearTimeout(this.heartbeatTimer);
     this.heartbeatTimer = setTimeout(() => {
       this.beat();
       this.scheduleBeat();
-    }, jitter(HEARTBEAT_MS));
+    }, jitter(this.beatInterval()));
   }
 
   /** 跨 relay 事件去重：已見過回傳 true；容量超限折半清理（保留較新）。 */
@@ -822,7 +886,14 @@ export class RelayChatBackend implements ChatBackend {
     return false;
   }
 
-  private onEvent(event: NostrEvent): void {
+  private onEvent(event: NostrEvent, url?: string): void {
+    // 收件箱水位（ADR-0109 S4）：記錄**這座中繼**送過的最大外層 created_at，供下次重連做增量。
+    // 刻意在去重之前更新——即使這顆事件已從別座中繼收過，它確實存在於**這座**中繼上，
+    // 水位仍應前進（否則對這座中繼永遠抓全量）。
+    if (url !== undefined && event.kind === KIND.OFFLINE_DM_GIFT_WRAP) {
+      const prev = this.inboxWatermark.get(url) ?? 0;
+      if (event.created_at > prev) this.inboxWatermark.set(url, event.created_at);
+    }
     if (this.seenBefore(event.id)) return;
     if (event.kind === SNAPSHOT_KIND) {
       this.receiveSnapshot(event); // 加密雲端快照（ADR-0071 J3）
@@ -843,10 +914,18 @@ export class RelayChatBackend implements ChatBackend {
       return;
     }
     switch (event.kind) {
-      case KIND.HEARTBEAT:
-        this.presence.observe(event.pubkey, event.created_at);
+      case KIND.HEARTBEAT: {
+        const wasIdle = !this.anyContactOnline();
+        this.presence.observe(event.pubkey, event.created_at, heartbeatCadenceMs(event));
         this.statuses.set(event.pubkey, decodePresence(event.content));
+        // 有人上線（ADR-0109）：立刻補發一次心跳並切回 ACTIVE，讓對方一個 RTT 內看到我。
+        // **只在 IDLE→ACTIVE 的轉換時補發**——若每收到一則心跳就回發，兩端會互相觸發成風暴。
+        if (wasIdle && this.anyContactOnline()) {
+          this.beat();
+          this.scheduleBeat(); // 以新節奏（ACTIVE）重排，取代原本的閒置排程
+        }
         return;
+      }
       case KIND.TYPING:
         this.handlers?.onTyping(event.pubkey);
         return;

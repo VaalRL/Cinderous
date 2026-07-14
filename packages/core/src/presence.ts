@@ -1,4 +1,4 @@
-import { KIND, OFFLINE_TIMEOUT_MS } from "./constants.js";
+import { KIND, OFFLINE_TIMEOUT_MS, PRESENCE_TOLERANCE_FACTOR } from "./constants.js";
 import type { PubkeyHex } from "./keys.js";
 import { LatestPerKey } from "./tracker.js";
 
@@ -33,19 +33,28 @@ export type PresenceStatus = "online" | "offline";
  *   {@link OFFLINE_TIMEOUT_MS} 即為上線。
  */
 export class PresenceTracker {
-  private readonly seen = new LatestPerKey();
+  /** 值＝對方自報的心跳間隔（毫秒，ADR-0109）；舊版客戶端未自報則為 undefined。 */
+  private readonly seen = new LatestPerKey<number | undefined>();
 
-  observe(pubkey: PubkeyHex, createdAtSec: number): void {
-    this.seen.observe(pubkey, createdAtSec * 1000, undefined);
+  observe(pubkey: PubkeyHex, createdAtSec: number, cadenceMs?: number): void {
+    this.seen.observe(pubkey, createdAtSec * 1000, cadenceMs);
   }
 
   lastSeenAt(pubkey: PubkeyHex): number | undefined {
     return this.seen.at(pubkey);
   }
 
+  /**
+   * 容忍窗依**對方自報的心跳節奏**計算（ADR-0109）：`2.5 × 間隔`。
+   *
+   * 不能用固定值——閒置者每 5 分鐘才發一次心跳，固定的短窗會把「在線但閒置」的人誤判為離線。
+   * 未自報（舊版客戶端）則退回 {@link OFFLINE_TIMEOUT_MS}。
+   */
   statusOf(pubkey: PubkeyHex, nowMs: number): PresenceStatus {
     const seen = this.seen.at(pubkey);
     if (seen === undefined) return "offline";
-    return nowMs - seen <= OFFLINE_TIMEOUT_MS ? "online" : "offline";
+    const cadence = this.seen.value(pubkey);
+    const tolerance = cadence !== undefined ? cadence * PRESENCE_TOLERANCE_FACTOR : OFFLINE_TIMEOUT_MS;
+    return nowMs - seen <= tolerance ? "online" : "offline";
   }
 }
