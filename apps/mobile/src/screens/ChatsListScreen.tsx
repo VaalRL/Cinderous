@@ -36,6 +36,12 @@ function makeStyles(tk: ThemeTokens) {
     addSubmitText: { color: "#ffffff", fontWeight: "700", fontSize: 13 },
     list: { flex: 1 },
     empty: { padding: 28, textAlign: "center", color: tk.muted, fontSize: 13, lineHeight: 20 },
+    memberWrap: { flexDirection: "row", flexWrap: "wrap", gap: 6, marginBottom: 8 },
+    chip: { borderWidth: 1, borderColor: tk.border, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 4 },
+    chipOn: { backgroundColor: tk.accent, borderColor: tk.accent },
+    chipText: { fontSize: 12, color: tk.ink },
+    chipTextOn: { color: "#ffffff" },
+    submitOff: { opacity: 0.4 },
     row: { flexDirection: "row", alignItems: "center", gap: 12, paddingVertical: 10, paddingHorizontal: 14, borderBottomWidth: 1, borderBottomColor: tk.border },
     avatar: { width: 46, height: 46, borderRadius: 23, alignItems: "center", justifyContent: "center" },
     avatarText: { color: "#ffffff", fontWeight: "700", fontSize: 18 },
@@ -55,6 +61,8 @@ export function ChatsListScreen({
   entries,
   onOpen,
   onAddContact,
+  onCreateGroup,
+  contacts,
   selfNpub,
   now = Date.now(),
   locale = "zh-Hant",
@@ -68,6 +76,14 @@ export function ChatsListScreen({
   onOpen: (id: string) => void;
   /** 加好友（貼 npub）；未提供＝不顯示「＋」（如示範模式）。 */
   onAddContact?: (npub: string) => void;
+  /**
+   * 建立群組（ADR-0114）：名稱 ＋ 成員 pubkey。未提供＝不顯示建群入口。
+   * 群組**無共用金鑰**（ADR-0027）：對每位成員各包一個 Gift Wrap 扇出，
+   * 所以成員清單就是收件人清單——移除成員＝下次不扇給他，即時且免 rekey。
+   */
+  onCreateGroup?: (name: string, memberPubkeys: string[]) => void;
+  /** 可選為群組成員的聯絡人（建群面板用）。 */
+  contacts?: { pubkey: string; name: string }[];
   /** 自己的 npub（真實 relay 模式顯示於加好友面板供分享）。 */
   selfNpub?: string;
   now?: number;
@@ -90,17 +106,53 @@ export function ChatsListScreen({
     setAddOpen(false);
   };
 
+  // 建立群組（ADR-0114）。
+  const [groupOpen, setGroupOpen] = useState(false);
+  const [groupName, setGroupName] = useState("");
+  const [picked, setPicked] = useState<string[]>([]);
+
+  const toggleMember = (pubkey: string): void =>
+    setPicked((p) => (p.includes(pubkey) ? p.filter((x) => x !== pubkey) : [...p, pubkey]));
+
+  const submitGroup = (): void => {
+    const name = groupName.trim();
+    // 名稱可空（引擎會給預設名），但**至少要有一位成員**——空群沒有收件人，
+    // 群訊會被 trackFanout 直接標成 failed（ADR-0095）。
+    if (picked.length === 0) return;
+    onCreateGroup?.(name, picked);
+    setGroupName("");
+    setPicked([]);
+    setGroupOpen(false);
+  };
+
   return (
     <View style={styles.root}>
       <View style={styles.header}>
         <View style={styles.headerRow}>
           <Text style={styles.headerTitle}>{t("mobileChats_title")}</Text>
+          {onCreateGroup && (contacts?.length ?? 0) > 0 ? (
+            <Pressable
+              style={styles.addBtn}
+              accessibilityRole="button"
+              aria-label={t("group_new")}
+              testID="new-group"
+              onPress={() => {
+                setGroupOpen((v) => !v);
+                setAddOpen(false);
+              }}
+            >
+              <Text style={styles.addBtnText}>#</Text>
+            </Pressable>
+          ) : null}
           {onAddContact ? (
             <Pressable
               style={styles.addBtn}
               accessibilityRole="button"
               aria-label={t("mobileChats_add")}
-              onPress={() => setAddOpen((v) => !v)}
+              onPress={() => {
+                setAddOpen((v) => !v);
+                setGroupOpen(false);
+              }}
             >
               <Text style={styles.addBtnText}>＋</Text>
             </Pressable>
@@ -131,6 +183,45 @@ export function ChatsListScreen({
                 <Text style={styles.addSubmitText}>{t("mobileChats_addBtn")}</Text>
               </Pressable>
             </View>
+          </View>
+        ) : null}
+        {/* 建立群組（ADR-0114）：名稱 ＋ 從聯絡人挑成員。 */}
+        {groupOpen && onCreateGroup ? (
+          <View style={styles.addPanel}>
+            <TextInput
+              style={styles.addInput}
+              value={groupName}
+              onChangeText={setGroupName}
+              placeholder={t("group_namePlaceholder")}
+              placeholderTextColor={tk.muted}
+              aria-label={t("group_name")}
+            />
+            <Text style={styles.addLabel}>{t("group_members")}</Text>
+            <View style={styles.memberWrap}>
+              {(contacts ?? []).map((c) => {
+                const on = picked.includes(c.pubkey);
+                return (
+                  <Pressable
+                    key={c.pubkey}
+                    style={[styles.chip, on ? styles.chipOn : null]}
+                    accessibilityRole="button"
+                    testID={`member-${c.pubkey}`}
+                    onPress={() => toggleMember(c.pubkey)}
+                  >
+                    <Text style={[styles.chipText, on ? styles.chipTextOn : null]}>{c.name}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            <Pressable
+              style={[styles.addSubmit, picked.length === 0 ? styles.submitOff : null]}
+              accessibilityRole="button"
+              disabled={picked.length === 0}
+              testID="create-group"
+              onPress={submitGroup}
+            >
+              <Text style={styles.addSubmitText}>{t("group_create")}</Text>
+            </Pressable>
           </View>
         ) : null}
       </View>

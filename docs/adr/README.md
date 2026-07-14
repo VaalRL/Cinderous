@@ -129,3 +129,4 @@
 | [0112](./0112-web-at-rest-encryption.md) | 網頁/行動端靜態加密（DEK=HKDF(nsec)）＋**nsec 不再明文落盤**；推翻 0067 的「瀏覽器＝假安全感」 | 已接受 |
 | [0113](./0113-local-launcher.md) | 本地啟動器 `cinder serve`：固定 port（origin ＝ 資料的身分）、撞埠不自動換、路徑穿越防護 | 已接受 |
 | [0114](./0114-mobile-parity-messaging.md) | 行動端對齊（一）：修好群訊（點進群組送訊會爆）＋補上收回／emoji 回應／封鎖 | 已接受 |
+| [0115](./0115-mobile-parity-groups.md) | 行動端對齊（二）：建立群組與成員管理、敲一下（可發）、上線狀態 | 已接受 |

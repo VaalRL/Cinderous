@@ -153,6 +153,9 @@ export interface Messages {
   block: string;
   unblock: string;
   blocked_title: string;
+  /** 建立群組（行動端，ADR-0114）；group_name/members/create 沿用桌面既有鍵。 */
+  group_new: string;
+  group_namePlaceholder: string;
   export_empty: string;
   settings_invisible: string;
   settings_invisibleHint: string;
@@ -447,6 +450,10 @@ export interface Messages {
   group_section: string;
   group_membersCount: string;
   group_leave: string;
+  /** 移除成員（僅管理者）。 */
+  group_remove: string;
+  /** 行動端設定：上線狀態（ADR-0114）。 */
+  settings_status: string;
   group_labelAdd: string;
   group_labelPlaceholder: string;
   group_labelRemove: string;
@@ -582,6 +589,8 @@ const zhHant: Messages = {
   block: "封鎖",
   unblock: "解除",
   blocked_title: "已封鎖",
+  group_new: "新群組",
+  group_namePlaceholder: "群組名稱（可留空）",
   export_empty: "沒有可導出的對話。",
   settings_invisible: "隱身",
   settings_invisibleHint: "開啟後完全不廣播在線狀態（中繼站與聯絡人皆顯示你離線），但仍可正常收發訊息。",
@@ -873,6 +882,8 @@ const zhHant: Messages = {
   group_section: "群組",
   group_membersCount: "{count} 位成員",
   group_leave: "離開群組",
+  group_remove: "移除",
+  settings_status: "上線狀態",
   group_labelAdd: "＋ 標籤",
   group_labelPlaceholder: "標籤名稱",
   group_labelRemove: "移除標籤 {label}",
@@ -1008,6 +1019,8 @@ const en: Messages = {
   block: "Block",
   unblock: "Unblock",
   blocked_title: "Blocked",
+  group_new: "New group",
+  group_namePlaceholder: "Group name (optional)",
   export_empty: "No conversations to export.",
   settings_invisible: "Invisible",
   settings_invisibleHint: "When on, your presence is never broadcast (relay and contacts both see you offline), but you can still send and receive normally.",
@@ -1299,6 +1312,8 @@ const en: Messages = {
   group_section: "Groups",
   group_membersCount: "{count} members",
   group_leave: "Leave group",
+  group_remove: "Remove",
+  settings_status: "Status",
   group_labelAdd: "＋ Label",
   group_labelPlaceholder: "Label name",
   group_labelRemove: "Remove label {label}",

@@ -50,6 +50,20 @@ function makeStyles(tk: ThemeTokens) {
     textMine: { color: "#ffffff", fontSize: 14 },
     textTheir: { color: tk.ink, fontSize: 14 },
     status: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 2, marginRight: 4 },
+    members: {
+      backgroundColor: tk.panel,
+      borderBottomWidth: 1,
+      borderBottomColor: tk.border,
+      paddingHorizontal: 12,
+      paddingVertical: 6,
+      gap: 2,
+    },
+    memberRow: { flexDirection: "row", alignItems: "center", paddingVertical: 3 },
+    memberName: { flex: 1, fontSize: 13, color: tk.ink },
+    memberBtn: { borderWidth: 1, borderColor: tk.border, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 2 },
+    memberBtnText: { fontSize: 11, color: tk.muted },
+    leaveBtn: { alignSelf: "flex-start", marginTop: 4, borderColor: "#dc2626" },
+    leaveText: { fontSize: 11, color: "#dc2626" },
     textGone: { fontStyle: "italic", opacity: 0.7 },
     reactions: { marginTop: 2, paddingHorizontal: 4 },
     reactionText: { fontSize: 13 },
@@ -128,7 +142,12 @@ export function ConversationScreen({
   onSend,
   onSendFile,
   onStartCall,
+  onNudge,
   onHistory,
+  onLeaveGroup,
+  onRemoveMember,
+  isGroupAdmin,
+  selfPubkey,
   onBack,
   locale = "zh-Hant",
   theme = "light",
@@ -147,6 +166,8 @@ export function ConversationScreen({
   onSendFile?: () => void;
   /** 發起通話（ADR-0101）；未提供則不顯示通話鈕（示範模式／平台無 WebRTC）。 */
   onStartCall?: (media: CallMedia) => void;
+  /** 敲一下（ADR-0114）：1:1 才有；過去行動端只能收、不能發。 */
+  onNudge?: () => void;
   /** 開啟歷史紀錄（ADR-0111）；只有該對話真的有封存時才傳入。 */
   onHistory?: () => void;
   /** 每則訊息收到的 emoji 回應（NIP-25）：訊息 id → emoji 清單。 */
@@ -157,6 +178,17 @@ export function ConversationScreen({
   onReact?: (messageId: string, emoji: string) => void;
   /** 收回自己送出的訊息；未提供則不顯示收回入口。 */
   onUnsend?: (messageId: string) => void;
+  /** 離開群組（ADR-0114）；未提供則不顯示。 */
+  onLeaveGroup?: () => void;
+  /**
+   * 移除群組成員（**僅管理者**，ADR-0027）。群組無共用金鑰——移除成員＝下次扇出略過他，
+   * 即時生效且免 rekey。
+   */
+  onRemoveMember?: (pubkey: string) => void;
+  /** 自己是不是這個群的管理者（決定要不要顯示移除成員）。 */
+  isGroupAdmin?: boolean;
+  /** 自己的 pubkey（成員清單中不對自己顯示「移除」）。 */
+  selfPubkey?: string;
   onSend: (text: string) => void;
   onBack: () => void;
   locale?: Locale;
@@ -169,6 +201,8 @@ export function ConversationScreen({
   const t = (k: MessageKey, params?: Record<string, string | number>): string => translate(locale, k, params);
   /** 長按選中的訊息（顯示回應/收回列）。手機沒有 hover，長按是等價的入口。 */
   const [picked, setPicked] = useState<string | null>(null);
+  /** 群組成員面板是否展開（ADR-0114）。 */
+  const [membersOpen, setMembersOpen] = useState(false);
   // 狀態圖示配色（ADR-0095）：張開眼＝主色、失敗＝紅、其餘＝灰。
   const statusColor = (s: MessageStatus): string =>
     s === "read" ? tk.accent : s === "failed" ? "#dc2626" : tk.muted;
@@ -225,6 +259,30 @@ export function ConversationScreen({
           <Text style={styles.headTitle}>{name}</Text>
           {subtitle ? <Text style={styles.headSub}>{subtitle}</Text> : null}
         </View>
+        {/* 敲一下（ADR-0114）：1:1 才有。 */}
+        {onNudge && !groupMembers ? (
+          <Pressable
+            style={styles.callBtn}
+            accessibilityRole="button"
+            aria-label={t("convo_nudge")}
+            testID="nudge"
+            onPress={onNudge}
+          >
+            <Text style={styles.callIcon}>👋</Text>
+          </Pressable>
+        ) : null}
+        {/* 群組管理（ADR-0114）：成員清單／離開群組。1:1 不顯示。 */}
+        {groupMembers && (onLeaveGroup || onRemoveMember) ? (
+          <Pressable
+            style={styles.callBtn}
+            accessibilityRole="button"
+            aria-label={t("members_title")}
+            testID="group-menu"
+            onPress={() => setMembersOpen((v) => !v)}
+          >
+            <Text style={styles.callIcon}>👥</Text>
+          </Pressable>
+        ) : null}
         {/* 歷史紀錄（ADR-0111）：主畫面只讀熱區；更舊的訊息在封存裡，由此進入。 */}
         {onHistory ? (
           <Pressable
@@ -259,6 +317,40 @@ export function ConversationScreen({
           </>
         ) : null}
       </View>
+
+      {/* 群組成員面板（ADR-0114）：管理者可移除成員；任何人都能離開。 */}
+      {membersOpen && groupMembers ? (
+        <View style={styles.members}>
+          {groupMembers.map((pk) => (
+            <View key={pk} style={styles.memberRow}>
+              <Text style={styles.memberName}>{nameFor ? nameFor(pk) : `${pk.slice(0, 10)}…`}</Text>
+              {isGroupAdmin && onRemoveMember && pk !== selfPubkey ? (
+                <Pressable
+                  style={styles.memberBtn}
+                  accessibilityRole="button"
+                  testID={`remove-${pk}`}
+                  onPress={() => onRemoveMember(pk)}
+                >
+                  <Text style={styles.memberBtnText}>{t("group_remove")}</Text>
+                </Pressable>
+              ) : null}
+            </View>
+          ))}
+          {onLeaveGroup ? (
+            <Pressable
+              style={[styles.memberBtn, styles.leaveBtn]}
+              accessibilityRole="button"
+              testID="leave-group"
+              onPress={() => {
+                onLeaveGroup();
+                setMembersOpen(false);
+              }}
+            >
+              <Text style={styles.leaveText}>{t("group_leave")}</Text>
+            </Pressable>
+          ) : null}
+        </View>
+      ) : null}
 
       <ScrollView style={styles.list} contentContainerStyle={styles.listInner}>
         {messages.map((m) => {

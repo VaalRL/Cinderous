@@ -1,9 +1,16 @@
 // 行動端設定分頁（ADR-0087）：身分備份（npub/nsec）、外觀（主題/主色/語言）、中繼站、登出。
 // 主題/主色/語言由 MobileApp 掌管、經 callback 即時切換；色彩吃 @cinder/theme。
 import { useMemo, useState } from "react";
-import type { CloudSyncMode } from "@cinder/engine";
+import type { CloudSyncMode, Status } from "@cinder/engine";
 import { type Locale, type MessageKey, translate } from "@cinder/i18n";
 import { resolveTheme, type Theme, type ThemeTokens } from "@cinder/theme";
+
+/** 上線狀態的 i18n 鍵（與桌面同一組）。 */
+const STATUS_KEY: Record<"online" | "away" | "busy", MessageKey> = {
+  online: "status_online",
+  away: "status_away",
+  busy: "status_busy",
+};
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native-web";
 
 const ACCENTS: { label: string; hex: string | null }[] = [
@@ -51,6 +58,8 @@ export function SettingsScreen({
   onAccent,
   invisible,
   onInvisible,
+  status,
+  onStatus,
   retention,
   onRetention,
   onExport,
@@ -73,6 +82,9 @@ export function SettingsScreen({
   /** 隱身（ADR-0088）：停止一切在線廣播。 */
   invisible: boolean;
   onInvisible: (v: boolean) => void;
+  /** 上線狀態（ADR-0114）：online/away/busy。未提供則不顯示（示範模式）。 */
+  status?: Status;
+  onStatus?: (s: Status) => void;
   /** 每對話保留上限（ADR-0094）；0＝無上限。未提供則不顯示。 */
   retention?: number;
   onRetention?: (n: number) => void;
@@ -153,6 +165,26 @@ export function SettingsScreen({
             </Pressable>
           </View>
         </View>
+
+        {/* 上線狀態（ADR-0114）：與桌面同一組。隱身（見下）優先於此——隱身時完全不廣播。 */}
+        {onStatus ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>{t("settings_status")}</Text>
+            <View style={styles.rowSeg}>
+              {(["online", "away", "busy"] as const).map((v) => (
+                <Pressable
+                  key={v}
+                  style={seg(status === v)}
+                  accessibilityRole="button"
+                  testID={`status-${v}`}
+                  onPress={() => onStatus(v)}
+                >
+                  <Text style={segTxt(status === v)}>{t(STATUS_KEY[v])}</Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+        ) : null}
 
         {/* 隱私：隱身 */}
         <View style={styles.section}>

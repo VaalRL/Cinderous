@@ -331,6 +331,22 @@ export function MobileApp({
     if (activeId === pubkey) back(); // 正在看的對話被封鎖 → 退回主畫面
   };
   const unblock = (pubkey: string): void => backendRef.current?.unblockContact?.(pubkey);
+  /**
+   * 建立群組（ADR-0114）。群組**無共用金鑰**（ADR-0027）：對每位其他成員各包一個 Gift Wrap
+   * 扇出——所以「成員清單」就是收件人清單。建立者自動是管理者。
+   */
+  const createGroup = (name: string, memberPubkeys: string[]): void =>
+    backendRef.current?.createGroup?.(name, memberPubkeys);
+  /** 敲一下（ADR-0114）：過去行動端只能收、不能發。 */
+  const nudge = (): void => {
+    if (activeId && !isGroup(activeId)) backendRef.current?.sendNudge(activeId);
+  };
+  /** 上線狀態（ADR-0114）。隱身優先——隱身時後端完全不廣播（ADR-0088）。 */
+  const [selfStatus, setSelfStatus] = useState<Status>("online");
+  const changeStatus = (v: Status): void => {
+    setSelfStatus(v);
+    backendRef.current?.setStatus(v);
+  };
   const toggleInvisible = (v: boolean): void => {
     setInvisible(v);
     backendRef.current?.setInvisible?.(v);
@@ -468,7 +484,20 @@ export function MobileApp({
         ? contact.statusMessage || translate(locale, STATUS_KEY[contact.status])
         : undefined;
     // 群組另傳成員名解析＋成員清單：供已讀分級（≤5 名單、6–10 計數、>10 不顯示，ADR-0095）。
-    const groupProps = group ? { nameFor, groupMembers: group.members } : {};
+    // 群組管理（ADR-0114）：任何成員都能離開；**只有管理者**能移除成員（ADR-0027）。
+    const groupProps = group
+      ? {
+          nameFor,
+          groupMembers: group.members,
+          selfPubkey,
+          isGroupAdmin: group.admin === selfPubkey,
+          onLeaveGroup: () => {
+            backendRef.current?.leaveGroup?.(group.id);
+            back(); // 已經不是成員了，留在對話畫面沒有意義
+          },
+          onRemoveMember: (pk: string) => backendRef.current?.removeGroupMember?.(group.id, pk),
+        }
+      : {};
     // 檔案：真實 relay 才有 P2P 傳輸（示範後端無 sendFile）。
     const fileProps = backendRef.current?.sendFile ? { onSendFile: sendFileFromPicker } : {};
     // 通話：需真實後端＋平台具備 WebRTC（ADR-0101）。
@@ -485,6 +514,7 @@ export function MobileApp({
           onReact={react}
           onUnsend={unsend}
           {...(subtitle ? { subtitle } : {})}
+          {...(relayUrl && !group ? { onNudge: nudge } : {})}
           {...((archived[activeId] ?? 0) > 0 ? { onHistory: () => setScreen("history") } : {})}
           {...groupProps}
           {...fileProps}
@@ -503,7 +533,15 @@ export function MobileApp({
         <ChatsListScreen
           entries={entries}
           onOpen={openConvo}
-          {...(relayUrl ? { onAddContact: addContact, selfNpub } : {})}
+          {...(relayUrl
+            ? {
+                onAddContact: addContact,
+                selfNpub,
+                // 建立群組（ADR-0114）：只有真實 relay 才有（示範後端無群組扇出）。
+                onCreateGroup: createGroup,
+                contacts: contacts.map((c) => ({ pubkey: c.pubkey, name: c.name })),
+              }
+            : {})}
           {...themeProps}
         />
       ) : tab === "contacts" ? (
@@ -533,6 +571,8 @@ export function MobileApp({
           onInvisible={toggleInvisible}
           {...(relayUrl
             ? {
+                status: selfStatus,
+                onStatus: changeStatus,
                 retention: retentionCap,
                 onRetention: changeRetention,
                 onExport: exportAll,
