@@ -44,13 +44,19 @@ function makeStyles(tk: ThemeTokens) {
 export function NsecSignInScreen({
   onSignIn,
   onUsePairing,
+  canRemember,
   locale = "zh-Hant",
   theme = "light",
   accent = null,
   accent2 = null,
 }: {
-  /** 登入成功：回傳同帳號身分（同一把 sk）。 */
-  onSignIn: (identity: MobileIdentity) => void;
+  /**
+   * 登入成功：回傳同帳號身分（同一把 sk）。`password` 非空＝使用者要「記住我」
+   * → 呼叫端以 Argon2id 包裹 nsec 落地（ADR-0117）。
+   */
+  onSignIn: (identity: MobileIdentity, password?: string) => void;
+  /** 是否提供「記住我」（需本地密碼）。未提供＝不顯示。 */
+  canRemember?: boolean;
   /** 切換到配對匯入（B）；未提供＝不顯示入口。 */
   onUsePairing?: () => void;
   locale?: Locale;
@@ -63,6 +69,8 @@ export function NsecSignInScreen({
   const [name, setName] = useState("");
   const [nsec, setNsec] = useState("");
   const [error, setError] = useState<MessageKey | null>(null);
+  /** 「記住我」的本地密碼（ADR-0117）。空＝不記住（nsec 只留在記憶體，重開要重貼）。 */
+  const [password, setPassword] = useState("");
   const T = (k: MessageKey): string => translate(locale, k);
   const npub = npubFromNsec(nsec);
 
@@ -73,7 +81,8 @@ export function NsecSignInScreen({
       return;
     }
     setError(null);
-    onSignIn(r.identity);
+    // 密碼空＝不記住。**絕不無密碼記住**——那等於明文存 nsec（ADR-0112 紅線）。
+    onSignIn(r.identity, password || undefined);
   };
 
   return (
@@ -97,6 +106,26 @@ export function NsecSignInScreen({
           autoCorrect={false}
           aria-label={T("mobileSignIn_nsecLabel")}
         />
+
+        {/* 「記住我」（ADR-0117）：以 Argon2id 密碼包裹 nsec 落地。留空＝不記住。 */}
+        {canRemember ? (
+          <>
+            <Text style={styles.label}>{T("remember_label")}</Text>
+            <TextInput
+              style={styles.input}
+              value={password}
+              onChangeText={setPassword}
+              placeholder={T("remember_placeholder")}
+              placeholderTextColor={tk.muted}
+              secureTextEntry
+              autoCapitalize="none"
+              autoCorrect={false}
+              aria-label={T("remember_label")}
+              testID="remember-password"
+            />
+            <Text style={styles.hint}>{T("remember_hint")}</Text>
+          </>
+        ) : null}
 
         {npub ? (
           <Text style={styles.npub}>

@@ -26,6 +26,8 @@ declare module "react-native-web" {
     autoCorrect?: boolean;
     onChangeText?: (text: string) => void;
     "aria-label"?: string;
+    /** react-native-web 渲染成 `data-testid`（測試用選擇器）。 */
+    testID?: string;
   }
   export interface PressableProps {
     style?: Style;

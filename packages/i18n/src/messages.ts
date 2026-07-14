@@ -454,6 +454,11 @@ export interface Messages {
   group_remove: string;
   /** 行動端設定：上線狀態（ADR-0114）。 */
   settings_status: string;
+  /** 「記住我」（行動端本地密碼，ADR-0117）。 */
+  remember_label: string;
+  remember_placeholder: string;
+  remember_hint: string;
+  remember_forget: string;
   group_labelAdd: string;
   group_labelPlaceholder: string;
   group_labelRemove: string;
@@ -884,6 +889,10 @@ const zhHant: Messages = {
   group_leave: "離開群組",
   group_remove: "移除",
   settings_status: "上線狀態",
+  remember_label: "記住我（本地密碼）",
+  remember_placeholder: "留空＝不記住",
+  remember_hint: "設密碼後，私鑰會以 Argon2id 加密存在這台裝置；沒有密碼就打不開。忘記密碼無法救回——改用 nsec 重新登入即可。",
+  remember_forget: "忘記這個身分",
   group_labelAdd: "＋ 標籤",
   group_labelPlaceholder: "標籤名稱",
   group_labelRemove: "移除標籤 {label}",
@@ -1314,6 +1323,10 @@ const en: Messages = {
   group_leave: "Leave group",
   group_remove: "Remove",
   settings_status: "Status",
+  remember_label: "Remember me (local password)",
+  remember_placeholder: "Leave blank to not remember",
+  remember_hint: "With a password, your key is stored on this device encrypted with Argon2id. No password, no access. Forgotten passwords cannot be recovered — just sign in with your nsec again.",
+  remember_forget: "Forget this identity",
   group_labelAdd: "＋ Label",
   group_labelPlaceholder: "Label name",
   group_labelRemove: "Remove label {label}",

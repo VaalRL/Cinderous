@@ -23,19 +23,26 @@ import { CallScreen } from "./screens/CallScreen.js";
 import { type Locale, type MessageKey, translate } from "@cinder/i18n";
 import type { Theme } from "@cinder/theme";
 import { StyleSheet, View } from "react-native-web";
-import type { MobileIdentity } from "./auth.js";
+import {
+  isRemembered,
+  type MobileIdentity,
+  rememberIdentity,
+  type RememberedIdentity,
+  unlockRemembered,
+} from "./auth.js";
 import { createBackend } from "./backend.js";
 import { chatList } from "./chat-list.js";
 import { BottomTabs, type Tab } from "./screens/BottomTabs.js";
 import { ChatsListScreen } from "./screens/ChatsListScreen.js";
 import { ContactListScreen, type MobileContact } from "./screens/ContactListScreen.js";
+import { UnlockScreen } from "./screens/UnlockScreen.js";
 import { ConversationScreen } from "./screens/ConversationScreen.js";
 import { HistoryScreen } from "./screens/HistoryScreen.js";
 import { NsecSignInScreen } from "./screens/NsecSignInScreen.js";
 import { PairImportScreen } from "./screens/PairImportScreen.js";
 import { SettingsScreen } from "./screens/SettingsScreen.js";
 
-type Screen = "signin" | "pair" | "main" | "conversation" | "history";
+type Screen = "signin" | "unlock" | "pair" | "main" | "conversation" | "history";
 
 const STATUS_KEY: Record<Status, MessageKey> = {
   online: "status_online",
@@ -51,6 +58,20 @@ const CLOUD_SYNC_KEY = "nb.cloudSync";
 /** 通知設定（ADR-0116）：開關與「隱藏預覽」。 */
 const NOTIFY_KEY = "nb.notify";
 const NOTIFY_HIDE_KEY = "nb.notifyHidePreview";
+/** 「記住我」（ADR-0117）：Argon2id 包裹的身分。**絕不明文存 nsec**（ADR-0112 紅線）。 */
+const REMEMBER_KEY = "nb.remembered";
+
+function loadRemembered(): RememberedIdentity | null {
+  try {
+    const raw = localStorage.getItem(REMEMBER_KEY);
+    if (!raw) return null;
+    const v: unknown = JSON.parse(raw);
+    // isRemembered 會檢查 wrapped 確實是 Argon2id blob——明文 nsec 一律不收。
+    return isRemembered(v) ? v : null;
+  } catch {
+    return null;
+  }
+}
 function readCloudSync(): CloudSyncMode {
   try {
     const v = localStorage.getItem(CLOUD_SYNC_KEY);
@@ -108,7 +129,9 @@ export function MobileApp({
   initialLocale?: Locale;
   initialAccent?: string | null;
 }): JSX.Element {
-  const [screen, setScreen] = useState<Screen>("signin");
+  /** 記住的身分（ADR-0117）：有的話開機直接進解鎖畫面。 */
+  const [remembered, setRemembered] = useState<RememberedIdentity | null>(loadRemembered);
+  const [screen, setScreen] = useState<Screen>(() => (loadRemembered() ? "unlock" : "signin"));
   const [tab, setTab] = useState<Tab>("chats");
   const [theme, setTheme] = useState<Theme>(initialTheme);
   const [locale, setLocale] = useState<Locale>(initialLocale);
@@ -179,7 +202,34 @@ export function MobileApp({
 
   const themeProps = { locale, theme, accent } as const;
 
-  const handleSignIn = (identity: MobileIdentity): void => {
+  /** 忘記記住的身分（清掉密文）。 */
+  const forgetRemembered = (): void => {
+    try {
+      localStorage.removeItem(REMEMBER_KEY);
+    } catch {
+      /* 忽略 */
+    }
+    setRemembered(null);
+    setScreen("signin");
+  };
+
+  const handleSignIn = (identity: MobileIdentity, password?: string): void => {
+    // 「記住我」：以 Argon2id 密碼包裹 nsec 落地（ADR-0117）。無密碼＝不記住。
+    if (password) {
+      const r = rememberIdentity(identity, password);
+      if (r) {
+        try {
+          localStorage.setItem(REMEMBER_KEY, JSON.stringify(r));
+        } catch {
+          /* 配額/不可用 → 不記住，但登入照常 */
+        }
+        setRemembered(r);
+      }
+    }
+    signInWith(identity);
+  };
+
+  const signInWith = (identity: MobileIdentity): void => {
     backendRef.current?.stop();
     // ADR-0094：真實 relay 用外部持有的儲存（供保留上限/導出）；示範模式無持久化。
     // ADR-0112：靜態加密——資料金鑰由 nsec 導出。行動端**從不持久化 nsec**（每次輸入），
@@ -355,6 +405,7 @@ export function MobileApp({
     setTab("chats");
     setActiveId(null);
     setInvisible(false);
+    forgetRemembered(); // 登出＝連「記住的身分」一起清（否則下次開機又跳解鎖）
   };
   // 通知點擊（ADR-0116）：開啟該對話。掛載一次即可。
   useEffect(() => onNotifyClick((convo) => convo && openConvo(convo)), []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -519,8 +570,33 @@ export function MobileApp({
     />
   ) : null;
 
+  // 解鎖（ADR-0117）：記住的身分以 Argon2id 密碼包裹，開機需輸入密碼。
+  if (screen === "unlock" && remembered) {
+    return (
+      <UnlockScreen
+        name={remembered.name}
+        onUnlock={(password) => {
+          const r = unlockRemembered(remembered, password);
+          if (!r.ok) return false; // 密碼錯／遭竄改（不區分）
+          signInWith(r.identity);
+          return true;
+        }}
+        onUseNsec={() => setScreen("signin")}
+        onForget={forgetRemembered}
+        {...themeProps}
+      />
+    );
+  }
+
   if (screen === "signin") {
-    return <NsecSignInScreen onSignIn={handleSignIn} onUsePairing={() => setScreen("pair")} {...themeProps} />;
+    return (
+      <NsecSignInScreen
+        onSignIn={handleSignIn}
+        onUsePairing={() => setScreen("pair")}
+        canRemember
+        {...themeProps}
+      />
+    );
   }
   if (screen === "pair") {
     return (

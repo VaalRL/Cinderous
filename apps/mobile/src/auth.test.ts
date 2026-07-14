@@ -16,7 +16,7 @@ import {
   runPairTarget,
 } from "@cinder/engine";
 import { describe, expect, it } from "vitest";
-import { identityFromNsec, identityFromPairBundle, npubFromNsec, previewPairing } from "./auth.js";
+import { identityFromNsec, identityFromPairBundle, isRemembered, npubFromNsec, previewPairing, rememberIdentity, type MobileIdentity, unlockRemembered } from "./auth.js";
 
 describe("行動端登入 A：nsec 匯入（ADR-0081）", () => {
   const sk = generateSecretKey();
@@ -121,5 +121,56 @@ describe("行動端登入 B：配對匯入（ADR-0081）", () => {
 
     const r = identityFromPairBundle(bundle);
     expect(r.ok && r.identity.pubkey).toBe(getPublicKey(sk)); // 同帳號
+  });
+});
+
+describe("「記住我」：以本地密碼包裹 nsec（ADR-0117）", () => {
+  const sk = generateSecretKey();
+  const nsec = nsecEncode(sk);
+  const id = (identityFromNsec(nsec, "我") as { ok: true; identity: MobileIdentity }).identity;
+
+  it("往返：正確密碼解得回同一把私鑰", () => {
+    const r = rememberIdentity(id, "好密碼")!;
+    const back = unlockRemembered(r, "好密碼");
+    expect(back.ok).toBe(true);
+    if (back.ok) {
+      expect(back.identity.pubkey).toBe(id.pubkey);
+      expect(back.identity.nsec).toBe(nsec);
+      expect(back.identity.name).toBe("我");
+    }
+  });
+
+  it("**落地的東西不含明文 nsec**——這是 ADR-0112 的紅線", () => {
+    const r = rememberIdentity(id, "pw")!;
+    expect(JSON.stringify(r)).not.toContain(nsec);
+    expect(r.wrapped).not.toContain(nsec);
+  });
+
+  it("**絕不無密碼記住**（那等於明文存 nsec）", () => {
+    expect(rememberIdentity(id, "")).toBeNull();
+  });
+
+  it("密碼錯誤 → 錯誤鍵（不區分「錯密碼」與「遭竄改」，不給攻擊者訊號）", () => {
+    const r = rememberIdentity(id, "正確")!;
+    const back = unlockRemembered(r, "錯誤");
+    expect(back.ok).toBe(false);
+  });
+
+  it("竄改密文 → 解不開（GCM 驗證失敗）", () => {
+    const r = rememberIdentity(id, "pw")!;
+    const blob = JSON.parse(r.wrapped) as { data: string };
+    const tampered = { ...r, wrapped: JSON.stringify({ ...blob, data: `${blob.data.slice(0, -4)}AAAA` }) };
+    expect(unlockRemembered(tampered, "pw").ok).toBe(false);
+  });
+
+  it("**只認 Argon2id 包裹的 blob**——有人塞明文 nsec 進去也不收（ADR-0112 紅線）", () => {
+    expect(isRemembered({ pubkey: id.pubkey, npub: id.npub, name: "我", wrapped: nsec })).toBe(false);
+    expect(isRemembered(rememberIdentity(id, "pw"))).toBe(true);
+    expect(isRemembered(null)).toBe(false);
+    expect(isRemembered({ pubkey: "x" })).toBe(false);
+  });
+
+  it("同一身分兩次記住 → 密文不同（鹽每次隨機）", () => {
+    expect(rememberIdentity(id, "pw")!.wrapped).not.toBe(rememberIdentity(id, "pw")!.wrapped);
   });
 });
