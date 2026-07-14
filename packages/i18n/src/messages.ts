@@ -459,6 +459,22 @@ export interface Messages {
   remember_placeholder: string;
   remember_hint: string;
   remember_forget: string;
+  /** 配對搬家——送出端（行動端，ADR-0118）。 */
+  pairExport_title: string;
+  pairExport_hint: string;
+  pairExport_start: string;
+  pairExport_offerHint: string;
+  pairExport_waiting: string;
+  pairExport_sasWarn: string;
+  pairExport_sasMatch: string;
+  pairExport_sasMismatch: string;
+  pairExport_sending: string;
+  pairExport_done: string;
+  pairExport_reset: string;
+  pairExport_needRelay: string;
+  pair_sasLabel: string;
+  copy: string;
+  copied: string;
   group_labelAdd: string;
   group_labelPlaceholder: string;
   group_labelRemove: string;
@@ -893,6 +909,21 @@ const zhHant: Messages = {
   remember_placeholder: "留空＝不記住",
   remember_hint: "設密碼後，私鑰會以 Argon2id 加密存在這台裝置；沒有密碼就打不開。忘記密碼無法救回——改用 nsec 重新登入即可。",
   remember_forget: "忘記這個身分",
+  pairExport_title: "搬到新裝置",
+  pairExport_hint: "把這台裝置的全部資料（含私鑰）一次搬到新裝置。全程 P2P 加密，不經中繼儲存。",
+  pairExport_start: "開始配對",
+  pairExport_offerHint: "把這串配對碼貼到新裝置：",
+  pairExport_waiting: "等待新裝置連上…",
+  pairExport_sasWarn: "務必與新裝置上顯示的驗證碼逐字比對。不相符代表有人在中間——請立刻拒絕。",
+  pairExport_sasMatch: "驗證碼相符，送出資料",
+  pairExport_sasMismatch: "不相符，中止",
+  pairExport_sending: "傳送中…",
+  pairExport_done: "搬家完成",
+  pairExport_reset: "重新開始",
+  pairExport_needRelay: "需先以真實中繼登入才能搬家",
+  pair_sasLabel: "驗證碼（SAS）",
+  copy: "複製",
+  copied: "已複製",
   group_labelAdd: "＋ 標籤",
   group_labelPlaceholder: "標籤名稱",
   group_labelRemove: "移除標籤 {label}",
@@ -1327,6 +1358,21 @@ const en: Messages = {
   remember_placeholder: "Leave blank to not remember",
   remember_hint: "With a password, your key is stored on this device encrypted with Argon2id. No password, no access. Forgotten passwords cannot be recovered — just sign in with your nsec again.",
   remember_forget: "Forget this identity",
+  pairExport_title: "Move to new device",
+  pairExport_hint: "Move everything on this device (including your key) to a new one. End-to-end encrypted over P2P; nothing is stored on the relay.",
+  pairExport_start: "Start pairing",
+  pairExport_offerHint: "Paste this pairing code on the new device:",
+  pairExport_waiting: "Waiting for the new device…",
+  pairExport_sasWarn: "Compare this code character by character with the new device. If they differ, someone is in the middle — reject immediately.",
+  pairExport_sasMatch: "Codes match, send data",
+  pairExport_sasMismatch: "Do not match, abort",
+  pairExport_sending: "Sending…",
+  pairExport_done: "Move complete",
+  pairExport_reset: "Start over",
+  pairExport_needRelay: "Sign in with a real relay first",
+  pair_sasLabel: "Verification code (SAS)",
+  copy: "Copy",
+  copied: "Copied",
   group_labelAdd: "＋ Label",
   group_labelPlaceholder: "Label name",
   group_labelRemove: "Remove label {label}",

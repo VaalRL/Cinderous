@@ -7,7 +7,7 @@
 // 匯出/套用走 `AppStorage` 介面（而非特定實作的 export/import），
 // 讓瀏覽器 LocalStorage 與 TauriStorage 一體適用。
 
-import type { AppStorage, StorageSnapshot, StoredMessage } from "./types.js";
+import type { AppStorage, StorageSnapshot, StoredIdentity, StoredMessage } from "./types.js";
 
 /** 配對捆包信封。 */
 export interface PairBundle {
@@ -19,8 +19,14 @@ export interface PairBundle {
   snapshot: StorageSnapshot;
 }
 
-/** 自任意 AppStorage 匯出全量快照（訊息鍵＝聯絡人 pubkey 與群組 id）。 */
-export function exportFullSnapshot(storage: AppStorage): StorageSnapshot {
+/**
+ * 自任意 AppStorage 匯出全量快照（訊息鍵＝聯絡人 pubkey 與群組 id）。
+ *
+ * `identity` 可顯式覆寫——**這是必要的**：私鑰不在 `AppStorage` 裡的環境（Tauri 走 OS 金鑰庫、
+ * 行動端根本不持久化 nsec、瀏覽器只存 Argon2id 包裹的 blob，見 ADR-0053/0112），
+ * `storage.loadIdentity()` 會回 `null`。
+ */
+export function exportFullSnapshot(storage: AppStorage, identity?: StoredIdentity): StorageSnapshot {
   const contacts = storage.loadContacts();
   const groups = storage.loadGroups();
   const blocked = storage.loadBlocked();
@@ -30,7 +36,7 @@ export function exportFullSnapshot(storage: AppStorage): StorageSnapshot {
     if (msgs.length > 0) messages[key] = msgs;
   }
   return {
-    identity: storage.loadIdentity(),
+    identity: identity ?? storage.loadIdentity(),
     contacts,
     blocked,
     messages,
@@ -41,16 +47,31 @@ export function exportFullSnapshot(storage: AppStorage): StorageSnapshot {
   };
 }
 
-/** 組包（舊機）：全量快照＋profile 精華。輸出 JSON 字串（交給協定層加密）。 */
+/**
+ * 組包（舊機）：全量快照＋profile 精華。輸出 JSON 字串（交給協定層加密）。
+ *
+ * **沒有 nsec 就當場拋錯**（ADR-0118）。過去這裡會靜默產出 `identity: null` 的捆包——
+ * 舊機顯示「配對成功」，新機才在最後拋出「捆包缺少身分」。**失敗要發生在源頭，而不是在
+ * 使用者已經比對完 SAS、以為搬家成功之後。**
+ *
+ * 這個洞是真的存在的：`nsecOverride` 的環境（**桌面 Tauri**、行動端）後端**不會**把 nsec
+ * 寫進 `AppStorage`（ADR-0053：私鑰託給 OS 金鑰庫），於是 `storage.loadIdentity()` 回 `null`
+ * ——**桌面的換機搬家一直是壞的**。呼叫端必須顯式傳入 `identity`（nsec 由金鑰庫/記憶體提供）。
+ */
 export function buildPairBundle(
   storage: AppStorage,
   profile: { relayUrl: string; cloudSync?: "off" | "basic" | "full" },
+  identity?: StoredIdentity,
 ): string {
+  const snapshot = exportFullSnapshot(storage, identity);
+  if (!snapshot.identity?.nsec) {
+    throw new Error("配對捆包缺少身分（nsec）：私鑰不在 AppStorage 時必須顯式傳入 identity");
+  }
   const bundle: PairBundle = {
     v: 1,
     relayUrl: profile.relayUrl,
     ...(profile.cloudSync ? { cloudSync: profile.cloudSync } : {}),
-    snapshot: exportFullSnapshot(storage),
+    snapshot,
   };
   return JSON.stringify(bundle);
 }

@@ -991,6 +991,13 @@ export function App(): JSX.Element {
     const p = activeProfile(profilesState);
     const store = storageRef.current;
     if (!p || !p.relayUrl || p.enterprise || !store) return;
+    // ADR-0118：**私鑰不在 AppStorage 裡**（Tauri 走 OS 金鑰庫、瀏覽器只存包裹過的 blob），
+    // 必須顯式傳入身分——否則捆包的 identity 是 null，新機收到後才拋「缺少身分」。
+    const nsec = backend?.selfNsec;
+    if (!nsec) {
+      setPairPhase({ kind: "error", message: "無法取得身分私鑰" });
+      return;
+    }
     const { offer, key } = createPairingOffer(p.relayUrl); // 載荷帶會合 relay（新機尚無設定）
     setSettingsOpen(false); // 設定面板在 DOM 中位於配對面板之後，不關會蓋住 SAS 確認鈕
     setPairPhase({ kind: "offer", code: offer.code, expiresAt: offer.expiresAt });
@@ -998,6 +1005,7 @@ export function App(): JSX.Element {
     void runPairSource({
       key,
       storage: store,
+      identity: { nsec, name: p.name },
       profile: { relayUrl: p.relayUrl, ...(p.cloudSync ? { cloudSync: p.cloudSync } : {}) },
       transport,
       confirmSas: (sas) =>

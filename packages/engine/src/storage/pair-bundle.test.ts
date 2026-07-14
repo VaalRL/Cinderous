@@ -51,3 +51,34 @@ describe("配對捆包（ADR-0072 D4a-2）", () => {
     expect(parsePairBundle(JSON.stringify(noIdentity))).toBeNull(); // 沒身分＝不是可用的克隆包
   });
 });
+
+describe("配對捆包一定要有身分（ADR-0118）", () => {
+  const identity = { nsec: "nsec1abc", name: "我" };
+
+  it("**沒有 nsec → 當場拋錯**，不要靜默產出一個沒用的捆包", () => {
+    const s = new MemoryStorage(); // 私鑰不在 AppStorage 裡（Tauri 走 OS 金鑰庫／行動端不持久化）
+    expect(() => buildPairBundle(s, { relayUrl: "wss://x" })).toThrow(/身分/);
+  });
+
+  it("顯式傳入 identity → 捆包帶著 nsec（這正是修正前壞掉的地方）", () => {
+    const s = new MemoryStorage();
+    s.addContact({ pubkey: "bob", name: "Bob" });
+    const bundle = parsePairBundle(buildPairBundle(s, { relayUrl: "wss://x" }, identity))!;
+    expect(bundle.snapshot.identity?.nsec).toBe("nsec1abc");
+    expect(bundle.snapshot.contacts.map((c) => c.pubkey)).toEqual(["bob"]);
+  });
+
+  it("storage 裡有身分時仍照舊可用（不強迫呼叫端改）", () => {
+    const s = new MemoryStorage();
+    s.saveIdentity(identity);
+    const bundle = parsePairBundle(buildPairBundle(s, { relayUrl: "wss://x" }))!;
+    expect(bundle.snapshot.identity?.nsec).toBe("nsec1abc");
+  });
+
+  it("顯式 identity 覆寫 storage 裡的（金鑰庫才是權威）", () => {
+    const s = new MemoryStorage();
+    s.saveIdentity({ nsec: "nsec1old", name: "舊" });
+    const bundle = parsePairBundle(buildPairBundle(s, { relayUrl: "wss://x" }, identity))!;
+    expect(bundle.snapshot.identity?.nsec).toBe("nsec1abc");
+  });
+})

@@ -64,6 +64,7 @@ export function SettingsScreen({
   onNotify,
   notifyHidePreview,
   onNotifyHidePreview,
+  onPairExport,
   retention,
   onRetention,
   onExport,
@@ -95,6 +96,8 @@ export function SettingsScreen({
   /** 隱藏預覽：通知只說「有新訊息」，不把明文推到鎖定畫面。 */
   notifyHidePreview?: boolean;
   onNotifyHidePreview?: (v: boolean) => void;
+  /** 搬到新裝置（ADR-0118）：把整台的資料（含私鑰）P2P 搬走。未提供則不顯示。 */
+  onPairExport?: () => void;
   /** 每對話保留上限（ADR-0094）；0＝無上限。未提供則不顯示。 */
   retention?: number;
   onRetention?: (n: number) => void;
@@ -193,6 +196,22 @@ export function SettingsScreen({
                 </Pressable>
               ))}
             </View>
+          </View>
+        ) : null}
+
+        {/* 搬到新裝置（ADR-0118）：全程 P2P 加密，不經中繼儲存。 */}
+        {onPairExport ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>{t("pairExport_title")}</Text>
+            <Text style={styles.label}>{t("pairExport_hint")}</Text>
+            <Pressable
+              accessibilityRole="button"
+              testID="pair-export"
+              onPress={onPairExport}
+              style={[styles.seg, { alignSelf: "flex-start", borderColor: tk.accent, backgroundColor: tk.field }]}
+            >
+              <Text style={[styles.segText, { color: tk.accent }]}>{t("pairExport_start")}</Text>
+            </Pressable>
           </View>
         ) : null}
 

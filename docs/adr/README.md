@@ -132,3 +132,4 @@
 | [0115](./0115-mobile-parity-groups.md) | 行動端對齊（二）：建立群組與成員管理、敲一下（可發）、上線狀態 | 已接受 |
 | [0116](./0116-mobile-notifications.md) | 行動端通知（＋隱藏預覽的隱私開關）；Web Notification 基質收斂為單一來源；不做推播 | 已接受 |
 | [0117](./0117-mobile-remember-me.md) | 行動端「記住我」：Argon2id 密碼包裹 nsec（絕不無密碼記住）；忘記密碼無救援但可改用 nsec | 已接受 |
+| [0118](./0118-pairing-source-identity.md) | **修好桌面配對搬家**（捆包一直沒有 nsec）＋行動端補上送出端與真實的匯入 | 已接受 |

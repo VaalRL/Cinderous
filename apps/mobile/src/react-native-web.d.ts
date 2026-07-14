@@ -13,7 +13,10 @@ declare module "react-native-web" {
     style?: Style;
     numberOfLines?: number;
     children?: ReactNode;
-  }
+      /** react-native-web 渲染成 `data-testid`。 */
+    testID?: string;
+    selectable?: boolean;
+}
   export interface TextInputProps {
     style?: Style;
     value?: string;

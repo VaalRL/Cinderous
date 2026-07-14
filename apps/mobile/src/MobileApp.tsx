@@ -13,7 +13,14 @@ import {
   openOpfsArchive,
 } from "@cinder/engine";
 import { nsecDecode } from "@cinder/core";
-import { notificationFor } from "@cinder/engine";
+import {
+  createPairingOffer,
+  notificationFor,
+  runPairSource,
+  runPairTarget,
+  webRtcPairTransport,
+  webSocketConnector,
+} from "@cinder/engine";
 import { notifier, onNotifyClick } from "./native/notify.js";
 import type { BlockedContact } from "@cinder/engine";
 import type { CallMedia, CallState } from "@cinder/core";
@@ -39,10 +46,11 @@ import { UnlockScreen } from "./screens/UnlockScreen.js";
 import { ConversationScreen } from "./screens/ConversationScreen.js";
 import { HistoryScreen } from "./screens/HistoryScreen.js";
 import { NsecSignInScreen } from "./screens/NsecSignInScreen.js";
+import { PairExportScreen, type PairPhase } from "./screens/PairExportScreen.js";
 import { PairImportScreen } from "./screens/PairImportScreen.js";
 import { SettingsScreen } from "./screens/SettingsScreen.js";
 
-type Screen = "signin" | "unlock" | "pair" | "main" | "conversation" | "history";
+type Screen = "signin" | "unlock" | "pair" | "pairExport" | "main" | "conversation" | "history";
 
 const STATUS_KEY: Record<Status, MessageKey> = {
   online: "status_online",
@@ -443,6 +451,50 @@ export function MobileApp({
    */
   const createGroup = (name: string, memberPubkeys: string[]): void =>
     backendRef.current?.createGroup?.(name, memberPubkeys);
+  // ── 配對搬家：送出端（ADR-0118）────────────────────────────────────────
+  const [pairPhase, setPairPhase] = useState<PairPhase>({ kind: "idle" });
+  /** SAS 裁示的 resolve（使用者按下「相符/不符」時呼叫）。 */
+  const pairDecision = useRef<((ok: boolean) => void) | null>(null);
+
+  /**
+   * 開始配對（舊機／資料持有方）。
+   *
+   * **必須顯式傳入 identity**（ADR-0118）：行動端**從不持久化 nsec**（ADR-0112 紅線），
+   * 所以 `storage.loadIdentity()` 是 null——不傳的話捆包會缺身分，新機收到才爆。
+   */
+  const startPairExport = (): void => {
+    const store = storeRef.current;
+    const nsec = backendRef.current?.selfNsec;
+    if (!store || !relayUrl || !nsec) {
+      setPairPhase({ kind: "error", message: translate(locale, "pairExport_needRelay") });
+      return;
+    }
+    const { offer, key } = createPairingOffer(relayUrl);
+    setPairPhase({ kind: "offer", code: offer.code, expiresAt: offer.expiresAt });
+    void runPairSource({
+      key,
+      storage: store,
+      identity: { nsec, name: selfName },
+      profile: { relayUrl, ...(cloudSync !== "off" ? { cloudSync } : {}) },
+      transport: webRtcPairTransport(webSocketConnector),
+      // SAS 是這個流程的安全核心：**必須是使用者的明確裁示**，不能自動通過。
+      confirmSas: (sas) =>
+        new Promise<boolean>((resolve) => {
+          setPairPhase({ kind: "sas", sas });
+          pairDecision.current = (ok) => {
+            pairDecision.current = null;
+            setPairPhase(ok ? { kind: "sending" } : { kind: "idle" });
+            resolve(ok);
+          };
+        }),
+    }).then(
+      (sent) => {
+        if (sent) setPairPhase({ kind: "done" });
+      },
+      (e: Error) => setPairPhase({ kind: "error", message: e.message || "配對失敗" }),
+    );
+  };
+
   /** 敲一下（ADR-0114）：過去行動端只能收、不能發。 */
   const nudge = (): void => {
     if (activeId && !isGroup(activeId)) backendRef.current?.sendNudge(activeId);
@@ -588,6 +640,23 @@ export function MobileApp({
     );
   }
 
+  // 配對搬家——送出端（ADR-0118）：把這台的全部資料搬到新裝置。
+  if (screen === "pairExport") {
+    return (
+      <PairExportScreen
+        phase={pairPhase}
+        onStart={startPairExport}
+        onConfirmSas={(ok) => pairDecision.current?.(ok)}
+        onCancel={() => setPairPhase({ kind: "idle" })}
+        onBack={() => {
+          setPairPhase({ kind: "idle" });
+          setScreen("main");
+        }}
+        {...themeProps}
+      />
+    );
+  }
+
   if (screen === "signin") {
     return (
       <NsecSignInScreen
@@ -601,7 +670,11 @@ export function MobileApp({
   if (screen === "pair") {
     return (
       <PairImportScreen
-        onPair={() => Promise.reject(new Error("配對需原生環境（WebRTC/EAS），此網頁示範不可用"))}
+        // ADR-0118：接上真的 WebRTC。過去這裡是「配對需原生環境」的拋錯 stub——但行動端
+        // **本來就有 WebRTC**（通話能用，ADR-0101），那個註解是舊的。
+        onPair={(code, onSas) =>
+          runPairTarget({ code, transport: webRtcPairTransport(webSocketConnector), onSas })
+        }
         onSignIn={handleSignIn}
         onUseNsec={() => setScreen("signin")}
         {...themeProps}
@@ -726,6 +799,7 @@ export function MobileApp({
             ? {
                 status: selfStatus,
                 onStatus: changeStatus,
+                onPairExport: () => setScreen("pairExport"),
                 notify,
                 onNotify: (v: boolean) => void setNotify(v),
                 notifyHidePreview: notifyHide,

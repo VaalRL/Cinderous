@@ -10,7 +10,7 @@ import {
   runPairingTarget,
 } from "@cinder/core";
 import { buildPairBundle, type PairBundle, parsePairBundle } from "../storage/pair-bundle.js";
-import type { AppStorage } from "../storage/types.js";
+import type { AppStorage, StoredIdentity } from "../storage/types.js";
 import { openPairingTransport } from "./pairing-transport.js";
 import type { RelayConnector } from "./relay-backend.js";
 
@@ -57,11 +57,17 @@ export async function runPairSource(opts: {
   key: Uint8Array;
   storage: AppStorage;
   profile: { relayUrl: string; cloudSync?: "off" | "basic" | "full" };
+  /**
+   * 來源身分（ADR-0118）。**私鑰不在 AppStorage 時必須傳**——Tauri 走 OS 金鑰庫、
+   * 行動端不持久化 nsec、瀏覽器只存包裹過的 blob。不傳且 storage 裡也沒有 → `buildPairBundle` 拋錯。
+   */
+  identity?: StoredIdentity;
   transport: PairTransportFactory;
   confirmSas: (sas: string) => Promise<boolean>;
 }): Promise<boolean> {
+  // 先組包再連線：沒有身分就當場失敗，不要讓使用者比對完 SAS 才發現搬了個空殼。
+  const bundle = buildPairBundle(opts.storage, opts.profile, opts.identity);
   const transport = await opts.transport("source", opts.key, opts.profile.relayUrl);
-  const bundle = buildPairBundle(opts.storage, opts.profile);
   return runPairingSource(transport, opts.key, bundle, opts.confirmSas);
 }
 
