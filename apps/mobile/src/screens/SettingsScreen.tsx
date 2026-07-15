@@ -56,6 +56,7 @@ function makeStyles(tk: ThemeTokens) {
     },
     code: { fontSize: 11, color: tk.ink, backgroundColor: tk.field, borderRadius: 8, padding: 10 },
     okMsg: { fontSize: 12, color: "#2f9e44" },
+    identityRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingVertical: 6 },
   });
 }
 
@@ -86,6 +87,9 @@ export function SettingsScreen({
   onReadReceipts,
   cloudSync,
   onCloudSync,
+  identities,
+  onSwitchIdentity,
+  onAddIdentity,
   onChangePassword,
   onMakeBackupCode,
   onLogout,
@@ -125,6 +129,12 @@ export function SettingsScreen({
   /** 加密雲端備份（ADR-0071）：off／basic（不含訊息）／full（含訊息）。 */
   cloudSync?: CloudSyncMode;
   onCloudSync?: (mode: CloudSyncMode) => void;
+  /** 身分清單（多身分，ADR-0138）：切換器顯示；未提供或僅 1 個時不顯示切換器。 */
+  identities?: { pubkey: string; name: string; active: boolean }[];
+  /** 切換到某身分（ADR-0138）。 */
+  onSwitchIdentity?: (pubkey: string) => void;
+  /** 新增身分（ADR-0138）。 */
+  onAddIdentity?: () => void;
   /** 改本地密碼（ADR-0135）：回 false＝舊密碼錯。僅在有「記住的身分」時提供。 */
   onChangePassword?: (oldPassword: string, newPassword: string) => boolean;
   /** 產生加密備份碼（ADR-0070）：以備份密碼包裹 nsec＋relay，回單一字串。僅在有 relay 時提供。 */
@@ -174,6 +184,36 @@ export function SettingsScreen({
         <Text style={styles.headerTitle}>{t("mobileTab_settings")}</Text>
       </View>
       <ScrollView contentContainerStyle={styles.body}>
+        {/* 多身分切換（ADR-0138）：列出各身分，點非作用中者切換；可新增。示範模式無此區。 */}
+        {onAddIdentity ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>{t("identities_title")}</Text>
+            {(identities ?? []).map((id) => (
+              <Pressable
+                key={id.pubkey}
+                accessibilityRole="button"
+                testID={`identity-${id.pubkey}`}
+                disabled={id.active}
+                onPress={() => onSwitchIdentity?.(id.pubkey)}
+                style={styles.identityRow}
+              >
+                <Text style={[styles.value, id.active ? { color: tk.accent, fontWeight: "700" } : null]} numberOfLines={1}>
+                  {id.name}
+                </Text>
+                {id.active ? <Text style={styles.label}>{t("identities_active")}</Text> : null}
+              </Pressable>
+            ))}
+            <Pressable
+              accessibilityRole="button"
+              testID="identity-add"
+              onPress={onAddIdentity}
+              style={[styles.seg, { alignSelf: "flex-start", borderColor: tk.accent, backgroundColor: tk.field }]}
+            >
+              <Text style={[styles.segText, { color: tk.accent }]}>＋ {t("identities_add")}</Text>
+            </Pressable>
+          </View>
+        ) : null}
+
         {/* 身分備份 */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>{t("settings_identityBackup")}</Text>

@@ -33,14 +33,19 @@ import { type Locale, type MessageKey, translate } from "@cinder/i18n";
 import type { ChatBg, Theme } from "@cinder/theme";
 import { getChatBg, removeChatBg, setChatBg } from "./personalize.js";
 import { StyleSheet, View } from "react-native-web";
+import { changeRememberedPassword, type MobileIdentity, unlockRemembered } from "./auth.js";
 import {
-  changeRememberedPassword,
-  isRemembered,
-  type MobileIdentity,
-  rememberIdentity,
-  type RememberedIdentity,
-  unlockRemembered,
-} from "./auth.js";
+  activeProfile,
+  getRemembered,
+  isOwnIdentity,
+  loadIdentities,
+  type ProfilesState,
+  putRemembered,
+  rememberInProfile,
+  removeIdentity,
+  switchActive,
+  visibleProfiles,
+} from "./identities.js";
 import { createBackend } from "./backend.js";
 import { chatList } from "./chat-list.js";
 import { BottomTabs, type Tab } from "./screens/BottomTabs.js";
@@ -54,7 +59,16 @@ import { PairExportScreen, type PairPhase } from "./screens/PairExportScreen.js"
 import { PairImportScreen } from "./screens/PairImportScreen.js";
 import { SettingsScreen } from "./screens/SettingsScreen.js";
 
-type Screen = "signin" | "unlock" | "pair" | "pairExport" | "main" | "conversation" | "history";
+type Screen =
+  | "signin"
+  | "unlock"
+  | "switch"
+  | "addIdentity"
+  | "pair"
+  | "pairExport"
+  | "main"
+  | "conversation"
+  | "history";
 
 const STATUS_KEY: Record<Status, MessageKey> = {
   online: "status_online",
@@ -70,20 +84,8 @@ const CLOUD_SYNC_KEY = "nb.cloudSync";
 /** 通知設定（ADR-0116）：開關與「隱藏預覽」。 */
 const NOTIFY_KEY = "nb.notify";
 const NOTIFY_HIDE_KEY = "nb.notifyHidePreview";
-/** 「記住我」（ADR-0117）：Argon2id 包裹的身分。**絕不明文存 nsec**（ADR-0112 紅線）。 */
-const REMEMBER_KEY = "nb.remembered";
-
-function loadRemembered(): RememberedIdentity | null {
-  try {
-    const raw = localStorage.getItem(REMEMBER_KEY);
-    if (!raw) return null;
-    const v: unknown = JSON.parse(raw);
-    // isRemembered 會檢查 wrapped 確實是 Argon2id blob——明文 nsec 一律不收。
-    return isRemembered(v) ? v : null;
-  } catch {
-    return null;
-  }
-}
+// 「記住我」（ADR-0117）＋多身分（ADR-0138）：每身分一份 Argon2id 包裹的 nsec，登錄見
+// identities.ts。**絕不明文存 nsec**（ADR-0112 紅線）。
 function readCloudSync(): CloudSyncMode {
   try {
     const v = localStorage.getItem(CLOUD_SYNC_KEY);
@@ -141,9 +143,14 @@ export function MobileApp({
   initialLocale?: Locale;
   initialAccent?: string | null;
 }): JSX.Element {
-  /** 記住的身分（ADR-0117）：有的話開機直接進解鎖畫面。 */
-  const [remembered, setRemembered] = useState<RememberedIdentity | null>(loadRemembered);
-  const [screen, setScreen] = useState<Screen>(() => (loadRemembered() ? "unlock" : "signin"));
+  /** 身分登錄（多身分，ADR-0138）：開機載入（含舊單一身分遷移）。 */
+  const [profiles, setProfiles] = useState<ProfilesState>(() => loadIdentities(relayUrl ?? ""));
+  /** 作用中身分的登錄項；其密碼包裹 blob 供解鎖／改密碼。 */
+  const activeReg = activeProfile(profiles);
+  const remembered = activeReg ? getRemembered(activeReg.pubkey) : null;
+  const [screen, setScreen] = useState<Screen>(() => (activeProfile(profiles) ? "unlock" : "signin"));
+  /** 切換身分時，待解鎖的目標 pubkey（ADR-0138）。 */
+  const [pendingSwitch, setPendingSwitch] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("chats");
   const [theme, setTheme] = useState<Theme>(initialTheme);
   const [locale, setLocale] = useState<Locale>(initialLocale);
@@ -220,32 +227,50 @@ export function MobileApp({
 
   const themeProps = { locale, theme, accent } as const;
 
-  /** 忘記記住的身分（清掉密文）。 */
-  const forgetRemembered = (): void => {
-    try {
-      localStorage.removeItem(REMEMBER_KEY);
-    } catch {
-      /* 忽略 */
-    }
-    setRemembered(null);
-    setScreen("signin");
+  /**
+   * 忘記／登出作用中身分（ADR-0138）：從登錄移除該身分＋刪其密文，改指剩餘者。
+   * 還有其他身分 → 進解鎖畫面解下一個；沒有了 → 回登入。
+   */
+  const forgetActive = (): void => {
+    const target = activeProfile(profiles);
+    const next = target ? removeIdentity(profiles, target.pubkey) : profiles;
+    setProfiles(next);
+    setScreen(activeProfile(next) ? "unlock" : "signin");
   };
 
   const handleSignIn = (identity: MobileIdentity, password?: string): void => {
-    // 「記住我」：以 Argon2id 密碼包裹 nsec 落地（ADR-0117）。無密碼＝不記住。
+    // 「記住我」：以 Argon2id 密碼包裹 nsec 落地並登錄成一個身分（ADR-0117／0138）。無密碼＝不記住
+    // （轉瞬 session，不進切換器）。
     if (password) {
-      const r = rememberIdentity(identity, password);
-      if (r) {
-        try {
-          localStorage.setItem(REMEMBER_KEY, JSON.stringify(r));
-        } catch {
-          /* 配額/不可用 → 不記住，但登入照常 */
-        }
-        setRemembered(r);
-      }
+      const res = rememberInProfile(profiles, identity, password, relayUrl ?? "");
+      if (res) setProfiles(res.state);
     }
     signInWith(identity);
   };
+
+  // ── 多身分切換（ADR-0138）─────────────────────────────────────────────────
+  /** 點切換器裡的某身分：同一個＝忽略；不同＝進切換解鎖畫面解該身分的密碼。 */
+  const beginSwitch = (pubkey: string): void => {
+    if (pubkey === selfPubkey) return; // 已是作用中
+    setPendingSwitch(pubkey);
+    setScreen("switch");
+  };
+  /** 解開待切換身分的密碼 → 換作用中並啟動其後端。密碼錯回 false（畫面不前進）。 */
+  const doSwitch = (password: string): boolean => {
+    if (!pendingSwitch) return false;
+    const rem = getRemembered(pendingSwitch);
+    if (!rem) return false;
+    const r = unlockRemembered(rem, password);
+    if (!r.ok) return false;
+    setProfiles(switchActive(profiles, pendingSwitch));
+    setPendingSwitch(null);
+    setScreen("main");
+    setTab("chats");
+    setActiveId(null);
+    signInWith(r.identity); // 換命名空間＝資料天然隔離（ADR-0138）
+    return true;
+  };
+  const pendingProfile = pendingSwitch ? profiles.profiles.find((p) => p.pubkey === pendingSwitch) : undefined;
 
   // 配對搬家匯入（新機／ADR-0125）：套用全量捆包（身分＋聯絡人＋歷史＋群組）而非只還原身分。
   // 過去這裡只 `onSignIn(identity)` → 換手機後聯絡人與訊息全部不見，只搬了個空身分。
@@ -439,11 +464,11 @@ export function MobileApp({
   const logout = (): void => {
     backendRef.current?.stop();
     backendRef.current = null;
-    setScreen("signin");
     setTab("chats");
     setActiveId(null);
     setInvisible(false);
-    forgetRemembered(); // 登出＝連「記住的身分」一起清（否則下次開機又跳解鎖）
+    // 登出＝移除這個身分並清其密文（ADR-0138）；還有其他身分就去解下一個，沒有了才回登入。
+    forgetActive();
   };
   // 通知點擊（ADR-0116）：開啟該對話。掛載一次即可。
   useEffect(() => onNotifyClick((convo) => convo && openConvo(convo)), []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -473,20 +498,22 @@ export function MobileApp({
     removeChatBg(activeId);
     setChatBgState(null);
   };
-  // 改本地密碼（ADR-0135）：舊密碼解開記住的 nsec、新密碼重新包裹落地。回 false＝舊密碼錯。
+  // 改本地密碼（ADR-0135）：舊密碼解開記住的 nsec、新密碼重新包裹、落地到該身分的 blob（ADR-0138）。
   const changePassword = (oldPw: string, newPw: string): boolean => {
     if (!remembered) return false;
     const next = changeRememberedPassword(remembered, oldPw, newPw);
     if (!next) return false;
-    try {
-      localStorage.setItem(REMEMBER_KEY, JSON.stringify(next));
-    } catch {
-      return false;
-    }
-    setRemembered(next);
+    if (!putRemembered(next)) return false;
+    setProfiles((p) => ({ ...p })); // 觸發重繪，讓 remembered 重新由 blob 導出
     return true;
   };
-  const addContact = (npub: string): void => backendRef.current?.addContact?.(npub.trim());
+  const addContact = (npub: string): void => {
+    const trimmed = npub.trim();
+    // ADR-0055：不得把**自己的任何身分**加成聯絡人（跨身分交友是社交圖譜洩漏）。後端只擋作用中身分；
+    // 多身分下（ADR-0138）連其他已註冊身分也一起擋（isOwnIdentity）。
+    if (isOwnIdentity(profiles, trimmed)) return; // 自己的身分——靜默拒絕
+    backendRef.current?.addContact?.(trimmed);
+  };
   /** 對某訊息送 emoji 回應（NIP-25）。群組回應同樣以 rumor.id 為鍵（ADR-0107）。 */
   const react = (messageId: string, emoji: string): void => {
     if (activeId) backendRef.current?.sendReaction?.(activeId, messageId, emoji);
@@ -687,10 +714,47 @@ export function MobileApp({
           const r = unlockRemembered(remembered, password);
           if (!r.ok) return false; // 密碼錯／遭竄改（不區分）
           signInWith(r.identity);
+          setScreen("main");
           return true;
         }}
         onUseNsec={() => setScreen("signin")}
-        onForget={forgetRemembered}
+        onForget={forgetActive}
+        {...themeProps}
+      />
+    );
+  }
+
+  // 切換身分（ADR-0138）：解開待切換身分的密碼。同一個解鎖畫面，指向目標身分。
+  if (screen === "switch" && pendingProfile) {
+    return (
+      <UnlockScreen
+        name={pendingProfile.name}
+        onUnlock={doSwitch}
+        onUseNsec={() => {
+          setPendingSwitch(null);
+          setScreen("main");
+        }}
+        onForget={() => {
+          setPendingSwitch(null);
+          setScreen("main");
+        }}
+        {...themeProps}
+      />
+    );
+  }
+
+  // 新增身分（ADR-0138）：貼另一把 nsec／備份碼，設本地密碼記住 → 加入登錄並切過去。
+  if (screen === "addIdentity") {
+    return (
+      <NsecSignInScreen
+        onSignIn={(identity, password) => {
+          handleSignIn(identity, password);
+          setScreen("main");
+          setTab("chats");
+          setActiveId(null);
+        }}
+        onBack={() => setScreen("main")}
+        canRemember
         {...themeProps}
       />
     );
@@ -895,6 +959,14 @@ export function MobileApp({
                 onCloudSync: changeCloudSync,
                 // 加密備份碼（ADR-0070）：需 relay（信封含 home relay）＋在手的 nsec。
                 onMakeBackupCode: (pw: string) => makeBackupCode(selfNsec, relayUrl, pw),
+                // 多身分（ADR-0138）：切換器列出已記住的身分，可切換/新增。
+                identities: visibleProfiles(profiles).map((p) => ({
+                  pubkey: p.pubkey,
+                  name: p.name,
+                  active: p.pubkey === selfPubkey,
+                })),
+                onSwitchIdentity: beginSwitch,
+                onAddIdentity: () => setScreen("addIdentity"),
               }
             : {})}
           {...(remembered ? { onChangePassword: changePassword } : {})}

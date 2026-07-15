@@ -355,6 +355,10 @@ export interface Messages {
   settings_backupCodeMake: string;
   /** 行動端改密碼／備份碼（ADR-0135）。 */
   mobilePassword_changed: string;
+  /** 多身分（ADR-0138）。 */
+  identities_title: string;
+  identities_add: string;
+  identities_active: string;
   backup_copy: string;
   backup_wrong: string;
   settings_cloud: string;
@@ -841,6 +845,9 @@ const zhHant: Messages = {
   settings_backupCodePw2: "再輸入一次備份密碼",
   settings_backupCodeMake: "產生",
   mobilePassword_changed: "密碼已更新",
+  identities_title: "身分",
+  identities_add: "新增身分",
+  identities_active: "使用中",
   backup_copy: "複製備份碼",
   backup_wrong: "備份密碼錯誤或備份碼格式不符",
   settings_cloud: "雲端備份（加密）",
@@ -1319,6 +1326,9 @@ const en: Messages = {
   settings_backupCodePw2: "Repeat backup password",
   settings_backupCodeMake: "Create",
   mobilePassword_changed: "Password updated",
+  identities_title: "Identities",
+  identities_add: "Add identity",
+  identities_active: "Active",
   backup_copy: "Copy backup code",
   backup_wrong: "Wrong backup password or malformed backup code",
   settings_cloud: "Cloud backup (encrypted)",

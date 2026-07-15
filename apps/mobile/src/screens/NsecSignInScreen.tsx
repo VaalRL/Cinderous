@@ -44,6 +44,7 @@ function makeStyles(tk: ThemeTokens) {
 export function NsecSignInScreen({
   onSignIn,
   onUsePairing,
+  onBack,
   canRemember,
   locale = "zh-Hant",
   theme = "light",
@@ -59,6 +60,8 @@ export function NsecSignInScreen({
   canRemember?: boolean;
   /** 切換到配對匯入（B）；未提供＝不顯示入口。 */
   onUsePairing?: () => void;
+  /** 返回（新增身分模式，ADR-0138）；未提供＝不顯示（初次登入沒有返回）。 */
+  onBack?: () => void;
   locale?: Locale;
   theme?: Theme;
   accent?: string | null;
@@ -162,6 +165,11 @@ export function NsecSignInScreen({
         {onUsePairing ? (
           <Pressable onPress={onUsePairing} accessibilityRole="button">
             <Text style={styles.link}>{T("mobileSignIn_toPair")}</Text>
+          </Pressable>
+        ) : null}
+        {onBack ? (
+          <Pressable onPress={onBack} accessibilityRole="button" testID="signin-back">
+            <Text style={styles.link}>{T("rescue_back")}</Text>
           </Pressable>
         ) : null}
       </View>
