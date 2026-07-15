@@ -1,6 +1,7 @@
 import type { MessageKey } from "@cinder/i18n";
 import { Fragment, useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n.js";
+import { useDialog } from "./Dialog.js";
 import type { BlockedContact, ConnectionState, Contact, ContactRequest, Group, Self, Status } from "@cinder/engine";
 import { qrDataUri } from "../qr.js";
 import { CinderMascot } from "./Brand.js";
@@ -643,15 +644,20 @@ function ContactRow({
   onSummarize?: ((pubkey: string) => void) | undefined;
 }): JSX.Element {
   const { t } = useI18n();
+  const { confirm } = useDialog();
   // 精簡單行清單（UI 改善）：次要狀態不再佔一行，改進 title 供滑鼠停留檢視。
   const secondaryText = contact.nowPlaying?.trim()
     ? `♪ ${contact.nowPlaying}`
     : contact.statusMessage?.trim() ?? "";
-  const remove = () => {
-    if (window.confirm(t("contact_removeConfirm", { name: contact.name }))) onRemove?.(contact.pubkey);
+  const remove = async () => {
+    if (await confirm({ message: t("contact_removeConfirm", { name: contact.name }), danger: true })) {
+      onRemove?.(contact.pubkey);
+    }
   };
-  const block = () => {
-    if (window.confirm(t("contact_blockConfirm", { name: contact.name }))) onBlock?.(contact.pubkey);
+  const block = async () => {
+    if (await confirm({ message: t("contact_blockConfirm", { name: contact.name }), danger: true })) {
+      onBlock?.(contact.pubkey);
+    }
   };
   return (
     <div

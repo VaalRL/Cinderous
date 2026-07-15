@@ -1,11 +1,13 @@
 import { type ChangeEvent, useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n.js";
+import { useDialog } from "./Dialog.js";
 import { usePersonalizeTick } from "./Avatar.js";
 import { BG_PRESETS, CHATBG_MAX_EDGE, downscaleImage, getChatBg, removeChatBg, setChatBg } from "./personalize.js";
 
 /** 對話背景設定入口（ADR-0077 O3）：內建預設色/漸層一鍵套用、或上傳本機圖片、或清除。 */
 export function ChatBgPicker({ pubkey }: { pubkey: string }): JSX.Element {
   const { t } = useI18n();
+  const { alert } = useDialog();
   usePersonalizeTick();
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -26,7 +28,7 @@ export function ChatBgPicker({ pubkey }: { pubkey: string }): JSX.Element {
     if (!f) return;
     try {
       const uri = await downscaleImage(f, CHATBG_MAX_EDGE);
-      if (!setChatBg(pubkey, { type: "image", value: uri })) window.alert(t("personalize_quota"));
+      if (!setChatBg(pubkey, { type: "image", value: uri })) await alert(t("personalize_quota"));
     } catch {
       /* 圖片解碼失敗略過 */
     }

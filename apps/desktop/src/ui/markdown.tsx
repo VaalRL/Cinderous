@@ -1,5 +1,6 @@
 import { Fragment, type ReactNode } from "react";
 import { useI18n } from "../i18n.js";
+import { useDialog } from "./Dialog.js";
 import { assessUrl, type UrlRisk, type UrlRiskReason } from "./url-hygiene.js";
 
 interface Rule {
@@ -20,6 +21,7 @@ const RULES: Rule[] = [
 /** 高風險連結（ADR-0038）：⚠ 徽章 + 點擊確認（列出理由）後才開啟。 */
 function RiskyLink({ href, risk, children }: { href: string; risk: UrlRisk; children: ReactNode }): JSX.Element {
   const { t } = useI18n();
+  const { confirm } = useDialog();
   const reasonText = (r: UrlRiskReason): string =>
     ({
       "text-mismatch": t("urlrisk_textMismatch"),
@@ -39,8 +41,12 @@ function RiskyLink({ href, risk, children }: { href: string; risk: UrlRisk; chil
       className={`risklink risklink--${risk.level}`}
       data-testid="risk-link"
       onClick={(e) => {
+        // 自訂對話框是非同步的：一律先攔下導覽，確認後再開新分頁（await 後才開，避免預設先跑掉）。
+        e.preventDefault();
         const msg = `${t("urlrisk_confirm", { url: href })}\n\n・${risk.reasons.map(reasonText).join("\n・")}`;
-        if (!window.confirm(msg)) e.preventDefault();
+        void confirm(msg).then((ok) => {
+          if (ok) window.open(href, "_blank", "noopener,noreferrer");
+        });
       }}
     >
       <span className="risklink__badge" title={risk.reasons.map(reasonText).join("；")}>⚠</span>

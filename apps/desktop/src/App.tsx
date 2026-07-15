@@ -108,6 +108,7 @@ import { createPairingOffer, runPairSource, runPairTarget, webRtcPairTransport }
 import { applyPairBundle } from "@cinder/engine";
 import { PairDeviceModal, type PairPhase } from "./ui/PairDeviceModal.js";
 import { SettingsPanel } from "./ui/SettingsPanel.js";
+import { dialog, useDialog } from "./ui/Dialog.js";
 import { ExportModal, type ExportConvoItem } from "./ui/ExportModal.js";
 import { RELAY_URL_KEY, SignIn } from "./ui/SignIn.js";
 import { RESCUE_RESET_OK, UnlockScreen } from "./ui/UnlockScreen.js";
@@ -255,15 +256,12 @@ function buildBackend(p: Profile, nsecOverride?: string, storage?: AppStorage): 
           } catch {
             /* 忽略 */
           }
-          try {
-            window.alert(
-              reason === "retired"
-                ? `你的中繼站已被維護者標記退役，已自動更換到 ${newUrl}。舊站來訊仍會續收 7 天。`
-                : `你的中繼站已離線超過一天，已自動更換到 ${newUrl}。舊站來訊仍會續收 7 天。`,
-            );
-          } catch {
-            /* 忽略 */
-          }
+          // 非元件情境（後端回呼）→ 走模組級橋接的自訂對話框（ADR-0139）。
+          void dialog().alert(
+            reason === "retired"
+              ? `你的中繼站已被維護者標記退役，已自動更換到 ${newUrl}。舊站來訊仍會續收 7 天。`
+              : `你的中繼站已離線超過一天，已自動更換到 ${newUrl}。舊站來訊仍會續收 7 天。`,
+          );
           try {
             location.reload();
           } catch {
@@ -304,6 +302,7 @@ async function loadNsecFromVault(p: Profile): Promise<string | undefined> {
 
 export function App(): JSX.Element {
   const { t } = useI18n(); // 通知隱藏預覽的本地化文案（ADR-0076）；其餘 UI 文字仍由子元件各自取用。
+  const { alert, prompt } = useDialog(); // 統一自訂對話框（ADR-0139）。
   const { layout } = useLayout(); // 桌面佈局（ADR-0079）：classic 浮動視窗 ↔ modern 三欄。
   const [backend, setBackend] = useState<ChatBackend | null>(null);
   const [profilesState, setProfilesState] = useState<ProfilesState>(() => loadProfiles());
@@ -964,7 +963,7 @@ export function App(): JSX.Element {
 
   // 解鎖隱藏身分（H4）：以密碼逐一嘗試隱藏身分，符合者切換過去（重載後再過解鎖閘門）。
   const unlockHidden = async (): Promise<void> => {
-    const password = window.prompt("輸入隱藏身分的本地密碼");
+    const password = await prompt({ message: t("hiddenId_prompt"), password: true });
     if (!password) return;
     const hidden = profilesState.profiles.filter((x) => x.hidden && x.pubkey !== profilesState.active);
     for (const p of hidden) {
@@ -981,7 +980,7 @@ export function App(): JSX.Element {
         /* 密碼不符此身分：試下一個 */
       }
     }
-    window.alert("密碼不符任何隱藏身分");
+    await alert(t("hiddenId_fail"));
   };
 
   const signIn = async (name: string, relayUrl: string, password?: string) => {

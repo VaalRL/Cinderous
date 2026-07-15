@@ -1,5 +1,6 @@
 import { type ChangeEvent, type CSSProperties, useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n.js";
+import { useDialog } from "./Dialog.js";
 import { AVATAR_MAX_EDGE, downscaleImage, getAvatar, removeAvatar, setAvatar, subscribePersonalize } from "./personalize.js";
 import { avatarColor, initial } from "./util.js";
 
@@ -70,6 +71,7 @@ export function EditableAvatar({
   className?: string;
 }): JSX.Element {
   const { t } = useI18n();
+  const { alert } = useDialog();
   usePersonalizeTick();
   const [menu, setMenu] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -90,7 +92,7 @@ export function EditableAvatar({
     if (!f) return;
     try {
       const uri = await downscaleImage(f, AVATAR_MAX_EDGE);
-      if (!setAvatar(id, uri)) window.alert(t("personalize_quota"));
+      if (!setAvatar(id, uri)) await alert(t("personalize_quota"));
     } catch {
       /* 圖片解碼失敗略過 */
     }

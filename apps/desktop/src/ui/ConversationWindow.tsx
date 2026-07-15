@@ -69,6 +69,7 @@ import { applyEmoticons } from "./emoticons.js";
 import { avatarColor, EMOTICONS, initial } from "./util.js";
 import { EditableAvatar, usePersonalizeTick } from "./Avatar.js";
 import { ChatBgPicker } from "./ChatBgPicker.js";
+import { useDialog } from "./Dialog.js";
 import { MsgStatusIcon } from "./MsgStatusIcon.js";
 import { readOriginal, relocateOriginal } from "../native/save-file.js";
 import { copyImageFromUrl, copyText } from "../native/clipboard.js";
@@ -292,6 +293,7 @@ const MESSAGE_TRUNCATE_CHARS = 600;
 
 export function ConversationWindow(props: ConversationProps): JSX.Element {
   const { t } = useI18n();
+  const { confirm, alert, prompt } = useDialog(); // 統一自訂對話框（ADR-0139）
   const { self, contact, messages } = props;
   // 檢視此對話（開窗或新訊息到達）→ 送已讀回條（ADR-0058；App 端另以聚焦把關）。
   const onMarkRead = props.onMarkRead;
@@ -491,7 +493,7 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
   const acquireSticker = (label: string, svg: string): boolean => {
     const r = addSticker(library, label, svg);
     if (!r.ok) {
-      window.alert(t("sticker_importFail", { reason: r.reason }));
+      void alert(t("sticker_importFail", { reason: r.reason }));
       return false;
     }
     setLibrary(r.list);
@@ -524,34 +526,34 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
       sendSticker(ref.pack, ref.id);
     }
   };
-  const promptTriggers = (ref: StickerRef, label: string): void => {
+  const promptTriggers = async (ref: StickerRef, label: string): Promise<void> => {
     const current = triggersFor(triggers, ref).join(" ");
-    const input = window.prompt(t("trigger_prompt", { name: label }), current);
+    const input = await prompt({ message: t("trigger_prompt", { name: label }), defaultValue: current });
     if (input === null) return;
     let list = removeTriggersFor(triggers, ref);
     const skipped: string[] = [];
     for (const raw of input.split(/[\s,，、]+/).filter(Boolean)) {
       const norm = normalizeTrigger(raw);
       const occupied = norm ? list.find((e) => e.trigger === norm) : undefined;
-      if (occupied && !window.confirm(t("trigger_conflict", { trigger: occupied.trigger }))) continue;
+      if (occupied && !(await confirm(t("trigger_conflict", { trigger: occupied.trigger })))) continue;
       const r = setTrigger(list, raw, ref);
       if (r.ok) list = r.list;
       else skipped.push(raw);
     }
-    if (skipped.length > 0) window.alert(t("trigger_skipped", { list: skipped.join(", ") }));
+    if (skipped.length > 0) void alert(t("trigger_skipped", { list: skipped.join(", ") }));
     setTriggers(list);
     saveTriggers(list);
   };
   // 觸發字總覽面板：改名 / 刪除（ADR-0037 後續）。
-  const renameOneTrigger = (oldTrigger: string): void => {
-    const input = window.prompt(t("trigger_renamePrompt"), oldTrigger);
+  const renameOneTrigger = async (oldTrigger: string): Promise<void> => {
+    const input = await prompt({ message: t("trigger_renamePrompt"), defaultValue: oldTrigger });
     if (input === null) return;
     const norm = normalizeTrigger(input);
     const occupied = norm && norm !== oldTrigger ? triggers.find((e) => e.trigger === norm) : undefined;
-    if (occupied && !window.confirm(t("trigger_conflict", { trigger: occupied.trigger }))) return;
+    if (occupied && !(await confirm(t("trigger_conflict", { trigger: occupied.trigger })))) return;
     const r = renameTrigger(triggers, oldTrigger, input);
     if (!r.ok) {
-      window.alert(t("trigger_skipped", { list: input }));
+      void alert(t("trigger_skipped", { list: input }));
       return;
     }
     setTriggers(r.list);
@@ -571,7 +573,7 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
       return;
     }
     if (!f.type.startsWith("image/")) {
-      window.alert(t("sticker_importFail", { reason: "not-image" }));
+      void alert(t("sticker_importFail", { reason: "not-image" }));
       return;
     }
     const bitmap = await createImageBitmap(f);
@@ -1063,9 +1065,11 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
                             aria-label={t("sticker_delete")}
                             title={t("sticker_delete")}
                             onClick={() => {
-                              if (window.confirm(t("sticker_deleteConfirm", { name: s.label }))) {
-                                deleteCustom(ref.id);
-                              }
+                              void confirm({ message: t("sticker_deleteConfirm", { name: s.label }), danger: true }).then(
+                                (ok) => {
+                                  if (ok) deleteCustom(ref.id);
+                                },
+                              );
                             }}
                           >
                             ✕

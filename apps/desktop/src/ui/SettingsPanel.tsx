@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { ACCENT_PRESETS, useAccent } from "../accent.js";
 import { useLayout } from "../layout.js";
 import { useI18n } from "../i18n.js";
+import { useDialog } from "./Dialog.js";
 import { qrSvg } from "../qr.js";
 import type { CloudSyncMode } from "@cinder/engine";
 import {
@@ -309,6 +310,7 @@ export function relayChangeReady(input: string, current: string): boolean {
 /** 更換 home relay（ADR-0066 H2）：顯示＋更換；套用前確認，App 層再做正規化與守門。 */
 function RelayChange({ current, onApply }: { current: string; onApply: (url: string) => void }): JSX.Element {
   const { t } = useI18n();
+  const { confirm } = useDialog();
   const [editing, setEditing] = useState(false);
   const [url, setUrl] = useState(current);
   if (!editing) {
@@ -341,7 +343,9 @@ function RelayChange({ current, onApply }: { current: string; onApply: (url: str
           type="button"
           disabled={!relayChangeReady(url, current)}
           onClick={() => {
-            if (window.confirm(t("settings_relayChangeConfirm", { url: target }))) onApply(target);
+            void confirm(t("settings_relayChangeConfirm", { url: target })).then((ok) => {
+              if (ok) onApply(target);
+            });
           }}
         >
           {t("settings_relayChangeApply")}
@@ -360,6 +364,7 @@ function RelayChange({ current, onApply }: { current: string; onApply: (url: str
  */
 function CloudSyncSettings({ value }: { value: NonNullable<SettingsPanelProps["cloud"]> }): JSX.Element {
   const { t } = useI18n();
+  const { confirm } = useDialog();
   const modes: { key: CloudSyncMode; label: string }[] = [
     { key: "off", label: t("settings_cloudOff") },
     { key: "basic", label: t("settings_cloudBasic") },
@@ -378,8 +383,14 @@ function CloudSyncSettings({ value }: { value: NonNullable<SettingsPanelProps["c
             checked={value.mode === m.key}
             onChange={() => {
               if (m.key === value.mode) return;
-              if (m.key === "off" && !window.confirm(t("settings_cloudOffConfirm"))) return;
-              value.onChange(m.key);
+              if (m.key !== "off") {
+                value.onChange(m.key);
+                return;
+              }
+              // 切到「關」＝立即 purge，先確認。
+              void confirm(t("settings_cloudOffConfirm")).then((ok) => {
+                if (ok) value.onChange("off");
+              });
             }}
           />
           <span>{m.label}</span>
@@ -541,6 +552,7 @@ function SecuritySettings({ value }: { value: NonNullable<SettingsPanelProps["se
 /** 設定面板：主題色、中繼站、身分備份（私鑰）、桌面通知。 */
 export function SettingsPanel(props: SettingsPanelProps): JSX.Element {
   const { t } = useI18n();
+  const { confirm } = useDialog();
   const [reveal, setReveal] = useState(false);
   const [copied, setCopied] = useState(false);
 
@@ -611,9 +623,12 @@ export function SettingsPanel(props: SettingsPanelProps): JSX.Element {
                               className="settings__staleact settings__staleact--danger"
                               title={t("settings_relayClear")}
                               onClick={() => {
-                                if (window.confirm(t("settings_relayClearConfirm", { url: r.url }))) {
-                                  props.onRelayClear?.(r.url);
-                                }
+                                void confirm({
+                                  message: t("settings_relayClearConfirm", { url: r.url }),
+                                  danger: true,
+                                }).then((ok) => {
+                                  if (ok) props.onRelayClear?.(r.url);
+                                });
                               }}
                             >
                               {t("settings_relayClear")}

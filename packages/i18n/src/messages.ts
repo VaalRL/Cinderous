@@ -359,6 +359,16 @@ export interface Messages {
   identities_title: string;
   identities_add: string;
   identities_active: string;
+  /** 統一自訂對話框（ADR-0139）。 */
+  dialog_titleConfirm: string;
+  dialog_titleAlert: string;
+  dialog_titlePrompt: string;
+  dialog_confirm: string;
+  dialog_cancel: string;
+  dialog_ok: string;
+  /** 隱藏身分解鎖（ADR-0045/0067）。 */
+  hiddenId_prompt: string;
+  hiddenId_fail: string;
   backup_copy: string;
   backup_wrong: string;
   settings_cloud: string;
@@ -848,6 +858,14 @@ const zhHant: Messages = {
   identities_title: "身分",
   identities_add: "新增身分",
   identities_active: "使用中",
+  dialog_titleConfirm: "確認",
+  dialog_titleAlert: "提示",
+  dialog_titlePrompt: "輸入",
+  dialog_confirm: "確定",
+  dialog_cancel: "取消",
+  dialog_ok: "好",
+  hiddenId_prompt: "輸入隱藏身分的本地密碼",
+  hiddenId_fail: "密碼不符任何隱藏身分",
   backup_copy: "複製備份碼",
   backup_wrong: "備份密碼錯誤或備份碼格式不符",
   settings_cloud: "雲端備份（加密）",
@@ -1329,6 +1347,14 @@ const en: Messages = {
   identities_title: "Identities",
   identities_add: "Add identity",
   identities_active: "Active",
+  dialog_titleConfirm: "Confirm",
+  dialog_titleAlert: "Notice",
+  dialog_titlePrompt: "Enter",
+  dialog_confirm: "OK",
+  dialog_cancel: "Cancel",
+  dialog_ok: "OK",
+  hiddenId_prompt: "Enter the hidden identity's local password",
+  hiddenId_fail: "Password doesn't match any hidden identity",
   backup_copy: "Copy backup code",
   backup_wrong: "Wrong backup password or malformed backup code",
   settings_cloud: "Cloud backup (encrypted)",

@@ -153,3 +153,4 @@
 | [0136](./0136-mobile-inline-reply.md) | **行動端對話串/回覆**：內嵌引用（Signal/LINE 風），同 `replyTo` 資料、與桌面討論串面板各自呈現；長按→回覆→引用列→送出帶 NIP-10 reply e-tag；引用對已收回/檔案/引用不到皆安全處理 | 已接受 |
 | [0137](./0137-mobile-stickers.md) | **行動端貼圖**：貼圖格式/內建資料/SVG 驗證下沉 `@cinder/core`、桌面 import 改指 core；行動端渲染收到的貼圖（含收端驗證惡意 SVG）＋內建貼圖挑選送出；編輯器留桌面 | 已接受 |
 | [0138](./0138-mobile-multi-identity.md) | **行動端多身分**：採用 engine `profiles` 登錄、每身分 Argon2id 密碼包裹的 nsec（`nb.remembered.<pubkey>`）、舊單一身分無縫遷移；切換即解該身分密碼、新增、逐一登出；禁跨身分交友（ADR-0055） | 已接受 |
+| [0139](./0139-unified-custom-dialog.md) | **統一自訂對話框**：Promise 介面的 confirm/alert/prompt（`useDialog`＋`DialogProvider`）取代瀏覽器內建；重用視窗樣式、主題感知、Esc/Enter/背景鍵盤操作、破壞性紅鈕；非元件走 `dialog()` 橋接、無 provider 回退 | 已接受 |

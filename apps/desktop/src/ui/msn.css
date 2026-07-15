@@ -581,6 +581,24 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
 .modal__box > .win__title { flex: 0 0 auto; }
 .modal__box > .win__title ~ * { overflow-y: auto; min-height: 0; }
 .settings__body { padding: 10px 12px; display: flex; flex-direction: column; gap: 12px; }
+
+/* 統一自訂對話框（ADR-0139）：confirm/alert/prompt，取代瀏覽器內建。 */
+.dialog { width: 340px; }
+.dialog__body { padding: 16px 16px 14px; display: flex; flex-direction: column; gap: 14px; }
+.dialog__msg { margin: 0; font-size: 13px; line-height: 1.6; color: var(--ink); white-space: pre-wrap; word-break: break-word; }
+.dialog__input {
+  width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px;
+  font-size: 14px; background: var(--field); color: var(--ink);
+}
+.dialog__actions { display: flex; justify-content: flex-end; gap: 8px; }
+.dialog__btn {
+  padding: 7px 16px; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer;
+  border: 1px solid var(--accent); background: var(--accent); color: #fff;
+}
+.dialog__btn:hover { filter: brightness(1.05); }
+.dialog__btn--ghost { background: var(--field); color: var(--ink); border-color: var(--border); }
+.dialog__btn--ghost:hover { border-color: var(--accent); filter: none; }
+.dialog__btn--danger { background: #e5484d; border-color: #d33; }
 .settings__sec h4 { margin: 0 0 4px; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
 .settings__relay { font-size: 12px; word-break: break-all; }
 .settings__warn { font-size: 11px; color: #c0392b; margin: 0 0 6px; line-height: 1.4; }
