@@ -632,6 +632,12 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
   font-size: 12px; padding: 5px 12px; border-radius: 6px; cursor: pointer;
   border: 1px solid var(--accent); background: var(--accent); color: #fff;
 }
+/* 燈箱快速複製動作列（ADR-0132）：底部置中，複製圖片／路徑。 */
+.lightbox__actions {
+  position: absolute; bottom: 32px; left: 50%; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 8px;
+}
+.lightbox__copyfail { font-size: 12px; color: #ffb4b4; }
 
 /* 群組已讀（名單制/計數制）。 */
 .readby { font-size: 10px; color: var(--muted); margin-left: 5px; vertical-align: middle; }

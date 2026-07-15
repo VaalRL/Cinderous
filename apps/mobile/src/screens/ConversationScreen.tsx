@@ -9,6 +9,7 @@ import { type Locale, type MessageKey, translate } from "@cinder/i18n";
 import { resolveTheme, type Theme, type ThemeTokens } from "@cinder/theme";
 import { Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native-web";
 import { MsgStatusIcon } from "./MsgStatusIcon.js";
+import { downloadImageFromUrl, shareImageFromUrl } from "../native/share.js";
 
 /** 送出狀態的 i18n 標籤（ADR-0058／0095）；與桌面同鍵。 */
 const MSG_STATUS_KEY: Record<MessageStatus, MessageKey> = {
@@ -356,7 +357,9 @@ export function ConversationScreen({
         {messages.map((m) => {
           const gone = unsent?.has(m.id) ?? false; // 已收回（NIP-09）
           const emojis = reactions?.[m.id] ?? [];
-          const canAct = !gone && (onReact || (m.outgoing && onUnsend));
+          // 圖片可分享（ADR-0132）——收到的圖即使沒有回應/收回，也要能長按叫出分享。
+          const canShareImg = !gone && !!m.file?.mime.startsWith("image/") && !!(m.file.url ?? m.file.thumb);
+          const canAct = !gone && (onReact || (m.outgoing && onUnsend) || canShareImg);
           return (
           <View key={m.id} style={m.outgoing ? styles.rowMine : styles.rowTheir}>
             {!m.outgoing && nameFor && m.sender ? <Text style={styles.sender}>{nameFor(m.sender)}</Text> : null}
@@ -419,6 +422,26 @@ export function ConversationScreen({
                       </Pressable>
                     ))
                   : null}
+                {/* 分享（ADR-0132）：圖片訊息 → 原生分享選單（與其他手機 app 同體驗）；
+                    不支援時退回下載，不讓按鈕變死路。 */}
+                {m.file?.mime.startsWith("image/") && (m.file.url ?? m.file.thumb) ? (
+                  <Pressable
+                    style={styles.actBtn}
+                    accessibilityRole="button"
+                    testID={`share-${m.id}`}
+                    onPress={() => {
+                      const uri = m.file?.url ?? m.file?.thumb ?? "";
+                      const name = m.file?.name ?? "image";
+                      const mime = m.file?.mime ?? "image/*";
+                      void shareImageFromUrl(uri, name, mime).then((ok) => {
+                        if (!ok) downloadImageFromUrl(uri, name);
+                      });
+                      setPicked(null);
+                    }}
+                  >
+                    <Text style={styles.actText}>{t("share_share")}</Text>
+                  </Pressable>
+                ) : null}
                 {m.outgoing && onUnsend ? (
                   <Pressable
                     style={styles.actBtn}

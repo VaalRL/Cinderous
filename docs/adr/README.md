@@ -146,3 +146,4 @@
 | [0129](./0129-sealed-presence-state.md) | **在線狀態內容改走封裝**：心跳降為無內容存活信標；狀態文字與音樂改以 NIP-59 封裝、只在改變/對方上線時發給「在線✕無P2P」的聯絡人——relay 再也讀不到你在聽什麼、狀態寫什麼 | 已接受 |
 | [0130](./0130-jsdom-effect-tests.md) | **UI 測試補上會跑 `useEffect` 的環境**（jsdom 逐檔切、`createRoot`+`act`，不churn 既有 SSR 測試）——關掉「effect 從不執行」的測試盲區（ADR-0122 的 P0 就藏在那裡） | 已接受 |
 | [0131](./0131-buffer-early-group-messages.md) | **早到的群訊不再被丟掉**——群訊比 group-create 先到（NIP-59 jitter 打亂順序）時緩存、加入後依時間重放；有界＋去重防假 `g` tag 撐爆記憶體 | 已接受 |
+| [0132](./0132-image-share.md) | **圖片分享**：行動端走原生分享選單（Web Share API，與其他手機 app 同體驗，不支援退回下載）、桌面燈箱走快速複製（複製圖片轉 PNG／複製路徑，僅在已另存時）；掛在圖片訊息上、不綁相簿 | 已接受 |

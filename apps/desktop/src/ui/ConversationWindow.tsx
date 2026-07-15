@@ -64,6 +64,7 @@ import { EditableAvatar, usePersonalizeTick } from "./Avatar.js";
 import { ChatBgPicker } from "./ChatBgPicker.js";
 import { MsgStatusIcon } from "./MsgStatusIcon.js";
 import { readOriginal, relocateOriginal } from "../native/save-file.js";
+import { copyImageFromUrl, copyText } from "../native/clipboard.js";
 import { chatBgCss, getChatBg, getConvoSize, setConvoSize } from "./personalize.js";
 
 /**
@@ -97,7 +98,7 @@ function lightboxItem(m: ChatMessage): LightboxItem {
  * 讀不到（使用者把檔案搬走/刪了）→ 顯示縮圖並提供「重新指定位置」，由使用者**主動**選新路徑
  * （點縮圖不該無預警彈出檔案總管）。瀏覽器無法讀回原檔 → 只顯示縮圖。
  */
-function Lightbox({
+export function Lightbox({
   item,
   onClose,
   onRelocated,
@@ -138,9 +139,35 @@ function Lightbox({
     });
   };
 
+  // 快速複製（ADR-0132）：複製圖片本身、或其檔案路徑（僅在已另存時）。
+  const [copied, setCopied] = useState<"" | "image" | "path" | "fail">("");
+  const flash = (ok: boolean, which: "image" | "path"): void => {
+    setCopied(ok ? which : "fail");
+    setTimeout(() => setCopied(""), 1500);
+  };
+  const doCopyImage = (): void => void copyImageFromUrl(src).then((ok) => flash(ok, "image"));
+  const doCopyPath = (): void => {
+    if (item.savedPath) void copyText(item.savedPath).then((ok) => flash(ok, "path"));
+  };
+
   return (
     <div className="lightbox" role="dialog" aria-modal="true" onClick={onClose}>
       {src ? <img src={src} alt={t("image_alt")} /> : null}
+      {/* 快速複製（ADR-0132）：圖片 / 路徑。只在正常顯示原圖時出現（missing/unsupported 已各有 note，
+          且同在底部，避免疊在一起）。點動作列不關燈箱。 */}
+      {state === "ok" && src ? (
+        <div className="lightbox__actions" onClick={(e) => e.stopPropagation()}>
+          <button className="lightbox__btn" data-testid="copy-image" onClick={doCopyImage}>
+            {copied === "image" ? t("share_copied") : t("share_copyImage")}
+          </button>
+          {item.savedPath ? (
+            <button className="lightbox__btn" data-testid="copy-path" onClick={doCopyPath}>
+              {copied === "path" ? t("share_copied") : t("share_copyPath")}
+            </button>
+          ) : null}
+          {copied === "fail" ? <span className="lightbox__copyfail">{t("share_failed")}</span> : null}
+        </div>
+      ) : null}
       {state === "missing" ? (
         <div className="lightbox__note" onClick={(e) => e.stopPropagation()}>
           <span>{t("image_originalMissing")}</span>

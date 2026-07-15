@@ -142,6 +142,12 @@ export interface Messages {
   image_originalMissing: string;
   image_relocate: string;
   image_thumbOnly: string;
+  /** 圖片分享（ADR-0132）。 */
+  share_copyImage: string;
+  share_copyPath: string;
+  share_copied: string;
+  share_share: string;
+  share_failed: string;
   settings_readReceipts: string;
   settings_readReceiptsHint: string;
   // 保留上限與導出（ADR-0094）
@@ -622,6 +628,11 @@ const zhHant: Messages = {
   image_originalMissing: "找不到原圖——檔案可能已被移動或刪除。",
   image_relocate: "重新指定位置",
   image_thumbOnly: "此處只能顯示縮圖（瀏覽器無法讀取本機原檔）。",
+  share_copyImage: "複製圖片",
+  share_copyPath: "複製路徑",
+  share_copied: "已複製",
+  share_share: "分享",
+  share_failed: "此環境不支援",
   settings_readReceipts: "已讀回條",
   settings_readReceiptsHint: "開啟後，你讀取訊息會通知對方；關閉則不送、也不顯示對方的已讀（互惠）。",
   settings_retention: "訊息保留上限",
@@ -1090,6 +1101,11 @@ const en: Messages = {
   image_originalMissing: "Original not found — the file may have been moved or deleted.",
   image_relocate: "Locate the file",
   image_thumbOnly: "Only the thumbnail can be shown here (browsers can't read local originals).",
+  share_copyImage: "Copy image",
+  share_copyPath: "Copy path",
+  share_copied: "Copied",
+  share_share: "Share",
+  share_failed: "Not supported here",
   settings_readReceipts: "Read receipts",
   settings_readReceiptsHint: "When on, others are told when you read their messages; off means you neither send yours nor see theirs (reciprocal).",
   settings_retention: "Message retention",
