@@ -290,8 +290,10 @@ export class LocalStorage implements AppStorage {
   }
   setMaxPerConvo(max: number): void {
     this.mem.setMaxPerConvo(max);
-    // 逐出結果需落地，否則重載後又冒出來。
-    for (const convo of Object.keys(this.mem.exportSnapshot().messages)) this.writeConvo(convo);
+    // ADR-0126：上限＝封存門檻（不再刪除）。調整後即刻對所有對話重新封存溢出——**透過本層的
+    // writer**（`this.mem` 的 writer 未掛，見 attachArchive 註解）。裁切後的落地由 writer 的
+    // onTrim＝writeConvo 完成。無封存（writer 未掛）→ 不裁切（ADR-0111 紅線）。
+    for (const convo of Object.keys(this.mem.exportSnapshot().messages)) this.writer?.schedule(convo);
   }
   loadReadAt(): Record<string, number> {
     return this.mem.loadReadAt();

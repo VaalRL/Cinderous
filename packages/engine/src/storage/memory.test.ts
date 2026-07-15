@@ -60,25 +60,26 @@ describe("MemoryStorage", () => {
     expect(s.loadMessages("aa").length).toBe(MESSAGES_PER_CONVO + 50);
   });
 
-  it("有限模式：超過設定上限即逐出最舊、保留最近（P0-1／ADR-0094）", () => {
+  it("🔴 **保留上限在無封存時不刪除**（ADR-0126）——絕不讓「封存不可用」變成「訊息被刪」", () => {
+    // 修正前：`cap()` 直接 splice 刪除。ADR-0126 後上限＝封存門檻，而**沒有封存就不裁切**
+    //（此處 MemoryStorage 未 attachArchive）。這是 ADR-0111 的紅線在保留上限上的延伸。
     const s = new MemoryStorage(MESSAGES_PER_CONVO);
     for (let i = 0; i < MESSAGES_PER_CONVO + 5; i++) {
       s.appendMessage({ id: `m${i}`, contact: "aa", outgoing: true, text: "x", at: i });
     }
-    const ids = s.loadMessages("aa").map((m) => m.id);
-    expect(ids.length).toBe(MESSAGES_PER_CONVO);
-    expect(ids[0]).toBe("m5"); // m0..m4 被逐出
-    expect(ids[ids.length - 1]).toBe(`m${MESSAGES_PER_CONVO + 4}`);
+    // 一則都沒少——舊行為會刪掉最舊的 5 則。
+    expect(s.loadMessages("aa").length).toBe(MESSAGES_PER_CONVO + 5);
+    expect(s.loadMessages("aa")[0]!.id).toBe("m0");
   });
 
-  it("setMaxPerConvo：調小上限即時逐出既有；調回 0 之後不再逐出", () => {
-    const s = new MemoryStorage(); // 無上限
+  it("setMaxPerConvo：無封存時調小上限也不刪；`retentionCap()` 回報設定值", () => {
+    const s = new MemoryStorage();
     for (let i = 0; i < 20; i++) s.appendMessage({ id: `m${i}`, contact: "aa", outgoing: true, text: "x", at: i });
-    s.setMaxPerConvo(5); // 立即逐出到剩 5 最新
-    expect(s.loadMessages("aa").map((m) => m.id)).toEqual(["m15", "m16", "m17", "m18", "m19"]);
-    s.setMaxPerConvo(0); // 回無上限：不再逐出，之後可累積
-    for (let i = 20; i < 30; i++) s.appendMessage({ id: `m${i}`, contact: "aa", outgoing: true, text: "x", at: i });
-    expect(s.loadMessages("aa").length).toBe(15);
+    s.setMaxPerConvo(5);
+    expect(s.retentionCap()).toBe(5); // 供 ArchiveWriter 決定有效熱區
+    expect(s.loadMessages("aa").length).toBe(20); // 無封存 → 不裁切（ADR-0126）
+    s.setMaxPerConvo(0);
+    expect(s.retentionCap()).toBe(0);
   });
 
   it("remapContact（ADR-0052）：搬移對話歷史、去重、按時間排序、移除舊聯絡人", () => {
@@ -187,17 +188,6 @@ describe("批次狀態/回條（ADR-0110）", () => {
     expect(s.setMessageReceiptBulk("g1", ["a"], "carol", "delivered").size).toBe(0);
   });
 
-  it("逐出（保留上限）必須同步清掉 id 索引——否則會留下指向已逐出訊息的幽靈", () => {
-    const s = new MemoryStorage(2);
-    s.appendMessage(msg("a", false, 1));
-    s.appendMessage(msg("b", false, 2));
-    s.appendMessage(msg("c", false, 3)); // a 被逐出
-    expect(s.loadMessages("bob").map((m) => m.id)).toEqual(["b", "c"]);
-    // 索引若沒清，setMessageStatus("a") 會改到一個已不在 list 裡的物件（靜默無效）
-    s.setMessageStatus("bob", "a", "read");
-    expect(s.loadMessages("bob").some((m) => m.id === "a")).toBe(false);
-    // 且被逐出的 id 可以重新加入（索引沒殘留就不會被誤判為重複）
-    s.appendMessage(msg("a", false, 4));
-    expect(s.loadMessages("bob").map((m) => m.id)).toEqual(["c", "a"]);
-  });
+  // 註：封存搬移（trimOldest）的 id 索引一致性由 archive.test.ts 的 ADR-0126 區塊涵蓋
+  //（那裡有 FakeArchive 可觸發真的裁切）。ADR-0126 後 MemoryStorage 本身不再有刪除路徑。
 });

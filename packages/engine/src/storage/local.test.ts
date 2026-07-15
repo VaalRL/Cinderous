@@ -53,13 +53,14 @@ describe("LocalStorage（ADR-0110：狀態常駐記憶體 + 逐鍵寫回）", ()
     expect(new LocalStorage("ns").loadMessages("bob").map((m) => m.status)).toEqual(["read", "read"]);
   });
 
-  it("保留上限（ADR-0094）：逐出結果必須落地，否則重載後又冒出來", () => {
+  it("保留上限：**無封存時不刪除**，重載後訊息仍在（ADR-0126）", () => {
     const s = new LocalStorage("ns");
     s.appendMessage(msg("a", 1));
     s.appendMessage(msg("b", 2));
     s.appendMessage(msg("c", 3));
-    s.setMaxPerConvo(2);
-    expect(new LocalStorage("ns").loadMessages("bob").map((m) => m.id)).toEqual(["b", "c"]);
+    s.setMaxPerConvo(2); // 這個 store 沒 attachArchive → 不裁切（絕不讓封存不可用變成刪除）
+    // 修正前：會刪到剩 b,c 並落地。ADR-0126：保留上限＝封存門檻，沒有封存就一則都不刪。
+    expect(new LocalStorage("ns").loadMessages("bob").map((m) => m.id)).toEqual(["a", "b", "c"]);
   });
 
   it("移除聯絡人：連同其訊息鍵一起清掉（不留孤兒）", () => {

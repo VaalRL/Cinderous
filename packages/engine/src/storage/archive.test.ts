@@ -185,3 +185,65 @@ describe("歷史紀錄分頁（ADR-0111，桌面與行動共用）", () => {
     expect(prependChunk([m("b"), m("c")], [m("a"), m("b")]).map((x) => x.id)).toEqual(["a", "b", "c"]);
   });
 });
+
+describe("保留上限＝封存門檻，不再刪除（ADR-0126）", () => {
+  it("🔴 **使用者設小上限 → 溢出進封存，不刪除**（統一兩個各說各話的上限）", async () => {
+    const arch = new FakeArchive();
+    const mem = new MemoryStorage();
+    mem.attachArchive(arch); // mem 自帶 writer（預設 hotCap＝HOT_CAP）
+    mem.setMaxPerConvo(10); // 但保留上限 10 會覆蓋 → 有效熱區＝10（ADR-0126）
+
+    // 加 10 + 一整塊 → 觸發一次封存搬移。
+    for (let i = 0; i < 10 + ARCHIVE_CHUNK; i++) mem.appendMessage(msg(i));
+    await mem.flushArchive();
+
+    // 修正前：`cap()` 會把它 splice 刪到剩 10，封存永遠不被觸發，舊訊息**永久消失**。
+    expect(mem.loadMessages("bob")).toHaveLength(10); // 熱區＝上限
+    const archived = await loadAllArchived(arch, "bob");
+    expect(archived).toHaveLength(ARCHIVE_CHUNK); // 溢出**在封存裡**，沒有不見
+    // 熱＋冷＝全部，一則不少。
+    const all = new Set([...mem.loadMessages("bob"), ...archived].map((m) => m.id));
+    expect(all.size).toBe(10 + ARCHIVE_CHUNK);
+  });
+
+  it("調低上限 → **即刻**重新封存既有溢出（不必等下一則訊息）", async () => {
+    const arch = new FakeArchive();
+    const mem = new MemoryStorage();
+    mem.attachArchive(arch);
+    // 先無上限累積一塊多。
+    for (let i = 0; i < ARCHIVE_CHUNK + 20; i++) mem.appendMessage(msg(i));
+    await mem.flushArchive();
+    expect(mem.loadMessages("bob")).toHaveLength(ARCHIVE_CHUNK + 20); // 還沒到 HOT_CAP，全在熱區
+
+    mem.setMaxPerConvo(10); // 調到 10 → 立刻封存溢出
+    await mem.flushArchive();
+    expect(mem.loadMessages("bob")).toHaveLength(20); // 剩最新 20（熱區在 [10,10+塊) 間；此處恰好一塊）
+    expect(await loadAllArchived(arch, "bob")).toHaveLength(ARCHIVE_CHUNK);
+  });
+
+  it("封存搬移**同步清掉 id 索引**——不留指向已搬走訊息的幽靈", async () => {
+    const arch = new FakeArchive();
+    const mem = new MemoryStorage();
+    mem.attachArchive(arch);
+    mem.setMaxPerConvo(10);
+    for (let i = 0; i < 10 + ARCHIVE_CHUNK; i++) mem.appendMessage(msg(i));
+    await mem.flushArchive();
+
+    // m0 已被搬進封存、離開熱區。改它的狀態不該改到熱區裡的幽靈。
+    mem.setMessageStatus("bob", "m0", "read");
+    expect(mem.loadMessages("bob").some((m) => m.id === "m0")).toBe(false);
+    // 且它的 id 可重新加入（索引沒殘留 → 不被誤判重複）。
+    mem.appendMessage(msg(0));
+    expect(mem.loadMessages("bob").some((m) => m.id === "m0")).toBe(true);
+  });
+
+  it("無上限（0）→ 沿用 HOT_CAP，行為不變", async () => {
+    const arch = new FakeArchive();
+    const { mem, writer } = writerWith(10, arch); // 建構 hotCap=10 當「HOT_CAP 替身」
+    // 沒有 setMaxPerConvo → retentionCap()＝0 → 用建構的 hotCap（10）。
+    for (let i = 0; i < 10 + ARCHIVE_CHUNK; i++) mem.appendMessage(msg(i));
+    for (let i = 0; i < 10 + ARCHIVE_CHUNK; i++) writer.schedule("bob");
+    await writer.flush();
+    expect(mem.loadMessages("bob")).toHaveLength(10);
+  });
+});

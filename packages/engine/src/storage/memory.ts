@@ -56,10 +56,21 @@ export class MemoryStorage implements AppStorage {
     this.maxPerConvo = Math.max(0, Math.floor(maxPerConvo));
   }
 
-  /** 每對話保留上限（ADR-0094）：`0`＝無上限。變更後即時對所有對話套用逐出。 */
+  /**
+   * 每對話保留上限（ADR-0094→0126）：`0`＝無上限（沿用 HOT_CAP）。
+   *
+   * ADR-0126：上限**不再刪除**，而是成為封存的有效熱區門檻——溢出移進封存（歷史紀錄仍可讀）。
+   * 變更後對所有對話 `schedule()` 一次封存搬移，讓調低上限**即刻**生效（不必等下一則訊息）。
+   * 無封存（`writer` 未掛）時什麼都不做——絕不讓「封存不可用」變成「訊息被刪」（ADR-0111 紅線）。
+   */
   setMaxPerConvo(max: number): void {
     this.maxPerConvo = Math.max(0, Math.floor(max));
-    if (this.maxPerConvo > 0) for (const convo of this.convos.values()) this.cap(convo);
+    for (const convo of this.convos.keys()) this.writer?.schedule(convo);
+  }
+
+  /** 使用者設定的保留上限（ADR-0126）：`0`＝無上限。供 ArchiveWriter 決定有效熱區大小。 */
+  retentionCap(): number {
+    return this.maxPerConvo;
   }
 
   /** 取得（或建立）某對話的訊息容器。 */
@@ -96,24 +107,6 @@ export class MemoryStorage implements AppStorage {
   /** 推進已讀水位（ADR-0108）：單調遞增，倒退忽略。 */
   setReadAt(convoKey: string, at: number): void {
     if (at > (this.readAt.get(convoKey) ?? 0)) this.readAt.set(convoKey, at);
-  }
-
-  /**
-   * 依**使用者設定的保留上限**（ADR-0094）逐出最舊；`0`＝無上限（預設）。索引同步移除。
-   *
-   * **這裡的刪除是刻意的**——保留上限的語意就是「我只要留 N 則」（使用者為了省空間而設）。
-   * 它與 ADR-0111 的**熱區上限**（`HOT_CAP`，內部、恆開、超出者**封存**而非刪除）是**兩回事**。
-   *
-   * ⚠️ 已知不一致（ADR-0119 記錄）：ADR-0111 的敘述「修好 ADR-0094 的資料遺失」**說過頭了**
-   * ——它只讓**熱區溢出**改走封存，使用者設的保留上限仍然是**真的刪除**（如其所願），
-   * 而且**不會連帶清理封存**，所以它其實**沒有真的限制住總儲存量**。
-   * 這個語意衝突（「省空間」vs「別刪我的歷史」）需要另立 ADR 釐清，本次不改行為。
-   */
-  private cap(convo: Convo): void {
-    if (this.maxPerConvo > 0 && convo.list.length > this.maxPerConvo) {
-      const evicted = convo.list.splice(0, convo.list.length - this.maxPerConvo);
-      for (const m of evicted) convo.byId.delete(m.id);
-    }
   }
 
   loadIdentity(): StoredIdentity | null {
@@ -170,7 +163,7 @@ export class MemoryStorage implements AppStorage {
       for (const m of moved) if (!dest.byId.has(m.id)) dest.list.push(m);
       dest.list.sort((a, b) => a.at - b.at);
       this.reindex(dest);
-      this.cap(dest);
+      this.writer?.schedule(to); // ADR-0126：合併後若溢出，封存（不再刪除）
     }
     this.convos.delete(from);
     this.groups = this.groups.map((g) =>
@@ -221,8 +214,9 @@ export class MemoryStorage implements AppStorage {
     if (convo.byId.has(message.id)) return; // O(1) 去重（ADR-0110；原為 O(n) 線性掃描）
     convo.list.push(message);
     convo.byId.set(message.id, message);
-    this.cap(convo); // ADR-0094：有限模式逐出最舊；預設無上限不動
-    this.writer?.schedule(message.contact); // ADR-0111：溢出滿一塊才搬進封存
+    // ADR-0126：保留上限不再刪除——溢出（HOT_CAP 或使用者上限，取較嚴者由 ArchiveWriter 決定）
+    // 一律封存。無封存時不裁切（ADR-0111 紅線）。
+    this.writer?.schedule(message.contact);
   }
   setMessageStatus(contactPubkey: string, messageId: string, status: MessageStatus): void {
     const msg = this.convos.get(contactPubkey)?.byId.get(messageId); // O(1)（ADR-0110）

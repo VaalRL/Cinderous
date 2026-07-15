@@ -102,8 +102,11 @@ export class ArchiveWriter {
   }
 
   private async run(convo: string): Promise<void> {
+    // 有效熱區（ADR-0126）：使用者設了保留上限就用他的，否則用內部 HOT_CAP。
+    // 於是「保留上限」與「熱區上限」收斂成同一個概念——溢出**封存**，不再有平行的刪除路徑。
+    const hotCap = this.mem.retentionCap() > 0 ? this.mem.retentionCap() : this.hotCap;
     // 只在溢出滿一整塊時才搬 → 每塊大小固定，分頁單純。
-    while (this.mem.loadMessages(convo).length >= this.hotCap + ARCHIVE_CHUNK) {
+    while (this.mem.loadMessages(convo).length >= hotCap + ARCHIVE_CHUNK) {
       const chunk = this.mem.oldest(convo, ARCHIVE_CHUNK);
       if (chunk.length < ARCHIVE_CHUNK) return;
       await this.archive.append(convo, chunk); // ← 先寫封存

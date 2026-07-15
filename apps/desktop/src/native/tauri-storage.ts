@@ -128,7 +128,9 @@ export class TauriStorage implements AppStorage {
   /** 每對話保留上限（ADR-0094）：委派記憶體層並持久化（逐出後的結果需寫回）。 */
   setMaxPerConvo(max: number): void {
     this.mem.setMaxPerConvo(max);
-    for (const convo of Object.keys(this.mem.exportSnapshot().messages)) this.persist(MSGS + convo);
+    // ADR-0126：上限＝封存門檻（不再刪除）。調整後即刻重新封存溢出（透過本層 writer；裁切落地
+    // 由 onTrim＝persist 完成）。無封存 → 不裁切（ADR-0111 紅線）。
+    for (const convo of Object.keys(this.mem.exportSnapshot().messages)) this.writer?.schedule(convo);
   }
 
   /**
