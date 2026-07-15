@@ -129,6 +129,10 @@ const PRESENCE_TIMEOUT_MS = 90_000; // 3× 心跳（30s）：容忍偶發丟包/
  * ＋提供「全部刪除」是合理的；讓它無界成長才是問題（記憶體與儲存都會被撐爆）。
  */
 const MAX_REQUESTS = 100;
+
+/** 早到群訊緩存的上限（ADR-0131）：防止惡意假 `g` tag 撐爆記憶體。 */
+const MAX_PENDING_GROUPS = 32;
+const MAX_PENDING_PER_GROUP = 64;
 const nowSec = () => Math.floor(Date.now() / 1000);
 
 const shortNpub = (npub: string) => `${npub.slice(0, 12)}…`;
@@ -391,6 +395,8 @@ export class RelayChatBackend implements ChatBackend {
    * 抵達時原樣重放。群組回條逐成員，故存整筆回條而非單一狀態。
    */
   private readonly pendingReceipts = new Map<string, { from: PubkeyHex; type: ReceiptType; groupId?: string }[]>();
+  /** 早到群訊緩存（ADR-0131）：指向本地還不存在的群組的訊息，待加入後重放（有界）。 */
+  private readonly pendingGroupMsgs = new Map<string, { sender: PubkeyHex; rumor: Rumor }[]>();
   /** 已送出的最新「已讀」水位訊息 id（避免重複送已讀回條）。
    *  鍵：1:1 為對方 pubkey；群組為 `<groupId>:<發訊者pubkey>`（每位發訊者各一條水位，ADR-0095）。 */
   private readonly lastReadSent = new Map<string, string>();
@@ -1283,6 +1289,35 @@ export class RelayChatBackend implements ChatBackend {
     }
   }
 
+  /**
+   * 緩存一則指向未知群組的訊息（ADR-0131）——群組實例化後由 {@link drainPendingGroup} 重放。
+   *
+   * 有界（每群 64、總群 32，FIFO 逐出）＋以 rumor.id 去重（跨中繼重複不重複緩存，避免重放時
+   * `bumpUnread` 重複計數）。惡意假 `g` tag 只會佔一小段有界記憶體後被逐出，**從不重放、從不入庫**。
+   */
+  private deferGroupMsg(groupId: string, sender: PubkeyHex, rumor: Rumor): void {
+    const queue = this.pendingGroupMsgs.get(groupId) ?? [];
+    if (queue.some((m) => m.rumor.id === rumor.id)) return; // 去重
+    queue.push({ sender, rumor });
+    while (queue.length > MAX_PENDING_PER_GROUP) queue.shift();
+    this.pendingGroupMsgs.set(groupId, queue);
+    while (this.pendingGroupMsgs.size > MAX_PENDING_GROUPS) {
+      const oldest = this.pendingGroupMsgs.keys().next().value;
+      if (oldest === undefined) break;
+      this.pendingGroupMsgs.delete(oldest);
+    }
+  }
+
+  /** 群組實例化後（ADR-0131）：把早到、緩存的群訊依送出時間重放；先刪緩存避免重放時又 defer 回去。 */
+  private drainPendingGroup(groupId: string): void {
+    const queue = this.pendingGroupMsgs.get(groupId);
+    if (!queue) return;
+    this.pendingGroupMsgs.delete(groupId);
+    for (const m of [...queue].sort((a, b) => msgTime(a.rumor) - msgTime(b.rumor))) {
+      this.receiveGroup(m.sender, m.rumor, groupId);
+    }
+  }
+
   /** 重放先前暫存的「早到回條」（ADR-0107）：自封副本抵達後，才有訊息可標。 */
   private applyPendingReceipts(messageId: string): void {
     const queue = this.pendingReceipts.get(messageId);
@@ -1302,7 +1337,12 @@ export class RelayChatBackend implements ChatBackend {
     if (rumor.kind !== KIND.CHAT) return;
     if (this.isBlocked(sender)) return;
     const g = this.groups.find((gr) => gr.id === groupId);
-    if (!g) return; // 未知群組（尚未被加入）
+    if (!g) {
+      // 🔴 未知群組（尚未被加入）→ **緩存**，待 group-create/snapshot 實例化後重放（ADR-0131）。
+      // NIP-59 jitter 讓群訊可能比 group-create **先到**——舊版直接丟棄＝一被加進群就漏掉開頭幾則。
+      this.deferGroupMsg(groupId, sender, rumor);
+      return;
+    }
     if (!canPostToGroup(g, sender)) return; // 非成員/公告群非管理者不得發訊（ADR-0049）
     // 群組檔案（ADR-0124）：kind CHAT ＋ `g` tag ＋ `file` tag。位元組另走 P2P；
     // 這則 metadata 只是讓每位成員（的每一台裝置）都知道「有這個檔案」——與 1:1 同一套。
@@ -1370,6 +1410,7 @@ export class RelayChatBackend implements ChatBackend {
       this.storage.saveGroup({ id: control.id, name: control.name, admin: from, members: control.members });
       this.groups = this.storage.loadGroups();
       this.emitGroups();
+      this.drainPendingGroup(control.id); // ADR-0131：重放在 group-create 之前先到的群訊
       return;
     }
     if (control.type === "group-create") return; // 已存在：不重複建立（對帳走快照）

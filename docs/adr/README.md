@@ -145,3 +145,4 @@
 | [0128](./0128-file-ipc-hardening.md) | **檔案 IPC 縱深防禦**：收檔檔名消毒（遠端可控 → 乾淨 basename）＋ `read_saved_file` 路徑白名單（只讀原生對話框授權過的路徑，雜湊持久化） | 已接受 |
 | [0129](./0129-sealed-presence-state.md) | **在線狀態內容改走封裝**：心跳降為無內容存活信標；狀態文字與音樂改以 NIP-59 封裝、只在改變/對方上線時發給「在線✕無P2P」的聯絡人——relay 再也讀不到你在聽什麼、狀態寫什麼 | 已接受 |
 | [0130](./0130-jsdom-effect-tests.md) | **UI 測試補上會跑 `useEffect` 的環境**（jsdom 逐檔切、`createRoot`+`act`，不churn 既有 SSR 測試）——關掉「effect 從不執行」的測試盲區（ADR-0122 的 P0 就藏在那裡） | 已接受 |
+| [0131](./0131-buffer-early-group-messages.md) | **早到的群訊不再被丟掉**——群訊比 group-create 先到（NIP-59 jitter 打亂順序）時緩存、加入後依時間重放；有界＋去重防假 `g` tag 撐爆記憶體 | 已接受 |

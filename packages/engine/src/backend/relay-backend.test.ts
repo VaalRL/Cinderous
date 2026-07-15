@@ -2293,3 +2293,63 @@ describe("在線狀態內容改走封裝（ADR-0129）", () => {
     stranger.stop();
   });
 });
+
+describe("早到的群訊：緩存＋加入後重放（ADR-0131）", () => {
+  /** 用原始封裝直接送（控制 group-create 與群訊的抵達順序）。 */
+  const setup = () => {
+    const net = createInMemoryRelayNetwork();
+    const aSk = generateSecretKey();
+    const aPk = getPublicKey(aSk);
+    const aClient = net.connect("a", { onEvent: () => {} });
+    const bMsgs: ChatMessage[] = [];
+    const unread: Record<string, number>[] = [];
+    const sv = new MemoryStorage();
+    const b = new RelayChatBackend(sv, (h) => net.connect("b", h), "Bob");
+    b.start({ ...noop, onMessage: (_c, m) => bMsgs.push(m), onUnread: (u) => unread.push(u) });
+    const gid = "aa".repeat(16); // groupId＝16 bytes hex
+    const members = [aPk, b.self.pubkey];
+    const group = { id: gid, name: "專案群", admin: aPk, members };
+    const sendMsg = (text: string, now?: number) => {
+      for (const evt of wrapGroupMessage(text, aSk, aPk, group, now !== undefined ? { now } : {}).events) aClient.publish(evt);
+    };
+    const sendCreate = () => {
+      const control = { type: "group-create", id: gid, name: "專案群", admin: aPk, members } as const;
+      for (const evt of wrapGroupControl(control, aSk, [b.self.pubkey])) aClient.publish(evt);
+    };
+    return { b, sv, bMsgs, unread, gid, sendMsg, sendCreate };
+  };
+
+  it("🔴 **群訊比 group-create 先到 → 緩存後重放**（不再一被加進群就漏掉開頭）", () => {
+    const { b, bMsgs, gid, sendMsg, sendCreate } = setup();
+
+    sendMsg("開頭第一則", 1000); // 群訊先到——Bob 還沒這個群
+    sendMsg("開頭第二則", 1001);
+    expect(bMsgs).toEqual([]); // 修正前：直接丟棄，永遠不見
+
+    sendCreate(); // group-create 後到 → 實例化 → 重放緩存
+
+    expect(bMsgs.map((m) => m.text)).toEqual(["開頭第一則", "開頭第二則"]); // 依送出時間補回來
+    b.stop();
+  });
+
+  it("**假 `g` tag 的群訊只被緩存後逐出，從不入庫**（永遠沒有 group-create）", () => {
+    const { b, sv, bMsgs, sendMsg } = setup();
+    sendMsg("假群訊"); // 送了訊息，但**永不** sendCreate
+
+    expect(bMsgs).toEqual([]); // 沒被建立的群 → 從不重放
+    expect(sv.loadMessages("aa".repeat(16))).toEqual([]); // 也沒入庫
+    b.stop();
+  });
+
+  it("**跨中繼重複不重複計數**——同 rumor.id 只緩存一次、重放一次", () => {
+    const { b, sv, bMsgs, gid, sendMsg, sendCreate } = setup();
+    // 同一則訊息送兩次、**釘同一個 now**（不同外層 wrap、相同內層 rumor.id）——模擬跨中繼重複。
+    sendMsg("只算一次", 2000);
+    sendMsg("只算一次", 2000);
+    sendCreate();
+
+    expect(bMsgs.filter((m) => m.text === "只算一次")).toHaveLength(1); // 去重
+    expect(sv.loadMessages(gid).filter((m) => m.text === "只算一次")).toHaveLength(1);
+    b.stop();
+  });
+});
