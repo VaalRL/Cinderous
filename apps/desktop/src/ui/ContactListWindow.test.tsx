@@ -138,3 +138,22 @@ describe("訊息請求區（ADR-0121）", () => {
     expect(html.split("小明")).toHaveLength(2);
   });
 });
+
+describe("訊息請求防洪：全部刪除（ADR-0127）", () => {
+  const two = [{ pubkey: "z1", name: "甲" }, { pubkey: "z2", name: "乙" }];
+
+  it("多於一筆請求時顯示「全部刪除」", () => {
+    const html = render({ requests: two, onClearRequests: () => {}, onAcceptRequest: () => {} });
+    expect(html).toContain('data-testid="requests-clear"');
+  });
+
+  it("只有一筆時不顯示（一鍵刪一筆用單項刪除即可）", () => {
+    const html = render({ requests: [two[0]], onClearRequests: () => {}, onAcceptRequest: () => {} });
+    expect(html).not.toContain('data-testid="requests-clear"');
+  });
+
+  it("未提供 onClearRequests（示範/唯讀）時不顯示", () => {
+    const html = render({ requests: two, onAcceptRequest: () => {} });
+    expect(html).not.toContain('data-testid="requests-clear"');
+  });
+});

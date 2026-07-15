@@ -1468,6 +1468,17 @@ export function App(): JSX.Element {
       : {}),
     // 預覽請求裡的訊息：**只開窗，不接受**——對方不會收到已讀回條（他不是聯絡人）。
     onOpenRequest: (pk: string) => setOpen((prev) => (prev.includes(pk) ? prev : [...prev, pk])),
+    // 全部刪除（ADR-0127 防洪）：清空請求區與相關對話視窗。
+    ...(activeBackend.clearRequests
+      ? {
+          onClearRequests: () => {
+            const reqPks = new Set(requests.map((r) => r.pubkey));
+            activeBackend.clearRequests?.();
+            setOpen((prev) => prev.filter((k) => !reqPks.has(k)));
+            setConvos((prev) => Object.fromEntries(Object.entries(prev).filter(([k]) => !reqPks.has(k))));
+          },
+        }
+      : {}),
   };
   const updatePrefs = (next: GroupPrefsMap) => {
     setGroupPrefs(next);

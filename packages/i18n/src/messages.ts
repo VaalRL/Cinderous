@@ -109,6 +109,7 @@ export interface Messages {
   request_accept: string;
   request_decline: string;
   request_preview: string;
+  request_clearAll: string;
   contact_unblock: string;
   contact_removeConfirm: string;
   contact_blockConfirm: string;
@@ -594,6 +595,7 @@ const zhHant: Messages = {
   request_accept: "接受",
   request_decline: "刪除",
   request_preview: "查看訊息（不會通知對方）",
+  request_clearAll: "全部刪除",
   contact_unblock: "解除封鎖",
   contact_removeConfirm: "確定要刪除 {name} 並清除對話紀錄嗎？",
   contact_blockConfirm: "確定要封鎖 {name}？將移出清單並忽略其後續訊息。",
@@ -1061,6 +1063,7 @@ const en: Messages = {
   request_accept: "Accept",
   request_decline: "Delete",
   request_preview: "Read messages (they won't be told)",
+  request_clearAll: "Delete all",
   contact_unblock: "Unblock",
   contact_removeConfirm: "Delete {name} and clear the conversation history?",
   contact_blockConfirm: "Block {name}? They'll be removed and their future messages ignored.",

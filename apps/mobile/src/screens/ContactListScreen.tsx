@@ -56,7 +56,9 @@ function makeStyles(tk: ThemeTokens) {
     blockBtn: { marginLeft: "auto", borderWidth: 1, borderColor: tk.accent, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 2 },
     blockText: { fontSize: 11, color: tk.accent },
     // 訊息請求（ADR-0121）：警示色，因為它需要使用者做決定。
+    reqHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingRight: 12 },
     reqSection: { fontSize: 11, fontWeight: "700", color: "#b45309", paddingHorizontal: 12, paddingTop: 10 },
+    reqClear: { fontSize: 11, color: "#e5484d", paddingTop: 10 },
     reqHint: { fontSize: 10, lineHeight: 15, color: tk.muted, paddingHorizontal: 12, paddingBottom: 6 },
     reqRow: { flexDirection: "row", alignItems: "center", gap: 6, paddingHorizontal: 12, paddingVertical: 5 },
     reqNameBox: { flex: 1, minWidth: 0 },
@@ -78,6 +80,7 @@ export function ContactListScreen({
   requests = [],
   onAcceptRequest,
   onDeclineRequest,
+  onClearRequests,
   locale = "zh-Hant",
   theme = "light",
   accent = null,
@@ -103,6 +106,8 @@ export function ContactListScreen({
   onAcceptRequest?: (pubkey: string) => void;
   /** 刪除請求（連同他傳來的訊息）；不封鎖，他還能再傳。 */
   onDeclineRequest?: (pubkey: string) => void;
+  /** 全部刪除訊息請求（ADR-0127 防洪）。 */
+  onClearRequests?: () => void;
   locale?: Locale;
   /** 深淺主題（與桌面共用，ADR-0080）。 */
   theme?: Theme;
@@ -124,9 +129,17 @@ export function ContactListScreen({
       {/* 訊息請求（ADR-0121）：放在名冊**之前**——這是需要你裁示的東西，不該被埋在清單裡。 */}
       {requests.length > 0 ? (
         <View testID="requests">
-          <Text style={styles.reqSection}>
-            {t("request_section")}（{requests.length}）
-          </Text>
+          <View style={styles.reqHead}>
+            <Text style={styles.reqSection}>
+              {t("request_section")}（{requests.length}）
+            </Text>
+            {/* 全部刪除（ADR-0127 防洪）：被灌爆時一次清空。 */}
+            {onClearRequests && requests.length > 1 ? (
+              <Pressable accessibilityRole="button" testID="requests-clear" onPress={() => onClearRequests()}>
+                <Text style={styles.reqClear}>{t("request_clearAll")}</Text>
+              </Pressable>
+            ) : null}
+          </View>
           <Text style={styles.reqHint}>{t("request_hint")}</Text>
           {requests.map((r) => (
             <View key={r.pubkey} style={styles.reqRow}>

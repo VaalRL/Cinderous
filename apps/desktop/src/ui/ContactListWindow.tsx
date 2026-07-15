@@ -61,6 +61,8 @@ export interface ContactListProps {
   onAcceptRequest?: (pubkey: string) => void;
   /** 刪除請求（連同他傳來的訊息）；不封鎖，他還能再傳。 */
   onDeclineRequest?: (pubkey: string) => void;
+  /** 全部刪除訊息請求（ADR-0127 防洪）。 */
+  onClearRequests?: () => void;
   /** 預覽請求裡的訊息（只讀，不接受）。 */
   onOpenRequest?: (pubkey: string) => void;
   /** 開啟設定面板。 */
@@ -248,6 +250,17 @@ export function ContactListWindow(props: ContactListProps): JSX.Element {
             <span>
               {t("request_section")}（{requests.length}）
             </span>
+            {/* 全部刪除（ADR-0127 防洪）：被灌爆時一次清空。 */}
+            {props.onClearRequests && requests.length > 1 ? (
+              <button
+                type="button"
+                className="requests__clear"
+                data-testid="requests-clear"
+                onClick={() => props.onClearRequests?.()}
+              >
+                {t("request_clearAll")}
+              </button>
+            ) : null}
           </div>
           <div className="requests__hint">{t("request_hint")}</div>
           {requests.map((r) => (

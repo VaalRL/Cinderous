@@ -109,3 +109,17 @@ describe("行動端訊息請求區（ADR-0121）", () => {
     expect(html.split("小明")).toHaveLength(2);
   });
 });
+
+describe("行動端訊息請求防洪：全部刪除（ADR-0127）", () => {
+  const two = [{ pubkey: "z1", name: "甲" }, { pubkey: "z2", name: "乙" }];
+  const render = (extra: Record<string, unknown>) =>
+    renderToStaticMarkup(<ContactListScreen selfPubkey={"aa".repeat(32)} selfName="我" contacts={[]} {...extra} />);
+
+  it("多於一筆時顯示「全部刪除」", () => {
+    expect(render({ requests: two, onClearRequests: () => {} })).toContain('data-testid="requests-clear"');
+  });
+
+  it("只有一筆時不顯示", () => {
+    expect(render({ requests: [two[0]], onClearRequests: () => {} })).not.toContain('data-testid="requests-clear"');
+  });
+});

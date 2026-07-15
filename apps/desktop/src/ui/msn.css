@@ -827,3 +827,8 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
 /* 瀏覽器登入的本地密碼（ADR-0122）：必填——沒有它，重新整理一次身分就沒了。 */
 .signin__pw { display: flex; flex-direction: column; gap: 6px; width: 100%; }
 .signin__err { margin: 0; font-size: 11px; color: #e5484d; }
+
+/* 全部刪除訊息請求（ADR-0127 防洪）。 */
+.group--requests { display: flex; align-items: center; justify-content: space-between; }
+.requests__clear { font-size: 10px; border: 1px solid #e5484d; background: var(--field); color: #e5484d; border-radius: 5px; cursor: pointer; padding: 1px 6px; }
+.requests__clear:hover { background: #e5484d; color: #fff; }

@@ -813,6 +813,12 @@ export function MobileApp({
               return rest;
             });
           }}
+          onClearRequests={() => {
+            // 全部刪除（ADR-0127 防洪）：清空請求區與相關對話快取。
+            const reqPks = new Set(requests.map((r) => r.pubkey));
+            backendRef.current?.clearRequests?.();
+            setConvos((c) => Object.fromEntries(Object.entries(c).filter(([k]) => !reqPks.has(k))));
+          }}
           {...themeProps}
         />
       ) : (

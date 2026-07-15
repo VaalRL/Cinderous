@@ -119,6 +119,14 @@ export const IDENTITY_UNAVAILABLE = "IDENTITY_UNAVAILABLE";
 export const IDENTITY_MISMATCH = "IDENTITY_MISMATCH";
 
 const PRESENCE_TIMEOUT_MS = 90_000; // 3× 心跳（30s）：容忍偶發丟包/抖動，不因單次遲到就翻離線（ADR-0059）
+
+/**
+ * 訊息請求區的數量上限（ADR-0127 防洪）。超過就 FIFO 逐出最舊（連同其訊息／封存）。
+ *
+ * 100 遠超任何正常情境——真的同時有 100 個陌生人在等你確認，那已經是被灌爆了。此時逐出最舊
+ * ＋提供「全部刪除」是合理的；讓它無界成長才是問題（記憶體與儲存都會被撐爆）。
+ */
+const MAX_REQUESTS = 100;
 const nowSec = () => Math.floor(Date.now() / 1000);
 
 const shortNpub = (npub: string) => `${npub.slice(0, 12)}…`;
@@ -1351,6 +1359,15 @@ export class RelayChatBackend implements ChatBackend {
     if (this.requests.some((r) => r.pubkey === pubkey)) return;
     this.storage.addRequest({ pubkey, name: shortNpub(npubEncode(pubkey)) });
     this.requests = this.storage.loadRequests();
+    // 防洪（ADR-0127）：超過上限 → FIFO 逐出最舊的請求，連同其訊息與封存一起清
+    //（走 declineRequest 的同一條清理路徑）。否則陌生人可用大量 pubkey 把請求區與儲存撐爆。
+    while (this.requests.length > MAX_REQUESTS) {
+      const oldest = this.requests[0];
+      if (!oldest) break;
+      this.storage.removeRequest(oldest.pubkey);
+      this.storage.removeContact(oldest.pubkey); // 清訊息／封存
+      this.requests = this.storage.loadRequests();
+    }
     this.emitRequests();
   }
 
@@ -1374,6 +1391,16 @@ export class RelayChatBackend implements ChatBackend {
   declineRequest(pubkey: PubkeyHex): void {
     this.storage.removeRequest(pubkey);
     this.storage.removeContact(pubkey); // 不是聯絡人 → 這裡的作用是**清掉他的訊息與封存**
+    this.requests = this.storage.loadRequests();
+    this.emitRequests();
+  }
+
+  /** 全部刪除訊息請求（ADR-0127 防洪）：被灌爆時一次清空，連同所有訊息／封存。不封鎖。 */
+  clearRequests(): void {
+    for (const r of this.requests) {
+      this.storage.removeRequest(r.pubkey);
+      this.storage.removeContact(r.pubkey);
+    }
     this.requests = this.storage.loadRequests();
     this.emitRequests();
   }

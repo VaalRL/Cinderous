@@ -2098,3 +2098,83 @@ describe("身分守衛（ADR-0122）", () => {
     b.stop();
   });
 });
+
+describe("訊息請求防洪（ADR-0127）", () => {
+  /** 讓 N 個不同的陌生人各對我發一則訊息（每個都是新 pubkey → 新請求）。 */
+  const flood = (me: RelayChatBackend, net: ReturnType<typeof createInMemoryRelayNetwork>, n: number) => {
+    for (let i = 0; i < n; i++) {
+      const s = new RelayChatBackend(new MemoryStorage(), (h) => net.connect(`x${i}`, h), `S${i}`);
+      s.start(noop);
+      s.sendMessage(me.self.pubkey, `spam ${i}`);
+      s.stop();
+    }
+  };
+
+  it("🔴 **請求區有上限**——大量陌生人灌爆時 FIFO 逐出最舊，不無界成長", () => {
+    const net = createInMemoryRelayNetwork();
+    const sv = new MemoryStorage();
+    const me = new RelayChatBackend(sv, (h) => net.connect("me", h), "我");
+    me.start(noop);
+
+    flood(me, net, 130); // > MAX_REQUESTS(100)
+
+    // 修正前：請求區與儲存都會被撐到 130（無界）。現在封在 100。
+    expect(sv.loadRequests().length).toBe(100);
+    me.stop();
+  });
+
+  it("逐出的請求**連同訊息一起清掉**——儲存不被撐爆", () => {
+    const net = createInMemoryRelayNetwork();
+    const sv = new MemoryStorage();
+    const me = new RelayChatBackend(sv, (h) => net.connect("me", h), "我");
+    me.start(noop);
+
+    // 記下第一個灌入者，稍後應被逐出。
+    const first = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("first", h), "First");
+    first.start(noop);
+    first.sendMessage(me.self.pubkey, "我最早");
+    first.stop();
+    expect(sv.loadMessages(first.self.pubkey)).toHaveLength(1);
+
+    flood(me, net, 105); // 把 first 擠出上限
+
+    expect(sv.loadRequests().some((r) => r.pubkey === first.self.pubkey)).toBe(false); // 被逐出
+    expect(sv.loadMessages(first.self.pubkey)).toEqual([]); // 訊息也清了
+    me.stop();
+  });
+
+  it("**全部刪除**：一次清空請求區與所有訊息（被灌爆時的出路）", () => {
+    const net = createInMemoryRelayNetwork();
+    const sv = new MemoryStorage();
+    const cleared: number[] = [];
+    const me = new RelayChatBackend(sv, (h) => net.connect("me", h), "我");
+    me.start({ ...noop, onRequests: (r) => cleared.push(r.length) });
+
+    flood(me, net, 30);
+    expect(sv.loadRequests().length).toBe(30);
+
+    me.clearRequests();
+
+    expect(sv.loadRequests()).toEqual([]);
+    expect(cleared[cleared.length - 1]).toBe(0); // UI 收到空清單
+    // 訊息也全清了。
+    expect(Object.keys(sv.exportSnapshot().messages).every((k) => sv.loadMessages(k).length === 0)).toBe(true);
+    me.stop();
+  });
+
+  it("全部刪除**不封鎖**——被清掉的人還能再傳（會變成新的請求）", () => {
+    const net = createInMemoryRelayNetwork();
+    const sv = new MemoryStorage();
+    const me = new RelayChatBackend(sv, (h) => net.connect("me", h), "我");
+    const s = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("s", h), "S");
+    me.start(noop);
+    s.start(noop);
+    s.sendMessage(me.self.pubkey, "一");
+    me.clearRequests();
+    expect(sv.loadBlocked()).toEqual([]); // 沒被封鎖
+    s.sendMessage(me.self.pubkey, "二"); // 又是一則新請求
+    expect(sv.loadRequests().map((r) => r.pubkey)).toEqual([s.self.pubkey]);
+    me.stop();
+    s.stop();
+  });
+});

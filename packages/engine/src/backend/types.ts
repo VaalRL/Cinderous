@@ -252,6 +252,8 @@ export interface ChatBackend {
   acceptRequest?(pubkey: PubkeyHex): void;
   /** 刪除訊息請求（ADR-0121）：連同他傳來的訊息一起清掉；不封鎖。 */
   declineRequest?(pubkey: PubkeyHex): void;
+  /** 全部刪除訊息請求（ADR-0127 防洪）：被灌爆時一次清空。 */
+  clearRequests?(): void;
   /** 清除指向某座 relay 的聯絡人 hint 並釋放連線（ADR-0036）。 */
   clearRelayHint?(url: string): void;
   /** 確認保留某座 stale relay（重置離線計時、暫時隱藏警告，ADR-0036）。 */

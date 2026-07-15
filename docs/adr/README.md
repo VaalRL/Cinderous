@@ -141,3 +141,4 @@
 | [0124](./0124-group-file-transfer.md) | **群組傳檔**：metadata 扇給每位成員（共用 rumor 與 tid）、位元組各自 P2P；順帶修正 `onFileBytes` 回報 peer 而非對話鍵 | 已接受 |
 | [0125](./0125-mobile-pair-import-apply-bundle.md) | **行動端配對搬家要套用捆包**——過去只還原身分，換手機後聯絡人與訊息全部沒搬過去（只搬空身分）；順帶補上行動端的 ADR-0122 身分守衛 | 已接受 |
 | [0126](./0126-retention-cap-archives-not-deletes.md) | **保留上限＝封存而非刪除**——統一與 HOT_CAP 各說各話的兩個上限；使用者設上限不再靜默刪歷史，溢出移進封存（web/mobile 移出 localStorage 紓解配額） | 已接受 |
+| [0127](./0127-message-request-flood-control.md) | **訊息請求防洪**：數量上限 100（FIFO 逐出，連訊息一起清）＋「全部刪除」一鍵出路；速率限制由硬上限上位替代 | 已接受 |
