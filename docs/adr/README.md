@@ -161,3 +161,4 @@
 | [0144](./0144-change-display-name.md) | **更改顯示名稱（桌面＋行動）**：後端加 `setSelfName`（落地本機＋廣播加密 profile 給聯絡人 ADR-0061）；設定加改名欄，同步 self/登錄/記住的 blob；不換金鑰、不換身分 | 已接受 |
 | [0145](./0145-add-identity-type-picker.md) | **新增身分先選類型（個人／組織）**：`AddIdentityModal` 改兩步——先以圖示＋說明選 👤 個人／🏢 組織（ADR-0047），再填表單；`mode` 取代 `enterprise` 布林、管理者 npub 欄只在組織出現、可回頭改選；`onAdd` 簽章不變 | 已接受 |
 | [0146](./0146-signin-by-name-and-unique-names.md) | **登入以顯示名稱解析既有身分＋本機名稱唯一**：桌面登入打既有名字＝`setActive`+reload 進那個身分（重用解鎖/救援路徑，Fix First），不建重複；純函式 `resolveSignIn`／`nameTaken`（排除 hidden、trim 比對）下沉 engine；新增/改名兩端擋重名；名稱只是查找鍵非加密鍵，安全不變；行動端登入係 nsec 導向故只做名稱唯一 | 已接受 |
+| [0147](./0147-self-hosted-web-app-separate-origin.md) | **自架網頁版部署——app 與官網分子網域**：瀏覽器版＝`apps/desktop` 的 web build（`isTauri()=false`，金鑰本機加密 ADR-0112/0122）；自架須把 app 與官網放**不同 origin**（延續 ADR-0090 隔離）、app origin HTTPS＋嚴格 CSP；relay 經 `?relay=`／`ANCHOR_RELAYS`／手動指定；官方 `apps/website` 維持硬隔離不變。附 `docs/self-hosting-web-app.md` 指南 | 已接受 |
