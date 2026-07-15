@@ -96,8 +96,8 @@ export function SettingsScreen({
   onLogout,
 }: {
   selfName: string;
-  /** 更改顯示名稱（ADR-0144）：落地本機並廣播給聯絡人。未提供則不顯示改名欄。 */
-  onRename?: (name: string) => void;
+  /** 更改顯示名稱（ADR-0144）：落地本機並廣播給聯絡人。未提供則不顯示改名欄。回 false＝撞本機同名（ADR-0146）。 */
+  onRename?: (name: string) => boolean;
   selfNpub: string;
   selfNsec: string;
   relayUrl: string | null;
@@ -151,11 +151,18 @@ export function SettingsScreen({
   // 更改顯示名稱（ADR-0144）。
   const [nameDraft, setNameDraft] = useState(selfName);
   const [nameSaved, setNameSaved] = useState(false);
+  const [nameTakenErr, setNameTakenErr] = useState(false); // ADR-0146：撞本機同名
   const nameDirty = nameDraft.trim().length > 0 && nameDraft.trim() !== selfName;
   const applyRename = (): void => {
     if (!onRename || !nameDirty) return;
-    onRename(nameDraft.trim());
-    setNameSaved(true);
+    // onRename 回 false＝名稱已被本機另一身分佔用（ADR-0146）→ 顯示重名提示，不視為成功。
+    if (onRename(nameDraft.trim())) {
+      setNameSaved(true);
+      setNameTakenErr(false);
+    } else {
+      setNameTakenErr(true);
+      setNameSaved(false);
+    }
   };
   // 改密碼表單（ADR-0135）。
   const [pwOld, setPwOld] = useState("");
@@ -240,6 +247,7 @@ export function SettingsScreen({
                   onChangeText={(v: string) => {
                     setNameDraft(v);
                     setNameSaved(false);
+                    setNameTakenErr(false);
                   }}
                   placeholder={t("settings_displayName")}
                   placeholderTextColor={tk.muted}
@@ -256,7 +264,11 @@ export function SettingsScreen({
                   <Text style={[styles.segText, { color: tk.accent }]}>{t("settings_nameApply")}</Text>
                 </Pressable>
               </View>
-              {nameSaved ? <Text style={styles.okMsg} testID="rename-ok">{t("settings_nameUpdated")}</Text> : null}
+              {nameTakenErr ? (
+                <Text style={styles.warn} testID="rename-taken">{t("settings_nameTaken")}</Text>
+              ) : nameSaved ? (
+                <Text style={styles.okMsg} testID="rename-ok">{t("settings_nameUpdated")}</Text>
+              ) : null}
             </>
           ) : (
             <Text style={styles.value}>{selfName}</Text>

@@ -39,6 +39,7 @@ import {
   getRemembered,
   isOwnIdentity,
   loadIdentities,
+  nameTaken,
   type ProfilesState,
   putRemembered,
   rememberInProfile,
@@ -509,12 +510,15 @@ export function MobileApp({
     return true;
   };
   // 更改顯示名稱（ADR-0144）：後端落地本機＋廣播給聯絡人（ADR-0061）；更新 self 與登錄/記住的 blob。
-  const renameSelf = (name: string): void => {
+  const renameSelf = (name: string): boolean => {
     const trimmed = name.trim();
-    if (!trimmed || trimmed === selfName) return;
+    if (!trimmed || trimmed === selfName) return true; // 空白或未變動：no-op，非錯誤
+    // ADR-0146：改名不得撞到本機另一個可見身分（排除自己）——維持名稱唯一。
+    if (nameTaken(profiles, trimmed, selfPubkey)) return false;
     backendRef.current?.setSelfName?.(trimmed);
     setSelfName(trimmed);
     setProfiles((prev) => renameIdentity(prev, selfPubkey, trimmed));
+    return true;
   };
   const addContact = (npub: string): void => {
     const trimmed = npub.trim();
@@ -762,6 +766,7 @@ export function MobileApp({
           setTab("chats");
           setActiveId(null);
         }}
+        nameTaken={(name, pubkey) => nameTaken(profiles, name, pubkey)}
         onBack={() => setScreen("main")}
         canRemember
         {...themeProps}

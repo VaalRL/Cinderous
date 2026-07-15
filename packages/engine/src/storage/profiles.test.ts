@@ -13,6 +13,8 @@ import {
   removeProfile,
   saveProfiles,
   setActive,
+  nameTaken,
+  resolveSignIn,
   setProfileCloudSync,
   setProfileSecurity,
   upsertProfile,
@@ -139,6 +141,58 @@ describe("profiles 純登錄（ADR-0045）", () => {
     const userBasic = setProfileCloudSync(fresh, "a", "basic");
     expect(activeProfile(adoptCloudSyncMode(userBasic, "a", "full"))?.cloudSync).toBe("basic");
     expect(adoptCloudSyncMode(fresh, "zzz", "full")).toBe(fresh);
+  });
+});
+
+describe("resolveSignIn（ADR-0146：登入以顯示名稱解析既有身分）", () => {
+  it("無命中 → create（建新身分）；空白名亦視為 create", () => {
+    const s = upsertProfile(empty, mk("a", { name: "小明" }));
+    expect(resolveSignIn(s, "小華")).toEqual({ kind: "create" });
+    expect(resolveSignIn(s, "   ").kind).toBe("create");
+    expect(resolveSignIn(empty, "任何").kind).toBe("create");
+  });
+
+  it("恰一個可見同名 → enter 該身分（trim 比對）", () => {
+    const s = upsertProfile(upsertProfile(empty, mk("a", { name: "小明" })), mk("b", { name: "工作" }));
+    const r = resolveSignIn(s, "  工作 ");
+    expect(r.kind).toBe("enter");
+    expect(r.kind === "enter" && r.profile.pubkey).toBe("b");
+  });
+
+  it("🔴 隱藏身分永不被名稱命中（維持 ADR-0067 隱藏性）", () => {
+    const s = upsertProfile(empty, mk("a", { name: "祕密", hidden: true }));
+    expect(resolveSignIn(s, "祕密")).toEqual({ kind: "create" });
+    // 可見同名存在時，只命中可見那個（隱藏的不參與）
+    const s2 = upsertProfile(s, mk("b", { name: "祕密" }));
+    const r = resolveSignIn(s2, "祕密");
+    expect(r.kind === "enter" && r.profile.pubkey).toBe("b");
+  });
+
+  it("多個可見同名（僅可能來自舊資料）→ ambiguous，不靜默進入", () => {
+    const s = upsertProfile(upsertProfile(empty, mk("a", { name: "重複" })), mk("b", { name: "重複" }));
+    const r = resolveSignIn(s, "重複");
+    expect(r.kind).toBe("ambiguous");
+    expect(r.kind === "ambiguous" && r.profiles.map((p) => p.pubkey)).toEqual(["a", "b"]);
+  });
+});
+
+describe("nameTaken（ADR-0146：本機可見身分名稱唯一）", () => {
+  it("可見同名 → 被佔用；不同名 → 未佔用（trim 比對）", () => {
+    const s = upsertProfile(empty, mk("a", { name: "工作" }));
+    expect(nameTaken(s, " 工作 ")).toBe(true);
+    expect(nameTaken(s, "個人")).toBe(false);
+    expect(nameTaken(s, "   ")).toBe(false);
+  });
+
+  it("排除自己（改名情境）：改回同名不算佔用", () => {
+    const s = upsertProfile(upsertProfile(empty, mk("a", { name: "工作" })), mk("b", { name: "個人" }));
+    expect(nameTaken(s, "工作", "a")).toBe(false); // a 改成自己的名字
+    expect(nameTaken(s, "工作", "b")).toBe(true); // b 想改成已被 a 佔用的名字
+  });
+
+  it("🔴 隱藏身分不佔名：不因『名稱被佔用』洩漏隱藏身分存在", () => {
+    const s = upsertProfile(empty, mk("a", { name: "祕密", hidden: true }));
+    expect(nameTaken(s, "祕密")).toBe(false);
   });
 });
 

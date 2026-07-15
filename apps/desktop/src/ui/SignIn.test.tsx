@@ -99,3 +99,32 @@ describe("瀏覽器登入必填本地密碼（ADR-0122）", () => {
     expect(render({})).not.toContain('data-testid="nsec-open"');
   });
 });
+
+describe("ADR-0146：登入名稱命中本機既有身分", () => {
+  const render = (extra: Record<string, unknown>) =>
+    renderToStaticMarkup(
+      <I18nProvider locale="zh-Hant">
+        <ThemeProvider>
+          <SignIn onSignIn={() => {}} {...extra} />
+        </ThemeProvider>
+      </I18nProvider>,
+    );
+
+  it("命中既有（enter）→ 顯示登入提示、按鈕改「登入既有身分」，且**收起**建新用的密碼/中繼站欄", () => {
+    const html = render({ requirePassword: true, lookupName: () => "enter" });
+    expect(html).toContain('data-testid="signin-enter-existing"');
+    expect(html).toContain("登入既有身分"); // 按鈕改標
+    expect(html).not.toContain('data-testid="signin-password"'); // 不在此設新密碼（於解鎖畫面驗證）
+    expect(html).not.toContain('data-testid="relay-status"'); // 既有身分自帶中繼站，收起選站
+  });
+
+  it("多個同名（ambiguous）→ 顯示無法自動判斷的提示", () => {
+    const html = render({ lookupName: () => "ambiguous" });
+    expect(html).toContain('data-testid="signin-enter-existing"');
+    expect(html).toContain("多個同名身分");
+  });
+
+  it("未提供 lookupName（示範/無登錄）→ 維持建新流程（不顯示登入既有提示）", () => {
+    expect(render({ requirePassword: true })).not.toContain('data-testid="signin-enter-existing"');
+  });
+});

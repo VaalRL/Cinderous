@@ -47,7 +47,7 @@ describe("更改顯示名稱（ADR-0144）", () => {
   });
 
   it("提供 onRename → 身分分頁出現、且有改名欄（預填目前名稱、按鈕預設停用）", () => {
-    const out = render({ initialTab: "identity", onRename: () => {}, selfName: "夜" });
+    const out = render({ initialTab: "identity", onRename: () => true, selfName: "夜" });
     expect(out).toContain('data-testid="settings-tab-identity"');
     expect(out).toContain('data-testid="rename-input"');
     expect(out).toContain('value="夜"'); // 預填目前名稱

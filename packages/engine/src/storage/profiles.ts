@@ -131,6 +131,40 @@ export function visibleProfiles(state: ProfilesState): Profile[] {
   return state.profiles.filter((p) => !p.hidden || p.pubkey === state.active);
 }
 
+/**
+ * 登入畫面以顯示名稱解析身分（ADR-0146）。name 不是加密金鑰，只是「選哪個既有身分」的查找鍵：
+ * - `enter`：恰好命中一個**可見（非隱藏）**同名身分 → 進入既有身分（有鎖則後續解鎖驗密碼）。
+ * - `ambiguous`：命中多個同名（僅可能來自本規則之前的舊資料；新資料受 `nameTaken` 擋重名）→
+ *   不得靜默進入以免登入到錯的身分，由 UI 擋下。
+ * - `create`：無命中 → 建立新身分（新金鑰）。
+ *
+ * 隱藏身分永不被名稱命中（維持 ADR-0067 的隱藏性；只能經「解鎖隱藏身分」逐一試密碼）。
+ */
+export type SignInResolution =
+  | { kind: "enter"; profile: Profile }
+  | { kind: "ambiguous"; profiles: Profile[] }
+  | { kind: "create" };
+
+export function resolveSignIn(state: ProfilesState, name: string): SignInResolution {
+  const trimmed = name.trim();
+  if (!trimmed) return { kind: "create" };
+  const hits = state.profiles.filter((p) => !p.hidden && p.name.trim() === trimmed);
+  if (hits.length === 1) return { kind: "enter", profile: hits[0]! };
+  if (hits.length > 1) return { kind: "ambiguous", profiles: hits };
+  return { kind: "create" };
+}
+
+/**
+ * 本機是否已有同名的**可見（非隱藏）**身分（ADR-0146 名稱唯一）。用於新增/改名時擋重名，
+ * 讓 `resolveSignIn` 的命中無歧義。排除 hidden：既不因「名稱被佔用」洩漏隱藏身分的存在，
+ * 也允許一個可見與一個隱藏同名並存（登入只命中可見那個）。`exceptPubkey` 排除自己（改名情境）。
+ */
+export function nameTaken(state: ProfilesState, name: string, exceptPubkey?: string): boolean {
+  const trimmed = name.trim();
+  if (!trimmed) return false;
+  return state.profiles.some((p) => p.pubkey !== exceptPubkey && !p.hidden && p.name.trim() === trimmed);
+}
+
 /** 設定某身分的雲端快照模式（ADR-0071）；未知 pubkey 回原狀態。 */
 export function setProfileCloudSync(
   state: ProfilesState,

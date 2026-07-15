@@ -37,6 +37,10 @@ export interface Messages {
   signIn_displayName: string;
   signIn_relayUrl: string;
   signIn_button: string;
+  /** ADR-0146：登入名稱命中本機既有身分。 */
+  signIn_enterExisting: string;
+  signIn_enterExistingHint: string;
+  signIn_ambiguousName: string;
   // ── 行動端登入（ADR-0081）：nsec 匯入（A）＋配對匯入（B）──
   mobileSignIn_title: string;
   mobileSignIn_nameLabel: string;
@@ -46,6 +50,8 @@ export interface Messages {
   mobileSignIn_button: string;
   mobileSignIn_errName: string;
   mobileSignIn_errNsec: string;
+  /** ADR-0146：本機已有同名身分（名稱唯一）。 */
+  mobileSignIn_nameTaken: string;
   mobileSignIn_hint: string;
   mobileSignIn_toPair: string;
   mobilePair_title: string;
@@ -92,6 +98,8 @@ export interface Messages {
   addId_admin: string;
   addId_import: string;
   addId_error: string;
+  /** ADR-0146：本機已有同名身分（名稱唯一）。 */
+  addId_nameTaken: string;
   addId_submit: string;
   addId_busy: string;
   /** 新增身分先選類型（ADR-0145）。 */
@@ -295,6 +303,8 @@ export interface Messages {
   settings_displayName: string;
   settings_nameApply: string;
   settings_nameUpdated: string;
+  /** ADR-0146：改名撞到本機另一身分（名稱唯一）。 */
+  settings_nameTaken: string;
   settings_identityWarning: string;
   settings_revealKey: string;
   settings_hideKey: string;
@@ -571,6 +581,9 @@ const zhHant: Messages = {
   signIn_displayName: "顯示名稱",
   signIn_relayUrl: "中繼站網址（留空使用示範模式）",
   signIn_button: "登入",
+  signIn_enterExisting: "登入既有身分",
+  signIn_enterExistingHint: "本機已有這個名稱的身分，將直接登入「{name}」（若有本地密碼會請你解鎖）。",
+  signIn_ambiguousName: "本機有多個同名身分（可能是舊資料），無法自動判斷。請改用「用 nsec 登入」，或稍後在設定裡改名區分。",
   mobileSignIn_title: "用私鑰登入",
   mobileSignIn_nameLabel: "顯示名稱",
   mobileSignIn_nsecLabel: "私鑰（nsec）",
@@ -579,6 +592,7 @@ const zhHant: Messages = {
   mobileSignIn_button: "登入",
   mobileSignIn_errName: "請輸入顯示名稱",
   mobileSignIn_errNsec: "nsec 格式不正確",
+  mobileSignIn_nameTaken: "本機已有同名身分，請換一個名稱。",
   mobileSignIn_hint: "在桌面版「設定 → 身分備份」複製你的 nsec；只存在本機、絕不外流。",
   mobileSignIn_toPair: "改用從舊裝置匯入",
   mobilePair_title: "從舊裝置匯入",
@@ -622,6 +636,7 @@ const zhHant: Messages = {
   addId_admin: "管理者 npub（可選，自動同步企業通訊錄）",
   addId_import: "匯入 nsec 或加密備份碼（留空＝產生新身分）",
   addId_error: "備份密碼錯誤或私鑰格式不符",
+  addId_nameTaken: "本機已有同名身分，請換一個名稱（登入時以名稱辨識要進哪個身分）。",
   addId_submit: "建立並切換",
   addId_busy: "還原中…",
   addId_modePersonal: "個人身分",
@@ -810,6 +825,7 @@ const zhHant: Messages = {
   settings_displayName: "顯示名稱",
   settings_nameApply: "更新",
   settings_nameUpdated: "名稱已更新",
+  settings_nameTaken: "本機已有同名身分，請換一個名稱。",
   settings_identityWarning: "這是你的私鑰（nsec），等同你的帳號本身。任何人拿到都能冒充你——切勿外流或貼給他人。請離線妥善保存。",
   settings_revealKey: "顯示私鑰（nsec）",
   settings_hideKey: "隱藏私鑰",
@@ -1073,6 +1089,9 @@ const en: Messages = {
   signIn_displayName: "Display name",
   signIn_relayUrl: "Relay URL (leave blank for demo mode)",
   signIn_button: "Sign in",
+  signIn_enterExisting: "Sign in to existing identity",
+  signIn_enterExistingHint: "An identity with this name already exists on this device; you'll sign in to \"{name}\" (you'll be asked to unlock if it has a local password).",
+  signIn_ambiguousName: "Multiple identities on this device share this name (likely old data), so it can't be resolved automatically. Use \"Sign in with nsec\" instead, or rename them later in Settings.",
   mobileSignIn_title: "Sign in with secret key",
   mobileSignIn_nameLabel: "Display name",
   mobileSignIn_nsecLabel: "Private key (nsec)",
@@ -1081,6 +1100,7 @@ const en: Messages = {
   mobileSignIn_button: "Sign in",
   mobileSignIn_errName: "Enter a display name",
   mobileSignIn_errNsec: "Invalid nsec key",
+  mobileSignIn_nameTaken: "An identity with this name already exists on this device; pick another.",
   mobileSignIn_hint: "Copy your nsec from Desktop → Settings → Identity backup. It stays on this device and is never uploaded.",
   mobileSignIn_toPair: "Import from old device instead",
   mobilePair_title: "Import from old device",
@@ -1124,6 +1144,7 @@ const en: Messages = {
   addId_admin: "Admin npub (optional — auto-syncs the org address book)",
   addId_import: "Import nsec or encrypted backup code (blank = new identity)",
   addId_error: "Wrong backup password or invalid secret key",
+  addId_nameTaken: "An identity with this name already exists on this device; pick another (the name selects which identity to sign in to).",
   addId_submit: "Create & switch",
   addId_busy: "Restoring…",
   addId_modePersonal: "Personal identity",
@@ -1312,6 +1333,7 @@ const en: Messages = {
   settings_displayName: "Display name",
   settings_nameApply: "Update",
   settings_nameUpdated: "Name updated",
+  settings_nameTaken: "An identity with this name already exists on this device; pick another.",
   settings_identityWarning: "This is your secret key (nsec) — it IS your account. Anyone who gets it can impersonate you. Never share or paste it anywhere; keep it safe offline.",
   settings_revealKey: "Reveal secret key (nsec)",
   settings_hideKey: "Hide secret key",

@@ -25,7 +25,7 @@ const settingsBase = {
 
 describe("設定：更改顯示名稱（ADR-0144）", () => {
   it("提供 onRename → 顯示改名欄（預填目前名稱）", () => {
-    const html = renderToStaticMarkup(<SettingsScreen {...settingsBase} onRename={() => {}} />);
+    const html = renderToStaticMarkup(<SettingsScreen {...settingsBase} onRename={() => true} />);
     expect(html).toContain('data-testid="rename-input"');
     expect(html).toContain('data-testid="rename-apply"');
     expect(html).toContain(`value="${settingsBase.selfName}"`);

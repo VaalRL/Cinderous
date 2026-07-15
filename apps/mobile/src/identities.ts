@@ -10,6 +10,7 @@
 import {
   activeProfile,
   loadProfiles,
+  nameTaken,
   type Profile,
   type ProfilesState,
   removeProfile,
@@ -21,7 +22,7 @@ import {
 import { npubDecode } from "@cinder/core";
 import { isRemembered, type MobileIdentity, rememberIdentity, type RememberedIdentity } from "./auth.js";
 
-export { activeProfile, type Profile, type ProfilesState, visibleProfiles };
+export { activeProfile, nameTaken, type Profile, type ProfilesState, visibleProfiles };
 
 /** 每身分的密碼包裹 blob 鍵：`nb.remembered.<pubkey>`。 */
 const REMEMBER_PREFIX = "nb.remembered.";

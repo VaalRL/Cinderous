@@ -47,8 +47,10 @@ import {
   adoptCloudSyncMode,
   changeProfileRelay,
   loadProfiles,
+  nameTaken,
   type Profile,
   type ProfilesState,
+  resolveSignIn,
   saveProfiles,
   setActive,
   setProfileCloudSync,
@@ -1007,6 +1009,19 @@ export function App(): JSX.Element {
   };
 
   const signIn = async (name: string, relayUrl: string, password?: string) => {
+    // ADR-0146：先以顯示名稱解析既有身分。名稱只是「選哪個身分」的查找鍵（非加密鍵）——
+    // 命中既有＝切為作用中並重載，重用開機的解鎖/救援路徑（Fix First），不建重複；
+    // 多個同名（僅可能來自舊資料）擋下不靜默進入；無命中才往下建新身分。
+    const resolution = resolveSignIn(profilesState, name);
+    if (resolution.kind === "enter") {
+      saveProfiles(setActive(profilesState, resolution.profile.pubkey));
+      location.reload();
+      return;
+    }
+    if (resolution.kind === "ambiguous") {
+      await alert(t("signIn_ambiguousName"));
+      return;
+    }
     if (!relayUrl) {
       const b = new BrowserChatBackend(name);
       setConn("online");
@@ -1256,7 +1271,13 @@ export function App(): JSX.Element {
         }
       : {};
     return (
-      <SignIn onSignIn={signIn} onPair={importFromOldDevice} requirePassword={!isTauri()} {...enterNsec} />
+      <SignIn
+        onSignIn={signIn}
+        onPair={importFromOldDevice}
+        requirePassword={!isTauri()}
+        lookupName={(name) => resolveSignIn(profilesState, name).kind}
+        {...enterNsec}
+      />
     );
   }
 
@@ -1273,17 +1294,20 @@ export function App(): JSX.Element {
   };
   // 更改顯示名稱（ADR-0144）：後端落地本機＋廣播給聯絡人（ADR-0061）；本地更新 self 與登錄
   // （讓切換器/重載也顯示新名）。
-  const renameSelf = (name: string) => {
+  const renameSelf = (name: string): boolean => {
     const trimmed = name.trim();
-    if (!trimmed || trimmed === self.name) return;
+    if (!trimmed || trimmed === self.name) return true; // 空白或未變動：no-op，非錯誤
+    const p = activeProfile(profilesState);
+    // ADR-0146：改名不得撞到本機另一個可見身分（排除自己）——否則登入解析會歧義。
+    if (nameTaken(profilesState, trimmed, p?.pubkey)) return false;
     activeBackend.setSelfName?.(trimmed);
     setSelf((x) => (x ? { ...x, name: trimmed } : x));
-    const p = activeProfile(profilesState);
     if (p) {
       const next = { ...profilesState, profiles: profilesState.profiles.map((x) => (x.pubkey === p.pubkey ? { ...x, name: trimmed } : x)) };
       saveProfiles(next);
       setProfilesState(next);
     }
+    return true;
   };
   // 設為當前分頁（ADR-0079 Q3）：清該對話未讀，且若當下可見則送已讀回條（切到分頁＝看到）。
   // 供側欄雙擊（openChat）與分頁列點擊（DeckTabs）共用，避免只設 activeConvo 卻漏清未讀。
@@ -1602,6 +1626,7 @@ export function App(): JSX.Element {
           onCancel={() => setAddIdOpen(false)}
           onAdd={addIdentity}
           requirePassword={!isTauri()}
+          nameTaken={(name) => nameTaken(profilesState, name)}
         />
       ) : null}
       {pairPhase ? (
@@ -2045,11 +2070,14 @@ export function AddIdentityModal({
   onCancel,
   requirePassword = false,
   initialMode = null,
+  nameTaken,
 }: {
   /** relay 欄位預設值（帶入目前作用中身分的網址，可改）。 */
   defaultRelayUrl: string;
   /** 直接進入某類型的表單（跳過選類型步驟）；供測試/深連結。預設 null＝先選類型（ADR-0145）。 */
   initialMode?: "personal" | "org" | null;
+  /** ADR-0146：本機是否已有同名（可見）身分；命中則擋下建立，維持名稱唯一以便登入解析。 */
+  nameTaken?: (name: string) => boolean;
   onAdd: (
     name: string,
     relayUrl: string,
@@ -2077,8 +2105,10 @@ export function AddIdentityModal({
   const [busy, setBusy] = useState(false);
   const [password, setPassword] = useState("");
   const isCode = isBackupCode(nsec.trim());
+  // ADR-0146：本機名稱唯一——命中同名（可見）身分即擋，避免登入解析時歧義。
+  const nameCollision = name.trim().length > 0 && !!nameTaken?.(name);
   const submit = () => {
-    if (!name.trim() || !relayUrl.trim() || busy) return;
+    if (!name.trim() || !relayUrl.trim() || busy || nameCollision) return;
     if (requirePassword && !password) return; // ADR-0122：沒有密碼＝重載就失去這個身分
     const adminPubkey = enterprise ? admin.trim() || undefined : undefined;
     const password_ = requirePassword ? password : undefined;
@@ -2211,10 +2241,13 @@ export function AddIdentityModal({
                 />
               ) : null}
               {backupErr ? <p className="settings__warn">{t("addId_error")}</p> : null}
+              {nameCollision ? (
+                <p className="settings__warn" data-testid="addid-name-taken">{t("addId_nameTaken")}</p>
+              ) : null}
               <button
                 className="groupmodal__create"
                 data-testid="add-identity-confirm"
-                disabled={!name.trim() || !relayUrl.trim() || (isCode && !backupPw) || busy}
+                disabled={!name.trim() || !relayUrl.trim() || (isCode && !backupPw) || busy || nameCollision}
                 onClick={submit}
               >
                 {busy ? t("addId_busy") : t("addId_submit")}

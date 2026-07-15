@@ -43,6 +43,7 @@ function makeStyles(tk: ThemeTokens) {
 
 export function NsecSignInScreen({
   onSignIn,
+  nameTaken,
   onUsePairing,
   onBack,
   canRemember,
@@ -56,6 +57,11 @@ export function NsecSignInScreen({
    * → 呼叫端以 Argon2id 包裹 nsec 落地（ADR-0117）。
    */
   onSignIn: (identity: MobileIdentity, password?: string) => void;
+  /**
+   * ADR-0146：本機是否已有同名（可見）身分（排除同一把金鑰的重複匯入）。命中則擋下並提示改名，
+   * 維持名稱唯一。未提供＝不檢查（初次登入無既有身分）。
+   */
+  nameTaken?: (name: string, pubkey: string) => boolean;
   /** 是否提供「記住我」（需本地密碼）。未提供＝不顯示。 */
   canRemember?: boolean;
   /** 切換到配對匯入（B）；未提供＝不顯示入口。 */
@@ -84,6 +90,11 @@ export function NsecSignInScreen({
     const r = identityFromSecret(nsec, name, backupPw);
     if (!r.ok) {
       setError(r.error);
+      return;
+    }
+    // ADR-0146：本機名稱唯一——撞到另一個身分（非同一把金鑰）即擋，提示改名。
+    if (nameTaken?.(r.identity.name, r.identity.pubkey)) {
+      setError("mobileSignIn_nameTaken");
       return;
     }
     setError(null);

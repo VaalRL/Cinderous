@@ -39,8 +39,8 @@ export interface SettingsPanelProps {
   initialTab?: SettingsTab;
   /** 目前顯示名稱（ADR-0144）；與 onRename 一起提供才顯示改名欄。 */
   selfName?: string;
-  /** 更改顯示名稱（ADR-0144）：落地本機並廣播給聯絡人（ADR-0061）。 */
-  onRename?: (name: string) => void;
+  /** 更改顯示名稱（ADR-0144）：落地本機並廣播給聯絡人（ADR-0061）。回 false＝撞本機同名（ADR-0146）。 */
+  onRename?: (name: string) => boolean;
   /** 目前使用的中繼站網址；空字串表示示範模式。 */
   relayUrl: string;
   /** Relay pool 各座連線狀態（多中繼時才有；ADR-0034）。 */
@@ -114,15 +114,22 @@ const STATE_DOT: Record<RelayPoolEntry["state"], string> = {
 
 /** 主題色設定（ADR-0064）：預設色票 + 自訂色 + 重設；即時套用、只存本機。 */
 /** 更改顯示名稱（ADR-0144）：輸入新名 → 落地本機＋廣播給聯絡人（ADR-0061）。 */
-function NameEditor({ name, onRename }: { name: string; onRename: (n: string) => void }): JSX.Element {
+function NameEditor({ name, onRename }: { name: string; onRename: (n: string) => boolean }): JSX.Element {
   const { t } = useI18n();
   const [draft, setDraft] = useState(name);
   const [saved, setSaved] = useState(false);
+  const [taken, setTaken] = useState(false); // ADR-0146：撞到本機同名身分
   const dirty = draft.trim().length > 0 && draft.trim() !== name;
   const apply = (): void => {
     if (!dirty) return;
-    onRename(draft.trim());
-    setSaved(true);
+    // onRename 回 false＝名稱已被本機另一身分佔用（ADR-0146）→ 不視為成功，顯示重名提示。
+    if (onRename(draft.trim())) {
+      setSaved(true);
+      setTaken(false);
+    } else {
+      setTaken(true);
+      setSaved(false);
+    }
   };
   return (
     <section className="settings__sec">
@@ -135,6 +142,7 @@ function NameEditor({ name, onRename }: { name: string; onRename: (n: string) =>
           onChange={(e) => {
             setDraft(e.target.value);
             setSaved(false);
+            setTaken(false);
           }}
           onKeyDown={(e) => {
             if (e.key === "Enter") apply();
@@ -144,7 +152,11 @@ function NameEditor({ name, onRename }: { name: string; onRename: (n: string) =>
           {t("settings_nameApply")}
         </button>
       </div>
-      {saved ? (
+      {taken ? (
+        <p className="settings__warn" data-testid="rename-taken">
+          {t("settings_nameTaken")}
+        </p>
+      ) : saved ? (
         <p className="settings__hint" data-testid="rename-ok">
           {t("settings_nameUpdated")}
         </p>

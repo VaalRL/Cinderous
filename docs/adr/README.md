@@ -160,3 +160,4 @@
 | [0143](./0143-embedded-conversation-flush.md) | **三欄中欄內嵌對話整塊填滿**：去除外框/視窗底色/彩色標題列（不再像浮動視窗），標題列改扁平對話標頭；並修正把 JSX `//` 註解當文字渲染的 bug | 已接受 |
 | [0144](./0144-change-display-name.md) | **更改顯示名稱（桌面＋行動）**：後端加 `setSelfName`（落地本機＋廣播加密 profile 給聯絡人 ADR-0061）；設定加改名欄，同步 self/登錄/記住的 blob；不換金鑰、不換身分 | 已接受 |
 | [0145](./0145-add-identity-type-picker.md) | **新增身分先選類型（個人／組織）**：`AddIdentityModal` 改兩步——先以圖示＋說明選 👤 個人／🏢 組織（ADR-0047），再填表單；`mode` 取代 `enterprise` 布林、管理者 npub 欄只在組織出現、可回頭改選；`onAdd` 簽章不變 | 已接受 |
+| [0146](./0146-signin-by-name-and-unique-names.md) | **登入以顯示名稱解析既有身分＋本機名稱唯一**：桌面登入打既有名字＝`setActive`+reload 進那個身分（重用解鎖/救援路徑，Fix First），不建重複；純函式 `resolveSignIn`／`nameTaken`（排除 hidden、trim 比對）下沉 engine；新增/改名兩端擋重名；名稱只是查找鍵非加密鍵，安全不變；行動端登入係 nsec 導向故只做名稱唯一 | 已接受 |

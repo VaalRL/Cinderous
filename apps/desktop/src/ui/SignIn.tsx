@@ -81,6 +81,7 @@ export function SignIn({
   onPair,
   requirePassword = false,
   onEnterNsec,
+  lookupName = () => "create",
 }: {
   /** `password` 只在 `requirePassword` 時有值（瀏覽器）。 */
   onSignIn: (name: string, relayUrl: string, password?: string) => void;
@@ -96,6 +97,12 @@ export function SignIn({
   requirePassword?: boolean;
   /** 以既有 nsec 登入（ADR-0122）：忘記密碼、或在舊版卡住的瀏覽器使用者的出路。 */
   onEnterNsec?: (nsec: string) => Promise<boolean>;
+  /**
+   * ADR-0146：以顯示名稱查詢本機是否已有同名身分。`"enter"`＝命中既有（改為登入該身分，不建新；
+   * 密碼在重載後的解鎖畫面驗證）；`"ambiguous"`＝多個同名（擋下）；`"create"`＝建新。
+   * 未提供（示範/無登錄）一律 `"create"`。
+   */
+  lookupName?: (name: string) => "create" | "enter" | "ambiguous";
 }): JSX.Element {
   const { t } = useI18n();
   const [name, setName] = useState("");
@@ -158,9 +165,19 @@ export function SignIn({
   const [nsec, setNsec] = useState("");
   const [nsecErr, setNsecErr] = useState("");
 
+  // ADR-0146：輸入的名稱是否命中本機既有身分。命中＝改為「登入既有」，隱藏建新用的密碼/中繼站欄。
+  const nameMatch = lookupName(name.trim());
+  const entering = nameMatch !== "create";
+
   const submit = () => {
     const n = name.trim();
     if (!n) return;
+    if (entering) {
+      // ADR-0146：命中既有身分（或多個同名）→ 交給 App 切換為作用中並重載（有鎖則於解鎖畫面驗密碼），
+      // 或多個同名時由 App 擋下提示。這裡不建新、不驗建新用的密碼。
+      onSignIn(n, relay.trim());
+      return;
+    }
     if (!requirePassword) {
       onSignIn(n, relay.trim());
       return;
@@ -204,7 +221,15 @@ export function SignIn({
             onKeyDown={(e) => e.key === "Enter" && submit()}
             placeholder={t("signIn_displayName")}
           />
-          {showRelay ? (
+          {/* ADR-0146：名稱命中本機既有身分 → 提示「將登入既有身分」，並收起建新用的中繼站/密碼欄。 */}
+          {entering ? (
+            <p className="hint signin__enterhint" data-testid="signin-enter-existing">
+              {nameMatch === "ambiguous"
+                ? t("signIn_ambiguousName")
+                : t("signIn_enterExistingHint", { name: name.trim() })}
+            </p>
+          ) : null}
+          {entering ? null : showRelay ? (
             <div className="signin__relay" data-testid="relay-field">
               <input
                 aria-label={t("signIn_relayUrl")}
@@ -233,8 +258,9 @@ export function SignIn({
               </span>
             </p>
           )}
-          {/* 瀏覽器（ADR-0122）：本地密碼**必填**——沒有它，重新整理一次身分就沒了。 */}
-          {requirePassword ? (
+          {/* 瀏覽器（ADR-0122）：本地密碼**必填**——沒有它，重新整理一次身分就沒了。
+              ADR-0146：命中既有身分時不在此設密碼（於重載後的解鎖畫面驗證既有密碼）。 */}
+          {!entering && requirePassword ? (
             <div className="signin__pw" data-testid="signin-password">
               <p className="hint">{t("signIn_passwordWhy")}</p>
               <input
@@ -263,7 +289,7 @@ export function SignIn({
             </div>
           ) : null}
 
-          <button onClick={submit}>{t("signIn_button")}</button>
+          <button onClick={submit}>{entering ? t("signIn_enterExisting") : t("signIn_button")}</button>
           <p className="hint">{t("signIn_hint2")}</p>
 
           {/* 用既有 nsec 登入（ADR-0122）：忘記密碼、或在舊版被換掉身分的人的出路。 */}
