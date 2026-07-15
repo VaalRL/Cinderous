@@ -2178,3 +2178,118 @@ describe("訊息請求防洪（ADR-0127）", () => {
     s.stop();
   });
 });
+
+describe("在線狀態內容改走封裝（ADR-0129）", () => {
+  const onContacts = (sink: { pubkey: string; status: string; statusMessage: string; nowPlaying: string }[][]) =>
+    (cs: { pubkey: string; status: string; statusMessage: string; nowPlaying: string }[]) =>
+      sink.push(cs.map((c) => ({ pubkey: c.pubkey, status: c.status, statusMessage: c.statusMessage, nowPlaying: c.nowPlaying })));
+
+  /** Alice←→Bob 互為聯絡人、都在線。 */
+  const pairOnline = (net: ReturnType<typeof createInMemoryRelayNetwork>) => {
+    const a = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("a", h), "Alice");
+    const b = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("b", h), "Bob");
+    const bSees: { pubkey: string; status: string; statusMessage: string; nowPlaying: string }[][] = [];
+    a.start(noop);
+    b.start({ ...noop, onContacts: onContacts(bSees) });
+    a.addContact(b.selfNpub);
+    b.acceptRequest(a.self.pubkey);
+    a.setStatus("online");
+    b.setStatus("online");
+    return { a, b, bSees };
+  };
+  const latest = (rows: { pubkey: string; status: string; statusMessage: string; nowPlaying: string }[][], pk: string) =>
+    [...rows].reverse().flat().find((c) => c.pubkey === pk);
+
+  it("🔴 **中繼的心跳不含 s/m/np**——relay 再也讀不到你的狀態文字與音樂", () => {
+    const seen: NostrEvent[] = [];
+    const net = createInMemoryRelayNetwork();
+    const wiretap = (h: RelayClientHandlers): CloseableRelayClient => {
+      const c = net.connect("a", h) as CloseableRelayClient;
+      const publish = c.publish.bind(c);
+      c.publish = (e: NostrEvent) => {
+        seen.push(e);
+        publish(e);
+      };
+      return c;
+    };
+    const a = new RelayChatBackend(new MemoryStorage(), wiretap, "Alice");
+    const b = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("b", h), "Bob");
+    a.start(noop);
+    b.start(noop);
+    a.addContact(b.selfNpub);
+    b.acceptRequest(a.self.pubkey);
+    a.setStatus("online", "我在發呆");
+    a.setNowPlaying("某首歌 - 某歌手");
+
+    // 心跳（kind 20000）內容一律空——修正前這裡是明文 JSON {s,m,np}。
+    const beacons = seen.filter((e) => e.kind === KIND.HEARTBEAT);
+    expect(beacons.length).toBeGreaterThan(0);
+    for (const beat of beacons) expect(beat.content).toBe("");
+    // 而且整條上線流量裡，明文都找不到「我在發呆」或那首歌（封裝的是密文）。
+    const wire = JSON.stringify(seen);
+    expect(wire).not.toContain("我在發呆");
+    expect(wire).not.toContain("某首歌");
+    a.stop();
+    b.stop();
+  });
+
+  it("狀態文字與音樂**仍送達聯絡人**（透過封裝，非 P2P 環境走 relay）", () => {
+    const net = createInMemoryRelayNetwork();
+    const { a, b, bSees } = pairOnline(net);
+    a.setStatus("online", "我在發呆");
+    a.setNowPlaying("某首歌");
+
+    const seen = latest(bSees, a.self.pubkey);
+    expect(seen?.statusMessage).toBe("我在發呆");
+    expect(seen?.nowPlaying).toBe("某首歌");
+    a.stop();
+    b.stop();
+  });
+
+
+  it("🔴 **剛上線的聯絡人被補送我先前設好的狀態**——不需我再改一次（catch-up）", () => {
+    const net = createInMemoryRelayNetwork();
+    const a = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("a", h), "Alice");
+    const b = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("b", h), "Bob");
+    const bSees: { pubkey: string; status: string; statusMessage: string; nowPlaying: string }[][] = [];
+    a.start(noop);
+    b.start({ ...noop, onContacts: onContacts(bSees) });
+    a.addContact(b.selfNpub);
+    b.acceptRequest(a.self.pubkey);
+    // Bob 隱身 → 對 Alice 完全不廣播（Alice 看不到 Bob 在線）。
+    b.setInvisible(true);
+    // Alice 設好狀態。Bob 此刻在 Alice 眼中是離線 → Alice **不會**封裝給他（他錯過這次改變）。
+    a.setStatus("online", "我在發呆");
+    a.setNowPlaying("某首歌");
+    expect(latest(bSees, a.self.pubkey)?.statusMessage ?? "").toBe(""); // Bob 還沒拿到
+
+    // Bob 復出上線 → 送信標 → Alice 偵測「Bob 離線→上線」→ **補送**當下狀態（Alice 沒再改一次）。
+    b.setInvisible(false);
+    b.setStatus("online");
+
+    const seen = latest(bSees, a.self.pubkey);
+    expect(seen?.statusMessage).toBe("我在發呆"); // 靠 catch-up 拿到
+    expect(seen?.nowPlaying).toBe("某首歌");
+    a.stop();
+    b.stop();
+  });
+
+  it("**陌生人不能注入在線狀態**（封裝狀態只採用聯絡人的）", () => {
+    const net = createInMemoryRelayNetwork();
+    const sv = new MemoryStorage();
+    const seen: { pubkey: string; status: string; statusMessage: string; nowPlaying: string }[][] = [];
+    const me = new RelayChatBackend(sv, (h) => net.connect("me", h), "我");
+    const stranger = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("x", h), "陌生人");
+    me.start({ ...noop, onContacts: onContacts(seen) });
+    stranger.start(noop);
+    // 陌生人直接對我封裝一個在線狀態——我不是他的聯絡人關係，且他不是我的聯絡人。
+    stranger.addContact(me.selfNpub); // 他把我當聯絡人，但我沒接受他
+    stranger.setStatus("online", "假狀態");
+    stranger.setNowPlaying("假音樂");
+
+    // 我這邊：陌生人不在我的聯絡人清單（他在請求區）→ 不採用他的封裝狀態，也不顯示。
+    expect(seen.flat().find((c) => c.statusMessage === "假狀態")).toBeUndefined();
+    me.stop();
+    stranger.stop();
+  });
+});

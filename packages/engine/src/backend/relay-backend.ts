@@ -9,7 +9,6 @@ import {
   createTyping,
   decodePresence,
   deletionTarget,
-  encodePresence,
   type Filter,
   groupTarget,
   groupReceiptMode,
@@ -50,6 +49,7 @@ import {
   relayHintOf,
   shouldAdoptList,
   verifyRelayList,
+  PRESENCE_SIGNAL_KIND,
   SDP_SIGNAL_KIND,
   threadRoot,
   unwrapMessage,
@@ -61,6 +61,7 @@ import {
   wrapMessage,
   wrapFileMessage,
   wrapGroupFile,
+  wrapPresenceState,
   parseFileMeta,
   wrapReaction,
   wrapReceipt,
@@ -81,6 +82,7 @@ import {
   type PresenceState,
   type PubkeyHex,
   readNudge,
+  readPresenceState,
   readTyping,
   type ReceivedFile,
   type RelayClientHandlers,
@@ -727,6 +729,7 @@ export class RelayChatBackend implements ChatBackend {
       { kinds: [SNAPSHOT_KIND], authors: me },
       { kinds: [SDP_SIGNAL_KIND], "#p": me },
       { kinds: [CALL_SIGNAL_KIND], "#p": me },
+      { kinds: [PRESENCE_SIGNAL_KIND], "#p": me }, // 封裝的在線狀態（ADR-0129）
       // 帶內引導清單（ADR-0039）：訂閱維護者簽章的 relay 清單事件。
       ...(this.maintainerPubkey ? [{ kinds: [RELAY_LIST_KIND], authors: [this.maintainerPubkey] }] : []),
       // 企業組織名冊（ADR-0047）：訂閱管理者簽章的名冊事件。
@@ -901,29 +904,81 @@ export class RelayChatBackend implements ChatBackend {
   private beat(): void {
     // 隱身（ADR-0088 (d)）或離線：完全不廣播在線信標（對方靠 60s 判離線）。
     if (this.invisible || this.self.status === "offline") return;
-    const payload: PresencePayload = {
-      s: this.self.status as PresenceState,
-      m: this.self.statusMessage,
-      np: this.nowPlaying,
-    };
-    // (e) P2P 卸載：對已開資料通道的聯絡人，在線狀態直送資料通道、不經 relay（複用 F5 模式）。
-    // `hb` 自報節奏（ADR-0109）：這條訊息的節奏＝心跳節奏（本函式就是被 beat 排程呼叫的），
-    // 閒置時每 5 分鐘才一則。不帶節奏的話，收端會用固定短窗把在線的我判成離線——而 `allP2P`
-    // 時**完全不發 relay 心跳**，P2P 是唯一信號，漏掉就真的看不見了。
+    // (e) P2P 卸載：對已開資料通道的聯絡人，**完整**在線狀態（含 s/m/np）直送資料通道、不經 relay。
+    // `hb` 自報節奏（ADR-0109）：閒置時每 5 分鐘一則；不帶節奏收端會用固定短窗誤判離線。
     const cadenceMs = this.beatInterval();
     let allP2P = this.contacts.length > 0;
     for (const c of this.contacts) {
-      const sent = this.transfer.sendPresence(c.pubkey, { s: payload.s, m: payload.m, np: payload.np, hb: cadenceMs });
+      const sent = this.transfer.sendPresence(c.pubkey, {
+        s: this.self.status,
+        m: this.self.statusMessage,
+        np: this.nowPlaying,
+        hb: cadenceMs,
+      });
       if (!sent) allP2P = false;
     }
-    // 心跳抑制（ADR-0088 (e)）：僅當所有聯絡人都有活的 P2P 通道時，才不再經 relay 明簽廣播在線。
+    // 心跳抑制（ADR-0088 (e)）：所有聯絡人都有活的 P2P 通道時，不再經 relay 廣播。
     if (allP2P) return;
-    // 自報節奏（ADR-0109）：讓觀察端算出正確的容忍窗（2.5×），否則閒置者（5 分鐘一次）
-    // 會被用短窗誤判為離線。節奏本來就能從時戳觀察，明寫不構成新的元數據洩漏。
-    const evt = createHeartbeat(this.sk, { status: encodePresence(payload), cadenceMs: this.beatInterval() });
-    // 心跳發到 pool 中所有 relay：對方未記錄我的 relay 也看得到我在線（ADR-0034）。
-    this.client.publish(evt);
-    for (const client of this.relayPool.values()) client.publish(evt);
+    // 🔴 ADR-0129：relay 心跳降為**無內容存活信標**——只證明「我在線」＋節奏（`hb`），
+    // **不再帶 s/m/np**。狀態內容改走封裝（見 broadcastPresenceState），relay 再也讀不到你的
+    // 自訂狀態文字與正在聽的音樂。節奏本來就能從時戳觀察，明寫不構成新的元資料洩漏。
+    const beacon = createHeartbeat(this.sk, { cadenceMs });
+    // 信標發到 pool 中所有 relay：對方未記錄我的 relay 也看得到我在線（ADR-0034）。
+    this.client.publish(beacon);
+    for (const client of this.relayPool.values()) client.publish(beacon);
+  }
+
+  /**
+   * 送出當下在線狀態給某聯絡人（ADR-0129）：有 P2P 走資料通道，否則**封裝**走 relay
+   *（僅在對方在線時——ephemeral 到不了離線的人，白費且多洩漏一則）。供「對方剛上線」的補送用。
+   */
+  private sendPresenceState(pubkey: PubkeyHex): void {
+    if (this.invisible || this.self.status === "offline") return;
+    const state = { s: this.self.status as PresenceState, m: this.self.statusMessage, np: this.nowPlaying, hb: this.beatInterval() };
+    if (this.transfer.sendPresence(pubkey, state)) return; // P2P 直送
+    if (this.presence.statusOf(pubkey, Date.now()) !== "online") return;
+    this.publishAddressed(wrapPresenceState(state, this.sk, pubkey));
+  }
+
+  /**
+   * 狀態改變時（ADR-0129）：把新狀態**封裝**送給每位「在線 ✕ 無 P2P」的聯絡人。
+   *
+   * P2P 的聯絡人由 `beat()` 的資料通道直送、離線的收不到 ephemeral——所以這裡只補「在線但沒 P2P」
+   * 這個小集合。改變稀疏 ＋ 集合小 → 封裝的發佈量遠小於「每 60 秒 × 全部聯絡人」（否則會炸穿免費層）。
+   */
+  private broadcastPresenceState(): void {
+    if (this.invisible || this.self.status === "offline") return;
+    const state = { s: this.self.status as PresenceState, m: this.self.statusMessage, np: this.nowPlaying, hb: this.beatInterval() };
+    for (const c of this.contacts) {
+      if (this.transfer.hasOpenChannel(c.pubkey)) continue; // P2P 由 beat 直送
+      if (this.presence.statusOf(c.pubkey, Date.now()) !== "online") continue; // 離線的收不到
+      this.publishAddressed(wrapPresenceState(state, this.sk, c.pubkey));
+    }
+  }
+
+  /**
+   * 觀察到某人的在線信號（心跳信標 **或** 封裝狀態，ADR-0129）——共用「補送＋喚醒握手」。
+   *
+   * **兩個接收路徑都要走這裡**：我的補送（catch-up）會讓封裝 PRESENCE 比信標**先到**，若只在
+   * 心跳路徑做喚醒，對方的 PRESENCE 先到就會把他提前標成在線，導致我收到他信標時 `wasIdle`
+   * 已是 false、喚醒被抑制（實測踩過）。所以誰先到都在這裡觸發。
+   *
+   * `wasIdle`（全域：本來沒人在線）與 `wasOnline`（這位先前是否在線）都在 `observe` **之前**判。
+   */
+  private observeContactPresence(pubkey: PubkeyHex, observedAtSec: number, cadenceMs: number | undefined): void {
+    const wasIdle = !this.anyContactOnline();
+    const wasOnline = this.presence.statusOf(pubkey, Date.now()) === "online";
+    this.presence.observe(pubkey, observedAtSec, cadenceMs);
+    // 對方剛上線（離線→上線）→ 把我當下的狀態封裝補送給他（否則他只看得到我在線、卻沒有我的
+    // 狀態文字/音樂——那些只在改變時發、他錯過了）。只補給聯絡人。一輪即止（第二次 observe 後
+    // wasOnline 為真，不再回補）。
+    if (!wasOnline && this.isContact(pubkey)) this.sendPresenceState(pubkey);
+    // 喚醒握手（ADR-0109）：有人上線 → 立刻補發信標並切回 ACTIVE，讓對方一個 RTT 內看到我。
+    // **只在 IDLE→ACTIVE 轉換時**——否則兩端互相觸發成風暴。
+    if (wasIdle && this.anyContactOnline()) {
+      this.beat();
+      this.scheduleBeat();
+    }
   }
 
   /** 是否有任一聯絡人在線（決定心跳快慢，ADR-0109）。 */
@@ -992,15 +1047,26 @@ export class RelayChatBackend implements ChatBackend {
     }
     switch (event.kind) {
       case KIND.HEARTBEAT: {
-        const wasIdle = !this.anyContactOnline();
-        this.presence.observe(event.pubkey, event.created_at, heartbeatCadenceMs(event));
-        this.statuses.set(event.pubkey, decodePresence(event.content));
-        // 有人上線（ADR-0109）：立刻補發一次心跳並切回 ACTIVE，讓對方一個 RTT 內看到我。
-        // **只在 IDLE→ACTIVE 的轉換時補發**——若每收到一則心跳就回發，兩端會互相觸發成風暴。
-        if (wasIdle && this.anyContactOnline()) {
-          this.beat();
-          this.scheduleBeat(); // 以新節奏（ACTIVE）重排，取代原本的閒置排程
+        // 🔴 ADR-0129：心跳現在是**無內容存活信標**，不再帶 s/m/np（那些改走封裝的 PRESENCE 事件）。
+        // 舊版客戶端仍可能在 content 帶狀態 → 有內容就沿用（過渡相容），無內容就只更新在線與否。
+        if (event.content) this.statuses.set(event.pubkey, decodePresence(event.content));
+        this.observeContactPresence(event.pubkey, event.created_at, heartbeatCadenceMs(event));
+        return;
+      }
+      case PRESENCE_SIGNAL_KIND: {
+        // 封裝的在線狀態（ADR-0129）：解出真實寄件人與 {s,m,np}。只採用**聯絡人**的
+        //（陌生人不得往你的介面注入在線狀態，比照 ADR-0121）。
+        let opened;
+        try {
+          opened = readPresenceState(event, this.sk);
+        } catch {
+          return;
         }
+        if (!this.isContact(opened.sender)) return;
+        this.statuses.set(opened.sender, { s: opened.state.s, m: opened.state.m, np: opened.state.np });
+        // 外層 created_at 被 jitter（不可用），以本機時間觀察在線；自報節奏供容忍窗。
+        this.observeContactPresence(opened.sender, Math.floor(Date.now() / 1000), opened.state.hb);
+        this.emitContacts();
         return;
       }
       case KIND.TYPING: {
@@ -1665,19 +1731,26 @@ export class RelayChatBackend implements ChatBackend {
   setStatus(status: Status, message?: string): void {
     this.self.status = status;
     if (message !== undefined) this.self.statusMessage = message;
-    if (status !== "offline") this.beat();
+    if (status !== "offline") {
+      this.beat(); // 存活信標（P2P 完整狀態 + relay 無內容信標）
+      this.broadcastPresenceState(); // ADR-0129：改變的狀態封裝給在線✕無P2P 的聯絡人
+    }
   }
 
   /** 隱身開關（ADR-0088 (d)）：開＝停止一切在線廣播（relay＋P2P），仍正常收發；關＝立即復出廣播。 */
   setInvisible(invisible: boolean): void {
     this.invisible = invisible;
-    if (!invisible) this.beat();
+    if (!invisible) {
+      this.beat();
+      this.broadcastPresenceState(); // 復出：重新封裝送出當下狀態（ADR-0129）
+    }
   }
 
   setNowPlaying(text: string): void {
-    // F5：音樂狀態彙整進心跳，不再單獨發事件；更新後立即發一次心跳。
+    // F5：音樂彙整進在線狀態；ADR-0129：改變時封裝送出（relay 不再明文看到你在聽什麼）。
     this.nowPlaying = text;
     this.beat();
+    this.broadcastPresenceState();
   }
 
   sendMessage(to: PubkeyHex, text: string, ttlSeconds?: number, mentions?: PubkeyHex[], replyTo?: string): void {

@@ -143,3 +143,4 @@
 | [0126](./0126-retention-cap-archives-not-deletes.md) | **保留上限＝封存而非刪除**——統一與 HOT_CAP 各說各話的兩個上限；使用者設上限不再靜默刪歷史，溢出移進封存（web/mobile 移出 localStorage 紓解配額） | 已接受 |
 | [0127](./0127-message-request-flood-control.md) | **訊息請求防洪**：數量上限 100（FIFO 逐出，連訊息一起清）＋「全部刪除」一鍵出路；速率限制由硬上限上位替代 | 已接受 |
 | [0128](./0128-file-ipc-hardening.md) | **檔案 IPC 縱深防禦**：收檔檔名消毒（遠端可控 → 乾淨 basename）＋ `read_saved_file` 路徑白名單（只讀原生對話框授權過的路徑，雜湊持久化） | 已接受 |
+| [0129](./0129-sealed-presence-state.md) | **在線狀態內容改走封裝**：心跳降為無內容存活信標；狀態文字與音樂改以 NIP-59 封裝、只在改變/對方上線時發給「在線✕無P2P」的聯絡人——relay 再也讀不到你在聽什麼、狀態寫什麼 | 已接受 |
