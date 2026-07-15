@@ -149,3 +149,4 @@
 | [0132](./0132-image-share.md) | **圖片分享**：行動端走原生分享選單（Web Share API，與其他手機 app 同體驗，不支援退回下載）、桌面燈箱走快速複製（複製圖片轉 PNG／複製路徑，僅在已另存時）；掛在圖片訊息上、不綁相簿 | 已接受 |
 | [0133](./0133-mobile-mentions.md) | **行動端補 @提及**：建議純函式（`suggestMentions`／`applyMention`）下沉 `@cinder/core`、兩端共用；行動端加建議列、送出解析成 `p` tag、被提及氣泡凸顯 | 已接受 |
 | [0134](./0134-mobile-chat-background.md) | **行動端補對話背景**：背景 token（預設漸層／CSS 產生／儲存鍵）下沉 `@cinder/theme`、桌面 re-export 零改動；行動端加標題列入口＋預設漸層挑選，純本地不上雲（圖片上傳待原生） | 已接受 |
+| [0135](./0135-mobile-identity-security-ui.md) | **行動端身分安全 UI**：改本地密碼（舊解新包）、產生加密備份碼（ADR-0070 core 早備）、登入/救援欄位同時吃 nsec 與備份碼；密碼學全在 core，行動端只接線 | 已接受 |

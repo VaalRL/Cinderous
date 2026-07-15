@@ -8,10 +8,12 @@
 // 交由畫面翻譯。傳輸層（WebRTC＋relay）不在此——由呼叫端注入（產線需原生/EAS，見 ADR-0063）。
 import {
   getPublicKey,
+  isBackupCode,
   isWrapped,
   npubEncode,
   nsecDecode,
   nsecEncode,
+  parseBackupCode,
   parsePairing,
   type PubkeyHex,
   type SecretKey,
@@ -55,6 +57,31 @@ export function identityFromNsec(nsec: string, name: string): SignInResult {
     return { ok: false, error: "mobileSignIn_errNsec" };
   }
   return { ok: true, identity: { sk, pubkey, npub: npubEncode(pubkey), nsec: nsecEncode(sk), name: nm } };
+}
+
+/**
+ * 由 nsec **或**加密備份碼組出身分（ADR-0070／0135）。
+ *
+ * 備份碼（NIP-49 信封）以 `isBackupCode` 偵測；偵測到就需要**備份密碼**才解得開。
+ * 這讓登入／救援兩處都能吃備份碼，不必分兩個欄位／兩條路。
+ */
+export function identityFromSecret(secret: string, name: string, backupPassword?: string): SignInResult {
+  const s = secret.trim();
+  if (isBackupCode(s)) {
+    try {
+      const { nsec } = parseBackupCode(s, backupPassword ?? "");
+      return identityFromNsec(nsec, name);
+    } catch {
+      // 備份密碼錯或信封壞——都回同一個鍵（不細分，不給攻擊者訊號）。
+      return { ok: false, error: "backup_wrong" };
+    }
+  }
+  return identityFromNsec(s, name);
+}
+
+/** 這段輸入看起來是不是備份碼（供 UI 決定要不要顯示「備份密碼」欄）；不驗密碼。 */
+export function looksLikeBackupCode(secret: string): boolean {
+  return isBackupCode(secret.trim());
 }
 
 /** B：由配對捆包萃取身分（同帳號）；捆包無身分回錯誤鍵。名稱優先用覆寫，其次捆包內名稱。 */
@@ -138,4 +165,21 @@ export function unlockRemembered(remembered: RememberedIdentity, password: strin
   const nsec = unwrapSecret(password, remembered.wrapped);
   if (!nsec) return { ok: false, error: "unlock_error" };
   return identityFromNsec(nsec, remembered.name);
+}
+
+/**
+ * 改本地密碼（ADR-0135）：以**舊密碼**解開記住的 nsec、再以**新密碼**重新包裹。
+ *
+ * 舊密碼是唯一的解料——沒有旁路、不存密碼雜湊（同 ADR-0067/0073 原則）。舊密碼錯或新密碼空回
+ * `null`。回傳新的 `RememberedIdentity`（新鹽、新密文），由呼叫端落地取代舊的。
+ */
+export function changeRememberedPassword(
+  remembered: RememberedIdentity,
+  oldPassword: string,
+  newPassword: string,
+): RememberedIdentity | null {
+  if (!newPassword) return null;
+  const r = unlockRemembered(remembered, oldPassword);
+  if (!r.ok) return null;
+  return rememberIdentity(r.identity, newPassword);
 }

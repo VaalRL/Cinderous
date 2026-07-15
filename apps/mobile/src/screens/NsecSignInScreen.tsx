@@ -5,7 +5,7 @@ import { useMemo, useState } from "react";
 import { type Locale, type MessageKey, translate } from "@cinder/i18n";
 import { resolveTheme, STATUS_COLORS, type Theme, type ThemeTokens } from "@cinder/theme";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native-web";
-import { identityFromNsec, type MobileIdentity, npubFromNsec } from "../auth.js";
+import { identityFromSecret, looksLikeBackupCode, type MobileIdentity, npubFromNsec } from "../auth.js";
 
 function makeStyles(tk: ThemeTokens) {
   return StyleSheet.create({
@@ -71,11 +71,14 @@ export function NsecSignInScreen({
   const [error, setError] = useState<MessageKey | null>(null);
   /** 「記住我」的本地密碼（ADR-0117）。空＝不記住（nsec 只留在記憶體，重開要重貼）。 */
   const [password, setPassword] = useState("");
+  /** 備份密碼（ADR-0070／0135）：貼的是備份碼時才需要，用來解開 NIP-49 信封。 */
+  const [backupPw, setBackupPw] = useState("");
   const T = (k: MessageKey): string => translate(locale, k);
-  const npub = npubFromNsec(nsec);
+  const isBackup = looksLikeBackupCode(nsec); // 貼的是備份碼？→ 顯示備份密碼欄
+  const npub = isBackup ? null : npubFromNsec(nsec); // 備份碼未解密前導不出 npub
 
   const submit = (): void => {
-    const r = identityFromNsec(nsec, name);
+    const r = identityFromSecret(nsec, name, backupPw);
     if (!r.ok) {
       setError(r.error);
       return;
@@ -94,7 +97,7 @@ export function NsecSignInScreen({
         <Text style={styles.label}>{T("mobileSignIn_nameLabel")}</Text>
         <TextInput style={styles.input} value={name} onChangeText={setName} aria-label={T("mobileSignIn_nameLabel")} />
 
-        <Text style={styles.label}>{T("mobileSignIn_nsecLabel")}</Text>
+        <Text style={styles.label}>{T("rescue_secret")}</Text>
         <TextInput
           style={styles.input}
           value={nsec}
@@ -104,8 +107,26 @@ export function NsecSignInScreen({
           secureTextEntry
           autoCapitalize="none"
           autoCorrect={false}
-          aria-label={T("mobileSignIn_nsecLabel")}
+          aria-label={T("rescue_secret")}
         />
+
+        {/* 貼的是加密備份碼（ADR-0070）→ 需要備份密碼才解得開 NIP-49 信封。 */}
+        {isBackup ? (
+          <>
+            <Text style={styles.label}>{T("rescue_backupPw")}</Text>
+            <TextInput
+              style={styles.input}
+              value={backupPw}
+              onChangeText={setBackupPw}
+              placeholderTextColor={tk.muted}
+              secureTextEntry
+              autoCapitalize="none"
+              autoCorrect={false}
+              aria-label={T("rescue_backupPw")}
+              testID="backup-password"
+            />
+          </>
+        ) : null}
 
         {/* 「記住我」（ADR-0117）：以 Argon2id 密碼包裹 nsec 落地。留空＝不記住。 */}
         {canRemember ? (

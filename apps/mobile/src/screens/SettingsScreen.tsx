@@ -11,7 +11,8 @@ const STATUS_KEY: Record<"online" | "away" | "busy", MessageKey> = {
   away: "status_away",
   busy: "status_busy",
 };
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native-web";
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native-web";
+import { copyText } from "../native/clipboard.js";
 
 const ACCENTS: { label: string; hex: string | null }[] = [
   { label: "預設", hex: null },
@@ -42,6 +43,19 @@ function makeStyles(tk: ThemeTokens) {
     revealText: { fontSize: 13, color: tk.accent, fontWeight: "600" },
     logout: { backgroundColor: "#e5484d", borderRadius: 8, paddingVertical: 10, alignItems: "center" },
     logoutText: { color: "#ffffff", fontWeight: "700", fontSize: 15 },
+    // 改密碼／備份碼（ADR-0135/0070）。
+    pwInput: {
+      borderWidth: 1,
+      borderColor: tk.border,
+      borderRadius: 8,
+      backgroundColor: tk.field,
+      color: tk.ink,
+      paddingVertical: 8,
+      paddingHorizontal: 10,
+      fontSize: 14,
+    },
+    code: { fontSize: 11, color: tk.ink, backgroundColor: tk.field, borderRadius: 8, padding: 10 },
+    okMsg: { fontSize: 12, color: "#2f9e44" },
   });
 }
 
@@ -72,6 +86,8 @@ export function SettingsScreen({
   onReadReceipts,
   cloudSync,
   onCloudSync,
+  onChangePassword,
+  onMakeBackupCode,
   onLogout,
 }: {
   selfName: string;
@@ -109,12 +125,45 @@ export function SettingsScreen({
   /** 加密雲端備份（ADR-0071）：off／basic（不含訊息）／full（含訊息）。 */
   cloudSync?: CloudSyncMode;
   onCloudSync?: (mode: CloudSyncMode) => void;
+  /** 改本地密碼（ADR-0135）：回 false＝舊密碼錯。僅在有「記住的身分」時提供。 */
+  onChangePassword?: (oldPassword: string, newPassword: string) => boolean;
+  /** 產生加密備份碼（ADR-0070）：以備份密碼包裹 nsec＋relay，回單一字串。僅在有 relay 時提供。 */
+  onMakeBackupCode?: (password: string) => string;
   onLogout: () => void;
 }): JSX.Element {
   const tk = useMemo(() => resolveTheme({ theme, accent }), [theme, accent]);
   const styles = useMemo(() => makeStyles(tk), [tk]);
   const t = (k: MessageKey): string => translate(locale, k);
   const [showNsec, setShowNsec] = useState(false);
+  // 改密碼表單（ADR-0135）。
+  const [pwOld, setPwOld] = useState("");
+  const [pwNew, setPwNew] = useState("");
+  const [pwNew2, setPwNew2] = useState("");
+  const [pwMsg, setPwMsg] = useState<"" | "ok" | "err">("");
+  // 備份碼表單（ADR-0070）。
+  const [bkPw, setBkPw] = useState("");
+  const [bkPw2, setBkPw2] = useState("");
+  const [bkCode, setBkCode] = useState("");
+  const [bkCopied, setBkCopied] = useState(false);
+
+  const changePassword = (): void => {
+    if (!onChangePassword || !pwOld || !pwNew || pwNew !== pwNew2) {
+      setPwMsg("err");
+      return;
+    }
+    const ok = onChangePassword(pwOld, pwNew);
+    setPwMsg(ok ? "ok" : "err");
+    if (ok) {
+      setPwOld("");
+      setPwNew("");
+      setPwNew2("");
+    }
+  };
+  const makeBackup = (): void => {
+    if (!onMakeBackupCode || !bkPw || bkPw !== bkPw2) return;
+    setBkCode(onMakeBackupCode(bkPw));
+    setBkCopied(false);
+  };
 
   const seg = (on: boolean) => [styles.seg, { borderColor: on ? tk.accent : tk.border, backgroundColor: on ? tk.accent : tk.field }];
   const segTxt = (on: boolean) => [styles.segText, { color: on ? "#ffffff" : tk.ink }];
@@ -140,6 +189,119 @@ export function SettingsScreen({
             <Text style={styles.revealText}>{showNsec ? t("settings_hideKey") : t("settings_revealKey")}</Text>
           </Pressable>
         </View>
+
+        {/* 加密備份碼（ADR-0070）：密碼加密的 nsec＋relay，換裝置時「貼備份碼＋密碼」即可還原。 */}
+        {onMakeBackupCode ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>{t("settings_backupCode")}</Text>
+            <Text style={styles.label}>{t("settings_backupCodeHint")}</Text>
+            <TextInput
+              style={styles.pwInput}
+              value={bkPw}
+              onChangeText={setBkPw}
+              placeholder={t("settings_backupCodePw")}
+              placeholderTextColor={tk.muted}
+              secureTextEntry
+              autoCapitalize="none"
+              autoCorrect={false}
+              aria-label={t("settings_backupCodePw")}
+              testID="backup-pw"
+            />
+            <TextInput
+              style={styles.pwInput}
+              value={bkPw2}
+              onChangeText={setBkPw2}
+              placeholder={t("settings_backupCodePw2")}
+              placeholderTextColor={tk.muted}
+              secureTextEntry
+              autoCapitalize="none"
+              autoCorrect={false}
+              aria-label={t("settings_backupCodePw2")}
+              testID="backup-pw2"
+            />
+            <Pressable
+              accessibilityRole="button"
+              testID="backup-make"
+              onPress={makeBackup}
+              style={[styles.seg, { alignSelf: "flex-start", borderColor: tk.accent, backgroundColor: tk.field }]}
+            >
+              <Text style={[styles.segText, { color: tk.accent }]}>{t("settings_backupCodeMake")}</Text>
+            </Pressable>
+            {bkCode ? (
+              <>
+                <Text style={styles.code} selectable testID="backup-code">
+                  {bkCode}
+                </Text>
+                <Pressable
+                  accessibilityRole="button"
+                  testID="backup-copy"
+                  onPress={() => void copyText(bkCode).then((ok) => setBkCopied(ok))}
+                  style={[styles.seg, { alignSelf: "flex-start", borderColor: tk.border, backgroundColor: tk.field }]}
+                >
+                  <Text style={[styles.segText, { color: tk.ink }]}>
+                    {bkCopied ? t("share_copied") : t("backup_copy")}
+                  </Text>
+                </Pressable>
+              </>
+            ) : null}
+          </View>
+        ) : null}
+
+        {/* 改本地密碼（ADR-0135）：舊密碼解開、新密碼重新包裹。僅在已「記住身分」時出現。 */}
+        {onChangePassword ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>{t("settings_passwordChange")}</Text>
+            <TextInput
+              style={styles.pwInput}
+              value={pwOld}
+              onChangeText={(v: string) => {
+                setPwOld(v);
+                setPwMsg("");
+              }}
+              placeholder={t("settings_passwordOld")}
+              placeholderTextColor={tk.muted}
+              secureTextEntry
+              autoCapitalize="none"
+              autoCorrect={false}
+              aria-label={t("settings_passwordOld")}
+              testID="pw-old"
+            />
+            <TextInput
+              style={styles.pwInput}
+              value={pwNew}
+              onChangeText={setPwNew}
+              placeholder={t("settings_passwordNew")}
+              placeholderTextColor={tk.muted}
+              secureTextEntry
+              autoCapitalize="none"
+              autoCorrect={false}
+              aria-label={t("settings_passwordNew")}
+              testID="pw-new"
+            />
+            <TextInput
+              style={styles.pwInput}
+              value={pwNew2}
+              onChangeText={setPwNew2}
+              placeholder={t("settings_passwordRepeat")}
+              placeholderTextColor={tk.muted}
+              secureTextEntry
+              autoCapitalize="none"
+              autoCorrect={false}
+              aria-label={t("settings_passwordRepeat")}
+              testID="pw-new2"
+            />
+            {pwMsg === "err" ? <Text style={styles.warn}>{t("settings_passwordError")}</Text> : null}
+            {pwMsg === "ok" ? <Text style={styles.okMsg}>{t("mobilePassword_changed")}</Text> : null}
+            <Pressable
+              accessibilityRole="button"
+              testID="pw-change"
+              onPress={changePassword}
+              style={[styles.seg, { alignSelf: "flex-start", borderColor: tk.accent, backgroundColor: tk.field }]}
+            >
+              <Text style={[styles.segText, { color: tk.accent }]}>{t("settings_passwordApply")}</Text>
+            </Pressable>
+          </View>
+        ) : null}
 
         {/* 外觀 */}
         <View style={styles.section}>

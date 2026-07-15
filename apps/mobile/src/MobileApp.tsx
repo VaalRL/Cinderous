@@ -14,7 +14,7 @@ import {
   openOpfsArchive,
   type PairBundle,
 } from "@cinder/engine";
-import { nsecDecode } from "@cinder/core";
+import { makeBackupCode, nsecDecode } from "@cinder/core";
 import {
   createPairingOffer,
   notificationFor,
@@ -34,6 +34,7 @@ import type { ChatBg, Theme } from "@cinder/theme";
 import { getChatBg, removeChatBg, setChatBg } from "./personalize.js";
 import { StyleSheet, View } from "react-native-web";
 import {
+  changeRememberedPassword,
   isRemembered,
   type MobileIdentity,
   rememberIdentity,
@@ -471,6 +472,19 @@ export function MobileApp({
     removeChatBg(activeId);
     setChatBgState(null);
   };
+  // 改本地密碼（ADR-0135）：舊密碼解開記住的 nsec、新密碼重新包裹落地。回 false＝舊密碼錯。
+  const changePassword = (oldPw: string, newPw: string): boolean => {
+    if (!remembered) return false;
+    const next = changeRememberedPassword(remembered, oldPw, newPw);
+    if (!next) return false;
+    try {
+      localStorage.setItem(REMEMBER_KEY, JSON.stringify(next));
+    } catch {
+      return false;
+    }
+    setRemembered(next);
+    return true;
+  };
   const addContact = (npub: string): void => backendRef.current?.addContact?.(npub.trim());
   /** 對某訊息送 emoji 回應（NIP-25）。群組回應同樣以 rumor.id 為鍵（ADR-0107）。 */
   const react = (messageId: string, emoji: string): void => {
@@ -878,8 +892,11 @@ export function MobileApp({
                 onReadReceipts: toggleReadReceipts,
                 cloudSync,
                 onCloudSync: changeCloudSync,
+                // 加密備份碼（ADR-0070）：需 relay（信封含 home relay）＋在手的 nsec。
+                onMakeBackupCode: (pw: string) => makeBackupCode(selfNsec, relayUrl, pw),
               }
             : {})}
+          {...(remembered ? { onChangePassword: changePassword } : {})}
           onLogout={logout}
         />
       )}

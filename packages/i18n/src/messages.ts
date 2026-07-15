@@ -353,6 +353,10 @@ export interface Messages {
   settings_backupCodePw: string;
   settings_backupCodePw2: string;
   settings_backupCodeMake: string;
+  /** 行動端改密碼／備份碼（ADR-0135）。 */
+  mobilePassword_changed: string;
+  backup_copy: string;
+  backup_wrong: string;
   settings_cloud: string;
   settings_cloudHint: string;
   settings_cloudOff: string;
@@ -833,6 +837,9 @@ const zhHant: Messages = {
   settings_backupCodePw: "備份密碼",
   settings_backupCodePw2: "再輸入一次備份密碼",
   settings_backupCodeMake: "產生",
+  mobilePassword_changed: "密碼已更新",
+  backup_copy: "複製備份碼",
+  backup_wrong: "備份密碼錯誤或備份碼格式不符",
   settings_cloud: "雲端備份（加密）",
   settings_cloudHint: "把加密的狀態備份存在你的中繼站：換裝置時「備份碼＋密碼」即可秒級還原。中繼站只見密文；備份由你的身分私鑰保護（本地密碼只保護這台裝置）。30 天未上線自動過期。",
   settings_cloudOff: "關閉（不上雲）",
@@ -1306,6 +1313,9 @@ const en: Messages = {
   settings_backupCodePw: "Backup password",
   settings_backupCodePw2: "Repeat backup password",
   settings_backupCodeMake: "Create",
+  mobilePassword_changed: "Password updated",
+  backup_copy: "Copy backup code",
+  backup_wrong: "Wrong backup password or malformed backup code",
   settings_cloud: "Cloud backup (encrypted)",
   settings_cloudHint: "Stores an encrypted state backup on your relay: a new device restores in seconds with your backup code + password. The relay only ever sees ciphertext; the backup is protected by your identity key (the local password only protects this device). Expires after 30 days offline.",
   settings_cloudOff: "Off (nothing in the cloud)",
