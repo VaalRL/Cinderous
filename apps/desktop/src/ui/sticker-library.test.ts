@@ -1,8 +1,8 @@
 import { contentHash } from "@cinder/core";
 import { describe, expect, it } from "vitest";
-import { formatCustomSticker, parseCustomSticker } from "../stickers.js";
+import { formatCustomSticker, parseCustomSticker } from "@cinder/core";
 import { addSticker, LIBRARY_MAX, removeSticker, type CustomSticker } from "./sticker-library.js";
-import { STICKER_LABEL_MAX } from "./sticker-svg.js";
+import { STICKER_LABEL_MAX } from "@cinder/core";
 
 const SVG_A = '<svg xmlns="http://www.w3.org/2000/svg"><circle r="4"/></svg>';
 const SVG_B = '<svg xmlns="http://www.w3.org/2000/svg"><rect width="4" height="4"/></svg>';

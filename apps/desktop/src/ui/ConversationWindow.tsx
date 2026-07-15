@@ -24,7 +24,7 @@ import {
   STICKER_PACKS,
   stickerSvg,
   svgToDataUri,
-} from "../stickers.js";
+} from "@cinder/core";
 import {
   addSticker,
   CUSTOM_PACK,
@@ -44,7 +44,7 @@ import {
   type StickerRef,
 } from "./sticker-prefs.js";
 import { StickerEditor } from "./StickerEditor.js";
-import { validateStickerSvg, wrapRasterAsSvg } from "./sticker-svg.js";
+import { validateStickerSvg, wrapRasterAsSvg } from "@cinder/core";
 import {
   buildTriggerIndex,
   loadTriggers,

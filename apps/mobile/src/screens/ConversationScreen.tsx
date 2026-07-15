@@ -2,7 +2,23 @@
 // 頂部返回列（‹ 返回＋名稱＋副標）、訊息氣泡（自己靠右主色、對方靠左淺底；群組顯示發送者名）、
 // 底部輸入列（輸入框＋送出）。色彩吃 @cinder/theme。訊息與送出由呼叫端注入（接 ChatBackend）。
 import { useMemo, useState } from "react";
-import { applyMention, calcPreview, groupReceiptMode, parseMentions, REACTION_EMOJIS, suggestMentions } from "@cinder/core";
+import {
+  applyMention,
+  calcPreview,
+  formatSticker,
+  groupReceiptMode,
+  parseCustomSticker,
+  parseMentions,
+  parseSticker,
+  REACTION_EMOJIS,
+  STICKER_PACK_META,
+  STICKER_PACK_ORDER,
+  STICKER_PACKS,
+  stickerSvg,
+  suggestMentions,
+  svgToDataUri,
+  validateStickerSvg,
+} from "@cinder/core";
 import type { CallMedia, MentionCandidate } from "@cinder/core";
 import type { ChatMessage, MessageStatus } from "@cinder/engine";
 import { type Locale, type MessageKey, translate } from "@cinder/i18n";
@@ -46,6 +62,9 @@ function makeStyles(tk: ThemeTokens) {
     rowTheir: { alignItems: "flex-start" },
     sender: { fontSize: 11, color: tk.muted, marginBottom: 2, marginLeft: 6 },
     bubble: { maxWidth: "78%", borderRadius: 14, paddingVertical: 8, paddingHorizontal: 12 },
+    // 貼圖（ADR-0137）：無泡泡底、直接顯示圖案。
+    bubbleSticker: { padding: 0, backgroundColor: "transparent" },
+    sticker: { width: 120, height: 120 },
     bubbleMine: { backgroundColor: tk.accent },
     bubbleTheir: { backgroundColor: tk.panel, borderWidth: 1, borderColor: tk.border },
     // @提及你（ADR-0133）：主色左邊條。
@@ -61,6 +80,14 @@ function makeStyles(tk: ThemeTokens) {
     replyBarText: { fontSize: 12, color: tk.muted },
     replyBarCancel: { paddingHorizontal: 8, paddingVertical: 2 },
     replyBarCancelText: { fontSize: 14, color: tk.muted },
+    // 貼圖面板（ADR-0137）。
+    stickerPanel: { maxHeight: 240, borderTopWidth: 1, borderTopColor: tk.border, backgroundColor: tk.panel },
+    stickerTabs: { gap: 6, paddingHorizontal: 8, paddingVertical: 6 },
+    stickerTab: { paddingHorizontal: 12, paddingVertical: 4, borderRadius: 999, borderWidth: 1, borderColor: tk.border },
+    stickerTabOn: { borderColor: tk.accent, backgroundColor: tk.field },
+    stickerTabText: { fontSize: 12, color: tk.ink },
+    stickerGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8, padding: 8 },
+    stickerThumb: { width: 72, height: 72 },
     textMine: { color: "#ffffff", fontSize: 14 },
     textTheir: { color: tk.ink, fontSize: 14 },
     status: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 2, marginRight: 4 },
@@ -257,6 +284,9 @@ export function ConversationScreen({
   const [membersOpen, setMembersOpen] = useState(false);
   /** 對話背景挑選面板是否展開（ADR-0134）。 */
   const [bgOpen, setBgOpen] = useState(false);
+  /** 貼圖挑選面板是否展開（ADR-0137）＋目前分頁。 */
+  const [stickerOpen, setStickerOpen] = useState(false);
+  const [stickerPack, setStickerPack] = useState<string>(STICKER_PACK_ORDER[0] ?? "");
   // 狀態圖示配色（ADR-0095）：張開眼＝主色、失敗＝紅、其餘＝灰。
   const statusColor = (s: MessageStatus): string =>
     s === "read" ? tk.accent : s === "failed" ? "#dc2626" : tk.muted;
@@ -295,6 +325,19 @@ export function ConversationScreen({
   const [draft, setDraft] = useState("");
   // 算式預覽（ADR-0097）：純函式判定草稿是否為算式；不是就回 null（不顯示）。
   const calc = calcPreview(draft);
+
+  /**
+   * 貼圖判定（ADR-0137）：訊息本文是不是貼圖標記？回可渲染的 SVG，否則 null。
+   * 內建（v1）解出 pack/id 取 SVG；自製（v2）解出內嵌 SVG 並**驗證**（收端縱深防禦）。
+   */
+  const stickerOf = (m: ChatMessage): string | null => {
+    if (m.file) return null;
+    const b = parseSticker(m.text);
+    if (b) return stickerSvg(b.pack, b.id) ?? null;
+    const c = parseCustomSticker(m.text);
+    if (c && validateStickerSvg(c.svg).ok) return c.svg;
+    return null;
+  };
 
   // @提及建議（ADR-0133，與桌面同一份 core 邏輯）：草稿結尾有進行中的 @token 就過濾候選。
   // 手機沒有下拉，改在輸入列上方橫向排一列可點的名字。
@@ -486,6 +529,7 @@ export function ConversationScreen({
           const canAct = !gone;
           const canShareImg = !gone && !!m.file?.mime.startsWith("image/") && !!(m.file.url ?? m.file.thumb);
           const quoted = m.replyTo ? messages.find((q) => q.id === m.replyTo) : undefined;
+          const sticker = gone ? null : stickerOf(m); // 貼圖（ADR-0137）：無泡泡底、直接渲染 SVG
           return (
           <View key={m.id} style={m.outgoing ? styles.rowMine : styles.rowTheir}>
             {!m.outgoing && nameFor && m.sender ? <Text style={styles.sender}>{nameFor(m.sender)}</Text> : null}
@@ -501,19 +545,28 @@ export function ConversationScreen({
             >
               <View
                 style={[
-                  styles.bubble,
-                  m.outgoing ? styles.bubbleMine : styles.bubbleTheir,
+                  // 貼圖（ADR-0137）：無泡泡底色與內距，直接顯示圖案（比照 LINE/WhatsApp）。
+                  sticker ? styles.bubbleSticker : styles.bubble,
+                  sticker ? null : m.outgoing ? styles.bubbleMine : styles.bubbleTheir,
                   // @提及你（ADR-0050／0133）：主色左邊條凸顯，一眼看到被點名。
                   !gone && m.mentionsMe ? styles.bubbleMention : null,
                 ]}
               >
-                {!gone && m.mentionsMe ? (
+                {sticker ? (
+                  <Image
+                    source={{ uri: svgToDataUri(sticker) }}
+                    style={styles.sticker}
+                    accessibilityLabel={t("sticker_alt")}
+                    testID={`sticker-${m.id}`}
+                  />
+                ) : null}
+                {!sticker && !gone && m.mentionsMe ? (
                   <Text style={styles.mentionBadge} aria-label={t("mention_you")} testID={`mention-badge-${m.id}`}>
                     @ {t("mention_you")}
                   </Text>
                 ) : null}
                 {/* 內嵌回覆引用（ADR-0136）：顯示被回覆的訊息（誰＋摘要）。引用不到（已捲出熱區）就略過。 */}
-                {!gone && m.replyTo && quoted ? (
+                {!sticker && !gone && m.replyTo && quoted ? (
                   <View
                     style={[styles.quote, { borderLeftColor: m.outgoing ? "#ffffffaa" : tk.accent }]}
                     testID={`reply-quote-${m.id}`}
@@ -534,15 +587,17 @@ export function ConversationScreen({
                     accessibilityLabel={m.file.name}
                   />
                 ) : null}
-                <Text
-                  style={[
-                    m.outgoing ? styles.textMine : styles.textTheir,
-                    gone ? styles.textGone : null,
-                  ]}
-                >
-                  {/* 已收回：**絕不顯示原文**——收回的意義就在這裡。 */}
-                  {gone ? t("msg_unsent") : m.file ? `📎 ${m.file.name}` : m.text}
-                </Text>
+                {!sticker ? (
+                  <Text
+                    style={[
+                      m.outgoing ? styles.textMine : styles.textTheir,
+                      gone ? styles.textGone : null,
+                    ]}
+                  >
+                    {/* 已收回：**絕不顯示原文**——收回的意義就在這裡。 */}
+                    {gone ? t("msg_unsent") : m.file ? `📎 ${m.file.name}` : m.text}
+                  </Text>
+                ) : null}
                 {!gone && m.file ? (
                   <Text style={[styles.fileMeta, { color: m.outgoing ? "#ffffffcc" : tk.muted }]}>
                     {fileNote(m)}
@@ -691,6 +746,41 @@ export function ConversationScreen({
         </View>
       ) : null}
 
+      {/* 貼圖挑選面板（ADR-0137）：內建貼圖包分頁＋圖格；點一下即送出（走既有加密訊息通道）。 */}
+      {stickerOpen ? (
+        <View style={styles.stickerPanel} testID="sticker-panel">
+          <ScrollView horizontal contentContainerStyle={styles.stickerTabs}>
+            {STICKER_PACK_ORDER.map((pk) => (
+              <Pressable
+                key={pk}
+                accessibilityRole="button"
+                testID={`sticker-tab-${pk}`}
+                onPress={() => setStickerPack(pk)}
+                style={[styles.stickerTab, stickerPack === pk ? styles.stickerTabOn : null]}
+              >
+                <Text style={styles.stickerTabText}>{STICKER_PACK_META[pk]?.title ?? pk}</Text>
+              </Pressable>
+            ))}
+          </ScrollView>
+          <ScrollView contentContainerStyle={styles.stickerGrid}>
+            {Object.entries(STICKER_PACKS[stickerPack] ?? {}).map(([id, s]) => (
+              <Pressable
+                key={id}
+                accessibilityRole="button"
+                aria-label={s.label}
+                testID={`sticker-pick-${stickerPack}-${id}`}
+                onPress={() => {
+                  onSend(formatSticker(stickerPack, id));
+                  setStickerOpen(false);
+                }}
+              >
+                <Image source={{ uri: svgToDataUri(s.svg) }} style={styles.stickerThumb} accessibilityLabel={s.label} />
+              </Pressable>
+            ))}
+          </ScrollView>
+        </View>
+      ) : null}
+
       <View style={styles.composer}>
         {/* 傳送檔案（ADR-0093/0100）：位元組走 P2P、metadata 走中繼。 */}
         {onSendFile ? (
@@ -698,6 +788,16 @@ export function ConversationScreen({
             <Text style={styles.attachText}>📎</Text>
           </Pressable>
         ) : null}
+        {/* 貼圖（ADR-0137）：切換貼圖面板。 */}
+        <Pressable
+          style={styles.attach}
+          accessibilityRole="button"
+          aria-label={t("sticker_title")}
+          testID="sticker-btn"
+          onPress={() => setStickerOpen((v) => !v)}
+        >
+          <Text style={styles.attachText}>😊</Text>
+        </Pressable>
         <TextInput
           style={styles.input}
           value={draft}

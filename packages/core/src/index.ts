@@ -18,6 +18,8 @@ export * from "./calc.js";
 export * from "./giftwrap.js";
 export * from "./mention.js";
 export * from "./mention-suggest.js";
+export * from "./sticker-svg.js";
+export * from "./stickers.js";
 export * from "./thread.js";
 export * from "./reaction.js";
 export * from "./receipt.js";

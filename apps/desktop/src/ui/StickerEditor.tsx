@@ -4,7 +4,7 @@
 
 import { useRef, useState, type JSX, type PointerEvent } from "react";
 import { useI18n } from "../i18n.js";
-import { svgToDataUri } from "../stickers.js";
+import { svgToDataUri } from "@cinder/core";
 import {
   addStroke,
   appendPoint,

@@ -4,7 +4,7 @@
 // id 一律為 contentHash(svg)（sha256），天然去重；純陣列運算可於 node 測試。
 
 import { contentHash } from "@cinder/core";
-import { clampStickerLabel, validateStickerSvg, type SvgVerdict } from "./sticker-svg.js";
+import { clampStickerLabel, validateStickerSvg, type SvgVerdict } from "@cinder/core";
 
 export interface CustomSticker {
   /** contentHash(svg)。 */

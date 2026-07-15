@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { STICKER_PACKS, svgToDataUri } from "../stickers.js";
+import { STICKER_PACKS, svgToDataUri } from "./stickers.js";
 import { STICKER_SVG_MAX_BYTES, validateStickerSvg, withReducedMotionGuard, wrapRasterAsSvg } from "./sticker-svg.js";
 
 const ok = (svg: string) => validateStickerSvg(svg);

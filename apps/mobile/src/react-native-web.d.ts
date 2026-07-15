@@ -54,6 +54,8 @@ declare module "react-native-web" {
     style?: Style;
     source: { uri: string | undefined };
     accessibilityLabel?: string;
+    /** react-native-web 渲染成 `data-testid`（測試用選擇器）。 */
+    testID?: string;
   }
   export const Image: ComponentType<ImageProps>;
   export const View: ComponentType<ViewProps>;
