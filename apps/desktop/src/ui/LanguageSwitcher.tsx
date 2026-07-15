@@ -69,11 +69,12 @@ export function LanguageSwitcher(): JSX.Element {
         aria-label={t("lang_label")}
         aria-haspopup="listbox"
         aria-expanded={menu.open}
-        title={t("lang_label")}
+        // 只留 🌐 圖示；懸停 tooltip 顯示「語言：<目前語言>」（原本外顯的語言名收進提示）。
+        title={`${t("lang_label")}：${LOCALE_LABELS[locale]}`}
         onClick={() => (menu.open ? close(false) : openMenu())}
         onKeyDown={onKeyDown}
       >
-        <span aria-hidden="true">🌐</span> {LOCALE_LABELS[locale]}
+        <span aria-hidden="true">🌐</span>
       </button>
       {menu.open && (
         <ul

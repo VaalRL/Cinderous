@@ -43,6 +43,22 @@
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg-b); color: var(--ink); }
 
+/* ── 卷軸統一：平時隱藏、滑鼠碰到可捲區才浮現（寬度固定→無版面位移）──────────────
+   桌面是 WebView2（Chromium），走 ::-webkit-scrollbar。
+   注意：Chromium 一旦看到 scrollbar-width/scrollbar-color 就會**忽略** ::-webkit-scrollbar，
+   故這裡刻意不設標準屬性。thumb 平時透明（等於隱形），hover 於可捲區（含其子元素）才上色。 */
+::-webkit-scrollbar { width: 11px; height: 11px; }
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background-color: transparent;
+  border: 3px solid transparent;      /* 讓可見的 thumb 變細、離邊有留白 */
+  border-radius: 999px;
+  background-clip: padding-box;
+}
+:hover::-webkit-scrollbar-thumb { background-color: color-mix(in srgb, var(--ink) 26%, transparent); }
+::-webkit-scrollbar-thumb:hover { background-color: color-mix(in srgb, var(--ink) 46%, transparent); }
+
 .idbar { display: flex; align-items: center; gap: 6px; padding: 4px 8px; }
 .idbar__icon { font-size: 14px; }
 .idbar__select { flex: 1; max-width: 220px; padding: 3px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--field); color: var(--ink); font-size: 12px; }
@@ -192,7 +208,7 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
 .langsw__opt.on::after { content: "✓"; margin-left: 10px; font-weight: 700; }
 
 /* ── 登入 ── */
-.signin { margin: 8vh auto; width: 360px; }
+.signin { margin: 8vh auto; width: 360px; position: relative; }
 .signin__body { padding: 28px 24px; text-align: center; background: var(--panel); color: var(--ink); }
 .signin__logo {
   width: 64px; height: 64px; margin: 0 auto 12px; display: grid; place-items: center;
@@ -217,6 +233,14 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
   text-decoration: underline; text-underline-offset: 2px; width: auto;
 }
 .signin__relaytoggle:hover { opacity: .8; }
+/* 「使用其他中繼站」——模擬視窗右下角、低調（預設不搶眼，hover 才浮現主色底線）。 */
+.signin__relaycorner {
+  position: absolute; right: 8px; bottom: 6px;
+  background: none; border: none; padding: 3px 5px; margin: 0; width: auto;
+  font-size: 14px; line-height: 1; cursor: pointer; opacity: .45;
+  filter: grayscale(.4);
+}
+.signin__relaycorner:hover { opacity: 1; filter: none; }
 
 /* ── 聯絡人清單 ── */
 .contacts { width: 300px; display: flex; flex-direction: column; max-height: 80vh; }
@@ -548,7 +572,14 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
 
 /* 設定面板 */
 .modal { position: fixed; inset: 0; background: rgba(0,0,0,.35); display: flex; align-items: center; justify-content: center; z-index: 50; }
-.modal__box { width: 320px; max-width: calc(100vw - 24px); }
+/* 彈窗一律不超過視窗：封頂高度、直向排列、標題列固定、內文區可捲（否則長設定頁會頂出畫面外）。 */
+.modal__box {
+  width: 320px; max-width: calc(100vw - 24px);
+  max-height: calc(100vh - 24px);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.modal__box > .win__title { flex: 0 0 auto; }
+.modal__box > .win__title ~ * { overflow-y: auto; min-height: 0; }
 .settings__body { padding: 10px 12px; display: flex; flex-direction: column; gap: 12px; }
 .settings__sec h4 { margin: 0 0 4px; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
 .settings__relay { font-size: 12px; word-break: break-all; }

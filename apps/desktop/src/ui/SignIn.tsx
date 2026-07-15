@@ -222,6 +222,7 @@ export function SignIn({
               </button>
             </div>
           ) : (
+            // 收合狀態只留「用哪個中繼站」的狀態文字；切換入口移到視窗右下角（不顯眼）。
             <p className="hint signin__relayline">
               <span data-testid="relay-status">
                 {relayHost
@@ -230,17 +231,6 @@ export function SignIn({
                     ? t("signIn_relayProbing")
                     : t("signIn_relayDemo")}
               </span>
-              <button
-                type="button"
-                className="signin__relaytoggle"
-                data-testid="relay-change"
-                onClick={() => {
-                  relayTouched.current = true; // 展開＝有意自訂→鎖住自動選座覆寫
-                  setShowRelay(true);
-                }}
-              >
-                {t("signIn_relayChange")}
-              </button>
             </p>
           )}
           {/* 瀏覽器（ADR-0122）：本地密碼**必填**——沒有它，重新整理一次身分就沒了。 */}
@@ -336,6 +326,23 @@ export function SignIn({
             </div>
           ) : null}
         </div>
+        {/* 「使用其他中繼站」移到模擬視窗右下角、低調呈現（ADR-0069：預設已自動選好站，換站是進階操作）。
+            展開輸入時（showRelay）由內文的欄位＋收合鈕接手，這裡就不重複出現。 */}
+        {!showRelay ? (
+          <button
+            type="button"
+            className="signin__relaycorner"
+            data-testid="relay-change"
+            aria-label={t("signIn_relayChange")}
+            title={t("signIn_relayChange")}
+            onClick={() => {
+              relayTouched.current = true; // 展開＝有意自訂→鎖住自動選座覆寫
+              setShowRelay(true);
+            }}
+          >
+            <span aria-hidden="true">📡</span>
+          </button>
+        ) : null}
       </div>
     </div>
   );

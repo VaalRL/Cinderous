@@ -33,6 +33,20 @@
 
 * { box-sizing: border-box; }
 html, body { margin: 0; padding: 0; }
+
+/* ── 卷軸統一：平時隱藏、滑鼠碰到可捲區才浮現（寬度固定→無版面位移）。與桌面同一套。
+   走 ::-webkit-scrollbar（Chromium/Edge/Safari）；設了 scrollbar-width 會讓 Chromium 忽略它，故不設。 */
+::-webkit-scrollbar { width: 11px; height: 11px; }
+::-webkit-scrollbar-track,
+::-webkit-scrollbar-corner { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background-color: transparent;
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
+}
+:hover::-webkit-scrollbar-thumb { background-color: color-mix(in srgb, var(--ink) 26%, transparent); }
+::-webkit-scrollbar-thumb:hover { background-color: color-mix(in srgb, var(--ink) 46%, transparent); }
 body {
   background: var(--bg);
   color: var(--ink);
