@@ -597,6 +597,18 @@ button:disabled { opacity: .5; cursor: default; filter: none; }
 .groupmodal__label { font-size: 11px; color: var(--muted); }
 .groupmodal__list { max-height: 200px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; border: 1px solid var(--border); border-radius: 5px; padding: 6px; }
 .groupmodal__item { display: flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; padding: 2px; }
+/* 新增身分先選類型（ADR-0145）：兩張大選項卡。 */
+.addid-choose { display: flex; flex-direction: column; gap: 8px; }
+.addid-mode {
+  display: flex; align-items: center; gap: 10px; text-align: left; width: 100%;
+  padding: 12px; border: 1px solid var(--border); border-radius: 8px;
+  background: var(--field); color: var(--ink); cursor: pointer;
+}
+.addid-mode:hover { border-color: var(--accent); background: var(--hover); }
+.addid-mode__ic { font-size: 22px; flex: none; }
+.addid-mode__txt { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.addid-mode__name { font-weight: 700; font-size: 14px; color: var(--ink); }
+.addid-mode__hint { font-size: 12px; color: var(--muted); line-height: 1.4; }
 .groupmodal__create { padding: 7px; border: 1px solid var(--accent); border-radius: 6px; background: var(--accent); color: #fff; font-weight: 600; cursor: pointer; }
 .groupmodal__create:hover { filter: brightness(1.06); }
 .groupmodal__create:disabled { opacity: .5; cursor: not-allowed; }

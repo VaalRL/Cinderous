@@ -10,10 +10,18 @@ import {
 } from "./App.js";
 import type { Profile } from "@cinder/engine";
 
-const renderModal = (defaultRelayUrl: string): string =>
+const renderModal = (
+  defaultRelayUrl: string,
+  initialMode: "personal" | "org" | null = "personal",
+): string =>
   renderToStaticMarkup(
     <I18nProvider locale="zh-Hant">
-      <AddIdentityModal defaultRelayUrl={defaultRelayUrl} onAdd={() => {}} onCancel={() => {}} />
+      <AddIdentityModal
+        defaultRelayUrl={defaultRelayUrl}
+        initialMode={initialMode}
+        onAdd={() => {}}
+        onCancel={() => {}}
+      />
     </I18nProvider>,
   );
 
@@ -30,6 +38,23 @@ describe("AddIdentityModal", () => {
     const out = renderModal("wss://x");
     expect(out).toContain("新增身分"); // addId_title
     expect(out).toContain("建立並切換"); // addId_submit
+  });
+
+  it("ADR-0145：預設先顯示「個人／組織」選類型步驟，尚未出現表單", () => {
+    const out = renderModal("wss://x", null);
+    expect(out).toContain('data-testid="addid-mode-personal"');
+    expect(out).toContain('data-testid="addid-mode-org"');
+    expect(out).not.toContain('value="wss://x"'); // relay 欄位尚未出現
+  });
+
+  it("ADR-0145：選「組織」後表單出現管理者 npub 欄位", () => {
+    const out = renderModal("wss://x", "org");
+    expect(out).toContain('data-testid="addid-admin"');
+  });
+
+  it("ADR-0145：選「個人」表單不含管理者 npub 欄位", () => {
+    const out = renderModal("wss://x", "personal");
+    expect(out).not.toContain('data-testid="addid-admin"');
   });
 });
 

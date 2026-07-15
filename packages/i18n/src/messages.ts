@@ -94,6 +94,12 @@ export interface Messages {
   addId_error: string;
   addId_submit: string;
   addId_busy: string;
+  /** 新增身分先選類型（ADR-0145）。 */
+  addId_modePersonal: string;
+  addId_modePersonalHint: string;
+  addId_modeOrg: string;
+  addId_modeOrgHint: string;
+  addId_changeMode: string;
   contact_myId: string;
   contact_addPlaceholder: string;
   contact_add: string;
@@ -618,6 +624,11 @@ const zhHant: Messages = {
   addId_error: "備份密碼錯誤或私鑰格式不符",
   addId_submit: "建立並切換",
   addId_busy: "還原中…",
+  addId_modePersonal: "個人身分",
+  addId_modePersonalHint: "一般帳號；聯絡人由你自己管理。",
+  addId_modeOrg: "組織身份",
+  addId_modeOrgHint: "工作身分：訂閱組織管理者發佈的名冊，自動採用通訊錄與政策（可選填管理者 npub）。",
+  addId_changeMode: "← 重新選擇類型",
   contact_myId: "我的 ID",
   contact_addPlaceholder: "貼上好友的 npub…（可附 @wss://中繼）",
   contact_add: "加好友",
@@ -1115,6 +1126,11 @@ const en: Messages = {
   addId_error: "Wrong backup password or invalid secret key",
   addId_submit: "Create & switch",
   addId_busy: "Restoring…",
+  addId_modePersonal: "Personal identity",
+  addId_modePersonalHint: "A regular account; you manage your own contacts.",
+  addId_modeOrg: "Organization identity",
+  addId_modeOrgHint: "A work identity that subscribes to an org admin's published roster (contacts & policy). Admin npub optional.",
+  addId_changeMode: "← Change type",
   contact_myId: "My ID",
   contact_addPlaceholder: "Paste a buddy's npub… (optionally @wss://relay)",
   contact_add: "Add",

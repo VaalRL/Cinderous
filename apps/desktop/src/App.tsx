@@ -2044,9 +2044,12 @@ export function AddIdentityModal({
   onAdd,
   onCancel,
   requirePassword = false,
+  initialMode = null,
 }: {
   /** relay 欄位預設值（帶入目前作用中身分的網址，可改）。 */
   defaultRelayUrl: string;
+  /** 直接進入某類型的表單（跳過選類型步驟）；供測試/深連結。預設 null＝先選類型（ADR-0145）。 */
+  initialMode?: "personal" | "org" | null;
   onAdd: (
     name: string,
     relayUrl: string,
@@ -2061,9 +2064,11 @@ export function AddIdentityModal({
   requirePassword?: boolean;
 }): JSX.Element {
   const { t } = useI18n();
+  // ADR-0145：先選類型（個人／組織），再填表單。null＝還在選。enterprise 由 mode 導出。
+  const [mode, setMode] = useState<"personal" | "org" | null>(initialMode);
+  const enterprise = mode === "org";
   const [name, setName] = useState("");
   const [relayUrl, setRelayUrl] = useState(defaultRelayUrl);
-  const [enterprise, setEnterprise] = useState(false);
   const [nsec, setNsec] = useState("");
   const [admin, setAdmin] = useState("");
   // 加密備份碼匯入（ADR-0070）：偵測到備份碼即要求備份密碼；信封 relay（明文）自動預填。
@@ -2114,79 +2119,108 @@ export function AddIdentityModal({
           </span>
         </div>
         <div className="groupmodal">
-          <input
-            className="groupmodal__name"
-            placeholder={t("signIn_displayName")}
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-          />
-          <input
-            className="groupmodal__name"
-            placeholder={t("addId_relay")}
-            value={relayUrl}
-            onChange={(e) => setRelayUrl(e.target.value)}
-          />
-          {/* 瀏覽器（ADR-0122）：必填。沒有它，重新整理就失去這個新身分。 */}
-          {requirePassword ? (
+          {mode === null ? (
+            // 第一步（ADR-0145）：選類型。個人＝一般帳號；組織＝訂閱管理者名冊的工作身分。
+            <div className="addid-choose">
+              <button type="button" className="addid-mode" data-testid="addid-mode-personal" onClick={() => setMode("personal")}>
+                <span className="addid-mode__ic" aria-hidden="true">👤</span>
+                <span className="addid-mode__txt">
+                  <span className="addid-mode__name">{t("addId_modePersonal")}</span>
+                  <span className="addid-mode__hint">{t("addId_modePersonalHint")}</span>
+                </span>
+              </button>
+              <button type="button" className="addid-mode" data-testid="addid-mode-org" onClick={() => setMode("org")}>
+                <span className="addid-mode__ic" aria-hidden="true">🏢</span>
+                <span className="addid-mode__txt">
+                  <span className="addid-mode__name">{t("addId_modeOrg")}</span>
+                  <span className="addid-mode__hint">{t("addId_modeOrgHint")}</span>
+                </span>
+              </button>
+            </div>
+          ) : (
             <>
+              <button
+                type="button"
+                className="settings__reveal"
+                data-testid="addid-change-mode"
+                onClick={() => setMode(null)}
+              >
+                {t("addId_changeMode")}
+              </button>
+              <p className="hint">{enterprise ? `🏢 ${t("addId_modeOrg")}` : `👤 ${t("addId_modePersonal")}`}</p>
               <input
                 className="groupmodal__name"
-                type="password"
-                placeholder={t("signIn_password")}
-                aria-label={t("signIn_password")}
-                data-testid="addid-password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                placeholder={t("signIn_displayName")}
+                value={name}
+                onChange={(e) => setName(e.target.value)}
               />
-              <p className="hint">{t("signIn_passwordWhy")}</p>
+              <input
+                className="groupmodal__name"
+                placeholder={t("addId_relay")}
+                value={relayUrl}
+                onChange={(e) => setRelayUrl(e.target.value)}
+              />
+              {/* 瀏覽器（ADR-0122）：必填。沒有它，重新整理就失去這個新身分。 */}
+              {requirePassword ? (
+                <>
+                  <input
+                    className="groupmodal__name"
+                    type="password"
+                    placeholder={t("signIn_password")}
+                    aria-label={t("signIn_password")}
+                    data-testid="addid-password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                  />
+                  <p className="hint">{t("signIn_passwordWhy")}</p>
+                </>
+              ) : null}
+              {/* 組織身份才有管理者名冊訂閱欄（ADR-0047）。 */}
+              {enterprise ? (
+                <input
+                  className="groupmodal__name"
+                  data-testid="addid-admin"
+                  placeholder={t("addId_admin")}
+                  value={admin}
+                  onChange={(e) => setAdmin(e.target.value)}
+                />
+              ) : null}
+              <input
+                className="groupmodal__name"
+                placeholder={t("addId_import")}
+                value={nsec}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  setNsec(v);
+                  setBackupErr(false);
+                  const relay = peekBackupRelay(v.trim());
+                  if (relay) setRelayUrl(relay); // 備份碼信封的 home relay 預填（可改）
+                }}
+              />
+              {isCode ? (
+                <input
+                  className="groupmodal__name"
+                  type="password"
+                  data-testid="backup-password"
+                  placeholder={t("settings_backupCodePw")}
+                  value={backupPw}
+                  onChange={(e) => {
+                    setBackupPw(e.target.value);
+                    setBackupErr(false);
+                  }}
+                />
+              ) : null}
+              {backupErr ? <p className="settings__warn">{t("addId_error")}</p> : null}
+              <button
+                className="groupmodal__create"
+                data-testid="add-identity-confirm"
+                disabled={!name.trim() || !relayUrl.trim() || (isCode && !backupPw) || busy}
+                onClick={submit}
+              >
+                {busy ? t("addId_busy") : t("addId_submit")}
+              </button>
             </>
-          ) : null}
-          <label className="groupmodal__item">
-            <input type="checkbox" checked={enterprise} onChange={(e) => setEnterprise(e.target.checked)} />
-            <span>{t("addId_enterprise")}</span>
-          </label>
-          {enterprise ? (
-            <input
-              className="groupmodal__name"
-              placeholder={t("addId_admin")}
-              value={admin}
-              onChange={(e) => setAdmin(e.target.value)}
-            />
-          ) : null}
-          <input
-            className="groupmodal__name"
-            placeholder={t("addId_import")}
-            value={nsec}
-            onChange={(e) => {
-              const v = e.target.value;
-              setNsec(v);
-              setBackupErr(false);
-              const relay = peekBackupRelay(v.trim());
-              if (relay) setRelayUrl(relay); // 備份碼信封的 home relay 預填（可改）
-            }}
-          />
-          {isCode ? (
-            <input
-              className="groupmodal__name"
-              type="password"
-              data-testid="backup-password"
-              placeholder={t("settings_backupCodePw")}
-              value={backupPw}
-              onChange={(e) => {
-                setBackupPw(e.target.value);
-                setBackupErr(false);
-              }}
-            />
-          ) : null}
-          {backupErr ? <p className="settings__warn">{t("addId_error")}</p> : null}
-          <button
-            className="groupmodal__create"
-            data-testid="add-identity-confirm"
-            disabled={!name.trim() || !relayUrl.trim() || (isCode && !backupPw) || busy}
-            onClick={submit}
-          >
-            {busy ? t("addId_busy") : t("addId_submit")}
-          </button>
+          )}
         </div>
       </div>
     </div>
