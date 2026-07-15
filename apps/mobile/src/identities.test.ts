@@ -13,6 +13,7 @@ import {
   putRemembered,
   rememberInProfile,
   removeIdentity,
+  renameIdentity,
   switchActive,
   visibleProfiles,
 } from "./identities.js";
@@ -125,6 +126,24 @@ describe("rememberInProfile / switchActive / removeIdentity（ADR-0138）", () =
     expect(s.profiles.map((p) => p.pubkey)).toEqual([a.pubkey]);
     expect(s.active).toBe(a.pubkey);
     expect(getRemembered(b.pubkey)).toBeNull(); // blob 也刪了
+  });
+});
+
+describe("renameIdentity：更改顯示名稱（ADR-0144）", () => {
+  it("更新登錄名稱（保留順序）＋同步記住的 blob 名稱；空白忽略", () => {
+    const a = mkIdentity("A");
+    const b = mkIdentity("B");
+    let s = rememberInProfile({ profiles: [], active: null }, a, "pw", RELAY)!.state;
+    s = rememberInProfile(s, b, "pw", RELAY)!.state; // 順序 [a, b]
+    s = renameIdentity(s, a.pubkey, "  阿明  "); // 前後空白會去除
+    expect(s.profiles.map((p) => p.pubkey)).toEqual([a.pubkey, b.pubkey]); // 順序不變
+    expect(s.profiles.find((p) => p.pubkey === a.pubkey)?.name).toBe("阿明");
+    expect(getRemembered(a.pubkey)?.name).toBe("阿明"); // blob 也更名（解鎖畫面顯示新名）
+    // 空白 → 不動。
+    const same = renameIdentity(s, a.pubkey, "   ");
+    expect(same.profiles.find((p) => p.pubkey === a.pubkey)?.name).toBe("阿明");
+    // 持久化：重載登錄仍是新名。
+    expect(loadIdentities(RELAY).profiles.find((p) => p.pubkey === a.pubkey)?.name).toBe("阿明");
   });
 });
 

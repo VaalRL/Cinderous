@@ -136,6 +136,23 @@ export function switchActive(state: ProfilesState, pubkey: string): ProfilesStat
 }
 
 /**
+ * 更改某身分的顯示名稱（ADR-0144）：更新登錄（保留順序）＋同步該身分記住的 blob 名稱
+ * （解鎖畫面才顯示新名）。回新狀態。
+ */
+export function renameIdentity(state: ProfilesState, pubkey: string, name: string): ProfilesState {
+  const trimmed = name.trim();
+  if (!trimmed) return state;
+  const next: ProfilesState = {
+    ...state,
+    profiles: state.profiles.map((p) => (p.pubkey === pubkey ? { ...p, name: trimmed } : p)),
+  };
+  saveProfiles(next);
+  const rem = getRemembered(pubkey);
+  if (rem) putRemembered({ ...rem, name: trimmed });
+  return next;
+}
+
+/**
  * 這個 npub 是不是**自己的某個身分**（ADR-0055：跨身分交友＝社交圖譜洩漏，一律禁止）。
  * 後端只擋作用中身分；多身分下連其他已註冊身分也要擋。解不出 pubkey 回 false（交後端驗格式）。
  */

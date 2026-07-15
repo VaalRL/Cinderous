@@ -1794,6 +1794,20 @@ export class RelayChatBackend implements ChatBackend {
     this.broadcastPresenceState();
   }
 
+  /**
+   * 更改顯示名稱（ADR-0144）：更新記憶體→落地本機（nsec 不明文，只更名，ADR-0112）→ 把新名
+   * 廣播給所有聯絡人（ADR-0061）。空白或未變動則忽略。
+   */
+  setSelfName(name: string): void {
+    const trimmed = name.trim();
+    if (!trimmed || trimmed === this.self.name) return;
+    this.self.name = trimmed;
+    this.storage.saveIdentity({ nsec: "", name: trimmed });
+    // 清掉「已送過 profile」記號，讓每個聯絡人都重新收到新名字（否則 sendProfileTo 會略過）。
+    this.profileSentTo.clear();
+    this.broadcastProfile();
+  }
+
   sendMessage(to: PubkeyHex, text: string, ttlSeconds?: number, mentions?: PubkeyHex[], replyTo?: string): void {
     // 你主動回覆一個請求＝你接受了他（ADR-0121）。不接受就送訊息會很怪：對方在你的清單裡
     // 永遠是「請求」，你卻在跟他聊天。**主動聯絡的人就是聯絡人。**

@@ -36,6 +36,29 @@ function render(extra: Partial<SettingsPanelProps> = {}): string {
   );
 }
 
+describe("更改顯示名稱（ADR-0144）", () => {
+  beforeEach(() => {
+    (globalThis as Record<string, unknown>).window = { matchMedia: () => ({ matches: false }) };
+    (globalThis as Record<string, unknown>).localStorage = { getItem: () => null };
+  });
+  afterEach(() => {
+    delete (globalThis as Record<string, unknown>).window;
+    delete (globalThis as Record<string, unknown>).localStorage;
+  });
+
+  it("提供 onRename → 身分分頁出現、且有改名欄（預填目前名稱、按鈕預設停用）", () => {
+    const out = render({ initialTab: "identity", onRename: () => {}, selfName: "夜" });
+    expect(out).toContain('data-testid="settings-tab-identity"');
+    expect(out).toContain('data-testid="rename-input"');
+    expect(out).toContain('value="夜"'); // 預填目前名稱
+    expect(out).toMatch(/data-testid="rename-apply"[^>]*disabled/); // 未改動 → 停用
+  });
+
+  it("未提供 onRename → 無改名欄", () => {
+    expect(render({ initialTab: "identity", selfName: "夜" })).not.toContain('data-testid="rename-input"');
+  });
+});
+
 describe("SettingsPanel 分頁（ADR-0142）", () => {
   beforeEach(() => {
     (globalThis as Record<string, unknown>).window = { matchMedia: () => ({ matches: false }) };

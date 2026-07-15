@@ -43,6 +43,7 @@ import {
   putRemembered,
   rememberInProfile,
   removeIdentity,
+  renameIdentity,
   switchActive,
   visibleProfiles,
 } from "./identities.js";
@@ -507,6 +508,14 @@ export function MobileApp({
     setProfiles((p) => ({ ...p })); // 觸發重繪，讓 remembered 重新由 blob 導出
     return true;
   };
+  // 更改顯示名稱（ADR-0144）：後端落地本機＋廣播給聯絡人（ADR-0061）；更新 self 與登錄/記住的 blob。
+  const renameSelf = (name: string): void => {
+    const trimmed = name.trim();
+    if (!trimmed || trimmed === selfName) return;
+    backendRef.current?.setSelfName?.(trimmed);
+    setSelfName(trimmed);
+    setProfiles((prev) => renameIdentity(prev, selfPubkey, trimmed));
+  };
   const addContact = (npub: string): void => {
     const trimmed = npub.trim();
     // ADR-0055：不得把**自己的任何身分**加成聯絡人（跨身分交友是社交圖譜洩漏）。後端只擋作用中身分；
@@ -930,6 +939,7 @@ export function MobileApp({
       ) : (
         <SettingsScreen
           selfName={selfName}
+          onRename={renameSelf}
           selfNpub={selfNpub}
           selfNsec={selfNsec}
           relayUrl={relayUrl}

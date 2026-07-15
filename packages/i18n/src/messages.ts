@@ -285,6 +285,10 @@ export interface Messages {
   settings_relayUrl: string;
   settings_relayDemo: string;
   settings_identityBackup: string;
+  /** 更改顯示名稱（ADR-0144）。 */
+  settings_displayName: string;
+  settings_nameApply: string;
+  settings_nameUpdated: string;
   settings_identityWarning: string;
   settings_revealKey: string;
   settings_hideKey: string;
@@ -792,6 +796,9 @@ const zhHant: Messages = {
   settings_relayUrl: "中繼站",
   settings_relayDemo: "示範模式（記憶體中繼）",
   settings_identityBackup: "身分備份",
+  settings_displayName: "顯示名稱",
+  settings_nameApply: "更新",
+  settings_nameUpdated: "名稱已更新",
   settings_identityWarning: "這是你的私鑰（nsec），等同你的帳號本身。任何人拿到都能冒充你——切勿外流或貼給他人。請離線妥善保存。",
   settings_revealKey: "顯示私鑰（nsec）",
   settings_hideKey: "隱藏私鑰",
@@ -1286,6 +1293,9 @@ const en: Messages = {
   settings_relayUrl: "Relay",
   settings_relayDemo: "Demo mode (in-memory relay)",
   settings_identityBackup: "Identity backup",
+  settings_displayName: "Display name",
+  settings_nameApply: "Update",
+  settings_nameUpdated: "Name updated",
   settings_identityWarning: "This is your secret key (nsec) — it IS your account. Anyone who gets it can impersonate you. Never share or paste it anywhere; keep it safe offline.",
   settings_revealKey: "Reveal secret key (nsec)",
   settings_hideKey: "Hide secret key",

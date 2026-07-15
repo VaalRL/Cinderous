@@ -37,6 +37,10 @@ export interface RelayPoolEntry {
 export interface SettingsPanelProps {
   /** 開啟時預設分頁（ADR-0142）；未指定＝外觀。供深連結與測試。 */
   initialTab?: SettingsTab;
+  /** 目前顯示名稱（ADR-0144）；與 onRename 一起提供才顯示改名欄。 */
+  selfName?: string;
+  /** 更改顯示名稱（ADR-0144）：落地本機並廣播給聯絡人（ADR-0061）。 */
+  onRename?: (name: string) => void;
   /** 目前使用的中繼站網址；空字串表示示範模式。 */
   relayUrl: string;
   /** Relay pool 各座連線狀態（多中繼時才有；ADR-0034）。 */
@@ -109,6 +113,46 @@ const STATE_DOT: Record<RelayPoolEntry["state"], string> = {
 };
 
 /** 主題色設定（ADR-0064）：預設色票 + 自訂色 + 重設；即時套用、只存本機。 */
+/** 更改顯示名稱（ADR-0144）：輸入新名 → 落地本機＋廣播給聯絡人（ADR-0061）。 */
+function NameEditor({ name, onRename }: { name: string; onRename: (n: string) => void }): JSX.Element {
+  const { t } = useI18n();
+  const [draft, setDraft] = useState(name);
+  const [saved, setSaved] = useState(false);
+  const dirty = draft.trim().length > 0 && draft.trim() !== name;
+  const apply = (): void => {
+    if (!dirty) return;
+    onRename(draft.trim());
+    setSaved(true);
+  };
+  return (
+    <section className="settings__sec">
+      <h4>{t("settings_displayName")}</h4>
+      <div className="settings__keyrow">
+        <input
+          aria-label={t("settings_displayName")}
+          data-testid="rename-input"
+          value={draft}
+          onChange={(e) => {
+            setDraft(e.target.value);
+            setSaved(false);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") apply();
+          }}
+        />
+        <button type="button" data-testid="rename-apply" disabled={!dirty} onClick={apply}>
+          {t("settings_nameApply")}
+        </button>
+      </div>
+      {saved ? (
+        <p className="settings__hint" data-testid="rename-ok">
+          {t("settings_nameUpdated")}
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
 function AccentSettings(): JSX.Element {
   const { t } = useI18n();
   const { accent, setAccent, accent2, setAccent2 } = useAccent();
@@ -576,7 +620,7 @@ export function SettingsPanel(props: SettingsPanelProps): JSX.Element {
   };
 
   // 只顯示有內容的分頁（身分/進階全條件式，可能為空）。
-  const hasIdentity = !!props.selfNsec || !!props.security || !!props.onPairDevice;
+  const hasIdentity = !!props.onRename || !!props.selfNsec || !!props.security || !!props.onPairDevice;
   const hasAdvanced = !!props.retention || !!props.onExport || !!(props.ollama && props.onOllamaChange);
   const TABS: { key: SettingsTab; label: string }[] = [
     { key: "appearance", label: t("settingsTab_appearance") },
@@ -689,6 +733,10 @@ export function SettingsPanel(props: SettingsPanelProps): JSX.Element {
               </p>
             ) : null}
           </section>
+          ) : null}
+
+          {tab === "identity" && props.onRename ? (
+            <NameEditor name={props.selfName ?? ""} onRename={props.onRename} />
           ) : null}
 
           {tab === "identity" && props.selfNsec ? (

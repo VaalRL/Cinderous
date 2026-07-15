@@ -41,6 +41,33 @@ describe("RelayChatBackend（真實後端 + 持久化）", () => {
     b.stop();
   });
 
+  it("setSelfName（ADR-0144）：更新 self.name、落地本機、把新名廣播給聯絡人（ADR-0061）", () => {
+    const net = createInMemoryRelayNetwork();
+    const storeA = new MemoryStorage();
+    const a = new RelayChatBackend(storeA, (h) => net.connect("a", h), "Alice");
+    const b = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("b", h), "Bob");
+    const bSawName: string[] = [];
+    a.start(noop);
+    b.start({ ...noop, onContacts: (cs) => cs.forEach((c) => c.pubkey === a.self.pubkey && bSawName.push(c.name)) });
+    // 互為聯絡人：B 收下 A、A 收下 B（A 廣播 profile 的對象＝A 的聯絡人）。
+    b.addContact(a.selfNpub);
+    a.addContact(b.selfNpub);
+
+    a.setSelfName("  Alicia  "); // 前後空白會被去除
+    expect(a.self.name).toBe("Alicia"); // 記憶體更新
+    expect(storeA.loadIdentity()?.name).toBe("Alicia"); // 落地本機（nsec 不動）
+    expect(bSawName).toContain("Alicia"); // 廣播到聯絡人 → B 更新 A 的顯示名稱
+
+    // 空白或未變動 → 忽略（不重複廣播）。
+    const before = bSawName.length;
+    a.setSelfName("   ");
+    a.setSelfName("Alicia");
+    expect(bSawName.length).toBe(before);
+
+    a.stop();
+    b.stop();
+  });
+
   it("NIP-42 AUTH（ADR-0057）：requireAuth 下兩端仍能對話（自動認證 + 認證後訂閱）", () => {
     const net = createInMemoryRelayNetwork({ requireAuth: true });
     const storeA = new MemoryStorage();

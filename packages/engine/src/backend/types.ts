@@ -182,6 +182,11 @@ export interface ChatBackend {
   setInvisible?(invisible: boolean): void;
   setNowPlaying(text: string): void;
   /**
+   * 更改顯示名稱（ADR-0144）：更新記憶體、落地本機（nsec 不明文，只更名）、把新名廣播給所有
+   * 聯絡人（ADR-0061 profile）。未實作的後端（如部分示範）由呼叫端以本機狀態更新即可。
+   */
+  setSelfName?(name: string): void;
+  /**
    * 送出訊息；`ttlSeconds` 設定時為限時訊息（閱後即焚，NIP-40 短期過期）；
    * `mentions` 為 @提及公鑰（ADR-0050）；`replyTo` 為對話串根訊息 id（ADR-0051）。
    */

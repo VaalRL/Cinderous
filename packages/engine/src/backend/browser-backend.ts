@@ -248,6 +248,12 @@ export class BrowserChatBackend implements ChatBackend {
     this.beat();
   }
 
+  /** 更改顯示名稱（ADR-0144）：示範後端無聯絡人可廣播，僅更新本機顯示。 */
+  setSelfName(name: string): void {
+    const trimmed = name.trim();
+    if (trimmed) this.self.name = trimmed;
+  }
+
   sendMessage(to: PubkeyHex, text: string, ttlSeconds?: number): void {
     const disappearAt = ttlSeconds ? nowSec() + ttlSeconds : undefined;
     const wrapped = wrapMessage(text, this.selfSk, to, disappearAt !== undefined ? { disappearAt } : {});

@@ -1271,6 +1271,20 @@ export function App(): JSX.Element {
     activeBackend.setStatus(self.status, message);
     setSelf((x) => (x ? { ...x, statusMessage: message } : x));
   };
+  // 更改顯示名稱（ADR-0144）：後端落地本機＋廣播給聯絡人（ADR-0061）；本地更新 self 與登錄
+  // （讓切換器/重載也顯示新名）。
+  const renameSelf = (name: string) => {
+    const trimmed = name.trim();
+    if (!trimmed || trimmed === self.name) return;
+    activeBackend.setSelfName?.(trimmed);
+    setSelf((x) => (x ? { ...x, name: trimmed } : x));
+    const p = activeProfile(profilesState);
+    if (p) {
+      const next = { ...profilesState, profiles: profilesState.profiles.map((x) => (x.pubkey === p.pubkey ? { ...x, name: trimmed } : x)) };
+      saveProfiles(next);
+      setProfilesState(next);
+    }
+  };
   // 設為當前分頁（ADR-0079 Q3）：清該對話未讀，且若當下可見則送已讀回條（切到分頁＝看到）。
   // 供側欄雙擊（openChat）與分頁列點擊（DeckTabs）共用，避免只設 activeConvo 卻漏清未讀。
   const activateConvo = (pk: string) => {
@@ -1665,6 +1679,8 @@ export function App(): JSX.Element {
       ) : null}
       {settingsOpen ? (
         <SettingsPanel
+          selfName={self.name}
+          onRename={renameSelf}
           relayUrl={(() => {
             try {
               return localStorage.getItem(RELAY_URL_KEY) ?? "";

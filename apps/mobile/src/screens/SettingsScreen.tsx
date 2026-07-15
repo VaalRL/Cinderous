@@ -62,6 +62,7 @@ function makeStyles(tk: ThemeTokens) {
 
 export function SettingsScreen({
   selfName,
+  onRename,
   selfNpub,
   selfNsec,
   relayUrl,
@@ -95,6 +96,8 @@ export function SettingsScreen({
   onLogout,
 }: {
   selfName: string;
+  /** 更改顯示名稱（ADR-0144）：落地本機並廣播給聯絡人。未提供則不顯示改名欄。 */
+  onRename?: (name: string) => void;
   selfNpub: string;
   selfNsec: string;
   relayUrl: string | null;
@@ -145,6 +148,15 @@ export function SettingsScreen({
   const styles = useMemo(() => makeStyles(tk), [tk]);
   const t = (k: MessageKey): string => translate(locale, k);
   const [showNsec, setShowNsec] = useState(false);
+  // 更改顯示名稱（ADR-0144）。
+  const [nameDraft, setNameDraft] = useState(selfName);
+  const [nameSaved, setNameSaved] = useState(false);
+  const nameDirty = nameDraft.trim().length > 0 && nameDraft.trim() !== selfName;
+  const applyRename = (): void => {
+    if (!onRename || !nameDirty) return;
+    onRename(nameDraft.trim());
+    setNameSaved(true);
+  };
   // 改密碼表單（ADR-0135）。
   const [pwOld, setPwOld] = useState("");
   const [pwNew, setPwNew] = useState("");
@@ -217,7 +229,38 @@ export function SettingsScreen({
         {/* 身分備份 */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>{t("settings_identityBackup")}</Text>
-          <Text style={styles.value}>{selfName}</Text>
+          {/* 更改顯示名稱（ADR-0144）：輸入新名 → 落地本機＋廣播給聯絡人。 */}
+          {onRename ? (
+            <>
+              <Text style={styles.label}>{t("settings_displayName")}</Text>
+              <View style={styles.rowSeg}>
+                <TextInput
+                  style={[styles.pwInput, { flex: 1 }]}
+                  value={nameDraft}
+                  onChangeText={(v: string) => {
+                    setNameDraft(v);
+                    setNameSaved(false);
+                  }}
+                  placeholder={t("settings_displayName")}
+                  placeholderTextColor={tk.muted}
+                  aria-label={t("settings_displayName")}
+                  testID="rename-input"
+                />
+                <Pressable
+                  accessibilityRole="button"
+                  testID="rename-apply"
+                  disabled={!nameDirty}
+                  onPress={applyRename}
+                  style={[styles.seg, { borderColor: nameDirty ? tk.accent : tk.border, backgroundColor: tk.field, opacity: nameDirty ? 1 : 0.5 }]}
+                >
+                  <Text style={[styles.segText, { color: tk.accent }]}>{t("settings_nameApply")}</Text>
+                </Pressable>
+              </View>
+              {nameSaved ? <Text style={styles.okMsg} testID="rename-ok">{t("settings_nameUpdated")}</Text> : null}
+            </>
+          ) : (
+            <Text style={styles.value}>{selfName}</Text>
+          )}
           {selfNpub ? <Text style={styles.npub} numberOfLines={1}>{selfNpub}</Text> : null}
           {showNsec ? (
             <>
