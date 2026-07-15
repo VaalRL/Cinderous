@@ -2,15 +2,23 @@
 
 > 本文件是模組邊界、資料流與初始化規劃的**單一真實來源（SSOT）**。產品行為以 [`PRD.md`](./PRD.md) 為準；本文件定義「落在哪一層、如何連接」。
 >
-> 狀態：**草稿（M0）**。隨實作推進，模組邊界、事件契約或資料流如有變更，必須同步更新本檔與相關入口文件。
+> 狀態：**M1–M9 核心已完成，中繼已部署生產**；本檔已對齊至 ADR-0124（2026-07）。隨實作推進，模組邊界、事件契約或資料流如有變更，必須同步更新本檔與相關入口文件。細部決策與反轉（D1→DO、捨棄→支援網頁、SQLite→加密 blob、無推播等）見 `docs/adr/`。
 
 ## 1. 設計原則
 
-- **本地優先（Local-First）**：本機 SQLite 是唯一真相來源；網路層只負責同步與轉發。
-- **零伺服器狀態**：中繼站不持久化線上狀態與信令（Ephemeral），僅暫存有過期時間的離線留言。Ephemeral 不寫 D1，但仍消耗 Worker 請求數（非零成本）。
+- **本地優先（Local-First）**：本機**加密儲存**是唯一真相來源；網路層只負責同步與轉發。
+  （儲存為「狀態常駐記憶體＋逐部位加密持久化」，ADR-0110；桌面走 AES blob 檔，web/mobile 走
+  加密的 localStorage＋OPFS 封存——**非 SQLite**，早期的 SQLite 規劃於 ADR-0054 起改為加密 blob。）
+- **零伺服器狀態**：中繼站不持久化線上狀態與信令（Ephemeral），僅暫存有過期時間的離線留言。
+  持久層為 **Durable Object 內建 SQLite**（ADR-0056，非 D1）。Ephemeral 不寫持久層，但仍消耗
+  DO 請求數（非零成本）。
 - **端到端加密**：明文不離開裝置；內容以 NIP-44 加密。
-- **元資料隱藏**：私訊以 NIP-17/59 Gift Wrap 包封收發雙方，中繼站無法重建社交圖譜（詳見 PRD §6–§7 與 `docs/adr/0002`）。
-- **靜態落地加密**：私鑰與本機 SQLite 不以明文落地（OS 安全儲存 + 資料庫加密），以對抗設備竊取。共用設備可再啟用**本地密碼**（ADR-0067）：Argon2id 衍生金鑰包裹 nsec 與資料金鑰、取代金鑰庫明文條目，並支援隱藏身分與閒置自動上鎖；nsec 僅用於匯入／換機／救援，不作日常登入。
+- **元資料隱藏**：私訊以 NIP-17/59 Gift Wrap 包封收發雙方，中繼站無法重建社交圖譜（詳見 PRD §6–§7 與 `docs/adr/0002`）。**typing／nudge 亦已封裝**（ADR-0120，原本以真名廣播指名事件，會反推 Gift Wrap 寄件人）。
+- **靜態落地加密**：私鑰與本機資料不以明文落地。**桌面**以 OS 金鑰庫（ADR-0053）＋AES-256-GCM
+  加密 blob（ADR-0054／0110）；**web/mobile**（無 OS 金鑰庫）以 Argon2id 本地密碼包裹 nsec、
+  資料以 nsec 導出金鑰加密（ADR-0112／0117／0122）。共用設備可再啟用**本地密碼**（ADR-0067）：
+  Argon2id 衍生金鑰包裹 nsec 與資料金鑰，並支援隱藏身分與閒置自動上鎖；nsec 僅用於匯入／換機／
+  救援，不作日常登入。
 - **雙軌動態切換**：能 P2P 直連就走 WebRTC；不能直連或對方離線時退回 Nostr 中繼；P2P 失敗以 TURN／經中繼降級保底。
 - **換機三條路**：加密備份碼（身分＋relay，NIP-49 使用者自持，ADR-0070）／加密雲端快照（opt-in 三檔，relay 只見密文，ADR-0071）／**桌面配對克隆**（一次性 P2P 全量搬家，SAS 短碼互認、內容不經中繼，ADR-0072）。nsec 僅為主金鑰，不作日常登入（ADR-0067）。
 - **跨中繼互通（ADR-0034）**：relay 之間不聯邦；客戶端維護 relay pool——addressed 事件（帶 `p` tag）發往**收件人的 relay**（好友 relay hint，`npub…@wss://…`）、心跳發往 pool 全部、收件箱訂閱掛在 pool 每座 relay，事件以 id 去重；hint 由加密 rumor 內層自動學習（ADR-0035，不用公開的 NIP-65），且**個人檔開機廣播帶 hint**（ADR-0066）＝每次開機刷新全聯絡人路由、陳舊自癒。更換 home relay 走「保留命名空間搬家＋舊站 7 天排水」（ADR-0066，對齊 ADR-0065 的 relay TTL）。任何標準 Nostr relay 皆可互通。
@@ -19,10 +27,10 @@
 
 ```text
         ┌─────────────────────────────┐         ┌─────────────────────────────┐
-        │        裝置 A（桌面）        │         │        裝置 B（桌面）        │
-        │  React UI ── Tauri(Rust)     │         │  React UI ── Tauri(Rust)     │
+        │     裝置 A（桌面/網頁）      │         │     裝置 B（桌面/網頁）      │
+        │  React UI ── Tauri/瀏覽器    │         │  React UI ── Tauri/瀏覽器    │
         │   │            │             │         │             │          │   │
-        │  SQLite(SSOT)  金鑰/加密      │         │       金鑰/加密  SQLite(SSOT) │
+        │ 加密儲存(SSOT) 金鑰/加密      │         │      金鑰/加密 加密儲存(SSOT) │
         └───────┬────────────┬─────────┘         └────┬────────────┬──────────┘
                 │            │                         │            │
    引擎 A：Nostr │            │ 引擎 B：WebRTC P2P       │            │ 引擎 A：Nostr
@@ -30,26 +38,26 @@
                 │              即時：Nudge / 檔案 / 動畫              │
                 ▼                                                    ▼
         ┌──────────────────────────────────────────────────────────────┐
-        │              Cloudflare Worker（Nostr Relay）                  │
-        │  Ephemeral(20000-29999)：純記憶體轉發，不寫 D1                  │
-        │  離線留言(NIP-17 GiftWrap)：寫入 D1，NIP-40 7 天過期，定時銷毀      │
+        │        Cloudflare Worker + Durable Object（Nostr Relay）       │
+        │  Ephemeral(20000-29999)：純記憶體轉發，不寫持久層              │
+        │  離線留言(NIP-17 GiftWrap)：寫入 DO 內建 SQLite，NIP-40 7 天過期 │
         └──────────────────────────────────────────────────────────────┘
 ```
 
-- **引擎 A — Nostr（Cloudflare Workers + D1）**：離線留言暫存、線上狀態廣播、WebRTC 初始 SDP 信令交換。
+- **引擎 A — Nostr（Cloudflare Workers + Durable Object SQLite，ADR-0056）**：離線留言暫存、線上狀態廣播、WebRTC 初始 SDP 信令交換。
 - **引擎 B — WebRTC（P2P）**：雙方上線並完成 SDP 交換後打通資料通道，後續即時互動繞過中繼站。
 
 ## 3. 模組與目錄落點
 
 | 模組 | 目錄 | 職責 |
 | --- | --- | --- |
-| 共用核心 | `packages/core/` | Nostr 事件建構/驗證、簽章（secp256k1 Schnorr, BIP-340）、加密（NIP-44）、SQLite schema 與型別、事件 Kind 常數。跨平台共用，**SSOT 邏輯所在**。零 UI 依賴。 |
+| 共用核心 | `packages/core/` | Nostr 事件建構/驗證、簽章（secp256k1 Schnorr, BIP-340）、加密（NIP-44）、Gift Wrap 與群組扇出、儲存型別、事件 Kind 常數（含 `NUDGE`，ADR-0120）。跨平台共用，**SSOT 邏輯所在**。零 UI 依賴。 |
 | 通訊引擎 | `packages/engine/` | **可用的通訊後端（ADR-0074）**：`ChatBackend`/`ChatBackendEvents` 契約＋UI DTO、`RelayChatBackend`（真實 relay pool）/`BrowserChatBackend`（記憶體 demo）、WebRTC、`AppStorage`/`LocalStorage`、多身分/搬家/快照。與 UI 框架無關，供任意前端重用（desktop 與 mobile 皆消費）。 |
 | 桌面前端 | `apps/desktop/src/` | React/TS UI：好友列表、對話視窗、狀態列、Nudge 動畫。消費 `@cinder/engine`；平台基質（Tauri 金鑰庫/加密儲存）經 `AppStorage`/keyvault 介面注入。 |
-| 桌面原生橋 | `apps/desktop/src-tauri/` | Rust：原生 SQLite 讀寫、背景 Nostr WebSocket 長連線、WebRTC 資料通道、金鑰安全儲存、IPC。 |
-| 行動端 | `apps/mobile/` | React Native（react-native-web 於此環境開發）：重用 `@cinder/core`/`@cinder/i18n`/`@cinder/engine`（`chat.ts` 已消費 `BrowserChatBackend`，實證跨前端重用）；SQLite/Silent Push 待 RN 工具鏈。 |
+| 桌面原生橋 | `apps/desktop/src-tauri/` | Rust：**為引擎提供原生能力**（非重造通訊，ADR-0105）——`encstore`（AES-256-GCM 加密 blob）、`passlock`（Argon2id 本地密碼＋救援）、`keyvault`（OS 金鑰庫）、`partfile`（部位檔的原子寫入／檔名白名單／毀損隔離，ADR-0119）、IPC。中繼連線/Gift Wrap/WebRTC/狀態機**留在 `packages/engine`（TS）**；原本的 Rust 背景連線與 SQLite（ADR-0019/0020）已於 ADR-0105 退役。 |
+| 行動端 | `apps/mobile/` | react-native-web：接**真實中繼**（ADR-0086），重用 `@cinder/core`/`@cinder/i18n`/`@cinder/engine`/`@cinder/theme`。儲存走加密 localStorage＋OPFS 封存；「記住我」以 Argon2id 包裹 nsec（ADR-0117）。**不做推播（APNs/FCM）**（ADR-0116）。 |
 | 官方網站 | `apps/website/` | 純靜態站（Vite+React；ADR-0090）：開源/永久免費/隱私主張、下載、捐款導流、**簽章式資金透明度**（`funds.json` 前端 `verifyFunds` 對釘死透明度公鑰驗簽＋算 runway，fail-closed）。**與通訊平面硬隔離、零追蹤、無常駐後台**；重用 `@cinder/core`（驗簽）/`@cinder/theme`/`@cinder/i18n`。 |
-| 中繼站 | `relay/` | Cloudflare Worker + D1：Nostr relay，處理 Ephemeral 轉發與 NIP-40 過期留言。 |
+| 中繼站 | `relay/` | Cloudflare Worker + **Durable Object 內建 SQLite**（ADR-0056）：Nostr relay，處理 Ephemeral 轉發與 NIP-40 過期留言；NIP-42 AUTH ＋具名訂閱 ACL（ADR-0057／0123）。`RelayCore` 傳輸無關，可自架於 Node/Deno/Bun/Docker。 |
 | 測試 | `tests/` | 跨層整合測試與共用 fixture。 |
 | 文件 | `docs/` | 設計決策與流程補充。 |
 
@@ -57,19 +65,19 @@
 
 ## 4. 身分與資料模型
 
-- **身分**：首次啟動生成 secp256k1 金鑰對（Nostr/NIP-01，簽章採 BIP-340 Schnorr）；公鑰 `npub` 為全網唯一 ID。私鑰寫入 OS 安全儲存（Keychain/DPAPI/libsecret/Keystore），**絕不離開裝置、無雲端備份、不提供金鑰輪替/撤銷**（取捨見 PRD §4、§7）。
-- **SQLite（SSOT）**：好友（npub、顯示名稱、上線狀態）、對話訊息（明文僅存本機）、金鑰、設定、聯絡人同意/封鎖清單。資料庫以裝置綁定金鑰加密落地（如 SQLCipher）；對外傳輸前一律以 NIP-44 加密。
-- **多設備同步（首次）**：QR Code 僅含「一次性 AES-256-GCM 金鑰 + 內網 IP + WebRTC 房間號」；通道與該 AEAD 金鑰綁定並雙向認證（challenge-response）。手機端以 **Happy Eyeballs（RFC 8305）** 同時發起 LAN 直連與 WAN 打洞，優先連通者整包加密傳輸 SQLite 與私鑰。
-- **多設備同步（持續）**：首次整包同步後，各設備就「新訊息、已讀位置、聯絡人/封鎖變更」持續對帳（自封 NIP-17 同步事件或設備間 P2P）；可變狀態採 LWW/CRDT，定案見 ADR。
+- **身分**：首次啟動生成 secp256k1 金鑰對（Nostr/NIP-01，簽章採 BIP-340 Schnorr）；公鑰 `npub` 為全網唯一 ID。私鑰**桌面**寫入 OS 安全儲存（Keychain/Credential Manager/Secret Service，ADR-0053）、**web/mobile** 以 Argon2id 本地密碼包裹（ADR-0112／0117／0122）。**協定層不提供金鑰輪替/撤銷**（取捨見 PRD §4、§7；企業範圍的名冊輪替見 §8）。多身分以 pubkey 命名空間隔離（ADR-0045）。
+- **加密儲存（SSOT）**：好友（npub、顯示名稱、上線狀態）、對話訊息（明文僅存本機）、設定、聯絡人同意/**訊息請求**（ADR-0121）/封鎖清單、群組。狀態常駐記憶體＋逐部位加密持久化（ADR-0110，桌面 AES blob 檔／web/mobile 加密 localStorage）；超出熱區上限的舊訊息移入**封存**而非刪除（ADR-0111，OPFS/塊檔）。對外傳輸前一律以 NIP-44 加密。
+- **換機搬家（配對克隆）**：實作採 **WebRTC 配對傳輸**（ADR-0072／0118）——舊機產生一次性載荷（會合 relay ＋ 一次性 AES-256-GCM 金鑰），新機貼上後經 WebRTC 打通、把全量捆包（身分＋聯絡人＋熱區歷史）端到端加密傳輸，雙方比對 **SAS** 相符才送出。（早期規劃的「QR＋LAN 內網 IP＋Happy Eyeballs 競速」未實作。）行動端送出端亦已補上（ADR-0118）。
+- **多設備同步（持續）**：各設備就「新訊息、已讀位置、聯絡人/封鎖變更」持續對帳（自封 NIP-17 同步事件、ADR-0107；加密雲端快照、ADR-0071）。訊息以 rumor.id 去重；已讀水位本機持久化（ADR-0108）。
 
 ## 5. 事件契約（Nostr Kind 對照）
 
-> 內容一律 NIP-44 加密；私訊以 NIP-17（kind 14 → kind 13 seal → kind 1059 Gift Wrap）隱藏收發雙方。中繼站要求 NIP-42 AUTH，持久化事件要求 NIP-13 PoW 並設每 pubkey 速率/大小上限。
+> 內容一律 NIP-44 加密；私訊以 NIP-17（kind 14 → kind 13 seal → kind 1059 Gift Wrap）隱藏收發雙方。中繼站要求 **NIP-42 AUTH ＋ 具名訂閱**（帶 `#p`／`authors`，ADR-0057／0123）。持久化事件可要求 NIP-13 PoW（`minPow`，**生產目前未強制**）並設每 pubkey 速率/大小上限與訂閱數上限（ADR-0119）。
 
 | 功能 | Kind | 持久化 | 機制 |
 | --- | --- | --- | --- |
-| 離線文字留言 | 1059（Gift Wrap，內含 13/14） | D1（NIP-40，7 天過期） | NIP-44 加密 + Gift Wrap 隱藏雙方後存中繼，對方上線拉取解密 |
-| 好友上線/離線 | 20000 | 否（Ephemeral） | 每 30 秒心跳（±抖動，模糊上線時序，ADR-0088 (d)）；斷線 60 秒判離線；僅向雙向同意聯絡人訂閱。**P2P 卸載（ADR-0088 (e)）**：與聯絡人資料通道已開時在線狀態改走資料通道直送；**全聯絡人皆有活 P2P 通道時抑制 relay 明簽心跳**（relay 不再收到你的在線信標）。收端對「來自 relay」與「來自資料通道」的在線訊號同一 60 秒狀態機處理。**隱身**：完全不廣播（relay＋P2P），仍正常收發 |
+| 離線文字留言 | 1059（Gift Wrap，內含 13/14） | DO SQLite（NIP-40，7 天過期） | NIP-44 加密 + Gift Wrap 隱藏雙方後存中繼，對方上線拉取解密 |
+| 好友上線/離線 | 20000 | 否（Ephemeral） | **自適應心跳**：活躍 60s／閒置 300s（ADR-0109，取代早期固定 30s；±抖動模糊上線時序，ADR-0088 (d)）；在線判定讀對方**自報節奏**（ADR-0119）；僅向雙向同意聯絡人訂閱。**P2P 卸載（ADR-0088 (e)）**：與聯絡人資料通道已開時在線狀態改走資料通道直送；**全聯絡人皆有活 P2P 通道時抑制 relay 明簽心跳**。**隱身**：完全不廣播（relay＋P2P），仍正常收發 |
 | 正在聆聽音樂（✅ F5 合併） | 併入 20000 心跳 | 否（Ephemeral） | now-playing（`np`）彙整進心跳負載 `{s,m,np}`，不再單獨用 kind 20002；減少事件與訂閱數（`encodePresence`/`decodePresence`，見 ADR-0006 補述） |
 | 正在輸入中（✅ F5 卸載） | 20001 或 P2P DataChannel | 否（Ephemeral） | 對話視窗觸發；**P2P 通道已開時走 Data Channel 卸載中繼**，否則走 kind 20001 中繼轉發（ADR-0006 F5） |
 | WebRTC SDP 交換 | 21000-21999（NIP-59 包封） | 否（Ephemeral） | 信令交換，純記憶體轉發，避免洩漏「誰呼叫誰」 |
@@ -77,12 +85,13 @@
 | 檔案傳輸（✅ A4；F3/C4 二進位） | — | — | WebRTC Data Channel，不受 JSON 大小限制；對稱 NAT 經 TURN 保底。桌面前端已接（`WebRtcTransfer`：附件/拖放、進度、下載），信令走 kind 21000（ADR-0017）。分塊改**二進位框架**（去 base64 ~33%，ADR-0029） |
 | 訊息回應（Reaction，✅ M6） | 1059（內含 kind 7） | 依訊息 | NIP-25 emoji 回應，`e` tag 指向目標訊息，Gift Wrap 隱藏雙方（已實作，見 ADR-0011） |
 | 收回訊息（Unsend，✅ M6） | 1059（內含 kind 5） | 短期 | NIP-09 刪除，`e` tag 指向目標；收件端顯示「訊息已收回」（已實作，見 ADR-0012） |
-| 限時訊息（Disappearing，✅ M6） | 1059（rumor 內帶較短 NIP-40） | D1 至過期 | 送訊即帶較短過期：rumor 內層 `expiration` 供收件端到期隱藏，外層 wrap 同步縮短以利中繼清除；客戶端到期顯示「訊息已到期」（已實作，見 ADR-0013） |
+| 正在輸入中／敲一下（✅ 封裝） | 20001／20100（**NIP-59 包封**） | 否（Ephemeral） | ADR-0120：改為 `sealAndWrap`——外層一次性臨時金鑰簽名，中繼看不到寄件人（原本以真名廣播指名事件，可靠時間相關反推 Gift Wrap 寄件人）。訂閱只靠 `#p`；只收聯絡人（防騷擾） |
+| 限時訊息（Disappearing，✅ M6） | 1059（rumor 內帶較短 NIP-40） | DO SQLite 至過期 | 送訊即帶較短過期：rumor 內層 `expiration` 供收件端到期隱藏，外層 wrap 同步縮短以利中繼清除；客戶端到期顯示「訊息已到期」（已實作，見 ADR-0013） |
 | 語音訊息／貼圖（規劃 M7） | WebRTC / 1059 | P2P 優先 | 錄音與媒體複用檔案分塊傳輸；貼圖以 `pack/id` 參照客戶端渲染 |
 | 群組聊天（✅ M9） | 1059（內含 kind 14 + `g` tag；控制為 kind 40） | 短期 | Gift-Wrap 成對扇出：群訊對每位成員各發一個 Gift Wrap（`g` tag = groupId）；控制訊息 create/add/remove/leave。對中繼完全不暴露群組/成員；移除即扇出略過、免 rekey（`group.ts`，ADR-0027） |
 | 語音/視訊通話（✅ M8） | 21002（NIP-59 包封） | 否（Ephemeral） | 通話控制 invite/accept/reject/hangup/candidate（`call.ts` 狀態機 + `WebRtcCall` 執行期）；媒體全程 P2P WebRTC track（DTLS）。假音源 + 真實 relay/WebRTC E2E 驗證（ADR-0025/0026） |
-| 加好友請求（規劃 M9） | 1059（內含請求 rumor） | D1（NIP-40） | QR/npub 交換後送出，對方核准前不建立聯絡（隱私同意） |
-| 群組訊息（規劃 M9） | 待定（群組加密） | — | 需群組金鑰管理（MLS/sender-key），另立 ADR |
+| 訊息請求（✅ ADR-0121） | 1059（一般私訊即是） | DO SQLite（NIP-40） | 陌生人的訊息進**訊息請求區**而非聯絡人清單；接受前不通知、不能 nudge、看不到你上線。訊息本身仍會抵達中繼（Nostr 擋不掉），此為客戶端顯示層防禦 |
+| 群組檔案（✅ ADR-0124） | 1059（內含 kind 14 + `g` + `file` tag） | 短期 | metadata 扇給每位成員（共用 rumor 與 tid），位元組各自走 P2P（明文不上中繼） |
 
 ## 6. 第一個功能（M1）：Nostr 中繼連線與心跳
 
@@ -90,9 +99,9 @@
 
 ```text
 本機金鑰 ──簽署──> Kind 20000 心跳事件 ──WebSocket──> Cloudflare Relay
-                                                          │（Ephemeral：純轉發，不寫 D1）
+                                                          │（Ephemeral：純轉發，不寫持久層）
 好友端 UI <── 渲染上線狀態 <── 訂閱接收 <───────────────────┘
-（每 30 秒一次心跳；連續 60 秒未收到即判定離線）
+（自適應心跳：活躍 60s／閒置 300s，ADR-0109；在線判定讀對方自報節奏，ADR-0119）
 ```
 
 **範圍**：relay WebSocket 連線管理、最小 secp256k1 Schnorr 簽章、Kind 20000 心跳發送與訂閱、上線/離線狀態判定與 UI 渲染。
@@ -101,13 +110,14 @@
 ## 7. 里程碑
 
 > 狀態圖例：✅ 核心邏輯完成且有測試覆蓋（`packages/core` / `relay`）；
-> ⏳ 執行期整合（真實 WebRTC / Tauri GUI / Rust 背景連線 / Cloudflare 部署）待具該環境時接線。
+> ⏳ 執行期整合（真實 `RTCPeerConnection`/ICE/TURN、行動端 EAS 原生建置）待具該環境時接線。
+> **中繼已部署生產**（DO SQLite）；「關窗仍在線」以系統匣隱藏達成，Rust 背景連線模組已於 ADR-0105 退役。
 
 - **M0**：文件與專案骨架、pnpm monorepo、ADR 機制。✅
-- **M1**：Nostr 中繼連線與心跳。✅ 核心（金鑰/事件/簽章/心跳/上線判定、relay 協定與 Ephemeral 扇出、TS RelayClient、端到端測試）；⏳ Rust 背景長連線(T9 退避邏輯已備)、OS 金鑰儲存、IPC、Worker 部署。
-- **M2**：離線文字留言（NIP-17/59 Gift Wrap、NIP-44 加密、NIP-40 過期）。✅ 核心（加密、Gift Wrap、relay 儲存/過期/`#p`、端到端測試）；⏳ Worker D1 綁定、收發 UI。
+- **M1**：Nostr 中繼連線與心跳。✅ 核心（金鑰/事件/簽章/自適應心跳/上線判定、relay 協定與 Ephemeral 扇出、TS RelayClient、端到端測試）＋ OS 金鑰儲存 ＋ **Worker 已部署生產**。「關窗仍在線」以系統匣隱藏達成（ADR-0105）。
+- **M2**：離線文字留言（NIP-17/59 Gift Wrap、NIP-44 加密、NIP-40 過期）。✅ 核心＋收發 UI＋**DO 內建 SQLite 持久化**（ADR-0056，已部署生產）。
 - **M3**：WebRTC P2P 直連（SDP 信令、Nudge 震動、檔案傳輸）。✅ 核心（信令封裝與端到端交換、資料通道分塊、雙軌降級）；⏳ 真實 `RTCPeerConnection`/ICE/TURN。
-- **M4**：多設備同步（QR Code + Happy Eyeballs）。✅ 核心（配對載荷與 AES-GCM 同步包、競速、多設備收斂）；⏳ 真實 LAN/WAN 連線器與背景同步。
+- **M4**：換機搬家（配對克隆）。✅ **WebRTC 配對傳輸 ＋ SAS 互認**（ADR-0072），桌面與行動端送出/匯入皆已接（ADR-0118）。（早期規劃的 QR＋LAN＋Happy Eyeballs 未採用。）
 - **M5**：經典體驗還原（音樂狀態、正在輸入中）與行動端。✅ 核心（Kind 20001/20002 事件與追蹤器）；⏳ 系統 API 取狀態、行動端。
 
 > 以下為借鏡 LINE 熱門功能的路線圖（📋 規劃中，見 `docs/adr/0010`）：
@@ -129,8 +139,8 @@
 - `RelayCore` 為傳輸無關；`relay/src/worker.ts` 僅注入 Cloudflare `WebSocketPair`。自架＝以 Node/Deno/Bun/Docker 的 WS server 包 `RelayCore`（`relay/src/dev-server.ts`、`in-memory-network.ts` 已示範 Worker 外執行）。
 
 **客戶端 — 多身分與資料隔離**
-- `apps/desktop/src/storage/profiles.ts`：全域設定檔登錄（`nb.profiles`＋作用中 pubkey）；首次載入把既有單一身分遷移為 namespace 為空的 legacy 設定檔（向後相容）。
-- `apps/desktop/src/storage/local.ts`：`LocalStorage(namespace)` 以 `nb.<pubkey>.<key>` 隔離各身分資料（聯絡人/訊息/群組/貼圖庫…），空 namespace＝舊鍵。
+- `packages/engine/src/storage/profiles.ts`：全域設定檔登錄（`nb.profiles`＋作用中 pubkey）；首次載入把既有單一身分遷移為 namespace 為空的 legacy 設定檔（向後相容）。（ADR-0074 起隨引擎抽出至 `packages/engine`。）
+- `packages/engine/src/storage/local.ts`：`LocalStorage(namespace)` 以 `nb.<pubkey>.<key>` 隔離各身分資料（聯絡人/訊息/群組/貼圖庫…），空 namespace＝舊鍵；web/mobile 以 nsec 導出金鑰加密（ADR-0112）。
 - `apps/desktop/src/App.tsx`：`buildBackend(profile)` 依身分建立後端——**工作身分（enterprise）鎖定單座**（不給 `connectorFor`/`anchors`/`onHomeSwitched` → 不漫遊、不遞補，ADR-0044/0045）；個人身分走開放模式（relay pool/錨點/漫遊）。切換身分以 reload 乾淨重建 per-身分 狀態。
 
 **資料流（工作身分送一則群訊）**
@@ -143,13 +153,13 @@
 
 ## 9. 待決議（Open Questions）
 
-- 中繼站採自建 Worker relay 還是相容既有 Nostr relay 實作？
-- `packages/core` 的加密原語選型（Web Crypto vs Rust 端 `ring`/`ed25519-dalek`）與跨平台一致性策略。
-- monorepo 工具（pnpm workspace / turborepo）與行動端共用程度。
-- ~~Ephemeral 心跳的 Worker 請求容量估算與批次/合併策略~~（已由 `docs/adr/0006` 定案：30s 心跳 + jitter，免費天花板約數十並行使用者，列出擴充旋鈕）。
-- 是否導入棘輪（Double Ratchet）以取得前向保密／後妥協安全，或維持 Nostr 靜態金鑰模型（另立 ADR）。
-- 多設備持續同步的衝突解法（LWW vs CRDT）定案。
-- 群組聊天（M9）的群組加密方案已定案（ADR-0027：Gift-Wrap 成對扇出；MLS 延後）；顯示名稱傳遞（kind 0）與大群升級為後續。
-- 語音訊息（M7）離線傳遞受中繼大小限制時的退回策略。
+- ~~中繼站採自建 Worker relay 還是相容既有 Nostr relay？~~（已定案 ADR-0005：**自建 Worker relay**，且客戶端與任何標準 Nostr relay 互通，ADR-0034。）
+- ~~`packages/core` 的加密原語選型與跨平台一致性？~~（已定案：core 用 `@noble/*`（TS）、Rust 用 `aes-gcm`/`argon2`/`sha2`（純 Rust、免 OpenSSL）；SSOT 在 `packages/core`。）
+- ~~monorepo 工具與行動端共用程度？~~（已定案：**pnpm workspace**；行動端共用 core/engine/i18n/theme，ADR-0086。）
+- ~~Ephemeral 心跳的容量估算與批次/合併？~~（已由 ADR-0109 定案並實作：**自適應心跳 60/300s ＋ 合併 REQ ＋ 增量收件箱**，取代 ADR-0006 的 30s。）
+- **（仍開放）** 是否導入棘輪（Double Ratchet）以取得前向保密／後妥協安全，或維持 Nostr 靜態金鑰模型？
+- 多設備同步的衝突解法：訊息以 rumor.id 去重、已讀水位 LWW（ADR-0108）已定；其餘可變狀態的 CRDT 化仍可評估。
+- ~~群組加密方案？~~（已定案 ADR-0027：Gift-Wrap 成對扇出；MLS 延後。顯示名稱走加密個人檔 kind 已實作，ADR-0061。）
+- **（仍開放）** 語音訊息（M7）離線傳遞受中繼大小限制時的退回策略；**心跳真名廣播＋訂閱洩漏聯絡人**的結構性隱私修法（ADR-0120／0123 已記為已知限制，待專門 ADR 權衡成本）。
 
 > 已定案決策見 `docs/adr/`（例如 `0002` 隱私元資料與協定基線、`0010` LINE 借鏡功能路線圖）。
