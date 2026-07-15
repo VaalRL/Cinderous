@@ -46,9 +46,37 @@ pub fn quarantine(path: &std::path::Path) {
     let _ = std::fs::rename(path, dest);
 }
 
+/// 把（**可能來自遠端**的）檔名消毒成乾淨的 basename，供原生另存對話框預填（ADR-0128）。
+///
+/// 收到的檔名一路從對方傳來的 `file` metadata 流到 `save_file` 的 `set_file_name`。對方不可信：
+/// 惡意檔名可以是 `../../../evil`、帶控制字元、Windows 保留字元、或超長。使用者仍會在對話框
+/// 確認位置，但預填一個穿越路徑或詭異檔名不該發生。
+///
+/// 規則：只取最後一段（丟掉 `/`、`\` 之前的一切）→ 移除控制字元與 `< > : " | ? *` → 去掉開頭
+/// 的 `.`（`..`／隱藏檔）與前後空白 → 長度上限 255 → 空的退回 `"file"`。
+pub fn sanitize_filename(name: &str) -> String {
+    // 只取最後一段：`/` 與 `\` 都當分隔（跨平台，且擋 Windows 路徑）。
+    let base = name.rsplit(['/', '\\']).next().unwrap_or("");
+    let mut out: String = base
+        .chars()
+        .filter(|c| !c.is_control() && !matches!(c, '<' | '>' | ':' | '"' | '|' | '?' | '*'))
+        .collect();
+    // 去掉開頭的點（`..`、隱藏檔）與前後空白。
+    out = out.trim().trim_start_matches('.').trim().to_string();
+    // 位元組上限（多數檔案系統 255）——以字元邊界切，避免切斷多位元組字元。
+    if out.chars().count() > 255 {
+        out = out.chars().take(255).collect();
+    }
+    if out.is_empty() {
+        "file".to_string()
+    } else {
+        out
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{atomic_write, quarantine, valid_part};
+    use super::{atomic_write, quarantine, sanitize_filename, valid_part};
 
     /// 每個測試一個獨立目錄（不引入 tempfile 相依）。
     fn tmpdir(tag: &str) -> std::path::PathBuf {
@@ -106,5 +134,34 @@ mod tests {
         let kept = d.join("msgs.deadbeef.corrupt");
         assert_eq!(std::fs::read(&kept).unwrap(), b"truncated ciphertext");
         let _ = std::fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn sanitize_filename_strips_path_traversal_and_junk() {
+        // 一般檔名原封不動。
+        assert_eq!(sanitize_filename("photo.png"), "photo.png");
+        assert_eq!(sanitize_filename("我的檔案.pdf"), "我的檔案.pdf");
+
+        // 🔴 路徑穿越：只留最後一段（`/` 與 `\` 都當分隔）。
+        assert_eq!(sanitize_filename("../../../../etc/passwd"), "passwd");
+        assert_eq!(sanitize_filename("..\\..\\Windows\\System32\\evil.exe"), "evil.exe");
+        assert_eq!(sanitize_filename("/absolute/path/x.txt"), "x.txt");
+
+        // 控制字元與 Windows 保留字元被移除。
+        assert_eq!(sanitize_filename("a\nb\tc.txt"), "abc.txt");
+        assert_eq!(sanitize_filename("a<b>c:\"d|e?f*g.txt"), "abcdefg.txt");
+
+        // 開頭的點（`..`、隱藏檔）與前後空白。
+        assert_eq!(sanitize_filename("..hidden"), "hidden");
+        assert_eq!(sanitize_filename("  spaced.txt  "), "spaced.txt");
+
+        // 全部被清光 → 退回預設，不回空字串。
+        assert_eq!(sanitize_filename(""), "file");
+        assert_eq!(sanitize_filename("..."), "file");
+        assert_eq!(sanitize_filename("/../"), "file");
+
+        // 超長 → 截到 255 字元。
+        let long = "a".repeat(300);
+        assert_eq!(sanitize_filename(&long).chars().count(), 255);
     }
 }

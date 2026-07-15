@@ -130,6 +130,25 @@ export async function relocateOriginal(name: string, mime: string): Promise<{ ur
   return bytes ? { url: bytesToUrl(bytes, mime), newPath } : null;
 }
 
+/**
+ * 檔名消毒（ADR-0128）：收到的檔名來自對方（遠端可控）。瀏覽器對 `<a download>` 本身會消毒，
+ * 但為求與桌面原生路徑一致、且不依賴各瀏覽器實作，這裡也收斂成乾淨 basename。
+ * 規則與 Rust `sanitize_filename` 一致：只取最後一段、移除控制字元與 Windows 保留字元、
+ * 去開頭的點、空的退回 `"file"`。
+ */
+export function sanitizeFilename(name: string): string {
+  const base = name.split(/[\\/]/).pop() ?? "";
+  // 丟掉控制字元（codepoint <= 0x1f）與 Windows 保留字元；以 codepoint 過濾避免在正則裡放
+  // 控制字元（會讓原始碼變 binary、且易寫錯範圍）。
+  const cleaned = [...base]
+    .filter((c) => (c.codePointAt(0) ?? 0) > 0x1f && !'<>:"|?*'.includes(c))
+    .join("")
+    .trim()
+    .replace(/^\.+/, "")
+    .trim();
+  return cleaned.slice(0, 255) || "file";
+}
+
 /** 瀏覽器下載共用：以 <a download> 觸發，回傳可再下載的物件 URL。 */
 function browserDownload(name: string, mime: string, bytes: Uint8Array): SaveResult {
   const blob = new Blob([bytes as BlobPart], { type: mime || "application/octet-stream" });
@@ -137,7 +156,7 @@ function browserDownload(name: string, mime: string, bytes: Uint8Array): SaveRes
   if (typeof document !== "undefined") {
     const a = document.createElement("a");
     a.href = url;
-    a.download = name || "file";
+    a.download = sanitizeFilename(name);
     document.body.appendChild(a);
     a.click();
     a.remove();

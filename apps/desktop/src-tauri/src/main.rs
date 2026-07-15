@@ -19,7 +19,7 @@ use tauri::{
 /// 顯示並聚焦主視窗（系統匣點擊/選單用）。
 // 檔案安全原語（ADR-0119）：檔名白名單、原子寫入、毀損隔離。**住在 lib**，因為這個 bin
 // target 需要 `tauri-app` feature，`cargo test` 永遠編不到它——安全關鍵的東西不能沒測試。
-use cinder_desktop::partfile::{atomic_write, quarantine, valid_part};
+use cinder_desktop::partfile::{atomic_write, quarantine, sanitize_filename, valid_part};
 
 fn show_main(app: &tauri::AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
@@ -672,14 +672,81 @@ async fn ai_models(provider: String, endpoint: String) -> Result<Vec<String>, St
 
 // ── 收檔另存 IPC（ADR-0093）：位元組交給 OS 檔案系統，App 不保管檔案本體 ──────────────
 
+// ── 讀檔路徑白名單（ADR-0128）──────────────────────────────────────────────────
+//
+// `read_saved_file` 對整個 webview 開放。一旦有 XSS，惡意 JS 就能讀走行程能讀的**任何檔案**。
+// 縱深防禦：只讀**使用者透過原生對話框親自授權過**的路徑。授權事件（save_file/pick_existing_file）
+// 把路徑加入白名單；`read_saved_file` 只讀白名單內的。持久化 → ADR-0102 的跨 session 讀原檔照常。
+// 存的是路徑的 **SHA-256 雜湊**，不是路徑本身——這道防禦不該自己變成明文檔名清單的洩漏。
+
+fn authorized_paths() -> &'static std::sync::Mutex<std::collections::HashSet<String>> {
+    static SET: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> = std::sync::OnceLock::new();
+    SET.get_or_init(|| std::sync::Mutex::new(std::collections::HashSet::new()))
+}
+
+/// 白名單檔：`<app_data>/file-authz`（每行一個 hex 雜湊）。
+fn authz_file(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir.join("file-authz"))
+}
+
+fn path_hash(path: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(path.as_bytes());
+    digest.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// 首次使用時把持久化的白名單載入記憶體（去重）。
+fn load_authz_once(app: &tauri::AppHandle) {
+    static LOADED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+    LOADED.get_or_init(|| {
+        if let Ok(file) = authz_file(app) {
+            if let Ok(contents) = std::fs::read_to_string(&file) {
+                if let Ok(mut set) = authorized_paths().lock() {
+                    for line in contents.lines() {
+                        let h = line.trim();
+                        if !h.is_empty() {
+                            set.insert(h.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
+/// 授權一個路徑（使用者透過原生對話框選定後）：加入記憶體白名單並持久化。
+fn authorize_path(app: &tauri::AppHandle, path: &str) {
+    load_authz_once(app);
+    let h = path_hash(path);
+    let inserted = authorized_paths().lock().map(|mut s| s.insert(h.clone())).unwrap_or(false);
+    if inserted {
+        if let Ok(file) = authz_file(app) {
+            use std::io::Write;
+            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&file) {
+                let _ = writeln!(f, "{h}");
+            }
+        }
+    }
+}
+
+fn is_authorized(app: &tauri::AppHandle, path: &str) -> bool {
+    load_authz_once(app);
+    authorized_paths().lock().map(|s| s.contains(&path_hash(path))).unwrap_or(false)
+}
+
 /// 收檔另存：開原生「另存新檔」對話框讓使用者選位置並寫入位元組；取消回 `None`。
 /// 回傳使用者選定的路徑供 UI 顯示。位元組由前端經 IPC 傳入（收自 P2P，不落 App 儲存）。
 #[tauri::command]
-fn save_file(name: String, bytes: Vec<u8>) -> Result<Option<String>, String> {
-    match rfd::FileDialog::new().set_file_name(&name).save_file() {
+fn save_file(app: tauri::AppHandle, name: String, bytes: Vec<u8>) -> Result<Option<String>, String> {
+    // ADR-0128：`name` 來自對方傳來的 metadata（遠端可控）→ 消毒成乾淨 basename 再預填。
+    match rfd::FileDialog::new().set_file_name(sanitize_filename(&name)).save_file() {
         Some(path) => {
             std::fs::write(&path, &bytes).map_err(|e| e.to_string())?;
-            Ok(Some(path.to_string_lossy().into_owned()))
+            let s = path.to_string_lossy().into_owned();
+            authorize_path(&app, &s); // 使用者選定 → 授權讀回（ADR-0128）
+            Ok(Some(s))
         }
         None => Ok(None),
     }
@@ -690,9 +757,13 @@ fn save_file(name: String, bytes: Vec<u8>) -> Result<Option<String>, String> {
 // 縮圖跨 session 存活，但**原檔位元組不由 App 保存**（ADR-0093）——原檔就在使用者當初
 // 選定的 `savedPath`。要看原圖時從那裡讀回；使用者若把檔案搬走，就讓他重新指定新位置。
 
-/// 讀回已另存的原檔；路徑不存在（被搬走/刪除）回 `Ok(None)` 讓前端走「重新指定」流程。
+/// 讀回已另存的原檔。路徑不存在、或**未經原生對話框授權**（ADR-0128）皆回 `Ok(None)`
+/// ——讓前端走既有的「重新指定」流程，且不給 XSS 可用的訊號。
 #[tauri::command]
-fn read_saved_file(path: String) -> Result<Option<Vec<u8>>, String> {
+fn read_saved_file(app: tauri::AppHandle, path: String) -> Result<Option<Vec<u8>>, String> {
+    if !is_authorized(&app, &path) {
+        return Ok(None); // 不是使用者親自授權過的路徑 → 當作「不存在」
+    }
     let p = std::path::Path::new(&path);
     if !p.is_file() {
         return Ok(None);
@@ -702,13 +773,18 @@ fn read_saved_file(path: String) -> Result<Option<Vec<u8>>, String> {
 
 /// 開「選擇檔案」對話框讓使用者重新指定原檔位置；取消回 `None`。
 #[tauri::command]
-fn pick_existing_file(name: String) -> Option<String> {
+fn pick_existing_file(app: tauri::AppHandle, name: String) -> Option<String> {
     let mut dlg = rfd::FileDialog::new();
-    // 以原檔名為起點，幫使用者更快找到。
-    if !name.is_empty() {
-        dlg = dlg.set_file_name(&name);
+    // 以原檔名為起點，幫使用者更快找到（ADR-0128：檔名遠端可控 → 消毒）。
+    let clean = sanitize_filename(&name);
+    if !clean.is_empty() && clean != "file" {
+        dlg = dlg.set_file_name(clean);
     }
-    dlg.pick_file().map(|p| p.to_string_lossy().into_owned())
+    let picked = dlg.pick_file().map(|p| p.to_string_lossy().into_owned());
+    if let Some(ref s) = picked {
+        authorize_path(&app, s); // 使用者親自選了 → 授權讀回（ADR-0128）
+    }
+    picked
 }
 
 fn main() {
