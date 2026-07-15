@@ -36,6 +36,39 @@ function render(extra: Partial<SettingsPanelProps> = {}): string {
   );
 }
 
+describe("SettingsPanel 分頁（ADR-0142）", () => {
+  beforeEach(() => {
+    (globalThis as Record<string, unknown>).window = { matchMedia: () => ({ matches: false }) };
+    (globalThis as Record<string, unknown>).localStorage = { getItem: () => null };
+  });
+  afterEach(() => {
+    delete (globalThis as Record<string, unknown>).window;
+    delete (globalThis as Record<string, unknown>).localStorage;
+  });
+
+  it("固定分頁（外觀/連線與備份/隱私與通知）恆在，預設外觀選中", () => {
+    const out = render();
+    expect(out).toContain('data-testid="settings-tab-appearance"');
+    expect(out).toContain('data-testid="settings-tab-relay"');
+    expect(out).toContain('data-testid="settings-tab-privacy"');
+    expect(out).toMatch(/aria-selected="true"[^>]*data-testid="settings-tab-appearance"/);
+  });
+
+  it("身分分頁只在有內容時出現（selfNsec/security/配對）；進階同理（retention/export/ollama）", () => {
+    expect(render()).not.toContain('data-testid="settings-tab-identity"');
+    expect(render({ selfNsec: "nsec1x" })).toContain('data-testid="settings-tab-identity"');
+    expect(render()).not.toContain('data-testid="settings-tab-advanced"');
+    expect(render({ onExport: () => {} })).toContain('data-testid="settings-tab-advanced"');
+  });
+
+  it("預設外觀分頁只顯示外觀區塊，不顯示其他分頁的內容", () => {
+    const out = render({ onRelayChange: () => {}, selfNsec: "nsec1x" });
+    expect(out).toContain('data-testid="layout-classic"'); // 外觀在
+    expect(out).not.toContain('data-testid="relay-change"'); // 連線分頁未啟用
+    expect(out).not.toContain('data-testid="backup-code"'); // 身分分頁未啟用
+  });
+});
+
 describe("SettingsPanel relay 區塊：更換中繼站（ADR-0066 H2）", () => {
   beforeEach(() => {
     (globalThis as Record<string, unknown>).window = {
@@ -51,17 +84,17 @@ describe("SettingsPanel relay 區塊：更換中繼站（ADR-0066 H2）", () => 
   });
 
   it("提供 onRelayChange 時顯示「更換」鈕", () => {
-    expect(render({ onRelayChange: () => {} })).toContain('data-testid="relay-change"');
+    expect(render({ initialTab: "relay", onRelayChange: () => {} })).toContain('data-testid="relay-change"');
   });
 
   it("relayLocked（工作身分）：顯示鎖定說明、無更換鈕", () => {
-    const out = render({ relayLocked: true });
+    const out = render({ initialTab: "relay", relayLocked: true });
     expect(out).toContain('data-testid="relay-locked"');
     expect(out).not.toContain('data-testid="relay-change"');
   });
 
   it("皆未提供（示範模式）：無更換鈕也無鎖定說明", () => {
-    const out = render();
+    const out = render({ initialTab: "relay" });
     expect(out).not.toContain('data-testid="relay-change"');
     expect(out).not.toContain('data-testid="relay-locked"');
   });
@@ -88,10 +121,10 @@ describe("SettingsPanel 安全區塊：本地密碼（ADR-0067）", () => {
   });
 
   it("未啟用：顯示啟用鈕；已啟用：顯示改密碼/停用/隱藏身分", () => {
-    const off = render({ security: security(false) });
+    const off = render({ initialTab: "identity", security: security(false) });
     expect(off).toContain('data-testid="pass-enable"');
     expect(off).not.toContain('data-testid="pass-change"');
-    const on = render({ security: security(true) });
+    const on = render({ initialTab: "identity", security: security(true) });
     expect(on).toContain('data-testid="pass-change"');
     expect(on).toContain('data-testid="pass-disable"');
     expect(on).toContain('data-testid="pass-hidden"');
@@ -99,7 +132,7 @@ describe("SettingsPanel 安全區塊：本地密碼（ADR-0067）", () => {
   });
 
   it("未提供 security（瀏覽器/示範模式）：無安全區塊", () => {
-    expect(render()).not.toContain('data-testid="security"');
+    expect(render({ initialTab: "identity" })).not.toContain('data-testid="security"');
   });
 });
 
@@ -114,15 +147,15 @@ describe("雲端同步設定（ADR-0071）", () => {
   });
 
   it("三檔模式選項齊備；開啟時有「立即備份」、關閉時沒有；未提供則無區塊", () => {
-    const on = render({ cloud: { mode: "full", onChange: () => {}, onBackupNow: () => {} } });
+    const on = render({ initialTab: "relay", cloud: { mode: "full", onChange: () => {}, onBackupNow: () => {} } });
     expect(on).toContain('data-testid="cloud-sync"');
     expect(on).toContain('data-testid="cloud-off"');
     expect(on).toContain('data-testid="cloud-basic"');
     expect(on).toContain('data-testid="cloud-full"');
     expect(on).toContain('data-testid="cloud-backup-now"');
-    const off = render({ cloud: { mode: "off", onChange: () => {} } });
+    const off = render({ initialTab: "relay", cloud: { mode: "off", onChange: () => {} } });
     expect(off).not.toContain('data-testid="cloud-backup-now"');
-    expect(render()).not.toContain('data-testid="cloud-sync"');
+    expect(render({ initialTab: "relay" })).not.toContain('data-testid="cloud-sync"');
   });
 });
 
@@ -174,7 +207,7 @@ describe("加密備份碼入口（ADR-0070）", () => {
   });
 
   it("有 selfNsec 時顯示「產生加密備份碼」；無 selfNsec（示範模式）不顯示", () => {
-    expect(render({ selfNsec: "nsec1xxx" })).toContain('data-testid="backup-code"');
-    expect(render()).not.toContain('data-testid="backup-code"');
+    expect(render({ initialTab: "identity", selfNsec: "nsec1xxx" })).toContain('data-testid="backup-code"');
+    expect(render({ initialTab: "identity" })).not.toContain('data-testid="backup-code"');
   });
 });

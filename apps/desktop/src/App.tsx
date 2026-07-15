@@ -184,6 +184,17 @@ export function relayChangeTarget(p: Profile | null, url: string): string | null
 }
 
 /**
+ * 登入建立身分的命名空間（ADR-0140，純函式可測）：
+ *
+ * **只有第一個身分**沿用空命名空間 `""`（向後相容 pre-multi-identity 的舊鍵）。若登錄裡**已有**
+ * 身分佔用 `""`，再從登入頁建身分就必須用**自己的 pubkey 命名空間**——否則新身分會讀到第一個
+ * 身分存在 `""` 的聯絡人/訊息（正是「新身分帶著舊聯絡人」的成因）。
+ */
+export function pickSignInNamespace(profiles: Profile[], pubkey: string): string {
+  return profiles.some((p) => p.namespace === "") ? pubkey : "";
+}
+
+/**
  * 某對話當下是否「真的看得到」（ADR-0079 三欄修正）：視窗需聚焦，且——
  * 經典佈局所有視窗同時可見（只看聚焦）；三欄僅 active 分頁可見。
  * 供未讀累加與已讀回條共用，取代「只看 document.hidden」的舊假設。
@@ -545,6 +556,15 @@ export function App(): JSX.Element {
             setLockedProfile({ ...active, locked: true });
             return;
           }
+          // ADR-0140：金鑰庫取不到這個**已知身分**的 nsec（換機/金鑰庫遺失/舊狀態）——
+          // 不能往下走：`buildBackend` 會因 expectPubkey 守衛拋 IDENTITY_UNAVAILABLE → 掉到通用登入頁，
+          // 使用者一登入就建出重複身分（且讀到 `""` 命名空間的舊聯絡人）。改與瀏覽器對稱：引導**貼回
+          // 這個身分的 nsec** 救回同一身分（`enterWithNsec` 會補寫金鑰庫，下次不再失敗）。
+          if (!override && active.pubkey) {
+            if (cancelled) return;
+            setNeedNsec(active);
+            return;
+          }
         }
 
         // 🔴 瀏覽器（ADR-0122）：**這裡沒有金鑰庫，nsec 只活在記憶體裡** → 重載後就沒了。
@@ -890,6 +910,9 @@ export function App(): JSX.Element {
     // 於是 ADR-0112 才剛加的「瀏覽器本地密碼解鎖」**永遠打不開**。必須分流。
     let store: AppStorage;
     if (isTauri()) {
+      // ADR-0140：救回時把 nsec 補回 OS 金鑰庫——若這次是因金鑰庫遺失才走到救援，補寫後下次重載
+      // 就能自動載入、不再掉登入頁（治本觸發點）。金鑰庫以 pubkey 為鍵，冪等。
+      await getKeyVault().setKey(p.pubkey, nsec);
       const ts = new TauriStorage(p.namespace);
       await ts.hydrate();
       ts.attachArchive(new TauriArchive(p.namespace)); // ADR-0111
@@ -992,16 +1015,19 @@ export function App(): JSX.Element {
       return;
     }
     localStorage.setItem(RELAY_URL_KEY, relayUrl);
-    // 第一個身分沿用舊鍵命名空間（空），達成向後相容
-    const first: Profile = { pubkey: "", name, relayUrl, enterprise: false, namespace: "" };
+    // 金鑰在此一次產生（兩條路徑共用同一把）。ADR-0140：命名空間只有**第一個身分**才用 `""`；
+    // 已有身分佔用 `""` 時，新身分用自己的 pubkey 命名空間，避免讀到第一個身分的資料。
+    const sk = generateSecretKey();
+    const nsec = nsecEncode(sk);
+    const pubkey = getPublicKey(sk);
+    const namespace = pickSignInNamespace(profilesState.profiles, pubkey);
+    const first: Profile = { pubkey, name, relayUrl, enterprise: false, namespace };
     let b: ChatBackend;
     if (isTauri()) {
       // B5（ADR-0053）：私鑰本機產生後存 OS 金鑰庫，不落 localStorage。
       // B2（ADR-0054）：狀態走加密 blob（TauriStorage）而非 localStorage。
-      const sk = generateSecretKey();
-      const nsec = nsecEncode(sk);
-      await getKeyVault().setKey(getPublicKey(sk), nsec);
-      const ts = new TauriStorage(first.namespace);
+      await getKeyVault().setKey(pubkey, nsec);
+      const ts = new TauriStorage(namespace);
       await ts.hydrate(); // 首個身分：空
       storageRef.current = ts; // ADR-0094：與後端同一份儲存
       b = buildBackend(first, nsec, ts);
@@ -1011,26 +1037,25 @@ export function App(): JSX.Element {
       // `storage.saveIdentity()` → **私鑰明文寫進 localStorage**（keyvault 的「拒收明文」守衛
       // 完全繞過，因為這條路根本不經過 keyvault）。ADR-0112 的紅線在這裡破了一個大洞。
       //
-      // 現在：在這裡產生 nsec，交給 `buildBackend` 當 override（後端不會落地它），
+      // 現在：以上面產生的 nsec 交給 `buildBackend` 當 override（後端不會落地它），
       // 並以它導出 DEK 加密 localStorage。
-      const genNsec = nsecEncode(generateSecretKey());
-      const ls = browserStore(first.namespace, genNsec);
+      const ls = browserStore(namespace, nsec);
       storageRef.current = ls; // ADR-0094：與後端同一份儲存
-      b = buildBackend(first, genNsec, ls);
+      b = buildBackend(first, nsec, ls);
       ls.saveIdentity({ nsec: "", name }); // 只存名稱；私鑰不落地
 
       // 🔴 ADR-0122：**這把 nsec 使用者從沒看過**，而瀏覽器沒有 OS 金鑰庫。
       // 不以密碼包裹它，使用者按一下重新整理，身分就永久消失。所以密碼在這條路徑上**必填**
       //（`SignIn` 已擋在前面；這裡是最後一道）。磁碟上只有 Argon2id 密文，KEK 從不落盤。
       if (!password) throw new Error("瀏覽器登入必須設定本機密碼（ADR-0122）");
-      await browserPassEnable(b.self.pubkey, genNsec, password);
+      await browserPassEnable(pubkey, nsec, password);
     }
     const profile: Profile = {
-      pubkey: b.self.pubkey,
+      pubkey,
       name,
       relayUrl,
       enterprise: false,
-      namespace: "",
+      namespace,
       ...(password ? { locked: true } : {}), // 瀏覽器：下次開機走解鎖畫面
     };
     const next = upsertProfile(profilesState, profile);
@@ -1509,34 +1534,50 @@ export function App(): JSX.Element {
 
   return (
     <div className={layout === "modern" ? "deck" : "desktop"} data-layout={layout}>
-      {profilesState.profiles.length > 0 ? (
+      {profilesState.profiles.length > 0 || layout === "modern" ? (
         <div className="idbar" data-testid="identity-bar">
-          <span className="idbar__icon" aria-hidden="true">
-            {activeProfile(profilesState)?.enterprise ? "🏢" : "👤"}
-          </span>
-          <select
-            className="idbar__select"
-            aria-label="切換身分"
-            value={profilesState.active ?? ""}
-            onChange={(e) => switchProfile(e.target.value)}
-          >
-            {visibleProfiles(profilesState).map((p) => (
-              <option key={p.pubkey} value={p.pubkey}>
-                {(p.enterprise ? "🏢 " : "👤 ") + p.name}
-              </option>
-            ))}
-          </select>
-          <button className="idbar__add" title="新增身分" onClick={() => setAddIdOpen(true)}>
-            ＋
-          </button>
-          {isTauri() ? (
-            <button className="idbar__add" title="解鎖隱藏身分" onClick={() => void unlockHidden()}>
-              🔒
-            </button>
+          {profilesState.profiles.length > 0 ? (
+            <>
+              <span className="idbar__icon" aria-hidden="true">
+                {activeProfile(profilesState)?.enterprise ? "🏢" : "👤"}
+              </span>
+              <select
+                className="idbar__select"
+                aria-label="切換身分"
+                value={profilesState.active ?? ""}
+                onChange={(e) => switchProfile(e.target.value)}
+              >
+                {visibleProfiles(profilesState).map((p) => (
+                  <option key={p.pubkey} value={p.pubkey}>
+                    {(p.enterprise ? "🏢 " : "👤 ") + p.name}
+                  </option>
+                ))}
+              </select>
+              <button className="idbar__add" title="新增身分" onClick={() => setAddIdOpen(true)}>
+                ＋
+              </button>
+              {isTauri() ? (
+                <button className="idbar__add" title="解鎖隱藏身分" onClick={() => void unlockHidden()}>
+                  🔒
+                </button>
+              ) : null}
+              {activeBackend.publishRoster ? (
+                <button className="idbar__add" title="組織名冊（管理者）" onClick={() => setRosterOpen(true)}>
+                  🗂
+                </button>
+              ) : null}
+            </>
           ) : null}
-          {activeBackend.publishRoster ? (
-            <button className="idbar__add" title="組織名冊（管理者）" onClick={() => setRosterOpen(true)}>
-              🗂
+          {/* 三欄版：設定入口移到上方 nav bar 右側（ADR-0142），不再擠在頭像旁。 */}
+          {layout === "modern" ? (
+            <button
+              className="idbar__add idbar__settings"
+              aria-label={t("settings_open")}
+              title={t("settings_open")}
+              data-testid="idbar-settings"
+              onClick={() => setSettingsOpen(true)}
+            >
+              ⚙️
             </button>
           ) : null}
         </div>
@@ -1577,8 +1618,9 @@ export function App(): JSX.Element {
             prefs={groupPrefs}
             unread={unread}
             onOpen={openChat}
-            onOpenSettings={() => setSettingsOpen(true)}
             onStatus={setStatus}
+            onStatusMessage={setStatusMessage}
+            onNowPlaying={(text) => activeBackend.setNowPlaying(text)}
             onAddLabel={(id, label) => updatePrefs(withLabel(groupPrefs, id, label))}
             onRemoveLabel={(id, label) => updatePrefs(withoutLabel(groupPrefs, id, label))}
             labelOptions={allLabels(groupPrefs)}

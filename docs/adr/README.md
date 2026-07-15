@@ -154,3 +154,7 @@
 | [0137](./0137-mobile-stickers.md) | **行動端貼圖**：貼圖格式/內建資料/SVG 驗證下沉 `@cinder/core`、桌面 import 改指 core；行動端渲染收到的貼圖（含收端驗證惡意 SVG）＋內建貼圖挑選送出；編輯器留桌面 | 已接受 |
 | [0138](./0138-mobile-multi-identity.md) | **行動端多身分**：採用 engine `profiles` 登錄、每身分 Argon2id 密碼包裹的 nsec（`nb.remembered.<pubkey>`）、舊單一身分無縫遷移；切換即解該身分密碼、新增、逐一登出；禁跨身分交友（ADR-0055） | 已接受 |
 | [0139](./0139-unified-custom-dialog.md) | **統一自訂對話框**：Promise 介面的 confirm/alert/prompt（`useDialog`＋`DialogProvider`）取代瀏覽器內建；重用視窗樣式、主題感知、Esc/Enter/背景鍵盤操作、破壞性紅鈕；非元件走 `dialog()` 橋接、無 provider 回退 | 已接受 |
+| [0140](./0140-fix-identity-switch-duplicate.md) | **修復切換身分→掉登入頁→建重複身分（帶舊聯絡人）**：Tauri 取不到金鑰改救援分流（`setNeedNsec`，與瀏覽器對稱）；`signIn` 命名空間隔離（純函式 `pickSignInNamespace`，非第一身分不重用 `""`）；救回即補寫金鑰庫治本 | 已接受 |
+| [0141](./0141-unified-button-system.md) | **統一按鈕系統**：主要動作＝主色實心（隨主題色，取代所有綠色漸層）、中性＝描邊淺底、危險＝單一紅；裸 `<button>` 給中性預設不再落回 OS 灰；全域一致焦點環/停用態；語意色（接聽綠/掛斷紅）保留 | 已接受 |
+| [0142](./0142-modern-layout-settings-and-status.md) | **三欄版改善**：設定入口移到上方 nav（idbar）不再擠頭像旁；左側欄補回自訂狀態文字＋正在聽（與經典版對齊）；設定改分頁（外觀/身分安全/連線備份/隱私通知/進階），只顯有內容分頁 | 已接受 |
+| [0143](./0143-embedded-conversation-flush.md) | **三欄中欄內嵌對話整塊填滿**：去除外框/視窗底色/彩色標題列（不再像浮動視窗），標題列改扁平對話標頭；並修正把 JSX `//` 註解當文字渲染的 bug | 已接受 |

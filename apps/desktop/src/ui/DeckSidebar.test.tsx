@@ -18,8 +18,8 @@ const render = (extra: Partial<DeckSidebarProps> = {}): string =>
         prefs={{}}
         unread={{}}
         onOpen={() => {}}
-        onOpenSettings={() => {}}
         onStatus={() => {}}
+        onStatusMessage={() => {}}
         onAddLabel={() => {}}
         onRemoveLabel={() => {}}
         labelOptions={[]}
@@ -45,5 +45,16 @@ describe("DeckSidebar 三欄左側欄（ADR-0079 Q2）", () => {
     expect(html).toContain('data-testid="sidebar-labelfilter"');
     expect(html).toContain("家人");
     expect(html).toMatch(/全部/);
+  });
+
+  it("可自訂狀態文字（ADR-0142）：頭像列有個人訊息輸入區；不再有設定齒輪（已移到上方 nav bar）", () => {
+    const html = render();
+    expect(html).toContain("me__msg"); // 個人狀態文字輸入（過去三欄版缺這個）
+    expect(html).not.toContain("⚙"); // 設定齒輪已移出側欄
+  });
+
+  it("提供 onNowPlaying → 顯示『正在聽』輸入", () => {
+    const html = render({ onNowPlaying: () => {} });
+    expect(html).toContain("me__np");
   });
 });

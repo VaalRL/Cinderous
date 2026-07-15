@@ -64,6 +64,8 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
 .idbar__select { flex: 1; max-width: 220px; padding: 3px 6px; border: 1px solid var(--border); border-radius: 6px; background: var(--field); color: var(--ink); font-size: 12px; }
 .idbar__add { border: 1px solid var(--border); background: var(--field); color: var(--accent); border-radius: 6px; cursor: pointer; padding: 2px 8px; font-size: 13px; }
 .idbar__add:hover { background: var(--hover); }
+/* 設定鈕靠右（三欄版 nav bar，ADR-0142）。 */
+.idbar__settings { margin-left: auto; }
 
 .desktop {
   min-height: 100vh;
@@ -98,8 +100,19 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
 .deck .convotab { display: none; }
 .deck .convotab.on { display: flex; flex: 1; min-height: 0; }
 .convo-dock--embed { flex: 1; min-height: 0; width: 100%; height: 100%; align-items: stretch; }
-.convo--embed { flex: 1; min-height: 0; width: auto; height: auto; border-radius: 0; box-shadow: none; }
+/* 內嵌對話（三欄中欄，ADR-0079/0143）：整塊填滿中欄，**不再是浮動視窗**——
+   去掉外框/圓角/陰影/視窗底色，標題列改為扁平的對話標頭（非彩色視窗標題列）。 */
+.convo--embed {
+  flex: 1; min-height: 0; width: auto; height: auto;
+  border: none; border-radius: 0; box-shadow: none; background: var(--panel);
+}
 .convo--embed .convo__resize { display: none; }
+.convo--embed .win__title {
+  background: var(--surface2); color: var(--ink); text-shadow: none;
+  border-bottom: 1px solid var(--border);
+}
+.convo--embed .win__title .win__btn { color: var(--muted); }
+.convo--embed .win__title .win__btn:hover { color: var(--ink); background: var(--hover); }
 .deckcenter__empty { flex: 1; display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 13px; padding: 24px; text-align: center; }
 .dtabs { display: flex; gap: 2px; padding: 6px 8px 0; overflow-x: auto; flex: none; background: var(--panel); border-bottom: 1px solid var(--border); }
 .dtabs__tab { display: flex; align-items: center; gap: 6px; padding: 6px 10px; border: 1px solid var(--border); border-bottom: none; border-radius: 8px 8px 0 0; background: var(--surface2); color: var(--ink); font-size: 12px; cursor: pointer; white-space: nowrap; }
@@ -137,8 +150,8 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
 
 /* 三欄左側欄（ADR-0079 Q2）：me 條 + 搜尋 + 標籤篩選 + 最近互動清單。 */
 .dsb { display: flex; flex-direction: column; height: 100%; min-height: 0; gap: 6px; }
-.dsb__me { display: flex; align-items: center; gap: 8px; padding: 2px 2px 6px; }
-.dsb__meinfo { flex: 1; min-width: 0; }
+.dsb__me { display: flex; align-items: flex-start; gap: 8px; padding: 2px 2px 6px; }
+.dsb__meinfo { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .dsb__mename { font-weight: 700; font-size: 13px; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dsb__search input { width: 100%; padding: 6px 9px; border: 1px solid var(--border); border-radius: 8px; background: var(--field); color: var(--ink); font: inherit; }
 .dsb__list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 1px; }
@@ -218,10 +231,26 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
   width: 100%; padding: 8px 10px; margin: 10px 0; border: 1px solid var(--border); border-radius: 5px; font-size: 14px;
   background: var(--field); color: var(--ink);
 }
-.signin button, .composer__send, .pill {
-  background: linear-gradient(180deg, #8ad08a, #2f9e44); color: #fff; border: 1px solid #2f8a3c;
+/* 統一按鈕系統：任何未指定 class 的 <button> 預設＝中性描邊（確保沒有按鈕落回瀏覽器灰色預設）。
+   有 class 的按鈕（主色/危險/選單/圖示…）specificity 較高，各自覆寫這個基底。 */
+button {
+  font: inherit; font-weight: 600; line-height: 1.2;
+  border: 1px solid var(--border); background: var(--field); color: var(--ink);
+  border-radius: 6px; padding: 5px 12px; cursor: pointer;
+}
+
+/* 主要動作（統一按鈕系統）：主色實心，隨主題色變（與標題列、對話框一致）。 */
+.signin button, .composer__send, .pill, .addbar__row button, .dialog__btn {
+  background: var(--accent); color: #fff; border: 1px solid var(--accent);
   border-radius: 6px; padding: 7px 16px; font-size: 13px; font-weight: 600; cursor: pointer;
 }
+.signin button:hover, .composer__send:hover, .pill:hover, .addbar__row button:hover, .dialog__btn:hover {
+  filter: brightness(1.06);
+}
+/* 全域按鈕：一致的鍵盤焦點環與停用態（涵蓋所有按鈕、含 role="button" 的 span）。 */
+button:focus-visible,
+[role="button"]:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+button:disabled { opacity: .5; cursor: default; filter: none; }
 .signin .hint { color: var(--muted); font-size: 12px; margin-top: 10px; }
 .signin__relayline {
   display: flex; align-items: center; justify-content: center; gap: 8px; flex-wrap: wrap;
@@ -257,7 +286,8 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
 .qrcard__npub { font-family: "Consolas", monospace; font-size: 10px; word-break: break-all; text-align: center; color: var(--fg); }
 .addbar__row { display: flex; gap: 4px; }
 .addbar__row input { flex: 1; min-width: 0; padding: 4px 6px; border: 1px solid var(--border); border-radius: 4px; background: var(--field); color: var(--ink); font-size: 12px; }
-.addbar__row button { padding: 4px 10px; border: 1px solid #2f8a3c; border-radius: 5px; background: linear-gradient(180deg, #8ad08a, #2f9e44); color: #fff; font-size: 12px; font-weight: 600; cursor: pointer; }
+/* 尺寸較小；色彩/形狀吃上面的主要動作群組（主色實心）。 */
+.addbar__row button { padding: 4px 10px; font-size: 12px; }
 .me {
   display: flex; gap: 10px; padding: 10px; align-items: center;
   background: linear-gradient(180deg, color-mix(in srgb, var(--accent) 22%, var(--surface2)) 0%, var(--surface2) 100%);
@@ -385,8 +415,11 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
 .export__fmts { display: flex; gap: 14px; }
 .export__fmt { display: flex; align-items: center; gap: 5px; font-size: 13px; cursor: pointer; }
 .export__actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
-.export__cancel, .export__go { font-size: 13px; padding: 6px 14px; border-radius: 6px; border: 1px solid var(--border); cursor: pointer; }
+.export__cancel, .export__go { font-size: 13px; padding: 6px 14px; border-radius: 6px; border: 1px solid var(--border); font-weight: 600; cursor: pointer; }
+.export__cancel { background: var(--field); color: var(--ink); }
+.export__cancel:hover { background: var(--hover); }
 .export__go { background: var(--accent); color: #fff; border-color: var(--accent); }
+.export__go:hover { filter: brightness(1.06); }
 .export__go:disabled { opacity: .5; cursor: default; }
 
 /* 保留上限設定（ADR-0094）。 */
@@ -459,7 +492,7 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
 .trigpanel__gone { width: 28px; text-align: center; flex: none; }
 .trigpanel__trigger { background: var(--code-bg); border-radius: 4px; padding: 1px 6px; }
 .trigpanel__label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
-.trigpanel__row button { border: 1px solid var(--border); border-radius: 4px; background: var(--field); color: var(--ink); font-size: 11px; padding: 1px 6px; cursor: pointer; flex: none; }
+.trigpanel__row button { border: 1px solid var(--border); border-radius: 6px; background: var(--field); color: var(--ink); font-size: 11px; padding: 1px 6px; cursor: pointer; flex: none; }
 .trigpanel__row button:hover { border-color: var(--accent); color: var(--accent); }
 
 /* 高風險連結（ADR-0038） */
@@ -474,9 +507,9 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
 .settings__home { color: var(--muted); font-style: normal; margin-left: 4px; }
 .settings__stale { color: #c47f17; font-style: normal; margin-left: 6px; }
 .settings__stalebox { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.settings__staleact { border: 1px solid var(--border); border-radius: 4px; background: var(--field); color: var(--ink); font-size: 11px; padding: 1px 7px; cursor: pointer; }
+.settings__staleact { border: 1px solid var(--border); border-radius: 6px; background: var(--field); color: var(--ink); font-size: 11px; padding: 1px 7px; cursor: pointer; }
 .settings__staleact:hover { background: var(--hover); }
-.settings__staleact--danger { color: #b3261e; border-color: #b3261e55; }
+.settings__staleact--danger { color: #e5484d; border-color: #e5484d55; }
 
 /* 貼圖編輯器（ADR-0033） */
 .stickered { position: fixed; inset: 0; background: rgba(0,0,0,.45); display: flex; align-items: center; justify-content: center; z-index: 55; }
@@ -542,7 +575,7 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
 
 /* 群組 */
 .group--groups { display: flex; align-items: center; justify-content: space-between; }
-.group__add { font-size: 10px; border: 1px solid var(--border); background: var(--field); color: var(--accent); border-radius: 5px; cursor: pointer; padding: 1px 5px; }
+.group__add { font-size: 10px; border: 1px solid var(--border); background: var(--field); color: var(--accent); border-radius: 6px; cursor: pointer; padding: 1px 5px; }
 .group__add:hover { background: var(--hover); }
 .group-row .avatar { font-weight: bold; }
 .pin-ic { font-size: 10px; margin-right: 3px; }
@@ -564,7 +597,8 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
 .groupmodal__label { font-size: 11px; color: var(--muted); }
 .groupmodal__list { max-height: 200px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; border: 1px solid var(--border); border-radius: 5px; padding: 6px; }
 .groupmodal__item { display: flex; align-items: center; gap: 6px; font-size: 13px; cursor: pointer; padding: 2px; }
-.groupmodal__create { padding: 7px; border: 1px solid #3fae5a; border-radius: 5px; background: #3fae5a; color: #fff; cursor: pointer; }
+.groupmodal__create { padding: 7px; border: 1px solid var(--accent); border-radius: 6px; background: var(--accent); color: #fff; font-weight: 600; cursor: pointer; }
+.groupmodal__create:hover { filter: brightness(1.06); }
 .groupmodal__create:disabled { opacity: .5; cursor: not-allowed; }
 .me__np { display: flex; align-items: center; gap: 4px; margin-top: 3px; }
 .me__np-ic { color: #9a6cd4; font-size: 12px; }
@@ -580,7 +614,18 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
 }
 .modal__box > .win__title { flex: 0 0 auto; }
 .modal__box > .win__title ~ * { overflow-y: auto; min-height: 0; }
-.settings__body { padding: 10px 12px; display: flex; flex-direction: column; gap: 12px; }
+/* 設定彈窗較寬（表單/中繼站清單較多）；仍受 max-width: calc(100vw - 24px) 封頂。 */
+.modal__box.settings-modal { width: 480px; }
+/* 設定分頁列（ADR-0142）：固定在標題下、不隨內文捲動。 */
+.settings__tabs { flex: 0 0 auto; display: flex; gap: 2px; padding: 6px 8px 0; border-bottom: 1px solid var(--border); overflow-x: auto; }
+.settings__tab {
+  border: none; background: none; color: var(--muted); font-size: 12px; font-weight: 600;
+  padding: 6px 10px; border-radius: 6px 6px 0 0; cursor: pointer; white-space: nowrap;
+  border-bottom: 2px solid transparent; margin-bottom: -1px;
+}
+.settings__tab:hover { color: var(--ink); background: var(--hover); }
+.settings__tab.on { color: var(--accent); border-bottom-color: var(--accent); }
+.settings__body { flex: 1 1 auto; padding: 10px 12px; display: flex; flex-direction: column; gap: 12px; }
 
 /* 統一自訂對話框（ADR-0139）：confirm/alert/prompt，取代瀏覽器內建。 */
 .dialog { width: 340px; }
@@ -591,11 +636,7 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
   font-size: 14px; background: var(--field); color: var(--ink);
 }
 .dialog__actions { display: flex; justify-content: flex-end; gap: 8px; }
-.dialog__btn {
-  padding: 7px 16px; border-radius: 6px; font-size: 13px; font-weight: 600; cursor: pointer;
-  border: 1px solid var(--accent); background: var(--accent); color: #fff;
-}
-.dialog__btn:hover { filter: brightness(1.05); }
+/* .dialog__btn 的實心主色/形狀吃上面的「主要動作」群組；這裡只定義次要/危險變體。 */
 .dialog__btn--ghost { background: var(--field); color: var(--ink); border-color: var(--border); }
 .dialog__btn--ghost:hover { border-color: var(--accent); filter: none; }
 .dialog__btn--danger { background: #e5484d; border-color: #d33; }
@@ -816,14 +857,16 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
 .rewrite__style:hover:not(:disabled) { background: var(--hover); }
 .rewrite__custom { display: flex; gap: 4px; }
 .rewrite__custom input { flex: 1; min-width: 0; border: 1px solid var(--border); border-radius: 5px; background: var(--field); color: var(--ink); font-size: 12px; padding: 4px 6px; }
-.rewrite__go { border: 1px solid #2f8a3c; background: linear-gradient(180deg, #8ad08a, #2f9e44); color: #fff; border-radius: 5px; font-size: 12px; font-weight: 600; padding: 3px 8px; cursor: pointer; }
+.rewrite__go { border: 1px solid var(--accent); background: var(--accent); color: #fff; border-radius: 6px; font-size: 12px; font-weight: 600; padding: 3px 8px; cursor: pointer; }
+.rewrite__go:hover { filter: brightness(1.06); }
 .rewrite__go:disabled { opacity: .5; cursor: not-allowed; }
 .rewrite__busy { font-size: 12px; color: var(--muted); }
 .rewrite__error { font-size: 12px; color: #c0392b; }
 .rewrite__result { font-size: 13px; color: var(--ink); white-space: pre-wrap; word-break: break-word; max-height: 180px; overflow-y: auto; background: var(--surface2); border-radius: 6px; padding: 6px 8px; }
 .rewrite__actions { display: flex; gap: 6px; justify-content: flex-end; }
-.rewrite__adopt { border: 1px solid #2f8a3c; background: linear-gradient(180deg, #8ad08a, #2f9e44); color: #fff; border-radius: 5px; font-size: 12px; font-weight: 600; padding: 3px 12px; cursor: pointer; }
-.rewrite__cancel { border: 1px solid var(--border); background: var(--field); color: var(--muted); border-radius: 5px; font-size: 12px; padding: 3px 10px; cursor: pointer; }
+.rewrite__adopt { border: 1px solid var(--accent); background: var(--accent); color: #fff; border-radius: 6px; font-size: 12px; font-weight: 600; padding: 3px 12px; cursor: pointer; }
+.rewrite__adopt:hover { filter: brightness(1.06); }
+.rewrite__cancel { border: 1px solid var(--border); background: var(--field); color: var(--muted); border-radius: 6px; font-size: 12px; padding: 3px 10px; cursor: pointer; }
 
 /* 設定：Ollama 端點/模型。 */
 .settings__ollama { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }

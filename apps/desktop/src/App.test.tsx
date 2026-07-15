@@ -1,7 +1,13 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { I18nProvider } from "./i18n.js";
-import { AddIdentityModal, convoVisibleIn, nextActiveAfterRemoval, relayChangeTarget } from "./App.js";
+import {
+  AddIdentityModal,
+  convoVisibleIn,
+  nextActiveAfterRemoval,
+  pickSignInNamespace,
+  relayChangeTarget,
+} from "./App.js";
 import type { Profile } from "@cinder/engine";
 
 const renderModal = (defaultRelayUrl: string): string =>
@@ -34,6 +40,19 @@ const prof = (over: Partial<Profile> = {}): Profile => ({
   enterprise: false,
   namespace: "",
   ...over,
+});
+
+describe("pickSignInNamespace（ADR-0140：登入建身分的命名空間隔離）", () => {
+  it("第一個身分（登錄無人佔用 \"\"）→ 沿用空命名空間（向後相容）", () => {
+    expect(pickSignInNamespace([], "pk_new")).toBe("");
+    // 登錄裡的身分都用非空命名空間 → 仍可讓下一個用 ""？不：只要沒人佔 "" 就給 ""。
+    expect(pickSignInNamespace([prof({ pubkey: "b", namespace: "b" })], "pk_new")).toBe("");
+  });
+
+  it("🔴 已有身分佔用 \"\" → 新身分改用自己的 pubkey 命名空間（不讀到第一個身分的聯絡人）", () => {
+    const existing = [prof({ pubkey: "a", namespace: "" })];
+    expect(pickSignInNamespace(existing, "pk_new")).toBe("pk_new");
+  });
 });
 
 describe("relayChangeTarget（ADR-0066 H2 更換守門）", () => {

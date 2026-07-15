@@ -359,6 +359,12 @@ export interface Messages {
   identities_title: string;
   identities_add: string;
   identities_active: string;
+  /** 設定分頁（ADR-0142）。 */
+  settingsTab_appearance: string;
+  settingsTab_identity: string;
+  settingsTab_relay: string;
+  settingsTab_privacy: string;
+  settingsTab_advanced: string;
   /** 統一自訂對話框（ADR-0139）。 */
   dialog_titleConfirm: string;
   dialog_titleAlert: string;
@@ -858,6 +864,11 @@ const zhHant: Messages = {
   identities_title: "身分",
   identities_add: "新增身分",
   identities_active: "使用中",
+  settingsTab_appearance: "外觀",
+  settingsTab_identity: "身分與安全",
+  settingsTab_relay: "連線與備份",
+  settingsTab_privacy: "隱私與通知",
+  settingsTab_advanced: "進階",
   dialog_titleConfirm: "確認",
   dialog_titleAlert: "提示",
   dialog_titlePrompt: "輸入",
@@ -1347,6 +1358,11 @@ const en: Messages = {
   identities_title: "Identities",
   identities_add: "Add identity",
   identities_active: "Active",
+  settingsTab_appearance: "Appearance",
+  settingsTab_identity: "Identity & Security",
+  settingsTab_relay: "Connection & Backup",
+  settingsTab_privacy: "Privacy & Notifications",
+  settingsTab_advanced: "Advanced",
   dialog_titleConfirm: "Confirm",
   dialog_titleAlert: "Notice",
   dialog_titlePrompt: "Enter",

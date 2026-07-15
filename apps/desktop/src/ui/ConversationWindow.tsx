@@ -687,7 +687,7 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
 
   return (
     <div className={`convo-dock${props.embedded ? " convo-dock--embed" : ""}`}>
-    // data-convo（ADR-0104）：原生拖放只給座標，靠它命中測試「掉在哪個對話上」。
+    {/* data-convo（ADR-0104）：原生拖放只給座標，靠它命中測試「掉在哪個對話上」。 */}
     <div
       className={`win convo${props.embedded ? " convo--embed" : ""}`}
       ref={rootRef}

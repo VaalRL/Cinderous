@@ -35,6 +35,8 @@ export interface RelayPoolEntry {
 }
 
 export interface SettingsPanelProps {
+  /** 開啟時預設分頁（ADR-0142）；未指定＝外觀。供深連結與測試。 */
+  initialTab?: SettingsTab;
   /** 目前使用的中繼站網址；空字串表示示範模式。 */
   relayUrl: string;
   /** Relay pool 各座連線狀態（多中繼時才有；ADR-0034）。 */
@@ -550,11 +552,15 @@ function SecuritySettings({ value }: { value: NonNullable<SettingsPanelProps["se
 }
 
 /** 設定面板：主題色、中繼站、身分備份（私鑰）、桌面通知。 */
+/** 設定分頁（ADR-0142）：把長設定頁切成分頁，減少捲動。 */
+type SettingsTab = "appearance" | "identity" | "relay" | "privacy" | "advanced";
+
 export function SettingsPanel(props: SettingsPanelProps): JSX.Element {
   const { t } = useI18n();
   const { confirm } = useDialog();
   const [reveal, setReveal] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [tab, setTab] = useState<SettingsTab>(props.initialTab ?? "appearance");
 
   const copy = () => {
     if (!props.selfNsec) return;
@@ -569,9 +575,20 @@ export function SettingsPanel(props: SettingsPanelProps): JSX.Element {
     );
   };
 
+  // 只顯示有內容的分頁（身分/進階全條件式，可能為空）。
+  const hasIdentity = !!props.selfNsec || !!props.security || !!props.onPairDevice;
+  const hasAdvanced = !!props.retention || !!props.onExport || !!(props.ollama && props.onOllamaChange);
+  const TABS: { key: SettingsTab; label: string }[] = [
+    { key: "appearance", label: t("settingsTab_appearance") },
+    ...(hasIdentity ? [{ key: "identity" as const, label: t("settingsTab_identity") }] : []),
+    { key: "relay", label: t("settingsTab_relay") },
+    { key: "privacy", label: t("settingsTab_privacy") },
+    ...(hasAdvanced ? [{ key: "advanced" as const, label: t("settingsTab_advanced") }] : []),
+  ];
+
   return (
     <div className="modal" role="dialog" aria-modal="true" aria-label={t("settings_title")}>
-      <div className="modal__box win">
+      <div className="modal__box win settings-modal">
         <div className="win__title">
           <span>{t("settings_title")}</span>
           <span className="spacer" />
@@ -584,9 +601,29 @@ export function SettingsPanel(props: SettingsPanelProps): JSX.Element {
             ×
           </span>
         </div>
+        <div className="settings__tabs" role="tablist">
+          {TABS.map((tb) => (
+            <button
+              key={tb.key}
+              type="button"
+              role="tab"
+              aria-selected={tab === tb.key}
+              className={`settings__tab${tab === tb.key ? " on" : ""}`}
+              data-testid={`settings-tab-${tb.key}`}
+              onClick={() => setTab(tb.key)}
+            >
+              {tb.label}
+            </button>
+          ))}
+        </div>
         <div className="settings__body">
-          <LayoutSettings />
-          <AccentSettings />
+          {tab === "appearance" ? (
+            <>
+              <LayoutSettings />
+              <AccentSettings />
+            </>
+          ) : null}
+          {tab === "relay" ? (
           <section className="settings__sec">
             <h4>{t("settings_relayUrl")}</h4>
             {props.relays && props.relays.length > 0 ? (
@@ -652,8 +689,9 @@ export function SettingsPanel(props: SettingsPanelProps): JSX.Element {
               </p>
             ) : null}
           </section>
+          ) : null}
 
-          {props.selfNsec ? (
+          {tab === "identity" && props.selfNsec ? (
             <section className="settings__sec">
               <h4>{t("settings_identityBackup")}</h4>
               <p className="settings__warn">⚠️ {t("settings_identityWarning")}</p>
@@ -674,7 +712,7 @@ export function SettingsPanel(props: SettingsPanelProps): JSX.Element {
             </section>
           ) : null}
 
-          {props.onPairDevice ? (
+          {tab === "identity" && props.onPairDevice ? (
             <section className="settings__sec" data-testid="pair-device">
               <h4>{t("pair_settingsButton")}</h4>
               <p className="hint">{t("pair_settingsHint")}</p>
@@ -684,11 +722,11 @@ export function SettingsPanel(props: SettingsPanelProps): JSX.Element {
             </section>
           ) : null}
 
-          {props.cloud ? <CloudSyncSettings value={props.cloud} /> : null}
+          {tab === "relay" && props.cloud ? <CloudSyncSettings value={props.cloud} /> : null}
 
-          {props.security ? <SecuritySettings value={props.security} /> : null}
+          {tab === "identity" && props.security ? <SecuritySettings value={props.security} /> : null}
 
-          {props.onToggleCleanOnPaste ? (
+          {tab === "privacy" && props.onToggleCleanOnPaste ? (
             <section className="settings__sec">
               <h4>{t("settings_privacy")}</h4>
               <label className="settings__toggle">
@@ -703,6 +741,7 @@ export function SettingsPanel(props: SettingsPanelProps): JSX.Element {
             </section>
           ) : null}
 
+          {tab === "privacy" ? (
           <section className="settings__sec">
             <h4>{t("settings_notifications")}</h4>
             <label className="settings__toggle">
@@ -730,8 +769,9 @@ export function SettingsPanel(props: SettingsPanelProps): JSX.Element {
               </label>
             ) : null}
           </section>
+          ) : null}
 
-          {props.onToggleReadReceipts ? (
+          {tab === "privacy" && props.onToggleReadReceipts ? (
             <section className="settings__sec">
               <h4>{t("settings_readReceipts")}</h4>
               <label className="settings__toggle">
@@ -744,7 +784,7 @@ export function SettingsPanel(props: SettingsPanelProps): JSX.Element {
               </label>
             </section>
           ) : null}
-          {props.onToggleInvisible ? (
+          {tab === "privacy" && props.onToggleInvisible ? (
             <section className="settings__sec">
               <h4>{t("settings_invisible")}</h4>
               <label className="settings__toggle">
@@ -753,15 +793,15 @@ export function SettingsPanel(props: SettingsPanelProps): JSX.Element {
               </label>
             </section>
           ) : null}
-          {props.retention ? <RetentionSettings {...props.retention} /> : null}
-          {props.onExport ? (
+          {tab === "advanced" && props.retention ? <RetentionSettings {...props.retention} /> : null}
+          {tab === "advanced" && props.onExport ? (
             <section className="settings__sec">
               <h4>{t("settings_export")}</h4>
               <p className="settings__hint">{t("settings_exportHint")}</p>
               <button className="retention__opt" onClick={props.onExport}>{t("export_title")}…</button>
             </section>
           ) : null}
-          {props.ollama && props.onOllamaChange ? (
+          {tab === "advanced" && props.ollama && props.onOllamaChange ? (
             <OllamaSettings value={props.ollama} onChange={props.onOllamaChange} />
           ) : null}
         </div>

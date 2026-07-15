@@ -3,6 +3,7 @@ import type { ChatMessage, Contact, Group, Self, Status } from "@cinder/engine";
 import { useI18n } from "../i18n.js";
 import { Avatar } from "./Avatar.js";
 import { AddContact, StatusPicker } from "./ContactListWindow.js";
+import { hasRichStatus, renderStatus } from "./status-text.js";
 import { buildEntries, type SidebarEntry, visibleEntries } from "./deck-sidebar.js";
 import type { GroupPrefsMap } from "./group-labels.js";
 
@@ -14,8 +15,11 @@ export interface DeckSidebarProps {
   prefs: GroupPrefsMap;
   unread: Record<string, number>;
   onOpen: (id: string) => void;
-  onOpenSettings: () => void;
   onStatus: (s: Status) => void;
+  /** 自訂狀態文字（ADR-0142）：三欄版過去缺這個入口。 */
+  onStatusMessage: (message: string) => void;
+  /** 正在聽什麼（可選）。 */
+  onNowPlaying?: (text: string) => void;
   onAddLabel: (id: string, label: string) => void;
   onRemoveLabel: (id: string, label: string) => void;
   labelOptions: string[];
@@ -60,16 +64,32 @@ export function DeckSidebar(props: DeckSidebarProps): JSX.Element {
         <div className="dsb__meinfo">
           <div className="dsb__mename">{props.self.name}</div>
           <StatusPicker value={props.self.status} onChange={props.onStatus} />
+          {/* 自訂狀態文字（ADR-0142）：與經典版同一套（含 :emoji: 等富狀態預覽）。 */}
+          <div className="me__msg">
+            <input
+              aria-label={t("personalMessage_placeholder")}
+              placeholder={t("personalMessage_placeholder")}
+              value={props.self.statusMessage}
+              onChange={(e) => props.onStatusMessage(e.target.value)}
+            />
+          </div>
+          {hasRichStatus(props.self.statusMessage) ? (
+            <div className="me__msg-preview" aria-hidden="true">{renderStatus(props.self.statusMessage)}</div>
+          ) : null}
+          {props.onNowPlaying ? (
+            <div className="me__np">
+              <span className="me__np-ic">♪</span>
+              <input
+                aria-label={t("nowPlaying_placeholder")}
+                placeholder={t("nowPlaying_placeholder")}
+                onBlur={(e) => props.onNowPlaying?.(e.target.value.trim())}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                }}
+              />
+            </div>
+          ) : null}
         </div>
-        <button
-          type="button"
-          className="themebtn"
-          aria-label={t("settings_open")}
-          title={t("settings_open")}
-          onClick={props.onOpenSettings}
-        >
-          ⚙️
-        </button>
       </div>
 
       {props.onAddContact ? (
