@@ -89,6 +89,62 @@ Content-Security-Policy:
   ——**取捨**：彈性換來較大的連線面，自架情境建議釘死自己的 relay。
 - WebRTC 通話走 P2P，不需在 `connect-src` 額外開（瀏覽器 RTC 不受 `connect-src` 限制）；如需 TURN，另按你的 TURN 設定調整。
 
+### 各家託管商的實際設定
+
+三家常見靜態託管的具體設定。共通點：monorepo 用 pnpm workspace，**建置根目錄保持 repo 根**（需要根
+lockfile 與 `packages/*`）、**輸出目錄 `apps/desktop/dist`**。下面 CSP 裡的 `wss://relay.example.com`
+**換成你實際的 relay**。
+
+> **pnpm 版本別重複指定**：三家都會用 corepack 依 `package.json` 的 `packageManager`（`pnpm@10.33.0`）
+> 自動裝對版本——**不要**再在平台設定裡另填 pnpm 版本，否則「指定了多個 pnpm 版本」會卡在安裝階段
+> （與本專案 CI 踩過的坑同一個）。
+
+以下 `_headers`／`netlify.toml`／`vercel.json` 都是**部署專屬**（內含你的 relay 網址）——放在**你自己的
+fork／部署**，不要 PR 回共用 repo（共用 repo 保持與 relay 網域無關）。
+
+**Cloudflare Pages**
+- 連結 repo → Framework preset 選 **None**。
+- Build command：`pnpm --filter @cinder/desktop build`（CF 會自動先 install）
+- Build output directory：`apps/desktop/dist`；Root directory：repo 根（`/`）。
+- CSP：在你的 fork 放 `apps/desktop/public/_headers`（Vite 會複製進 `dist`；無 `public/` 就新建）：
+  ```
+  /*
+    Content-Security-Policy: default-src 'self'; connect-src 'self' wss://relay.example.com; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'
+  ```
+- 自訂網域：加 `app.example.com`。
+
+**Netlify**
+- 在你的 fork 放 repo 根 `netlify.toml`：
+  ```toml
+  [build]
+    command = "pnpm --filter @cinder/desktop build"
+    publish = "apps/desktop/dist"
+
+  [[headers]]
+    for = "/*"
+    [headers.values]
+      Content-Security-Policy = "default-src 'self'; connect-src 'self' wss://relay.example.com; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'"
+  ```
+- 自訂網域：Domain settings 加 `app.example.com`。
+
+**Vercel**
+- 專案設定：Framework Preset **Other**、Build Command `pnpm --filter @cinder/desktop build`、
+  Output Directory `apps/desktop/dist`、Install Command `pnpm install`。
+- 在你的 fork 放 repo 根 `vercel.json`：
+  ```json
+  {
+    "headers": [
+      {
+        "source": "/(.*)",
+        "headers": [
+          { "key": "Content-Security-Policy", "value": "default-src 'self'; connect-src 'self' wss://relay.example.com; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'" }
+        ]
+      }
+    ]
+  }
+  ```
+- 自訂網域：Project → Domains 加 `app.example.com`。
+
 ---
 
 ## 6. 官網那一側
