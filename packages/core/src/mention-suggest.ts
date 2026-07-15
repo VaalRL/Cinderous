@@ -1,8 +1,9 @@
 // @提及 composer 建議（ADR-0050）：從輸入中的進行中 @token 過濾候選。
 //
-// 純函式，沿用 ADR-0037 尾端建議列的體驗；名稱→公鑰解析交給 core parseMentions。
+// 純函式，沿用 ADR-0037 尾端建議列的體驗；名稱→公鑰解析交給 parseMentions（mention.ts）。
+// 放在 core 讓桌面與行動端**共用同一份**（ADR-0133）——過去只有桌面有，行動端無從提及。
 
-import type { MentionCandidate } from "@cinder/core";
+import type { MentionCandidate } from "./mention.js";
 
 /** 建議列上限。 */
 export const MENTION_SUGGEST_MAX = 6;

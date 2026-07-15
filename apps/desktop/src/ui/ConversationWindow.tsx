@@ -1,8 +1,15 @@
-import { calcPreview, contentHash, groupReceiptMode, parseMentions, REACTION_EMOJIS } from "@cinder/core";
+import {
+  applyMention,
+  calcPreview,
+  contentHash,
+  groupReceiptMode,
+  parseMentions,
+  REACTION_EMOJIS,
+  suggestMentions,
+} from "@cinder/core";
 import { type MouseEvent as ReactMouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "../i18n.js";
 import type { CallMedia, MentionCandidate } from "@cinder/core";
-import { applyMention, suggestMentions } from "./mention-suggest.js";
 import { mainMessages, replyCounts, threadMessages } from "./thread-util.js";
 import type { MessageKey } from "@cinder/i18n";
 import type { ChatMessage, Contact, MessageStatus, Self } from "@cinder/engine";

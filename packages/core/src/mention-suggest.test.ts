@@ -7,7 +7,7 @@ const cands = [
   { pubkey: "pk_bob", name: "Bob" },
 ];
 
-describe("suggestMentions（ADR-0050）", () => {
+describe("suggestMentions（ADR-0050／0133）", () => {
   it("剛輸入 @ 顯示全部候選", () => {
     const s = suggestMentions("嗨 @", cands);
     expect(s?.candidates.map((c) => c.name)).toEqual(["Alice", "Alan", "Bob"]);

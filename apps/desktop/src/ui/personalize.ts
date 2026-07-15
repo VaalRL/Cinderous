@@ -1,8 +1,20 @@
 // 本地個人化儲存（ADR-0077）：頭像／每對話背景／對話框尺寸純存 localStorage，
 // 不廣播、不進 Nostr 事件、不進雲端快照或備份。圖片一律本機縮圖壓縮成 data URI。
+//
+// 對話背景的**純資料與純函式**（預設漸層、CSS 產生、儲存鍵、尺寸上限）自 ADR-0134 起下沉
+// `@cinder/theme`，桌面與行動端共用一份。這裡沿用同一組並 re-export，桌面既有 import 不變。
+
+import {
+  BG_PRESETS,
+  CHATBG_MAX_EDGE,
+  CHATBG_PREFIX,
+  chatBgCss,
+  type ChatBg,
+  presetCss,
+} from "@cinder/theme";
+export { BG_PRESETS, CHATBG_MAX_EDGE, chatBgCss, type ChatBg, presetCss };
 
 const AVATAR_PREFIX = "nb.avatar.";
-const CHATBG_PREFIX = "nb.chatbg.";
 const CONVO_SIZE_KEY = "nb.convoSize";
 
 function lsGet(key: string): string | null {
@@ -80,9 +92,7 @@ export function removeAvatar(pubkey: string): void {
   notify();
 }
 
-// ── O3 每對話背景：preset id 或圖片 data URI ─────────────────────────────────
-export type ChatBg = { type: "preset"; value: string } | { type: "image"; value: string };
-
+// ── O3 每對話背景：preset id 或圖片 data URI（型別/預設/CSS 產生見 @cinder/theme）──────────
 export function getChatBg(pubkey: string): ChatBg | null {
   const raw = lsGet(CHATBG_PREFIX + pubkey);
   if (!raw) return null;
@@ -102,30 +112,6 @@ export function setChatBg(pubkey: string, bg: ChatBg): boolean {
 export function removeChatBg(pubkey: string): void {
   lsRemove(CHATBG_PREFIX + pubkey);
   notify();
-}
-
-/** 內建背景預設（O3）：id → CSS background 值。淡色漸層＋一組深色，訊息泡泡自帶底色故仍易讀。 */
-export interface BgPreset {
-  id: string;
-  css: string;
-}
-export const BG_PRESETS: BgPreset[] = [
-  { id: "sky", css: "linear-gradient(160deg,#eaf3ff,#d3e6ff)" },
-  { id: "mint", css: "linear-gradient(160deg,#e9f7ef,#cfeede)" },
-  { id: "dusk", css: "linear-gradient(160deg,#efe6ff,#ffe6f2)" },
-  { id: "sand", css: "linear-gradient(160deg,#faf3e6,#f1e4c9)" },
-  { id: "rose", css: "linear-gradient(160deg,#ffe9ec,#ffd6de)" },
-  { id: "graphite", css: "linear-gradient(160deg,#2b2f38,#1c2027)" },
-];
-export function presetCss(id: string): string | undefined {
-  return BG_PRESETS.find((p) => p.id === id)?.css;
-}
-
-/** 把 ChatBg 轉成可套用的 CSS `background` 值；未設或壞的 preset 回 undefined（＝不套、用預設面板色）。 */
-export function chatBgCss(bg: ChatBg | null): string | undefined {
-  if (!bg) return undefined;
-  if (bg.type === "image") return `center / cover no-repeat url("${bg.value}")`;
-  return presetCss(bg.value);
 }
 
 /**
@@ -152,5 +138,4 @@ export async function downscaleImage(file: File, maxEdge: number, quality = 0.82
 
 /** 頭像縮圖邊長上限（px）。 */
 export const AVATAR_MAX_EDGE = 128;
-/** 背景縮圖邊長上限（px）。 */
-export const CHATBG_MAX_EDGE = 900;
+// 背景縮圖邊長上限 CHATBG_MAX_EDGE 已下沉 @cinder/theme（上方 re-export）。

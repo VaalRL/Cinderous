@@ -2,11 +2,11 @@
 // 頂部返回列（‹ 返回＋名稱＋副標）、訊息氣泡（自己靠右主色、對方靠左淺底；群組顯示發送者名）、
 // 底部輸入列（輸入框＋送出）。色彩吃 @cinder/theme。訊息與送出由呼叫端注入（接 ChatBackend）。
 import { useMemo, useState } from "react";
-import { calcPreview, groupReceiptMode, REACTION_EMOJIS } from "@cinder/core";
-import type { CallMedia } from "@cinder/core";
+import { applyMention, calcPreview, groupReceiptMode, parseMentions, REACTION_EMOJIS, suggestMentions } from "@cinder/core";
+import type { CallMedia, MentionCandidate } from "@cinder/core";
 import type { ChatMessage, MessageStatus } from "@cinder/engine";
 import { type Locale, type MessageKey, translate } from "@cinder/i18n";
-import { resolveTheme, type Theme, type ThemeTokens } from "@cinder/theme";
+import { BG_PRESETS, type ChatBg, chatBgStyle, resolveTheme, type Theme, type ThemeTokens } from "@cinder/theme";
 import { Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native-web";
 import { MsgStatusIcon } from "./MsgStatusIcon.js";
 import { downloadImageFromUrl, shareImageFromUrl } from "../native/share.js";
@@ -48,6 +48,9 @@ function makeStyles(tk: ThemeTokens) {
     bubble: { maxWidth: "78%", borderRadius: 14, paddingVertical: 8, paddingHorizontal: 12 },
     bubbleMine: { backgroundColor: tk.accent },
     bubbleTheir: { backgroundColor: tk.panel, borderWidth: 1, borderColor: tk.border },
+    // @提及你（ADR-0133）：主色左邊條。
+    bubbleMention: { borderLeftWidth: 3, borderLeftColor: tk.accent },
+    mentionBadge: { fontSize: 10, fontWeight: "700", color: tk.accent, marginBottom: 2 },
     textMine: { color: "#ffffff", fontSize: 14 },
     textTheir: { color: tk.ink, fontSize: 14 },
     status: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 2, marginRight: 4 },
@@ -65,6 +68,19 @@ function makeStyles(tk: ThemeTokens) {
     memberBtnText: { fontSize: 11, color: tk.muted },
     leaveBtn: { alignSelf: "flex-start", marginTop: 4, borderColor: "#dc2626" },
     leaveText: { fontSize: 11, color: "#dc2626" },
+    // 對話背景挑選面板（ADR-0134）。
+    bgpanel: {
+      backgroundColor: tk.panel,
+      borderBottomWidth: 1,
+      borderBottomColor: tk.border,
+      paddingHorizontal: 10,
+      paddingVertical: 8,
+      gap: 8,
+    },
+    bggrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
+    bgswatch: { width: 44, height: 44, borderRadius: 8, borderWidth: 1, borderColor: tk.border },
+    bgswatchOn: { borderWidth: 2, borderColor: tk.accent },
+    bgclear: { alignSelf: "flex-start" },
     textGone: { fontStyle: "italic", opacity: 0.7 },
     reactions: { marginTop: 2, paddingHorizontal: 4 },
     reactionText: { fontSize: 13 },
@@ -84,6 +100,18 @@ function makeStyles(tk: ThemeTokens) {
     actEmoji: { fontSize: 16 },
     actText: { fontSize: 12, color: tk.accent },
     readby: { fontSize: 10, color: tk.muted },
+    // @提及建議列（ADR-0133）：輸入列上方橫向可捲。
+    menbar: { maxHeight: 44, borderTopWidth: 1, borderTopColor: tk.border, backgroundColor: tk.panel },
+    menbarInner: { alignItems: "center", gap: 6, paddingHorizontal: 8, paddingVertical: 6 },
+    menItem: {
+      paddingHorizontal: 10,
+      paddingVertical: 4,
+      borderRadius: 999,
+      borderWidth: 1,
+      borderColor: tk.accent,
+      backgroundColor: tk.field,
+    },
+    menItemText: { fontSize: 13, color: tk.accent },
     // 算式預覽 chip（ADR-0097）
     calcchip: {
       flexDirection: "row",
@@ -141,6 +169,10 @@ export function ConversationScreen({
   onReact,
   onUnsend,
   onSend,
+  mentionCandidates,
+  chatBg = null,
+  onSetChatBg,
+  onClearChatBg,
   onSendFile,
   onStartCall,
   onNudge,
@@ -190,7 +222,16 @@ export function ConversationScreen({
   isGroupAdmin?: boolean;
   /** 自己的 pubkey（成員清單中不對自己顯示「移除」）。 */
   selfPubkey?: string;
-  onSend: (text: string) => void;
+  /** 送出訊息；`mentions` 為解析出的 @提及公鑰（ADR-0050／0133）。 */
+  onSend: (text: string, mentions?: string[]) => void;
+  /** @提及候選（ADR-0133）：群組＝其他成員、1:1＝對方。未提供則不顯示提及建議。 */
+  mentionCandidates?: MentionCandidate[];
+  /** 目前對話背景（ADR-0134，本地個人化）；null＝用預設面板色。 */
+  chatBg?: ChatBg | null;
+  /** 設定對話背景；未提供則不顯示背景入口（如示範模式）。 */
+  onSetChatBg?: (bg: ChatBg) => void;
+  /** 清除對話背景。 */
+  onClearChatBg?: () => void;
   onBack: () => void;
   locale?: Locale;
   theme?: Theme;
@@ -204,6 +245,8 @@ export function ConversationScreen({
   const [picked, setPicked] = useState<string | null>(null);
   /** 群組成員面板是否展開（ADR-0114）。 */
   const [membersOpen, setMembersOpen] = useState(false);
+  /** 對話背景挑選面板是否展開（ADR-0134）。 */
+  const [bgOpen, setBgOpen] = useState(false);
   // 狀態圖示配色（ADR-0095）：張開眼＝主色、失敗＝紅、其餘＝灰。
   const statusColor = (s: MessageStatus): string =>
     s === "read" ? tk.accent : s === "failed" ? "#dc2626" : tk.muted;
@@ -243,10 +286,19 @@ export function ConversationScreen({
   // 算式預覽（ADR-0097）：純函式判定草稿是否為算式；不是就回 null（不顯示）。
   const calc = calcPreview(draft);
 
+  // @提及建議（ADR-0133，與桌面同一份 core 邏輯）：草稿結尾有進行中的 @token 就過濾候選。
+  // 手機沒有下拉，改在輸入列上方橫向排一列可點的名字。
+  const menSuggest = mentionCandidates ? suggestMentions(draft, mentionCandidates) : null;
+  const acceptMention = (cand: MentionCandidate): void => {
+    if (menSuggest) setDraft(applyMention(draft, menSuggest, cand));
+  };
+
   const submit = (): void => {
     const text = draft.trim();
     if (!text) return;
-    onSend(text);
+    // 解析 @提及 → p tag（隨 Gift Wrap 加密，中繼看不到；ADR-0050）。
+    const mentions = mentionCandidates ? parseMentions(text, mentionCandidates) : [];
+    onSend(text, mentions.length > 0 ? mentions : undefined);
     setDraft("");
   };
 
@@ -282,6 +334,18 @@ export function ConversationScreen({
             onPress={() => setMembersOpen((v) => !v)}
           >
             <Text style={styles.callIcon}>👥</Text>
+          </Pressable>
+        ) : null}
+        {/* 對話背景（ADR-0134）：本地個人化，點開挑選面板。 */}
+        {onSetChatBg ? (
+          <Pressable
+            style={styles.callBtn}
+            accessibilityRole="button"
+            aria-label={t("chatbg_title")}
+            testID="chatbg-btn"
+            onPress={() => setBgOpen((v) => !v)}
+          >
+            <Text style={styles.callIcon}>🖼</Text>
           </Pressable>
         ) : null}
         {/* 歷史紀錄（ADR-0111）：主畫面只讀熱區；更舊的訊息在封存裡，由此進入。 */}
@@ -353,7 +417,44 @@ export function ConversationScreen({
         </View>
       ) : null}
 
-      <ScrollView style={styles.list} contentContainerStyle={styles.listInner}>
+      {/* 對話背景挑選面板（ADR-0134）：預設漸層一鍵套、或清除。圖片上傳留待原生建置（見 ADR）。 */}
+      {bgOpen && onSetChatBg ? (
+        <View style={styles.bgpanel} testID="chatbg-panel">
+          <View style={styles.bggrid}>
+            {BG_PRESETS.map((p) => {
+              const on = chatBg?.type === "preset" && chatBg.value === p.id;
+              return (
+                <Pressable
+                  key={p.id}
+                  style={[styles.bgswatch, chatBgStyle({ type: "preset", value: p.id }), on ? styles.bgswatchOn : null]}
+                  accessibilityRole="button"
+                  aria-label={p.id}
+                  testID={`chatbg-${p.id}`}
+                  onPress={() => {
+                    onSetChatBg({ type: "preset", value: p.id });
+                    setBgOpen(false);
+                  }}
+                />
+              );
+            })}
+          </View>
+          {chatBg && onClearChatBg ? (
+            <Pressable
+              style={[styles.memberBtn, styles.bgclear]}
+              accessibilityRole="button"
+              testID="chatbg-clear"
+              onPress={() => {
+                onClearChatBg();
+                setBgOpen(false);
+              }}
+            >
+              <Text style={styles.memberBtnText}>{t("chatbg_clear")}</Text>
+            </Pressable>
+          ) : null}
+        </View>
+      ) : null}
+
+      <ScrollView style={[styles.list, chatBgStyle(chatBg)]} contentContainerStyle={styles.listInner}>
         {messages.map((m) => {
           const gone = unsent?.has(m.id) ?? false; // 已收回（NIP-09）
           const emojis = reactions?.[m.id] ?? [];
@@ -373,7 +474,19 @@ export function ConversationScreen({
                 : {})}
               testID={`bubble-${m.id}`}
             >
-              <View style={[styles.bubble, m.outgoing ? styles.bubbleMine : styles.bubbleTheir]}>
+              <View
+                style={[
+                  styles.bubble,
+                  m.outgoing ? styles.bubbleMine : styles.bubbleTheir,
+                  // @提及你（ADR-0050／0133）：主色左邊條凸顯，一眼看到被點名。
+                  !gone && m.mentionsMe ? styles.bubbleMention : null,
+                ]}
+              >
+                {!gone && m.mentionsMe ? (
+                  <Text style={styles.mentionBadge} aria-label={t("mention_you")} testID={`mention-badge-${m.id}`}>
+                    @ {t("mention_you")}
+                  </Text>
+                ) : null}
                 {/* 圖片縮圖（ADR-0102）：跨 session 存活——重載後圖片仍是圖片，不會退化成檔名。 */}
                 {!gone && m.file && (m.file.url ?? m.file.thumb) ? (
                   <Image
@@ -473,6 +586,23 @@ export function ConversationScreen({
           );
         })}
       </ScrollView>
+
+      {/* @提及建議列（ADR-0133）：輸入 @ 時橫向列出可點的名字，點一下補進草稿。 */}
+      {menSuggest ? (
+        <ScrollView horizontal style={styles.menbar} contentContainerStyle={styles.menbarInner}>
+          {menSuggest.candidates.map((c) => (
+            <Pressable
+              key={c.pubkey}
+              style={styles.menItem}
+              accessibilityRole="button"
+              testID={`mention-${c.pubkey}`}
+              onPress={() => acceptMention(c)}
+            >
+              <Text style={styles.menItemText}>@{c.name}</Text>
+            </Pressable>
+          ))}
+        </ScrollView>
+      ) : null}
 
       {/* 算式即時預覽（ADR-0097）：純本地計算，草稿不外流；點一下把「= 答案」加到草稿。 */}
       {calc ? (

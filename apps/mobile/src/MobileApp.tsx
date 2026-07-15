@@ -30,7 +30,8 @@ import { makeThumbnail, pickFile, saveFile } from "./native/files.js";
 import { hasCallSupport } from "./native/call-media.js";
 import { CallScreen } from "./screens/CallScreen.js";
 import { type Locale, type MessageKey, translate } from "@cinder/i18n";
-import type { Theme } from "@cinder/theme";
+import type { ChatBg, Theme } from "@cinder/theme";
+import { getChatBg, removeChatBg, setChatBg } from "./personalize.js";
 import { StyleSheet, View } from "react-native-web";
 import {
   isRemembered,
@@ -177,6 +178,8 @@ export function MobileApp({
     }
   });
   const [activeId, setActiveId] = useState<string | null>(null);
+  // 對話背景（ADR-0134，本地個人化）：開對話時載入該對話的偏好，換對話時更新。
+  const [chatBg, setChatBgState] = useState<ChatBg | null>(null);
   const [selfPubkey, setSelfPubkey] = useState("");
   const [selfName, setSelfName] = useState("");
   const [selfNpub, setSelfNpub] = useState("");
@@ -417,6 +420,7 @@ export function MobileApp({
 
   const openConvo = (id: string): void => {
     setActiveId(id);
+    setChatBgState(getChatBg(id)); // 載入該對話的背景偏好（ADR-0134）
     setScreen("conversation");
     // ADR-0111：查這個對話有沒有封存（決定要不要顯示「歷史紀錄」入口）。非同步、不擋畫面。
     const arch = storeRef.current?.archiveOf?.();
@@ -446,14 +450,26 @@ export function MobileApp({
   /** 目前開啟的對話是不是群組。 */
   const isGroup = (id: string): boolean => groups.some((g) => g.id === id);
 
-  const send = (text: string): void => {
+  const send = (text: string, mentions?: string[]): void => {
     if (!activeId) return;
     const b = backendRef.current;
     // **群組必須走 sendGroupMessage**：`groupId` 是 16 bytes hex（32 字元），**不是** pubkey。
     // 過去這裡一律呼叫 `sendMessage(activeId)`，而群組會出現在手機的聊天清單裡
     // → 點進群組送訊直接拋錯（`second arg must be public key`），訊息送不出去。
-    if (isGroup(activeId)) b?.sendGroupMessage?.(activeId, text);
-    else b?.sendMessage(activeId, text);
+    // `mentions`＝@提及公鑰（ADR-0050／0133）；隨 Gift Wrap 加密，中繼看不到社交圖譜。
+    if (isGroup(activeId)) b?.sendGroupMessage?.(activeId, text, mentions);
+    else b?.sendMessage(activeId, text, undefined, mentions);
+  };
+  // 對話背景（ADR-0134）：純本地，寫 localStorage ＋ 即時反映到畫面（不廣播、不進雲端）。
+  const applyChatBg = (bg: ChatBg): void => {
+    if (!activeId) return;
+    setChatBg(activeId, bg);
+    setChatBgState(bg);
+  };
+  const clearChatBg = (): void => {
+    if (!activeId) return;
+    removeChatBg(activeId);
+    setChatBgState(null);
   };
   const addContact = (npub: string): void => backendRef.current?.addContact?.(npub.trim());
   /** 對某訊息送 emoji 回應（NIP-25）。群組回應同樣以 rumor.id 為鍵（ADR-0107）。 */
@@ -742,6 +758,10 @@ export function MobileApp({
           groupMembers: group.members,
           selfPubkey,
           isGroupAdmin: group.admin === selfPubkey,
+          // @提及候選（ADR-0133）：群組＝其他成員（排除自己）。
+          mentionCandidates: group.members
+            .filter((m) => m !== selfPubkey)
+            .map((m) => ({ pubkey: m, name: nameFor(m) })),
           onLeaveGroup: () => {
             backendRef.current?.leaveGroup?.(group.id);
             back(); // 已經不是成員了，留在對話畫面沒有意義
@@ -749,6 +769,9 @@ export function MobileApp({
           onRemoveMember: (pk: string) => backendRef.current?.removeGroupMember?.(group.id, pk),
         }
       : {};
+    // @提及候選（ADR-0133）：1:1＝對方一人（群組候選已在 groupProps 內）。
+    const dmMentionProps =
+      !group && contact ? { mentionCandidates: [{ pubkey: contact.pubkey, name: contact.name }] } : {};
     // 檔案：真實 relay 才有 P2P 傳輸（示範後端無 sendFile）。
     const fileProps = backendRef.current?.sendFile ? { onSendFile: sendFileFromPicker } : {};
     // 通話：需真實後端＋平台具備 WebRTC（ADR-0101）。
@@ -767,7 +790,11 @@ export function MobileApp({
           {...(subtitle ? { subtitle } : {})}
           {...(relayUrl && !group ? { onNudge: nudge } : {})}
           {...((archived[activeId] ?? 0) > 0 ? { onHistory: () => setScreen("history") } : {})}
+          chatBg={chatBg}
+          onSetChatBg={applyChatBg}
+          onClearChatBg={clearChatBg}
           {...groupProps}
+          {...dmMentionProps}
           {...fileProps}
           {...callProps}
           {...themeProps}
