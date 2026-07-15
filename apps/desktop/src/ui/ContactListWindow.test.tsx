@@ -10,7 +10,8 @@ const groups: Group[] = [{ id: "g1", name: "工作群", admin: "aa", members: ["
 
 const render = (extra: Record<string, unknown>) =>
   renderToStaticMarkup(
-    <I18nProvider>
+    // locale 釘死 zh-Hant：斷言用繁中字串，否則 CI（無 navigator.language → 預設英文）會不符。
+    <I18nProvider locale="zh-Hant">
       <ThemeProvider>
       <ContactListWindow
         self={self}
