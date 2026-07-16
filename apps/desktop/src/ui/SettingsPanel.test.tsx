@@ -351,3 +351,36 @@ describe("企業頭銜編輯（ADR-0158）", () => {
     expect(html).not.toContain('data-testid="org-title"');
   });
 });
+
+describe("公司儲存槽設定（ADR-0161）", () => {
+  it("員工端：提供 slotQueue → 佇列面板（含狀態與失敗重試）", () => {
+    const html = render({
+      initialTab: "identity",
+      selfName: "夜",
+      onRename: () => true,
+      slotQueue: [
+        { id: "1", path: "C:/a.pdf", name: "a.pdf", size: 1, mime: "application/pdf", origin: "x", status: "done", queuedAt: 1 },
+        { id: "2", path: "C:/b.pdf", name: "b.pdf", size: 1, mime: "application/pdf", origin: "x", status: "failed", queuedAt: 2 },
+      ],
+      onSlotRetry: () => {},
+      onSlotRemove: () => {},
+    });
+    expect(html).toContain('data-testid="settings-slot-queue"');
+    expect(html).toContain("已存放");
+    expect(html).toContain("失敗");
+    expect(html).toContain('data-testid="slot-retry"');
+  });
+
+  it("企業主端：提供 onPickSlotDir → 槽目錄區（未設顯示預設槽說明）", () => {
+    const html = render({ initialTab: "identity", selfName: "夜", onRename: () => true, slotDirValue: "", onPickSlotDir: () => {} });
+    expect(html).toContain('data-testid="settings-slot-dir"');
+    expect(html).toContain("CinderSlot"); // settings_slotDirDefault
+    expect(html).toContain('data-testid="slot-dir-pick"');
+  });
+
+  it("皆未提供（個人身分）→ 兩區都不顯示", () => {
+    const html = render({ initialTab: "identity", selfName: "夜", onRename: () => true });
+    expect(html).not.toContain('data-testid="settings-slot-queue"');
+    expect(html).not.toContain('data-testid="settings-slot-dir"');
+  });
+});

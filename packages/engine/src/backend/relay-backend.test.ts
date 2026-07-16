@@ -1223,6 +1223,55 @@ describe("檔案投遞與另存（ADR-0093）", () => {
   beforeEach(() => vi.stubGlobal("RTCPeerConnection", FakePeerConnection));
   afterEach(() => vi.unstubAllGlobals());
 
+  it("公司儲存槽（ADR-0161）：存放不建聊天訊息、位元組到齊發 onSlotDeposit；非名冊成員拒收", () => {
+    const net = createInMemoryRelayNetwork();
+    const token = "tok-slot";
+    const storeO = new MemoryStorage();
+    const owner = new RelayChatBackend(storeO, (h) => net.connect("o", h), "老闆", {
+      orgOwner: true,
+      orgInviteToken: token,
+    });
+    const deposits: { sender: string; name: string; origin: string; bytes: Uint8Array }[] = [];
+    owner.start({ ...noop, onSlotDeposit: (sender, d) => deposits.push({ sender, name: d.name, origin: d.origin, bytes: d.bytes }) });
+    owner.publishRoster("小公司", [{ pubkey: owner.self.pubkey, name: "老闆" }]);
+
+    const storeA = new MemoryStorage();
+    const a = new RelayChatBackend(storeA, (h) => net.connect("a", h), "小美", {
+      orgAdminPubkey: owner.self.pubkey,
+      orgJoinToken: token,
+    });
+    a.start(noop);
+
+    // 存放：metadata（帶 slot 標記）經中繼到達企業主——**兩端都不建聊天訊息**。
+    const tid = a.depositFile(owner.self.pubkey, { name: "報表.xlsx", mime: "application/x", bytes: new Uint8Array([1, 2, 3]) }, "與阿強的對話");
+    expect(storeO.loadMessages(a.self.pubkey)).toEqual([]);
+    expect(storeA.loadMessages(owner.self.pubkey).filter((m) => m.file)).toEqual([]);
+
+    // P2P 位元組到齊（node 無真實 WebRTC → 直接餵 onFileBytes 模擬）→ onSlotDeposit。
+    (owner as unknown as { onFileBytes(peer: string, file: { id: string; name: string; mime: string; bytes: Uint8Array }): void }).onFileBytes(
+      a.self.pubkey,
+      { id: tid, name: "報表.xlsx", mime: "application/x", bytes: new Uint8Array([1, 2, 3]) },
+    );
+    expect(deposits.length).toBe(1);
+    expect(deposits[0]).toMatchObject({ sender: a.self.pubkey, name: "報表.xlsx", origin: "與阿強的對話" });
+    expect([...deposits[0]!.bytes]).toEqual([1, 2, 3]);
+    expect(storeO.loadMessages(a.self.pubkey)).toEqual([]); // 位元組到齊也不建訊息
+
+    // 非名冊成員（陌生人）帶 slot 標記塞檔 → metadata 直接被忽略（不記待收、不建訊息）。
+    const evil = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("e", h), "壞人");
+    evil.start(noop);
+    const evilTid = evil.depositFile(owner.self.pubkey, { name: "malware.exe", mime: "application/x", bytes: new Uint8Array([9]) }, "x");
+    (owner as unknown as { onFileBytes(peer: string, file: { id: string; name: string; mime: string; bytes: Uint8Array }): void }).onFileBytes(
+      evil.self.pubkey,
+      { id: evilTid, name: "malware.exe", mime: "application/x", bytes: new Uint8Array([9]) },
+    );
+    expect(deposits.length).toBe(1); // 不觸發 onSlotDeposit（位元組走一般陌生人流程，不入槽）
+
+    a.stop();
+    evil.stop();
+    owner.stop();
+  });
+
   it("送檔另發加密 metadata 訊息：對方裝置知道有檔案（G1），雙方持久化 file metadata（無位元組）", () => {
     const net = createInMemoryRelayNetwork();
     const storeA = new MemoryStorage();

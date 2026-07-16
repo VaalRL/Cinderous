@@ -674,6 +674,14 @@ button:disabled { opacity: .5; cursor: default; filter: none; }
 .pics__labels { max-width: 96px; justify-content: center; flex-wrap: wrap; gap: 3px; margin: 2px 0 6px; }
 /* 下班提示（ADR-0159）：輸入區上方的非阻斷淡色橫幅。 */
 .offhours { padding: 4px 10px; font-size: 11px; color: var(--muted); background: var(--field); border-top: 1px solid var(--border); }
+/* 公司儲存槽（ADR-0161）：檔案卡上的存放鈕＋設定佇列列。 */
+.filecard__slot { margin-top: 3px; font-size: 11px; padding: 1px 6px; border: 1px dashed var(--border); border-radius: 6px; background: none; color: var(--accent); cursor: pointer; }
+.filecard__slot:hover { background: var(--hover); }
+.slotrow { align-items: center; gap: 6px; font-size: 12px; }
+.slotrow__name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.slotrow__status { color: var(--muted); }
+.slotrow__status--done { color: #2f9e44; }
+.slotrow__status--failed { color: #e5484d; }
 .chip--add:hover { background: var(--hover); }
 .chip__x { border: none; background: none; color: inherit; font-size: 11px; line-height: 1; padding: 0 0 0 1px; cursor: pointer; }
 .chip__x:hover { color: var(--accent); }

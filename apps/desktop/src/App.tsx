@@ -102,6 +102,17 @@ import {
 import { ANCHOR_RELAYS, MAINTAINER_PUBKEY } from "@cinder/engine";
 import { initIdle, reduceIdle, type IdleState } from "./ui/idle-status.js";
 import { setBroadcastAvatars } from "./ui/personalize.js";
+import {
+  enqueueSlot,
+  loadSlotQueue,
+  nextPending,
+  removeSlot,
+  retryFailed,
+  saveSlotQueue,
+  setSlotStatus,
+  type SlotItem,
+} from "./ui/slot-queue.js";
+import { pickSlotFolder, setSlotDir, slotDir, storeSlotDeposit } from "./native/slot-store.js";
 import { createRinger, createRingback, DEFAULT_CHIME_ID, playChime } from "./ui/ringtone.js";
 import { CallWindow } from "./ui/CallWindow.js";
 import { ContactListWindow } from "./ui/ContactListWindow.js";
@@ -419,6 +430,24 @@ export function App(): JSX.Element {
   const [policy, setPolicy] = useState<OrgPolicy>({});
   /** 組織資訊（ADR-0157）：採用名冊時由引擎發出；null＝非工作身分或尚未採用。 */
   const [orgInfo, setOrgInfo] = useState<OrgInfo | null>(null);
+  /** 公司儲存槽（ADR-0161）：員工端待存放佇列＋企業主端槽目錄（依身分載入）。 */
+  const [slotQueue, setSlotQueue] = useState<SlotItem[]>([]);
+  const [slotDirVal, setSlotDirVal] = useState("");
+  const slotBusyRef = useRef(false);
+  useEffect(() => {
+    const pk = profilesState.active;
+    if (!pk) return;
+    setSlotQueue(loadSlotQueue(pk));
+    setSlotDirVal(slotDir(pk));
+  }, [profilesState.active]);
+  const updateSlotQueue = (fn: (prev: SlotItem[]) => SlotItem[]): void => {
+    setSlotQueue((prev) => {
+      const next = fn(prev);
+      const pk = profilesState.active;
+      if (pk && next !== prev) saveSlotQueue(pk, next);
+      return next;
+    });
+  };
   const [notify, setNotify] = useState<boolean>(() => {
     try {
       return localStorage.getItem(NOTIFY_KEY) === "1";
@@ -535,6 +564,32 @@ export function App(): JSX.Element {
   }, [contacts]);
   /** 設定/移除自己的廣播頭像（ADR-0154）；回 false＝引擎拒收（格式防線），UI 提示。 */
   const broadcastSelfAvatar = (uri: string | undefined): boolean => backend?.setSelfAvatar?.(uri) ?? true;
+  // 公司儲存槽背景傳輸（ADR-0161，員工端）：企業主在線且佇列有待傳項 → 逐一重讀原檔並 P2P 送出。
+  useEffect(() => {
+    const p = activeProfile(profilesState);
+    const admin = p?.enterprise ? p.adminPubkey : undefined;
+    if (!admin || !backend?.depositFile || slotBusyRef.current) return;
+    if (!contacts.some((c) => c.pubkey === admin && c.status !== "offline")) return;
+    const item = nextPending(slotQueue);
+    if (!item) return;
+    slotBusyRef.current = true;
+    updateSlotQueue((q) => setSlotStatus(q, item.id, "sending"));
+    void readFileAtPath(item.path)
+      .then((picked) => {
+        if (!picked) {
+          // 原檔已被搬走/刪除（ADR-0103 語意）→ 標失敗，可於設定面板重試。
+          updateSlotQueue((q) => setSlotStatus(q, item.id, "failed"));
+          return;
+        }
+        backend.depositFile!(admin, { name: item.name, mime: item.mime, bytes: picked.bytes }, item.origin);
+        updateSlotQueue((q) => setSlotStatus(q, item.id, "done"));
+      })
+      .catch(() => updateSlotQueue((q) => setSlotStatus(q, item.id, "failed")))
+      .finally(() => {
+        slotBusyRef.current = false;
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contacts, slotQueue, backend, profilesState]);
   // ADR-0155：企業主身分建立後首次進入 → 自動開啟名冊管理（旗標跨越 Tauri reload；用後即清）。
   useEffect(() => {
     const pk = profilesState.active;
@@ -791,6 +846,17 @@ export function App(): JSX.Element {
       onConnection: setConn,
       onRelayPool: setRelays,
       onPolicy: setPolicy,
+      onSlotDeposit: (sender, dep) => {
+        // 公司儲存槽（ADR-0161，企業主端）：靜默落盤（無通知）；槽目錄未設＝appData 預設槽。
+        const senderName = contactsRef.current.find((c) => c.pubkey === sender)?.name ?? sender.slice(0, 8);
+        void storeSlotDeposit(slotDir(backend.self.pubkey), {
+          senderName,
+          senderPubkey: sender,
+          name: dep.name,
+          origin: dep.origin,
+          bytes: dep.bytes,
+        }).catch((e: unknown) => console.warn("[slot] 存放落盤失敗", e));
+      },
       onOrgInfo: (info) => {
         // 組織資訊（ADR-0157）：供設定面板顯示與下班靜音判定。
         setOrgInfo(info);
@@ -1654,6 +1720,18 @@ export function App(): JSX.Element {
         selfNpub: activeBackend.selfShareUri ?? activeBackend.selfNpub ?? "",
       }
     : {};
+  // 公司儲存槽（ADR-0161）：企業成員＋Tauri 才提供存放入口（佇列走 savedPath 重讀）。
+  const slotEnabled = (() => {
+    const p = activeProfile(profilesState);
+    return !!(p?.enterprise && p.adminPubkey && activeBackend.depositFile && isTauri());
+  })();
+  const queueSlotDeposit = (m: ChatMessage, origin: string): void => {
+    const f = m.file;
+    if (!f?.savedPath) return;
+    updateSlotQueue((q) =>
+      enqueueSlot(q, { path: f.savedPath!, name: f.name, size: f.size, mime: f.mime, origin, queuedAt: Date.now() }),
+    );
+  };
   const manageProps = {
     ...(activeBackend.removeContact ? { onRemoveContact: removeContact } : {}),
     ...(activeBackend.blockContact ? { onBlockContact: blockContact } : {}),
@@ -1888,6 +1966,30 @@ export function App(): JSX.Element {
               onSetTitle: (title: string) => activeBackend.setSelfTitle!(title || undefined),
             };
           })()}
+          {...(slotEnabled
+            ? {
+                // 公司儲存槽佇列（ADR-0161，員工端）。
+                slotQueue,
+                onSlotRetry: () => updateSlotQueue(retryFailed),
+                onSlotRemove: (id: string) => updateSlotQueue((q) => removeSlot(q, id)),
+              }
+            : {})}
+          {...(activeProfile(profilesState)?.orgOwner && isTauri()
+            ? {
+                // 儲存槽目錄（ADR-0161，企業主端）；空＝appData 預設槽。
+                slotDirValue: slotDirVal,
+                onPickSlotDir: () => {
+                  void pickSlotFolder().then((d) => {
+                    if (!d) return;
+                    const pk = profilesState.active;
+                    if (pk) {
+                      setSlotDir(pk, d);
+                      setSlotDirVal(d);
+                    }
+                  });
+                },
+              }
+            : {})}
           relayUrl={(() => {
             try {
               return localStorage.getItem(RELAY_URL_KEY) ?? "";
@@ -2120,6 +2222,8 @@ export function App(): JSX.Element {
               onSelfAvatar={broadcastSelfAvatar}
               // 下班提示（ADR-0159）：組織群組同樣適用。
               {...(orgInfo?.workHours && group.org ? { orgWorkHours: orgInfo.workHours } : {})}
+              // 公司儲存槽（ADR-0161）：群組檔案同樣可存放。
+              {...(slotEnabled ? { onDepositFile: (m: ChatMessage) => queueSlotDeposit(m, group.name) } : {})}
               senderName={senderName}
               mentionCandidates={group.members
                 .filter((m) => m !== self.pubkey)
@@ -2202,6 +2306,8 @@ export function App(): JSX.Element {
             onSelfAvatar={broadcastSelfAvatar}
             // 下班提示（ADR-0159）：對象是組織成員且名冊有班表 → 表定時間外顯示非阻斷橫幅。
             {...(orgInfo?.workHours && orgInfo.members.includes(pk) ? { orgWorkHours: orgInfo.workHours } : {})}
+            // 公司儲存槽（ADR-0161）：檔案訊息（有本機路徑）可存入。
+            {...(slotEnabled ? { onDepositFile: (m: ChatMessage) => queueSlotDeposit(m, contact.alias || contact.name) } : {})}
             // 私有標籤（ADR-0158 經典佈局入口）：資料同三欄側欄（ADR-0040，id 通用）。
             labels={labelsOf(groupPrefs, pk)}
             onAddLabel={(label: string) => updatePrefs(withLabel(groupPrefs, pk, label))}

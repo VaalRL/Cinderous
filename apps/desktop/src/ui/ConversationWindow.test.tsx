@@ -347,3 +347,43 @@ describe("下班時間發訊提示（ADR-0159）", () => {
     expect(renderHours({ orgWorkHours: night, nowMinutes: 23 * 60 })).not.toContain('data-testid="offhours-hint"');
   });
 });
+
+describe("公司儲存槽存放鈕（ADR-0161）", () => {
+  const renderSlot = (extra: Record<string, unknown>, msg: ChatMessage) =>
+    renderToStaticMarkup(
+      <I18nProvider locale="zh-Hant">
+        <ThemeProvider>
+          <ConversationWindow
+            self={self}
+            contact={contact}
+            messages={[msg]}
+            typing={false}
+            nudgeSignal={0}
+            onSend={() => {}}
+            onTyping={() => {}}
+            onNudge={() => {}}
+            onClose={() => {}}
+            {...extra}
+          />
+        </ThemeProvider>
+      </I18nProvider>,
+    );
+  const fileMsg = (savedPath?: string): ChatMessage => ({
+    id: "f1",
+    outgoing: false,
+    text: "",
+    at: 1,
+    file: { id: "t1", name: "報表.xlsx", size: 10, mime: "application/x", incoming: true, sent: 10, ...(savedPath ? { savedPath } : {}) },
+  });
+
+  it("提供 onDepositFile 且檔案已另存（有路徑）→ 顯示存放鈕", () => {
+    const html = renderSlot({ onDepositFile: () => {} }, fileMsg("C:/x/報表.xlsx"));
+    expect(html).toContain('data-testid="slot-deposit"');
+    expect(html).toContain("存入公司儲存槽");
+  });
+
+  it("未另存（無路徑）或未提供 onDepositFile → 不顯示存放鈕", () => {
+    expect(renderSlot({ onDepositFile: () => {} }, fileMsg())).not.toContain('data-testid="slot-deposit"');
+    expect(renderSlot({}, fileMsg("C:/x/報表.xlsx"))).not.toContain('data-testid="slot-deposit"');
+  });
+});

@@ -5,6 +5,7 @@ import { useLayout } from "../layout.js";
 import { useI18n } from "../i18n.js";
 import { useDialog } from "./Dialog.js";
 import { CHIME_PRESETS, DEFAULT_CHIME_ID, playChime } from "./ringtone.js";
+import type { SlotItem } from "./slot-queue.js";
 import { placeControl, type ControlId } from "./titlebar-controls.js";
 import { useTitlebar } from "../titlebar.js";
 import { qrSvg } from "../qr.js";
@@ -46,6 +47,13 @@ export interface SettingsPanelProps {
   myTitle?: string;
   /** 設定/移除頭銜（空＝移除）；廣播給該身分的所有聯絡人（工作身分＝全組織同事）。 */
   onSetTitle?: (title: string) => void;
+  /** 公司儲存槽佇列（ADR-0161，員工端）；提供才顯示佇列面板。 */
+  slotQueue?: SlotItem[];
+  onSlotRetry?: () => void;
+  onSlotRemove?: (id: string) => void;
+  /** 儲存槽目錄（ADR-0161，企業主端）；與 onPickSlotDir 一起提供才顯示。空＝appData 預設槽。 */
+  slotDirValue?: string;
+  onPickSlotDir?: () => void;
   /** 目前顯示名稱（ADR-0144）；與 onRename 一起提供才顯示改名欄。 */
   selfName?: string;
   /** 更改顯示名稱（ADR-0144）：落地本機並廣播給聯絡人（ADR-0061）。回 false＝撞本機同名（ADR-0146）。 */
@@ -909,6 +917,51 @@ export function SettingsPanel(props: SettingsPanelProps): JSX.Element {
           {/* 企業頭銜（ADR-0158）：自填、隨加密個人檔廣播給同事；chip--role 顯示。 */}
           {tab === "identity" && props.onSetTitle ? (
             <TitleEditor title={props.myTitle ?? ""} onSet={props.onSetTitle} />
+          ) : null}
+
+          {/* 公司儲存槽佇列（ADR-0161，員工端）：排隊中/傳輸中/已存放/失敗＋重試/移除。 */}
+          {tab === "identity" && props.slotQueue ? (
+            <section className="settings__sec" data-testid="settings-slot-queue">
+              <h4>{t("settings_slot")}</h4>
+              {props.slotQueue.length === 0 ? (
+                <p className="hint">{t("slot_empty")}</p>
+              ) : (
+                <>
+                  {props.slotQueue.map((q) => (
+                    <div key={q.id} className="settings__keyrow slotrow" data-testid="slot-row">
+                      <span className="slotrow__name" title={q.path}>{q.name}</span>
+                      <span className={`slotrow__status slotrow__status--${q.status}`}>
+                        {t(`slot_${q.status}` as "slot_pending")}
+                      </span>
+                      {props.onSlotRemove ? (
+                        <button type="button" className="chip__x" aria-label={t("slot_remove")} onClick={() => props.onSlotRemove!(q.id)}>
+                          ×
+                        </button>
+                      ) : null}
+                    </div>
+                  ))}
+                  {props.slotQueue.some((q) => q.status === "failed") && props.onSlotRetry ? (
+                    <button type="button" className="settings__reveal" data-testid="slot-retry" onClick={props.onSlotRetry}>
+                      {t("slot_retry")}
+                    </button>
+                  ) : null}
+                </>
+              )}
+            </section>
+          ) : null}
+
+          {/* 儲存槽目錄（ADR-0161，企業主端）：同事存放的檔案落盤位置。 */}
+          {tab === "identity" && props.onPickSlotDir ? (
+            <section className="settings__sec" data-testid="settings-slot-dir">
+              <h4>{t("settings_slotDir")}</h4>
+              <p className="hint">{t("settings_slotDirHint")}</p>
+              <p className="settings__desc" data-testid="slot-dir-value">
+                {props.slotDirValue || t("settings_slotDirDefault")}
+              </p>
+              <button type="button" className="settings__reveal" data-testid="slot-dir-pick" onClick={props.onPickSlotDir}>
+                {t("settings_slotDirPick")}
+              </button>
+            </section>
           ) : null}
 
           {/* 組織資訊（ADR-0157）：工作身分採用名冊後的公司設定摘要（唯讀）。 */}

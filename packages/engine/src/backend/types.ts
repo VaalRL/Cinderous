@@ -192,6 +192,11 @@ export interface ChatBackendEvents {
   onFileBytes?(contact: PubkeyHex, messageId: string, file: ReceivedFile): void;
   /** 某圖片訊息的縮圖已產生/更新（ADR-0102）：UI 據此即時顯示，不必等重載。 */
   onFileThumb?(contact: PubkeyHex, messageId: string, thumb: string): void;
+  /**
+   * 公司儲存槽存放到達（ADR-0161，企業主端）：名冊成員的存放位元組已收齊。
+   * App 負責落盤（槽目錄＋索引），**不建聊天訊息、不跳通知**。
+   */
+  onSlotDeposit?(sender: PubkeyHex, deposit: { tid: string; name: string; mime: string; origin: string; bytes: Uint8Array }): void;
   /** 檔案傳輸錯誤。 */
   onFileError?(contact: PubkeyHex, reason: string): void;
   /** 群組清單更新（M9）。 */
@@ -294,6 +299,11 @@ export interface ChatBackend {
   sendFile?(to: PubkeyHex, file: OutgoingFile, opts?: { thumb?: string; savedPath?: string }): string;
   /** 記錄某圖片訊息的縮圖（ADR-0102）：收檔端產生縮圖後回填。 */
   setFileThumb?(contact: PubkeyHex, messageId: string, thumb: string): void;
+  /**
+   * 存入公司儲存槽（ADR-0161，員工端）：以 P2P 把檔案交給企業主（帶 `slot` 標記，
+   * 兩端不建聊天訊息）。`origin`＝來源對話標註。回傳傳輸 id 供進度/完成對應。
+   */
+  depositFile?(to: PubkeyHex, file: OutgoingFile, origin: string): string;
   /** 回填某檔案訊息收檔後的本機儲存路徑（ADR-0093）：App 另存完成後呼叫以持久化路徑。 */
   setFileSavedPath?(contact: PubkeyHex, messageId: string, savedPath: string): void;
   /** 開啟對話時主動建立 P2P 通道（F5：讓輸入中等狀態卸載中繼）。 */

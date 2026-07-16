@@ -133,6 +133,11 @@ export interface FileMeta {
   name: string;
   size: number;
   mime: string;
+  /**
+   * 公司儲存槽存放（ADR-0161）：值＝來源對話標註。帶此欄位的檔案是「存進企業主
+   * 儲存槽」的位元組，**兩端都不建立聊天訊息**；企業主端收齊位元組後直接落盤。
+   */
+  slot?: string;
 }
 
 /**
@@ -151,6 +156,7 @@ export function wrapFileMessage(
   const rumorTags: string[][] = [
     [TO_TAG, recipientPk],
     ["file", meta.tid, meta.name, String(meta.size), meta.mime],
+    ...(meta.slot !== undefined ? [["slot", meta.slot]] : []), // ADR-0161：儲存槽存放標記
     ...(opts.relayHint ? [["relay", opts.relayHint]] : []),
   ];
   return wrapForBoth(
@@ -169,7 +175,14 @@ export function parseFileMeta(rumor: Rumor): FileMeta | null {
   const name = t[2];
   if (!tid || !name) return null;
   const size = Number(t[3]);
-  return { tid, name, size: Number.isFinite(size) ? size : 0, mime: t[4] || "application/octet-stream" };
+  const slot = rumor.tags.find((x) => x[0] === "slot")?.[1]; // ADR-0161：儲存槽存放標記
+  return {
+    tid,
+    name,
+    size: Number.isFinite(size) ? size : 0,
+    mime: t[4] || "application/octet-stream",
+    ...(slot !== undefined ? { slot } : {}),
+  };
 }
 
 /** 讀出限時訊息 rumor 內的到期時間（NIP-40 `expiration`，unix 秒）；無則回傳 undefined。 */

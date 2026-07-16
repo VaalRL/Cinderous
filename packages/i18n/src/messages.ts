@@ -124,6 +124,19 @@ export interface Messages {
   settings_orgTitleHint: string;
   settings_orgTitleUpdated: string;
   convo_offHours: string;
+  slot_deposit: string;
+  settings_slot: string;
+  slot_empty: string;
+  slot_retry: string;
+  slot_remove: string;
+  slot_pending: string;
+  slot_sending: string;
+  slot_done: string;
+  slot_failed: string;
+  settings_slotDir: string;
+  settings_slotDirHint: string;
+  settings_slotDirPick: string;
+  settings_slotDirDefault: string;
   signIn_joinHint: string;
   signIn_joinName: string;
   signIn_joinButton: string;
@@ -710,6 +723,19 @@ const zhHant: Messages = {
   settings_orgTitleHint: "自填頭銜（最多 24 字），會廣播給這個身分的所有聯絡人——工作身分即全組織同事看得到。留空套用＝移除。",
   settings_orgTitleUpdated: "頭銜已更新並廣播。",
   convo_offHours: "目前非上班時間（{start}–{end}）——對方的通知已靜音，可能不會即時看到；訊息照常送達。",
+  slot_deposit: "存入公司儲存槽",
+  settings_slot: "公司儲存槽",
+  slot_empty: "目前沒有排隊中的存放。",
+  slot_retry: "重試失敗項",
+  slot_remove: "移除",
+  slot_pending: "排隊中",
+  slot_sending: "傳輸中",
+  slot_done: "已存放",
+  slot_failed: "失敗",
+  settings_slotDir: "儲存槽目錄",
+  settings_slotDirHint: "同事存放的檔案會靜默寫入此資料夾（依員工分資料夾＋index.jsonl 索引）。",
+  settings_slotDirPick: "選擇資料夾…",
+  settings_slotDirDefault: "（未設定：使用應用程式資料夾內的 CinderSlot）",
   signIn_joinHint: "偵測到入職邀請：將在 {host} 建立企業成員身分，並自動向管理者提出入職。",
   signIn_joinName: "你的顯示名稱（同事會看到）",
   signIn_joinButton: "加入組織",
@@ -1267,6 +1293,19 @@ const en: Messages = {
   settings_orgTitleHint: "Self-declared title (up to 24 chars), broadcast to all contacts of this identity — on a work identity that means every colleague. Apply empty to remove.",
   settings_orgTitleUpdated: "Title updated and broadcast.",
   convo_offHours: "Outside work hours ({start}–{end}) — their notifications are muted, so they may not see this right away. The message is still delivered.",
+  slot_deposit: "Save to company vault",
+  settings_slot: "Company vault",
+  slot_empty: "Nothing queued for the vault.",
+  slot_retry: "Retry failed items",
+  slot_remove: "Remove",
+  slot_pending: "Queued",
+  slot_sending: "Transferring",
+  slot_done: "Stored",
+  slot_failed: "Failed",
+  settings_slotDir: "Vault folder",
+  settings_slotDirHint: "Files deposited by staff are silently written here (per-employee folders + an index.jsonl).",
+  settings_slotDirPick: "Choose folder…",
+  settings_slotDirDefault: "(unset: CinderSlot inside the app data folder)",
   signIn_joinHint: "Onboarding invite detected: an organization member identity will be created on {host} and a join request sent to the admin automatically.",
   signIn_joinName: "Your display name (visible to colleagues)",
   signIn_joinButton: "Join organization",

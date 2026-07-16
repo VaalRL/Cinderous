@@ -390,6 +390,8 @@ export class RelayChatBackend implements ChatBackend {
   private readonly orgInviteToken: string | undefined;
   /** 首份名冊發佈前收到的入職請求（ADR-0156）：發佈時自動併入。 */
   private readonly pendingJoins = new Map<PubkeyHex, string>();
+  /** 待收位元組的儲存槽存放（ADR-0161，企業主端）：tid → 寄件人與 metadata。 */
+  private readonly pendingSlots = new Map<string, { sender: PubkeyHex; name: string; mime: string; origin: string }>();
   /** 企業 TURN 伺服器與強制 TURN 政策狀態（ADR-0048）：供 WebRTC ICE 設定。 */
   private readonly turnServers: RTCIceServer[] | undefined;
   private forceTurn = false;
@@ -1309,6 +1311,17 @@ export class RelayChatBackend implements ChatBackend {
 
     const fileMeta = parseFileMeta(rumor);
     if (fileMeta) {
+      if (fileMeta.slot !== undefined) {
+        // ADR-0161：儲存槽存放的 metadata——**不建聊天訊息**。企業主端且寄件人為名冊
+        // 在世成員才記下待收位元組；其餘身分/陌生人一律忽略（拒收非成員塞檔）。
+        if (
+          this.orgOwnerFlag &&
+          this.lastRoster?.members.some((m) => m.pubkey === sender && !m.supersededBy)
+        ) {
+          this.pendingSlots.set(fileMeta.tid, { sender, name: fileMeta.name, mime: fileMeta.mime, origin: fileMeta.slot });
+        }
+        return;
+      }
       // 檔案 metadata（ADR-0093）：讓收件人**所有裝置**都知道有檔案；位元組另走 P2P。
       // 以 tid 去重（位元組可能已先到並建了訊息）；仍回送已送達回條讓 sender 有投遞可見度（G3）。
       // 自封副本 → 我的另一台裝置：看得到 metadata，但**沒有位元組、也沒有縮圖**
@@ -2496,6 +2509,21 @@ export class RelayChatBackend implements ChatBackend {
 
   /** 收到 P2P 檔案位元組（ADR-0093）：關聯到檔案訊息（位元組可能早於 metadata），交 App 另存。 */
   private onFileBytes(peer: PubkeyHex, file: ReceivedFile): void {
+    // 儲存槽存放（ADR-0161）：位元組收齊 → 交 App 落盤，不進聊天訊息流。
+    const slotMeta = this.pendingSlots.get(file.id);
+    if (slotMeta) {
+      this.pendingSlots.delete(file.id);
+      if (slotMeta.sender === peer) {
+        this.handlers?.onSlotDeposit?.(peer, {
+          tid: file.id,
+          name: slotMeta.name,
+          mime: slotMeta.mime,
+          origin: slotMeta.origin,
+          bytes: file.bytes,
+        });
+      }
+      return;
+    }
     const existing = this.fileMsgByTid.get(file.id);
     const msgId = existing?.msgId ?? `bf-${file.id}`;
     if (!existing) {
@@ -2518,6 +2546,23 @@ export class RelayChatBackend implements ChatBackend {
   /** 回填某檔案訊息收檔後的本機儲存路徑（ADR-0093）：App 另存完成後呼叫，持久化路徑。 */
   setFileSavedPath(contact: PubkeyHex, messageId: string, savedPath: string): void {
     this.storage.setFileSavedPath(contact, messageId, savedPath);
+  }
+
+  /**
+   * 存入公司儲存槽（ADR-0161，員工端）：位元組走現有 P2P、metadata 帶 `slot` 標記——
+   * 兩端不建聊天訊息、不發自封副本（自己的其他裝置無需知道）。
+   */
+  depositFile(to: PubkeyHex, file: OutgoingFile, origin: string): string {
+    const tid = this.transfer.sendFile(to, file);
+    const meta = { tid, name: file.name, size: file.bytes.length, mime: file.mime, slot: origin };
+    const now = nowSec();
+    const wrapped = wrapFileMessage(this.sk, to, meta, {
+      now,
+      ...(this.homeUrl ? { relayHint: this.homeUrl } : {}),
+    });
+    this.seenMsg.add(wrapped.id);
+    for (const evt of wrapped.events) this.publishReliable(evt);
+    return tid;
   }
 
   /**

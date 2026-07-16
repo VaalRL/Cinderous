@@ -119,6 +119,14 @@ describe("NIP-17/59 Gift Wrap 離線私訊", () => {
       const { rumor } = unwrapMessage(dm("只是文字", aliceSk, bobPk), bobSk);
       expect(parseFileMeta(rumor)).toBeNull();
     });
+
+    it("儲存槽存放標記（ADR-0161）：slot round-trip；一般檔案訊息無 slot 欄位", () => {
+      const wrap = fileDm(aliceSk, bobPk, { ...meta, slot: "與阿強的對話" });
+      const out = parseFileMeta(unwrapMessage(wrap, bobSk).rumor);
+      expect(out?.slot).toBe("與阿強的對話");
+      const plain = parseFileMeta(unwrapMessage(fileDm(aliceSk, bobPk, meta), bobSk).rumor);
+      expect(plain?.slot).toBeUndefined();
+    });
   });
 
   describe("自封副本（ADR-0107）", () => {

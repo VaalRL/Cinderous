@@ -771,6 +771,84 @@ fn read_saved_file(app: tauri::AppHandle, path: String) -> Result<Option<Vec<u8>
     std::fs::read(p).map(Some).map_err(|e| e.to_string())
 }
 
+// ── 公司儲存槽（ADR-0161）：企業主端靜默落盤 ─────────────────────────────────────
+//
+// 寫入**只允許**在槽基底目錄之下：基底＝使用者以原生對話框親選（授權）或未設時的
+// `<app_data>/CinderSlot` 預設槽。子路徑（員工名/檔名）逐段以 `sanitize_filename`
+// 消毒——寄件人可控字串絕不參與路徑語意（ADR-0128 延伸）。
+
+/// 開「選擇資料夾」對話框（槽目錄設定用）；取消回 `None`。選定即授權為合法基底。
+#[tauri::command]
+fn pick_folder(app: tauri::AppHandle) -> Option<String> {
+    let picked = rfd::FileDialog::new().pick_folder().map(|p| p.to_string_lossy().into_owned());
+    if let Some(ref s) = picked {
+        authorize_path(&app, s);
+    }
+    picked
+}
+
+/// 解析槽基底：空字串＝`<app_data>/CinderSlot` 預設槽（隱式授權）；
+/// 非空＝必須是使用者親選（授權）過的資料夾。
+fn slot_base(app: &tauri::AppHandle, base: &str) -> Result<std::path::PathBuf, String> {
+    if base.is_empty() {
+        let dir = app.path().app_data_dir().map_err(|e| e.to_string())?.join("CinderSlot");
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        return Ok(dir);
+    }
+    if !is_authorized(app, base) {
+        return Err("儲存槽目錄未經授權".into());
+    }
+    Ok(std::path::PathBuf::from(base))
+}
+
+/// 寫入儲存槽：`<base>/<sub>/<name>`（sub/name 逐段消毒；重名自動加 ` (n)` 尾碼）。
+/// 回傳實際寫入的**相對路徑**（供索引記錄）。
+#[tauri::command]
+fn write_slot_file(
+    app: tauri::AppHandle,
+    base: String,
+    sub: String,
+    name: String,
+    bytes: Vec<u8>,
+) -> Result<String, String> {
+    let root = slot_base(&app, &base)?;
+    let sub_clean = sanitize_filename(&sub);
+    let name_clean = sanitize_filename(&name);
+    let dir = root.join(&sub_clean);
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    // 重名：`name.ext` → `name (2).ext`、`name (3).ext`…
+    let (stem, ext) = match name_clean.rsplit_once('.') {
+        Some((s, e)) if !s.is_empty() => (s.to_string(), format!(".{e}")),
+        _ => (name_clean.clone(), String::new()),
+    };
+    let mut candidate = name_clean.clone();
+    let mut n = 2u32;
+    while dir.join(&candidate).exists() {
+        candidate = format!("{stem} ({n}){ext}");
+        n += 1;
+        if n > 9999 {
+            return Err("重名尾碼耗盡".into());
+        }
+    }
+    let path = dir.join(&candidate);
+    std::fs::write(&path, &bytes).map_err(|e| e.to_string())?;
+    Ok(format!("{sub_clean}/{candidate}"))
+}
+
+/// 附加一行文字到槽基底下的檔案（index.jsonl 用；檔名消毒、不接受子路徑）。
+#[tauri::command]
+fn append_slot_index(app: tauri::AppHandle, base: String, name: String, line: String) -> Result<(), String> {
+    let root = slot_base(&app, &base)?;
+    let path = root.join(sanitize_filename(&name));
+    use std::io::Write;
+    let mut f = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .map_err(|e| e.to_string())?;
+    writeln!(f, "{}", line.replace(['\r', '\n'], " ")).map_err(|e| e.to_string())
+}
+
 /// 開「選擇檔案」對話框讓使用者重新指定原檔位置；取消回 `None`。
 #[tauri::command]
 fn pick_existing_file(app: tauri::AppHandle, name: String) -> Option<String> {
@@ -859,7 +937,10 @@ fn main() {
             ai_has_key,
             save_file,
             read_saved_file,
-            pick_existing_file
+            pick_existing_file,
+            pick_folder,
+            write_slot_file,
+            append_slot_index
         ])
         .run(tauri::generate_context!())
         .expect("執行 Tauri 應用程式時發生錯誤");

@@ -270,6 +270,8 @@ export interface ConversationProps {
   orgWorkHours?: { start: string; end: string };
   /** 測試用：注入當日分鐘數（SSR 無法控制時鐘）。 */
   nowMinutes?: number;
+  /** 存入公司儲存槽（ADR-0161）：企業成員提供；檔案訊息（有 savedPath）顯示存放鈕。 */
+  onDepositFile?: (message: ChatMessage) => void;
   /** 此聯絡人的私有標籤（ADR-0158：經典佈局入口）；與 onAddLabel 一起提供才顯示標籤列。 */
   labels?: string[];
   /** 新增私有標籤（ADR-0040 資料層；App 負責正規化/去重/持久化）。 */
@@ -947,6 +949,7 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
               onOpenThread={props.readOnly ? undefined : () => openThread(m.id)}
               onExpand={() => openDetail(m.id)}
               groupRead={groupReadOf(m)}
+              onDeposit={props.onDepositFile}
             />
           ))}
         </div>
@@ -1729,6 +1732,7 @@ function MessageLine({
   onExpand,
   expanded = false,
   groupRead,
+  onDeposit,
 }: {
   message: ChatMessage;
   who: string;
@@ -1750,6 +1754,8 @@ function MessageLine({
   expanded?: boolean;
   /** 群組已讀（ADR-0095）：名單制/計數制；大群或非群組為 undefined（不顯示）。 */
   groupRead?: GroupRead | undefined;
+  /** 存入公司儲存槽（ADR-0161）：企業成員限定；App 依 savedPath 排隊背景傳給企業主。 */
+  onDeposit?: ((message: ChatMessage) => void) | undefined;
 }): JSX.Element {
   const { t } = useI18n();
   const [picking, setPicking] = useState(false);
@@ -1776,7 +1782,14 @@ function MessageLine({
   }
 
   if (message.file) {
-    return <FileLine message={message} who={who} onView={onView} />;
+    return (
+      <FileLine
+        message={message}
+        who={who}
+        onView={onView}
+        {...(onDeposit && message.file.savedPath ? { onDeposit: () => onDeposit(message) } : {})}
+      />
+    );
   }
 
   return (
@@ -1899,10 +1912,13 @@ function FileLine({
   message,
   who,
   onView,
+  onDeposit,
 }: {
   message: ChatMessage;
   who: string;
   onView?: ((item: LightboxItem) => void) | undefined;
+  /** 存入公司儲存槽（ADR-0161）；僅企業成員且檔案有本機路徑時提供。 */
+  onDeposit?: (() => void) | undefined;
 }): JSX.Element {
   const { t } = useI18n();
   const file = message.file!;
@@ -1945,6 +1961,11 @@ function FileLine({
               <div className="filecard__note">📍 {t("file_onOtherDevice")}</div>
             ) : file.incoming ? (
               <div className="filecard__note">{t("file_notSaved")}</div>
+            ) : null}
+            {onDeposit ? (
+              <button type="button" className="filecard__slot" data-testid="slot-deposit" onClick={onDeposit}>
+                🗃 {t("slot_deposit")}
+              </button>
             ) : null}
           </div>
         </div>
