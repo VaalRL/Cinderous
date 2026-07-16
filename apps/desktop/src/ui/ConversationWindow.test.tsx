@@ -263,3 +263,45 @@ describe("原生拖放命中測試（ADR-0104）", () => {
     expect(html).toContain('data-convo="bb"');
   });
 });
+
+describe("私有標籤與企業頭銜（ADR-0158）", () => {
+  const renderWith = (extra: Record<string, unknown>, c: Contact = contact) =>
+    renderToStaticMarkup(
+      <I18nProvider locale="zh-Hant">
+        <ThemeProvider>
+          <ConversationWindow
+            self={self}
+            contact={c}
+            messages={[]}
+            typing={false}
+            nudgeSignal={0}
+            onSend={() => {}}
+            onTyping={() => {}}
+            onNudge={() => {}}
+            onClose={() => {}}
+            {...extra}
+          />
+        </ThemeProvider>
+      </I18nProvider>,
+    );
+
+  it("提供 labels＋onAddLabel → 對方頭像旁顯示標籤列（chips＋🏷 新增）", () => {
+    const html = renderWith({ labels: ["家人", "同好"], onAddLabel: () => {}, onRemoveLabel: () => {} });
+    expect(html).toContain('data-testid="convo-labels"');
+    expect(html).toContain("家人");
+    expect(html).toContain("同好");
+    expect(html).toContain('data-testid="convo-label-add"');
+  });
+
+  it("聯絡人帶廣播頭銜 → chip--role 色彩區隔顯示；未提供標籤功能仍顯示頭銜", () => {
+    const html = renderWith({}, { ...contact, title: "後端工程師" });
+    expect(html).toContain('data-testid="convo-title-chip"');
+    expect(html).toContain("chip--role");
+    expect(html).toContain("後端工程師");
+  });
+
+  it("無標籤功能且無頭銜 → 不渲染標籤列", () => {
+    const html = renderWith({});
+    expect(html).not.toContain('data-testid="convo-labels"');
+  });
+});

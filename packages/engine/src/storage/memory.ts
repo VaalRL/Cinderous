@@ -33,6 +33,8 @@ export class MemoryStorage implements AppStorage {
   private identity: StoredIdentity | null = null;
   /** 自己的廣播頭像（ADR-0154）：null＝從未設定；""＝已移除記號。 */
   private selfAvatar: string | null = null;
+  /** 自己的企業頭銜（ADR-0158）：三態語意同 selfAvatar。 */
+  private selfTitle: string | null = null;
   private contacts: StoredContact[] = [];
   private readonly convos = new Map<string, Convo>();
   private reactions: StoredReaction[] = [];
@@ -123,6 +125,12 @@ export class MemoryStorage implements AppStorage {
   saveSelfAvatar(avatar: string | undefined): void {
     this.selfAvatar = avatar ?? null;
   }
+  loadSelfTitle(): string | null {
+    return this.selfTitle;
+  }
+  saveSelfTitle(title: string | undefined): void {
+    this.selfTitle = title ?? null;
+  }
   loadContacts(): StoredContact[] {
     return [...this.contacts];
   }
@@ -175,6 +183,16 @@ export class MemoryStorage implements AppStorage {
       if (c.pubkey !== pubkey) return c;
       const { avatar: _drop, ...rest } = c;
       return avatar ? { ...rest, avatar } : rest;
+    };
+    this.contacts = this.contacts.map(put);
+    this.requests = this.requests.map(put);
+  }
+  updateContactTitle(pubkey: string, title: string | undefined): void {
+    // ADR-0158：對方廣播的企業頭銜（同 avatar 的更新語意）。
+    const put = (c: StoredContact): StoredContact => {
+      if (c.pubkey !== pubkey) return c;
+      const { title: _drop, ...rest } = c;
+      return title ? { ...rest, title } : rest;
     };
     this.contacts = this.contacts.map(put);
     this.requests = this.requests.map(put);
@@ -365,6 +383,7 @@ export class MemoryStorage implements AppStorage {
     return {
       identity: this.identity,
       selfAvatar: this.selfAvatar, // ADR-0154
+      selfTitle: this.selfTitle, // ADR-0158
       contacts: [...this.contacts],
       blocked: [...this.blocked],
       requests: [...this.requests],
@@ -381,6 +400,7 @@ export class MemoryStorage implements AppStorage {
   importSnapshot(s: StorageSnapshot): void {
     this.identity = s.identity;
     this.selfAvatar = s.selfAvatar ?? null; // 舊快照沒有這個欄位（ADR-0154）
+    this.selfTitle = s.selfTitle ?? null; // ADR-0158
     this.contacts = [...s.contacts];
     this.blocked = [...s.blocked];
     this.requests = [...(s.requests ?? [])]; // 舊快照沒有 requests（ADR-0121）

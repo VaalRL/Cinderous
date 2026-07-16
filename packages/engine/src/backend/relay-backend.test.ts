@@ -165,6 +165,36 @@ describe("RelayChatBackend（真實後端 + 持久化）", () => {
     b.stop();
   });
 
+  it("setSelfTitle（ADR-0158）：頭銜隨加密個人檔廣播、清洗截斷；移除記號讓對方清掉；隨儲存重啟仍在", () => {
+    const net = createInMemoryRelayNetwork();
+    const storeA = new MemoryStorage();
+    const storeB = new MemoryStorage();
+    const a = new RelayChatBackend(storeA, (h) => net.connect("a", h), "Alice");
+    const b = new RelayChatBackend(storeB, (h) => net.connect("b", h), "Bob");
+    a.start(noop);
+    b.start(noop);
+    b.addContact(a.selfNpub);
+    a.addContact(b.selfNpub);
+
+    a.setSelfTitle("  後端   工程師 "); // 清洗：收斂空白＋修剪
+    expect(a.selfTitle()).toBe("後端 工程師");
+    expect(storeA.loadSelfTitle()).toBe("後端 工程師");
+    expect(storeB.loadContacts().find((c) => c.pubkey === a.self.pubkey)?.title).toBe("後端 工程師");
+
+    // 重啟：持久化頭銜跟著回來（送給晚加入的聯絡人也帶）。
+    a.stop();
+    const a2 = new RelayChatBackend(storeA, (h) => net.connect("a2", h), "Alice");
+    a2.start(noop);
+    expect(a2.selfTitle()).toBe("後端 工程師");
+
+    // 移除 → 持久化 ""，對方清掉。
+    a2.setSelfTitle(undefined);
+    expect(storeA.loadSelfTitle()).toBe("");
+    expect(storeB.loadContacts().find((c) => c.pubkey === a2.self.pubkey)?.title).toBeUndefined();
+    a2.stop();
+    b.stop();
+  });
+
   it("開機廣播帶頭像（ADR-0154）：重啟後的 backend 仍把持久化頭像送給晚加入的聯絡人", () => {
     const AVATAR = "data:image/png;base64,iVBORw0KGgo=";
     const net = createInMemoryRelayNetwork();

@@ -668,6 +668,10 @@ button:disabled { opacity: .5; cursor: default; filter: none; }
 .chip--filter:hover { background: var(--hover); }
 .chip--on { background: var(--accent); color: #fff; border-color: var(--accent); }
 .chip--add { cursor: pointer; color: var(--accent); border-style: dashed; }
+/* 企業頭銜（ADR-0158）：實心強調色，與私有標籤（outline）一眼區隔；對方自填、不可移除。 */
+.chip--role { background: var(--accent); color: #fff; border-color: var(--accent); font-weight: 600; }
+/* 對話視窗對方頭像旁的標籤列（ADR-0158 經典佈局入口）：窄欄直排、置中、可換行。 */
+.pics__labels { max-width: 96px; justify-content: center; flex-wrap: wrap; gap: 3px; margin: 2px 0 6px; }
 .chip--add:hover { background: var(--hover); }
 .chip__x { border: none; background: none; color: inherit; font-size: 11px; line-height: 1; padding: 0 0 0 1px; cursor: pointer; }
 .chip__x:hover { color: var(--accent); }

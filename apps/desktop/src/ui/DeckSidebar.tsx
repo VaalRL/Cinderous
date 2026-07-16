@@ -217,8 +217,14 @@ function DeckRow({
           🏷
         </button>
       </div>
-      {entry.labels.length > 0 || editing ? (
+      {entry.title || entry.labels.length > 0 || editing ? (
         <div className="labelrow dsb__labels">
+          {/* 企業頭銜（ADR-0158）：實心強調色 chip，與私標 outline 區隔；不可移除（對方自填）。 */}
+          {entry.title ? (
+            <span className="chip chip--role" data-testid="sidebar-title-chip">
+              {entry.title}
+            </span>
+          ) : null}
           {entry.labels.map((l) => (
             <span className="chip" key={l}>
               {l}

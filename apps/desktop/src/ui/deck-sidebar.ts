@@ -12,6 +12,8 @@ export interface SidebarEntry {
   memberCount: number | undefined; // 群組才有
   lastAt: number; // 最近互動時間（毫秒；無互動＝0）
   labels: string[];
+  /** 對方廣播的企業頭銜（ADR-0158；聯絡人才有）——顯示為 chip--role，與私標色彩區隔。 */
+  title?: string;
 }
 
 /** 某對話的最近互動時間＝其訊息中最大時間戳；無訊息回 0。 */
@@ -38,6 +40,7 @@ export function buildEntries(
     memberCount: undefined,
     lastAt: lastInteraction(x.pubkey, convos),
     labels: labelsOf(prefs, x.pubkey),
+    ...(x.title ? { title: x.title } : {}), // ADR-0158：企業頭銜
   }));
   const g: SidebarEntry[] = groups.map((x) => ({
     id: x.id,

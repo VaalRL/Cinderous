@@ -337,3 +337,17 @@ describe("組織資訊（ADR-0157）", () => {
     expect(html).not.toContain('data-testid="org-info"');
   });
 });
+
+describe("企業頭銜編輯（ADR-0158）", () => {
+  it("提供 onSetTitle → 身分分頁顯示頭銜編輯欄（預填現值）", () => {
+    const html = render({ initialTab: "identity", selfName: "夜", onRename: () => true, myTitle: "PM", onSetTitle: () => {} });
+    expect(html).toContain('data-testid="org-title"');
+    expect(html).toContain('data-testid="org-title-input"');
+    expect(html).toContain('value="PM"');
+  });
+
+  it("未提供 onSetTitle（個人身分）→ 無頭銜編輯欄", () => {
+    const html = render({ initialTab: "identity", selfName: "夜", onRename: () => true });
+    expect(html).not.toContain('data-testid="org-title"');
+  });
+});

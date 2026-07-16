@@ -119,6 +119,9 @@ export interface Messages {
   orgInfo_title: string;
   orgInfo_hours: string;
   orgInfo_muteNote: string;
+  settings_orgTitle: string;
+  settings_orgTitleHint: string;
+  settings_orgTitleUpdated: string;
   signIn_joinHint: string;
   signIn_joinName: string;
   signIn_joinButton: string;
@@ -700,6 +703,9 @@ const zhHant: Messages = {
   orgInfo_title: "組織資訊",
   orgInfo_hours: "表定上班時間：{start}–{end}",
   orgInfo_muteNote: "下班時間，來自公司成員與組織群組的通知會自動靜音（未讀照常累計）。",
+  settings_orgTitle: "頭銜",
+  settings_orgTitleHint: "自填頭銜（最多 24 字），會廣播給這個身分的所有聯絡人——工作身分即全組織同事看得到。留空套用＝移除。",
+  settings_orgTitleUpdated: "頭銜已更新並廣播。",
   signIn_joinHint: "偵測到入職邀請：將在 {host} 建立企業成員身分，並自動向管理者提出入職。",
   signIn_joinName: "你的顯示名稱（同事會看到）",
   signIn_joinButton: "加入組織",
@@ -1252,6 +1258,9 @@ const en: Messages = {
   orgInfo_title: "Organization",
   orgInfo_hours: "Work hours: {start}–{end}",
   orgInfo_muteNote: "Outside work hours, notifications from company members and org groups are muted automatically (unread still accrues).",
+  settings_orgTitle: "Job title",
+  settings_orgTitleHint: "Self-declared title (up to 24 chars), broadcast to all contacts of this identity — on a work identity that means every colleague. Apply empty to remove.",
+  settings_orgTitleUpdated: "Title updated and broadcast.",
   signIn_joinHint: "Onboarding invite detected: an organization member identity will be created on {host} and a join request sent to the admin automatically.",
   signIn_joinName: "Your display name (visible to colleagues)",
   signIn_joinButton: "Join organization",

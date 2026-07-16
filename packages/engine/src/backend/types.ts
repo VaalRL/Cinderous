@@ -53,6 +53,11 @@ export interface Contact {
    * 大小上限）。顯示優先序：本地覆寫（ADR-0077）＞此欄位＞生成頭像。
    */
   avatar?: string;
+  /**
+   * 對方廣播的企業頭銜（ADR-0158）：自填自述標註（≤24 字，收端已清洗）。
+   * UI 以實心 `chip--role` 顯示，與私有標籤（outline chip）色彩區隔。
+   */
+  title?: string;
   status: Status;
   /** 個人狀態訊息（暱稱後方那行字）。 */
   statusMessage: string;
@@ -247,6 +252,13 @@ export interface ChatBackend {
   setSelfAvatar?(avatar: string | undefined): boolean;
   /** 自己目前的廣播頭像（ADR-0154）；未設定或已移除回 undefined。 */
   selfAvatar?(): string | undefined;
+  /**
+   * 設定/移除自己的企業頭銜（ADR-0158）：≤24 字（引擎清洗），空/undefined＝移除
+   * （廣播移除記號）。變更比照改名全量重播個人檔。
+   */
+  setSelfTitle?(title: string | undefined): void;
+  /** 自己目前的企業頭銜（ADR-0158）；未設定或已移除回 undefined。 */
+  selfTitle?(): string | undefined;
   /**
    * 送出訊息；`ttlSeconds` 設定時為限時訊息（閱後即焚，NIP-40 短期過期）；
    * `mentions` 為 @提及公鑰（ADR-0050）；`replyTo` 為對話串根訊息 id（ADR-0051）。

@@ -91,6 +91,7 @@ import {
   allLabels,
   arrangeGroups,
   type GroupPrefsMap,
+  labelsOf,
   loadGroupPrefs,
   pruneGroup,
   saveGroupPrefs,
@@ -1555,7 +1556,7 @@ export function App(): JSX.Element {
     playChime(id);
   };
 
-  // 刪除/封鎖後：關閉其對話視窗並清掉本地對話快取
+  // 刪除/封鎖後：關閉其對話視窗並清掉本地對話快取＋私有標籤（ADR-0158：不留孤兒標籤）
   const forget = (pk: string) => {
     setOpen((prev) => prev.filter((x) => x !== pk));
     dropActive(pk); // 三欄：若刪的是當前分頁，遞補相鄰（避免中欄空白/右欄幽靈，ADR-0079 修正）。
@@ -1563,6 +1564,11 @@ export function App(): JSX.Element {
       if (!(pk in prev)) return prev;
       const next = { ...prev };
       delete next[pk];
+      return next;
+    });
+    setGroupPrefs((prev) => {
+      const next = pruneGroup(prev, pk);
+      if (next !== prev) saveGroupPrefs(next);
       return next;
     });
   };
@@ -1873,6 +1879,15 @@ export function App(): JSX.Element {
           selfName={self.name}
           onRename={renameSelf}
           {...(orgInfo ? { orgInfo } : {})}
+          {...(() => {
+            // 企業頭銜（ADR-0158）：企業成員與企業主身分才顯示編輯欄。
+            const p = activeProfile(profilesState);
+            if (!(p?.enterprise || p?.orgOwner) || !activeBackend.setSelfTitle) return {};
+            return {
+              myTitle: activeBackend.selfTitle?.() ?? "",
+              onSetTitle: (title: string) => activeBackend.setSelfTitle!(title || undefined),
+            };
+          })()}
           relayUrl={(() => {
             try {
               return localStorage.getItem(RELAY_URL_KEY) ?? "";
@@ -2183,6 +2198,10 @@ export function App(): JSX.Element {
               ? { onSetNotifySound: (cp: string, sid: string | undefined) => activeBackend.setContactNotifySound!(cp, sid) }
               : {})}
             onSelfAvatar={broadcastSelfAvatar}
+            // 私有標籤（ADR-0158 經典佈局入口）：資料同三欄側欄（ADR-0040，id 通用）。
+            labels={labelsOf(groupPrefs, pk)}
+            onAddLabel={(label: string) => updatePrefs(withLabel(groupPrefs, pk, label))}
+            onRemoveLabel={(label: string) => updatePrefs(withoutLabel(groupPrefs, pk, label))}
             messages={convos[pk] ?? []}
             reactions={reactions}
             unsent={unsent}

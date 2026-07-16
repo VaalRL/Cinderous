@@ -18,6 +18,7 @@ import {
   readNudge,
   readTyping,
   type RelayClient,
+  sanitizeTitle,
   type SecretKey,
   validAvatarDataUri,
 } from "@cinder/core";
@@ -290,6 +291,17 @@ export class BrowserChatBackend implements ChatBackend {
 
   selfAvatar(): string | undefined {
     return this.myAvatar;
+  }
+
+  /** 企業頭銜（ADR-0158）：示範模式純記憶體。 */
+  private myTitle: string | undefined;
+
+  setSelfTitle(title: string | undefined): void {
+    this.myTitle = title ? sanitizeTitle(title) || undefined : undefined;
+  }
+
+  selfTitle(): string | undefined {
+    return this.myTitle;
   }
 
   sendMessage(to: PubkeyHex, text: string, ttlSeconds?: number): void {

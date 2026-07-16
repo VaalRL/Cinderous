@@ -3,7 +3,7 @@ import { KIND } from "./constants.js";
 import { relayHintOf } from "./giftwrap.js";
 import { generateSecretKey, getPublicKey } from "./keys.js";
 import { openWrap, type Rumor } from "./nip59.js";
-import { parseProfile, PROFILE_AVATAR_MAX_BYTES, validAvatarDataUri, wrapProfile } from "./profile.js";
+import { parseProfile, PROFILE_AVATAR_MAX_BYTES, PROFILE_TITLE_MAX, validAvatarDataUri, wrapProfile } from "./profile.js";
 
 const aliceSk = generateSecretKey();
 const alicePk = getPublicKey(aliceSk);
@@ -69,6 +69,23 @@ describe("顯示名稱個人檔（ADR-0061，加密廣播）", () => {
     const p = parseProfile(rumor(KIND.PROFILE, JSON.stringify({ avatar: AVATAR })));
     expect(p?.name).toBeUndefined();
     expect(p?.avatar).toBe(AVATAR);
+  });
+
+  it("頭銜 round-trip（ADR-0158）：wrap 帶 title，收端清洗後還原；'' 移除記號原樣傳遞", () => {
+    const opened = openWrap(wrapProfile({ name: "小明", title: "  後端  工程師 " }, aliceSk, bobPk), bobSk);
+    expect(parseProfile(opened.rumor)?.title).toBe("後端 工程師"); // 收斂空白＋修剪
+    const removed = openWrap(wrapProfile({ name: "小明", title: "" }, aliceSk, bobPk), bobSk);
+    expect(parseProfile(removed.rumor)?.title).toBe("");
+    const none = openWrap(wrapProfile({ name: "小明" }, aliceSk, bobPk), bobSk);
+    expect(parseProfile(none.rumor)?.title).toBeUndefined(); // 缺席＝無變更
+  });
+
+  it("頭銜收端防禦（ADR-0158）：超長截斷至上限；全空白視同缺席", () => {
+    const long = "職".repeat(PROFILE_TITLE_MAX + 10);
+    const p = parseProfile(rumor(KIND.PROFILE, JSON.stringify({ name: "x", title: long })));
+    expect(p?.title?.length).toBe(PROFILE_TITLE_MAX);
+    const blank = parseProfile(rumor(KIND.PROFILE, JSON.stringify({ name: "x", title: "   " })));
+    expect(blank?.title).toBeUndefined();
   });
 
   it("validAvatarDataUri：白名單 jpeg/png/webp/gif；拒 SVG、非 data、超長", () => {

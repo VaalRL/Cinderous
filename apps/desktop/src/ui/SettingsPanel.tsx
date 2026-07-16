@@ -42,6 +42,10 @@ export interface SettingsPanelProps {
   initialTab?: SettingsTab;
   /** 組織資訊（ADR-0157，工作身分）：公司名稱/歡迎詞/班表的唯讀摘要；未採用名冊則不顯示。 */
   orgInfo?: { org: string; welcome?: string; workHours?: { start: string; end: string } };
+  /** 自己的企業頭銜（ADR-0158）；與 onSetTitle 一起提供才顯示編輯欄（企業身分限定）。 */
+  myTitle?: string;
+  /** 設定/移除頭銜（空＝移除）；廣播給該身分的所有聯絡人（工作身分＝全組織同事）。 */
+  onSetTitle?: (title: string) => void;
   /** 目前顯示名稱（ADR-0144）；與 onRename 一起提供才顯示改名欄。 */
   selfName?: string;
   /** 更改顯示名稱（ADR-0144）：落地本機並廣播給聯絡人（ADR-0061）。回 false＝撞本機同名（ADR-0146）。 */
@@ -124,6 +128,48 @@ const STATE_DOT: Record<RelayPoolEntry["state"], string> = {
 
 /** 主題色設定（ADR-0064）：預設色票 + 自訂色 + 重設；即時套用、只存本機。 */
 /** 更改顯示名稱（ADR-0144）：輸入新名 → 落地本機＋廣播給聯絡人（ADR-0061）。 */
+/** 企業頭銜編輯（ADR-0158）：≤24 字、留空套用＝移除；廣播給該身分的所有聯絡人。 */
+function TitleEditor({ title, onSet }: { title: string; onSet: (t: string) => void }): JSX.Element {
+  const { t } = useI18n();
+  const [draft, setDraft] = useState(title);
+  const [saved, setSaved] = useState(false);
+  const dirty = draft.trim() !== title;
+  const apply = (): void => {
+    if (!dirty) return;
+    onSet(draft.trim());
+    setSaved(true);
+  };
+  return (
+    <section className="settings__sec" data-testid="org-title">
+      <h4>{t("settings_orgTitle")}</h4>
+      <p className="hint">{t("settings_orgTitleHint")}</p>
+      <div className="settings__keyrow">
+        <input
+          aria-label={t("settings_orgTitle")}
+          data-testid="org-title-input"
+          maxLength={24}
+          value={draft}
+          onChange={(e) => {
+            setDraft(e.target.value);
+            setSaved(false);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") apply();
+          }}
+        />
+        <button type="button" data-testid="org-title-apply" disabled={!dirty} onClick={apply}>
+          {t("settings_nameApply")}
+        </button>
+      </div>
+      {saved ? (
+        <p className="settings__hint" data-testid="org-title-ok">
+          {t("settings_orgTitleUpdated")}
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
 function NameEditor({ name, onRename }: { name: string; onRename: (n: string) => boolean }): JSX.Element {
   const { t } = useI18n();
   const [draft, setDraft] = useState(name);
@@ -858,6 +904,11 @@ export function SettingsPanel(props: SettingsPanelProps): JSX.Element {
 
           {tab === "identity" && props.onRename ? (
             <NameEditor name={props.selfName ?? ""} onRename={props.onRename} />
+          ) : null}
+
+          {/* 企業頭銜（ADR-0158）：自填、隨加密個人檔廣播給同事；chip--role 顯示。 */}
+          {tab === "identity" && props.onSetTitle ? (
+            <TitleEditor title={props.myTitle ?? ""} onSet={props.onSetTitle} />
           ) : null}
 
           {/* 組織資訊（ADR-0157）：工作身分採用名冊後的公司設定摘要（唯讀）。 */}

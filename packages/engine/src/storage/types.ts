@@ -38,6 +38,11 @@ export interface StoredContact {
    * 隨搬家捆包流動。顯示優先序：本地覆寫（ADR-0077）＞此欄位＞生成頭像。
    */
   avatar?: string;
+  /**
+   * 對方廣播的企業頭銜（ADR-0158）：收自加密個人檔（≤24 字，收端已清洗）。
+   * 體積極小，照常隨快照/搬家流動（不需 ADR-0154 的剝除）。
+   */
+  title?: string;
 }
 
 /**
@@ -180,6 +185,8 @@ export interface AppStorage {
   setContactNotifySound(pubkey: string, soundId: string | undefined): void;
   /** 更新聯絡人廣播頭像（收到對方加密個人檔時；ADR-0154）；undefined＝清除（對方已移除）。 */
   updateContactAvatar(pubkey: string, avatar: string | undefined): void;
+  /** 更新聯絡人廣播頭銜（收到對方加密個人檔時；ADR-0158）；undefined＝清除。 */
+  updateContactTitle(pubkey: string, title: string | undefined): void;
   /**
    * 自己的廣播頭像（ADR-0154）：隨每次個人檔廣播送出。`null`＝從未設定（欄位缺席，
    * 不影響對方）；`""`＝已移除（持續廣播移除記號，讓晚上線的聯絡人也清掉舊圖）。
@@ -187,6 +194,10 @@ export interface AppStorage {
   loadSelfAvatar(): string | null;
   /** 寫入自己的廣播頭像；`undefined`＝回到「從未設定」。 */
   saveSelfAvatar(avatar: string | undefined): void;
+  /** 自己的企業頭銜（ADR-0158）：三態語意同 {@link loadSelfAvatar}。 */
+  loadSelfTitle(): string | null;
+  /** 寫入自己的企業頭銜；`undefined`＝回到「從未設定」。 */
+  saveSelfTitle(title: string | undefined): void;
   /** 移除聯絡人並清除其對話訊息。 */
   removeContact(pubkey: string): void;
   /**
@@ -304,6 +315,8 @@ export interface StorageSnapshot {
    * `""`＝已移除記號（語意見 {@link AppStorage.loadSelfAvatar}）。
    */
   selfAvatar?: string | null;
+  /** 自己的企業頭銜（ADR-0158）；語意同 {@link StorageSnapshot.selfAvatar}。 */
+  selfTitle?: string | null;
   contacts: StoredContact[];
   blocked: StoredContact[];
   /** 訊息請求（ADR-0121）；舊快照沒有這個欄位 → 匯入時須容忍 `undefined`（退回 `[]`）。 */

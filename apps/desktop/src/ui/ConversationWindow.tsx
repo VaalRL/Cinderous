@@ -262,6 +262,12 @@ export interface ConversationProps {
   onSetNotifySound?: (pubkey: string, soundId: string | undefined) => void;
   /** 設定/移除自己的廣播頭像（ADR-0154）；接在 .pics 區自己的頭像選單上。 */
   onSelfAvatar?: (uri: string | undefined) => boolean;
+  /** 此聯絡人的私有標籤（ADR-0158：經典佈局入口）；與 onAddLabel 一起提供才顯示標籤列。 */
+  labels?: string[];
+  /** 新增私有標籤（ADR-0040 資料層；App 負責正規化/去重/持久化）。 */
+  onAddLabel?: (label: string) => void;
+  /** 移除私有標籤。 */
+  onRemoveLabel?: (label: string) => void;
   /** 測試用：初始展開音效選擇列（SSR 測試無法點擊 🔔）。 */
   initialSoundEditing?: boolean;
   /** 離開群組（群組視窗才提供）。 */
@@ -328,6 +334,16 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
   // ADR-0149：依聯絡人通知音效。🔔 展開/收合選擇列；換對話即收回。
   const [soundEditing, setSoundEditing] = useState(props.initialSoundEditing ?? false);
   useEffect(() => setSoundEditing(false), [contact.pubkey]);
+  // 私有標籤編輯（ADR-0158 經典佈局入口）：換聯絡人時收起。
+  const [labelEditing, setLabelEditing] = useState(false);
+  const [labelDraft, setLabelDraft] = useState("");
+  useEffect(() => setLabelEditing(false), [contact.pubkey]);
+  const submitLabel = (): void => {
+    const v = labelDraft.trim();
+    if (v) props.onAddLabel?.(v);
+    setLabelDraft("");
+    setLabelEditing(false);
+  };
   const [text, setText] = useState("");
   const composerRef = useRef<HTMLTextAreaElement>(null);
   /** 快速插入模板（➕ 選單）：插到游標處（非行首自動補換行），並選取佔位字。 */
@@ -915,6 +931,56 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
         <div className="pics">
           <EditableAvatar id={contact.pubkey} name={contact.name} />
           <div className="cap">{contactLabel(contact)}</div>
+          {/* 頭銜（ADR-0158 chip--role）＋私有標籤列（經典佈局入口）：對方頭像正下方。 */}
+          {contact.title || (props.labels && props.onAddLabel) ? (
+            <div className="labelrow pics__labels" data-testid="convo-labels">
+              {contact.title ? (
+                <span className="chip chip--role" data-testid="convo-title-chip">
+                  {contact.title}
+                </span>
+              ) : null}
+              {(props.labels ?? []).map((l) => (
+                <span className="chip" key={l}>
+                  {l}
+                  {props.onRemoveLabel ? (
+                    <button className="chip__x" aria-label={t("group_labelRemove", { label: l })} onClick={() => props.onRemoveLabel!(l)}>
+                      ×
+                    </button>
+                  ) : null}
+                </span>
+              ))}
+              {props.onAddLabel ? (
+                labelEditing ? (
+                  <input
+                    className="labelrow__input"
+                    aria-label={t("group_labelPlaceholder")}
+                    placeholder={t("group_labelPlaceholder")}
+                    autoFocus
+                    value={labelDraft}
+                    onChange={(e) => setLabelDraft(e.target.value)}
+                    onBlur={submitLabel}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") submitLabel();
+                      else if (e.key === "Escape") setLabelEditing(false);
+                    }}
+                  />
+                ) : (
+                  <button
+                    type="button"
+                    className="dsb__label"
+                    title={t("sidebar_labelAdd")}
+                    data-testid="convo-label-add"
+                    onClick={() => {
+                      setLabelDraft("");
+                      setLabelEditing(true);
+                    }}
+                  >
+                    🏷
+                  </button>
+                )
+              ) : null}
+            </div>
+          ) : null}
           <EditableAvatar id={self.pubkey} name={self.name} {...(props.onSelfAvatar ? { onBroadcast: props.onSelfAvatar } : {})} />
           <div className="cap">{self.name}</div>
         </div>

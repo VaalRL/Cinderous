@@ -253,6 +253,9 @@ export class TauriStorage implements AppStorage {
   loadSelfAvatar(): string | null {
     return this.mem.loadSelfAvatar(); // ADR-0154：自己的廣播頭像（隨 META 部位落地）
   }
+  loadSelfTitle(): string | null {
+    return this.mem.loadSelfTitle(); // ADR-0158
+  }
   loadContacts(): StoredContact[] {
     return this.mem.loadContacts();
   }
@@ -304,8 +307,16 @@ export class TauriStorage implements AppStorage {
     this.mem.updateContactAvatar(pubkey, avatar); // ADR-0154：對方廣播的頭像
     this.persist(META);
   }
+  updateContactTitle(pubkey: string, title: string | undefined): void {
+    this.mem.updateContactTitle(pubkey, title); // ADR-0158：對方廣播的企業頭銜
+    this.persist(META);
+  }
   saveSelfAvatar(avatar: string | undefined): void {
     this.mem.saveSelfAvatar(avatar); // ADR-0154
+    this.persist(META);
+  }
+  saveSelfTitle(title: string | undefined): void {
+    this.mem.saveSelfTitle(title); // ADR-0158
     this.persist(META);
   }
   removeContact(pubkey: string): void {

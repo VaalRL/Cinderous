@@ -22,7 +22,15 @@ export function validAvatarDataUri(s: string): boolean {
   return s.length <= PROFILE_AVATAR_MAX_BYTES && /^data:image\/(jpeg|png|webp|gif);base64,/.test(s);
 }
 
-/** 加密個人檔內容（ADR-0061 名稱；ADR-0154 擴充頭像）。 */
+/** 頭銜字元數上限（ADR-0158）：chip 尺寸的自述標註，與本地標籤上限一致。 */
+export const PROFILE_TITLE_MAX = 24;
+
+/** 清洗頭銜：收斂空白、修剪、截斷（sign/parse 兩側同一套防禦）。 */
+export function sanitizeTitle(raw: string): string {
+  return raw.replace(/\s+/g, " ").trim().slice(0, PROFILE_TITLE_MAX);
+}
+
+/** 加密個人檔內容（ADR-0061 名稱；ADR-0154 頭像；ADR-0158 頭銜）。 */
 export interface ProfileData {
   name?: string;
   /**
@@ -30,6 +38,11 @@ export interface ProfileData {
    * `undefined`／欄位缺席＝無變更（不清不改）。
    */
   avatar?: string;
+  /**
+   * 企業頭銜（ADR-0158）：自填自述標註（≤{@link PROFILE_TITLE_MAX} 字）。
+   * `""`＝已移除；缺席＝無變更。工作身分的聯絡人＝全組織同事 → 全員可見。
+   */
+  title?: string;
 }
 
 /**
@@ -39,7 +52,7 @@ export interface ProfileData {
  * 網址只當輸入方式，絕不把 URL 發給對方讓對方裝置去抓，見 ADR-0154）。
  */
 export function wrapProfile(
-  profile: { name: string; avatar?: string },
+  profile: { name: string; avatar?: string; title?: string },
   senderSk: SecretKey,
   recipientPk: PubkeyHex,
   opts: { now?: number; relayHint?: string } = {},
@@ -49,6 +62,7 @@ export function wrapProfile(
   const tags = opts.relayHint ? [["relay", opts.relayHint]] : [];
   const content: ProfileData = { name: profile.name };
   if (profile.avatar !== undefined) content.avatar = profile.avatar;
+  if (profile.title !== undefined) content.title = profile.title === "" ? "" : sanitizeTitle(profile.title);
   return sealAndWrap(
     { kind: KIND.PROFILE, created_at: nowSec, tags, content: JSON.stringify(content) },
     senderSk,
@@ -71,11 +85,16 @@ export function wrapProfile(
 export function parseProfile(rumor: Rumor): ProfileData | undefined {
   if (rumor.kind !== KIND.PROFILE) return undefined;
   try {
-    const raw = JSON.parse(rumor.content) as { name?: unknown; avatar?: unknown };
+    const raw = JSON.parse(rumor.content) as { name?: unknown; avatar?: unknown; title?: unknown };
     const out: ProfileData = {};
     if (typeof raw.name === "string" && raw.name.trim()) out.name = raw.name.trim();
     if (typeof raw.avatar === "string" && (raw.avatar === "" || validAvatarDataUri(raw.avatar))) out.avatar = raw.avatar;
-    return out.name !== undefined || out.avatar !== undefined ? out : undefined;
+    // 頭銜（ADR-0158）：收端清洗（收斂空白/截斷）；""＝移除記號原樣保留；清洗後全空視同缺席。
+    if (typeof raw.title === "string") {
+      const t = raw.title === "" ? "" : sanitizeTitle(raw.title);
+      if (t !== "" || raw.title === "") out.title = t;
+    }
+    return out.name !== undefined || out.avatar !== undefined || out.title !== undefined ? out : undefined;
   } catch {
     return undefined;
   }

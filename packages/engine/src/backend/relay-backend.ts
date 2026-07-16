@@ -68,6 +68,7 @@ import {
   receiptOf,
   wrapProfile,
   parseProfile,
+  sanitizeTitle,
   validAvatarDataUri,
   wrapOrgJoin,
   parseOrgJoin,
@@ -448,12 +449,22 @@ export class RelayChatBackend implements ChatBackend {
    * 只在記憶體：session 內重連走增量，App 重啟仍全量抓一次。
    */
   private readonly inboxWatermark = new Map<string, number>();
-  private contacts: { pubkey: PubkeyHex; name: string; relayUrl?: string; alias?: string; notifySound?: string; avatar?: string }[];
+  private contacts: {
+    pubkey: PubkeyHex;
+    name: string;
+    relayUrl?: string;
+    alias?: string;
+    notifySound?: string;
+    avatar?: string;
+    title?: string;
+  }[];
   /** 自己的廣播頭像（ADR-0154）：null＝從未設定；""＝已移除（持續廣播移除記號）。 */
   private myAvatar: string | null = null;
+  /** 自己的企業頭銜（ADR-0158）：三態語意同 myAvatar。 */
+  private myTitle: string | null = null;
   private blocked: { pubkey: PubkeyHex; name: string }[];
   /** 訊息請求（ADR-0121）：陌生人傳來訊息但你還沒接受。**不是聯絡人。** */
-  private requests: { pubkey: PubkeyHex; name: string; relayUrl?: string; avatar?: string }[];
+  private requests: { pubkey: PubkeyHex; name: string; relayUrl?: string; avatar?: string; title?: string }[];
   private groups: Group[];
   private readonly transfer: WebRtcTransfer;
   private readonly call: WebRtcCall;
@@ -518,6 +529,7 @@ export class RelayChatBackend implements ChatBackend {
     this.selfNsec = identity.nsec;
     this.contacts = storage.loadContacts();
     this.myAvatar = storage.loadSelfAvatar(); // ADR-0154：開機廣播帶上頭像（或移除記號）
+    this.myTitle = storage.loadSelfTitle(); // ADR-0158：企業頭銜同理
     this.blocked = storage.loadBlocked();
     this.requests = storage.loadRequests();
     this.groups = storage.loadGroups();
@@ -1263,6 +1275,12 @@ export class RelayChatBackend implements ChatBackend {
           this.storage.updateContactAvatar(sender, incoming);
           changed = true;
         }
+        // ADR-0158：對方廣播的企業頭銜（同 avatar 語意）。
+        const incomingTitle = profile.title === "" ? undefined : profile.title;
+        if (profile.title !== undefined && incomingTitle !== known.title) {
+          this.storage.updateContactTitle(sender, incomingTitle);
+          changed = true;
+        }
         if (changed) {
           this.contacts = this.storage.loadContacts();
           this.requests = this.storage.loadRequests();
@@ -1664,6 +1682,24 @@ export class RelayChatBackend implements ChatBackend {
     return this.myAvatar || undefined;
   }
 
+  /**
+   * 設定/移除自己的企業頭銜（ADR-0158）：清洗（收斂空白/截斷 24 字）→ 落地 →
+   * 比照改名清 profileSentTo 全量重播。空/undefined＝移除（持久化 "" 持續廣播移除記號）。
+   */
+  setSelfTitle(title: string | undefined): void {
+    const next = title ? sanitizeTitle(title) : "";
+    if (next === this.myTitle) return; // 無變更不重播
+    this.myTitle = next;
+    this.storage.saveSelfTitle(next);
+    this.profileSentTo.clear();
+    this.broadcastProfile();
+  }
+
+  /** 自己目前的企業頭銜（ADR-0158）；未設定或已移除回 undefined。 */
+  selfTitle(): string | undefined {
+    return this.myTitle || undefined;
+  }
+
   blockContact(pubkey: PubkeyHex): void {
     const existing =
       this.contacts.find((c) => c.pubkey === pubkey) ?? this.requests.find((r) => r.pubkey === pubkey);
@@ -1868,6 +1904,7 @@ export class RelayChatBackend implements ChatBackend {
         ...(c.alias ? { alias: c.alias } : {}), // ADR-0148：本地暱稱（有設才帶）
         ...(c.notifySound ? { notifySound: c.notifySound } : {}), // ADR-0149：依聯絡人通知音效
         ...(c.avatar ? { avatar: c.avatar } : {}), // ADR-0154：對方廣播的頭像
+        ...(c.title ? { title: c.title } : {}), // ADR-0158：對方廣播的企業頭銜
         status: online ? payload?.s ?? "online" : "offline",
         statusMessage: (online ? payload?.m : undefined) ?? "",
         nowPlaying: (online ? payload?.np : undefined) ?? "",
@@ -1984,8 +2021,12 @@ export class RelayChatBackend implements ChatBackend {
   /** ADR-0061：把自己的顯示名稱與頭像（加密個人檔）送給某聯絡人；帶 home hint（ADR-0066）。 */
   private sendProfileTo(pubkey: PubkeyHex): void {
     this.profileSentTo.add(pubkey);
-    // 頭像（ADR-0154）：null＝從未設定 → 欄位缺席（不影響對方）；""＝移除記號照送。
-    const profile = { name: this.self.name, ...(this.myAvatar !== null ? { avatar: this.myAvatar } : {}) };
+    // 頭像（ADR-0154）/頭銜（ADR-0158）：null＝從未設定 → 欄位缺席（不影響對方）；""＝移除記號照送。
+    const profile = {
+      name: this.self.name,
+      ...(this.myAvatar !== null ? { avatar: this.myAvatar } : {}),
+      ...(this.myTitle !== null ? { title: this.myTitle } : {}),
+    };
     // hint 讓「每次開機廣播」同時成為全聯絡人的路由刷新——搬家後自動改道、陳舊自癒。
     this.publishReliable(wrapProfile(profile, this.sk, pubkey, this.homeUrl ? { relayHint: this.homeUrl } : {}));
   }

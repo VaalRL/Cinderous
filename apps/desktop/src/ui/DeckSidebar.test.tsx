@@ -65,3 +65,14 @@ describe("DeckSidebar 三欄左側欄（ADR-0079 Q2）", () => {
     expect(html).toContain('data-testid="avatar-file"');
   });
 });
+
+describe("企業頭銜 chip（ADR-0158）", () => {
+  it("聯絡人帶 title → 列上顯示 chip--role（與私標區隔、不可移除）", () => {
+    const html = render({
+      contacts: [{ pubkey: "p1", name: "Amy", status: "online", statusMessage: "", nowPlaying: "", title: "設計師" }],
+    });
+    expect(html).toContain('data-testid="sidebar-title-chip"');
+    expect(html).toContain("chip--role");
+    expect(html).toContain("設計師");
+  });
+});
