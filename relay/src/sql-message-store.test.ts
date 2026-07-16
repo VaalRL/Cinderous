@@ -111,6 +111,18 @@ describe("壽命上限（ADR-0065：孤兒資料不可能）", () => {
     expect(s.query(f({ "#p": ["a"] }), 1000 + WEEK + 1)).toEqual([]);
   });
 
+  it("放寬上限（ADR-0160 企業站 MAX_TTL_DAYS）：30 天章在 90 天上限站不被截；仍截超過站方上限者", () => {
+    const s = new SqlMessageStore(nodeSqlExec(), { maxTtlSeconds: 90 * 86_400 });
+    s.put(ev("m30", { p: ["a"], expiration: 1000 + 30 * 86_400 }), 1000);
+    s.put(ev("huge", { p: ["b"], expiration: 999_999_999 }), 1000);
+    // 30 天章：第 29 天仍在、第 31 天收走（未被舊的 7 天上限截斷）。
+    expect(s.query(f({ "#p": ["a"] }), 1000 + 29 * 86_400).map((e) => e.id)).toEqual(["m30"]);
+    expect(s.query(f({ "#p": ["a"] }), 1000 + 31 * 86_400)).toEqual([]);
+    // 超長章仍被截到站方上限（90 天）——站方上限恆為權威。
+    expect(s.query(f({ "#p": ["b"] }), 1000 + 89 * 86_400).map((e) => e.id)).toEqual(["huge"]);
+    expect(s.query(f({ "#p": ["b"] }), 1000 + 91 * 86_400)).toEqual([]);
+  });
+
   it("遷移：修正前殘留的 NULL 到期列，重啟（重建 store）後補上有界壽命", () => {
     const sql = nodeSqlExec();
     new SqlMessageStore(sql); // 建表

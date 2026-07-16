@@ -3,6 +3,11 @@ import { SqlMessageStore } from "./sql-message-store.js";
 
 export interface Env {
   RELAY_ROOM: DurableObjectNamespace;
+  /**
+   * 離線留言 TTL 上限（天，ADR-0160）：企業自架站以 wrangler var 放寬（例 "90"）。
+   * 未設/壞值＝預設 7 天。發送端蓋超過此上限的過期章會被截斷——站方上限恆為權威。
+   */
+  MAX_TTL_DAYS?: string;
 }
 
 /** 每收件人離線留言上限（防單一收件人塞爆免費額度；PRD §8）。 */
@@ -36,13 +41,18 @@ export class RelayRoom {
   /** 本次喚醒是否已從 attachment 重建 RelayCore 狀態。 */
   private hydrated = false;
 
-  constructor(ctx: DurableObjectState, _env: Env) {
+  constructor(ctx: DurableObjectState, env: Env) {
     this.ctx = ctx;
     // 離線留言持久化於 DO 內建 SQLite（同步、免 D1；ADR-0056）——storage 跨休眠存活。
     const sql = ctx.storage.sql;
     const exec = (query: string, ...bindings: (string | number | null)[]): Record<string, unknown>[] =>
       sql.exec(query, ...bindings).toArray() as Record<string, unknown>[];
-    this.store = new SqlMessageStore(exec, { maxPerRecipient: MAX_PER_RECIPIENT });
+    // TTL 上限（ADR-0160）：企業站可放寬；未設/壞值＝預設 7 天。
+    const ttlDays = Number(env.MAX_TTL_DAYS ?? 0);
+    this.store = new SqlMessageStore(exec, {
+      maxPerRecipient: MAX_PER_RECIPIENT,
+      ...(Number.isFinite(ttlDays) && ttlDays >= 1 ? { maxTtlSeconds: Math.floor(ttlDays) * 86_400 } : {}),
+    });
     // NIP-42 AUTH（ADR-0057）：開放中繼要求認證——只有本人能拉自己的加密收件匣。
     // 每連線訂閱數上限（ADR-0119）：`relay-core` 一直有這道防禦（含正確的 `CLOSED rate-limited`
     // 回應），但**從來沒被啟用**——而這是**單一全域房間 DO**（所有人共用），任何人自產一把金鑰

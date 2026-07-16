@@ -2555,6 +2555,10 @@ export function RosterAdminModal({
   const [groupText, setGroupText] = useState("");
   const [rotText, setRotText] = useState("");
   const [pol, setPol] = useState<OrgPolicy>(initial?.policy ?? {});
+  // 訊息保留天數（ADR-0160）：留空＝預設 7 天；1–365 才併入政策。
+  const [ttlDays, setTtlDays] = useState(
+    initial?.policy?.messageTtlDays !== undefined ? String(initial.policy.messageTtlDays) : "",
+  );
   // 公司設定（ADR-0157）：歡迎詞/基本規範＋表定上下班時間。
   const [welcome, setWelcome] = useState(initial?.welcome ?? "");
   const [workStart, setWorkStart] = useState(initial?.workHours?.start ?? "");
@@ -2624,8 +2628,14 @@ export function RosterAdminModal({
       }
       groups.push({ id: newGroupId(), name, members: [...gm], ...(announce ? { announce: true } : {}) });
     }
+    // 訊息保留天數（ADR-0160）：1–365 整數才生效；併入政策一起簽發。
+    const ttlParsed = parseInt(ttlDays.trim(), 10);
+    const polOut: OrgPolicy = {
+      ...pol,
+      ...(Number.isInteger(ttlParsed) && ttlParsed >= 1 && ttlParsed <= 365 ? { messageTtlDays: ttlParsed } : {}),
+    };
     try {
-      const anyPol = Object.values(pol).some(Boolean);
+      const anyPol = Object.values(polOut).some(Boolean);
       // 公司設定（ADR-0157）：兩端皆填且不相等才帶班表（相等/單端＝視為未設）。
       const profile = {
         ...(welcome.trim() ? { welcome: welcome.trim() } : {}),
@@ -2635,7 +2645,7 @@ export function RosterAdminModal({
         onPublish(
           org.trim() || "組織",
           finalMembers,
-          anyPol ? pol : undefined,
+          anyPol ? polOut : undefined,
           groups.length ? groups : undefined,
           Object.keys(profile).length > 0 ? profile : undefined,
         ),
@@ -2721,6 +2731,18 @@ export function RosterAdminModal({
             <input type="checkbox" checked={!!pol.forceTurn} onChange={() => flip("forceTurn")} />
             <span>強制 TURN（不揭露內網 IP）</span>
           </label>
+          {/* 訊息保留天數（ADR-0160）：需搭配自架 relay 的 MAX_TTL_DAYS 放寬上限。 */}
+          <div className="groupmodal__label">{t("roster_ttlLabel")}</div>
+          <input
+            className="groupmodal__name"
+            type="number"
+            min={1}
+            max={365}
+            placeholder="7"
+            data-testid="roster-ttl-days"
+            value={ttlDays}
+            onChange={(e) => setTtlDays(e.target.value)}
+          />
           <div className="groupmodal__label">組織群組（可選，每行：群組名稱, npub, npub…；名稱前綴 ! 為公告頻道）</div>
           <textarea
             className="groupmodal__name"

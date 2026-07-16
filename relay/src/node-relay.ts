@@ -18,6 +18,8 @@ const port = Number(process.env.PORT ?? 8787);
 const dbPath = process.env.DB_PATH ?? "cinder-relay.db";
 const requireAuth = process.env.REQUIRE_AUTH !== "0"; // 預設開 NIP-42 認證；設 REQUIRE_AUTH=0 可關
 const maxPerRecipient = Number(process.env.MAX_PER_RECIPIENT ?? 500);
+// TTL 上限（天，ADR-0160）：企業自架站可放寬離線留言保留；未設/壞值＝預設 7 天。
+const maxTtlDays = Number(process.env.MAX_TTL_DAYS ?? 0);
 const PRUNE_INTERVAL_MS = 60 * 60 * 1000;
 
 const db = new DatabaseSync(dbPath);
@@ -27,7 +29,10 @@ const exec: SqlExec = (query, ...bindings) => {
   stmt.run(...bindings);
   return [];
 };
-const store = new SqlMessageStore(exec, { maxPerRecipient });
+const store = new SqlMessageStore(exec, {
+  maxPerRecipient,
+  ...(Number.isFinite(maxTtlDays) && maxTtlDays >= 1 ? { maxTtlSeconds: Math.floor(maxTtlDays) * 86_400 } : {}),
+});
 const core = new RelayCore({ store, requireAuth });
 
 const sockets = new Map<string, WebSocket>();

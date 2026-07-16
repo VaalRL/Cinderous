@@ -31,6 +31,21 @@ export interface OrgPolicy {
   forceTurn?: boolean;
   /** 禁止工作身分把狀態快照上雲（ADR-0071）：組織不願工作狀態密文駐留 relay 時啟用。 */
   disableCloudBackup?: boolean;
+  /**
+   * 訊息保留天數（ADR-0160，1–365 整數）：發送端對聊天/檔案 metadata 蓋 `now+N天`
+   * 外層過期——企業自架 relay 搭配 `MAX_TTL_DAYS` 放寬上限才生效（站方上限恆為權威）。
+   * 未設＝預設 7 天。閱後即焚（disappearAt）不受影響。
+   */
+  messageTtlDays?: number;
+}
+
+/** 訊息保留天數上限（ADR-0160）。 */
+export const ORG_TTL_MAX_DAYS = 365;
+
+/** 政策保留天數 → 秒（ADR-0160）；未設回 undefined，供發送端蓋章。 */
+export function policyTtlSeconds(policy: OrgPolicy | undefined): number | undefined {
+  const d = policy?.messageTtlDays;
+  return d !== undefined ? d * 86_400 : undefined;
 }
 
 /** 組織群組（ADR-0049）：管理者佈建的部門群／公告頻道。 */
@@ -125,6 +140,10 @@ function parsePolicy(value: unknown): OrgPolicy | undefined {
   if (v.disableStickers === true) p.disableStickers = true;
   if (v.forceTurn === true) p.forceTurn = true;
   if (v.disableCloudBackup === true) p.disableCloudBackup = true;
+  // ADR-0160：保留天數僅接受 1–365 整數（壞值視為未設，退回預設 7 天）。
+  if (typeof v.messageTtlDays === "number" && Number.isInteger(v.messageTtlDays) && v.messageTtlDays >= 1 && v.messageTtlDays <= ORG_TTL_MAX_DAYS) {
+    p.messageTtlDays = v.messageTtlDays;
+  }
   return Object.keys(p).length > 0 ? p : undefined;
 }
 

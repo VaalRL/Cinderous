@@ -66,6 +66,7 @@ import {
   wrapReaction,
   wrapReceipt,
   receiptOf,
+  policyTtlSeconds,
   wrapProfile,
   parseProfile,
   sanitizeTitle,
@@ -1972,6 +1973,8 @@ export class RelayChatBackend implements ChatBackend {
     const wrapped = wrapMessage(text, this.sk, to, {
       now,
       ...(disappearAt !== undefined ? { disappearAt } : {}),
+      // 組織保留政策（ADR-0160）：閱後即焚不受影響（disappearAt 語意優先）。
+      ...(disappearAt === undefined ? this.orgExpiration(now) : {}),
       ...(this.homeUrl ? { relayHint: this.homeUrl } : {}),
       ...(mentions && mentions.length > 0 ? { mentions } : {}),
       ...(replyTo ? { replyTo } : {}),
@@ -2381,7 +2384,11 @@ export class RelayChatBackend implements ChatBackend {
     const tid = this.transfer.sendFile(to, file);
     const meta = { tid, name: file.name, size: file.bytes.length, mime: file.mime };
     const now = nowSec(); // 同一個送出時間寫進 rumor 也當本機 `at`（ADR-0108）
-    const wrapped = wrapFileMessage(this.sk, to, meta, { now, ...(this.homeUrl ? { relayHint: this.homeUrl } : {}) });
+    const wrapped = wrapFileMessage(this.sk, to, meta, {
+      now,
+      ...this.orgExpiration(now), // ADR-0160
+      ...(this.homeUrl ? { relayHint: this.homeUrl } : {}),
+    });
     const id = wrapped.id;
     this.seenMsg.add(id);
     // 訊息 id＝metadata 的 rumor id（ADR-0107，供回條與自己的其他裝置對得上）；file.id＝tid。
@@ -2416,6 +2423,7 @@ export class RelayChatBackend implements ChatBackend {
     const now = nowSec();
     const wrapped = wrapGroupFile(meta, this.sk, this.self.pubkey, group, {
       now,
+      ...this.orgExpiration(now), // ADR-0160
       ...(this.homeUrl ? { relayHint: this.homeUrl } : {}),
     });
     const id = wrapped.id;
@@ -2609,6 +2617,15 @@ export class RelayChatBackend implements ChatBackend {
     return this.lastRoster;
   }
 
+  /**
+   * 組織保留政策的外層過期（ADR-0160）：名冊政策有 `messageTtlDays` 才蓋
+   * （成員＝採用的名冊；企業主＝自己發佈的名冊）；未設回空物件（沿用預設 7 天）。
+   */
+  private orgExpiration(now: number): { expiration: number } | Record<string, never> {
+    const ttl = policyTtlSeconds(this.lastRoster?.policy);
+    return ttl !== undefined ? { expiration: now + ttl } : {};
+  }
+
   /** 新成員直接成為管理者的聯絡人（帶名冊名，非 shortNpub），並清掉可能先到的訊息請求。 */
   private ensureJoinContact(pubkey: PubkeyHex, name: string): void {
     if (this.isBlocked(pubkey) || this.contacts.some((c) => c.pubkey === pubkey)) return;
@@ -2649,6 +2666,7 @@ export class RelayChatBackend implements ChatBackend {
     const now = nowSec(); // 同一個送出時間寫進 rumor 也當本機 `at`（ADR-0108）
     const wrapped = wrapGroupMessage(text, this.sk, this.self.pubkey, group, {
       now,
+      ...this.orgExpiration(now), // ADR-0160：組織保留政策
       ...(this.homeUrl ? { relayHint: this.homeUrl } : {}),
       ...(validMentions.length > 0 ? { mentions: validMentions } : {}),
       ...(replyTo ? { replyTo } : {}),

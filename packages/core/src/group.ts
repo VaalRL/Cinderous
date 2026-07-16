@@ -133,14 +133,22 @@ function wrapFor(
  * rumor **只建一次**（與收件人無關）→ `rumor.id` 跨成員一致 → 回條（ADR-0095）與自封副本
  * （ADR-0107）才對得回同一則訊息。
  */
-function fanOutGroupRumor(input: RumorInput, senderSk: SecretKey, senderPk: PubkeyHex, group: Group): WrappedMessage {
+function fanOutGroupRumor(
+  input: RumorInput,
+  senderSk: SecretKey,
+  senderPk: PubkeyHex,
+  group: Group,
+  /** 外層過期（unix 秒；ADR-0160 組織保留政策可覆寫）；省略＝created_at＋7 天。 */
+  expiration?: number,
+): WrappedMessage {
   const id = getEventHash({ ...input, pubkey: getPublicKey(senderSk) });
+  const outerExpiration = expiration ?? input.created_at + DEFAULT_TTL_SECONDS;
   const wrapFor = (pk: PubkeyHex): NostrEvent =>
     sealAndWrap(input, senderSk, pk, {
       kind: KIND.OFFLINE_DM_GIFT_WRAP,
       tags: [
         ["p", pk],
-        ["expiration", String(input.created_at + DEFAULT_TTL_SECONDS)],
+        ["expiration", String(outerExpiration)],
       ],
     });
   return { id, events: others(group.members, senderPk).map(wrapFor), selfCopy: wrapFor(senderPk) };
@@ -151,7 +159,7 @@ export function wrapGroupMessage(
   senderSk: SecretKey,
   senderPk: PubkeyHex,
   group: Group,
-  opts: { now?: number; relayHint?: string; mentions?: PubkeyHex[]; replyTo?: string } = {},
+  opts: { now?: number; relayHint?: string; mentions?: PubkeyHex[]; replyTo?: string; expiration?: number } = {},
 ): WrappedMessage {
   const nowSec = opts.now ?? Math.floor(Date.now() / 1000);
   const input: RumorInput = {
@@ -165,7 +173,7 @@ export function wrapGroupMessage(
     ],
     content: text,
   };
-  return fanOutGroupRumor(input, senderSk, senderPk, group);
+  return fanOutGroupRumor(input, senderSk, senderPk, group, opts.expiration);
 }
 
 /**
@@ -179,7 +187,7 @@ export function wrapGroupFile(
   senderSk: SecretKey,
   senderPk: PubkeyHex,
   group: Group,
-  opts: { now?: number; relayHint?: string } = {},
+  opts: { now?: number; relayHint?: string; expiration?: number } = {},
 ): WrappedMessage {
   const nowSec = opts.now ?? Math.floor(Date.now() / 1000);
   const input: RumorInput = {
@@ -192,7 +200,7 @@ export function wrapGroupFile(
     ],
     content: "",
   };
-  return fanOutGroupRumor(input, senderSk, senderPk, group);
+  return fanOutGroupRumor(input, senderSk, senderPk, group, opts.expiration);
 }
 
 /** 將群組控制訊息扇出給指定收件人（各一個 Gift Wrap）。 */

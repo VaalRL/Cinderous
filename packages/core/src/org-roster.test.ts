@@ -4,6 +4,7 @@ import {
   applyRosterRotations,
   diffRoster,
   inWorkHours,
+  policyTtlSeconds,
   type OrgRosterDoc,
   rosterAllowlist,
   rosterRemap,
@@ -256,5 +257,25 @@ describe("公司設定隨名冊分發（ADR-0157）", () => {
     expect(inWorkHours(wh, 2 * 60)).toBe(true);
     expect(inWorkHours(wh, 6 * 60)).toBe(false);
     expect(inWorkHours(wh, 12 * 60)).toBe(false);
+  });
+});
+
+describe("訊息保留政策（ADR-0160）", () => {
+  const base = { org: "小公司", members: [{ pubkey: admin, name: "老闆" }], updatedAt: 100 };
+
+  it("messageTtlDays round-trip：1–365 整數原樣還原；壞值（0/負/超上限/小數/字串）視為未設", () => {
+    const ok = verifyOrgRoster(signOrgRoster({ ...base, policy: { messageTtlDays: 90 } }, adminSk), admin);
+    expect(ok?.policy?.messageTtlDays).toBe(90);
+    for (const bad of [0, -1, 366, 1.5, "30" as unknown as number]) {
+      const out = verifyOrgRoster(signOrgRoster({ ...base, policy: { messageTtlDays: bad, forceTurn: true } }, adminSk), admin);
+      expect(out?.policy?.messageTtlDays).toBeUndefined();
+      expect(out?.policy?.forceTurn).toBe(true); // 其餘政策不受影響
+    }
+  });
+
+  it("policyTtlSeconds：換算天→秒；未設回 undefined", () => {
+    expect(policyTtlSeconds({ messageTtlDays: 30 })).toBe(30 * 86_400);
+    expect(policyTtlSeconds({ forceTurn: true })).toBeUndefined();
+    expect(policyTtlSeconds(undefined)).toBeUndefined();
   });
 });
