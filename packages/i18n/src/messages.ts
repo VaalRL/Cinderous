@@ -110,6 +110,13 @@ export interface Messages {
   addId_modeOwner: string;
   addId_modeOwnerHint: string;
   addId_changeMode: string;
+  addId_invite: string;
+  addId_inviteApplied: string;
+  roster_inviteHint: string;
+  roster_inviteCopy: string;
+  signIn_joinHint: string;
+  signIn_joinName: string;
+  signIn_joinButton: string;
   idbar_addIdentity: string;
   idbar_unlockHidden: string;
   idbar_roster: string;
@@ -677,8 +684,15 @@ const zhHant: Messages = {
   addId_modeOrg: "企業成員",
   addId_modeOrgHint: "工作身分：訂閱組織管理者發佈的名冊，自動採用通訊錄與政策（可選填管理者 npub）。",
   addId_modeOwner: "企業主（建立組織名冊）",
-  addId_modeOwnerHint: "一般身分＋名冊管理權：建立後直接進入組織名冊管理，把你的 npub 交給成員填入即可佈建。",
+  addId_modeOwnerHint: "一般身分＋名冊管理權：建立後直接進入組織名冊管理，複製入職邀請碼給員工即可佈建。",
   addId_changeMode: "← 重新選擇類型",
+  addId_invite: "貼上入職邀請碼（自動填入中繼站與管理者）",
+  addId_inviteApplied: "已套用邀請碼：建立後會自動向管理者提出入職，核准後全公司通訊錄自動同步。",
+  roster_inviteHint: "入職邀請碼（含中繼站＋你的身分＋核准權杖）：員工在登入畫面或「企業成員」表單貼上即自動加入",
+  roster_inviteCopy: "複製",
+  signIn_joinHint: "偵測到入職邀請：將在 {host} 建立企業成員身分，並自動向管理者提出入職。",
+  signIn_joinName: "你的顯示名稱（同事會看到）",
+  signIn_joinButton: "加入組織",
   idbar_addIdentity: "新增身分",
   idbar_unlockHidden: "解鎖隱藏身分",
   idbar_roster: "組織名冊（管理者）",
@@ -1217,8 +1231,15 @@ const en: Messages = {
   addId_modeOrg: "Organization member",
   addId_modeOrgHint: "A work identity that subscribes to an org admin's published roster (contacts & policy). Admin npub optional.",
   addId_modeOwner: "Organization owner (create a roster)",
-  addId_modeOwnerHint: "A regular identity with roster management: opens the org roster right after creation — hand your npub to members.",
+  addId_modeOwnerHint: "A regular identity with roster management: opens the org roster right after creation — copy the invite code for your staff.",
   addId_changeMode: "← Change type",
+  addId_invite: "Paste an onboarding invite code (fills relay & admin automatically)",
+  addId_inviteApplied: "Invite applied: after creation your join request is sent automatically; once approved the whole org address book syncs.",
+  roster_inviteHint: "Onboarding invite code (relay + your identity + approval token): staff paste it at sign-in or in the “Organization member” form to join automatically",
+  roster_inviteCopy: "Copy",
+  signIn_joinHint: "Onboarding invite detected: an organization member identity will be created on {host} and a join request sent to the admin automatically.",
+  signIn_joinName: "Your display name (visible to colleagues)",
+  signIn_joinButton: "Join organization",
   idbar_addIdentity: "Add identity",
   idbar_unlockHidden: "Unlock hidden identity",
   idbar_roster: "Org roster (admin)",

@@ -69,6 +69,8 @@ import {
   wrapProfile,
   parseProfile,
   validAvatarDataUri,
+  wrapOrgJoin,
+  parseOrgJoin,
   type CallMedia,
   type Group,
   type GroupControl,
@@ -291,6 +293,18 @@ export interface RelayPoolOptions {
   onHomeSwitched?: (newUrl: string) => void;
   /** 企業組織名冊的管理者公鑰（ADR-0047）；設定後訂閱並自動採用名冊、同步通訊錄。 */
   orgAdminPubkey?: string;
+  /**
+   * 入職權杖（ADR-0156，成員側）：來自邀請碼。設定後每次開機檢查——名冊尚未包含自己
+   * 即把 `{name, token}` 加密送給管理者（冪等；管理者對已在冊者忽略）。
+   */
+  orgJoinToken?: string;
+  /**
+   * 企業主（ADR-0155/0156，管理者側）：訂閱**自己簽章**的名冊（重啟後找回 lastRoster），
+   * 並開啟入職請求的自動核准管線。
+   */
+  orgOwner?: boolean;
+  /** 企業主的核准權杖（ADR-0156）：入職請求帶相同權杖才自動核准；未設＝不自動核准。 */
+  orgInviteToken?: string;
   /** 企業 TURN 伺服器（ADR-0048）：供強制 TURN 政策使用；relay-only 時的 ICE 中繼。 */
   turnServers?: RTCIceServer[];
   /**
@@ -366,6 +380,13 @@ export class RelayChatBackend implements ChatBackend {
   /** 企業名冊管理者公鑰與最近採用的名冊（ADR-0047）。 */
   private readonly orgAdminPubkey: string | undefined;
   private lastRoster: OrgRosterDoc | null = null;
+  /** 入職權杖（ADR-0156 成員側）：開機時名冊未含自己 → 送入職請求。 */
+  private readonly orgJoinToken: string | undefined;
+  /** 企業主旗標與核准權杖（ADR-0156 管理者側）。 */
+  private readonly orgOwnerFlag: boolean;
+  private readonly orgInviteToken: string | undefined;
+  /** 首份名冊發佈前收到的入職請求（ADR-0156）：發佈時自動併入。 */
+  private readonly pendingJoins = new Map<PubkeyHex, string>();
   /** 企業 TURN 伺服器與強制 TURN 政策狀態（ADR-0048）：供 WebRTC ICE 設定。 */
   private readonly turnServers: RTCIceServer[] | undefined;
   private forceTurn = false;
@@ -459,6 +480,9 @@ export class RelayChatBackend implements ChatBackend {
     this.connectorFor = pool?.connectorFor;
     this.maintainerPubkey = pool?.maintainerPubkey;
     this.orgAdminPubkey = pool?.orgAdminPubkey;
+    this.orgJoinToken = pool?.orgJoinToken; // ADR-0156
+    this.orgOwnerFlag = pool?.orgOwner === true;
+    this.orgInviteToken = pool?.orgInviteToken;
     this.turnServers = pool?.turnServers;
     this.onHomeSwitched = pool?.onHomeSwitched;
     for (const a of pool?.anchors ?? []) {
@@ -570,6 +594,7 @@ export class RelayChatBackend implements ChatBackend {
     this.resubscribe();
     this.beat();
     this.broadcastProfile(); // ADR-0061：把自己的顯示名稱廣播給聯絡人
+    this.maybeSendOrgJoin(); // ADR-0156：入職請求（名冊尚未收錄自己時，每次開機重送直到入冊）
     this.broadcastGroups(); // ADR-0068：管理員把自建群組快照廣播給成員（換機自癒）
     this.maybePublishSnapshot(); // ADR-0071：雲端快照（開機檢查；內容有變＋每日至多一次）
     this.reconcileCloudOff(); // 審查修正 #6：關閉狀態的雲端殘留對帳
@@ -744,6 +769,8 @@ export class RelayChatBackend implements ChatBackend {
       ...(this.maintainerPubkey ? [{ kinds: [RELAY_LIST_KIND], authors: [this.maintainerPubkey] }] : []),
       // 企業組織名冊（ADR-0047）：訂閱管理者簽章的名冊事件。
       ...(this.orgAdminPubkey ? [{ kinds: [ORG_ROSTER_KIND], authors: [this.orgAdminPubkey] }] : []),
+      // 企業主（ADR-0156）：訂閱**自己**簽章的名冊——重啟後找回 lastRoster，自動核准不失憶。
+      ...(this.orgOwnerFlag ? [{ kinds: [ORG_ROSTER_KIND], authors: [this.self.pubkey] }] : []),
     ];
     client.subscribe("all", filters);
   }
@@ -1052,6 +1079,19 @@ export class RelayChatBackend implements ChatBackend {
       if (this.orgAdminPubkey) {
         const doc = verifyOrgRoster(event, this.orgAdminPubkey);
         if (doc) this.adoptRoster(doc);
+      } else if (this.orgOwnerFlag && event.pubkey === this.self.pubkey) {
+        // ADR-0156：企業主找回自己簽章的名冊（重啟後 lastRoster 失憶的解方）。
+        // 只記狀態，不走 adoptRoster 的通訊錄對帳（管理者的聯絡人不受名冊管理）。
+        const doc = verifyOrgRoster(event, this.self.pubkey);
+        if (doc && shouldAdoptRoster(this.lastRoster, doc)) {
+          this.lastRoster = doc;
+          // 名冊到位 → 清掉排隊中的入職請求（逐一核准併入）。
+          if (this.pendingJoins.size > 0) {
+            const queued = [...this.pendingJoins];
+            this.pendingJoins.clear();
+            for (const [pk, name] of queued) this.approveJoin(pk, name);
+          }
+        }
       }
       return;
     }
@@ -1226,6 +1266,13 @@ export class RelayChatBackend implements ChatBackend {
       // **但只回給真正的聯絡人**（ADR-0121）：對還在請求區的陌生人回送，等於向他確認
       // 「這把金鑰是活的、有人在線上」——那是垃圾訊息發送者最想要的回饋。
       if (this.isContact(sender) && !this.profileSentTo.has(sender)) this.sendProfileTo(sender);
+      return;
+    }
+
+    const orgJoin = parseOrgJoin(rumor);
+    if (orgJoin) {
+      // ADR-0156：入職請求——只有企業主身分、且權杖相符才處理（自動核准）。
+      this.handleOrgJoin(sender, orgJoin);
       return;
     }
 
@@ -2422,12 +2469,24 @@ export class RelayChatBackend implements ChatBackend {
    * `adminPubkey` 的成員會採用此名冊。
    */
   publishRoster(org: string, members: OrgMember[], policy?: OrgPolicy, groups?: OrgGroup[]): PubkeyHex[] {
+    // ADR-0156：首份名冊發佈前排隊的入職請求（權杖已驗）自動併入，並補上聯絡人互通。
+    const merged = [...members];
+    if (this.pendingJoins.size > 0) {
+      for (const [pk, name] of this.pendingJoins) {
+        if (!merged.some((m) => m.pubkey === pk)) merged.push({ pubkey: pk, name });
+      }
+      const queued = [...this.pendingJoins];
+      this.pendingJoins.clear();
+      for (const [pk, name] of queued) this.ensureJoinContact(pk, name);
+    }
     const doc: OrgRosterDoc = {
       org,
-      members,
+      members: merged,
       ...(policy ? { policy } : {}),
       ...(groups && groups.length > 0 ? { groups } : {}),
-      updatedAt: nowSec(),
+      // ADR-0156：嚴格遞增——同一秒內連續核准（多名員工同時貼碼入職）時，`updatedAt` 相同
+      // 會讓 NIP-01 取代語意 tie-break 不收斂（中繼可能拒收較新份、成員端 shouldAdopt 也不採用）。
+      updatedAt: Math.max(nowSec(), (this.lastRoster?.updatedAt ?? 0) + 1),
     };
     const evt = signOrgRoster(doc, this.sk);
     this.client.publish(evt);
@@ -2440,6 +2499,60 @@ export class RelayChatBackend implements ChatBackend {
     }
     this.reconcileOrgGroups(doc);
     return rosterAllowlist(doc);
+  }
+
+  /**
+   * 入職請求送出（ADR-0156 成員側）：名冊尚未包含自己 → 把 `{name, token}` 加密送給
+   * 管理者。每次開機呼叫一次；lastRoster 只在記憶體，故已在冊者開機仍可能重送——
+   * 冪等（管理者對已在冊者忽略），把「管理者離線／先建成員後發名冊」等時序全化為自癒。
+   */
+  private maybeSendOrgJoin(): void {
+    const admin = this.orgAdminPubkey;
+    if (!admin || !this.orgJoinToken) return;
+    if (this.lastRoster?.members.some((m) => m.pubkey === this.self.pubkey)) return; // 已在冊
+    this.publishReliable(
+      wrapOrgJoin(
+        { name: this.self.name, token: this.orgJoinToken },
+        this.sk,
+        admin,
+        this.homeUrl ? { relayHint: this.homeUrl } : {},
+      ),
+    );
+  }
+
+  /**
+   * 入職請求處理（ADR-0156 管理者側）：只有企業主身分、權杖相符才理會——權杖是
+   * capability，撿到管理者 npub 的人不能憑空入冊。名冊已到位 → 立即核准；
+   * 首份名冊尚未發佈 → 排隊（發佈時自動併入）。
+   */
+  private handleOrgJoin(sender: PubkeyHex, join: { name: string; token: string }): void {
+    if (!this.orgOwnerFlag || !this.orgInviteToken || join.token !== this.orgInviteToken) return;
+    if (sender === this.self.pubkey || this.isBlocked(sender)) return;
+    if (this.lastRoster) this.approveJoin(sender, join.name);
+    else this.pendingJoins.set(sender, join.name);
+  }
+
+  /** 核准入職（ADR-0156）：併入名冊重新簽發（已在冊者跳過），並確保成為聯絡人（互送個人檔）。 */
+  private approveJoin(pubkey: PubkeyHex, name: string): void {
+    const r = this.lastRoster;
+    if (!r) return;
+    if (!r.members.some((m) => m.pubkey === pubkey)) {
+      this.publishRoster(r.org, [...r.members, { pubkey, name }], r.policy, r.groups);
+    }
+    this.ensureJoinContact(pubkey, name);
+  }
+
+  /** 新成員直接成為管理者的聯絡人（帶名冊名，非 shortNpub），並清掉可能先到的訊息請求。 */
+  private ensureJoinContact(pubkey: PubkeyHex, name: string): void {
+    if (this.isBlocked(pubkey) || this.contacts.some((c) => c.pubkey === pubkey)) return;
+    this.storage.addContact({ pubkey, name });
+    this.storage.removeRequest(pubkey);
+    this.contacts = this.storage.loadContacts();
+    this.requests = this.storage.loadRequests();
+    this.resubscribe();
+    this.emitContacts();
+    this.emitRequests();
+    this.sendProfileTo(pubkey); // 名字/頭像（ADR-0061/0154）立即互通
   }
 
   createGroup(name: string, memberPubkeys: PubkeyHex[]): void {

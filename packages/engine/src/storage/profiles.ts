@@ -20,6 +20,16 @@ export interface Profile {
    * 此旗標只決定 UI：切換器前綴 🗂 與 idbar 名冊管理按鈕的顯示。舊資料無此欄＝false。
    */
   orgOwner?: boolean;
+  /**
+   * 企業主的入職核准權杖（ADR-0156）：建立企業主身分時生成、嵌入邀請碼；入職請求帶
+   * 相同權杖才自動核准。非機密級（capability），洩漏的補救目前是換企業主身分。
+   */
+  orgInviteToken?: string;
+  /**
+   * 成員的入職權杖（ADR-0156）：來自貼上的邀請碼。設定後每次開機在名冊收錄自己前
+   * 自動向管理者送入職請求（冪等）。
+   */
+  orgJoinToken?: string;
   /** localStorage 命名空間；空＝既有單一身分的舊鍵（ADR-0045）。 */
   namespace: string;
   /** 企業名冊管理者 hex pubkey（工作身分可選，ADR-0047）：訂閱並自動採用組織通訊錄。 */

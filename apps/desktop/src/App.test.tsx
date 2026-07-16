@@ -49,9 +49,11 @@ describe("AddIdentityModal", () => {
     expect(out).not.toContain('value="wss://x"'); // relay 欄位尚未出現
   });
 
-  it("ADR-0145：選「組織」後表單出現管理者 npub 欄位", () => {
+  it("ADR-0145：選「組織」後表單出現管理者 npub 欄位；ADR-0156：另有邀請碼貼入欄", () => {
     const out = renderModal("wss://x", "org");
     expect(out).toContain('data-testid="addid-admin"');
+    expect(out).toContain('data-testid="addid-invite"');
+    expect(out).not.toContain('data-testid="addid-invite-ok"'); // 尚未貼碼
   });
 
   it("ADR-0145：選「個人」表單不含管理者 npub 欄位", () => {

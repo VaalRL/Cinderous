@@ -5,13 +5,17 @@ import {
   generateSecretKey,
   getPublicKey,
   isBackupCode,
+  makeOrgInvite,
   newGroupId,
+  newInviteToken,
   npubDecode,
   nsecDecode,
   nsecEncode,
   type OrgGroup,
+  type OrgInvite,
   type OrgMember,
   parseBackupCode,
+  parseOrgInvite,
   peekBackupRelay,
   type PubkeyHex,
 } from "@cinder/core";
@@ -255,10 +259,17 @@ function buildBackend(p: Profile, nsecOverride?: string, storage?: AppStorage): 
   const cloud =
     p.cloudSync && p.cloudSync !== "off" ? { cloudSync: { mode: p.cloudSync, deviceId: getDeviceId() } } : {};
   const opts = p.enterprise
-    ? { relayUrl: p.relayUrl, ...cloud, ...(p.adminPubkey ? { orgAdminPubkey: p.adminPubkey } : {}) }
+    ? {
+        relayUrl: p.relayUrl,
+        ...cloud,
+        ...(p.adminPubkey ? { orgAdminPubkey: p.adminPubkey } : {}),
+        ...(p.orgJoinToken ? { orgJoinToken: p.orgJoinToken } : {}), // ADR-0156：開機自動入職
+      }
     : {
         relayUrl: p.relayUrl,
         ...cloud,
+        // 企業主（ADR-0155/0156）：訂自己的名冊找回狀態＋入職自動核准；其餘同個人身分。
+        ...(p.orgOwner ? { orgOwner: true, ...(p.orgInviteToken ? { orgInviteToken: p.orgInviteToken } : {}) } : {}),
         ...(drain ? { drainUrl: drain.url } : {}),
         connectorFor: webSocketConnector,
         anchors: ANCHOR_RELAYS,
@@ -1255,6 +1266,8 @@ export function App(): JSX.Element {
       adminPubkey?: string | undefined;
       password?: string | undefined;
       orgOwner?: boolean | undefined;
+      /** 入職權杖（ADR-0156）：來自邀請碼；成員身分開機自動向管理者提出入職。 */
+      orgJoinToken?: string | undefined;
     } = {},
   ) => {
     const sk = opts.nsec?.trim() ? nsecDecode(opts.nsec.trim()) : generateSecretKey();
@@ -1268,7 +1281,9 @@ export function App(): JSX.Element {
       enterprise,
       namespace: pubkey,
       ...(admin ? { adminPubkey: admin } : {}),
-      ...(opts.orgOwner ? { orgOwner: true } : {}), // ADR-0155：企業主標記
+      // ADR-0155/0156：企業主標記＋核准權杖（嵌入邀請碼）；成員帶入職權杖。
+      ...(opts.orgOwner ? { orgOwner: true, orgInviteToken: newInviteToken() } : {}),
+      ...(enterprise && admin && opts.orgJoinToken ? { orgJoinToken: opts.orgJoinToken } : {}),
       ...(!isTauri() ? { locked: true } : {}), // 瀏覽器：以密碼包裹（ADR-0122）→ 下次開機走解鎖
     };
     const next = upsertProfile(profilesState, profile);
@@ -1341,6 +1356,11 @@ export function App(): JSX.Element {
         onPair={importFromOldDevice}
         requirePassword={!isTauri()}
         lookupName={(name) => resolveSignIn(profilesState, name).kind}
+        // 入職邀請（ADR-0156）：名稱欄貼碼 → 以邀請碼的 relay/管理者建立企業成員身分，
+        // 並帶入職權杖（開機自動向管理者提出入職、核准後全公司通訊錄自動同步）。
+        onJoinOrg={(inv, n, pw) => {
+          void addIdentity(n, inv.relayUrl, true, { adminPubkey: inv.adminPubkey, password: pw, orgJoinToken: inv.token });
+        }}
         {...enterNsec}
       />
     );
@@ -1727,6 +1747,13 @@ export function App(): JSX.Element {
           selfNpub={activeBackend.selfNpub ?? ""}
           onCancel={() => setRosterOpen(false)}
           onPublish={(org, members, pol, groups) => activeBackend.publishRoster!(org, members, pol, groups)}
+          {...(() => {
+            // 入職邀請碼（ADR-0156）：relay＋自己的 pubkey＋核准權杖組成單一字串，一鍵複製。
+            const p = activeProfile(profilesState);
+            return p?.orgOwner && p.orgInviteToken && p.relayUrl
+              ? { inviteCode: makeOrgInvite({ relayUrl: p.relayUrl, adminPubkey: p.pubkey, token: p.orgInviteToken }) }
+              : {};
+          })()}
         />
       ) : null}
       <div className="deckwrap deckwrap--left">
@@ -2201,6 +2228,9 @@ export function AddIdentityModal({
   const [relayUrl, setRelayUrl] = useState(defaultRelayUrl);
   const [nsec, setNsec] = useState("");
   const [admin, setAdmin] = useState("");
+  // 入職邀請碼（ADR-0156）：貼上即自動填 relay＋管理者並記下核准權杖（建立後自動入職）。
+  const [inviteInput, setInviteInput] = useState("");
+  const [inviteToken, setInviteToken] = useState("");
   // 加密備份碼匯入（ADR-0070）：偵測到備份碼即要求備份密碼；信封 relay（明文）自動預填。
   const [backupPw, setBackupPw] = useState("");
   const [backupErr, setBackupErr] = useState(false);
@@ -2215,6 +2245,7 @@ export function AddIdentityModal({
     const adminPubkey = enterprise ? admin.trim() || undefined : undefined;
     const password_ = requirePassword ? password : undefined;
     const owner = mode === "owner" ? { orgOwner: true } : {}; // ADR-0155
+    const join = enterprise && inviteToken ? { orgJoinToken: inviteToken } : {}; // ADR-0156
     if (isCode) {
       if (!backupPw) return;
       // scrypt 解碼約需一秒（審查修正 #9）：先讓「還原中…」上畫再執行，避免無回饋凍結。
@@ -2222,7 +2253,7 @@ export function AddIdentityModal({
       setTimeout(() => {
         try {
           const imported = parseBackupCode(nsec.trim(), backupPw).nsec;
-          onAdd(name.trim(), relayUrl.trim(), enterprise, { nsec: imported, adminPubkey, password: password_, ...owner });
+          onAdd(name.trim(), relayUrl.trim(), enterprise, { nsec: imported, adminPubkey, password: password_, ...owner, ...join });
         } catch {
           setBackupErr(true); // 備份密碼錯誤：保留輸入
         } finally {
@@ -2237,6 +2268,7 @@ export function AddIdentityModal({
         adminPubkey,
         password: password_,
         ...owner,
+        ...join,
       });
     } catch {
       setBackupErr(true); // 非法 nsec：保留輸入
@@ -2319,15 +2351,37 @@ export function AddIdentityModal({
                   <p className="hint">{t("signIn_passwordWhy")}</p>
                 </>
               ) : null}
-              {/* 組織身份才有管理者名冊訂閱欄（ADR-0047）。 */}
+              {/* 組織身份才有管理者名冊訂閱欄（ADR-0047）＋入職邀請碼貼入欄（ADR-0156）。 */}
               {enterprise ? (
-                <input
-                  className="groupmodal__name"
-                  data-testid="addid-admin"
-                  placeholder={t("addId_admin")}
-                  value={admin}
-                  onChange={(e) => setAdmin(e.target.value)}
-                />
+                <>
+                  <input
+                    className="groupmodal__name"
+                    data-testid="addid-invite"
+                    placeholder={t("addId_invite")}
+                    value={inviteInput}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      setInviteInput(v);
+                      const inv = parseOrgInvite(v);
+                      if (inv) {
+                        // 邀請碼自動填入（可再手改）；權杖記下供建立後自動入職。
+                        setRelayUrl(inv.relayUrl);
+                        setAdmin(inv.adminPubkey);
+                        setInviteToken(inv.token);
+                      }
+                    }}
+                  />
+                  {inviteToken ? (
+                    <p className="hint" data-testid="addid-invite-ok">{t("addId_inviteApplied")}</p>
+                  ) : null}
+                  <input
+                    className="groupmodal__name"
+                    data-testid="addid-admin"
+                    placeholder={t("addId_admin")}
+                    value={admin}
+                    onChange={(e) => setAdmin(e.target.value)}
+                  />
+                </>
               ) : null}
               <input
                 className="groupmodal__name"
@@ -2379,11 +2433,25 @@ function RosterAdminModal({
   selfNpub,
   onPublish,
   onCancel,
+  inviteCode,
 }: {
   selfNpub: string;
   onPublish: (org: string, members: OrgMember[], policy?: OrgPolicy, groups?: OrgGroup[]) => string[];
   onCancel: () => void;
+  /** 入職邀請碼（ADR-0156）：一鍵複製給員工；未提供（缺權杖/relay）則不顯示。 */
+  inviteCode?: string;
 }): JSX.Element {
+  const { t } = useI18n();
+  const [inviteCopied, setInviteCopied] = useState(false);
+  const copyInvite = (): void => {
+    if (!inviteCode) return;
+    try {
+      void navigator.clipboard?.writeText(inviteCode);
+      setInviteCopied(true);
+    } catch {
+      /* 剪貼簿不可用：欄位本身可手動全選複製 */
+    }
+  };
   const [org, setOrg] = useState("");
   const [text, setText] = useState(selfNpub ? `${selfNpub} 管理者` : "");
   const [groupText, setGroupText] = useState("");
@@ -2472,6 +2540,18 @@ function RosterAdminModal({
           <span className="win__btn" role="button" aria-label="關閉" onClick={onCancel}>×</span>
         </div>
         <div className="groupmodal">
+          {/* 入職邀請碼（ADR-0156）：員工在登入畫面或「企業成員」表單貼上即自動加入。 */}
+          {inviteCode ? (
+            <>
+              <div className="groupmodal__label">{t("roster_inviteHint")}</div>
+              <div className="settings__keyrow">
+                <input className="groupmodal__name" readOnly value={inviteCode} data-testid="roster-invite-code" style={{ flex: 1 }} />
+                <button type="button" data-testid="roster-invite-copy" onClick={copyInvite}>
+                  {inviteCopied ? "✓" : t("roster_inviteCopy")}
+                </button>
+              </div>
+            </>
+          ) : null}
           <input className="groupmodal__name" placeholder="組織名稱" value={org} onChange={(e) => setOrg(e.target.value)} />
           <div className="groupmodal__label">成員（每行：npub 名稱）</div>
           <textarea

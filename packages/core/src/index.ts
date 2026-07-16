@@ -23,6 +23,7 @@ export * from "./stickers.js";
 export * from "./thread.js";
 export * from "./reaction.js";
 export * from "./receipt.js";
+export * from "./invite.js";
 export * from "./profile.js";
 export * from "./deletion.js";
 export * from "./signaling.js";

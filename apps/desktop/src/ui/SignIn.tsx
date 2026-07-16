@@ -1,4 +1,4 @@
-import { listEntries, weightedOrder } from "@cinder/core";
+import { listEntries, type OrgInvite, parseOrgInvite, weightedOrder } from "@cinder/core";
 import { useEffect, useRef, useState } from "react";
 import { ANCHOR_RELAYS } from "@cinder/engine";
 import { useI18n } from "../i18n.js";
@@ -82,6 +82,8 @@ export function SignIn({
   requirePassword = false,
   onEnterNsec,
   lookupName = () => "create",
+  onJoinOrg,
+  initialName,
 }: {
   /** `password` 只在 `requirePassword` 時有值（瀏覽器）。 */
   onSignIn: (name: string, relayUrl: string, password?: string) => void;
@@ -103,9 +105,16 @@ export function SignIn({
    * 未提供（示範/無登錄）一律 `"create"`。
    */
   lookupName?: (name: string) => "create" | "enter" | "ambiguous";
+  /**
+   * 入職邀請（ADR-0156）：顯示名稱欄偵測到邀請碼時轉為「加入組織」面板，
+   * 以邀請碼的 relay／管理者建立企業成員身分（建立後自動向管理者提出入職）。
+   */
+  onJoinOrg?: (invite: OrgInvite, name: string, password?: string) => void;
+  /** 測試用：預填顯示名稱欄（SSR 測試無法打字；貼邀請碼情境）。 */
+  initialName?: string;
 }): JSX.Element {
   const { t } = useI18n();
-  const [name, setName] = useState("");
+  const [name, setName] = useState(initialName ?? "");
   const [relay, setRelay] = useState(initialRelay);
   // relay 欄預設收起（已自動填好預設站）；點「使用其他中繼站」才展開輸入（ADR-0069）。
   const [showRelay, setShowRelay] = useState(false);
@@ -169,6 +178,26 @@ export function SignIn({
   const nameMatch = lookupName(name.trim());
   const entering = nameMatch !== "create";
 
+  // 入職邀請（ADR-0156）：名稱欄貼入邀請碼（或含邀請碼的整封信）→ 轉為「加入組織」面板。
+  const invite = onJoinOrg ? parseOrgInvite(name) : null;
+  const [joinName, setJoinName] = useState("");
+  const joinTaken = !!invite && joinName.trim().length > 0 && lookupName(joinName.trim()) !== "create";
+  const submitJoin = (): void => {
+    if (!invite || !joinName.trim() || joinTaken) return;
+    if (requirePassword) {
+      if (!password) {
+        setPwErr(t("signIn_passwordRequired"));
+        return;
+      }
+      if (password !== password2) {
+        setPwErr(t("signIn_passwordMismatch"));
+        return;
+      }
+    }
+    setPwErr("");
+    onJoinOrg?.(invite, joinName.trim(), requirePassword ? password : undefined);
+  };
+
   const submit = () => {
     const n = name.trim();
     if (!n) return;
@@ -218,18 +247,67 @@ export function SignIn({
             aria-label={t("signIn_displayName")}
             value={name}
             onChange={(e) => setName(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && submit()}
+            onKeyDown={(e) => e.key === "Enter" && (invite ? submitJoin() : submit())}
             placeholder={t("signIn_displayName")}
           />
+          {/* 入職邀請（ADR-0156）：偵測到邀請碼 → 加入組織面板（其餘建新/登入區塊全收起）。 */}
+          {invite ? (
+            <div className="signin__join" data-testid="signin-join">
+              <p className="hint">{t("signIn_joinHint", { host: hostOf(invite.relayUrl) })}</p>
+              <input
+                aria-label={t("signIn_joinName")}
+                value={joinName}
+                onChange={(e) => {
+                  setJoinName(e.target.value);
+                  setPwErr("");
+                }}
+                onKeyDown={(e) => e.key === "Enter" && submitJoin()}
+                placeholder={t("signIn_joinName")}
+                autoFocus
+              />
+              {joinTaken ? <p className="signin__err" data-testid="join-name-taken">{t("addId_nameTaken")}</p> : null}
+              {requirePassword ? (
+                <>
+                  <p className="hint">{t("signIn_passwordWhy")}</p>
+                  <input
+                    type="password"
+                    aria-label={t("signIn_password")}
+                    value={password}
+                    onChange={(e) => {
+                      setPassword(e.target.value);
+                      setPwErr("");
+                    }}
+                    onKeyDown={(e) => e.key === "Enter" && submitJoin()}
+                    placeholder={t("signIn_password")}
+                  />
+                  <input
+                    type="password"
+                    aria-label={t("signIn_passwordAgain")}
+                    value={password2}
+                    onChange={(e) => {
+                      setPassword2(e.target.value);
+                      setPwErr("");
+                    }}
+                    onKeyDown={(e) => e.key === "Enter" && submitJoin()}
+                    placeholder={t("signIn_passwordAgain")}
+                  />
+                </>
+              ) : null}
+              {pwErr ? <p className="signin__err">{pwErr}</p> : null}
+              <button data-testid="signin-join-submit" disabled={!joinName.trim() || joinTaken} onClick={submitJoin}>
+                {t("signIn_joinButton")}
+              </button>
+            </div>
+          ) : null}
           {/* ADR-0146：名稱命中本機既有身分 → 提示「將登入既有身分」，並收起建新用的中繼站/密碼欄。 */}
-          {entering ? (
+          {!invite && entering ? (
             <p className="hint signin__enterhint" data-testid="signin-enter-existing">
               {nameMatch === "ambiguous"
                 ? t("signIn_ambiguousName")
                 : t("signIn_enterExistingHint", { name: name.trim() })}
             </p>
           ) : null}
-          {entering ? null : showRelay ? (
+          {invite || entering ? null : showRelay ? (
             <div className="signin__relay" data-testid="relay-field">
               <input
                 aria-label={t("signIn_relayUrl")}
@@ -260,7 +338,7 @@ export function SignIn({
           )}
           {/* 瀏覽器（ADR-0122）：本地密碼**必填**——沒有它，重新整理一次身分就沒了。
               ADR-0146：命中既有身分時不在此設密碼（於重載後的解鎖畫面驗證既有密碼）。 */}
-          {!entering && requirePassword ? (
+          {!invite && !entering && requirePassword ? (
             <div className="signin__pw" data-testid="signin-password">
               <p className="hint">{t("signIn_passwordWhy")}</p>
               <input
@@ -289,16 +367,20 @@ export function SignIn({
             </div>
           ) : null}
 
-          <button onClick={submit}>{entering ? t("signIn_enterExisting") : t("signIn_button")}</button>
-          <p className="hint">{t("signIn_hint2")}</p>
+          {invite ? null : (
+            <>
+              <button onClick={submit}>{entering ? t("signIn_enterExisting") : t("signIn_button")}</button>
+              <p className="hint">{t("signIn_hint2")}</p>
+            </>
+          )}
 
           {/* 用既有 nsec 登入（ADR-0122）：忘記密碼、或在舊版被換掉身分的人的出路。 */}
-          {onEnterNsec && !nsecOpen ? (
+          {!invite && onEnterNsec && !nsecOpen ? (
             <button className="settings__reveal" data-testid="nsec-open" onClick={() => setNsecOpen(true)}>
               {t("signIn_useNsec")}
             </button>
           ) : null}
-          {onEnterNsec && nsecOpen ? (
+          {!invite && onEnterNsec && nsecOpen ? (
             <div className="settings__key" data-testid="nsec-panel">
               <p className="hint">{t("signIn_useNsecHint")}</p>
               <input
@@ -319,12 +401,12 @@ export function SignIn({
             </div>
           ) : null}
 
-          {onPair && !pairOpen ? (
+          {!invite && onPair && !pairOpen ? (
             <button className="settings__reveal" data-testid="pair-import" onClick={() => setPairOpen(true)}>
               {t("pair_importButton")}
             </button>
           ) : null}
-          {onPair && pairOpen ? (
+          {!invite && onPair && pairOpen ? (
             <div className="settings__key" data-testid="pair-import-panel">
               <p className="hint">{t("pair_importHint")}</p>
               <input

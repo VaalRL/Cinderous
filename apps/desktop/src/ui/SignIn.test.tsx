@@ -1,3 +1,4 @@
+import { makeOrgInvite } from "@cinder/core";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it } from "vitest";
 import { I18nProvider } from "../i18n.js";
@@ -126,5 +127,42 @@ describe("ADR-0146：登入名稱命中本機既有身分", () => {
 
   it("未提供 lookupName（示範/無登錄）→ 維持建新流程（不顯示登入既有提示）", () => {
     expect(render({ requirePassword: true })).not.toContain('data-testid="signin-enter-existing"');
+  });
+});
+
+describe("ADR-0156：登入畫面貼入職邀請碼 → 加入組織面板", () => {
+  const render = (extra: Record<string, unknown>) =>
+    renderToStaticMarkup(
+      <I18nProvider locale="zh-Hant">
+        <ThemeProvider>
+          <SignIn onSignIn={() => {}} {...extra} />
+        </ThemeProvider>
+      </I18nProvider>,
+    );
+  const invite = makeOrgInvite({
+    relayUrl: "wss://corp.example",
+    adminPubkey: "a".repeat(64),
+    token: "tok123",
+  });
+
+  it("名稱欄含邀請碼＋提供 onJoinOrg → 顯示加入面板（主機提示＋顯示名稱欄＋加入鈕），收起建新/登入/nsec/配對區塊", () => {
+    const html = render({ requirePassword: true, onJoinOrg: () => {}, onEnterNsec: async () => true, initialName: `歡迎加入！${invite}` });
+    expect(html).toContain('data-testid="signin-join"');
+    expect(html).toContain("corp.example"); // signIn_joinHint 帶主機
+    expect(html).toContain("加入組織"); // signIn_joinButton
+    expect(html).toContain("你的顯示名稱"); // signIn_joinName
+    expect(html).not.toContain('data-testid="relay-status"'); // 建新用區塊全收起
+    expect(html).not.toContain('data-testid="nsec-open"');
+    expect(html).toContain("本機密碼"); // 瀏覽器仍要設密碼（面板內）
+  });
+
+  it("未提供 onJoinOrg → 邀請碼當一般名稱處理（不顯示加入面板）", () => {
+    const html = render({ initialName: invite });
+    expect(html).not.toContain('data-testid="signin-join"');
+  });
+
+  it("一般名字不觸發加入面板", () => {
+    const html = render({ onJoinOrg: () => {}, initialName: "小明" });
+    expect(html).not.toContain('data-testid="signin-join"');
   });
 });

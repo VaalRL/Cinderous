@@ -182,6 +182,71 @@ describe("RelayChatBackend（真實後端 + 持久化）", () => {
     b.stop();
   });
 
+  it("入職邀請自動核准（ADR-0156）：成員憑權杖入職 → 企業主自動併入名冊、互為聯絡人、同事自動同步；壞權杖忽略；重啟不失憶", () => {
+    const net = createInMemoryRelayNetwork();
+    const token = "tok-secret-123";
+    const storeO = new MemoryStorage();
+    const owner = new RelayChatBackend(storeO, (h) => net.connect("o", h), "老闆", {
+      orgOwner: true,
+      orgInviteToken: token,
+    });
+    owner.start(noop);
+    // 企業主先發佈只有自己的首份名冊（0155 流程：建立身分即開名冊管理）。
+    owner.publishRoster("小公司", [{ pubkey: owner.self.pubkey, name: "老闆" }]);
+
+    // 成員 A 憑邀請碼建立（orgAdminPubkey＋orgJoinToken）→ 開機自動送入職請求。
+    const storeA = new MemoryStorage();
+    const a = new RelayChatBackend(storeA, (h) => net.connect("a", h), "小美", {
+      orgAdminPubkey: owner.self.pubkey,
+      orgJoinToken: token,
+    });
+    a.start(noop);
+    // 自動核准：企業主名冊長出 A、A 成為企業主聯絡人（帶名冊名，不是 shortNpub）。
+    expect(storeO.loadContacts().find((c) => c.pubkey === a.self.pubkey)?.name).toBe("小美");
+    // A 端採用重發的名冊 → 老闆自動成為 A 的聯絡人。
+    expect(storeA.loadContacts().map((c) => c.pubkey)).toContain(owner.self.pubkey);
+
+    // 成員 B 加入 → A 不用做任何事，自動長出同事 B。
+    const storeB = new MemoryStorage();
+    const b = new RelayChatBackend(storeB, (h) => net.connect("b", h), "阿強", {
+      orgAdminPubkey: owner.self.pubkey,
+      orgJoinToken: token,
+    });
+    b.start(noop);
+    expect(storeA.loadContacts().map((c) => c.pubkey)).toContain(b.self.pubkey);
+    expect(storeB.loadContacts().map((c) => c.pubkey)).toContain(a.self.pubkey);
+
+    // 壞權杖：不入冊、不成為聯絡人（撿到管理者 npub 不能憑空入冊）。
+    const evil = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("e", h), "壞人", {
+      orgAdminPubkey: owner.self.pubkey,
+      orgJoinToken: "wrong-token",
+    });
+    evil.start(noop);
+    expect(storeO.loadContacts().some((c) => c.pubkey === evil.self.pubkey)).toBe(false);
+
+    // 企業主重啟（lastRoster 記憶體失憶）→ 從中繼站訂回自己的可取代名冊 → 仍能自動核准。
+    owner.stop();
+    const owner2 = new RelayChatBackend(storeO, (h) => net.connect("o2", h), "老闆", {
+      orgOwner: true,
+      orgInviteToken: token,
+    });
+    owner2.start(noop);
+    const storeC = new MemoryStorage();
+    const c = new RelayChatBackend(storeC, (h) => net.connect("c", h), "新人", {
+      orgAdminPubkey: owner2.self.pubkey,
+      orgJoinToken: token,
+    });
+    c.start(noop);
+    expect(storeO.loadContacts().find((x) => x.pubkey === c.self.pubkey)?.name).toBe("新人");
+    expect(storeC.loadContacts().map((x) => x.pubkey)).toContain(a.self.pubkey); // 新人也自動同步既有同事
+
+    a.stop();
+    b.stop();
+    evil.stop();
+    c.stop();
+    owner2.stop();
+  });
+
   it("NIP-42 AUTH（ADR-0057）：requireAuth 下兩端仍能對話（自動認證 + 認證後訂閱）", () => {
     const net = createInMemoryRelayNetwork({ requireAuth: true });
     const storeA = new MemoryStorage();
