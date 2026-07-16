@@ -238,10 +238,21 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
 }
 .titlebar__btn:hover { background: var(--hover); color: var(--ink); }
 .titlebar__btn--close:hover { background: #e81123; color: #fff; }
-/* 平時隱藏按鈕（ADR-0151）：滑鼠碰到標題列才顯示。 */
-.titlebar__controls--autohide { opacity: 0; transition: opacity 0.15s ease; }
-.titlebar:hover .titlebar__controls--autohide,
-.titlebar:focus-within .titlebar__controls--autohide { opacity: 1; }
+/* 平時隱藏（ADR-0153）：**整條標題列**滑出畫面，滑鼠碰到視窗頂端熱區或標題列本身才滑入。
+   內容區拿回整個視窗高度（--viewport-h 回 100vh）；外框是視窗殼，疊層蓋過 app 內一切（最高 70）。 */
+.window-chrome--autohide { --viewport-h: 100vh; }
+.window-chrome--autohide .titlebar {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+  transform: translateY(-100%); transition: transform 0.15s ease;
+  box-shadow: 0 1px 8px rgba(0, 0, 0, 0.25);
+}
+.window-chrome__hotzone { position: fixed; top: 0; left: 0; right: 0; height: 6px; z-index: 101; }
+.window-chrome__hotzone:hover + .titlebar,
+.window-chrome--autohide .titlebar:hover,
+.window-chrome--autohide .titlebar:focus-within { transform: translateY(0); }
+@media (prefers-reduced-motion: reduce) {
+  .window-chrome--autohide .titlebar { transition: none; }
+}
 /* 設定頁迷你預覽：縮一圈、整條不可互動。 */
 .titlebar--preview { border: 1px solid var(--border); border-radius: 6px; pointer-events: none; max-width: 320px; margin-bottom: 8px; }
 /* 視窗外框拖曳編輯器（ADR-0151）：一條假標題列＋左右兩個放置帶，即編輯即預覽。 */

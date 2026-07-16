@@ -40,7 +40,7 @@ export function TitleBar(props: {
     const visible = ids.filter((id) => id !== "settings" || onOpenSettings);
     if (visible.length === 0) return null;
     return (
-      <div className={`titlebar__controls${controls.autoHide ? " titlebar__controls--autohide" : ""}`}>
+      <div className="titlebar__controls">
         {visible.map((id) => (
           <button
             key={id}

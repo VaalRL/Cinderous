@@ -58,10 +58,9 @@ describe("TitleBar 自繪視窗標題列（ADR-0150/0151）", () => {
     expect(iMax).toBeLessThan(iSettings); // 右帶：□ ⚙
   });
 
-  it("autoHide（ADR-0151）：開啟時按鈕帶掛 --autohide（滑鼠碰標題列才顯示）", () => {
+  it("autoHide 語意升級（ADR-0153）：隱藏由殼層（ChromeFrame）處理，TitleBar 不再對按鈕帶掛類", () => {
     const on = render({ controls: { left: [], right: ["min", "max", "close"], autoHide: true } });
-    expect(on).toContain("titlebar__controls--autohide");
-    expect(render()).not.toContain("titlebar__controls--autohide");
+    expect(on).not.toContain("titlebar__controls--autohide");
   });
 
   it("preview 模式：加 titlebar--preview（設定頁迷你預覽、不可互動）", () => {

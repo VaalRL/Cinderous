@@ -6,7 +6,7 @@
 import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
 import { isTauri } from "@tauri-apps/api/core";
 import { tauriTitleBarActions } from "./native/window-controls.js";
-import { TitleBar } from "./ui/TitleBar.js";
+import { TitleBar, type TitleBarActions } from "./ui/TitleBar.js";
 import {
   parseTitlebarControls,
   serializeTitlebarControls,
@@ -70,18 +70,38 @@ export function useRegisterSettingsOpener(): (fn: (() => void) | null) => void {
   return ctx?.registerSettingsOpener ?? (() => {});
 }
 
+/**
+ * 自繪外框本體（獨立出來供 SSR 測試）。autoHide（ADR-0153）＝**整條標題列**滑出畫面
+ * （fixed 覆蓋層、translateY(-100%)），滑鼠碰到視窗頂端 6px 熱區或標題列本身才滑入；
+ * 內容區同時拿回整個視窗高度（--viewport-h 回 100vh）。
+ */
+export function ChromeFrame(props: {
+  controls: TitlebarControls;
+  actions: TitleBarActions;
+  onOpenSettings?: () => void;
+  children: ReactNode;
+}): JSX.Element {
+  const { controls } = props;
+  return (
+    <div className={`window-chrome${controls.autoHide ? " window-chrome--autohide" : ""}`}>
+      {controls.autoHide ? <div className="window-chrome__hotzone" data-testid="chrome-hotzone" /> : null}
+      <TitleBar
+        controls={controls}
+        actions={props.actions}
+        {...(props.onOpenSettings ? { onOpenSettings: props.onOpenSettings } : {})}
+      />
+      <div className="window-chrome__body">{props.children}</div>
+    </div>
+  );
+}
+
 /** Tauri 下包一層自繪外框（標題列＋內容區）；瀏覽器版原樣透傳。 */
 export function WindowChrome({ children }: { children: ReactNode }): JSX.Element {
   const { controls, openSettings } = useTitlebar();
   if (!isTauri()) return <>{children}</>;
   return (
-    <div className="window-chrome">
-      <TitleBar
-        controls={controls}
-        actions={tauriTitleBarActions}
-        {...(openSettings ? { onOpenSettings: openSettings } : {})}
-      />
-      <div className="window-chrome__body">{children}</div>
-    </div>
+    <ChromeFrame controls={controls} actions={tauriTitleBarActions} {...(openSettings ? { onOpenSettings: openSettings } : {})}>
+      {children}
+    </ChromeFrame>
   );
 }
