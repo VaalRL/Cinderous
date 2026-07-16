@@ -114,6 +114,7 @@ import {
 } from "./ui/slot-queue.js";
 import { pickSlotFolder, setSlotDir, slotDir, storeSlotDeposit } from "./native/slot-store.js";
 import { type EscrowEntry, loadEscrow, offboardedEntries, removeEscrow, saveEscrow, upsertEscrow } from "./ui/org-escrow.js";
+import { loadPresence, savePresence } from "./ui/presence-store.js";
 import { createRinger, createRingback, DEFAULT_CHIME_ID, playChime } from "./ui/ringtone.js";
 import { CallWindow } from "./ui/CallWindow.js";
 import { ContactListWindow } from "./ui/ContactListWindow.js";
@@ -740,7 +741,10 @@ export function App(): JSX.Element {
         storageRef.current = store ?? null;
         const b = buildBackend(active, override, store);
         setConn(active.relayUrl ? "connecting" : "online");
-        setSelf({ ...b.self });
+        // ADR-0164：還原上次的手動狀態與自訂狀態文字（本機記憶；先塞進 self，讓稍後的
+        // 閒置初始化以此為基準）。後端側的同步與廣播在 start effect 完成。
+        const pref = loadPresence(b.self.pubkey);
+        setSelf(pref ? { ...b.self, status: pref.status, statusMessage: pref.statusMessage } : { ...b.self });
         setBackend(b);
       } catch {
         /* 忽略 */
@@ -977,6 +981,10 @@ export function App(): JSX.Element {
       onCallRemoteStream: setRemoteStream,
       onGroups: setGroups,
     });
+    // ADR-0164：後端建構時 self 一律 online/空白——啟動後把本機記住的手動狀態同步進後端
+    // 並廣播（setStatus 在 online 時 beat＋廣播；offline 則靜默，與「上次設離線」一致）。
+    const pref = loadPresence(backend.self.pubkey);
+    if (pref) backend.setStatus(pref.status, pref.statusMessage);
     return () => backend.stop();
   }, [backend]);
 
@@ -1525,10 +1533,12 @@ export function App(): JSX.Element {
     idleRef.current = reduceIdle(idleRef.current, { type: "manual", status, at: Date.now() }).state;
     activeBackend.setStatus(status, self.statusMessage);
     setSelf((x) => (x ? { ...x, status } : x));
+    savePresence(self.pubkey, { status, statusMessage: self.statusMessage }); // ADR-0164：本機記住手動狀態
   };
   const setStatusMessage = (message: string) => {
     activeBackend.setStatus(self.status, message);
     setSelf((x) => (x ? { ...x, statusMessage: message } : x));
+    savePresence(self.pubkey, { status: self.status, statusMessage: message }); // ADR-0164
   };
   // 更改顯示名稱（ADR-0144）：後端落地本機＋廣播給聯絡人（ADR-0061）；本地更新 self 與登錄
   // （讓切換器/重載也顯示新名）。
