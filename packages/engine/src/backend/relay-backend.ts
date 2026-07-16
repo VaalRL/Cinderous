@@ -79,6 +79,7 @@ import {
   type OrgMember,
   type OrgPolicy,
   type OrgRosterDoc,
+  type OrgWorkHours,
   type OutgoingFile,
   type PresencePayload,
   type ReceiptType,
@@ -871,6 +872,13 @@ export class RelayChatBackend implements ChatBackend {
     if (!shouldAdoptRoster(this.lastRoster, doc)) return;
     this.lastRoster = doc;
     if (doc.policy) this.handlers?.onPolicy?.(doc.policy); // 企業政策（ADR-0048）
+    // 組織資訊（ADR-0157）：公司名稱/歡迎詞/班表＋在世成員（供下班靜音判定）。
+    this.handlers?.onOrgInfo?.({
+      org: doc.org,
+      members: rosterAllowlist(doc),
+      ...(doc.welcome ? { welcome: doc.welcome } : {}),
+      ...(doc.workHours ? { workHours: doc.workHours } : {}),
+    });
     this.forceTurn = doc.policy?.forceTurn === true; // 強制 TURN 生效於後續新建的 WebRTC 連線
     this.cloudBackupBlocked = doc.policy?.disableCloudBackup === true; // 禁止快照上雲（ADR-0071）
     const self = this.self.pubkey;
@@ -2468,7 +2476,13 @@ export class RelayChatBackend implements ChatBackend {
    * 回傳供 relay `allowedAuthors` 佈建的 pubkey 清單。只有把此身分 pubkey 設為
    * `adminPubkey` 的成員會採用此名冊。
    */
-  publishRoster(org: string, members: OrgMember[], policy?: OrgPolicy, groups?: OrgGroup[]): PubkeyHex[] {
+  publishRoster(
+    org: string,
+    members: OrgMember[],
+    policy?: OrgPolicy,
+    groups?: OrgGroup[],
+    profile?: { welcome?: string; workHours?: OrgWorkHours },
+  ): PubkeyHex[] {
     // ADR-0156：首份名冊發佈前排隊的入職請求（權杖已驗）自動併入，並補上聯絡人互通。
     const merged = [...members];
     if (this.pendingJoins.size > 0) {
@@ -2484,6 +2498,9 @@ export class RelayChatBackend implements ChatBackend {
       members: merged,
       ...(policy ? { policy } : {}),
       ...(groups && groups.length > 0 ? { groups } : {}),
+      // 公司設定（ADR-0157）：歡迎詞/班表隨名冊簽章分發。
+      ...(profile?.welcome ? { welcome: profile.welcome } : {}),
+      ...(profile?.workHours ? { workHours: profile.workHours } : {}),
       // ADR-0156：嚴格遞增——同一秒內連續核准（多名員工同時貼碼入職）時，`updatedAt` 相同
       // 會讓 NIP-01 取代語意 tie-break 不收斂（中繼可能拒收較新份、成員端 shouldAdopt 也不採用）。
       updatedAt: Math.max(nowSec(), (this.lastRoster?.updatedAt ?? 0) + 1),
@@ -2537,9 +2554,18 @@ export class RelayChatBackend implements ChatBackend {
     const r = this.lastRoster;
     if (!r) return;
     if (!r.members.some((m) => m.pubkey === pubkey)) {
-      this.publishRoster(r.org, [...r.members, { pubkey, name }], r.policy, r.groups);
+      // 公司設定（ADR-0157）一併帶上——自動核准重發不得洗掉歡迎詞/班表。
+      this.publishRoster(r.org, [...r.members, { pubkey, name }], r.policy, r.groups, {
+        ...(r.welcome ? { welcome: r.welcome } : {}),
+        ...(r.workHours ? { workHours: r.workHours } : {}),
+      });
     }
     this.ensureJoinContact(pubkey, name);
+  }
+
+  /** 現行名冊（ADR-0157，企業主）：名冊管理視窗預填用；未發佈/找回前為 null。 */
+  currentRoster(): OrgRosterDoc | null {
+    return this.lastRoster;
   }
 
   /** 新成員直接成為管理者的聯絡人（帶名冊名，非 shortNpub），並清掉可能先到的訊息請求。 */

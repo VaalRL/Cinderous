@@ -114,6 +114,11 @@ export interface Messages {
   addId_inviteApplied: string;
   roster_inviteHint: string;
   roster_inviteCopy: string;
+  roster_welcomeLabel: string;
+  roster_workHoursLabel: string;
+  orgInfo_title: string;
+  orgInfo_hours: string;
+  orgInfo_muteNote: string;
   signIn_joinHint: string;
   signIn_joinName: string;
   signIn_joinButton: string;
@@ -690,6 +695,11 @@ const zhHant: Messages = {
   addId_inviteApplied: "已套用邀請碼：建立後會自動向管理者提出入職，核准後全公司通訊錄自動同步。",
   roster_inviteHint: "入職邀請碼（含中繼站＋你的身分＋核准權杖）：員工在登入畫面或「企業成員」表單貼上即自動加入",
   roster_inviteCopy: "複製",
+  roster_welcomeLabel: "歡迎詞／基本規範（可選：新成員加入時一次性顯示，並可隨時在設定 → 組織資訊查看）",
+  roster_workHoursLabel: "表定上下班時間（可選：下班時間成員端自動靜音公司通知；留空＝不設）",
+  orgInfo_title: "組織資訊",
+  orgInfo_hours: "表定上班時間：{start}–{end}",
+  orgInfo_muteNote: "下班時間，來自公司成員與組織群組的通知會自動靜音（未讀照常累計）。",
   signIn_joinHint: "偵測到入職邀請：將在 {host} 建立企業成員身分，並自動向管理者提出入職。",
   signIn_joinName: "你的顯示名稱（同事會看到）",
   signIn_joinButton: "加入組織",
@@ -1237,6 +1247,11 @@ const en: Messages = {
   addId_inviteApplied: "Invite applied: after creation your join request is sent automatically; once approved the whole org address book syncs.",
   roster_inviteHint: "Onboarding invite code (relay + your identity + approval token): staff paste it at sign-in or in the “Organization member” form to join automatically",
   roster_inviteCopy: "Copy",
+  roster_welcomeLabel: "Welcome message / ground rules (optional: shown once to new members, always available under Settings → Organization)",
+  roster_workHoursLabel: "Scheduled work hours (optional: company notifications auto-mute off-hours on members' devices; leave blank to unset)",
+  orgInfo_title: "Organization",
+  orgInfo_hours: "Work hours: {start}–{end}",
+  orgInfo_muteNote: "Outside work hours, notifications from company members and org groups are muted automatically (unread still accrues).",
   signIn_joinHint: "Onboarding invite detected: an organization member identity will be created on {host} and a join request sent to the admin automatically.",
   signIn_joinName: "Your display name (visible to colleagues)",
   signIn_joinButton: "Join organization",

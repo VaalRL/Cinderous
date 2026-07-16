@@ -5,14 +5,28 @@ import type {
   OrgGroup,
   OrgMember,
   OrgPolicy,
+  OrgRosterDoc,
+  OrgWorkHours,
   OutgoingFile,
   PubkeyHex,
   ReceivedFile,
 } from "@cinder/core";
 import type { MessageStatus } from "../storage/types.js";
 
-export type { Group, OrgGroup, OrgMember, OrgPolicy };
+export type { Group, OrgGroup, OrgMember, OrgPolicy, OrgRosterDoc, OrgWorkHours };
 export type { MessageStatus };
+
+/** 組織資訊（ADR-0157）：採用名冊時發給前端的公司設定摘要。 */
+export interface OrgInfo {
+  /** 公司名稱。 */
+  org: string;
+  /** 在世成員 pubkey（供「下班靜音組織通知」判定來源）。 */
+  members: PubkeyHex[];
+  /** 歡迎詞／基本規範。 */
+  welcome?: string;
+  /** 表定上下班時間。 */
+  workHours?: OrgWorkHours;
+}
 
 /** 使用者可見狀態（避開商標，以中文呈現於 UI）。 */
 export type Status = "online" | "away" | "busy" | "offline";
@@ -179,6 +193,11 @@ export interface ChatBackendEvents {
   onGroups?(groups: Group[]): void;
   /** 企業政策更新（ADR-0048，來自組織名冊）：前端據此隱藏對應功能。 */
   onPolicy?(policy: OrgPolicy): void;
+  /**
+   * 組織資訊更新（ADR-0157，來自組織名冊）：公司名稱、在世成員（供下班靜音判定）、
+   * 歡迎詞/基本規範、表定上下班時間。每次採用名冊時發出（含開機重放）。
+   */
+  onOrgInfo?(info: OrgInfo): void;
   /** 收到自己的雲端快照時回報其模式（ADR-0071）：App 於本機從未設定時採用（還原接續備份習慣）。 */
   onCloudSyncMode?(mode: "basic" | "full"): void;
   /**
@@ -277,8 +296,16 @@ export interface ChatBackend {
   addGroupMember?(groupId: string, pubkey: PubkeyHex): void;
   /** 管理者移除群組成員（M9 成員管理）。 */
   removeGroupMember?(groupId: string, pubkey: PubkeyHex): void;
-  /** 管理者佈建（ADR-0047/0048/0049）：簽章並發布組織名冊（含可選政策/群組），回傳供 relay allowlist 佈建的 pubkey 清單。 */
-  publishRoster?(org: string, members: OrgMember[], policy?: OrgPolicy, groups?: OrgGroup[]): PubkeyHex[];
+  /** 管理者佈建（ADR-0047/0048/0049/0157）：簽章並發布組織名冊（含可選政策/群組/公司設定），回傳供 relay allowlist 佈建的 pubkey 清單。 */
+  publishRoster?(
+    org: string,
+    members: OrgMember[],
+    policy?: OrgPolicy,
+    groups?: OrgGroup[],
+    profile?: { welcome?: string; workHours?: OrgWorkHours },
+  ): PubkeyHex[];
+  /** 現行名冊（ADR-0157，企業主）：供名冊管理視窗預填；尚未發佈/找回前為 null。 */
+  currentRoster?(): OrgRosterDoc | null;
   /** 發起語音/視訊通話（M8，媒體全程 P2P）。 */
   startCall?(to: PubkeyHex, media: CallMedia): void;
   /** 接聽目前來電。 */

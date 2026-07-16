@@ -4,11 +4,13 @@ import {
   type CallState,
   generateSecretKey,
   getPublicKey,
+  inWorkHours,
   isBackupCode,
   makeOrgInvite,
   newGroupId,
   newInviteToken,
   npubDecode,
+  npubEncode,
   nsecDecode,
   nsecEncode,
   type OrgGroup,
@@ -73,7 +75,9 @@ import type {
   ConnectionState,
   Contact,
   Group,
+  OrgInfo,
   OrgPolicy,
+  OrgRosterDoc,
   Self,
   Status,
 } from "@cinder/engine";
@@ -198,6 +202,20 @@ export function relayChangeTarget(p: Profile | null, url: string): string | null
 /** 身分類型圖示（ADR-0155，純函式可測）：🗂 企業主 ＞ 🏢 企業成員 ＞ 👤 個人。 */
 export function profileGlyph(p: Profile | null | undefined): string {
   return p?.orgOwner ? "🗂" : p?.enterprise ? "🏢" : "👤";
+}
+
+/**
+ * 下班自動靜音（ADR-0157，純函式可測）：表定時間外、且來源是組織成員（1:1）或組織群組
+ * → 靜音（不彈通知、不響音效；未讀照常）。未設班表、上班時間內、或非組織來源皆不靜音。
+ */
+export function shouldMuteOrgNotification(
+  info: Pick<OrgInfo, "members" | "workHours"> | null,
+  source: { senderContact?: string; orgGroup?: boolean },
+  minutesOfDay: number,
+): boolean {
+  if (!info?.workHours) return false;
+  if (inWorkHours(info.workHours, minutesOfDay)) return false;
+  return source.orgGroup === true || (!!source.senderContact && info.members.includes(source.senderContact));
 }
 
 /**
@@ -398,6 +416,8 @@ export function App(): JSX.Element {
   const [addIdOpen, setAddIdOpen] = useState(false);
   const [rosterOpen, setRosterOpen] = useState(false);
   const [policy, setPolicy] = useState<OrgPolicy>({});
+  /** 組織資訊（ADR-0157）：採用名冊時由引擎發出；null＝非工作身分或尚未採用。 */
+  const [orgInfo, setOrgInfo] = useState<OrgInfo | null>(null);
   const [notify, setNotify] = useState<boolean>(() => {
     try {
       return localStorage.getItem(NOTIFY_KEY) === "1";
@@ -505,6 +525,9 @@ export function App(): JSX.Element {
   notifyHidePreviewRef.current = notifyHidePreview;
   const contactsRef = useRef(contacts);
   contactsRef.current = contacts;
+  // ADR-0157：通知路徑（onMessage 閉包）要讀最新組織資訊 → ref。
+  const orgInfoRef = useRef(orgInfo);
+  orgInfoRef.current = orgInfo;
   // ADR-0154：把引擎帶出的廣播頭像鏡射到顯示層快取（<Avatar> 免穿 props 直接查）。
   useEffect(() => {
     setBroadcastAvatars(contacts.filter((c) => c.avatar).map((c) => [c.pubkey, c.avatar!] as [string, string]));
@@ -668,6 +691,7 @@ export function App(): JSX.Element {
 
   useEffect(() => {
     if (!backend) return;
+    setOrgInfo(null); // ADR-0157：換身分/後端時重置，避免沿用上一個身分的組織資訊
     backend.start({
       onContacts: setContacts,
       onMessage: (pk, msg) => {
@@ -692,6 +716,20 @@ export function App(): JSX.Element {
             // 標題＝該對話（群組/聯絡人）顯示名；隱藏預覽時只顯示提示語，
             // 群組訊息在內文前綴傳訊者名（ADR-0076）。以 ref 取現值避免 [backend] 閉包陳舊。
             const group = groupsRef.current.find((g) => g.id === pk);
+            // 下班自動靜音（ADR-0157）：組織來源在表定時間外不彈通知、不響音效；未讀照常。
+            const nowMin = (() => {
+              const d = new Date();
+              return d.getHours() * 60 + d.getMinutes();
+            })();
+            if (
+              shouldMuteOrgNotification(
+                orgInfoRef.current,
+                group ? { orgGroup: group.org === true } : { senderContact: pk },
+                nowMin,
+              )
+            ) {
+              return;
+            }
             const title = group?.name ?? contactsRef.current.find((c) => c.pubkey === pk)?.name ?? "Cinder";
             let body: string;
             if (notifyHidePreviewRef.current) {
@@ -752,6 +790,22 @@ export function App(): JSX.Element {
       onConnection: setConn,
       onRelayPool: setRelays,
       onPolicy: setPolicy,
+      onOrgInfo: (info) => {
+        // 組織資訊（ADR-0157）：供設定面板顯示與下班靜音判定。
+        setOrgInfo(info);
+        // 歡迎詞：首次或內容變更時一次性彈窗（標題＝公司名稱）；以身分為鍵記住已顯示的內容。
+        if (info.welcome) {
+          const key = `nb.orgWelcome.${backend.self.pubkey}`;
+          try {
+            if (localStorage.getItem(key) !== info.welcome) {
+              localStorage.setItem(key, info.welcome);
+              void alert({ title: info.org, message: info.welcome });
+            }
+          } catch {
+            /* localStorage 不可用：寧可不重複彈，也不要每次開機都彈 */
+          }
+        }
+      },
       onCloudSyncMode: (mode) => {
         // ADR-0071：還原時採用快照傳播的模式——僅本機從未設定時（不覆蓋較新的手動選擇）。
         const state = loadProfiles();
@@ -1746,7 +1800,8 @@ export function App(): JSX.Element {
         <RosterAdminModal
           selfNpub={activeBackend.selfNpub ?? ""}
           onCancel={() => setRosterOpen(false)}
-          onPublish={(org, members, pol, groups) => activeBackend.publishRoster!(org, members, pol, groups)}
+          onPublish={(org, members, pol, groups, profile) => activeBackend.publishRoster!(org, members, pol, groups, profile)}
+          initial={activeBackend.currentRoster?.() ?? null}
           {...(() => {
             // 入職邀請碼（ADR-0156）：relay＋自己的 pubkey＋核准權杖組成單一字串，一鍵複製。
             const p = activeProfile(profilesState);
@@ -1817,6 +1872,7 @@ export function App(): JSX.Element {
         <SettingsPanel
           selfName={self.name}
           onRename={renameSelf}
+          {...(orgInfo ? { orgInfo } : {})}
           relayUrl={(() => {
             try {
               return localStorage.getItem(RELAY_URL_KEY) ?? "";
@@ -2429,17 +2485,26 @@ export function AddIdentityModal({
 }
 
 /** 組織名冊管理（ADR-0047）：每行「npub 名稱」→ 簽章發布 → 顯示供 relay 佈建的 allowlist。 */
-function RosterAdminModal({
+export function RosterAdminModal({
   selfNpub,
   onPublish,
   onCancel,
   inviteCode,
+  initial,
 }: {
   selfNpub: string;
-  onPublish: (org: string, members: OrgMember[], policy?: OrgPolicy, groups?: OrgGroup[]) => string[];
+  onPublish: (
+    org: string,
+    members: OrgMember[],
+    policy?: OrgPolicy,
+    groups?: OrgGroup[],
+    profile?: { welcome?: string; workHours?: { start: string; end: string } },
+  ) => string[];
   onCancel: () => void;
   /** 入職邀請碼（ADR-0156）：一鍵複製給員工；未提供（缺權杖/relay）則不顯示。 */
   inviteCode?: string;
+  /** 現行名冊（ADR-0157）：預填組織名/成員/政策/公司設定——修一項不必重打整份。 */
+  initial?: OrgRosterDoc | null;
 }): JSX.Element {
   const { t } = useI18n();
   const [inviteCopied, setInviteCopied] = useState(false);
@@ -2452,11 +2517,25 @@ function RosterAdminModal({
       /* 剪貼簿不可用：欄位本身可手動全選複製 */
     }
   };
-  const [org, setOrg] = useState("");
-  const [text, setText] = useState(selfNpub ? `${selfNpub} 管理者` : "");
+  // 預填（ADR-0157）：以現行名冊帶入；成員行＝「npub 名稱」（排除已輪替作廢者）。
+  const [org, setOrg] = useState(initial?.org ?? "");
+  const [text, setText] = useState(() =>
+    initial
+      ? initial.members
+          .filter((m) => !m.supersededBy)
+          .map((m) => `${npubEncode(m.pubkey)} ${m.name}`)
+          .join("\n")
+      : selfNpub
+        ? `${selfNpub} 管理者`
+        : "",
+  );
   const [groupText, setGroupText] = useState("");
   const [rotText, setRotText] = useState("");
-  const [pol, setPol] = useState<OrgPolicy>({});
+  const [pol, setPol] = useState<OrgPolicy>(initial?.policy ?? {});
+  // 公司設定（ADR-0157）：歡迎詞/基本規範＋表定上下班時間。
+  const [welcome, setWelcome] = useState(initial?.welcome ?? "");
+  const [workStart, setWorkStart] = useState(initial?.workHours?.start ?? "");
+  const [workEnd, setWorkEnd] = useState(initial?.workHours?.end ?? "");
   const [allowlist, setAllowlist] = useState<string[] | null>(null);
   const [error, setError] = useState("");
   const flip = (k: keyof OrgPolicy) => setPol((p) => ({ ...p, [k]: !p[k] }));
@@ -2524,8 +2603,19 @@ function RosterAdminModal({
     }
     try {
       const anyPol = Object.values(pol).some(Boolean);
+      // 公司設定（ADR-0157）：兩端皆填且不相等才帶班表（相等/單端＝視為未設）。
+      const profile = {
+        ...(welcome.trim() ? { welcome: welcome.trim() } : {}),
+        ...(workStart && workEnd && workStart !== workEnd ? { workHours: { start: workStart, end: workEnd } } : {}),
+      };
       setAllowlist(
-        onPublish(org.trim() || "組織", finalMembers, anyPol ? pol : undefined, groups.length ? groups : undefined),
+        onPublish(
+          org.trim() || "組織",
+          finalMembers,
+          anyPol ? pol : undefined,
+          groups.length ? groups : undefined,
+          Object.keys(profile).length > 0 ? profile : undefined,
+        ),
       );
     } catch {
       setError("發布失敗");
@@ -2561,6 +2651,36 @@ function RosterAdminModal({
             value={text}
             onChange={(e) => setText(e.target.value)}
           />
+          {/* 公司設定（ADR-0157）：歡迎詞／基本規範＋表定上下班時間。 */}
+          <div className="groupmodal__label">{t("roster_welcomeLabel")}</div>
+          <textarea
+            className="groupmodal__name"
+            rows={3}
+            aria-label={t("roster_welcomeLabel")}
+            data-testid="roster-welcome"
+            value={welcome}
+            onChange={(e) => setWelcome(e.target.value)}
+          />
+          <div className="groupmodal__label">{t("roster_workHoursLabel")}</div>
+          <div className="settings__keyrow">
+            <input
+              className="groupmodal__name"
+              type="time"
+              aria-label="start"
+              data-testid="roster-work-start"
+              value={workStart}
+              onChange={(e) => setWorkStart(e.target.value)}
+            />
+            <span aria-hidden="true">–</span>
+            <input
+              className="groupmodal__name"
+              type="time"
+              aria-label="end"
+              data-testid="roster-work-end"
+              value={workEnd}
+              onChange={(e) => setWorkEnd(e.target.value)}
+            />
+          </div>
           <div className="groupmodal__label">政策（可選，集中控管）</div>
           <label className="groupmodal__item">
             <input type="checkbox" checked={!!pol.disableFiles} onChange={() => flip("disableFiles")} />

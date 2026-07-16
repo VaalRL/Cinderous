@@ -8,6 +8,8 @@ import {
   pickSignInNamespace,
   profileGlyph,
   relayChangeTarget,
+  RosterAdminModal,
+  shouldMuteOrgNotification,
 } from "./App.js";
 import type { Profile } from "@cinder/engine";
 
@@ -149,5 +151,63 @@ describe("nextActiveAfterRemoval（ADR-0079 Q3 activeConvo 遞補）", () => {
   });
   it("關唯一分頁：回 null（中欄回空狀態、不留幽靈）", () => {
     expect(nextActiveAfterRemoval(["a"], "a", "a")).toBeNull();
+  });
+});
+
+describe("shouldMuteOrgNotification（ADR-0157：下班自動靜音）", () => {
+  const info = { members: ["m1", "m2"], workHours: { start: "09:00", end: "18:00" } };
+
+  it("下班時間＋組織來源（成員 1:1 或組織群組）→ 靜音", () => {
+    expect(shouldMuteOrgNotification(info, { senderContact: "m1" }, 20 * 60)).toBe(true);
+    expect(shouldMuteOrgNotification(info, { orgGroup: true }, 20 * 60)).toBe(true);
+  });
+
+  it("上班時間內、或非組織來源 → 不靜音", () => {
+    expect(shouldMuteOrgNotification(info, { senderContact: "m1" }, 10 * 60)).toBe(false); // 上班中
+    expect(shouldMuteOrgNotification(info, { senderContact: "stranger" }, 20 * 60)).toBe(false); // 私人聯絡人
+    expect(shouldMuteOrgNotification(info, { orgGroup: false }, 20 * 60)).toBe(false); // 私人群組
+  });
+
+  it("未設班表或無組織資訊 → 永不靜音", () => {
+    expect(shouldMuteOrgNotification({ members: ["m1"] }, { senderContact: "m1" }, 20 * 60)).toBe(false);
+    expect(shouldMuteOrgNotification(null, { senderContact: "m1" }, 20 * 60)).toBe(false);
+  });
+});
+
+describe("RosterAdminModal（ADR-0157：公司設定欄位＋現行名冊預填）", () => {
+  const render = (initial?: Parameters<typeof RosterAdminModal>[0]["initial"]) =>
+    renderToStaticMarkup(
+      <I18nProvider locale="zh-Hant">
+        <RosterAdminModal
+          selfNpub="npub1self"
+          onPublish={() => []}
+          onCancel={() => {}}
+          {...(initial !== undefined ? { initial } : {})}
+        />
+      </I18nProvider>,
+    );
+
+  it("有歡迎詞與上下班時間欄位（未預填時為空）", () => {
+    const html = render();
+    expect(html).toContain('data-testid="roster-welcome"');
+    expect(html).toContain('data-testid="roster-work-start"');
+    expect(html).toContain('data-testid="roster-work-end"');
+    expect(html).toContain("npub1self 管理者"); // 無現行名冊 → 預填自己一行
+  });
+
+  it("以現行名冊預填：組織名/歡迎詞/班表/成員行（npub＋名稱）", () => {
+    const pk = "a".repeat(64);
+    const html = render({
+      org: "小公司",
+      members: [{ pubkey: pk, name: "老闆" }],
+      welcome: "請詳讀規範",
+      workHours: { start: "09:30", end: "18:30" },
+      updatedAt: 1,
+    });
+    expect(html).toContain('value="小公司"');
+    expect(html).toContain("請詳讀規範");
+    expect(html).toContain('value="09:30"');
+    expect(html).toContain('value="18:30"');
+    expect(html).toContain(" 老闆"); // 成員行帶名冊名
   });
 });

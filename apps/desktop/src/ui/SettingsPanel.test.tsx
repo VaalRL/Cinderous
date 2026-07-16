@@ -316,3 +316,24 @@ describe("加密備份碼入口（ADR-0070）", () => {
     expect(render({ initialTab: "identity" })).not.toContain('data-testid="backup-code"');
   });
 });
+
+describe("組織資訊（ADR-0157）", () => {
+  it("提供 orgInfo → 身分分頁顯示公司名稱/歡迎詞/班表與靜音說明", () => {
+    const html = render({
+      initialTab: "identity",
+      selfName: "夜",
+      onRename: () => true, // 讓身分分頁存在（hasIdentity）
+      orgInfo: { org: "小公司", welcome: "請詳讀規範", workHours: { start: "09:00", end: "18:00" } },
+    });
+    expect(html).toContain('data-testid="org-info"');
+    expect(html).toContain("小公司");
+    expect(html).toContain("請詳讀規範");
+    expect(html).toContain("09:00–18:00"); // orgInfo_hours 插值
+    expect(html).toContain("自動靜音"); // orgInfo_muteNote
+  });
+
+  it("未提供 orgInfo（個人身分/尚未採用名冊）→ 無組織資訊區", () => {
+    const html = render({ initialTab: "identity", selfName: "夜", onRename: () => true });
+    expect(html).not.toContain('data-testid="org-info"');
+  });
+});

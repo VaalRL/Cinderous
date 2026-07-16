@@ -42,6 +42,12 @@ export interface OrgGroup {
   announce?: boolean;
 }
 
+/** 表定上下班時間（ADR-0157）：`"HH:MM"` 24 小時制；支援跨夜（start > end）。 */
+export interface OrgWorkHours {
+  start: string;
+  end: string;
+}
+
 /** 組織名冊文件（簽章事件的 content JSON）。 */
 export interface OrgRosterDoc {
   org: string;
@@ -50,8 +56,49 @@ export interface OrgRosterDoc {
   policy?: OrgPolicy;
   /** 組織群組（可選，ADR-0049）。 */
   groups?: OrgGroup[];
+  /** 歡迎詞／基本規範（可選，ADR-0157）：新成員首次採用時一次性顯示；組織資訊面板可查。 */
+  welcome?: string;
+  /** 表定上下班時間（可選，ADR-0157）：成員端下班時間自動靜音組織通知。 */
+  workHours?: OrgWorkHours;
   /** 發佈時間（unix 秒）；用於「較新才取代」。 */
   updatedAt: number;
+}
+
+/** 歡迎詞長度上限（防惡意巨大名冊；sign/verify 兩側皆截斷防禦）。 */
+export const WELCOME_MAX_CHARS = 2000;
+
+const HHMM_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+/** 解析/清洗歡迎詞：修剪＋截斷；空回 undefined。 */
+function parseWelcome(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const t = value.trim().slice(0, WELCOME_MAX_CHARS);
+  return t ? t : undefined;
+}
+
+/** 解析/清洗上下班時間：兩端皆合法 HH:MM 且不相等才有效（相等＝無意義，視為未設）。 */
+function parseWorkHours(value: unknown): OrgWorkHours | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const v = value as Record<string, unknown>;
+  if (typeof v.start !== "string" || typeof v.end !== "string") return undefined;
+  if (!HHMM_RE.test(v.start) || !HHMM_RE.test(v.end) || v.start === v.end) return undefined;
+  return { start: v.start, end: v.end };
+}
+
+/** `"HH:MM"` → 當日分鐘數。 */
+function toMinutes(hhmm: string): number {
+  return Number(hhmm.slice(0, 2)) * 60 + Number(hhmm.slice(3, 5));
+}
+
+/**
+ * 是否在表定上班時間內（ADR-0157）。`minutesOfDay`＝當地時間的當日分鐘數（0–1439）。
+ * 支援跨夜班表（start > end，如 22:00–06:00）：`m >= start || m < end`。
+ */
+export function inWorkHours(wh: OrgWorkHours, minutesOfDay: number): boolean {
+  const s = toMinutes(wh.start);
+  const e = toMinutes(wh.end);
+  if (s < e) return minutesOfDay >= s && minutesOfDay < e;
+  return minutesOfDay >= s || minutesOfDay < e;
 }
 
 /** 從任意值解析組織群組（僅保留合法項）；無有效群組回傳 undefined。 */
@@ -104,6 +151,8 @@ export function signOrgRoster(doc: OrgRosterDoc, adminSk: SecretKey): NostrEvent
   const members = dedupeMembers(doc.members);
   const policy = parsePolicy(doc.policy);
   const groups = parseGroups(doc.groups);
+  const welcome = parseWelcome(doc.welcome); // ADR-0157
+  const workHours = parseWorkHours(doc.workHours);
   return finalizeEvent(
     {
       kind: ORG_ROSTER_KIND,
@@ -114,6 +163,8 @@ export function signOrgRoster(doc: OrgRosterDoc, adminSk: SecretKey): NostrEvent
         members,
         ...(policy ? { policy } : {}),
         ...(groups ? { groups } : {}),
+        ...(welcome ? { welcome } : {}),
+        ...(workHours ? { workHours } : {}),
         updatedAt: doc.updatedAt,
       }),
     },
@@ -152,7 +203,17 @@ export function verifyOrgRoster(event: NostrEvent, adminPubkey: PubkeyHex): OrgR
   if (members.length < MIN_ROSTER) return null;
   const policy = parsePolicy(doc.policy);
   const groups = parseGroups(doc.groups);
-  return { org: doc.org, members, ...(policy ? { policy } : {}), ...(groups ? { groups } : {}), updatedAt: doc.updatedAt };
+  const welcome = parseWelcome(doc.welcome); // ADR-0157：修剪/截斷防禦；壞值視為未設
+  const workHours = parseWorkHours(doc.workHours);
+  return {
+    org: doc.org,
+    members,
+    ...(policy ? { policy } : {}),
+    ...(groups ? { groups } : {}),
+    ...(welcome ? { welcome } : {}),
+    ...(workHours ? { workHours } : {}),
+    updatedAt: doc.updatedAt,
+  };
 }
 
 /**

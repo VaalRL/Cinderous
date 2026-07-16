@@ -40,6 +40,8 @@ export interface RelayPoolEntry {
 export interface SettingsPanelProps {
   /** 開啟時預設分頁（ADR-0142）；未指定＝外觀。供深連結與測試。 */
   initialTab?: SettingsTab;
+  /** 組織資訊（ADR-0157，工作身分）：公司名稱/歡迎詞/班表的唯讀摘要；未採用名冊則不顯示。 */
+  orgInfo?: { org: string; welcome?: string; workHours?: { start: string; end: string } };
   /** 目前顯示名稱（ADR-0144）；與 onRename 一起提供才顯示改名欄。 */
   selfName?: string;
   /** 更改顯示名稱（ADR-0144）：落地本機並廣播給聯絡人（ADR-0061）。回 false＝撞本機同名（ADR-0146）。 */
@@ -856,6 +858,27 @@ export function SettingsPanel(props: SettingsPanelProps): JSX.Element {
 
           {tab === "identity" && props.onRename ? (
             <NameEditor name={props.selfName ?? ""} onRename={props.onRename} />
+          ) : null}
+
+          {/* 組織資訊（ADR-0157）：工作身分採用名冊後的公司設定摘要（唯讀）。 */}
+          {tab === "identity" && props.orgInfo ? (
+            <section className="settings__sec" data-testid="org-info">
+              <h4>{t("orgInfo_title")}</h4>
+              <p className="settings__desc">{props.orgInfo.org}</p>
+              {props.orgInfo.welcome ? (
+                <p className="hint" style={{ whiteSpace: "pre-wrap" }} data-testid="org-info-welcome">
+                  {props.orgInfo.welcome}
+                </p>
+              ) : null}
+              {props.orgInfo.workHours ? (
+                <>
+                  <p className="settings__desc" data-testid="org-info-hours">
+                    {t("orgInfo_hours", { start: props.orgInfo.workHours.start, end: props.orgInfo.workHours.end })}
+                  </p>
+                  <p className="hint">{t("orgInfo_muteNote")}</p>
+                </>
+              ) : null}
+            </section>
           ) : null}
 
           {tab === "identity" && props.selfNsec ? (

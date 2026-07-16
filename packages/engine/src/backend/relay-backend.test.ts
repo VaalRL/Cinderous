@@ -191,16 +191,27 @@ describe("RelayChatBackend（真實後端 + 持久化）", () => {
       orgInviteToken: token,
     });
     owner.start(noop);
-    // 企業主先發佈只有自己的首份名冊（0155 流程：建立身分即開名冊管理）。
-    owner.publishRoster("小公司", [{ pubkey: owner.self.pubkey, name: "老闆" }]);
+    // 企業主先發佈只有自己的首份名冊（0155 流程：建立身分即開名冊管理），
+    // 含公司設定（ADR-0157）：歡迎詞＋表定上下班時間。
+    owner.publishRoster("小公司", [{ pubkey: owner.self.pubkey, name: "老闆" }], undefined, undefined, {
+      welcome: "歡迎加入小公司！",
+      workHours: { start: "09:00", end: "18:00" },
+    });
 
     // 成員 A 憑邀請碼建立（orgAdminPubkey＋orgJoinToken）→ 開機自動送入職請求。
     const storeA = new MemoryStorage();
+    const aOrgInfo: { org: string; members: string[]; welcome?: string; workHours?: { start: string; end: string } }[] = [];
     const a = new RelayChatBackend(storeA, (h) => net.connect("a", h), "小美", {
       orgAdminPubkey: owner.self.pubkey,
       orgJoinToken: token,
     });
-    a.start(noop);
+    a.start({ ...noop, onOrgInfo: (info) => aOrgInfo.push(info) });
+    // 組織資訊（ADR-0157）：採用名冊即發出——公司名/歡迎詞/班表/在世成員。
+    const lastInfo = () => aOrgInfo[aOrgInfo.length - 1]!;
+    expect(lastInfo().org).toBe("小公司");
+    expect(lastInfo().welcome).toBe("歡迎加入小公司！");
+    expect(lastInfo().workHours).toEqual({ start: "09:00", end: "18:00" });
+    expect(lastInfo().members).toContain(a.self.pubkey); // 自動核准後的名冊含自己
     // 自動核准：企業主名冊長出 A、A 成為企業主聯絡人（帶名冊名，不是 shortNpub）。
     expect(storeO.loadContacts().find((c) => c.pubkey === a.self.pubkey)?.name).toBe("小美");
     // A 端採用重發的名冊 → 老闆自動成為 A 的聯絡人。
@@ -215,6 +226,12 @@ describe("RelayChatBackend（真實後端 + 持久化）", () => {
     b.start(noop);
     expect(storeA.loadContacts().map((c) => c.pubkey)).toContain(b.self.pubkey);
     expect(storeB.loadContacts().map((c) => c.pubkey)).toContain(a.self.pubkey);
+    // ADR-0157：自動核准重發**保留**公司設定（歡迎詞/班表不被洗掉）。
+    expect(lastInfo().welcome).toBe("歡迎加入小公司！");
+    expect(lastInfo().workHours).toEqual({ start: "09:00", end: "18:00" });
+    // ADR-0157：企業主端 currentRoster 供名冊視窗預填。
+    expect(owner.currentRoster()?.welcome).toBe("歡迎加入小公司！");
+    expect(owner.currentRoster()?.members.map((m) => m.pubkey)).toContain(b.self.pubkey);
 
     // 壞權杖：不入冊、不成為聯絡人（撿到管理者 npub 不能憑空入冊）。
     const evil = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("e", h), "壞人", {

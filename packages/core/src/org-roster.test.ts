@@ -3,12 +3,14 @@ import { generateSecretKey, getPublicKey } from "./keys.js";
 import {
   applyRosterRotations,
   diffRoster,
+  inWorkHours,
   type OrgRosterDoc,
   rosterAllowlist,
   rosterRemap,
   shouldAdoptRoster,
   signOrgRoster,
   verifyOrgRoster,
+  WELCOME_MAX_CHARS,
 } from "./org-roster.js";
 
 const adminSk = generateSecretKey();
@@ -213,5 +215,46 @@ describe("身分輪替（ADR-0052）", () => {
   it("applyRosterRotations：from===to 略過（不自我作廢）", () => {
     const members = [{ pubkey: a, name: "Alice" }];
     expect(applyRosterRotations(members, [{ from: a, to: a }])).toEqual([{ pubkey: a, name: "Alice" }]);
+  });
+});
+
+describe("公司設定隨名冊分發（ADR-0157）", () => {
+  const base = { org: "小公司", members: [{ pubkey: admin, name: "老闆" }], updatedAt: 100 };
+
+  it("welcome/workHours round-trip：簽章→驗證原樣還原；舊格式（無欄位）照常", () => {
+    const doc: OrgRosterDoc = { ...base, welcome: "  歡迎加入！請詳讀規範。 ", workHours: { start: "09:00", end: "18:00" } };
+    const out = verifyOrgRoster(signOrgRoster(doc, adminSk), admin);
+    expect(out?.welcome).toBe("歡迎加入！請詳讀規範。"); // 修剪
+    expect(out?.workHours).toEqual({ start: "09:00", end: "18:00" });
+    // 舊格式：無欄位 → undefined（不炸）
+    const legacy = verifyOrgRoster(signOrgRoster(base, adminSk), admin);
+    expect(legacy?.welcome).toBeUndefined();
+    expect(legacy?.workHours).toBeUndefined();
+  });
+
+  it("防禦：超長 welcome 截斷；壞 workHours（格式錯/相等）視為未設", () => {
+    const long = "規".repeat(WELCOME_MAX_CHARS + 500);
+    const out = verifyOrgRoster(signOrgRoster({ ...base, welcome: long }, adminSk), admin);
+    expect(out?.welcome?.length).toBe(WELCOME_MAX_CHARS);
+    for (const bad of [{ start: "9:00", end: "18:00" }, { start: "09:00", end: "24:00" }, { start: "09:00", end: "09:00" }]) {
+      const o = verifyOrgRoster(signOrgRoster({ ...base, workHours: bad as { start: string; end: string } }, adminSk), admin);
+      expect(o?.workHours).toBeUndefined();
+    }
+  });
+
+  it("inWorkHours：日班（09:00–18:00）邊界含起不含迄", () => {
+    const wh = { start: "09:00", end: "18:00" };
+    expect(inWorkHours(wh, 9 * 60)).toBe(true); // 09:00 上班
+    expect(inWorkHours(wh, 17 * 60 + 59)).toBe(true);
+    expect(inWorkHours(wh, 18 * 60)).toBe(false); // 18:00 下班
+    expect(inWorkHours(wh, 8 * 60 + 59)).toBe(false);
+  });
+
+  it("inWorkHours：跨夜班（22:00–06:00）", () => {
+    const wh = { start: "22:00", end: "06:00" };
+    expect(inWorkHours(wh, 23 * 60)).toBe(true);
+    expect(inWorkHours(wh, 2 * 60)).toBe(true);
+    expect(inWorkHours(wh, 6 * 60)).toBe(false);
+    expect(inWorkHours(wh, 12 * 60)).toBe(false);
   });
 });
