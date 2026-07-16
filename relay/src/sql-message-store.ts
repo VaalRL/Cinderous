@@ -4,8 +4,10 @@ import {
   ADDRESSABLE_MAX_BYTES,
   ADDRESSABLE_MAX_PER_AUTHOR,
   ADDRESSABLE_TTL_SECONDS,
+  DEFAULT_FILE_PER_RECIPIENT,
   DEFAULT_MAX_TTL_SECONDS,
   dedupById,
+  FILE_WRAP_KIND,
   dTagOf,
   effectiveExpiration,
   getExpiration,
@@ -155,16 +157,21 @@ export class SqlMessageStore implements OfflineStore {
 
   private enforceCap(recipients: string[]): void {
     const cap = this.opts.maxPerRecipient;
-    if (cap === undefined) return;
+    const fileCap = this.opts.filePerRecipient ?? DEFAULT_FILE_PER_RECIPIENT;
     for (const recipient of recipients) {
-      const rows = this.sql(
-        `SELECT id FROM offline_msgs WHERE recipient = ? ORDER BY created_at ASC`,
-        recipient,
-      );
-      if (rows.length <= cap) continue;
-      for (const row of rows.slice(0, rows.length - cap)) {
-        this.sql(`DELETE FROM offline_msgs WHERE recipient = ? AND id = ?`, recipient, row.id as string);
-      }
+      // ADR-0162：檔案塊（1060）與聊天留言分桶計數（kind 以 json_extract 取，免 schema 遷移）。
+      const trim = (where: string, limit: number): void => {
+        const rows = this.sql(
+          `SELECT id FROM offline_msgs WHERE recipient = ? AND ${where} ORDER BY created_at ASC`,
+          recipient,
+        );
+        if (rows.length <= limit) return;
+        for (const row of rows.slice(0, rows.length - limit)) {
+          this.sql(`DELETE FROM offline_msgs WHERE recipient = ? AND id = ?`, recipient, row.id as string);
+        }
+      };
+      if (cap !== undefined) trim(`json_extract(json, '$.kind') != ${FILE_WRAP_KIND}`, cap);
+      trim(`json_extract(json, '$.kind') = ${FILE_WRAP_KIND}`, fileCap);
     }
   }
 }

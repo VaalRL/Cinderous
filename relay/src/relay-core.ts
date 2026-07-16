@@ -6,7 +6,7 @@ import { matchFilter } from "./filters.js";
  * 1024 遠大於任何真實聯絡人清單／組織名冊，也遠小於枚舉所需。
  */
 const MAX_AUTHORS = 1024;
-import { isAddressableKind, isReplaceableOrAddressable, type OfflineStore } from "./message-store.js";
+import { FILE_EVENT_MAX_BYTES, FILE_WRAP_KIND, isAddressableKind, isReplaceableOrAddressable, type OfflineStore } from "./message-store.js";
 import {
   parseClientMessage,
   type RelayFilter,
@@ -83,6 +83,11 @@ export interface RelayCoreOptions {
    * 未設＝不限制。停用檔案/通話＝從名單排除其信令 kind（無信令即無 WebRTC）。
    */
   allowedKinds?: Iterable<number>;
+  /**
+   * 接受檔案塊事件（FILE_WRAP=1060，ADR-0162）：企業站以 `MAX_FILE_MB` 啟用。
+   * 未設/false＝整類拒收（公共站零儲存風險）。
+   */
+  acceptFileEvents?: boolean;
   /**
    * NIP-42 AUTH（開放中繼，ADR-0057）：開啟後連線須先回應 AUTH 挑戰才准讀寫；
    * 且帶 `#p` 的訂閱只能查自己的收件匣（認證 pubkey ∈ `#p`）。未設＝開放（現況）。
@@ -369,6 +374,17 @@ export class RelayCore {
       }
       this.seenIds.set(event.id, event.created_at);
       if (this.seenIds.size > 1024) this.pruneSeen(now - skew);
+    }
+
+    // 檔案塊（FILE_WRAP=1060，ADR-0162）：企業限定——`acceptFileEvents` 未啟用整類拒收
+    //（公共站零儲存風險）；啟用後仍有單顆大小 sanity 上限。
+    if (event.kind === FILE_WRAP_KIND) {
+      if (!this.opts.acceptFileEvents) {
+        return [{ to: connId, message: ["OK", event.id, false, "blocked: 檔案事件未啟用（MAX_FILE_MB）"] }];
+      }
+      if (JSON.stringify(event).length > FILE_EVENT_MAX_BYTES) {
+        return [{ to: connId, message: ["OK", event.id, false, "blocked: 檔案塊過大"] }];
+      }
     }
 
     // Ephemeral 純轉發、不寫 D1；其餘（持久化）需通過 PoW 並寫入持久層。

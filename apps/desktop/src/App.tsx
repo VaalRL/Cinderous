@@ -2665,6 +2665,10 @@ export function RosterAdminModal({
   const [ttlDays, setTtlDays] = useState(
     initial?.policy?.messageTtlDays !== undefined ? String(initial.policy.messageTtlDays) : "",
   );
+  // relay 檔案上限（ADR-0162）：留空＝關（維持 P2P）；1–16 MB 才併入政策。
+  const [relayFilesMb, setRelayFilesMb] = useState(
+    initial?.policy?.relayFilesMaxMb !== undefined ? String(initial.policy.relayFilesMaxMb) : "",
+  );
   // 公司設定（ADR-0157）：歡迎詞/基本規範＋表定上下班時間。
   const [welcome, setWelcome] = useState(initial?.welcome ?? "");
   const [workStart, setWorkStart] = useState(initial?.workHours?.start ?? "");
@@ -2736,9 +2740,12 @@ export function RosterAdminModal({
     }
     // 訊息保留天數（ADR-0160）：1–365 整數才生效；併入政策一起簽發。
     const ttlParsed = parseInt(ttlDays.trim(), 10);
+    // relay 檔案上限（ADR-0162）：1–16 整數 MB 才生效。
+    const relayMbParsed = parseInt(relayFilesMb.trim(), 10);
     const polOut: OrgPolicy = {
       ...pol,
       ...(Number.isInteger(ttlParsed) && ttlParsed >= 1 && ttlParsed <= 365 ? { messageTtlDays: ttlParsed } : {}),
+      ...(Number.isInteger(relayMbParsed) && relayMbParsed >= 1 && relayMbParsed <= 16 ? { relayFilesMaxMb: relayMbParsed } : {}),
     };
     try {
       const anyPol = Object.values(polOut).some(Boolean);
@@ -2848,6 +2855,18 @@ export function RosterAdminModal({
             data-testid="roster-ttl-days"
             value={ttlDays}
             onChange={(e) => setTtlDays(e.target.value)}
+          />
+          {/* relay 檔案上限（ADR-0162）：需搭配自架 relay 的 MAX_FILE_MB 開關。 */}
+          <div className="groupmodal__label">{t("roster_relayFilesLabel")}</div>
+          <input
+            className="groupmodal__name"
+            type="number"
+            min={1}
+            max={16}
+            placeholder="0"
+            data-testid="roster-relay-files"
+            value={relayFilesMb}
+            onChange={(e) => setRelayFilesMb(e.target.value)}
           />
           <div className="groupmodal__label">組織群組（可選，每行：群組名稱, npub, npub…；名稱前綴 ! 為公告頻道）</div>
           <textarea

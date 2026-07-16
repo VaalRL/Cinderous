@@ -1,5 +1,5 @@
 import { KIND, RelayClient, applyRosterRotations, generateSecretKey, getPublicKey, npubEncode, nsecEncode, signOrgRoster, type NostrEvent, type RelayClientHandlers, wrapGroupControl, wrapGroupMessage, wrapMessage, wrapReceipt } from "@cinder/core";
-import { createInMemoryRelayNetwork } from "@cinder/relay";
+import { createInMemoryRelayNetwork, MessageStore } from "@cinder/relay";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryStorage } from "../storage/memory.js";
 import type { ChatBackendEvents, ChatMessage } from "./types.js";
@@ -1222,6 +1222,58 @@ describe("檔案投遞與另存（ADR-0093）", () => {
   }
   beforeEach(() => vi.stubGlobal("RTCPeerConnection", FakePeerConnection));
   afterEach(() => vi.unstubAllGlobals());
+
+  it("relay 檔案暫存（ADR-0162）：政策啟用＋名冊成員 1:1 → 分塊經中繼；離線收件人上線後收齊位元組", () => {
+    // 企業站：MAX_FILE_MB 已設（acceptFileEvents）；離線暫存需要持久層（store）。
+    const net = createInMemoryRelayNetwork({ acceptFileEvents: true, store: new MessageStore() });
+    const token = "tok-relay-file";
+    const owner = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("o", h), "老闆", {
+      orgOwner: true,
+      orgInviteToken: token,
+    });
+    owner.start(noop);
+    // 政策：relay 檔案上限 1MB（ADR-0162）。
+    owner.publishRoster("小公司", [{ pubkey: owner.self.pubkey, name: "老闆" }], { relayFilesMaxMb: 1 });
+
+    const storeA = new MemoryStorage();
+    const a = new RelayChatBackend(storeA, (h) => net.connect("a", h), "小美", {
+      orgAdminPubkey: owner.self.pubkey,
+      orgJoinToken: token,
+    });
+    a.start(noop);
+    const storeB = new MemoryStorage();
+    const bId = new RelayChatBackend(storeB, (h) => net.connect("b", h), "阿強", {
+      orgAdminPubkey: owner.self.pubkey,
+      orgJoinToken: token,
+    });
+    bId.start(noop);
+    const bPk = bId.self.pubkey;
+    bId.stop(); // 收件人離線——P2P 在此必然失敗，relay 暫存是唯一出路
+
+    // A 送 100KB（> 1 塊）給離線的 B：政策啟用＋B 在名冊 → 走 relay 分塊（不碰 P2P，node 下無 RTC 也不炸）。
+    const payload = new Uint8Array(100_000).map((_, i) => i % 251);
+    a.sendFile(bPk, { name: "簡報.pdf", mime: "application/pdf", bytes: payload });
+
+    // B 上線 → 從離線信箱收齊分塊 → 重組 → onFileBytes（走既有收檔路徑）。
+    const gotBytes: { name: string; size: number; first: number; last: number }[] = [];
+    const b2 = new RelayChatBackend(storeB, (h) => net.connect("b2", h), "阿強", {
+      orgAdminPubkey: owner.self.pubkey,
+      orgJoinToken: token,
+    });
+    b2.start({
+      ...noop,
+      onFileBytes: (_pk, _id, f) =>
+        gotBytes.push({ name: f.name, size: f.bytes.length, first: f.bytes[0]!, last: f.bytes[f.bytes.length - 1]! }),
+    });
+    expect(gotBytes.length).toBe(1);
+    expect(gotBytes[0]).toEqual({ name: "簡報.pdf", size: 100_000, first: 0, last: (100_000 - 1) % 251 });
+    // metadata 訊息照舊入庫（檔案訊息存在、只存 metadata 無位元組）。
+    expect(storeB.loadMessages(a.self.pubkey).some((m) => m.file?.name === "簡報.pdf")).toBe(true);
+
+    a.stop();
+    b2.stop();
+    owner.stop();
+  });
 
   it("公司儲存槽（ADR-0161）：存放不建聊天訊息、位元組到齊發 onSlotDeposit；非名冊成員拒收", () => {
     const net = createInMemoryRelayNetwork();

@@ -66,7 +66,10 @@ import {
   wrapReaction,
   wrapReceipt,
   receiptOf,
+  parseFileChunk,
   policyTtlSeconds,
+  splitFileChunks,
+  wrapFileChunk,
   wrapProfile,
   parseProfile,
   sanitizeTitle,
@@ -392,6 +395,11 @@ export class RelayChatBackend implements ChatBackend {
   private readonly pendingJoins = new Map<PubkeyHex, string>();
   /** 待收位元組的儲存槽存放（ADR-0161，企業主端）：tid → 寄件人與 metadata。 */
   private readonly pendingSlots = new Map<string, { sender: PubkeyHex; name: string; mime: string; origin: string }>();
+  /** relay 檔案分塊重組（ADR-0162）：tid → 收到的塊。防禦上限見 receiveFileChunk。 */
+  private readonly chunkAsm = new Map<
+    string,
+    { sender: PubkeyHex; name: string; mime: string; total: number; parts: Map<number, Uint8Array> }
+  >();
   /** 企業 TURN 伺服器與強制 TURN 政策狀態（ADR-0048）：供 WebRTC ICE 設定。 */
   private readonly turnServers: RTCIceServer[] | undefined;
   private forceTurn = false;
@@ -783,6 +791,8 @@ export class RelayChatBackend implements ChatBackend {
       { kinds: [PRESENCE_SIGNAL_KIND], "#p": me }, // 封裝的在線狀態（ADR-0129）
       // 帶內引導清單（ADR-0039）：訂閱維護者簽章的 relay 清單事件。
       ...(this.maintainerPubkey ? [{ kinds: [RELAY_LIST_KIND], authors: [this.maintainerPubkey] }] : []),
+      // 檔案塊（ADR-0162）：組織小檔案經 relay 暫存；未啟用的站不會有這類事件，訂閱無成本。
+      { kinds: [KIND.FILE_WRAP], "#p": me },
       // 企業組織名冊（ADR-0047）：訂閱管理者簽章的名冊事件。
       ...(this.orgAdminPubkey ? [{ kinds: [ORG_ROSTER_KIND], authors: [this.orgAdminPubkey] }] : []),
       // 企業主（ADR-0156）：訂閱**自己**簽章的名冊——重啟後找回 lastRoster，自動核准不失憶。
@@ -1096,6 +1106,10 @@ export class RelayChatBackend implements ChatBackend {
         const doc = verifyRelayList(event, this.maintainerPubkey);
         if (doc) this.adoptRelayList(doc);
       }
+      return;
+    }
+    if (event.kind === KIND.FILE_WRAP) {
+      this.receiveFileChunk(event); // ADR-0162：組織檔案分塊
       return;
     }
     if (event.kind === ORG_ROSTER_KIND) {
@@ -2392,9 +2406,14 @@ export class RelayChatBackend implements ChatBackend {
     const group = this.groups.find((g) => g.id === to);
     if (group) return this.sendGroupFile(group, file, opts);
 
-    // 位元組走 P2P（不變）；另發一則加密 metadata 訊息讓對方所有裝置都知道有檔案（ADR-0093）。
-    // `thumb` 只存在本機（ADR-0102）——**不進 metadata 訊息、不上中繼**；對方自己從位元組產生。
-    const tid = this.transfer.sendFile(to, file);
+    // 位元組預設走 P2P；組織政策 relayFilesMaxMb（ADR-0162）啟用且對象為名冊在世成員、
+    // 檔案 ≤ 上限時改走 relay 加密分塊（離線也送得到）。metadata 訊息兩種路徑皆照發。
+    const relayMb = this.lastRoster?.policy?.relayFilesMaxMb;
+    const viaRelay =
+      !!relayMb &&
+      file.bytes.length <= relayMb * 1024 * 1024 &&
+      !!this.lastRoster?.members.some((m) => m.pubkey === to && !m.supersededBy);
+    const tid = viaRelay ? this.transfer.newTransferId() : this.transfer.sendFile(to, file);
     const meta = { tid, name: file.name, size: file.bytes.length, mime: file.mime };
     const now = nowSec(); // 同一個送出時間寫進 rumor 也當本機 `at`（ADR-0108）
     const wrapped = wrapFileMessage(this.sk, to, meta, {
@@ -2410,6 +2429,21 @@ export class RelayChatBackend implements ChatBackend {
     // 送出端原檔路徑（ADR-0103）：原生選檔才有；讓自己送出的圖片重載後也讀得回原圖。
     if (opts.savedPath) this.storage.setFileSavedPath(to, id, opts.savedPath);
     this.publishWrapped(to, id, wrapped);
+    if (viaRelay) {
+      // 分塊經外送匣節流背景送出；無逐塊進度——送端直接標傳輸完成（ADR-0162 已知限制）。
+      const parts = splitFileChunks(file.bytes);
+      for (let seq = 0; seq < parts.length; seq++) {
+        this.publishReliable(
+          wrapFileChunk(
+            { tid, seq, total: parts.length, name: file.name, mime: file.mime, data: parts[seq]! },
+            this.sk,
+            to,
+            { now, ...this.orgExpiration(now) },
+          ),
+        );
+      }
+      this.handlers?.onFileProgress?.(to, tid, file.bytes.length, file.bytes.length);
+    }
     return tid;
   }
 
@@ -2508,6 +2542,45 @@ export class RelayChatBackend implements ChatBackend {
   }
 
   /** 收到 P2P 檔案位元組（ADR-0093）：關聯到檔案訊息（位元組可能早於 metadata），交 App 另存。 */
+  /**
+   * relay 檔案分塊（ADR-0162）：解密 → 驗塊 → 重組；收齊走既有 onFileBytes 收檔路徑
+   * （儲存槽/另存/縮圖全部照舊）。只收**聯絡人**的塊（組織內功能；陌生人塊＝垃圾儲存向量）。
+   */
+  private receiveFileChunk(event: NostrEvent): void {
+    let opened;
+    try {
+      opened = unwrapMessage(event, this.sk);
+    } catch {
+      return;
+    }
+    const { sender, rumor } = opened;
+    if (this.isBlocked(sender) || !this.contacts.some((c) => c.pubkey === sender)) return;
+    const chunk = parseFileChunk(rumor);
+    if (!chunk) return;
+    let asm = this.chunkAsm.get(chunk.tid);
+    if (!asm) {
+      if (this.chunkAsm.size >= 8) return; // 併發重組上限（防記憶體）
+      asm = { sender, name: chunk.name, mime: chunk.mime, total: chunk.total, parts: new Map() };
+      this.chunkAsm.set(chunk.tid, asm);
+    }
+    if (asm.sender !== sender || asm.total !== chunk.total) return; // 塊間不一致＝丟棄
+    asm.parts.set(chunk.seq, chunk.data);
+    if (asm.parts.size < asm.total) return;
+    // 收齊 → 重組 → 走既有收檔路徑。
+    this.chunkAsm.delete(chunk.tid);
+    let size = 0;
+    for (const p of asm.parts.values()) size += p.length;
+    const bytes = new Uint8Array(size);
+    let off = 0;
+    for (let i = 0; i < asm.total; i++) {
+      const part = asm.parts.get(i);
+      if (!part) return; // 理論不可能（size 檢查過）；防禦
+      bytes.set(part, off);
+      off += part.length;
+    }
+    this.onFileBytes(sender, { id: chunk.tid, name: asm.name, mime: asm.mime, bytes });
+  }
+
   private onFileBytes(peer: PubkeyHex, file: ReceivedFile): void {
     // 儲存槽存放（ADR-0161）：位元組收齊 → 交 App 落盤，不進聊天訊息流。
     const slotMeta = this.pendingSlots.get(file.id);

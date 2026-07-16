@@ -14,8 +14,15 @@ export const KIND = {
   RECEIPT: 41,
   /** 組織入職請求（app 內部 rumor kind，經 Gift Wrap 給管理者；ADR-0156）。 */
   ORG_JOIN: 42,
+  /** 檔案分塊（app 內部 rumor kind，經 FILE_WRAP 外層；ADR-0162）。 */
+  FILE_CHUNK: 43,
   /** 離線留言：NIP-17/59 Gift Wrap。 */
   OFFLINE_DM_GIFT_WRAP: 1059,
+  /**
+   * 檔案塊外層（ADR-0162）：與 1059 同為 Gift Wrap 密文，但獨立 kind 讓中繼站能
+   * 整類拒收（`MAX_FILE_MB` 未設）與獨立配額桶（不與聊天訊息互踐）。
+   */
+  FILE_WRAP: 1060,
   /** 好友上線/離線心跳（Ephemeral）。 */
   HEARTBEAT: 20000,
   /** 正在輸入中（Ephemeral；**NIP-59 封裝**，ADR-0120）。 */

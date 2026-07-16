@@ -273,6 +273,16 @@ describe("訊息保留政策（ADR-0160）", () => {
     }
   });
 
+  it("relayFilesMaxMb（ADR-0162）：1–16 整數原樣還原；壞值視為未設", () => {
+    const ok = verifyOrgRoster(signOrgRoster({ ...base, policy: { relayFilesMaxMb: 8 } }, adminSk), admin);
+    expect(ok?.policy?.relayFilesMaxMb).toBe(8);
+    for (const bad of [0, 17, 2.5]) {
+      const out = verifyOrgRoster(signOrgRoster({ ...base, policy: { relayFilesMaxMb: bad, forceTurn: true } }, adminSk), admin);
+      expect(out?.policy?.relayFilesMaxMb).toBeUndefined();
+      expect(out?.policy?.forceTurn).toBe(true);
+    }
+  });
+
   it("policyTtlSeconds：換算天→秒；未設回 undefined", () => {
     expect(policyTtlSeconds({ messageTtlDays: 30 })).toBe(30 * 86_400);
     expect(policyTtlSeconds({ forceTurn: true })).toBeUndefined();

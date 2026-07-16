@@ -8,6 +8,11 @@ export interface Env {
    * 未設/壞值＝預設 7 天。發送端蓋超過此上限的過期章會被截斷——站方上限恆為權威。
    */
   MAX_TTL_DAYS?: string;
+  /**
+   * 接受檔案塊事件（ADR-0162）：≥1 才收 FILE_WRAP(1060)；未設＝整類拒收（公共站預設）。
+   * 值目前僅作開關（實際上限由名冊政策 relayFilesMaxMb ≤16 控制）。
+   */
+  MAX_FILE_MB?: string;
 }
 
 /** 每收件人離線留言上限（防單一收件人塞爆免費額度；PRD §8）。 */
@@ -53,12 +58,18 @@ export class RelayRoom {
       maxPerRecipient: MAX_PER_RECIPIENT,
       ...(Number.isFinite(ttlDays) && ttlDays >= 1 ? { maxTtlSeconds: Math.floor(ttlDays) * 86_400 } : {}),
     });
+    const fileMb = Number(env.MAX_FILE_MB ?? 0); // ADR-0162：檔案塊開關
     // NIP-42 AUTH（ADR-0057）：開放中繼要求認證——只有本人能拉自己的加密收件匣。
     // 每連線訂閱數上限（ADR-0119）：`relay-core` 一直有這道防禦（含正確的 `CLOSED rate-limited`
     // 回應），但**從來沒被啟用**——而這是**單一全域房間 DO**（所有人共用），任何人自產一把金鑰
     // 通過 AUTH 後即可開無限訂閱把 DO 記憶體撐爆 → **全站掛掉**。
     // 客戶端合併後只需 1 個 REQ（ADR-0109），16 已是非常寬鬆的上限。
-    this.core = new RelayCore({ store: this.store, requireAuth: true, maxSubscriptions: MAX_SUBSCRIPTIONS });
+    this.core = new RelayCore({
+      store: this.store,
+      requireAuth: true,
+      maxSubscriptions: MAX_SUBSCRIPTIONS,
+      ...(Number.isFinite(fileMb) && fileMb >= 1 ? { acceptFileEvents: true } : {}),
+    });
     // C2：排程 NIP-40 過期清理（DO 休眠仍會被 alarm 喚醒執行）。
     ctx.blockConcurrencyWhile(async () => {
       if ((await ctx.storage.getAlarm()) === null) {

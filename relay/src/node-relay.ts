@@ -20,6 +20,8 @@ const requireAuth = process.env.REQUIRE_AUTH !== "0"; // 預設開 NIP-42 認證
 const maxPerRecipient = Number(process.env.MAX_PER_RECIPIENT ?? 500);
 // TTL 上限（天，ADR-0160）：企業自架站可放寬離線留言保留；未設/壞值＝預設 7 天。
 const maxTtlDays = Number(process.env.MAX_TTL_DAYS ?? 0);
+// 檔案塊開關（ADR-0162）：≥1 才收 FILE_WRAP(1060)；未設＝整類拒收。
+const maxFileMb = Number(process.env.MAX_FILE_MB ?? 0);
 const PRUNE_INTERVAL_MS = 60 * 60 * 1000;
 
 const db = new DatabaseSync(dbPath);
@@ -33,7 +35,11 @@ const store = new SqlMessageStore(exec, {
   maxPerRecipient,
   ...(Number.isFinite(maxTtlDays) && maxTtlDays >= 1 ? { maxTtlSeconds: Math.floor(maxTtlDays) * 86_400 } : {}),
 });
-const core = new RelayCore({ store, requireAuth });
+const core = new RelayCore({
+  store,
+  requireAuth,
+  ...(Number.isFinite(maxFileMb) && maxFileMb >= 1 ? { acceptFileEvents: true } : {}),
+});
 
 const sockets = new Map<string, WebSocket>();
 let counter = 0;

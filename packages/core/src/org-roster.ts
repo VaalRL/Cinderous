@@ -37,7 +37,16 @@ export interface OrgPolicy {
    * 未設＝預設 7 天。閱後即焚（disappearAt）不受影響。
    */
   messageTtlDays?: number;
+  /**
+   * 組織檔案經 relay 暫存的大小上限（MB，ADR-0162，1–16 整數）：設定後名冊成員 1:1
+   * 的 ≤ 上限檔案改走加密分塊 relay（離線也送得到）；需自架 relay 設 `MAX_FILE_MB`
+   * 才收。未設＝關（維持 P2P）。
+   */
+  relayFilesMaxMb?: number;
 }
+
+/** relay 檔案上限的政策最大值（MB，ADR-0162）。 */
+export const ORG_RELAY_FILE_MAX_MB = 16;
 
 /** 訊息保留天數上限（ADR-0160）。 */
 export const ORG_TTL_MAX_DAYS = 365;
@@ -143,6 +152,10 @@ function parsePolicy(value: unknown): OrgPolicy | undefined {
   // ADR-0160：保留天數僅接受 1–365 整數（壞值視為未設，退回預設 7 天）。
   if (typeof v.messageTtlDays === "number" && Number.isInteger(v.messageTtlDays) && v.messageTtlDays >= 1 && v.messageTtlDays <= ORG_TTL_MAX_DAYS) {
     p.messageTtlDays = v.messageTtlDays;
+  }
+  // ADR-0162：relay 檔案上限僅接受 1–16 整數 MB（壞值視為未設＝關）。
+  if (typeof v.relayFilesMaxMb === "number" && Number.isInteger(v.relayFilesMaxMb) && v.relayFilesMaxMb >= 1 && v.relayFilesMaxMb <= ORG_RELAY_FILE_MAX_MB) {
+    p.relayFilesMaxMb = v.relayFilesMaxMb;
   }
   return Object.keys(p).length > 0 ? p : undefined;
 }

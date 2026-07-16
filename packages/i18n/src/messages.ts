@@ -117,6 +117,7 @@ export interface Messages {
   roster_welcomeLabel: string;
   roster_workHoursLabel: string;
   roster_ttlLabel: string;
+  roster_relayFilesLabel: string;
   orgInfo_title: string;
   orgInfo_hours: string;
   orgInfo_muteNote: string;
@@ -716,6 +717,7 @@ const zhHant: Messages = {
   roster_welcomeLabel: "歡迎詞／基本規範（可選：新成員加入時一次性顯示，並可隨時在設定 → 組織資訊查看）",
   roster_workHoursLabel: "表定上下班時間（可選：下班時間成員端自動靜音公司通知；留空＝不設）",
   roster_ttlLabel: "離線訊息保留天數（可選，1–365；留空＝預設 7 天。需自架 relay 以 MAX_TTL_DAYS 放寬上限，站方上限恆為權威）",
+  roster_relayFilesLabel: "檔案經 relay 暫存上限（MB，可選，1–16；留空＝關、維持 P2P。啟用後成員間 ≤ 上限的檔案離線也送得到；需自架 relay 設 MAX_FILE_MB）",
   orgInfo_title: "組織資訊",
   orgInfo_hours: "表定上班時間：{start}–{end}",
   orgInfo_muteNote: "下班時間，來自公司成員與組織群組的通知會自動靜音（未讀照常累計）。",
@@ -1286,6 +1288,7 @@ const en: Messages = {
   roster_welcomeLabel: "Welcome message / ground rules (optional: shown once to new members, always available under Settings → Organization)",
   roster_workHoursLabel: "Scheduled work hours (optional: company notifications auto-mute off-hours on members' devices; leave blank to unset)",
   roster_ttlLabel: "Offline message retention in days (optional, 1–365; blank = default 7. Requires a self-hosted relay with MAX_TTL_DAYS raised — the relay's cap always wins)",
+  roster_relayFilesLabel: "Relay file staging limit in MB (optional, 1–16; blank = off, P2P only. Files up to the limit reach offline members; requires MAX_FILE_MB on your self-hosted relay)",
   orgInfo_title: "Organization",
   orgInfo_hours: "Work hours: {start}–{end}",
   orgInfo_muteNote: "Outside work hours, notifications from company members and org groups are muted automatically (unread still accrues).",

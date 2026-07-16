@@ -203,3 +203,22 @@ describe("可取代事件（NIP-01 10000–19999；ADR-0035）", () => {
     expect(store.query({ kinds: [10037] }, 1000).length).toBe(2);
   });
 });
+
+describe("檔案塊獨立配額桶（ADR-0162）", () => {
+  const mk = (id: string, kind: number, createdAt: number): NostrEvent =>
+    ({ id, kind, created_at: createdAt, tags: [["p", "r1"], ["expiration", String(createdAt + 86_400)]], content: "", pubkey: "p", sig: "s" }) as NostrEvent;
+
+  it("檔案塊（1060）灌爆自己的桶，不把聊天留言擠出 FIFO；聊天配額也不影響檔案塊", () => {
+    const store = new MessageStore({ maxPerRecipient: 2, filePerRecipient: 3 });
+    store.put(mk("c1", 1059, 1), 0);
+    store.put(mk("c2", 1059, 2), 0);
+    for (let i = 0; i < 5; i++) store.put(mk(`f${i}`, 1060, 10 + i), 0);
+    const kept = store.query({ "#p": ["r1"] }, 5).map((e) => e.id).sort();
+    // 聊天 2 則全留；檔案塊只留最新 3 顆（f2,f3,f4）。
+    expect(kept).toEqual(["c1", "c2", "f2", "f3", "f4"]);
+    // 再灌聊天：聊天桶 FIFO，檔案塊不受影響。
+    store.put(mk("c3", 1059, 3), 0);
+    const kept2 = store.query({ "#p": ["r1"] }, 5).map((e) => e.id).sort();
+    expect(kept2).toEqual(["c2", "c3", "f2", "f3", "f4"]);
+  });
+});

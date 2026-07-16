@@ -583,3 +583,34 @@ describe("ADR-0123 的邊界：`authors: []` 必須放行", () => {
     expect(out).toContainEqual({ to: "c", message: ["EOSE", "boot"] });
   });
 });
+
+describe("檔案塊事件（FILE_WRAP=1060，ADR-0162）", () => {
+  const fileEvent = (recipient = "a".repeat(64), content = "x"): NostrEvent =>
+    finalizeEvent(
+      { kind: 1060, created_at: 1700000000, tags: [["p", recipient], ["expiration", "1700086400"]], content },
+      generateSecretKey(),
+    );
+
+  it("預設（公共站）整類拒收：OK false、不入庫", () => {
+    const store = new MessageStore();
+    const core = new RelayCore({ store });
+    core.connect("c1");
+    const e = fileEvent();
+    const out = core.handle("c1", EVENT(e));
+    expect(out).toContainEqual({ to: "c1", message: ["OK", e.id, false, "blocked: 檔案事件未啟用（MAX_FILE_MB）"] });
+    expect(store.query({ kinds: [1060] }, 1700000001)).toEqual([]);
+  });
+
+  it("acceptFileEvents 啟用：收下入庫；單顆超過 200KB sanity 上限仍拒", () => {
+    const store = new MessageStore();
+    const core = new RelayCore({ store, acceptFileEvents: true, now: () => 1_700_000_001 });
+    core.connect("c1");
+    const e = fileEvent();
+    const out = core.handle("c1", EVENT(e));
+    expect(out).toContainEqual({ to: "c1", message: ["OK", e.id, true, ""] });
+    expect(store.query({ kinds: [1060] }, 1700000001).map((x) => x.id)).toEqual([e.id]);
+    const huge = fileEvent("b".repeat(64), "z".repeat(210_000));
+    const out2 = core.handle("c1", EVENT(huge));
+    expect(out2).toContainEqual({ to: "c1", message: ["OK", huge.id, false, "blocked: 檔案塊過大"] });
+  });
+});
