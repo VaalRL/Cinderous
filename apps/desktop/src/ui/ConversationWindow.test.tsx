@@ -4,6 +4,7 @@ import { I18nProvider } from "../i18n.js";
 import { ThemeProvider } from "../theme.js";
 import type { ChatMessage, Contact, MessageStatus, Self } from "@cinder/engine";
 import { ConversationWindow } from "./ConversationWindow.js";
+import { CHIME_PRESETS } from "./ringtone.js";
 
 const self: Self = { pubkey: "aa", name: "我", status: "online", statusMessage: "" };
 const contact: Contact = { pubkey: "bb", name: "Bob", status: "online", statusMessage: "", nowPlaying: "" };
@@ -139,6 +140,42 @@ describe("ConversationWindow 訊息列視窗化（P0-3）", () => {
   it("本地暱稱：未提供 onSetAlias（群組/示範）→ 無鉛筆入口", () => {
     const html = renderCW({ alias: "阿伯" });
     expect(html).not.toContain('data-testid="convo-alias-edit"');
+  });
+
+  const renderSound = (over: Partial<Contact>, onSetNotifySound?: () => void, initialSoundEditing?: boolean) =>
+    renderToStaticMarkup(
+      <I18nProvider locale="zh-Hant">
+        <ThemeProvider>
+          <ConversationWindow
+            self={self}
+            contact={{ ...contact, ...over }}
+            messages={[]}
+            typing={false}
+            nudgeSignal={0}
+            {...(onSetNotifySound ? { onSetNotifySound } : {})}
+            {...(initialSoundEditing ? { initialSoundEditing } : {})}
+            onSend={() => {}}
+            onTyping={() => {}}
+            onNudge={() => {}}
+            onClose={() => {}}
+          />
+        </ThemeProvider>
+      </I18nProvider>,
+    );
+
+  it("依聯絡人通知音效（ADR-0149）：提供 onSetNotifySound→標頭有 🔔 入口；未提供則無", () => {
+    expect(renderSound({}, () => {})).toContain('data-testid="convo-sound-edit"');
+    expect(renderSound({})).not.toContain('data-testid="convo-sound-edit"');
+  });
+
+  it("依聯絡人通知音效：展開選擇列→「跟隨全域」＋全部預設＋試聽鈕", () => {
+    const html = renderSound({ notifySound: "bell" }, () => {}, true);
+    expect(html).toContain('data-testid="convo-sound-select"');
+    expect(html).toContain("跟隨全域預設"); // 清除選項（空值）
+    for (const p of CHIME_PRESETS) expect(html).toContain(`value="${p.id}"`);
+    expect(html).toContain('data-testid="convo-sound-preview"'); // 試聽
+    // 未展開時不佔版面
+    expect(renderSound({ notifySound: "bell" }, () => {})).not.toContain('data-testid="convo-sound-select"');
   });
 });
 

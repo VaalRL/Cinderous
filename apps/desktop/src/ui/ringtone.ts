@@ -4,6 +4,8 @@
 // - 外撥回鈴音（ringback）：長單響 + 長停頓，模擬「等待對方接聽」的回鈴，音色/節拍與來電有別。
 // 節拍為純函式（可測）；實際發聲的 Ringer 以 AudioContext 播放（瀏覽器限定，薄封裝）。
 
+import type { MessageKey } from "@cinder/i18n";
+
 /** 來電雙音鈴聲頻率（經典電話鈴的和聲近似）。 */
 export const RING_FREQ_A = 440;
 export const RING_FREQ_B = 480;
@@ -144,31 +146,106 @@ export function createRingback(ctor?: AudioCtor): Ringer {
 export const CHIME_FREQ_LOW = 880;
 export const CHIME_FREQ_HIGH = 1174;
 
+/** 預設集中的一顆音符：`at`/`dur` 為秒；`glide` 設定時於音長中點切至該頻率（叮咚式滑音）。 */
+export interface ChimeNote {
+  freq: number;
+  at: number;
+  dur: number;
+  glide?: number;
+}
+
+/** 通知音效預設（ADR-0149）：純資料配方，由 `playChime` 以 Web Audio 合成，無外部音檔。 */
+export interface ChimePreset {
+  id: string;
+  /** i18n 顯示名鍵（型別鎖住 Messages，避免鍵漏加）。 */
+  nameKey: MessageKey;
+  notes: ChimeNote[];
+}
+
 /**
- * 一次性通知提示音（ADR-0076）：短促上行「叮咚」，無外部音檔（離線/CSP 相容）。
+ * 內建通知音效預設集（ADR-0149）。
+ * 全部為合成配方——零資產、離線/CSP 相容，可測（純資料）。
+ */
+export const CHIME_PRESETS: ChimePreset[] = [
+  // 經典叮咚（ADR-0076 原音色）：上行兩音。
+  { id: "classic", nameKey: "chime_classic", notes: [{ freq: CHIME_FREQ_LOW, at: 0, dur: 0.2, glide: CHIME_FREQ_HIGH }] },
+  // 咚叮：下行兩音，與經典相反。
+  { id: "descend", nameKey: "chime_descend", notes: [{ freq: CHIME_FREQ_HIGH, at: 0, dur: 0.2, glide: CHIME_FREQ_LOW }] },
+  // 三連音：短-短-揚。
+  {
+    id: "triple",
+    nameKey: "chime_triple",
+    notes: [
+      { freq: 988, at: 0, dur: 0.08 },
+      { freq: 988, at: 0.12, dur: 0.08 },
+      { freq: 1319, at: 0.24, dur: 0.14 },
+    ],
+  },
+  // 鐘聲：低音單響、餘韻較長。
+  { id: "bell", nameKey: "chime_bell", notes: [{ freq: 523, at: 0, dur: 0.4 }] },
+  // 水滴：高音急落。
+  {
+    id: "drop",
+    nameKey: "chime_drop",
+    notes: [
+      { freq: 1760, at: 0, dur: 0.06 },
+      { freq: 1175, at: 0.08, dur: 0.14 },
+    ],
+  },
+  // 叩叩：低音兩短響。
+  {
+    id: "knock",
+    nameKey: "chime_knock",
+    notes: [
+      { freq: 220, at: 0, dur: 0.06 },
+      { freq: 220, at: 0.14, dur: 0.06 },
+    ],
+  },
+];
+
+/** 預設音效 id（未設定/設定損壞時的後備）。 */
+export const DEFAULT_CHIME_ID = "classic";
+
+/** 依 id 取預設；未給或查無（例如舊設定指向已移除的 id）一律退回 classic，確保永遠發得出聲。 */
+export function chimePreset(id?: string): ChimePreset {
+  return CHIME_PRESETS.find((p) => p.id === id) ?? CHIME_PRESETS.find((p) => p.id === DEFAULT_CHIME_ID)!;
+}
+
+/** 整段音效的長度（毫秒）＝最後一顆音符結束時刻，供關閉 AudioContext 排程。 */
+export function chimeDurationMs(preset: ChimePreset): number {
+  return Math.ceil(Math.max(...preset.notes.map((n) => n.at + n.dur)) * 1000);
+}
+
+/**
+ * 一次性通知提示音（ADR-0076／0149）：以 Web Audio 合成指定預設（`preset` 為 id，
+ * 未給/未知退回經典叮咚），無外部音檔（離線/CSP 相容）。
  * 無 AudioContext（測試/不支援）時安全 no-op。`ctor` 可注入以利測試。
  */
-export function playChime(ctor?: AudioCtor): void {
+export function playChime(preset?: string, ctor?: AudioCtor): void {
   const Ctor = resolveCtor(ctor);
   if (!Ctor) return;
+  const recipe = chimePreset(preset);
   try {
     const ctx = new Ctor();
     void ctx.resume?.();
     const now = ctx.currentTime;
-    const dur = 0.2;
-    const gain = ctx.createGain();
-    gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.exponentialRampToValueAtTime(0.12, now + 0.02);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + dur);
-    gain.connect(ctx.destination);
-    const osc = ctx.createOscillator();
-    osc.type = "sine";
-    osc.frequency.setValueAtTime(CHIME_FREQ_LOW, now);
-    osc.frequency.setValueAtTime(CHIME_FREQ_HIGH, now + dur / 2); // 上行兩音的「叮咚」
-    osc.connect(gain);
-    osc.start(now);
-    osc.stop(now + dur);
-    setTimeout(() => void ctx.close?.(), Math.ceil(dur * 1000) + 50);
+    for (const note of recipe.notes) {
+      const start = now + note.at;
+      const end = start + note.dur;
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0.0001, start);
+      gain.gain.exponentialRampToValueAtTime(0.12, start + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, end);
+      gain.connect(ctx.destination);
+      const osc = ctx.createOscillator();
+      osc.type = "sine";
+      osc.frequency.setValueAtTime(note.freq, start);
+      if (note.glide) osc.frequency.setValueAtTime(note.glide, start + note.dur / 2); // 中點滑音（叮咚）
+      osc.connect(gain);
+      osc.start(start);
+      osc.stop(end);
+    }
+    setTimeout(() => void ctx.close?.(), chimeDurationMs(recipe) + 50);
   } catch {
     /* 忽略發聲失敗 */
   }

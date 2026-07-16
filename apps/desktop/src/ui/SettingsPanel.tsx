@@ -4,6 +4,7 @@ import { ACCENT_PRESETS, useAccent } from "../accent.js";
 import { useLayout } from "../layout.js";
 import { useI18n } from "../i18n.js";
 import { useDialog } from "./Dialog.js";
+import { CHIME_PRESETS, DEFAULT_CHIME_ID, playChime } from "./ringtone.js";
 import { qrSvg } from "../qr.js";
 import type { CloudSyncMode } from "@cinder/engine";
 import {
@@ -53,6 +54,9 @@ export interface SettingsPanelProps {
   /** 通知提示音（ADR-0076）；未提供則不顯示該子開關。 */
   notifySound?: boolean;
   onToggleNotifySound?: () => void;
+  /** 全域通知音效（ADR-0149）：合成預設集 id；與 onSelectNotifyChime 一起提供才顯示下拉。 */
+  notifyChime?: string;
+  onSelectNotifyChime?: (id: string) => void;
   /** 通知隱藏內文預覽（ADR-0076）；未提供則不顯示該子開關。 */
   notifyHidePreview?: boolean;
   onToggleNotifyHidePreview?: () => void;
@@ -816,6 +820,33 @@ export function SettingsPanel(props: SettingsPanelProps): JSX.Element {
               <label className="settings__toggle">
                 <input type="checkbox" checked={props.notifySound ?? true} onChange={props.onToggleNotifySound} />
                 <span>{t("settings_notifySound")}</span>
+              </label>
+            ) : null}
+            {/* ADR-0149：全域通知音效（合成預設集）＋試聽；提示音開啟時才顯示。 */}
+            {props.notifications && (props.notifySound ?? true) && props.onSelectNotifyChime ? (
+              <label className="settings__field settings__chime">
+                <span>{t("settings_notifyChime")}</span>
+                <span className="settings__modelrow">
+                  <select
+                    data-testid="notify-chime-select"
+                    value={props.notifyChime ?? DEFAULT_CHIME_ID}
+                    onChange={(e) => props.onSelectNotifyChime!(e.target.value)}
+                  >
+                    {CHIME_PRESETS.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {t(p.nameKey)}
+                      </option>
+                    ))}
+                  </select>
+                  <button
+                    type="button"
+                    data-testid="notify-chime-preview"
+                    title={t("sound_preview")}
+                    onClick={() => playChime(props.notifyChime)}
+                  >
+                    {t("sound_preview")}
+                  </button>
+                </span>
               </label>
             ) : null}
             {props.notifications && props.onToggleNotifyHidePreview ? (

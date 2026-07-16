@@ -320,6 +320,16 @@ export interface Messages {
   settings_notifications: string;
   settings_notificationsHint: string;
   settings_notifySound: string;
+  settings_notifyChime: string;
+  sound_perContact: string;
+  sound_useDefault: string;
+  sound_preview: string;
+  chime_classic: string;
+  chime_descend: string;
+  chime_triple: string;
+  chime_bell: string;
+  chime_drop: string;
+  chime_knock: string;
   settings_notifyHidePreview: string;
   notify_newMessage: string;
   settings_close: string;
@@ -847,6 +857,16 @@ const zhHant: Messages = {
   settings_notifications: "桌面通知",
   settings_notificationsHint: "視窗未聚焦時，有新訊息就通知。",
   settings_notifySound: "通知提示音",
+  settings_notifyChime: "提示音效",
+  sound_perContact: "此聯絡人的通知音效",
+  sound_useDefault: "跟隨全域預設",
+  sound_preview: "試聽",
+  chime_classic: "叮咚（經典）",
+  chime_descend: "咚叮（下行）",
+  chime_triple: "三連音",
+  chime_bell: "鐘聲",
+  chime_drop: "水滴",
+  chime_knock: "叩叩",
   settings_notifyHidePreview: "隱藏內文預覽（只顯示有新訊息）",
   notify_newMessage: "有新訊息",
   settings_close: "關閉",
@@ -1361,6 +1381,16 @@ const en: Messages = {
   settings_notifications: "Desktop notifications",
   settings_notificationsHint: "Notify on new messages when the window isn't focused.",
   settings_notifySound: "Notification sound",
+  settings_notifyChime: "Sound effect",
+  sound_perContact: "Notification sound for this contact",
+  sound_useDefault: "Follow global default",
+  sound_preview: "Preview",
+  chime_classic: "Ding-dong (classic)",
+  chime_descend: "Dong-ding (descending)",
+  chime_triple: "Triple tone",
+  chime_bell: "Bell",
+  chime_drop: "Water drop",
+  chime_knock: "Knock knock",
   settings_notifyHidePreview: "Hide message preview (show only \"New message\")",
   notify_newMessage: "New message",
   settings_close: "Close",

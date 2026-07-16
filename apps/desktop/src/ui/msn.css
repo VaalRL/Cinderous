@@ -193,6 +193,21 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
 .convo__name--toggle { cursor: pointer; }
 .convo__name--toggle:hover { text-decoration: underline dotted; text-underline-offset: 2px; }
 .convo__aliasedit { cursor: pointer; }
+/* 依聯絡人通知音效（ADR-0149）：🔔 展開的選擇列。 */
+.convo__soundedit { cursor: pointer; }
+.convo__soundrow {
+  display: flex; align-items: center; gap: 6px; padding: 4px 8px; font-size: 12px;
+  background: var(--surface2); color: var(--ink); border-bottom: 1px solid var(--border);
+}
+.convo__soundrow select {
+  font-size: 12px; max-width: 180px; padding: 2px 4px;
+  border: 1px solid var(--border); border-radius: 6px; background: var(--field); color: var(--ink);
+}
+.convo__soundrow button {
+  font-size: 12px; cursor: pointer; padding: 2px 8px;
+  border: 1px solid var(--border); border-radius: 6px; background: var(--field); color: var(--accent);
+}
+.convo__soundrow button:hover { background: var(--hover); }
 .win__btn {
   width: 16px; height: 16px; border-radius: 3px; border: 1px solid #ffffff80;
   background: #ffffff30; color: #fff; font-size: 11px; line-height: 14px; text-align: center; cursor: pointer;

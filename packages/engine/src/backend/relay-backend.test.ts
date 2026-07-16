@@ -74,7 +74,7 @@ describe("RelayChatBackend（真實後端 + 持久化）", () => {
     const storeB = new MemoryStorage();
     const a = new RelayChatBackend(storeA, (h) => net.connect("a", h), "Alice");
     const b = new RelayChatBackend(storeB, (h) => net.connect("b", h), "Bob");
-    const aSawB: { name: string; alias?: string }[] = [];
+    const aSawB: { name: string; alias: string | undefined }[] = [];
     a.start({ ...noop, onContacts: (cs) => cs.forEach((c) => c.pubkey === b.self.pubkey && aSawB.push({ name: c.name, alias: c.alias })) });
     b.start(noop);
     // 互為聯絡人。順序要點（ADR-0061）：A 先加 B（A 名冊有 B）→ B 再加 A 時把 B 的 profile
@@ -97,6 +97,33 @@ describe("RelayChatBackend（真實後端 + 持久化）", () => {
     a.setContactAlias(b.self.pubkey, "");
     expect(last().alias).toBeUndefined();
     expect(last().name).toBe("Bobby");
+
+    a.stop();
+    b.stop();
+  });
+
+  it("setContactNotifySound（ADR-0149）：依聯絡人通知音效純本地、不外送；清除退回全域", () => {
+    const net = createInMemoryRelayNetwork();
+    const storeA = new MemoryStorage();
+    const storeB = new MemoryStorage();
+    const a = new RelayChatBackend(storeA, (h) => net.connect("a", h), "Alice");
+    const b = new RelayChatBackend(storeB, (h) => net.connect("b", h), "Bob");
+    const aSawB: { notifySound: string | undefined }[] = [];
+    a.start({ ...noop, onContacts: (cs) => cs.forEach((c) => c.pubkey === b.self.pubkey && aSawB.push({ notifySound: c.notifySound })) });
+    b.start(noop);
+    a.addContact(b.selfNpub);
+    b.addContact(a.selfNpub);
+    const last = () => aSawB[aSawB.length - 1]!;
+
+    a.setContactNotifySound(b.self.pubkey, "bell");
+    expect(last().notifySound).toBe("bell"); // DTO 帶出，UI 收訊時查表用
+    expect(storeA.loadContacts().find((c) => c.pubkey === b.self.pubkey)?.notifySound).toBe("bell"); // 落地本機
+    // 🔴 純本地：音效偏好**絕不外送**——B 對 A 的聯絡人紀錄沒有任何 notifySound。
+    expect(storeB.loadContacts().find((c) => c.pubkey === a.self.pubkey)?.notifySound).toBeUndefined();
+
+    // 清除 → 欄位移除，播放時退回全域預設。
+    a.setContactNotifySound(b.self.pubkey, undefined);
+    expect(last().notifySound).toBeUndefined();
 
     a.stop();
     b.stop();

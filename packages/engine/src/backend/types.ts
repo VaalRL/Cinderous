@@ -29,6 +29,11 @@ export interface Contact {
    * 暱稱↔廣播名間切換。純本地私有，絕不廣播。未設＝顯示 `name`。
    */
   alias?: string;
+  /**
+   * 依聯絡人通知音效（ADR-0149）：合成預設集 id。純本地偏好，絕不廣播。
+   * 未設＝全域預設音效；指向已移除 id 時播放端退回經典叮咚。
+   */
+  notifySound?: string;
   status: Status;
   /** 個人狀態訊息（暱稱後方那行字）。 */
   statusMessage: string;
@@ -205,6 +210,11 @@ export interface ChatBackend {
    * 純本地私有——**不廣播、不送對方/中繼站**，只更新本機儲存並重發聯絡人清單。
    */
   setContactAlias?(pubkey: PubkeyHex, alias: string | undefined): void;
+  /**
+   * 設定/清除依聯絡人通知音效（ADR-0149）：`soundId` 為合成預設集 id，空/undefined＝清除，
+   * 退回全域預設。純本地偏好——**不廣播、不送對方/中繼站**。
+   */
+  setContactNotifySound?(pubkey: PubkeyHex, soundId: string | undefined): void;
   /**
    * 送出訊息；`ttlSeconds` 設定時為限時訊息（閱後即焚，NIP-40 短期過期）；
    * `mentions` 為 @提及公鑰（ADR-0050）；`replyTo` 為對話串根訊息 id（ADR-0051）。

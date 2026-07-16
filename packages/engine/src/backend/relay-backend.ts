@@ -425,7 +425,7 @@ export class RelayChatBackend implements ChatBackend {
    * 只在記憶體：session 內重連走增量，App 重啟仍全量抓一次。
    */
   private readonly inboxWatermark = new Map<string, number>();
-  private contacts: { pubkey: PubkeyHex; name: string; relayUrl?: string; alias?: string }[];
+  private contacts: { pubkey: PubkeyHex; name: string; relayUrl?: string; alias?: string; notifySound?: string }[];
   private blocked: { pubkey: PubkeyHex; name: string }[];
   /** 訊息請求（ADR-0121）：陌生人傳來訊息但你還沒接受。**不是聯絡人。** */
   private requests: { pubkey: PubkeyHex; name: string; relayUrl?: string }[];
@@ -1562,6 +1562,16 @@ export class RelayChatBackend implements ChatBackend {
     this.emitContacts();
   }
 
+  /**
+   * 設定/清除依聯絡人通知音效（ADR-0149）：只寫本機儲存並重發聯絡人清單——**不廣播、不送對方/中繼站**。
+   * 空/undefined＝清除，播放退回全域預設。
+   */
+  setContactNotifySound(pubkey: PubkeyHex, soundId: string | undefined): void {
+    this.storage.setContactNotifySound(pubkey, soundId);
+    this.contacts = this.storage.loadContacts();
+    this.emitContacts();
+  }
+
   blockContact(pubkey: PubkeyHex): void {
     const existing =
       this.contacts.find((c) => c.pubkey === pubkey) ?? this.requests.find((r) => r.pubkey === pubkey);
@@ -1764,6 +1774,7 @@ export class RelayChatBackend implements ChatBackend {
         pubkey: c.pubkey,
         name: c.name,
         ...(c.alias ? { alias: c.alias } : {}), // ADR-0148：本地暱稱（有設才帶）
+        ...(c.notifySound ? { notifySound: c.notifySound } : {}), // ADR-0149：依聯絡人通知音效
         status: online ? payload?.s ?? "online" : "offline",
         statusMessage: (online ? payload?.m : undefined) ?? "",
         nowPlaying: (online ? payload?.np : undefined) ?? "",

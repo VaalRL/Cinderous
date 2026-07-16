@@ -5,6 +5,7 @@ import { I18nProvider } from "../i18n.js";
 import { LayoutProvider } from "../layout.js";
 import { ThemeProvider } from "../theme.js";
 import { relayChangeReady, SettingsPanel, type SettingsPanelProps } from "./SettingsPanel.js";
+import { CHIME_PRESETS } from "./ringtone.js";
 
 describe("relayChangeReady（更換輸入驗證）", () => {
   it("ws(s):// 且與現值不同才可套用", () => {
@@ -216,6 +217,40 @@ describe("主題色：主色＋副色（ADR-0078）", () => {
     expect(out).toContain("主色");
     expect(out).toContain("副色");
     expect(out).toContain("跟隨主色");
+  });
+});
+
+describe("通知音效下拉（ADR-0149）", () => {
+  beforeEach(() => {
+    (globalThis as Record<string, unknown>).window = { matchMedia: () => ({ matches: false }) };
+    (globalThis as Record<string, unknown>).localStorage = { getItem: () => null };
+  });
+  afterEach(() => {
+    delete (globalThis as Record<string, unknown>).window;
+    delete (globalThis as Record<string, unknown>).localStorage;
+  });
+
+  const base: Partial<SettingsPanelProps> = {
+    initialTab: "privacy",
+    notifications: true,
+    notifySound: true,
+    onToggleNotifySound: () => {},
+    notifyChime: "bell",
+    onSelectNotifyChime: () => {},
+  };
+
+  it("提示音開啟→列出全部合成預設與試聽鈕（零音檔）", () => {
+    const out = render(base);
+    expect(out).toContain('data-testid="notify-chime-select"');
+    for (const p of CHIME_PRESETS) expect(out).toContain(`value="${p.id}"`);
+    expect(out).toContain("鐘聲"); // zh-Hant 預設名（bell）
+    expect(out).toContain('data-testid="notify-chime-preview"'); // 試聽
+  });
+
+  it("提示音關閉或未接 onSelectNotifyChime→不顯示下拉", () => {
+    expect(render({ ...base, notifySound: false })).not.toContain('data-testid="notify-chime-select"');
+    const { onSelectNotifyChime: _drop, ...noSelect } = base;
+    expect(render(noSelect)).not.toContain('data-testid="notify-chime-select"');
   });
 });
 

@@ -26,6 +26,12 @@ export interface StoredContact {
    * 裝置間流動。清除（空）即退回對方廣播名。不覆寫 `name`（廣播名獨立保存，供點擊切換/清除還原）。
    */
   alias?: string;
+  /**
+   * 依聯絡人通知音效（ADR-0149）：內建合成預設集的 id（見 desktop `CHIME_PRESETS`）。
+   * 純本地偏好——**絕不廣播、絕不送給對方或中繼站**；僅隨你自己的加密快照/搬家捆包流動。
+   * 未設＝播全域預設音效。指向已移除 id 時播放端自動退回經典叮咚。
+   */
+  notifySound?: string;
 }
 
 /**
@@ -164,6 +170,8 @@ export interface AppStorage {
   updateContactName(pubkey: string, name: string): void;
   /** 設定/清除聯絡人本地暱稱（ADR-0148）；空字串或 undefined＝清除，退回廣播名。 */
   setContactAlias(pubkey: string, alias: string | undefined): void;
+  /** 設定/清除依聯絡人通知音效（ADR-0149）；空字串或 undefined＝清除，退回全域預設。 */
+  setContactNotifySound(pubkey: string, soundId: string | undefined): void;
   /** 移除聯絡人並清除其對話訊息。 */
   removeContact(pubkey: string): void;
   /**

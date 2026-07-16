@@ -80,6 +80,8 @@ export class BrowserChatBackend implements ChatBackend {
   private lastContactsSig = "";
   /** 本地暱稱（ADR-0148）：示範模式亦支援，純記憶體。 */
   private readonly aliases = new Map<PubkeyHex, string>();
+  /** 依聯絡人通知音效（ADR-0149）：示範模式亦支援，純記憶體。 */
+  private readonly notifySounds = new Map<PubkeyHex, string>();
   private readonly roster: Peer[] = [];
   private readonly blocked: { pubkey: PubkeyHex; name: string }[] = [];
   private readonly hidden = new Set<PubkeyHex>();
@@ -226,10 +228,12 @@ export class BrowserChatBackend implements ChatBackend {
       const payload = this.statuses.get(peer.pk);
       const fallback = this.defaults.get(peer.pk);
       const alias = this.aliases.get(peer.pk);
+      const notifySound = this.notifySounds.get(peer.pk);
       return {
         pubkey: peer.pk,
         name: peer.name,
         ...(alias ? { alias } : {}), // ADR-0148：本地暱稱
+        ...(notifySound ? { notifySound } : {}), // ADR-0149：依聯絡人通知音效
         status: online ? payload?.s ?? "online" : "offline",
         statusMessage: (online ? payload?.m : undefined) ?? fallback?.message ?? "",
         nowPlaying: (online ? payload?.np : undefined) ?? "",
@@ -263,6 +267,14 @@ export class BrowserChatBackend implements ChatBackend {
     const trimmed = alias?.trim();
     if (trimmed) this.aliases.set(pubkey, trimmed);
     else this.aliases.delete(pubkey);
+    this.emitContacts();
+  }
+
+  /** 設定/清除依聯絡人通知音效（ADR-0149）：純記憶體、不廣播。空＝清除，退回全域預設。 */
+  setContactNotifySound(pubkey: PubkeyHex, soundId: string | undefined): void {
+    const trimmed = soundId?.trim();
+    if (trimmed) this.notifySounds.set(pubkey, trimmed);
+    else this.notifySounds.delete(pubkey);
     this.emitContacts();
   }
 

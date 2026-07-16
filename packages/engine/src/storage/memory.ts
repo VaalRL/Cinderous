@@ -152,6 +152,15 @@ export class MemoryStorage implements AppStorage {
       return trimmed ? { ...rest, alias: trimmed } : rest;
     });
   }
+  setContactNotifySound(pubkey: string, soundId: string | undefined): void {
+    // ADR-0149：依聯絡人通知音效（預設集 id）。空＝清除，播放退回全域預設。
+    const trimmed = soundId?.trim();
+    this.contacts = this.contacts.map((c) => {
+      if (c.pubkey !== pubkey) return c;
+      const { notifySound: _drop, ...rest } = c;
+      return trimmed ? { ...rest, notifySound: trimmed } : rest;
+    });
+  }
   removeContact(pubkey: string): void {
     const ids = new Set(this.convos.get(pubkey)?.byId.keys() ?? []);
     this.contacts = this.contacts.filter((c) => c.pubkey !== pubkey);

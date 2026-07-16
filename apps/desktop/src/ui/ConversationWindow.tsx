@@ -70,6 +70,7 @@ import { applyEmoticons } from "./emoticons.js";
 import { avatarColor, EMOTICONS, initial } from "./util.js";
 import { EditableAvatar, usePersonalizeTick } from "./Avatar.js";
 import { ChatBgPicker } from "./ChatBgPicker.js";
+import { CHIME_PRESETS, playChime } from "./ringtone.js";
 import { useDialog } from "./Dialog.js";
 import { MsgStatusIcon } from "./MsgStatusIcon.js";
 import { readOriginal, relocateOriginal } from "../native/save-file.js";
@@ -257,6 +258,10 @@ export interface ConversationProps {
   senderName?: (pubkey: string) => string;
   /** 設定/清除此聯絡人的本地暱稱（ADR-0148）；空＝清除。未提供＝不顯示暱稱編輯（群組/示範）。 */
   onSetAlias?: (pubkey: string, alias: string | undefined) => void;
+  /** 設定/清除此聯絡人的通知音效（ADR-0149）；空＝清除退回全域預設。未提供＝不顯示 🔔（群組/示範）。 */
+  onSetNotifySound?: (pubkey: string, soundId: string | undefined) => void;
+  /** 測試用：初始展開音效選擇列（SSR 測試無法點擊 🔔）。 */
+  initialSoundEditing?: boolean;
   /** 離開群組（群組視窗才提供）。 */
   onLeaveGroup?: () => void;
   /** 導出此對話紀錄（ADR-0094）；未提供則不顯示。 */
@@ -318,6 +323,9 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
     if (next === null) return; // 取消
     props.onSetAlias?.(contact.pubkey, next.trim() || undefined); // 空＝清除
   };
+  // ADR-0149：依聯絡人通知音效。🔔 展開/收合選擇列；換對話即收回。
+  const [soundEditing, setSoundEditing] = useState(props.initialSoundEditing ?? false);
+  useEffect(() => setSoundEditing(false), [contact.pubkey]);
   const [text, setText] = useState("");
   const composerRef = useRef<HTMLTextAreaElement>(null);
   /** 快速插入模板（➕ 選單）：插到游標處（非行首自動補換行），並選取佔位字。 */
@@ -737,6 +745,17 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
             ✎
           </span>
         ) : null}
+        {props.onSetNotifySound ? (
+          <span
+            className="win__btn convo__soundedit"
+            role="button"
+            data-testid="convo-sound-edit"
+            title={t("sound_perContact")}
+            onClick={() => setSoundEditing((v) => !v)}
+          >
+            🔔
+          </span>
+        ) : null}
         <span className="spacer" />
         {props.onStartCall ? (
           <>
@@ -807,6 +826,33 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
         <ChatBgPicker pubkey={contact.pubkey} />
         <span className="win__btn" onClick={props.onClose} role="button" aria-label={t("convo_close")}>×</span>
       </div>
+
+      {/* ADR-0149：依聯絡人通知音效選擇列（🔔 展開）。空值＝跟隨全域預設。 */}
+      {soundEditing && props.onSetNotifySound ? (
+        <div className="convo__soundrow" data-testid="convo-sound-row">
+          <span>{t("sound_perContact")}</span>
+          <select
+            data-testid="convo-sound-select"
+            value={contact.notifySound ?? ""}
+            onChange={(e) => props.onSetNotifySound!(contact.pubkey, e.target.value || undefined)}
+          >
+            <option value="">{t("sound_useDefault")}</option>
+            {CHIME_PRESETS.map((p) => (
+              <option key={p.id} value={p.id}>
+                {t(p.nameKey)}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            data-testid="convo-sound-preview"
+            title={t("sound_preview")}
+            onClick={() => playChime(contact.notifySound)}
+          >
+            {t("sound_preview")}
+          </button>
+        </div>
+      ) : null}
 
       <div className="convo__head">
         <b>{contactLabel(contact)}</b>

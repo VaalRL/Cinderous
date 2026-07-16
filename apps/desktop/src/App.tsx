@@ -92,7 +92,7 @@ import {
 } from "./ui/group-labels.js";
 import { ANCHOR_RELAYS, MAINTAINER_PUBKEY } from "@cinder/engine";
 import { initIdle, reduceIdle, type IdleState } from "./ui/idle-status.js";
-import { createRinger, createRingback, playChime } from "./ui/ringtone.js";
+import { createRinger, createRingback, DEFAULT_CHIME_ID, playChime } from "./ui/ringtone.js";
 import { CallWindow } from "./ui/CallWindow.js";
 import { ContactListWindow } from "./ui/ContactListWindow.js";
 import { DeckSidebar } from "./ui/DeckSidebar.js";
@@ -123,6 +123,8 @@ const PASS_LOCK_MS = 5 * 60_000;
 const NOTIFY_KEY = "nb.notify";
 // 通知子設定（ADR-0076）：提示音預設開、隱藏預覽預設關（顯示內文，LINE 風）。
 const NOTIFY_SOUND_KEY = "nb.notifySound";
+// 全域通知音效（ADR-0149）：合成預設集 id；未設＝經典叮咚。
+const NOTIFY_CHIME_KEY = "nb.notifyChime";
 const NOTIFY_PREVIEW_KEY = "nb.notifyHidePreview";
 const READ_RECEIPTS_KEY = "nb.readReceipts";
 const INVISIBLE_KEY = "nb.invisible";
@@ -383,6 +385,13 @@ export function App(): JSX.Element {
       return true;
     }
   });
+  const [notifyChime, setNotifyChime] = useState<string>(() => {
+    try {
+      return localStorage.getItem(NOTIFY_CHIME_KEY) ?? DEFAULT_CHIME_ID;
+    } catch {
+      return DEFAULT_CHIME_ID;
+    }
+  });
   const [notifyHidePreview, setNotifyHidePreview] = useState<boolean>(() => {
     try {
       return localStorage.getItem(NOTIFY_PREVIEW_KEY) === "1"; // 預設關（顯示內文）
@@ -463,6 +472,8 @@ export function App(): JSX.Element {
   // 通知內容/音效需最新的聯絡人、群組與子設定；onMessage 閉包依 [backend]、故以 ref 取現值（ADR-0076）。
   const notifySoundRef = useRef(notifySound);
   notifySoundRef.current = notifySound;
+  const notifyChimeRef = useRef(notifyChime);
+  notifyChimeRef.current = notifyChime;
   const notifyHidePreviewRef = useRef(notifyHidePreview);
   notifyHidePreviewRef.current = notifyHidePreview;
   const contactsRef = useRef(contacts);
@@ -646,7 +657,11 @@ export function App(): JSX.Element {
               body = msg.text;
             }
             void getNotifier().notify({ title, body, convo: pk });
-            if (notifySoundRef.current) playChime();
+            if (notifySoundRef.current) {
+              // ADR-0149：1:1 依聯絡人音效（未設→全域預設）；群組一律全域預設。
+              const perContact = group ? undefined : contactsRef.current.find((c) => c.pubkey === pk)?.notifySound;
+              playChime(perContact ?? notifyChimeRef.current);
+            }
           }
         }
       },
@@ -1405,6 +1420,16 @@ export function App(): JSX.Element {
       return next;
     });
   };
+  // 全域通知音效（ADR-0149）：選定即試播一次（所聽即所得），本機持久化。
+  const selectNotifyChime = (id: string) => {
+    setNotifyChime(id);
+    try {
+      localStorage.setItem(NOTIFY_CHIME_KEY, id);
+    } catch {
+      /* 忽略 */
+    }
+    playChime(id);
+  };
 
   // 刪除/封鎖後：關閉其對話視窗並清掉本地對話快取
   const forget = (pk: string) => {
@@ -1838,6 +1863,8 @@ export function App(): JSX.Element {
           onToggleNotifications={toggleNotifications}
           notifySound={notifySound}
           onToggleNotifySound={toggleNotifySound}
+          notifyChime={notifyChime}
+          onSelectNotifyChime={selectNotifyChime}
           notifyHidePreview={notifyHidePreview}
           onToggleNotifyHidePreview={toggleNotifyHidePreview}
           readReceipts={readReceipts}
@@ -2007,6 +2034,9 @@ export function App(): JSX.Element {
             contact={contact}
             {...(activeBackend.setContactAlias
               ? { onSetAlias: (cp: string, alias: string | undefined) => activeBackend.setContactAlias!(cp, alias) }
+              : {})}
+            {...(activeBackend.setContactNotifySound
+              ? { onSetNotifySound: (cp: string, sid: string | undefined) => activeBackend.setContactNotifySound!(cp, sid) }
               : {})}
             messages={convos[pk] ?? []}
             reactions={reactions}

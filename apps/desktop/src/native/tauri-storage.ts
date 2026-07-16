@@ -293,6 +293,10 @@ export class TauriStorage implements AppStorage {
     this.mem.setContactAlias(pubkey, alias); // ADR-0148：本地暱稱，隨加密 blob 落地
     this.persist(META);
   }
+  setContactNotifySound(pubkey: string, soundId: string | undefined): void {
+    this.mem.setContactNotifySound(pubkey, soundId); // ADR-0149：依聯絡人通知音效
+    this.persist(META);
+  }
   removeContact(pubkey: string): void {
     this.mem.removeContact(pubkey);
     this.persist(META);

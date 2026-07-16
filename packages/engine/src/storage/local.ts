@@ -197,6 +197,10 @@ export class LocalStorage implements AppStorage {
     this.mem.setContactAlias(pubkey, alias); // ADR-0148：本地暱稱，僅寫聯絡人區
     this.writeContacts();
   }
+  setContactNotifySound(pubkey: string, soundId: string | undefined): void {
+    this.mem.setContactNotifySound(pubkey, soundId); // ADR-0149：依聯絡人通知音效
+    this.writeContacts();
+  }
   removeContact(pubkey: string): void {
     this.mem.removeContact(pubkey);
     this.writeContacts();

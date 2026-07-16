@@ -37,6 +37,24 @@ describe("MemoryStorage", () => {
     s.setContactAlias("zzz", "無此人"); // no-op
   });
 
+  it("依聯絡人通知音效 setContactNotifySound（ADR-0149）：設定/清除、trim、與暱稱互不干擾", () => {
+    const s = new MemoryStorage();
+    s.addContact({ pubkey: "aa", name: "小明" });
+    s.setContactNotifySound("aa", "  bell ");
+    expect(s.loadContacts()[0]).toMatchObject({ name: "小明", notifySound: "bell" });
+    // 與本地暱稱（ADR-0148）各自獨立
+    s.setContactAlias("aa", "阿伯");
+    expect(s.loadContacts()[0]).toMatchObject({ alias: "阿伯", notifySound: "bell" });
+    // 清除（空字串/undefined）→ 退回全域預設（欄位移除）；暱稱不動
+    s.setContactNotifySound("aa", "");
+    expect(s.loadContacts()[0]!.notifySound).toBeUndefined();
+    expect(s.loadContacts()[0]!.alias).toBe("阿伯");
+    s.setContactNotifySound("aa", "drop");
+    s.setContactNotifySound("aa", undefined);
+    expect(s.loadContacts()[0]!.notifySound).toBeUndefined();
+    s.setContactNotifySound("zzz", "bell"); // 未知 pubkey no-op
+  });
+
   it("訊息按聯絡人分流、以 id 去重", () => {
     const s = new MemoryStorage();
     s.appendMessage({ id: "m1", contact: "aa", outgoing: true, text: "hi", at: 1 });
