@@ -6,13 +6,14 @@ import {
   convoVisibleIn,
   nextActiveAfterRemoval,
   pickSignInNamespace,
+  profileGlyph,
   relayChangeTarget,
 } from "./App.js";
 import type { Profile } from "@cinder/engine";
 
 const renderModal = (
   defaultRelayUrl: string,
-  initialMode: "personal" | "org" | null = "personal",
+  initialMode: "personal" | "org" | "owner" | null = "personal",
 ): string =>
   renderToStaticMarkup(
     <I18nProvider locale="zh-Hant">
@@ -40,10 +41,11 @@ describe("AddIdentityModal", () => {
     expect(out).toContain("建立並切換"); // addId_submit
   });
 
-  it("ADR-0145：預設先顯示「個人／組織」選類型步驟，尚未出現表單", () => {
+  it("ADR-0145/0155：預設先顯示「個人／企業成員／企業主」選類型步驟，尚未出現表單", () => {
     const out = renderModal("wss://x", null);
     expect(out).toContain('data-testid="addid-mode-personal"');
     expect(out).toContain('data-testid="addid-mode-org"');
+    expect(out).toContain('data-testid="addid-mode-owner"');
     expect(out).not.toContain('value="wss://x"'); // relay 欄位尚未出現
   });
 
@@ -55,6 +57,23 @@ describe("AddIdentityModal", () => {
   it("ADR-0145：選「個人」表單不含管理者 npub 欄位", () => {
     const out = renderModal("wss://x", "personal");
     expect(out).not.toContain('data-testid="addid-admin"');
+  });
+
+  it("ADR-0155：選「企業主」表單＝個人表單（無管理者欄——自己就是管理者）＋🗂 類型標示", () => {
+    const out = renderModal("wss://x", "owner");
+    expect(out).not.toContain('data-testid="addid-admin"');
+    expect(out).toContain("🗂");
+    expect(out).toContain("企業主（建立組織名冊）"); // addId_modeOwner
+    expect(out).toContain('value="wss://x"'); // 進入表單（relay 欄位已出現）
+  });
+});
+
+describe("profileGlyph（ADR-0155：身分類型圖示）", () => {
+  it("🗂 企業主 ＞ 🏢 企業成員 ＞ 👤 個人；null 回 👤", () => {
+    expect(profileGlyph(prof({ orgOwner: true }))).toBe("🗂");
+    expect(profileGlyph(prof({ enterprise: true }))).toBe("🏢");
+    expect(profileGlyph(prof())).toBe("👤");
+    expect(profileGlyph(null)).toBe("👤");
   });
 });
 

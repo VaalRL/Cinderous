@@ -14,6 +14,12 @@ export interface Profile {
   relayUrl: string;
   /** 工作身分（連公司座、受 allowlist、鎖定漫遊）。 */
   enterprise: boolean;
+  /**
+   * 企業主（ADR-0155）：可管理/發佈組織名冊的身分標記。後端語意與一般個人身分完全相同
+   * （漫遊/搬家/配對全開；成員的鎖定是「接受組織管理」的結果，管理者不受自己管理）——
+   * 此旗標只決定 UI：切換器前綴 🗂 與 idbar 名冊管理按鈕的顯示。舊資料無此欄＝false。
+   */
+  orgOwner?: boolean;
   /** localStorage 命名空間；空＝既有單一身分的舊鍵（ADR-0045）。 */
   namespace: string;
   /** 企業名冊管理者 hex pubkey（工作身分可選，ADR-0047）：訂閱並自動採用組織通訊錄。 */

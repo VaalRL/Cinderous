@@ -107,7 +107,13 @@ export interface Messages {
   addId_modePersonalHint: string;
   addId_modeOrg: string;
   addId_modeOrgHint: string;
+  addId_modeOwner: string;
+  addId_modeOwnerHint: string;
   addId_changeMode: string;
+  idbar_addIdentity: string;
+  idbar_unlockHidden: string;
+  idbar_roster: string;
+  idbar_switch: string;
   contact_myId: string;
   contact_addPlaceholder: string;
   contact_add: string;
@@ -668,9 +674,15 @@ const zhHant: Messages = {
   addId_busy: "還原中…",
   addId_modePersonal: "個人身分",
   addId_modePersonalHint: "一般帳號；聯絡人由你自己管理。",
-  addId_modeOrg: "組織身份",
+  addId_modeOrg: "企業成員",
   addId_modeOrgHint: "工作身分：訂閱組織管理者發佈的名冊，自動採用通訊錄與政策（可選填管理者 npub）。",
+  addId_modeOwner: "企業主（建立組織名冊）",
+  addId_modeOwnerHint: "一般身分＋名冊管理權：建立後直接進入組織名冊管理，把你的 npub 交給成員填入即可佈建。",
   addId_changeMode: "← 重新選擇類型",
+  idbar_addIdentity: "新增身分",
+  idbar_unlockHidden: "解鎖隱藏身分",
+  idbar_roster: "組織名冊（管理者）",
+  idbar_switch: "切換身分",
   contact_myId: "我的 ID",
   contact_addPlaceholder: "貼上好友的 npub…（可附 @wss://中繼）",
   contact_add: "加好友",
@@ -1202,9 +1214,15 @@ const en: Messages = {
   addId_busy: "Restoring…",
   addId_modePersonal: "Personal identity",
   addId_modePersonalHint: "A regular account; you manage your own contacts.",
-  addId_modeOrg: "Organization identity",
+  addId_modeOrg: "Organization member",
   addId_modeOrgHint: "A work identity that subscribes to an org admin's published roster (contacts & policy). Admin npub optional.",
+  addId_modeOwner: "Organization owner (create a roster)",
+  addId_modeOwnerHint: "A regular identity with roster management: opens the org roster right after creation — hand your npub to members.",
   addId_changeMode: "← Change type",
+  idbar_addIdentity: "Add identity",
+  idbar_unlockHidden: "Unlock hidden identity",
+  idbar_roster: "Org roster (admin)",
+  idbar_switch: "Switch identity",
   contact_myId: "My ID",
   contact_addPlaceholder: "Paste a buddy's npub… (optionally @wss://relay)",
   contact_add: "Add",

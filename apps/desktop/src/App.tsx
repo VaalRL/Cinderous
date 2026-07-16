@@ -129,6 +129,8 @@ const NOTIFY_SOUND_KEY = "nb.notifySound";
 const NOTIFY_CHIME_KEY = "nb.notifyChime";
 const NOTIFY_PREVIEW_KEY = "nb.notifyHidePreview";
 const READ_RECEIPTS_KEY = "nb.readReceipts";
+// 企業主首次進入自動開名冊管理（ADR-0155）：建立時寫入、開啟一次即清除（跨 Tauri reload）。
+const ROSTER_INTRO_PREFIX = "nb.rosterIntro.";
 const INVISIBLE_KEY = "nb.invisible";
 const OLLAMA_KEY = "nb.ollama";
 // 每對話保留上限（ADR-0094）：裝置本地、不同步；`0`＝無上限（預設）。
@@ -187,6 +189,11 @@ export function relayChangeTarget(p: Profile | null, url: string): string | null
   const norm = normalizeRelayUrl(url);
   if (!norm || norm === normalizeRelayUrl(p.relayUrl)) return null;
   return norm;
+}
+
+/** 身分類型圖示（ADR-0155，純函式可測）：🗂 企業主 ＞ 🏢 企業成員 ＞ 👤 個人。 */
+export function profileGlyph(p: Profile | null | undefined): string {
+  return p?.orgOwner ? "🗂" : p?.enterprise ? "🏢" : "👤";
 }
 
 /**
@@ -493,6 +500,19 @@ export function App(): JSX.Element {
   }, [contacts]);
   /** 設定/移除自己的廣播頭像（ADR-0154）；回 false＝引擎拒收（格式防線），UI 提示。 */
   const broadcastSelfAvatar = (uri: string | undefined): boolean => backend?.setSelfAvatar?.(uri) ?? true;
+  // ADR-0155：企業主身分建立後首次進入 → 自動開啟名冊管理（旗標跨越 Tauri reload；用後即清）。
+  useEffect(() => {
+    const pk = profilesState.active;
+    if (!pk || !backend?.publishRoster) return;
+    try {
+      if (localStorage.getItem(ROSTER_INTRO_PREFIX + pk) === "1") {
+        localStorage.removeItem(ROSTER_INTRO_PREFIX + pk);
+        setRosterOpen(true);
+      }
+    } catch {
+      /* 忽略：仍可從 idbar 🗂 進入 */
+    }
+  }, [backend, profilesState.active]);
   const groupsRef = useRef(groups);
   groupsRef.current = groups;
   const requestsRef = useRef(requests);
@@ -1230,7 +1250,12 @@ export function App(): JSX.Element {
     name: string,
     relayUrl: string,
     enterprise: boolean,
-    opts: { nsec?: string | undefined; adminPubkey?: string | undefined; password?: string | undefined } = {},
+    opts: {
+      nsec?: string | undefined;
+      adminPubkey?: string | undefined;
+      password?: string | undefined;
+      orgOwner?: boolean | undefined;
+    } = {},
   ) => {
     const sk = opts.nsec?.trim() ? nsecDecode(opts.nsec.trim()) : generateSecretKey();
     const nsec = nsecEncode(sk);
@@ -1243,10 +1268,20 @@ export function App(): JSX.Element {
       enterprise,
       namespace: pubkey,
       ...(admin ? { adminPubkey: admin } : {}),
+      ...(opts.orgOwner ? { orgOwner: true } : {}), // ADR-0155：企業主標記
       ...(!isTauri() ? { locked: true } : {}), // 瀏覽器：以密碼包裹（ADR-0122）→ 下次開機走解鎖
     };
     const next = upsertProfile(profilesState, profile);
     saveProfiles(next);
+    // ADR-0155：企業主建立後首次進入自動開名冊管理。Tauri 走 reload → 旗標跨越重載；
+    // 瀏覽器原地切換 → 下方直接開。
+    if (opts.orgOwner) {
+      try {
+        localStorage.setItem(ROSTER_INTRO_PREFIX + pubkey, "1");
+      } catch {
+        /* 忽略：開不了介紹彈窗仍可從 idbar 🗂 進入 */
+      }
+    }
 
     if (isTauri()) {
       await getKeyVault().setKey(pubkey, nsec); // B5：私鑰 → OS 金鑰庫，不落 localStorage
@@ -1617,30 +1652,36 @@ export function App(): JSX.Element {
           {profilesState.profiles.length > 0 ? (
             <>
               <span className="idbar__icon" aria-hidden="true">
-                {activeProfile(profilesState)?.enterprise ? "🏢" : "👤"}
+                {profileGlyph(activeProfile(profilesState))}
               </span>
               <select
                 className="idbar__select"
-                aria-label="切換身分"
+                aria-label={t("idbar_switch")}
                 value={profilesState.active ?? ""}
                 onChange={(e) => switchProfile(e.target.value)}
               >
                 {visibleProfiles(profilesState).map((p) => (
                   <option key={p.pubkey} value={p.pubkey}>
-                    {(p.enterprise ? "🏢 " : "👤 ") + p.name}
+                    {`${profileGlyph(p)} ${p.name}`}
                   </option>
                 ))}
               </select>
-              <button className="idbar__add" title="新增身分" onClick={() => setAddIdOpen(true)}>
+              <button className="idbar__add" title={t("idbar_addIdentity")} onClick={() => setAddIdOpen(true)}>
                 ＋
               </button>
               {isTauri() ? (
-                <button className="idbar__add" title="解鎖隱藏身分" onClick={() => void unlockHidden()}>
+                <button className="idbar__add" title={t("idbar_unlockHidden")} onClick={() => void unlockHidden()}>
                   🔒
                 </button>
               ) : null}
-              {activeBackend.publishRoster ? (
-                <button className="idbar__add" title="組織名冊（管理者）" onClick={() => setRosterOpen(true)}>
+              {/* 名冊管理（ADR-0155 收斂）：只對企業主身分顯示——一般與成員身分的頂欄不再有管理者按鈕。 */}
+              {activeBackend.publishRoster && activeProfile(profilesState)?.orgOwner ? (
+                <button
+                  className="idbar__add"
+                  title={t("idbar_roster")}
+                  data-testid="idbar-roster"
+                  onClick={() => setRosterOpen(true)}
+                >
                   🗂
                 </button>
               ) : null}
@@ -2128,15 +2169,21 @@ export function AddIdentityModal({
 }: {
   /** relay 欄位預設值（帶入目前作用中身分的網址，可改）。 */
   defaultRelayUrl: string;
-  /** 直接進入某類型的表單（跳過選類型步驟）；供測試/深連結。預設 null＝先選類型（ADR-0145）。 */
-  initialMode?: "personal" | "org" | null;
+  /** 直接進入某類型的表單（跳過選類型步驟）；供測試/深連結。預設 null＝先選類型（ADR-0145/0155）。 */
+  initialMode?: "personal" | "org" | "owner" | null;
   /** ADR-0146：本機是否已有同名（可見）身分；命中則擋下建立，維持名稱唯一以便登入解析。 */
   nameTaken?: (name: string) => boolean;
   onAdd: (
     name: string,
     relayUrl: string,
     enterprise: boolean,
-    opts: { nsec?: string | undefined; adminPubkey?: string | undefined; password?: string | undefined },
+    opts: {
+      nsec?: string | undefined;
+      adminPubkey?: string | undefined;
+      password?: string | undefined;
+      /** 企業主（ADR-0155）：一般身分＋名冊管理權標記。 */
+      orgOwner?: boolean | undefined;
+    },
   ) => void;
   onCancel: () => void;
   /**
@@ -2146,8 +2193,9 @@ export function AddIdentityModal({
   requirePassword?: boolean;
 }): JSX.Element {
   const { t } = useI18n();
-  // ADR-0145：先選類型（個人／組織），再填表單。null＝還在選。enterprise 由 mode 導出。
-  const [mode, setMode] = useState<"personal" | "org" | null>(initialMode);
+  // ADR-0145/0155：先選類型（個人／企業成員／企業主），再填表單。null＝還在選。
+  // enterprise 只屬於成員；企業主是一般身分＋orgOwner 標記（後端語意同個人）。
+  const [mode, setMode] = useState<"personal" | "org" | "owner" | null>(initialMode);
   const enterprise = mode === "org";
   const [name, setName] = useState("");
   const [relayUrl, setRelayUrl] = useState(defaultRelayUrl);
@@ -2166,6 +2214,7 @@ export function AddIdentityModal({
     if (requirePassword && !password) return; // ADR-0122：沒有密碼＝重載就失去這個身分
     const adminPubkey = enterprise ? admin.trim() || undefined : undefined;
     const password_ = requirePassword ? password : undefined;
+    const owner = mode === "owner" ? { orgOwner: true } : {}; // ADR-0155
     if (isCode) {
       if (!backupPw) return;
       // scrypt 解碼約需一秒（審查修正 #9）：先讓「還原中…」上畫再執行，避免無回饋凍結。
@@ -2173,7 +2222,7 @@ export function AddIdentityModal({
       setTimeout(() => {
         try {
           const imported = parseBackupCode(nsec.trim(), backupPw).nsec;
-          onAdd(name.trim(), relayUrl.trim(), enterprise, { nsec: imported, adminPubkey, password: password_ });
+          onAdd(name.trim(), relayUrl.trim(), enterprise, { nsec: imported, adminPubkey, password: password_, ...owner });
         } catch {
           setBackupErr(true); // 備份密碼錯誤：保留輸入
         } finally {
@@ -2187,6 +2236,7 @@ export function AddIdentityModal({
         nsec: nsec.trim() || undefined,
         adminPubkey,
         password: password_,
+        ...owner,
       });
     } catch {
       setBackupErr(true); // 非法 nsec：保留輸入
@@ -2220,6 +2270,14 @@ export function AddIdentityModal({
                   <span className="addid-mode__hint">{t("addId_modeOrgHint")}</span>
                 </span>
               </button>
+              {/* 企業主（ADR-0155）：一般身分＋名冊管理權；建立後直接進名冊管理。 */}
+              <button type="button" className="addid-mode" data-testid="addid-mode-owner" onClick={() => setMode("owner")}>
+                <span className="addid-mode__ic" aria-hidden="true">🗂</span>
+                <span className="addid-mode__txt">
+                  <span className="addid-mode__name">{t("addId_modeOwner")}</span>
+                  <span className="addid-mode__hint">{t("addId_modeOwnerHint")}</span>
+                </span>
+              </button>
             </div>
           ) : (
             <>
@@ -2231,7 +2289,9 @@ export function AddIdentityModal({
               >
                 {t("addId_changeMode")}
               </button>
-              <p className="hint">{enterprise ? `🏢 ${t("addId_modeOrg")}` : `👤 ${t("addId_modePersonal")}`}</p>
+              <p className="hint">
+                {mode === "owner" ? `🗂 ${t("addId_modeOwner")}` : enterprise ? `🏢 ${t("addId_modeOrg")}` : `👤 ${t("addId_modePersonal")}`}
+              </p>
               <input
                 className="groupmodal__name"
                 placeholder={t("signIn_displayName")}
