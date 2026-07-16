@@ -238,18 +238,27 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
 }
 .titlebar__btn:hover { background: var(--hover); color: var(--ink); }
 .titlebar__btn--close:hover { background: #e81123; color: #fff; }
+/* 平時隱藏按鈕（ADR-0151）：滑鼠碰到標題列才顯示。 */
+.titlebar__controls--autohide { opacity: 0; transition: opacity 0.15s ease; }
+.titlebar:hover .titlebar__controls--autohide,
+.titlebar:focus-within .titlebar__controls--autohide { opacity: 1; }
 /* 設定頁迷你預覽：縮一圈、整條不可互動。 */
 .titlebar--preview { border: 1px solid var(--border); border-radius: 6px; pointer-events: none; max-width: 320px; margin-bottom: 8px; }
-/* 視窗外框設定（位置/順序）。 */
-.titlebarset__side { display: flex; gap: 14px; font-size: 13px; }
-.titlebarset__side label { display: inline-flex; align-items: center; gap: 4px; }
-.titlebarset__order { display: flex; gap: 6px; flex-wrap: wrap; }
-.titlebarset__chip {
-  display: inline-flex; align-items: center; gap: 4px; font-size: 12px;
-  border: 1px solid var(--border); border-radius: 6px; padding: 2px 6px; background: var(--field);
+/* 視窗外框拖曳編輯器（ADR-0151）：一條假標題列＋左右兩個放置帶，即編輯即預覽。 */
+.titlebarset__editor {
+  display: flex; align-items: center; height: 34px; margin-bottom: 6px;
+  border: 1px solid var(--border); border-radius: 6px; background: var(--panel); overflow: hidden;
 }
-.titlebarset__chip button { border: none; background: transparent; cursor: pointer; color: var(--accent); font-size: 12px; padding: 0 2px; }
-.titlebarset__chip button:hover { color: var(--ink); }
+.titlebarset__title { font-size: 12px; font-weight: 600; padding: 0 10px; white-space: nowrap; color: var(--ink); }
+.titlebarset__gap { flex: 1; }
+.titlebarset__zone { display: flex; align-self: stretch; align-items: stretch; min-width: 46px; }
+.titlebarset__zone--target { outline: 1px dashed var(--accent); outline-offset: -2px; border-radius: 4px; }
+.titlebarset__piece {
+  width: 38px; display: grid; place-items: center; font-size: 12px; color: var(--muted);
+  cursor: grab; user-select: none;
+}
+.titlebarset__piece:hover { background: var(--hover); color: var(--ink); }
+.titlebarset__piece:active { cursor: grabbing; }
 
 /* 標題列控制（主題 + 語言） */
 .titlectl { display: flex; align-items: center; gap: 6px; }

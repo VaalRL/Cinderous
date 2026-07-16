@@ -5,8 +5,7 @@ import { useLayout } from "../layout.js";
 import { useI18n } from "../i18n.js";
 import { useDialog } from "./Dialog.js";
 import { CHIME_PRESETS, DEFAULT_CHIME_ID, playChime } from "./ringtone.js";
-import { TitleBar } from "./TitleBar.js";
-import { moveControl, type ControlId } from "./titlebar-controls.js";
+import { placeControl, type ControlId } from "./titlebar-controls.js";
 import { useTitlebar } from "../titlebar.js";
 import { qrSvg } from "../qr.js";
 import type { CloudSyncMode } from "@cinder/engine";
@@ -274,63 +273,82 @@ function LayoutSettings(): JSX.Element {
   );
 }
 
-/** 視窗外框（ADR-0150）：自繪標題列按鈕的位置（左/右）與順序（←→ 逐顆調），附迷你預覽。 */
+/**
+ * 視窗外框（ADR-0150/0151）：拖曳編輯器——一條假標題列、左右兩個放置帶，四顆按鈕
+ * （⚙ ─ □ ✕）用滑鼠拖到任一帶的任意位置（拖到某顆上＝插到它前面、拖到帶上＝放帶尾）。
+ * 另附「平時隱藏」勾選（滑鼠碰標題列才顯示按鈕）。
+ */
 function TitlebarSettings(): JSX.Element {
   const { t } = useI18n();
   const { controls, setControls } = useTitlebar();
-  const move = (id: ControlId, dir: -1 | 1): void =>
-    setControls({ ...controls, order: moveControl(controls.order, id, dir) });
+  const [dragId, setDragId] = useState<ControlId | null>(null);
+  const glyph: Record<ControlId, string> = { settings: "⚙", min: "─", max: "□", close: "✕" };
   const label: Record<ControlId, string> = {
-    min: `─ ${t("titlebar_minimize")}`,
-    max: `□ ${t("titlebar_maximize")}`,
-    close: `✕ ${t("titlebar_close")}`,
+    settings: t("settings_open"),
+    min: t("titlebar_minimize"),
+    max: t("titlebar_maximize"),
+    close: t("titlebar_close"),
   };
+  const drop = (side: "left" | "right", beforeId: ControlId | null): void => {
+    if (dragId) setControls(placeControl(controls, dragId, side, beforeId));
+    setDragId(null);
+  };
+  const zone = (side: "left" | "right"): JSX.Element => (
+    <div
+      className={`titlebarset__zone${dragId ? " titlebarset__zone--target" : ""}`}
+      data-testid={`titlebar-zone-${side}`}
+      onDragOver={(e) => {
+        if (dragId) e.preventDefault();
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        drop(side, null);
+      }}
+    >
+      {controls[side].map((id) => (
+        <span
+          key={id}
+          draggable
+          className="titlebarset__piece"
+          data-testid={`titlebar-piece-${id}`}
+          title={label[id]}
+          aria-label={label[id]}
+          onDragStart={() => setDragId(id)}
+          onDragEnd={() => setDragId(null)}
+          onDragOver={(e) => {
+            if (dragId && dragId !== id) e.preventDefault();
+          }}
+          onDrop={(e) => {
+            e.preventDefault();
+            e.stopPropagation(); // 別冒泡到帶（帶＝放帶尾，這裡＝插到本顆前）
+            drop(side, id);
+          }}
+        >
+          {glyph[id]}
+        </span>
+      ))}
+    </div>
+  );
   return (
     <section className="settings__sec">
       <h4>{t("settings_titlebar")}</h4>
-      {/* 迷你預覽：吃同一個 TitleBar 元件，改了立刻看到。 */}
-      <TitleBar preview controls={controls} actions={{ minimize() {}, toggleMaximize() {}, close() {} }} />
-      <div className="settings__field">
-        <span>{t("titlebar_side")}</span>
-        <div className="titlebarset__side" role="radiogroup" aria-label={t("titlebar_side")}>
-          <label>
-            <input
-              type="radio"
-              name="titlebar-side"
-              data-testid="titlebar-side-left"
-              checked={controls.side === "left"}
-              onChange={() => setControls({ ...controls, side: "left" })}
-            />
-            {t("titlebar_side_left")}
-          </label>
-          <label>
-            <input
-              type="radio"
-              name="titlebar-side"
-              data-testid="titlebar-side-right"
-              checked={controls.side === "right"}
-              onChange={() => setControls({ ...controls, side: "right" })}
-            />
-            {t("titlebar_side_right")}
-          </label>
-        </div>
+      {/* 編輯器即預覽：所見即所得，拖完真的外框立刻跟著變（同一個 Provider 狀態）。 */}
+      <div className="titlebarset__editor">
+        {zone("left")}
+        <span className="titlebarset__title">Cinder</span>
+        <span className="titlebarset__gap" />
+        {zone("right")}
       </div>
-      <div className="settings__field">
-        <span>{t("titlebar_order")}</span>
-        <div className="titlebarset__order">
-          {controls.order.map((id) => (
-            <span key={id} className="titlebarset__chip" data-testid={`order-chip-${id}`}>
-              <button type="button" title={t("titlebar_moveLeft")} data-testid={`order-left-${id}`} onClick={() => move(id, -1)}>
-                ←
-              </button>
-              <span>{label[id]}</span>
-              <button type="button" title={t("titlebar_moveRight")} data-testid={`order-right-${id}`} onClick={() => move(id, 1)}>
-                →
-              </button>
-            </span>
-          ))}
-        </div>
-      </div>
+      <p className="settings__hint">{t("titlebar_dragHint")}</p>
+      <label className="settings__toggle">
+        <input
+          type="checkbox"
+          data-testid="titlebar-autohide"
+          checked={controls.autoHide}
+          onChange={() => setControls({ ...controls, autoHide: !controls.autoHide })}
+        />
+        <span>{t("titlebar_autoHide")}</span>
+      </label>
     </section>
   );
 }

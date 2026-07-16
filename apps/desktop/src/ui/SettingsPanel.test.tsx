@@ -280,22 +280,21 @@ describe("視窗外框設定（ADR-0150）", () => {
       </ThemeProvider>,
     );
 
-  it("showTitlebarSettings（Tauri）→ 外觀分頁有迷你預覽＋左右位置＋順序 chips ←→", () => {
+  it("showTitlebarSettings（Tauri）→ 拖曳編輯器：左右兩帶＋四顆可拖 piece＋隱藏勾選（ADR-0151）", () => {
     const out = renderWithTitlebar({ showTitlebarSettings: true });
-    expect(out).toContain("titlebar--preview"); // 迷你預覽
-    expect(out).toContain('data-testid="titlebar-side-left"');
-    expect(out).toContain('data-testid="titlebar-side-right"');
-    for (const id of ["min", "max", "close"]) {
-      expect(out).toContain(`data-testid="order-chip-${id}"`);
-      expect(out).toContain(`data-testid="order-left-${id}"`);
-      expect(out).toContain(`data-testid="order-right-${id}"`);
+    expect(out).toContain('data-testid="titlebar-zone-left"');
+    expect(out).toContain('data-testid="titlebar-zone-right"');
+    for (const id of ["settings", "min", "max", "close"]) {
+      expect(out).toContain(`data-testid="titlebar-piece-${id}"`);
     }
+    expect(out).toContain('draggable="true"'); // 滑鼠拖曳排位（ADR-0151）
+    expect(out).toContain('data-testid="titlebar-autohide"'); // 平時隱藏、滑鼠碰到才顯示
   });
 
   it("未開 showTitlebarSettings（瀏覽器版）→ 整區不顯示", () => {
     const out = renderWithTitlebar();
-    expect(out).not.toContain("titlebar--preview");
-    expect(out).not.toContain('data-testid="order-chip-min"');
+    expect(out).not.toContain('data-testid="titlebar-zone-left"');
+    expect(out).not.toContain('data-testid="titlebar-piece-min"');
   });
 });
 

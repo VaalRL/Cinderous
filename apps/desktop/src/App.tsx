@@ -110,6 +110,7 @@ import { createPairingOffer, runPairSource, runPairTarget, webRtcPairTransport }
 import { applyPairBundle } from "@cinder/engine";
 import { PairDeviceModal, type PairPhase } from "./ui/PairDeviceModal.js";
 import { SettingsPanel } from "./ui/SettingsPanel.js";
+import { useRegisterSettingsOpener } from "./titlebar.js";
 import { dialog, useDialog } from "./ui/Dialog.js";
 import { ExportModal, type ExportConvoItem } from "./ui/ExportModal.js";
 import { RELAY_URL_KEY, SignIn } from "./ui/SignIn.js";
@@ -360,6 +361,13 @@ export function App(): JSX.Element {
   const [pairPhase, setPairPhase] = useState<PairPhase | null>(null);
   const pairDecision = useRef<((ok: boolean) => void) | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // ADR-0151：⚙ 上移到自繪外框——把「開啟設定」註冊給標題列（僅 Tauri 有標題列會用到）。
+  const registerSettingsOpener = useRegisterSettingsOpener();
+  useEffect(() => {
+    registerSettingsOpener(() => setSettingsOpen(true));
+    return () => registerSettingsOpener(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 註冊器來自 context、掛載一次即可
+  }, []);
   // 右欄計算機 → 主對話框的單向插入指令（ADR-0097）：nonce 變動即觸發，不接管草稿狀態。
   const [pendingInsert, setPendingInsert] = useState<{ convo: string; text: string; nonce: number } | null>(null);
   // 原生拖放（ADR-0104）：拖曳中被命中的對話（highlight 用）。
@@ -1631,8 +1639,9 @@ export function App(): JSX.Element {
               ) : null}
             </>
           ) : null}
-          {/* 三欄版：設定入口移到上方 nav bar 右側（ADR-0142），不再擠在頭像旁。 */}
-          {layout === "modern" ? (
+          {/* 三欄版：設定入口移到上方 nav bar 右側（ADR-0142）。Tauri 下 ⚙ 已上移到
+              自繪外框標題列（ADR-0151），這顆就不重複畫。 */}
+          {layout === "modern" && !isTauri() ? (
             <button
               className="idbar__add idbar__settings"
               aria-label={t("settings_open")}
