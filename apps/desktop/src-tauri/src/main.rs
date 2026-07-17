@@ -821,18 +821,29 @@ fn write_slot_file(
         Some((s, e)) if !s.is_empty() => (s.to_string(), format!(".{e}")),
         _ => (name_clean.clone(), String::new()),
     };
+    // 審查修正：check-then-write 是 TOCTOU——兩個並發存放（多員工同時傳）可能都選到同一
+    // 候選名後互相覆蓋、靜默丟失一份，而 index.jsonl 卻記兩筆成功。改用 `create_new`
+    // （O_EXCL 原子建檔）：檔案已存在即失敗，據此換下一個尾碼重試，保證不覆蓋既有檔。
+    use std::io::Write;
     let mut candidate = name_clean.clone();
     let mut n = 2u32;
-    while dir.join(&candidate).exists() {
-        candidate = format!("{stem} ({n}){ext}");
-        n += 1;
-        if n > 9999 {
-            return Err("重名尾碼耗盡".into());
+    loop {
+        let path = dir.join(&candidate);
+        match std::fs::OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(mut f) => {
+                f.write_all(&bytes).map_err(|e| e.to_string())?;
+                return Ok(format!("{sub_clean}/{candidate}"));
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                candidate = format!("{stem} ({n}){ext}");
+                n += 1;
+                if n > 9999 {
+                    return Err("重名尾碼耗盡".into());
+                }
+            }
+            Err(e) => return Err(e.to_string()),
         }
     }
-    let path = dir.join(&candidate);
-    std::fs::write(&path, &bytes).map_err(|e| e.to_string())?;
-    Ok(format!("{sub_clean}/{candidate}"))
 }
 
 /// 附加一行文字到槽基底下的檔案（index.jsonl 用；檔名消毒、不接受子路徑）。

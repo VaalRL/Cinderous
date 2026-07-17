@@ -63,6 +63,17 @@ pub fn sanitize_filename(name: &str) -> String {
         .collect();
     // 去掉開頭的點（`..`、隱藏檔）與前後空白。
     out = out.trim().trim_start_matches('.').trim().to_string();
+    // Windows 保留裝置名（CON/PRN/AUX/NUL/COM1-9/LPT1-9；即使帶副檔名也保留）→ 前綴底線避開。
+    // 收到的檔名/員工名（ADR-0161 儲存槽）遠端可控；叫「Con」的人不該讓每次落盤永久失敗。
+    let stem_upper = out.split('.').next().unwrap_or("").to_ascii_uppercase();
+    let reserved = matches!(stem_upper.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+        || ((stem_upper.starts_with("COM") || stem_upper.starts_with("LPT"))
+            && stem_upper.len() == 4
+            && stem_upper.as_bytes()[3].is_ascii_digit()
+            && stem_upper.as_bytes()[3] != b'0');
+    if reserved {
+        out = format!("_{out}");
+    }
     // 位元組上限（多數檔案系統 255）——以字元邊界切，避免切斷多位元組字元。
     if out.chars().count() > 255 {
         out = out.chars().take(255).collect();
@@ -163,5 +174,14 @@ mod tests {
         // 超長 → 截到 255 字元。
         let long = "a".repeat(300);
         assert_eq!(sanitize_filename(&long).chars().count(), 255);
+
+        // Windows 保留裝置名（含帶副檔名、大小寫）→ 前綴底線避開；非保留者不動。
+        assert_eq!(sanitize_filename("CON"), "_CON");
+        assert_eq!(sanitize_filename("con.txt"), "_con.txt");
+        assert_eq!(sanitize_filename("NUL"), "_NUL");
+        assert_eq!(sanitize_filename("COM1.pdf"), "_COM1.pdf");
+        assert_eq!(sanitize_filename("LPT9"), "_LPT9");
+        assert_eq!(sanitize_filename("COM0"), "COM0"); // COM0 不是保留名
+        assert_eq!(sanitize_filename("Connor.txt"), "Connor.txt"); // 前綴不誤傷
     }
 }
