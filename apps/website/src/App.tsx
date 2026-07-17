@@ -8,7 +8,7 @@ import { Home } from "./pages/Home.js";
 import { Node } from "./pages/Node.js";
 import { Transparency } from "./pages/Transparency.js";
 
-export const GITHUB_URL = "https://github.com/VaalRL/Nostr-buddy";
+export const GITHUB_URL = "https://github.com/VaalRL/Cinder";
 
 type View = "home" | "download" | "node" | "transparency";
 

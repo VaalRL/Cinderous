@@ -1,0 +1,58 @@
+name: Deploy website to GitHub Pages
+
+# 官網（apps/website）是純靜態站（Vite），部署到 GitHub Pages。
+# 只在網站或其 workspace 相依（i18n/theme/core）變動時重建，避免每次 push 都跑。
+#
+# 前置（在 GitHub 一次性設定）：Settings → Pages → Build and deployment → Source = "GitHub Actions"。
+# 網站以 base "/" 打包，適用於「根站」——即 user/org page（repo 命名為 <user>.github.io）或自訂網域。
+# 若改走「專案頁」（<user>.github.io/<repo>/），需在 vite.config 設 base 並改 funds.json 的 fetch。
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/website/**"
+      - "packages/i18n/**"
+      - "packages/theme/**"
+      - "packages/core/**"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 同時只跑一次部署；新 push 取消進行中的舊部署。
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build website
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # 版本由 package.json 的 `packageManager`（pnpm@10.x）決定；這裡再指定 version 會觸發
+      # 「Multiple versions of pnpm specified」而卡在 setup（與 ci.yml 同一坑）。
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @cinder/website build
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: apps/website/dist
+
+  deploy:
+    name: Deploy to Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
