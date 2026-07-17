@@ -54,6 +54,8 @@ relay/dist/
 *.db-journal
 *.key
 *.pem
+*.nsec
+maintainer.nsec
 secrets/
 .dev.vars
 

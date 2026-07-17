@@ -19,7 +19,8 @@
     "build:node-relay": "esbuild src/node-relay.ts --bundle --platform=node --format=esm --outfile=dist/node-relay.js --external:ws",
     "node-relay": "pnpm build:node-relay && node dist/node-relay.js",
     "bootstrap:build": "esbuild bootstrap/health-check.ts --bundle --platform=node --format=esm --outfile=dist/health-check.js",
-    "bootstrap:run": "pnpm bootstrap:build && node dist/health-check.js"
+    "bootstrap:run": "pnpm bootstrap:build && node dist/health-check.js",
+    "genkey:maintainer": "esbuild bootstrap/genkey.ts --bundle --platform=node --format=esm --outfile=dist/genkey.js && node dist/genkey.js"
   },
   "dependencies": {
     "@cinder/core": "workspace:*"
