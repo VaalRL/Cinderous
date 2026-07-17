@@ -3,15 +3,15 @@ import type { Locale } from "@cinder/i18n";
 import type { Theme } from "@cinder/theme";
 import { CinderMark } from "./Brand.js";
 import { useCopy } from "./copy.js";
-import { Download } from "./pages/Download.js";
 import { Home } from "./pages/Home.js";
 import { Node } from "./pages/Node.js";
+import { Tech } from "./pages/Tech.js";
 // 透明度頁暫時下架（保留 pages/Transparency.tsx 與 tr_* 文案，還原＝復原此 import＋nav＋路由）
 // import { Transparency } from "./pages/Transparency.js";
 
 export const GITHUB_URL = "https://github.com/VaalRL/Cinder";
 
-type View = "home" | "download" | "node";
+type View = "home" | "tech" | "node";
 
 function initialTheme(): Theme {
   if (typeof window !== "undefined" && window.matchMedia?.("(prefers-color-scheme: dark)").matches) return "dark";
@@ -49,6 +49,7 @@ export function App(): JSX.Element {
           </button>
           <span className="nav__spacer" />
           {link("home", c.nav_home)}
+          {link("tech", c.nav_tech)}
           {link("node", c.nav_node)}
           <button type="button" className="nav__toggle" onClick={() => setLocale(locale === "zh-Hant" ? "en" : "zh-Hant")}>
             {locale === "zh-Hant" ? "EN" : "繁中"}
@@ -56,16 +57,16 @@ export function App(): JSX.Element {
           <button type="button" className="nav__toggle" aria-label="theme" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
             {theme === "dark" ? "☀" : "☾"}
           </button>
-          <button type="button" className="nav__cta" onClick={() => setView("download")}>
+          <a className="nav__cta" href={`${GITHUB_URL}/releases`} target="_blank" rel="noreferrer">
             {c.nav_download}
-          </button>
+          </a>
         </div>
       </nav>
 
       {view === "home" ? (
-        <Home c={c} theme={theme} onNode={() => setView("node")} onDownload={() => setView("download")} />
-      ) : view === "download" ? (
-        <Download c={c} onNode={() => setView("node")} />
+        <Home c={c} theme={theme} onNode={() => setView("node")} onTech={() => setView("tech")} />
+      ) : view === "tech" ? (
+        <Tech c={c} />
       ) : (
         <Node c={c} />
       )}

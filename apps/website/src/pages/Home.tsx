@@ -1,26 +1,26 @@
 import type { Theme } from "@cinder/theme";
 import type { Copy } from "../copy.js";
 import { CinderMark } from "../Brand.js";
-import { FlowDiagram } from "../FlowDiagram.js";
 import { OFFICIAL_DONATIONS } from "../donations.js";
 import { GITHUB_URL } from "../App.js";
 
+// 首頁（ADR-0187）：闡述核心價值觀與「取回通訊自主權」的願景。技術細節移至技術原理頁。
 export function Home({
   c,
   theme,
   onNode,
-  onDownload,
+  onTech,
 }: {
   c: Copy;
   theme: Theme;
   onNode: () => void;
-  onDownload: () => void;
+  onTech: () => void;
 }): JSX.Element {
-  const features = [
-    { t: c.feat_e2e_t, b: c.feat_e2e_b },
-    { t: c.feat_decentral_t, b: c.feat_decentral_b },
-    { t: c.feat_local_t, b: c.feat_local_b },
-    { t: c.feat_free_t, b: c.feat_free_b },
+  const values = [
+    { t: c.val_autonomy_t, b: c.val_autonomy_b },
+    { t: c.val_privacy_t, b: c.val_privacy_b },
+    { t: c.val_decentral_t, b: c.val_decentral_b },
+    { t: c.val_free_t, b: c.val_free_b },
   ];
   return (
     <>
@@ -29,11 +29,20 @@ export function Home({
           <div className="hero__mark">
             <CinderMark size={84} theme={theme} />
           </div>
+          <p className="eyebrow">{c.hero_eyebrow}</p>
           <h1>{c.hero_title}</h1>
           <p className="hero__sub">{c.hero_subtitle}</p>
           <div className="cta">
-            <button type="button" className="btn btn--primary" onClick={onDownload}>
+            <a
+              className="btn btn--primary"
+              href={`${GITHUB_URL}/releases`}
+              target="_blank"
+              rel="noreferrer"
+            >
               {c.hero_download}
+            </a>
+            <button type="button" className="btn" onClick={onTech}>
+              {c.hero_tech} →
             </button>
             <a className="btn" href={GITHUB_URL} target="_blank" rel="noreferrer">
               {c.hero_github}
@@ -44,24 +53,25 @@ export function Home({
 
       <section className="sec">
         <div className="wrap">
-          <h2>{c.features_title}</h2>
-          <div className="grid grid--4">
-            {features.map((f) => (
-              <div className="card" key={f.t}>
-                <div className="card__ember" />
-                <h3>{f.t}</h3>
-                <p>{f.b}</p>
-              </div>
-            ))}
-          </div>
+          <h2>{c.vision_title}</h2>
+          <p className="sec__lead" style={{ maxWidth: 760 }}>
+            {c.vision_body}
+          </p>
         </div>
       </section>
 
       <section className="sec">
         <div className="wrap">
-          <h2>{c.how_title}</h2>
-          <p className="sec__lead">{c.how_lead}</p>
-          <FlowDiagram c={c} />
+          <h2>{c.values_title}</h2>
+          <div className="grid grid--4">
+            {values.map((v) => (
+              <div className="card" key={v.t}>
+                <div className="card__ember" />
+                <h3>{v.t}</h3>
+                <p>{v.b}</p>
+              </div>
+            ))}
+          </div>
         </div>
       </section>
 

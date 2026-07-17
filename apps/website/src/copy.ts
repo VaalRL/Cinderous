@@ -1,16 +1,35 @@
-// 官網雙語文案（ADR-0090）。重用 @cinder/i18n 的 Locale；行銷文案為官網專屬。
+// 官網雙語文案（ADR-0090；ADR-0187 資訊架構改版）。重用 @cinder/i18n 的 Locale；行銷文案為官網專屬。
 // 意象：夜晚森林裡，一小簇營火旁圍坐的少數人——溫暖、私密、只有受邀者在場。
+// 首頁＝核心價值觀與「取回通訊自主權」願景；技術原理獨立一頁；下載直連 GitHub Releases。
 import type { Locale } from "@cinder/i18n";
 
 export interface Copy {
   nav_home: string;
-  nav_download: string;
+  nav_tech: string;
   nav_node: string;
+  nav_download: string;
   nav_transparency: string;
+  hero_eyebrow: string;
   hero_title: string;
   hero_subtitle: string;
   hero_download: string;
+  hero_tech: string;
   hero_github: string;
+  vision_title: string;
+  vision_body: string;
+  values_title: string;
+  val_autonomy_t: string;
+  val_autonomy_b: string;
+  val_privacy_t: string;
+  val_privacy_b: string;
+  val_decentral_t: string;
+  val_decentral_b: string;
+  val_free_t: string;
+  val_free_b: string;
+  tech_title: string;
+  tech_intro: string;
+  tech_proto_t: string;
+  tech_proto_b: string;
   features_title: string;
   feat_e2e_t: string;
   feat_e2e_b: string;
@@ -28,10 +47,6 @@ export interface Copy {
   fd_relay_note: string;
   fd_encrypt: string;
   fd_p2p: string;
-  download_title: string;
-  download_desktop: string;
-  download_mobile: string;
-  download_releases: string;
   donate_title: string;
   donate_intro: string;
   donate_disclaimer: string;
@@ -66,15 +81,40 @@ export interface Copy {
 
 const zhHant: Copy = {
   nav_home: "首頁",
-  nav_download: "下載",
+  nav_tech: "技術原理",
   nav_node: "建立節點",
+  nav_download: "下載",
   nav_transparency: "透明度",
+  hero_eyebrow: "取回通訊自主權",
   hero_title: "Cinder",
   hero_subtitle:
-    "像夜裡森林深處的一簇營火——只有你邀來的人圍坐。開源、永久免費、端到端加密的去中心化即時通。",
+    "通訊本該屬於說話的人，而不是中間的平台。Cinder 讓你在沒有伺服器帳號、沒有守門人的前提下，安全地和你邀來的人說話——像夜裡森林深處的一簇營火，只有圍坐的人聽得見。",
   hero_download: "下載桌面版",
+  hero_tech: "看技術原理",
   hero_github: "在 GitHub 檢視原始碼",
-  features_title: "為什麼是 Cinder",
+  vision_title: "為什麼要取回通訊自主權",
+  vision_body:
+    "今天你的對話幾乎都住在別人的伺服器上：平台掌握你的身分與社交圈，能讀取、審查、封鎖，甚至販售這些資料。帳號可以被停用，資料可以被傳喚，規則隨時會變。Cinder 反過來——身分是一把只存在你裝置上的金鑰，訊息在離開前就已加密，傳遞只靠任何人都能自架的中繼。沒有一間公司站在你和朋友中間，通訊的主導權回到說話的人手上。",
+  values_title: "我們相信什麼",
+  val_autonomy_t: "你擁有你的身分",
+  val_autonomy_b:
+    "身分是一把金鑰，不是平台帳號。沒有人能替你停用、封鎖或販售它；設備全毀即帳號終止，沒有可被接管的中央資料。",
+  val_privacy_t: "隱私是預設，不是選項",
+  val_privacy_b:
+    "明文永不離開你的裝置，全程端到端加密。連「誰在跟誰說話」中繼站都看不到——沒有可被翻閱的對話，也沒有可被分析的社交圖譜。",
+  val_decentral_t: "沒有守門人",
+  val_decentral_b:
+    "沒有中央伺服器、沒有唯一入口。傳遞靠任何人都能自架的中繼與點對點連線；這片森林由許多小小的營火撐起，關掉任何一座都不會熄滅。",
+  val_free_t: "永久免費・開源",
+  val_free_b:
+    "AGPL-3.0 授權、程式碼公開可稽核。沒有廣告、沒有帳號販售、沒有金流抽成；營運靠自願捐款與自架節點，而不是你的資料。",
+  tech_title: "技術原理",
+  tech_intro:
+    "價值觀要靠機制守住。以下是 Cinder 如何在不信任任何伺服器的前提下，安全地把一則訊息從你送到朋友手上。",
+  tech_proto_t: "協定基線",
+  tech_proto_b:
+    "建構於 Nostr 開放協定：訊息以 NIP-17／44／59（Gift Wrap）加密封裝、NIP-42 驗證中繼連線、NIP-13 工作量證明抑制濫用。即時互動（檔案、在線、輸入中）改走 WebRTC P2P，直接點對點、完全不經中繼。全為開放標準，任何人都能自行實作與稽核。",
+  features_title: "四大技術支柱",
   feat_e2e_t: "端到端加密",
   feat_e2e_b: "以 Nostr NIP-17/44/59（Gift Wrap）加密——中繼站看不到內容，也看不到寄件者。",
   feat_decentral_t: "去中心化",
@@ -92,10 +132,6 @@ const zhHant: Copy = {
   fd_relay_note: "只轉發密文·看不到內容與寄件者",
   fd_encrypt: "🔒 Gift Wrap 密文（NIP-17/44/59）",
   fd_p2p: "WebRTC P2P — 檔案／在線／輸入中，不經中繼",
-  download_title: "下載",
-  download_desktop: "桌面版（Windows／macOS／Linux）由 GitHub Releases 發佈，以 Tauri 打包（MSI／NSIS 安裝檔或免安裝執行檔）。",
-  download_mobile: "行動版（React Native Web）與桌面共用引擎、功能高度對齊，目前以網頁形式提供；原生 App（App Store／Play 上架）規劃中。",
-  download_releases: "前往 GitHub Releases",
   donate_title: "為營火添柴",
   donate_intro: "捐款用於官方節點營運與部分貢獻者獎金。以下皆為純外部連結，交由你的第三方帳號/錢包處理。",
   donate_disclaimer: "本站無站內錢包、無托管、無抽成、不採 Zap。捐款完全自願。",
@@ -134,15 +170,40 @@ const zhHant: Copy = {
 
 const en: Copy = {
   nav_home: "Home",
-  nav_download: "Download",
+  nav_tech: "How it works",
   nav_node: "Run a node",
+  nav_download: "Download",
   nav_transparency: "Transparency",
+  hero_eyebrow: "Own your conversations",
   hero_title: "Cinder",
   hero_subtitle:
-    "Like a small campfire deep in a night forest — only the people you invite sit around it. An open-source, forever-free, end-to-end encrypted decentralized messenger.",
+    "Conversations should belong to the people having them — not to the platform in the middle. Cinder lets you talk safely with the people you invite, with no server account and no gatekeeper — like a campfire deep in a night forest, heard only by those sitting around it.",
   hero_download: "Download desktop",
+  hero_tech: "How it works",
   hero_github: "View source on GitHub",
-  features_title: "Why Cinder",
+  vision_title: "Why reclaim communication autonomy",
+  vision_body:
+    "Today your conversations mostly live on someone else's servers: the platform owns your identity and your social graph, and can read, censor, block, or even sell it. Accounts get suspended, data gets subpoenaed, rules change overnight. Cinder inverts that — your identity is a key that exists only on your device, messages are encrypted before they ever leave, and delivery rides on relays anyone can self-host. No company sits between you and your friends; control over your conversations returns to the people having them.",
+  values_title: "What we believe",
+  val_autonomy_t: "You own your identity",
+  val_autonomy_b:
+    "Your identity is a key, not a platform account. No one can suspend, block, or sell it; lose all your devices and the account simply ends — there is no central record to seize.",
+  val_privacy_t: "Privacy by default, not by setting",
+  val_privacy_b:
+    "Plaintext never leaves your device; everything is end-to-end encrypted. Relays cannot even see who talks to whom — no conversations to browse, no social graph to mine.",
+  val_decentral_t: "No gatekeeper",
+  val_decentral_b:
+    "No central server, no single entry point. Delivery rides on relays anyone can host plus peer-to-peer links; this forest is held up by many small fires — put out any one and it stays lit.",
+  val_free_t: "Free forever, open",
+  val_free_b:
+    "AGPL-3.0 licensed and fully auditable. No ads, no selling accounts, no cut of any transaction; it runs on voluntary donations and self-hosted nodes — not on your data.",
+  tech_title: "How it works",
+  tech_intro:
+    "Values only hold if the mechanism enforces them. Here is how Cinder gets a message from you to your friend safely — without trusting any server.",
+  tech_proto_t: "Protocol baseline",
+  tech_proto_b:
+    "Built on the open Nostr protocol: messages are encrypted and wrapped with NIP-17/44/59 (Gift Wrap), relay connections are authenticated with NIP-42, and NIP-13 proof-of-work deters abuse. Real-time interactions (files, presence, typing) go over WebRTC P2P, straight peer-to-peer, bypassing relays entirely. All open standards — implementable and auditable by anyone.",
+  features_title: "Four technical pillars",
   feat_e2e_t: "End-to-end encrypted",
   feat_e2e_b: "Encrypted with Nostr NIP-17/44/59 (Gift Wrap) — relays see neither the content nor the sender.",
   feat_decentral_t: "Decentralized",
@@ -162,10 +223,6 @@ const en: Copy = {
   fd_relay_note: "Forwards ciphertext only · no content, no sender",
   fd_encrypt: "🔒 Gift Wrap ciphertext (NIP-17/44/59)",
   fd_p2p: "WebRTC P2P — files / presence / typing, no relay",
-  download_title: "Download",
-  download_desktop: "Desktop (Windows / macOS / Linux) is published via GitHub Releases, packaged with Tauri (MSI / NSIS installers, or a standalone binary).",
-  download_mobile: "Mobile (React Native Web) shares the desktop engine with high feature parity and is available as a web app today; native app-store builds are planned.",
-  download_releases: "Go to GitHub Releases",
   donate_title: "Feed the fire",
   donate_intro:
     "Donations fund official node operations and some contributor bonuses. All links below are external and handled by your own third-party account or wallet.",
