@@ -45,6 +45,7 @@ function makeStyles(tk: ThemeTokens) {
 export function NsecSignInScreen({
   onSignIn,
   onJoinOrg,
+  onCreateCompany,
   nameTaken,
   onUsePairing,
   onBack,
@@ -64,6 +65,11 @@ export function NsecSignInScreen({
    * 企業成員身分）。未提供＝不顯示入職（如新增身分時）。
    */
   onJoinOrg?: (invite: OrgInvite, name: string, password?: string) => void;
+  /**
+   * 建立公司（ADR-0155／0178，企業主）：以顯示名稱欄的名字生成全新企業主身分 → 進組織名冊管理。
+   * 未提供＝不顯示（如新增身分時）。
+   */
+  onCreateCompany?: (name: string, password?: string) => void;
   /**
    * ADR-0146：本機是否已有同名（可見）身分（排除同一把金鑰的重複匯入）。命中則擋下並提示改名，
    * 維持名稱唯一。未提供＝不檢查（初次登入無既有身分）。
@@ -232,6 +238,17 @@ export function NsecSignInScreen({
         {onUsePairing ? (
           <Pressable onPress={onUsePairing} accessibilityRole="button">
             <Text style={styles.link}>{T("mobileSignIn_toPair")}</Text>
+          </Pressable>
+        ) : null}
+        {/* 建立公司（ADR-0178，企業主）：填顯示名稱後可直接建企業主身分（不需邀請碼/nsec）。 */}
+        {onCreateCompany && !invite ? (
+          <Pressable
+            accessibilityRole="button"
+            testID="create-company"
+            disabled={!name.trim()}
+            onPress={() => onCreateCompany(name.trim(), password || undefined)}
+          >
+            <Text style={[styles.link, name.trim() ? null : { opacity: 0.5 }]}>{T("settings_createCompany")}</Text>
           </Pressable>
         ) : null}
         {onBack ? (

@@ -2,7 +2,7 @@
 // 接 @cinder/engine 的 ChatBackend（示範或真實 relay，見 backend.ts）；主題/主色/語言由本殼掌管，
 // 設定分頁即時切換。正式版把後端換成注入 RelayChatBackend＋原生安全儲存即可（同一套 UI）。
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { AppStorage, ChatBackend, ChatMessage, CloudSyncMode, ConnectionState, Contact, Group, OrgInfo, Status } from "@cinder/engine";
+import type { AppStorage, ChatBackend, ChatMessage, CloudSyncMode, ConnectionState, Contact, Group, OrgInfo, PairBundleOrg, Status } from "@cinder/engine";
 import {
   applyPairBundle,
   exportExtension,
@@ -15,7 +15,7 @@ import {
   type PairBundle,
   shouldMuteOrgNotification,
 } from "@cinder/engine";
-import { generateSecretKey, makeBackupCode, nsecDecode, nsecEncode, type OrgInvite } from "@cinder/core";
+import { generateSecretKey, makeBackupCode, newInviteToken, nsecDecode, nsecEncode, type OrgInvite } from "@cinder/core";
 import {
   contactLabel,
   createPairingOffer,
@@ -65,6 +65,7 @@ import { HistoryScreen } from "./screens/HistoryScreen.js";
 import { NsecSignInScreen } from "./screens/NsecSignInScreen.js";
 import { PairExportScreen, type PairPhase } from "./screens/PairExportScreen.js";
 import { PairImportScreen } from "./screens/PairImportScreen.js";
+import { RosterAdminScreen } from "./screens/RosterAdminScreen.js";
 import { SettingsScreen } from "./screens/SettingsScreen.js";
 
 type Screen =
@@ -76,7 +77,8 @@ type Screen =
   | "pairExport"
   | "main"
   | "conversation"
-  | "history";
+  | "history"
+  | "roster";
 
 const STATUS_KEY: Record<Status, MessageKey> = {
   online: "status_online",
@@ -279,6 +281,23 @@ export function MobileApp({
     signInWith(r.identity, undefined, invite);
   };
 
+  /**
+   * 建立公司（ADR-0155／0178，企業主）：生成全新一般身分＋`orgOwner` 標記＋核准權杖 → 進「組織
+   * 名冊」畫面設組織名/成員/公司設定並**首次發布**，並複製邀請碼給員工。企業主後端語意同個人
+   * （漫遊/搬家全開），只是多了名冊管理權。有密碼＝記住（跨重啟持久，ADR-0174）。
+   */
+  const createCompany = (name: string, password?: string): void => {
+    const r = identityFromNsec(nsecEncode(generateSecretKey()), name);
+    if (!r.ok) return;
+    const org: PairBundleOrg = { orgOwner: true, orgInviteToken: newInviteToken() };
+    if (password) {
+      const res = rememberInProfile(profiles, r.identity, password, relayUrl ?? "", org);
+      if (res) setProfiles(res.state);
+    }
+    signInWith(r.identity, undefined, undefined, org); // overrideOrg：profiles 尚未 commit，直接帶
+    setScreen("roster"); // signInWith 末尾設 main；此行覆寫 → 落在名冊管理
+  };
+
   // ── 多身分切換（ADR-0138）─────────────────────────────────────────────────
   /** 點切換器裡的某身分：同一個＝忽略；不同＝進切換解鎖畫面解該身分的密碼。 */
   const beginSwitch = (pubkey: string): void => {
@@ -317,7 +336,7 @@ export function MobileApp({
     signInWith(identity, bundle);
   };
 
-  const signInWith = (identity: MobileIdentity, bundle?: PairBundle, joinInvite?: OrgInvite): void => {
+  const signInWith = (identity: MobileIdentity, bundle?: PairBundle, joinInvite?: OrgInvite, overrideOrg?: PairBundleOrg): void => {
     backendRef.current?.stop();
     // ADR-0176：企業成員鎖定於公司座——入職當下取邀請碼的 relay；否則取已記住登錄的 relay
     //（配對/入職時 rememberInProfile 存的是公司 relay）；再退回全域 prop。
@@ -348,7 +367,8 @@ export function MobileApp({
     // ADR-0100：帶上錨點/簽章清單（backend.ts 內）與加密雲端備份模式。
     // 企業身分精華：入職當下取邀請碼（ADR-0176）；配對取捆包 org（0173）；重啟解鎖取**已記住的
     // 登錄 Profile**（0174，跨重啟持久）。皆無＝一般身分。
-    const org = joinInvite ? inviteToOrg(joinInvite) : (bundle?.org ?? profileOrg(prof));
+    // ADR-0178：建立公司當下取 overrideOrg（新企業主，profiles 尚未 commit）；否則入職/配對/登錄。
+    const org = overrideOrg ?? (joinInvite ? inviteToOrg(joinInvite) : (bundle?.org ?? profileOrg(prof)));
     const backend = createBackend(identity, idRelay, {
       store: store ?? undefined,
       cloudSync,
@@ -367,6 +387,9 @@ export function MobileApp({
     setSelfAdmin(org?.adminPubkey ?? null);
     setSlotQueue([]);
     slotBusyRef.current = false;
+    // ADR-0178：企業主身分＋核准權杖（供設定頁「組織名冊」入口與邀請碼）。
+    setSelfOwner(!!org?.orgOwner);
+    setSelfInviteToken(org?.orgInviteToken ?? null);
     setConnState("connecting"); // ADR-0169：換身分重連，先回連線中，待後端回報 online
     // ADR-0169 審查修正：換身分清掉殘留的 typing 狀態與計時器（衛生性，避免舊值誤帶到新身分）。
     setTypingFrom(null);
@@ -737,6 +760,10 @@ export function MobileApp({
   const [selfEnterprise, setSelfEnterprise] = useState(false);
   /** 企業主 pubkey（ADR-0177）：公司儲存槽的存放對象；企業成員（有 adminPubkey）才有。 */
   const [selfAdmin, setSelfAdmin] = useState<string | null>(null);
+  /** 企業主身分（ADR-0178）：可管理/發布組織名冊；設定頁顯示「組織名冊」入口。 */
+  const [selfOwner, setSelfOwner] = useState(false);
+  /** 企業主的核准權杖（ADR-0156）：嵌入邀請碼給員工；企業主才有。 */
+  const [selfInviteToken, setSelfInviteToken] = useState<string | null>(null);
   /** 公司儲存槽佇列（ADR-0161／0177，員工端）：session 內待傳；企業主上線由背景效果 P2P 逐一送。 */
   const [slotQueue, setSlotQueue] = useState<MobileSlotItem[]>([]);
   const slotBusyRef = useRef(false);
@@ -991,6 +1018,7 @@ export function MobileApp({
         }}
         nameTaken={(name, pubkey) => nameTaken(profiles, name, pubkey)}
         onJoinOrg={joinOrg}
+        onCreateCompany={createCompany}
         onBack={() => setScreen("main")}
         canRemember
         {...themeProps}
@@ -1020,6 +1048,7 @@ export function MobileApp({
       <NsecSignInScreen
         onSignIn={handleSignIn}
         onJoinOrg={joinOrg}
+        onCreateCompany={createCompany}
         nameTaken={(name, pubkey) => nameTaken(profiles, name, pubkey)}
         onUsePairing={() => setScreen("pair")}
         canRemember
@@ -1169,6 +1198,24 @@ export function MobileApp({
     );
   }
 
+  // 組織名冊管理（ADR-0178，企業主）：建立公司後或設定入口進入；發布名冊、複製邀請碼、設公司設定。
+  if (screen === "roster" && selfOwner) {
+    return (
+      <RosterAdminScreen
+        selfNpub={selfNpub}
+        onPublish={(org, members, policy, profile) =>
+          backendRef.current?.publishRoster?.(org, members, policy, undefined, profile) ?? []
+        }
+        onBack={() => setScreen("main")}
+        {...(selfInviteToken && relayUrl
+          ? { invite: { relayUrl, adminPubkey: selfPubkey, token: selfInviteToken } }
+          : {})}
+        initial={backendRef.current?.currentRoster?.() ?? null}
+        {...themeProps}
+      />
+    );
+  }
+
   // 主畫面：分頁內容 + 底部分頁列。
   return (
     <View style={shell.root}>
@@ -1241,6 +1288,8 @@ export function MobileApp({
                 // 企業自報頭銜（ADR-0170／0172）：**企業/企業主身分才顯示編輯器**（與桌面設閘一致；
                 // 旗標來自配對搬家捆包），且需真實 relay 後端（setSelfTitle 廣播個人檔）。
                 ...(selfEnterprise && backendRef.current?.setSelfTitle ? { title: orgTitle, onSetTitle: changeOrgTitle } : {}),
+                // 組織名冊管理（ADR-0178）：企業主＋後端支援才顯示入口。
+                ...(selfOwner && backendRef.current?.publishRoster ? { onOpenRoster: () => setScreen("roster") } : {}),
                 onPairExport: () => setScreen("pairExport"),
                 notify,
                 onNotify: (v: boolean) => void setNotify(v),

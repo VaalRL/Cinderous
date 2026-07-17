@@ -88,6 +88,7 @@ export function SettingsScreen({
   onNowPlaying,
   title,
   onSetTitle,
+  onOpenRoster,
   notify,
   onNotify,
   notifyHidePreview,
@@ -136,6 +137,8 @@ export function SettingsScreen({
   /** 企業自報頭銜（ADR-0158／0170）：≤24 字，變更即廣播給這個身分的所有聯絡人。未提供則不顯示。 */
   title?: string;
   onSetTitle?: (title: string) => void;
+  /** 組織名冊管理入口（ADR-0178，企業主）：未提供則不顯示（非企業主）。 */
+  onOpenRoster?: () => void;
   /** 通知（ADR-0116）。未提供則不顯示（示範模式）。 */
   notify?: boolean;
   onNotify?: (v: boolean) => void;
@@ -636,6 +639,16 @@ export function SettingsScreen({
             {titleSaved ? (
               <Text style={styles.okMsg} testID="org-title-ok">{t("settings_orgTitleUpdated")}</Text>
             ) : null}
+          </View>
+        ) : null}
+
+        {/* 組織名冊管理（ADR-0178，企業主）：發布名冊、複製邀請碼、公司設定。 */}
+        {onOpenRoster ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>{t("settings_orgRoster")}</Text>
+            <Pressable accessibilityRole="button" testID="open-roster" onPress={onOpenRoster} style={[styles.seg, { borderColor: tk.accent, backgroundColor: tk.field }]}>
+              <Text style={[styles.segText, { color: tk.accent }]}>{t("settings_orgRoster")}</Text>
+            </Pressable>
           </View>
         ) : null}
 

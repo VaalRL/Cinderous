@@ -26,6 +26,8 @@ export interface PairBundleOrg {
   orgJoinToken?: string;
   /** 公司帳號金鑰託管旗標（ADR-0163）。 */
   orgEscrow?: boolean;
+  /** 企業主的核准權杖（ADR-0156）：嵌入邀請碼、比對入職請求。企業主身分才有。 */
+  orgInviteToken?: string;
 }
 
 /** 配對捆包信封。 */
@@ -112,6 +114,7 @@ function sanitizeBundleOrg(raw: unknown): PairBundleOrg | undefined {
   if (typeof o.adminPubkey === "string" && o.adminPubkey) org.adminPubkey = o.adminPubkey;
   if (typeof o.orgJoinToken === "string" && o.orgJoinToken) org.orgJoinToken = o.orgJoinToken;
   if (o.orgEscrow === true) org.orgEscrow = true;
+  if (typeof o.orgInviteToken === "string" && o.orgInviteToken) org.orgInviteToken = o.orgInviteToken;
   return Object.keys(org).length > 0 ? org : undefined;
 }
 

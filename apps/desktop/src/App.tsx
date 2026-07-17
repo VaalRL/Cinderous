@@ -1336,6 +1336,7 @@ export function App(): JSX.Element {
                 ...(p.adminPubkey ? { adminPubkey: p.adminPubkey } : {}),
                 ...(p.orgJoinToken ? { orgJoinToken: p.orgJoinToken } : {}),
                 ...(p.orgEscrow ? { orgEscrow: true } : {}),
+                ...(p.orgInviteToken ? { orgInviteToken: p.orgInviteToken } : {}),
               },
             }
           : {}),

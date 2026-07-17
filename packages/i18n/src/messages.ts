@@ -124,6 +124,17 @@ export interface Messages {
   roster_workHoursLabel: string;
   roster_ttlLabel: string;
   roster_relayFilesLabel: string;
+  roster_inviteLabel: string;
+  roster_orgName: string;
+  roster_membersLabel: string;
+  roster_membersHint: string;
+  roster_parseError: string;
+  roster_needMember: string;
+  roster_publishFailed: string;
+  roster_published: string;
+  roster_publish: string;
+  settings_orgRoster: string;
+  settings_createCompany: string;
   orgInfo_title: string;
   orgInfo_hours: string;
   orgInfo_muteNote: string;
@@ -734,6 +745,17 @@ const zhHant: Messages = {
   roster_workHoursLabel: "表定上下班時間（可選：下班時間成員端自動靜音公司通知；留空＝不設）",
   roster_ttlLabel: "離線訊息保留天數（可選，1–365；留空＝預設 7 天。需自架 relay 以 MAX_TTL_DAYS 放寬上限，站方上限恆為權威）",
   roster_relayFilesLabel: "檔案經 relay 暫存上限（MB，可選，1–16；留空＝關、維持 P2P。啟用後成員間 ≤ 上限的檔案離線也送得到；需自架 relay 設 MAX_FILE_MB）",
+  roster_inviteLabel: "入職邀請碼",
+  roster_orgName: "組織名稱",
+  roster_membersLabel: "成員",
+  roster_membersHint: "每行一位：npub 名稱（管理者已預填；移除成員＝刪掉該行後重新發布）",
+  roster_parseError: "無法解析：",
+  roster_needMember: "至少需要一位成員",
+  roster_publishFailed: "發布失敗",
+  roster_published: "名冊已發布並佈建到中繼站。",
+  roster_publish: "發布名冊",
+  settings_orgRoster: "組織名冊",
+  settings_createCompany: "建立公司（企業主）",
   orgInfo_title: "組織資訊",
   orgInfo_hours: "表定上班時間：{start}–{end}",
   orgInfo_muteNote: "下班時間，來自公司成員與組織群組的通知會自動靜音（未讀照常累計）。",
@@ -1315,6 +1337,17 @@ const en: Messages = {
   roster_workHoursLabel: "Scheduled work hours (optional: company notifications auto-mute off-hours on members' devices; leave blank to unset)",
   roster_ttlLabel: "Offline message retention in days (optional, 1–365; blank = default 7. Requires a self-hosted relay with MAX_TTL_DAYS raised — the relay's cap always wins)",
   roster_relayFilesLabel: "Relay file staging limit in MB (optional, 1–16; blank = off, P2P only. Files up to the limit reach offline members; requires MAX_FILE_MB on your self-hosted relay)",
+  roster_inviteLabel: "Onboarding invite code",
+  roster_orgName: "Organization name",
+  roster_membersLabel: "Members",
+  roster_membersHint: "One per line: npub name (admin prefilled; remove a member = delete their line and republish)",
+  roster_parseError: "Can't parse: ",
+  roster_needMember: "At least one member is required",
+  roster_publishFailed: "Publish failed",
+  roster_published: "Roster published and provisioned to the relay.",
+  roster_publish: "Publish roster",
+  settings_orgRoster: "Organization roster",
+  settings_createCompany: "Create a company (owner)",
   orgInfo_title: "Organization",
   orgInfo_hours: "Work hours: {start}–{end}",
   orgInfo_muteNote: "Outside work hours, notifications from company members and org groups are muted automatically (unread still accrues).",

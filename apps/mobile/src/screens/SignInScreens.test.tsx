@@ -32,6 +32,12 @@ describe("行動端登入畫面（ADR-0081）", () => {
     expect(html).not.toContain("邀請碼");
   });
 
+  it("NsecSignInScreen：提供 onCreateCompany → 顯示「建立公司」入口（ADR-0178）", () => {
+    const html = renderToStaticMarkup(<NsecSignInScreen onSignIn={() => {}} onCreateCompany={() => {}} locale="zh-Hant" />);
+    expect(html).toContain('data-testid="create-company"');
+    expect(html).toContain("建立公司");
+  });
+
   it("PairImportScreen（B）：渲染標題與切換金鑰入口（zh）", () => {
     const html = renderToStaticMarkup(
       <PairImportScreen

@@ -121,6 +121,7 @@ export function rememberInProfile(
     ...(org?.adminPubkey ? { adminPubkey: org.adminPubkey } : {}),
     ...(org?.orgJoinToken ? { orgJoinToken: org.orgJoinToken } : {}),
     ...(org?.orgEscrow ? { orgEscrow: true } : {}),
+    ...(org?.orgInviteToken ? { orgInviteToken: org.orgInviteToken } : {}),
     namespace: identity.pubkey,
   };
   const next = upsertProfile(state, profile);
@@ -147,6 +148,7 @@ export function profileOrg(p: Profile | undefined | null): PairBundleOrg | undef
   if (p.adminPubkey) org.adminPubkey = p.adminPubkey;
   if (p.orgJoinToken) org.orgJoinToken = p.orgJoinToken;
   if (p.orgEscrow) org.orgEscrow = true;
+  if (p.orgInviteToken) org.orgInviteToken = p.orgInviteToken;
   return Object.keys(org).length > 0 ? org : undefined;
 }
 
