@@ -308,6 +308,11 @@ export interface RelayPoolOptions {
   initialStatus?: Status;
   initialStatusMessage?: string;
   /**
+   * 建構即隱身（ADR-0088／0180）：讓 `start()` 的首拍 `beat()` 直接靜默——與 `initialStatus`
+   * 同理，隱身也**不能事後補正**（否則已漏一拍）。離職接管查看歷史時用，避免離職身分被廣播上線。
+   */
+  initialInvisible?: boolean;
+  /**
    * 入職權杖（ADR-0156，成員側）：來自邀請碼。設定後每次開機檢查——名冊尚未包含自己
    * 即把 `{name, token}` 加密送給管理者（冪等；管理者對已在冊者忽略）。
    */
@@ -550,6 +555,7 @@ export class RelayChatBackend implements ChatBackend {
     if (pool?.expectPubkey && pubkey !== pool.expectPubkey) throw new Error(IDENTITY_MISMATCH);
     // ADR-0164：以本機記住的狀態 seed（尤其離線須從第一拍就靜默）；未提供＝預設 online/空。
     this.self = { pubkey, name: identity.name, status: pool?.initialStatus ?? "online", statusMessage: pool?.initialStatusMessage ?? "" };
+    this.invisible = pool?.initialInvisible ?? false; // ADR-0180：建構即隱身 → 首拍 beat() 直接靜默（離職接管不洩漏上線）
     this.selfNpub = npubEncode(pubkey);
     this.selfNsec = identity.nsec;
     this.contacts = storage.loadContacts();

@@ -44,6 +44,7 @@ import {
   loadIdentities,
   nameTaken,
   profileOrg,
+  resolveIdRelay,
   type ProfilesState,
   putRemembered,
   rememberInProfile,
@@ -279,7 +280,7 @@ export function MobileApp({
       const res = rememberInProfile(profiles, r.identity, password, invite.relayUrl, inviteToOrg(invite));
       if (res) setProfiles(res.state);
     }
-    signInWith(r.identity, undefined, invite);
+    signInWith(r.identity, { joinInvite: invite });
   };
 
   /**
@@ -295,7 +296,7 @@ export function MobileApp({
       const res = rememberInProfile(profiles, r.identity, password, relayUrl ?? "", org);
       if (res) setProfiles(res.state);
     }
-    signInWith(r.identity, undefined, undefined, org); // overrideOrg：profiles 尚未 commit，直接帶
+    signInWith(r.identity, { overrideOrg: org }); // overrideOrg：profiles 尚未 commit，直接帶
     setScreen("roster"); // signInWith 末尾設 main；此行覆寫 → 落在名冊管理
   };
 
@@ -306,9 +307,9 @@ export function MobileApp({
   const takeoverOffboarded = (entry: EscrowEntry): void => {
     const r = identityFromNsec(entry.nsec, `離職·${entry.name}`);
     if (!r.ok) return;
-    signInWith(r.identity, undefined, undefined, undefined, entry.relayUrl); // 指向該員工公司座
-    setInvisible(true);
-    backendRef.current?.setInvisible?.(true); // 不廣播（接管只為查看歷史）
+    // ADR-0180 審查修正：forceInvisible 讓後端**建構即隱身**——首拍 beat() 就靜默，離職身分不會被
+    // 廣播上線（先前是 start 後才 setInvisible，第一拍已洩漏）。overrideRelay 指向該員工公司座。
+    signInWith(r.identity, { overrideRelay: entry.relayUrl, forceInvisible: true });
   };
   /** 刪除一筆託管（ADR-0163）：企業主決定不再保留該離職員工的金鑰備份。重新加密落盤。 */
   const deleteEscrow = (pubkey: string): void => {
@@ -356,16 +357,29 @@ export function MobileApp({
       const res = rememberInProfile(profiles, identity, password, bundle.relayUrl, bundle.org);
       if (res) setProfiles(res.state);
     }
-    signInWith(identity, bundle);
+    signInWith(identity, { bundle }); // ADR-0180 審查修正：bundle.relayUrl 現由 idRelay 鏈解析（連對公司座）
   };
 
-  const signInWith = (identity: MobileIdentity, bundle?: PairBundle, joinInvite?: OrgInvite, overrideOrg?: PairBundleOrg, overrideRelay?: string): void => {
+  const signInWith = (
+    identity: MobileIdentity,
+    opts: { bundle?: PairBundle; joinInvite?: OrgInvite; overrideOrg?: PairBundleOrg; overrideRelay?: string; forceInvisible?: boolean } = {},
+  ): void => {
+    const { bundle, joinInvite, overrideOrg, overrideRelay, forceInvisible } = opts;
     backendRef.current?.stop();
-    // ADR-0176：企業成員鎖定於公司座——入職當下取邀請碼的 relay；否則取已記住登錄的 relay
-    //（配對/入職時 rememberInProfile 存的是公司 relay）；再退回全域 prop。
-    // ADR-0179：離職接管以 overrideRelay 指向該員工的公司座（純查看歷史）。
+    // ADR-0180 審查修正：每次登入統一重設隱身（切身分/登出對稱）——接管以 forceInvisible 覆寫為 true。
+    setInvisible(!!forceInvisible);
+    // ADR-0176／0180：企業成員鎖公司座——接管 overrideRelay ＞ 入職邀請 relay ＞ **配對捆包 relay**
+    //（審查修正：先前漏掉→配對進來的企業身分連錯 relay、收不到名冊）＞ 已記住登錄 relay ＞ 全域。
+    // 註：`prof` 在剛 remember/switch 的同一輪為 stale（setProfiles 未 commit），故企業精華與 relay
+    // 都以顯式來源（bundle/joinInvite/overrideOrg/overrideRelay）優先，不依賴 prof。
     const prof = profiles.profiles.find((p) => p.pubkey === identity.pubkey);
-    const idRelay = overrideRelay || joinInvite?.relayUrl || prof?.relayUrl || relayUrl;
+    const idRelay = resolveIdRelay({
+      overrideRelay,
+      inviteRelay: joinInvite?.relayUrl,
+      bundleRelay: bundle?.relayUrl,
+      profileRelay: prof?.relayUrl,
+      fallback: relayUrl,
+    });
     // ADR-0094：真實 relay 用外部持有的儲存（供保留上限/導出）；示範模式無持久化。
     // ADR-0112：靜態加密——資料金鑰由 nsec 導出。行動端**從不持久化 nsec**（每次輸入），
     // 所以金鑰不在磁碟上 → localStorage/OPFS 上的訊息**真的**解不開。
@@ -397,6 +411,8 @@ export function MobileApp({
       store: store ?? undefined,
       cloudSync,
       ...(pref ? { initialStatus: pref.status, initialStatusMessage: pref.statusMessage } : {}),
+      // ADR-0180 審查修正：接管離職身分＝建構即隱身，首拍 beat() 就靜默（不把離職身分廣播上線）。
+      ...(forceInvisible ? { initialInvisible: true } : {}),
       // ADR-0173：企業身分 → 後端唯讀採用公司名冊（同事/allowlist/政策/組織資訊）。
       ...(org ? { org } : {}),
     });

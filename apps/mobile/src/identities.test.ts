@@ -13,6 +13,7 @@ import {
   loadIdentities,
   profileOrg,
   putRemembered,
+  resolveIdRelay,
   rememberInProfile,
   removeIdentity,
   renameIdentity,
@@ -160,6 +161,22 @@ describe("企業身分跨重啟持久（ADR-0174）", () => {
     const p = activeProfile(rememberInProfile({ profiles: [], active: null }, a, "pw", RELAY)!.state)!;
     expect(p.enterprise).toBe(false);
     expect(profileOrg(p)).toBeUndefined();
+  });
+});
+
+describe("公司座解析 resolveIdRelay（ADR-0180 審查修正）", () => {
+  const FALLBACK = "wss://public.default";
+  it("配對捆包 relay 優先於全域 fallback（先前漏掉→企業身分連錯 relay、收不到名冊）", () => {
+    // 配對進來的企業身分：prof 尚未 commit（undefined），必須用 bundleRelay 而非落到全域。
+    expect(resolveIdRelay({ bundleRelay: "wss://company.relay", profileRelay: undefined, fallback: FALLBACK })).toBe("wss://company.relay");
+  });
+  it("優先序：接管 ＞ 入職邀請 ＞ 配對捆包 ＞ 登錄 ＞ 全域", () => {
+    expect(resolveIdRelay({ overrideRelay: "o", inviteRelay: "i", bundleRelay: "b", profileRelay: "p", fallback: FALLBACK })).toBe("o");
+    expect(resolveIdRelay({ inviteRelay: "i", bundleRelay: "b", profileRelay: "p", fallback: FALLBACK })).toBe("i");
+    expect(resolveIdRelay({ bundleRelay: "b", profileRelay: "p", fallback: FALLBACK })).toBe("b");
+    expect(resolveIdRelay({ profileRelay: "p", fallback: FALLBACK })).toBe("p");
+    expect(resolveIdRelay({ fallback: FALLBACK })).toBe(FALLBACK);
+    expect(resolveIdRelay({ fallback: null })).toBeNull();
   });
 });
 

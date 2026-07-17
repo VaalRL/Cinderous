@@ -32,6 +32,8 @@ export interface MobileBackendOptions {
   initialStatus?: Status | undefined;
   /** 上線時的初始自訂狀態文字（ADR-0164／0168）；未提供＝空。 */
   initialStatusMessage?: string | undefined;
+  /** 建構即隱身（ADR-0180）：離職接管查看歷史時用——首拍心跳就靜默，不把離職身分廣播上線。 */
+  initialInvisible?: boolean | undefined;
   /**
    * 企業身分精華（ADR-0172／0173／0176）：來自配對搬家捆包、已記住登錄，或邀請碼入職。
    * `adminPubkey` → 後端訂閱並採用公司名冊（同事、allowlist、政策、組織資訊）。
@@ -75,6 +77,7 @@ export function createRelayChat(
       // （隱身時 App 另有攔截，不經此路徑）。缺省＝online、空文字。
       ...(opts.initialStatus ? { initialStatus: opts.initialStatus } : {}),
       ...(opts.initialStatusMessage ? { initialStatusMessage: opts.initialStatusMessage } : {}),
+      ...(opts.initialInvisible ? { initialInvisible: true } : {}),
       // ADR-0173／0176：企業身分——訂閱管理者名冊＝同事/allowlist/政策/組織資訊（桌面 buildBackend 鏡像）。
       // ADR-0176：入職權杖／託管一併帶（冪等）：orgJoinToken → 開機自動入職（ADR-0156）；
       // orgEscrow → 公司帳號私鑰託管（ADR-0163，貼碼時已明示同意）。

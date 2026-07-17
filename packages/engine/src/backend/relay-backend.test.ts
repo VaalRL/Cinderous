@@ -1926,6 +1926,18 @@ describe("中繼流量削減（ADR-0109）", () => {
     a.stop();
   });
 
+  it("建構即隱身（ADR-0180 修正）：離職接管——start() 首拍不漏任何心跳（不把離職身分廣播上線）", () => {
+    const net = createInMemoryRelayNetwork();
+    // 模擬離職接管：以託管金鑰登入查看歷史，狀態預設 online 但**建構即隱身**。
+    const a = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("a", h), "離職·Eve", {
+      initialInvisible: true,
+    });
+    const hb = spy(net, { kinds: [KIND.HEARTBEAT] });
+    a.start(noop); // 修正前：start 首拍 beat() 已廣播一則存活信標 → 離職員工對同事短暫顯示在線
+    expect(hb.length).toBe(0); // 修正後：建構就隱身 → 首拍靜默
+    a.stop();
+  });
+
   it("初始狀態忙碌（ADR-0164）：seed 進 self，start 首拍即以該狀態廣播（非事後補正）", () => {
     const net = createInMemoryRelayNetwork();
     const a = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("a", h), "Alice", {

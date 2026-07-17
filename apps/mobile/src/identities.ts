@@ -129,6 +129,21 @@ export function rememberInProfile(
   return { state: next, remembered: r };
 }
 
+/**
+ * 企業成員鎖定的公司座解析（ADR-0176／0180，純函式可測）：優先序
+ * 接管 overrideRelay ＞ 入職邀請 relay ＞ **配對捆包 relay** ＞ 已記住登錄 relay ＞ 全域 fallback。
+ * 審查修正：先前漏掉「配對捆包 relay」→ 配對進來的企業身分會連錯 relay、收不到名冊。
+ */
+export function resolveIdRelay(s: {
+  overrideRelay?: string | undefined;
+  inviteRelay?: string | undefined;
+  bundleRelay?: string | undefined;
+  profileRelay?: string | undefined;
+  fallback: string | null;
+}): string | null {
+  return s.overrideRelay || s.inviteRelay || s.bundleRelay || s.profileRelay || s.fallback;
+}
+
 /** 邀請碼 → 企業身分精華（ADR-0176）：入職＝企業成員（帶管理者 pubkey、入職權杖、是否託管）。 */
 export function inviteToOrg(invite: { adminPubkey: string; token: string; escrow?: boolean }): PairBundleOrg {
   return {
