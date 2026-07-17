@@ -17,6 +17,8 @@ export interface MobileContact {
   pubkey: string;
   name: string;
   status: MobileStatus;
+  /** 對方的企業自報頭銜（ADR-0158／0170）：以實心 chip 顯示於名字旁。未設＝不顯示。 */
+  title?: string;
 }
 
 const STATUS_SECTIONS: MobileStatus[] = ["online", "away", "busy", "offline"];
@@ -50,6 +52,9 @@ function makeStyles(tk: ThemeTokens) {
     row: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 8, paddingHorizontal: 12 },
     dot: { width: 9, height: 9, borderRadius: 5 },
     name: { fontSize: 14, color: tk.ink },
+    // 企業頭銜 chip（ADR-0170）：實心主色底、白字，與私有標籤（outline）色彩區隔。
+    roleChip: { backgroundColor: tk.accent, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 1 },
+    roleChipText: { fontSize: 10, fontWeight: "700", color: "#fff" },
     empty: { padding: 28, textAlign: "center", color: tk.muted, fontSize: 13, lineHeight: 20 },
     secTitle: { paddingHorizontal: 12, paddingTop: 10, paddingBottom: 2, fontSize: 11, fontWeight: "700", color: tk.muted },
     blockedName: { flex: 1, fontSize: 14, color: tk.muted },
@@ -191,6 +196,12 @@ export function ContactListScreen({
               >
                 <View style={[styles.dot, { backgroundColor: STATUS_COLORS[c.status] }]} />
                 <Text style={styles.name}>{c.name}</Text>
+                {/* 企業頭銜（ADR-0170）：實心 chip，與私有標籤色彩區隔。 */}
+                {c.title?.trim() ? (
+                  <View style={styles.roleChip} testID={`title-${c.pubkey}`}>
+                    <Text style={styles.roleChipText}>{c.title}</Text>
+                  </View>
+                ) : null}
                 {/* 長按＝手機上的「右鍵選單」。移除＝清對話但不封鎖（可再加回）；封鎖＝移出並忽略後續訊息。 */}
                 {picked === c.pubkey && (onBlock || onRemove) ? (
                   <View style={styles.actRow}>

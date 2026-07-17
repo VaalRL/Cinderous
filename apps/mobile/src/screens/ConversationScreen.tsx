@@ -56,6 +56,9 @@ function makeStyles(tk: ThemeTokens) {
     callIcon: { fontSize: 18 },
     headTitle: { fontSize: 16, fontWeight: "700", color: tk.ink },
     headSub: { fontSize: 11, color: tk.muted },
+    // 企業頭銜 chip（ADR-0170）：實心主色底、白字，與私有標籤（outline）色彩區隔。
+    roleChip: { backgroundColor: tk.accent, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 1 },
+    roleChipText: { fontSize: 10, fontWeight: "700", color: "#fff" },
     list: { flex: 1 },
     listInner: { padding: 12, gap: 8 },
     rowMine: { alignItems: "flex-end" },
@@ -252,7 +255,10 @@ export function ConversationScreen({
   onHistory,
   onLeaveGroup,
   onRemoveMember,
+  onAddMember,
+  addMemberCandidates,
   isGroupAdmin,
+  title,
   selfPubkey,
   onBack,
   locale = "zh-Hant",
@@ -298,8 +304,14 @@ export function ConversationScreen({
    * 即時生效且免 rekey。
    */
   onRemoveMember?: (pubkey: string) => void;
-  /** 自己是不是這個群的管理者（決定要不要顯示移除成員）。 */
+  /** 管理者新增群組成員（ADR-0027／0170）：從尚非成員的聯絡人中挑選。未提供則不顯示。 */
+  onAddMember?: (pubkey: string) => void;
+  /** 可新增的候選（尚非成員的聯絡人）；空＝沒有可加的人，不顯示新增區。 */
+  addMemberCandidates?: MentionCandidate[];
+  /** 自己是不是這個群的管理者（決定要不要顯示移除/新增成員）。 */
   isGroupAdmin?: boolean;
+  /** 對方的企業自報頭銜（ADR-0158／0170，1:1）：標頭旁以 chip 顯示。未提供＝不顯示。 */
+  title?: string;
   /** 自己的 pubkey（成員清單中不對自己顯示「移除」）。 */
   selfPubkey?: string;
   /**
@@ -341,6 +353,8 @@ export function ConversationScreen({
   };
   /** 群組成員面板是否展開（ADR-0114）。 */
   const [membersOpen, setMembersOpen] = useState(false);
+  /** 新增成員挑選是否展開（ADR-0170）：管理者才有；避免成員面板一開就塞一長串聯絡人。 */
+  const [addMemberOpen, setAddMemberOpen] = useState(false);
   /** 對話背景挑選面板是否展開（ADR-0134）。 */
   const [bgOpen, setBgOpen] = useState(false);
   /** 貼圖挑選面板是否展開（ADR-0137）＋目前分頁。 */
@@ -479,6 +493,12 @@ export function ConversationScreen({
                 <Text style={styles.headSub}>✎</Text>
               </Pressable>
             ) : null}
+            {/* 企業自報頭銜（ADR-0158／0170）：實心 chip，與私有標籤色彩區隔；1:1 才有。 */}
+            {title?.trim() && !groupMembers ? (
+              <View style={styles.roleChip} testID="convo-title-chip">
+                <Text style={styles.roleChipText}>{title}</Text>
+              </View>
+            ) : null}
           </View>
           {subtitle ? <Text style={styles.headSub}>{subtitle}</Text> : null}
         </View>
@@ -589,6 +609,34 @@ export function ConversationScreen({
               ) : null}
             </View>
           ))}
+          {/* 新增成員（ADR-0170，僅管理者且有可加的聯絡人）：點「新增成員」展開候選清單，逐一加入。 */}
+          {isGroupAdmin && onAddMember && addMemberCandidates && addMemberCandidates.length > 0 ? (
+            <View>
+              <Pressable
+                style={styles.memberBtn}
+                accessibilityRole="button"
+                testID="add-member-toggle"
+                onPress={() => setAddMemberOpen((v) => !v)}
+              >
+                <Text style={styles.memberBtnText}>＋ {t("members_add")}</Text>
+              </Pressable>
+              {addMemberOpen
+                ? addMemberCandidates.map((cand) => (
+                    <View key={cand.pubkey} style={styles.memberRow}>
+                      <Text style={styles.memberName}>{cand.name}</Text>
+                      <Pressable
+                        style={styles.memberBtn}
+                        accessibilityRole="button"
+                        testID={`add-member-${cand.pubkey}`}
+                        onPress={() => onAddMember(cand.pubkey)}
+                      >
+                        <Text style={styles.memberBtnText}>{t("members_add")}</Text>
+                      </Pressable>
+                    </View>
+                  ))
+                : null}
+            </View>
+          ) : null}
           {onLeaveGroup ? (
             <Pressable
               style={[styles.memberBtn, styles.leaveBtn]}

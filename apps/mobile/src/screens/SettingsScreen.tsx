@@ -86,6 +86,8 @@ export function SettingsScreen({
   onStatusMessage,
   nowPlaying,
   onNowPlaying,
+  title,
+  onSetTitle,
   notify,
   onNotify,
   notifyHidePreview,
@@ -131,6 +133,9 @@ export function SettingsScreen({
   /** 正在聽（ADR-0142／0168）：隨心跳廣播、易失不落地。與 onStatus 同時提供才顯示。 */
   nowPlaying?: string;
   onNowPlaying?: (text: string) => void;
+  /** 企業自報頭銜（ADR-0158／0170）：≤24 字，變更即廣播給這個身分的所有聯絡人。未提供則不顯示。 */
+  title?: string;
+  onSetTitle?: (title: string) => void;
   /** 通知（ADR-0116）。未提供則不顯示（示範模式）。 */
   notify?: boolean;
   onNotify?: (v: boolean) => void;
@@ -199,6 +204,14 @@ export function SettingsScreen({
   // 正在聽（ADR-0168）：草稿本地暫存，離開輸入框（送出/失焦）才廣播——不想把打到一半的
   // 歌名一個字一個字廣播出去。狀態文字則照桌面即時（每次改動就更新，引擎自會節流心跳）。
   const [npDraft, setNpDraft] = useState(nowPlaying ?? "");
+  // 企業自報頭銜（ADR-0170）：草稿＋套用鈕（廣播是有代價的動作＝全量重播個人檔，不逐字送）。
+  const [titleDraft, setTitleDraft] = useState(title ?? "");
+  const [titleSaved, setTitleSaved] = useState(false);
+  const titleDirty = titleDraft.trim() !== (title ?? "").trim();
+  const applyTitle = (): void => {
+    onSetTitle?.(titleDraft.trim()); // 空＝移除
+    setTitleSaved(true);
+  };
 
   const changePassword = (): void => {
     if (!onChangePassword || !pwOld || !pwNew || pwNew !== pwNew2) {
@@ -586,6 +599,40 @@ export function SettingsScreen({
                 aria-label={t("nowPlaying_placeholder")}
                 testID="now-playing"
               />
+            ) : null}
+          </View>
+        ) : null}
+
+        {/* 企業自報頭銜（ADR-0158／0170）：草稿＋套用鈕；廣播＝全量重播個人檔給聯絡人。 */}
+        {onSetTitle ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>{t("settings_orgTitle")}</Text>
+            <Text style={styles.label}>{t("settings_orgTitleHint")}</Text>
+            <View style={styles.rowSeg}>
+              <TextInput
+                style={[styles.pwInput, { flex: 1 }]}
+                value={titleDraft}
+                onChangeText={(v: string) => {
+                  setTitleDraft(v);
+                  setTitleSaved(false);
+                }}
+                placeholder={t("settings_orgTitle")}
+                placeholderTextColor={tk.muted}
+                aria-label={t("settings_orgTitle")}
+                testID="org-title"
+              />
+              <Pressable
+                accessibilityRole="button"
+                testID="org-title-apply"
+                disabled={!titleDirty}
+                onPress={applyTitle}
+                style={[styles.seg, { borderColor: titleDirty ? tk.accent : tk.border, backgroundColor: tk.field, opacity: titleDirty ? 1 : 0.5 }]}
+              >
+                <Text style={[styles.segText, { color: tk.accent }]}>{t("settings_nameApply")}</Text>
+              </Pressable>
+            </View>
+            {titleSaved ? (
+              <Text style={styles.okMsg} testID="org-title-ok">{t("settings_orgTitleUpdated")}</Text>
             ) : null}
           </View>
         ) : null}

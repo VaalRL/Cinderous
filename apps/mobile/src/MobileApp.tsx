@@ -323,6 +323,8 @@ export function MobileApp({
     setSelfStatus(pref?.status ?? "online");
     setSelfStatusMessage(pref?.statusMessage ?? "");
     setSelfNowPlaying("");
+    setOrgTitle(backend.selfTitle?.() ?? ""); // ADR-0170：還原這個身分已廣播的頭銜（供設定頁預填）
+    setConnState("connecting"); // ADR-0169：換身分重連，先回連線中，待後端回報 online
     setSelfPubkey(identity.pubkey);
     setSelfName(identity.name);
     setSelfNpub(identity.npub);
@@ -642,6 +644,13 @@ export function MobileApp({
   const [selfStatusMessage, setSelfStatusMessage] = useState("");
   /** 正在聽（ADR-0142；行動端於 ADR-0168 補齊）：純易失，不持久化（換歌就換）。 */
   const [selfNowPlaying, setSelfNowPlaying] = useState("");
+  /** 企業自報頭銜（ADR-0158；行動端於 ADR-0170 補齊）：≤24 字，變更即全量重播個人檔給聯絡人。 */
+  const [orgTitle, setOrgTitle] = useState("");
+  const changeOrgTitle = (title: string): void => {
+    const trimmed = title.trim();
+    setOrgTitle(trimmed);
+    backendRef.current?.setSelfTitle?.(trimmed || undefined); // 空＝移除（廣播移除記號）
+  };
   const persistPresence = (status: Status, message: string): void => {
     if (selfPubkey) savePresence(selfPubkey, { status, statusMessage: message }); // ADR-0164：本機記住手動狀態
   };
@@ -767,7 +776,8 @@ export function MobileApp({
   const entries = useMemo(() => chatList(contacts, groups, convos, unread), [contacts, groups, convos, unread]);
   const unreadTotal = useMemo(() => Object.values(unread).reduce((a, b) => a + b, 0), [unread]);
   const mobileContacts = useMemo<MobileContact[]>(
-    () => contacts.map((c) => ({ pubkey: c.pubkey, name: contactLabel(c), status: c.status })), // ADR-0148：暱稱優先
+    // ADR-0148：暱稱優先；ADR-0170：帶對方企業自報頭銜（有才帶，供 chip 顯示）。
+    () => contacts.map((c) => ({ pubkey: c.pubkey, name: contactLabel(c), status: c.status, ...(c.title ? { title: c.title } : {}) })),
     [contacts],
   );
 
@@ -948,6 +958,15 @@ export function MobileApp({
             back(); // 已經不是成員了，留在對話畫面沒有意義
           },
           onRemoveMember: (pk: string) => backendRef.current?.removeGroupMember?.(group.id, pk),
+          // 新增成員（ADR-0170）：候選＝尚非成員的聯絡人；僅管理者且後端支援時才接上。
+          ...(group.admin === selfPubkey && backendRef.current?.addGroupMember
+            ? {
+                onAddMember: (pk: string) => backendRef.current?.addGroupMember?.(group.id, pk),
+                addMemberCandidates: contacts
+                  .filter((c) => !group.members.includes(c.pubkey))
+                  .map((c) => ({ pubkey: c.pubkey, name: contactLabel(c) })),
+              }
+            : {}),
         }
       : {};
     // @提及候選（ADR-0133）：1:1＝對方一人（群組候選已在 groupProps 內）。
@@ -979,6 +998,7 @@ export function MobileApp({
           onReact={react}
           onUnsend={unsend}
           {...aliasProps}
+          {...(!group && contact?.title ? { title: contact.title } : {})}
           {...(subtitle ? { subtitle } : {})}
           {...(relayUrl && !group ? { onNudge: nudge, onTyping: sendTyping } : {})}
           {...((archived[activeId] ?? 0) > 0 ? { onHistory: () => setScreen("history") } : {})}
@@ -1065,6 +1085,8 @@ export function MobileApp({
                 onStatusMessage: changeStatusMessage,
                 nowPlaying: selfNowPlaying,
                 onNowPlaying: changeNowPlaying,
+                // 企業自報頭銜（ADR-0170）：真實 relay 後端才接得上（setSelfTitle 廣播個人檔）。
+                ...(backendRef.current?.setSelfTitle ? { title: orgTitle, onSetTitle: changeOrgTitle } : {}),
                 onPairExport: () => setScreen("pairExport"),
                 notify,
                 onNotify: (v: boolean) => void setNotify(v),

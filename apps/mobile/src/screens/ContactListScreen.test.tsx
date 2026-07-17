@@ -38,6 +38,28 @@ describe("行動端 ContactListScreen（Phase D 起手）", () => {
   });
 });
 
+describe("企業頭銜 chip（行動端，ADR-0170）", () => {
+  it("聯絡人帶頭銜 → 名字旁顯示 chip 與頭銜文字", () => {
+    const html = renderToStaticMarkup(
+      <ContactListScreen
+        selfPubkey={"aa".repeat(32)}
+        selfName="我"
+        contacts={[{ pubkey: "pk_bob", name: "Bob", status: "online", title: "工程師" }]}
+        locale="en"
+      />,
+    );
+    expect(html).toContain('data-testid="title-pk_bob"');
+    expect(html).toContain("工程師");
+  });
+
+  it("未帶頭銜 → 無 chip", () => {
+    const html = renderToStaticMarkup(
+      <ContactListScreen selfPubkey={"aa".repeat(32)} selfName="我" contacts={[mk("Bob", "online")]} locale="en" />,
+    );
+    expect(html).not.toContain('data-testid="title-Bob"');
+  });
+});
+
 describe("封鎖（行動端）", () => {
   const bob: MobileContact = { pubkey: "pk_bob", name: "Bob", status: "online" };
 

@@ -37,3 +37,30 @@ describe("行動端限時訊息切換鈕（ADR-0169）", () => {
     expect(html).not.toContain('data-testid="burn-label"');
   });
 });
+
+describe("行動端企業頭銜 chip（ADR-0170）", () => {
+  it("1:1 對方帶頭銜 → 標頭顯示 chip 與頭銜文字", () => {
+    const html = renderToStaticMarkup(<ConversationScreen {...base} title="工程師" />);
+    expect(html).toContain('data-testid="convo-title-chip"');
+    expect(html).toContain("工程師");
+  });
+
+  it("未帶頭銜 → 無 chip", () => {
+    const html = renderToStaticMarkup(<ConversationScreen {...base} />);
+    expect(html).not.toContain('data-testid="convo-title-chip"');
+  });
+
+  it("群組不顯示頭銜 chip（頭銜是 1:1 對象語意）", () => {
+    const html = renderToStaticMarkup(
+      <ConversationScreen
+        {...base}
+        name="專案群"
+        title="工程師"
+        groupMembers={["pk_me", "pk_bob"]}
+        selfPubkey="pk_me"
+        nameFor={(pk) => (pk === "pk_me" ? "我" : "Bob")}
+      />,
+    );
+    expect(html).not.toContain('data-testid="convo-title-chip"');
+  });
+});
