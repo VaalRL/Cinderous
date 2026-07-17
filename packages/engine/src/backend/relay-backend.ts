@@ -2663,12 +2663,15 @@ export class RelayChatBackend implements ChatBackend {
     // ADR-0156：首份名冊發佈前排隊的入職請求（權杖已驗）自動併入，並補上聯絡人互通。
     const merged = [...members];
     if (this.pendingJoins.size > 0) {
-      for (const [pk, name] of this.pendingJoins) {
-        if (!merged.some((m) => m.pubkey === pk)) merged.push({ pubkey: pk, name });
-      }
       const queued = [...this.pendingJoins];
       this.pendingJoins.clear();
-      for (const [pk, name] of queued) this.ensureJoinContact(pk, name);
+      for (const [pk, name] of queued) {
+        // 審查修正：首發前才被封鎖者不得進簽章名冊/allowlist（與 handleOrgJoin 到達時的
+        // isBlocked 檢查一致）——否則管理者以為封鎖了，對方仍取得公司站寫入權與全員可見。
+        if (this.isBlocked(pk)) continue;
+        if (!merged.some((m) => m.pubkey === pk)) merged.push({ pubkey: pk, name });
+        this.ensureJoinContact(pk, name);
+      }
     }
     const doc: OrgRosterDoc = {
       org,
@@ -2742,6 +2745,7 @@ export class RelayChatBackend implements ChatBackend {
   private approveJoin(pubkey: PubkeyHex, name: string): void {
     const r = this.lastRoster;
     if (!r) return;
+    if (this.isBlocked(pubkey)) return; // 審查修正：封鎖者不核准入冊（與 handleOrgJoin 一致）
     if (!r.members.some((m) => m.pubkey === pubkey)) {
       // 公司設定（ADR-0157）一併帶上——自動核准重發不得洗掉歡迎詞/班表。
       this.publishRoster(r.org, [...r.members, { pubkey, name }], r.policy, r.groups, {

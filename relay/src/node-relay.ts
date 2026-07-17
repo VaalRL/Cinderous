@@ -19,7 +19,8 @@ const dbPath = process.env.DB_PATH ?? "cinder-relay.db";
 const requireAuth = process.env.REQUIRE_AUTH !== "0"; // 預設開 NIP-42 認證；設 REQUIRE_AUTH=0 可關
 const maxPerRecipient = Number(process.env.MAX_PER_RECIPIENT ?? 500);
 // TTL 上限（天，ADR-0160）：企業自架站可放寬離線留言保留；未設/壞值＝預設 7 天。
-const maxTtlDays = Number(process.env.MAX_TTL_DAYS ?? 0);
+// 上界 clamp 3650 天（審查修正：防手誤產生實質無界保留）。
+const maxTtlDays = Math.min(Number(process.env.MAX_TTL_DAYS ?? 0), 3650);
 // 檔案塊開關（ADR-0162）：≥1 才收 FILE_WRAP(1060)；未設＝整類拒收。
 const maxFileMb = Number(process.env.MAX_FILE_MB ?? 0);
 const PRUNE_INTERVAL_MS = 60 * 60 * 1000;

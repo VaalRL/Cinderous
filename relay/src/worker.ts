@@ -52,8 +52,9 @@ export class RelayRoom {
     const sql = ctx.storage.sql;
     const exec = (query: string, ...bindings: (string | number | null)[]): Record<string, unknown>[] =>
       sql.exec(query, ...bindings).toArray() as Record<string, unknown>[];
-    // TTL 上限（ADR-0160）：企業站可放寬；未設/壞值＝預設 7 天。
-    const ttlDays = Number(env.MAX_TTL_DAYS ?? 0);
+    // TTL 上限（ADR-0160）：企業站可放寬；未設/壞值＝預設 7 天。上界 clamp 3650 天（審查修正：
+    // 防 `MAX_TTL_DAYS=99999` 這類手誤產生實質無界保留）。
+    const ttlDays = Math.min(Number(env.MAX_TTL_DAYS ?? 0), 3650);
     this.store = new SqlMessageStore(exec, {
       maxPerRecipient: MAX_PER_RECIPIENT,
       ...(Number.isFinite(ttlDays) && ttlDays >= 1 ? { maxTtlSeconds: Math.floor(ttlDays) * 86_400 } : {}),

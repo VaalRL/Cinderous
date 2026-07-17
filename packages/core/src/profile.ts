@@ -19,7 +19,9 @@ export const PROFILE_AVATAR_MAX_BYTES = 48_000;
  * 也擋掉 http(s)/javascript 等任何非 data 來源（頭像字串會進 CSS `url()`）。
  */
 export function validAvatarDataUri(s: string): boolean {
-  return s.length <= PROFILE_AVATAR_MAX_BYTES && /^data:image\/(jpeg|png|webp|gif);base64,/.test(s);
+  // 審查修正：除前綴外，也驗逗號後為合法 base64 字元集（此值會進 CSS `url()`，縱深防禦）。
+  const m = /^data:image\/(?:jpeg|png|webp|gif);base64,([A-Za-z0-9+/]*={0,2})$/.exec(s);
+  return s.length <= PROFILE_AVATAR_MAX_BYTES && m !== null && m[1]!.length > 0;
 }
 
 /** 頭銜字元數上限（ADR-0158）：chip 尺寸的自述標註，與本地標籤上限一致。 */

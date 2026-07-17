@@ -449,6 +449,10 @@ export function App(): JSX.Element {
   const [slotQueue, setSlotQueue] = useState<SlotItem[]>([]);
   const [slotDirVal, setSlotDirVal] = useState("");
   const slotBusyRef = useRef(false);
+  // 審查修正：以 ref 追蹤當前作用中 pubkey——updateSlotQueue 從 async 傳輸回呼觸發時，
+  // 不能閉包捕捉舊 render 的 profilesState（瀏覽器「原地換身分」下會把 A 的佇列寫成 B 的內容）。
+  const activePkRef = useRef(profilesState.active);
+  activePkRef.current = profilesState.active;
   useEffect(() => {
     const pk = profilesState.active;
     if (!pk) return;
@@ -458,7 +462,7 @@ export function App(): JSX.Element {
   const updateSlotQueue = (fn: (prev: SlotItem[]) => SlotItem[]): void => {
     setSlotQueue((prev) => {
       const next = fn(prev);
-      const pk = profilesState.active;
+      const pk = activePkRef.current;
       if (pk && next !== prev) saveSlotQueue(pk, next);
       return next;
     });

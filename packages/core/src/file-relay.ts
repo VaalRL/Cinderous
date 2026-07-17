@@ -110,6 +110,9 @@ export function parseFileChunk(rumor: Rumor): FileChunk | null {
     if (typeof p.name !== "string" || !p.name || p.name.length > 255) return null;
     if (typeof p.mime !== "string" || p.mime.length > 100) return null;
     if (typeof p.data !== "string") return null;
+    // 審查修正：**解碼前**先界定 base64 字串長度——避免寬鬆/非 Cinder relay 轉發的超大
+    // `data` 被完整 atob 解碼才拒絕（CPU/記憶體壓力面）。base64 每 4 字元 ≤3 位元組。
+    if (p.data.length > Math.ceil(FILE_CHUNK_BYTES / 3) * 4 + 4) return null;
     const data = b64decode(p.data);
     if (!data || data.length > FILE_CHUNK_BYTES) return null;
     return { tid: p.tid, seq, total, name: p.name, mime: p.mime || "application/octet-stream", data };

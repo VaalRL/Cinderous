@@ -88,11 +88,14 @@ describe("顯示名稱個人檔（ADR-0061，加密廣播）", () => {
     expect(blank?.title).toBeUndefined();
   });
 
-  it("validAvatarDataUri：白名單 jpeg/png/webp/gif；拒 SVG、非 data、超長", () => {
+  it("validAvatarDataUri：白名單 jpeg/png/webp/gif；拒 SVG、非 data、超長；驗 base64 字元集（審查修正）", () => {
     expect(validAvatarDataUri(AVATAR)).toBe(true);
     expect(validAvatarDataUri("data:image/png;base64,iVBORw0KGgo=")).toBe(true);
     expect(validAvatarDataUri("data:image/svg+xml;base64,PHN2Zz4=")).toBe(false);
     expect(validAvatarDataUri("https://x.example/a.jpg")).toBe(false);
     expect(validAvatarDataUri(`data:image/jpeg;base64,${"A".repeat(PROFILE_AVATAR_MAX_BYTES)}`)).toBe(false);
+    // 非法 base64 字元（會進 CSS url()）→ 拒；空 payload → 拒。
+    expect(validAvatarDataUri("data:image/png;base64,abc<script>")).toBe(false);
+    expect(validAvatarDataUri("data:image/png;base64,")).toBe(false);
   });
 });

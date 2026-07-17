@@ -294,6 +294,30 @@ describe("RelayChatBackend（真實後端 + 持久化）", () => {
     owner2.stop();
   });
 
+  it("封鎖時機一致（審查修正）：首發前才封鎖的待入職者，不進簽章名冊/allowlist", () => {
+    const net = createInMemoryRelayNetwork();
+    const token = "tok-blk";
+    const storeO = new MemoryStorage();
+    const owner = new RelayChatBackend(storeO, (h) => net.connect("o", h), "老闆", {
+      orgOwner: true,
+      orgInviteToken: token,
+    });
+    owner.start(noop);
+    // 成員送入職（此時 owner 尚未發首份名冊 → 進 pendingJoins）。
+    const a = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("a", h), "小美", {
+      orgAdminPubkey: owner.self.pubkey,
+      orgJoinToken: token,
+    });
+    a.start(noop);
+    // 管理者在首發前封鎖該成員。
+    owner.blockContact(a.self.pubkey);
+    // 首次發佈名冊 → pendingJoins 併入時應排除被封鎖者。
+    owner.publishRoster("小公司", [{ pubkey: owner.self.pubkey, name: "老闆" }]);
+    expect(owner.currentRoster()?.members.some((m) => m.pubkey === a.self.pubkey)).toBe(false);
+    a.stop();
+    owner.stop();
+  });
+
   it("入職金鑰託管（ADR-0163）：公司帳號成員入職 → 管理者收 onOrgEscrow（nsec 對回成員）；未 escrow 不帶；一般身分不觸發", () => {
     const net = createInMemoryRelayNetwork();
     const token = "tok-escrow";
