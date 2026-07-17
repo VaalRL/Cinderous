@@ -500,6 +500,9 @@ export function MobileApp({
     setTab("chats");
     setActiveId(null);
     setInvisible(false);
+    // ADR-0169 審查修正：登出也顯式清掉殘留的 typing 狀態與計時器（與 signInWith 對稱，雙保險）。
+    setTypingFrom(null);
+    if (typingTimer.current) clearTimeout(typingTimer.current);
     // 登出＝移除這個身分並清其密文（ADR-0138）；還有其他身分就去解下一個，沒有了才回登入。
     forgetActive();
   };
@@ -682,6 +685,10 @@ export function MobileApp({
     if (typingTimer.current) clearTimeout(typingTimer.current);
     typingTimer.current = setTimeout(() => setTypingFrom(null), 6000);
   };
+  // ADR-0169 審查修正：卸載時清掉待觸發的 typing 計時器，避免對已卸載元件 setState。
+  useEffect(() => () => {
+    if (typingTimer.current) clearTimeout(typingTimer.current);
+  }, []);
   /** 與中繼站連線狀態（ADR-0034）：非 online 時頂端顯示細條（連線中/離線）。 */
   const [connState, setConnState] = useState<ConnectionState>("connecting");
   /**
