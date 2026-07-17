@@ -7,10 +7,11 @@ import { createContext, useContext, useMemo, useState, type ReactNode } from "re
 import { isTauri } from "@tauri-apps/api/core";
 import { tauriTitleBarActions } from "./native/window-controls.js";
 import { TitleBar, type TitleBarActions } from "./ui/TitleBar.js";
+import { scopedGet, scopedSet } from "./identity-scoped.js";
 import {
   parseTitlebarControls,
   serializeTitlebarControls,
-  TITLEBAR_CONTROLS_KEY,
+  TITLEBAR_CONTROLS_SUFFIX,
   type TitlebarControls,
 } from "./ui/titlebar-controls.js";
 
@@ -25,22 +26,15 @@ interface TitlebarContextValue {
 const TitlebarContext = createContext<TitlebarContextValue | null>(null);
 
 function initialControls(): TitlebarControls {
-  try {
-    return parseTitlebarControls(localStorage.getItem(TITLEBAR_CONTROLS_KEY));
-  } catch {
-    return parseTitlebarControls(null); // localStorage 不可用（測試/SSR）→ 預設
-  }
+  // ADR-0167：標題列配置改為身分層覆寫、回退裝置層。
+  return parseTitlebarControls(scopedGet(TITLEBAR_CONTROLS_SUFFIX));
 }
 
 export function TitlebarProvider({ children }: { children: ReactNode }): JSX.Element {
   const [controls, setControlsState] = useState<TitlebarControls>(initialControls);
   const [openSettings, setOpenSettings] = useState<(() => void) | null>(null);
   const setControls = (next: TitlebarControls): void => {
-    try {
-      localStorage.setItem(TITLEBAR_CONTROLS_KEY, serializeTitlebarControls(next));
-    } catch {
-      /* 忽略 */
-    }
+    scopedSet(TITLEBAR_CONTROLS_SUFFIX, serializeTitlebarControls(next));
     setControlsState(next);
   };
   const value = useMemo<TitlebarContextValue>(

@@ -44,7 +44,7 @@ describe("TitleBar 自繪視窗標題列（ADR-0150/0151）", () => {
 
   it("自訂雙帶順序：left/right 各依陣列序渲染", () => {
     const html = render({
-      controls: { left: ["close", "min"], right: ["max", "settings"], autoHide: false },
+      controls: { left: ["close", "min"], right: ["max", "settings"], autoHide: false, style: "flat" },
       onOpenSettings: () => {},
     });
     const iTitle = html.indexOf("titlebar__title");
@@ -59,7 +59,7 @@ describe("TitleBar 自繪視窗標題列（ADR-0150/0151）", () => {
   });
 
   it("autoHide 語意升級（ADR-0153）：隱藏由殼層（ChromeFrame）處理，TitleBar 不再對按鈕帶掛類", () => {
-    const on = render({ controls: { left: [], right: ["min", "max", "close"], autoHide: true } });
+    const on = render({ controls: { left: [], right: ["min", "max", "close"], autoHide: true, style: "flat" } });
     expect(on).not.toContain("titlebar__controls--autohide");
   });
 

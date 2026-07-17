@@ -6,7 +6,7 @@ import { useI18n } from "../i18n.js";
 import { useDialog } from "./Dialog.js";
 import { CHIME_PRESETS, DEFAULT_CHIME_ID, playChime } from "./ringtone.js";
 import type { SlotItem } from "./slot-queue.js";
-import { placeControl, type ControlId } from "./titlebar-controls.js";
+import { placeControl, type ControlId, TITLEBAR_STYLES } from "./titlebar-controls.js";
 import { useTitlebar } from "../titlebar.js";
 import { qrSvg } from "../qr.js";
 import type { CloudSyncMode } from "@cinder/engine";
@@ -412,8 +412,22 @@ function TitlebarSettings(): JSX.Element {
   return (
     <section className="settings__sec">
       <h4>{t("settings_titlebar")}</h4>
+      {/* 按鈕風格（ADR-0167）：切換即時反映到真的外框（同一 Provider 狀態）。 */}
+      <div className="titlebarset__styles" data-testid="titlebar-styles">
+        {TITLEBAR_STYLES.map((s) => (
+          <button
+            key={s}
+            type="button"
+            className={`chip chip--filter${controls.style === s ? " chip--on" : ""}`}
+            data-testid={`titlebar-style-${s}`}
+            onClick={() => setControls({ ...controls, style: s })}
+          >
+            {t(`titlebarStyle_${s}` as "titlebarStyle_flat")}
+          </button>
+        ))}
+      </div>
       {/* 編輯器即預覽：所見即所得，拖完真的外框立刻跟著變（同一個 Provider 狀態）。 */}
-      <div className="titlebarset__editor">
+      <div className={`titlebarset__editor titlebar--style-${controls.style}`}>
         {zone("left")}
         <span className="titlebarset__title">Cinder</span>
         <span className="titlebarset__gap" />

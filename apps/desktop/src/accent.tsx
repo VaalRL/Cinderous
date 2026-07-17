@@ -8,21 +8,19 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import { accentForTheme } from "@cinder/theme";
 import { useTheme } from "./theme.js";
+import { scopedGet, scopedRemove, scopedSet } from "./identity-scoped.js";
 
 // 轉引 SSOT，供設定頁與測試沿用既有 import 路徑。
 export { accentForTheme, lightenHex } from "@cinder/theme";
 
-const STORAGE_KEY = "nb.accent";
+// ADR-0167：主色改為身分層覆寫、回退裝置層（`nb.<pubkey>.accent` → `nb.accent`）。
+const SUFFIX = "accent";
 /** 副色（次要主題色，ADR-0078）：驅動標題列＋頂部漸層；未設＝沿用主色。 */
-const STORAGE_KEY2 = "nb.accent2";
+const SUFFIX2 = "accent2";
 
-function loadHex(key: string): string | null {
-  try {
-    const v = localStorage.getItem(key);
-    return v && /^#[0-9a-f]{6}$/i.test(v) ? v : null;
-  } catch {
-    return null;
-  }
+function loadHex(suffix: string): string | null {
+  const v = scopedGet(suffix);
+  return v && /^#[0-9a-f]{6}$/i.test(v) ? v : null;
 }
 
 interface AccentContextValue {
@@ -38,8 +36,8 @@ const AccentContext = createContext<AccentContextValue | null>(null);
 
 export function AccentProvider({ children }: { children: ReactNode }): JSX.Element {
   const { theme } = useTheme();
-  const [accent, setAccentState] = useState<string | null>(() => loadHex(STORAGE_KEY));
-  const [accent2, setAccent2State] = useState<string | null>(() => loadHex(STORAGE_KEY2));
+  const [accent, setAccentState] = useState<string | null>(() => loadHex(SUFFIX));
+  const [accent2, setAccent2State] = useState<string | null>(() => loadHex(SUFFIX2));
 
   useEffect(() => {
     const root = document.documentElement;
@@ -54,22 +52,14 @@ export function AccentProvider({ children }: { children: ReactNode }): JSX.Eleme
   }, [accent2, theme]);
 
   const setAccent = (hex: string | null): void => {
-    try {
-      if (hex) localStorage.setItem(STORAGE_KEY, hex);
-      else localStorage.removeItem(STORAGE_KEY);
-    } catch {
-      /* localStorage 不可用時忽略 */
-    }
+    if (hex) scopedSet(SUFFIX, hex);
+    else scopedRemove(SUFFIX);
     setAccentState(hex);
   };
 
   const setAccent2 = (hex: string | null): void => {
-    try {
-      if (hex) localStorage.setItem(STORAGE_KEY2, hex);
-      else localStorage.removeItem(STORAGE_KEY2);
-    } catch {
-      /* 忽略 */
-    }
+    if (hex) scopedSet(SUFFIX2, hex);
+    else scopedRemove(SUFFIX2);
     setAccent2State(hex);
   };
 

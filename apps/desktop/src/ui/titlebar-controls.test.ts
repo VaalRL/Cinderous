@@ -9,7 +9,7 @@ import {
 
 describe("titlebar-controls 標題列按鈕設定 v2（ADR-0150/0151）", () => {
   it("未設／壞 JSON／非物件 → 預設（⚙ 在最小化左側、同右帶、不隱藏；ADR-0152）", () => {
-    expect(DEFAULT_TITLEBAR_CONTROLS).toEqual({ left: [], right: ["settings", "min", "max", "close"], autoHide: false });
+    expect(DEFAULT_TITLEBAR_CONTROLS).toEqual({ left: [], right: ["settings", "min", "max", "close"], autoHide: false, style: "flat" });
     expect(parseTitlebarControls(null)).toEqual(DEFAULT_TITLEBAR_CONTROLS);
     expect(parseTitlebarControls("")).toEqual(DEFAULT_TITLEBAR_CONTROLS);
     expect(parseTitlebarControls("{oops")).toEqual(DEFAULT_TITLEBAR_CONTROLS);
@@ -21,11 +21,13 @@ describe("titlebar-controls 標題列按鈕設定 v2（ADR-0150/0151）", () => 
       left: [],
       right: ["settings", "close", "min", "max"],
       autoHide: false,
+      style: "flat",
     });
     expect(parseTitlebarControls(JSON.stringify({ side: "left", order: ["min", "max", "close"] }))).toEqual({
       left: ["settings", "min", "max", "close"],
       right: [],
       autoHide: false,
+      style: "flat",
     });
   });
 
@@ -34,31 +36,38 @@ describe("titlebar-controls 標題列按鈕設定 v2（ADR-0150/0151）", () => 
       JSON.stringify({ left: ["close", "nope", "settings"], right: ["close", "min"], autoHide: true }),
     );
     // close 在左帶先出現→右帶的重複剔除；max 缺漏→補右帶尾
-    expect(c).toEqual({ left: ["close", "settings"], right: ["min", "max"], autoHide: true });
+    expect(c).toEqual({ left: ["close", "settings"], right: ["min", "max"], autoHide: true, style: "flat" });
     // ⚙ 缺漏 → 補右帶最前
     expect(parseTitlebarControls(JSON.stringify({ left: ["min"], right: ["max", "close"] }))).toEqual({
       left: ["min"],
       right: ["settings", "max", "close"],
       autoHide: false,
+      style: "flat",
     });
     expect(parseTitlebarControls(JSON.stringify({ left: [], right: [], autoHide: "yes" })).autoHide).toBe(false);
   });
 
+  it("按鈕風格（ADR-0167）：合法值原樣、未知/缺 → flat", () => {
+    expect(parseTitlebarControls(JSON.stringify({ left: [], right: ["close"], style: "mac" })).style).toBe("mac");
+    expect(parseTitlebarControls(JSON.stringify({ left: [], right: ["close"], style: "bogus" })).style).toBe("flat");
+    expect(parseTitlebarControls(JSON.stringify({ left: [], right: ["close"] })).style).toBe("flat");
+  });
+
   it("serialize → parse 往返不變", () => {
-    const c: TitlebarControls = { left: ["close", "settings"], right: ["max", "min"], autoHide: true };
+    const c: TitlebarControls = { left: ["close", "settings"], right: ["max", "min"], autoHide: true, style: "mac" };
     expect(parseTitlebarControls(serializeTitlebarControls(c))).toEqual(c);
   });
 
   it("0151 舊預設（⚙ 獨佔左帶）視為未自訂 → 轉新預設；autoHide 保留（ADR-0152）", () => {
     const old = JSON.stringify({ left: ["settings"], right: ["min", "max", "close"], autoHide: true });
-    expect(parseTitlebarControls(old)).toEqual({ left: [], right: ["settings", "min", "max", "close"], autoHide: true });
+    expect(parseTitlebarControls(old)).toEqual({ left: [], right: ["settings", "min", "max", "close"], autoHide: true, style: "flat" });
     // 使用者自訂過的左帶配置（順序不同）不受影響
     const custom = JSON.stringify({ left: ["settings"], right: ["close", "min", "max"], autoHide: false });
     expect(parseTitlebarControls(custom).left).toEqual(["settings"]);
   });
 
   it("placeControl：拖到某顆之前（同帶/跨帶）、拖到帶尾（beforeId=null）、自拖 no-op、純函式", () => {
-    const base: TitlebarControls = { left: ["settings"], right: ["min", "max", "close"], autoHide: false }; // 自訂配置（⚙ 已被拖到左帶）
+    const base: TitlebarControls = { left: ["settings"], right: ["min", "max", "close"], autoHide: false, style: "flat" }; // 自訂配置（⚙ 已被拖到左帶）
     // 同帶：close 拖到 min 之前
     expect(placeControl(base, "close", "right", "min").right).toEqual(["close", "min", "max"]);
     // 跨帶：close 拖到左帶 settings 之前

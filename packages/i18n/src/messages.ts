@@ -383,6 +383,10 @@ export interface Messages {
   settings_titlebar: string;
   titlebar_dragHint: string;
   titlebar_autoHide: string;
+  titlebarStyle_flat: string;
+  titlebarStyle_rounded: string;
+  titlebarStyle_mac: string;
+  titlebarStyle_compact: string;
   settings_notifyHidePreview: string;
   notify_newMessage: string;
   settings_close: string;
@@ -973,6 +977,10 @@ const zhHant: Messages = {
   settings_titlebar: "視窗外框",
   titlebar_dragHint: "用滑鼠把按鈕拖到標題列左右兩側，即可調整位置與順序。",
   titlebar_autoHide: "平時隱藏整條標題列（滑鼠移到視窗頂端才滑入）",
+  titlebarStyle_flat: "扁平",
+  titlebarStyle_rounded: "圓角",
+  titlebarStyle_mac: "交通燈",
+  titlebarStyle_compact: "精簡",
   settings_notifyHidePreview: "隱藏內文預覽（只顯示有新訊息）",
   notify_newMessage: "有新訊息",
   settings_close: "關閉",
@@ -1550,6 +1558,10 @@ const en: Messages = {
   settings_titlebar: "Window frame",
   titlebar_dragHint: "Drag the buttons to either side of the title bar to arrange position and order.",
   titlebar_autoHide: "Hide the whole title bar until the mouse reaches the top edge",
+  titlebarStyle_flat: "Flat",
+  titlebarStyle_rounded: "Rounded",
+  titlebarStyle_mac: "Traffic lights",
+  titlebarStyle_compact: "Compact",
   settings_notifyHidePreview: "Hide message preview (show only \"New message\")",
   notify_newMessage: "New message",
   settings_close: "Close",

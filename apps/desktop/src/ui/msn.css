@@ -238,6 +238,25 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
 }
 .titlebar__btn:hover { background: var(--hover); color: var(--ink); }
 .titlebar__btn--close:hover { background: #e81123; color: #fff; }
+
+/* 標題列按鈕風格（ADR-0167）：flat＝上方預設，以下三種可於設定切換。 */
+/* rounded：圓角膠囊懸停底、按鈕間留白。 */
+.titlebar--style-rounded .titlebar__controls { gap: 2px; padding: 0 4px; align-items: center; }
+.titlebar--style-rounded .titlebar__btn { width: 34px; height: 22px; border-radius: 7px; }
+.titlebar--style-rounded .titlebar__btn--close:hover { border-radius: 7px; }
+/* compact：較小、低調（窄視窗）。 */
+.titlebar--style-compact .titlebar__btn { width: 30px; font-size: 10px; }
+/* mac：紅黃綠交通燈圓點（close 紅／min 黃／max 綠／⚙ 灰）；靠左慣例但沿用配置位置。 */
+.titlebar--style-mac .titlebar__controls { gap: 8px; padding: 0 10px; align-items: center; }
+.titlebar--style-mac .titlebar__btn {
+  width: 13px; height: 13px; border-radius: 50%; background: #c9ccd1; color: transparent; font-size: 0;
+}
+.titlebar--style-mac .titlebar__btn--close { background: #ff5f57; }
+.titlebar--style-mac .titlebar__btn--min { background: #febc2e; }
+.titlebar--style-mac .titlebar__btn--max { background: #28c840; }
+.titlebar--style-mac .titlebar__btn--settings { background: #c9ccd1; }
+.titlebar--style-mac .titlebar__btn:hover { filter: brightness(0.9); background-color: inherit; color: transparent; }
+.titlebar--style-mac .titlebar__btn--close:hover { background: #ff5f57; color: transparent; }
 /* 平時隱藏（ADR-0153）：**整條標題列**滑出畫面，滑鼠碰到視窗頂端熱區或標題列本身才滑入。
    內容區拿回整個視窗高度（--viewport-h 回 100vh）；外框是視窗殼，疊層蓋過 app 內一切（最高 70）。 */
 .window-chrome--autohide { --viewport-h: 100vh; }

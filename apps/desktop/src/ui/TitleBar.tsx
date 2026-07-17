@@ -45,7 +45,7 @@ export function TitleBar(props: {
           <button
             key={id}
             type="button"
-            className={`titlebar__btn${meta[id].cls}`}
+            className={`titlebar__btn titlebar__btn--${id}${meta[id].cls}`}
             data-testid={`titlebar-${id}`}
             title={meta[id].label}
             aria-label={meta[id].label}
@@ -60,7 +60,10 @@ export function TitleBar(props: {
   };
 
   return (
-    <div className={`titlebar${props.preview ? " titlebar--preview" : ""}`} data-tauri-drag-region>
+    <div
+      className={`titlebar titlebar--style-${controls.style ?? "flat"}${props.preview ? " titlebar--preview" : ""}`}
+      data-tauri-drag-region
+    >
       {strip(controls.left)}
       <span className="titlebar__title" data-tauri-drag-region>
         Cinder

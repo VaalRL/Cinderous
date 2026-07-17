@@ -5,6 +5,17 @@
 
 export type ControlId = "settings" | "min" | "max" | "close";
 
+/**
+ * 標題列按鈕風格（ADR-0167）：外框按鈕的視覺呈現。
+ * - `flat`：簡約現代扁平（ADR-0150 原樣，方形、close 懸停轉紅）
+ * - `rounded`：圓角按鈕（懸停底色為圓角膠囊）
+ * - `mac`：紅黃綠交通燈圓點（macOS 風；close 紅、min 黃、max 綠、⚙ 灰）
+ * - `compact`：較小、低調（適合窄視窗）
+ */
+export type TitlebarStyle = "flat" | "rounded" | "mac" | "compact";
+export const TITLEBAR_STYLES: readonly TitlebarStyle[] = ["flat", "rounded", "mac", "compact"];
+export const DEFAULT_TITLEBAR_STYLE: TitlebarStyle = "flat";
+
 export interface TitlebarControls {
   /** 標題列左端的按鈕（由左至右）。 */
   left: ControlId[];
@@ -12,6 +23,8 @@ export interface TitlebarControls {
   right: ControlId[];
   /** 平時隱藏按鈕，滑鼠移到標題列才顯示（ADR-0151）。 */
   autoHide: boolean;
+  /** 按鈕風格（ADR-0167）；未設＝flat。 */
+  style: TitlebarStyle;
 }
 
 export const CONTROL_IDS: readonly ControlId[] = ["settings", "min", "max", "close"];
@@ -21,10 +34,15 @@ export const DEFAULT_TITLEBAR_CONTROLS: TitlebarControls = {
   left: [],
   right: ["settings", "min", "max", "close"],
   autoHide: false,
+  style: DEFAULT_TITLEBAR_STYLE,
 };
 
-/** localStorage 鍵。 */
-export const TITLEBAR_CONTROLS_KEY = "nb.titlebarControls";
+/** 依身分覆寫的儲存 suffix（ADR-0167）：實際鍵為 `nb.<pubkey>.titlebarControls` 或裝置層 `nb.titlebarControls`。 */
+export const TITLEBAR_CONTROLS_SUFFIX = "titlebarControls";
+
+function parseStyle(x: unknown): TitlebarStyle {
+  return (TITLEBAR_STYLES as readonly unknown[]).includes(x) ? (x as TitlebarStyle) : DEFAULT_TITLEBAR_STYLE;
+}
 
 function isControlId(x: unknown): x is ControlId {
   return (CONTROL_IDS as readonly unknown[]).includes(x);
@@ -51,8 +69,9 @@ function scanStrip(raw: unknown, seen: Set<ControlId>): ControlId[] {
 export function parseTitlebarControls(raw: string | null | undefined): TitlebarControls {
   if (!raw) return DEFAULT_TITLEBAR_CONTROLS;
   try {
-    const v = JSON.parse(raw) as { side?: unknown; order?: unknown; left?: unknown; right?: unknown; autoHide?: unknown };
+    const v = JSON.parse(raw) as { side?: unknown; order?: unknown; left?: unknown; right?: unknown; autoHide?: unknown; style?: unknown };
     if (typeof v !== "object" || v === null) return DEFAULT_TITLEBAR_CONTROLS;
+    const style = parseStyle(v.style); // ADR-0167：按鈕風格（未知/缺 → flat）
     const seen = new Set<ControlId>();
     let left: ControlId[];
     let right: ControlId[];
@@ -78,9 +97,9 @@ export function parseTitlebarControls(raw: string | null | undefined): TitlebarC
     // ADR-0152：0151 的舊預設（⚙ 獨佔左帶、右帶恰為 ─ □ ✕）視為未自訂 → 轉新預設；
     // autoHide 是獨立偏好，照舊保留。順序不同＝使用者拖過，不動。
     if (left.length === 1 && left[0] === "settings" && right.join() === "min,max,close") {
-      return { ...DEFAULT_TITLEBAR_CONTROLS, autoHide: v.autoHide === true };
+      return { ...DEFAULT_TITLEBAR_CONTROLS, autoHide: v.autoHide === true, style };
     }
-    return { left, right, autoHide: v.autoHide === true };
+    return { left, right, autoHide: v.autoHide === true, style };
   } catch {
     return DEFAULT_TITLEBAR_CONTROLS;
   }

@@ -294,6 +294,15 @@ describe("視窗外框設定（ADR-0150）", () => {
     expect(out).toContain('data-testid="titlebar-autohide"'); // 平時隱藏、滑鼠碰到才顯示
   });
 
+  it("按鈕風格選擇（ADR-0167）：四種風格 chip＋預設 flat 為選中", () => {
+    const out = renderWithTitlebar({ showTitlebarSettings: true });
+    expect(out).toContain('data-testid="titlebar-styles"');
+    for (const s of ["flat", "rounded", "mac", "compact"]) {
+      expect(out).toContain(`data-testid="titlebar-style-${s}"`);
+    }
+    expect(out).toContain("交通燈"); // titlebarStyle_mac（zh-Hant）
+  });
+
   it("未開 showTitlebarSettings（瀏覽器版）→ 整區不顯示", () => {
     const out = renderWithTitlebar();
     expect(out).not.toContain('data-testid="titlebar-zone-left"');
