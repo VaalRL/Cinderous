@@ -1,0 +1,20 @@
+# 第二座錨點 relay 的部署設定（ADR-0039 建議 ≥2 座）。
+# 與 wrangler.toml 相同，只換 name——好讓「同一個 Cloudflare 帳號」也能並存第二座
+# （同名部署會覆蓋第一座！）。部署：
+#   pnpm dlx wrangler deploy -c wrangler.relay2.toml
+# → wss://cinder-relay-2.<你的子網域>.workers.dev
+#
+# 若第二座要放「另一個 CF 帳號」，其實用主設定 wrangler.toml 直接 deploy 即可
+# （不同帳號＝不同子網域，同名不衝突），這份就用不到。
+name = "cinder-relay-2"
+main = "src/worker.ts"
+compatibility_date = "2024-12-01"
+
+# 單一全域房間：以 Durable Object 在記憶體中保存連線並做 Ephemeral 扇出。
+[[durable_objects.bindings]]
+name = "RELAY_ROOM"
+class_name = "RelayRoom"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["RelayRoom"]
