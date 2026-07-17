@@ -17,4 +17,4 @@ export const ANCHOR_RELAYS: string[] = [
 ];
 
 /** 維護者公鑰（hex，64 字元）；發佈簽章 relay 清單者。留空 = 不學帶內清單。 */
-export const MAINTAINER_PUBKEY = "";
+export const MAINTAINER_PUBKEY = "6efd2603d1d01ebe159410ab12e6f840268cf874015c75a779928a5b397a0e65";
