@@ -15,7 +15,7 @@ import {
   type PairBundle,
   shouldMuteOrgNotification,
 } from "@cinder/engine";
-import { generateSecretKey, makeBackupCode, newInviteToken, nsecDecode, nsecEncode, type OrgInvite } from "@cinder/core";
+import { deriveStorageKey, generateSecretKey, makeBackupCode, newInviteToken, nsecDecode, nsecEncode, type OrgInvite } from "@cinder/core";
 import {
   contactLabel,
   createPairingOffer,
@@ -55,6 +55,7 @@ import {
 } from "./identities.js";
 import { createBackend } from "./backend.js";
 import { loadPresence, savePresence } from "./presence.js";
+import { loadNote, saveNote } from "./note-store.js";
 import { completeSlot, enqueueSlot, type MobileSlotItem, nextPending, removeSlot as removeSlotItem, retryFailed, setSlotStatus } from "./slot-queue.js";
 import { type EscrowEntry, loadEscrow, offboardedEntries, removeEscrow, saveEscrow, upsertEscrow } from "./org-escrow.js";
 import { chatList } from "./chat-list.js";
@@ -1011,6 +1012,8 @@ export function MobileApp({
     () => contacts.map((c) => ({ pubkey: c.pubkey, name: contactLabel(c), status: c.status, ...(c.title ? { title: c.title } : {}) })),
     [contacts],
   );
+  // 便條金鑰（ADR-0183）：以作用中身分 nsec 導出，供便條加密落盤（每對話一張、只存本機）。
+  const noteKey = useMemo(() => (selfNsec ? deriveStorageKey(nsecDecode(selfNsec)) : null), [selfNsec]);
 
   // 通話覆蓋層（ADR-0101）：來電/通話中一律蓋在最上層，不論當下在哪個畫面。
   const inCall = callState !== "idle" && callState !== "ended";
@@ -1219,6 +1222,11 @@ export function MobileApp({
         : {};
     // 檔案：真實 relay 才有 P2P 傳輸（示範後端無 sendFile）。
     const fileProps = backendRef.current?.sendFile ? { onSendFile: sendFileFromPicker } : {};
+    // 便條（ADR-0183）：有身分金鑰才提供（示範模式無）；讀/寫加密便條，App 層持金鑰、元件只碰明文。
+    const noteProps =
+      noteKey && activeId
+        ? { onNoteLoad: () => loadNote(activeId, noteKey), onNoteSave: (text: string) => saveNote(activeId, noteKey, text) }
+        : {};
     // 公司儲存槽（ADR-0161／0177）：企業成員（有企業主 pubkey）＋後端支援才顯示 🗄；origin＝對話名。
     const convoName = group ? group.name : contact ? contactLabel(contact) : activeId;
     const slotProps =
@@ -1251,6 +1259,7 @@ export function MobileApp({
           {...groupProps}
           {...dmMentionProps}
           {...fileProps}
+          {...noteProps}
           {...slotProps}
           {...callProps}
           {...themeProps}

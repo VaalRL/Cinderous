@@ -20,6 +20,7 @@ import {
   validateStickerSvg,
 } from "@cinder/core";
 import type { CallMedia, MentionCandidate } from "@cinder/core";
+import { replyCounts } from "@cinder/engine";
 import type { ChatMessage, MessageStatus } from "@cinder/engine";
 import { type Locale, type MessageKey, translate } from "@cinder/i18n";
 import { BG_PRESETS, type ChatBg, chatBgStyle, resolveTheme, type Theme, type ThemeTokens } from "@cinder/theme";
@@ -104,6 +105,23 @@ function makeStyles(tk: ThemeTokens) {
     },
     memberRow: { flexDirection: "row", alignItems: "center", paddingVertical: 3 },
     memberName: { flex: 1, fontSize: 13, color: tk.ink },
+    // 輔助面板（ADR-0183）：媒體/對話串/便條分頁——桌面右欄的行動端版。
+    auxPanel: { backgroundColor: tk.panel, borderBottomWidth: 1, borderBottomColor: tk.border, padding: 10, gap: 8, maxHeight: 320 },
+    auxTabs: { flexDirection: "row", gap: 6, flexWrap: "wrap" },
+    auxTab: { paddingVertical: 5, paddingHorizontal: 10, borderRadius: 999, borderWidth: 1, borderColor: tk.border },
+    auxTabOn: { borderColor: tk.accent, backgroundColor: tk.field },
+    auxTabTxt: { fontSize: 12, color: tk.muted },
+    auxTabTxtOn: { color: tk.accent, fontWeight: "700" },
+    auxEmpty: { fontSize: 11, color: tk.muted, lineHeight: 16, paddingVertical: 4 },
+    auxMedia: { flexDirection: "row", flexWrap: "wrap", gap: 6 },
+    auxThumb: { width: 72, height: 72, borderRadius: 8, backgroundColor: tk.field },
+    auxRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 4, borderBottomWidth: 1, borderBottomColor: tk.border },
+    auxRowText: { flex: 1, fontSize: 13, color: tk.ink },
+    auxCount: { fontSize: 11, color: tk.accent },
+    auxNote: {
+      minHeight: 140, textAlignVertical: "top", borderWidth: 1, borderColor: tk.border, borderRadius: 8,
+      backgroundColor: tk.field, color: tk.ink, padding: 10, fontSize: 14, lineHeight: 20,
+    },
     // 本地暱稱編輯列（ADR-0148）。
     aliasEdit: {
       flexDirection: "row",
@@ -249,6 +267,8 @@ export function ConversationScreen({
   chatBg = null,
   onSetChatBg,
   onClearChatBg,
+  onNoteLoad,
+  onNoteSave,
   onSendFile,
   onDepositSlot,
   onStartCall,
@@ -332,6 +352,12 @@ export function ConversationScreen({
   onSetChatBg?: (bg: ChatBg) => void;
   /** 清除對話背景。 */
   onClearChatBg?: () => void;
+  /**
+   * 便條（ADR-0183）：讀/寫這個對話的私人便條（加密由 App 層處理，只回/收明文）。兩者皆提供才
+   * 顯示「便條」分頁。未提供＝不顯示（如示範模式）。
+   */
+  onNoteLoad?: () => string;
+  onNoteSave?: (text: string) => void;
   onBack: () => void;
   locale?: Locale;
   theme?: Theme;
@@ -360,6 +386,17 @@ export function ConversationScreen({
   const [addMemberOpen, setAddMemberOpen] = useState(false);
   /** 對話背景挑選面板是否展開（ADR-0134）。 */
   const [bgOpen, setBgOpen] = useState(false);
+  /** 輔助面板（ADR-0183）：桌面右欄的行動端版——📋 開，內含媒體/對話串/便條分頁。 */
+  const [auxOpen, setAuxOpen] = useState(false);
+  const [auxTab, setAuxTab] = useState<"media" | "threads" | "note">("media");
+  // 便條（ADR-0183）：本畫面以 key={activeId} 重掛（App 層），故 useState 初值即載對應對話的便條。
+  const [noteText, setNoteText] = useState(() => onNoteLoad?.() ?? "");
+  // 媒體相簿（ADR-0102/0183）：對話中可顯示的圖片（本 session 有原圖 blob 或有跨 session 縮圖）。
+  const auxImages = messages.filter((m) => m.file?.mime.startsWith("image/") && (m.file.url || m.file.thumb));
+  // 對話串（ADR-0051/0183）：有回覆的串根＋回覆數。
+  const auxThreads = [...replyCounts(messages).entries()].filter(([, n]) => n > 0);
+  const auxTabStyle = (on: boolean) => [styles.auxTab, on ? styles.auxTabOn : null];
+  const auxTabTxt = (on: boolean) => [styles.auxTabTxt, on ? styles.auxTabTxtOn : null];
   /** 貼圖挑選面板是否展開（ADR-0137）＋目前分頁。 */
   const [stickerOpen, setStickerOpen] = useState(false);
   const [stickerPack, setStickerPack] = useState<string>(STICKER_PACK_ORDER[0] ?? "");
@@ -541,6 +578,16 @@ export function ConversationScreen({
             <Text style={styles.callIcon}>🖼</Text>
           </Pressable>
         ) : null}
+        {/* 輔助面板（ADR-0183）：桌面右欄的行動端版——媒體/對話串/便條。點 📋 展開分頁面板。 */}
+        <Pressable
+          style={styles.callBtn}
+          accessibilityRole="button"
+          aria-label={t("aux_title")}
+          testID="aux-btn"
+          onPress={() => setAuxOpen((v) => !v)}
+        >
+          <Text style={styles.callIcon}>📋</Text>
+        </Pressable>
         {/* 歷史紀錄（ADR-0111）：主畫面只讀熱區；更舊的訊息在封存裡，由此進入。 */}
         {onHistory ? (
           <Pressable
@@ -652,6 +699,82 @@ export function ConversationScreen({
             >
               <Text style={styles.leaveText}>{t("group_leave")}</Text>
             </Pressable>
+          ) : null}
+        </View>
+      ) : null}
+
+      {/* 輔助面板（ADR-0183）：桌面右欄的行動端版——媒體相簿／對話串／便條分頁。 */}
+      {auxOpen ? (
+        <View style={styles.auxPanel} testID="aux-panel">
+          <View style={styles.auxTabs}>
+            <Pressable style={auxTabStyle(auxTab === "media")} testID="aux-tab-media" onPress={() => setAuxTab("media")}>
+              <Text style={auxTabTxt(auxTab === "media")}>{t("aux_tabMedia")}（{auxImages.length}）</Text>
+            </Pressable>
+            <Pressable style={auxTabStyle(auxTab === "threads")} testID="aux-tab-threads" onPress={() => setAuxTab("threads")}>
+              <Text style={auxTabTxt(auxTab === "threads")}>{t("aux_tabThreads")}（{auxThreads.length}）</Text>
+            </Pressable>
+            {onNoteSave ? (
+              <Pressable style={auxTabStyle(auxTab === "note")} testID="aux-tab-note" onPress={() => setAuxTab("note")}>
+                <Text style={auxTabTxt(auxTab === "note")}>{t("aux_tabNote")}</Text>
+              </Pressable>
+            ) : null}
+          </View>
+
+          {auxTab === "media" ? (
+            auxImages.length === 0 ? (
+              <Text style={styles.auxEmpty}>{t("aux_noMedia")}</Text>
+            ) : (
+              <View style={styles.auxMedia}>
+                {auxImages.map((m) => (
+                  <Pressable
+                    key={m.id}
+                    testID={`aux-media-${m.id}`}
+                    onPress={() => {
+                      if (m.file?.url && typeof window !== "undefined") window.open(m.file.url, "_blank");
+                    }}
+                  >
+                    <Image style={styles.auxThumb} source={{ uri: m.file!.url ?? m.file!.thumb }} accessibilityLabel={m.file!.name} />
+                  </Pressable>
+                ))}
+              </View>
+            )
+          ) : null}
+
+          {auxTab === "threads" ? (
+            auxThreads.length === 0 ? (
+              <Text style={styles.auxEmpty}>{t("aux_noThreads")}</Text>
+            ) : (
+              auxThreads.map(([rootId, count]) => {
+                const root = messages.find((m) => m.id === rootId);
+                return (
+                  <View key={rootId} style={styles.auxRow} testID={`aux-thread-${rootId}`}>
+                    <Text style={styles.auxRowText} numberOfLines={1}>
+                      {root ? (root.file ? `📎 ${root.file.name}` : root.text) : `${rootId.slice(0, 8)}…`}
+                    </Text>
+                    <Text style={styles.auxCount}>{t("aux_replies", { count })}</Text>
+                  </View>
+                );
+              })
+            )
+          ) : null}
+
+          {auxTab === "note" && onNoteSave ? (
+            <View>
+              <TextInput
+                style={styles.auxNote}
+                value={noteText}
+                onChangeText={(v: string) => {
+                  setNoteText(v);
+                  onNoteSave(v);
+                }}
+                multiline
+                placeholder={t("note_placeholder")}
+                placeholderTextColor={tk.muted}
+                aria-label={t("aux_tabNote")}
+                testID="aux-note-input"
+              />
+              <Text style={styles.auxEmpty}>{t("note_hint")}</Text>
+            </View>
           ) : null}
         </View>
       ) : null}

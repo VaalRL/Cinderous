@@ -11,7 +11,7 @@ import {
 import { type MouseEvent as ReactMouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "../i18n.js";
 import type { CallMedia, MentionCandidate } from "@cinder/core";
-import { mainMessages, replyCounts, threadMessages } from "./thread-util.js";
+import { mainMessages, replyCounts, threadMessages } from "@cinder/engine";
 import type { MessageKey } from "@cinder/i18n";
 import type { ChatMessage, Contact, MessageStatus, Self } from "@cinder/engine";
 import { contactLabel } from "@cinder/engine";

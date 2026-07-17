@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ChatMessage } from "@cinder/engine";
+import type { ChatMessage } from "./types.js";
 import { mainMessages, replyCounts, rootIdOf, threadMessages } from "./thread-util.js";
 
 const msg = (id: string, at: number, replyTo?: string): ChatMessage => ({

@@ -4,8 +4,8 @@ import type { ChatMessage, Contact, Group, Self, Status } from "@cinder/engine";
 import type { MessageKey } from "@cinder/i18n";
 import { useI18n } from "../i18n.js";
 import { Avatar } from "./Avatar.js";
+import { replyCounts } from "@cinder/engine";
 import { loadNote, saveNote } from "./note-store.js";
-import { replyCounts } from "./thread-util.js";
 
 type AuxTab = "info" | "members" | "media" | "threads" | "note";
 

@@ -65,6 +65,15 @@ describe("行動端企業頭銜 chip（ADR-0170）", () => {
   });
 });
 
+describe("行動端對話輔助面板入口（ADR-0183）", () => {
+  it("標頭恆有 📋 輔助面板鈕（媒體/對話串/便條）", () => {
+    const html = renderToStaticMarkup(<ConversationScreen {...base} />);
+    expect(html).toContain('data-testid="aux-btn"');
+    // 面板內容在點開後才渲染（auxOpen 為互動狀態，SSR 不展開）——與成員/背景面板一致。
+    expect(html).not.toContain('data-testid="aux-panel"');
+  });
+});
+
 describe("行動端存入公司儲存槽鈕（ADR-0177）", () => {
   it("提供 onDepositSlot（企業成員）→ 顯示 🗄 存入鈕", () => {
     const html = renderToStaticMarkup(<ConversationScreen {...base} onDepositSlot={() => {}} />);

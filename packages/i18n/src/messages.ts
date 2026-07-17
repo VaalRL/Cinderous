@@ -284,6 +284,7 @@ export interface Messages {
   aux_tabMedia: string;
   aux_tabThreads: string;
   aux_tabNote: string;
+  aux_title: string;
   note_placeholder: string;
   note_hint: string;
   aux_noMedia: string;
@@ -894,6 +895,7 @@ const zhHant: Messages = {
   aux_tabMedia: "媒體",
   aux_tabThreads: "對話串",
   aux_tabNote: "便條",
+  aux_title: "對話輔助（媒體／對話串／便條）",
   note_placeholder: "便條…（記筆記；最後一行輸入算式如 12*8 會自動算出）",
   note_hint: "私人便條，每個對話一張，只存在這台裝置（不廣播、不上雲）。輸入算式會自動辨識，可插入對話。",
   aux_noMedia: "此對話尚無圖片",
@@ -1488,6 +1490,7 @@ const en: Messages = {
   aux_tabMedia: "Media",
   aux_tabThreads: "Threads",
   aux_tabNote: "Notes",
+  aux_title: "Conversation panels (media / threads / notes)",
   note_placeholder: "Notes… (jot anything; type a calc like 12*8 on the last line to evaluate)",
   note_hint: "Private notes, one per conversation, stored only on this device (never broadcast or synced). Calculations are auto-detected and can be inserted.",
   aux_noMedia: "No images in this conversation yet",
