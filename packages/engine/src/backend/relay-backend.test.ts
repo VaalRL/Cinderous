@@ -1892,6 +1892,30 @@ describe("中繼流量削減（ADR-0109）", () => {
   }
   const cadenceOf = (e: NostrEvent): string | undefined => e.tags.find((t) => t[0] === "hb")?.[1];
 
+  it("初始狀態離線（ADR-0164 修正）：start() 首拍不漏任何心跳信標", () => {
+    const net = createInMemoryRelayNetwork();
+    const a = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("a", h), "Alice", {
+      initialStatus: "offline",
+    });
+    const hb = spy(net, { kinds: [KIND.HEARTBEAT] });
+    a.start(noop); // 以往：建構恆 online → start 的 beat() 漏一拍上線信標；修正後：seed 離線 → 靜默
+    expect(hb.length).toBe(0);
+    expect(a.self.status).toBe("offline");
+    a.stop();
+  });
+
+  it("初始狀態忙碌（ADR-0164）：seed 進 self，start 首拍即以該狀態廣播（非事後補正）", () => {
+    const net = createInMemoryRelayNetwork();
+    const a = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("a", h), "Alice", {
+      initialStatus: "busy",
+      initialStatusMessage: "趕稿中",
+    });
+    a.start(noop);
+    expect(a.self.status).toBe("busy");
+    expect(a.self.statusMessage).toBe("趕稿中");
+    a.stop();
+  });
+
   it("沒有聯絡人在線 → 心跳自報 5 分鐘（IDLE）：閒置時的心跳是在對空氣廣播", () => {
     const net = createInMemoryRelayNetwork();
     const a = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("a", h), "Alice");

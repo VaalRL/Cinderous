@@ -283,6 +283,8 @@ function normalizeAdminPubkey(input: string): string | undefined {
  */
 function buildBackend(p: Profile, nsecOverride?: string, storage?: AppStorage): ChatBackend {
   if (!p.relayUrl) return new BrowserChatBackend(p.name);
+  // ADR-0164：本機記住的手動狀態——**建構時就 seed**，讓 start() 首拍 beat() 尊重離線（不事後補正）。
+  const pref = loadPresence(p.pubkey);
   // 儲存一律由呼叫端提供（ADR-0119）：過去這裡會自己 `new LocalStorage(...)` 當退路，
   // 而呼叫端**也**各自建一份不帶金鑰的——結果真正被用的是沒加密的那份。單一來源見 `browserStore()`。
   const store = storage ?? browserStore(p.namespace, nsecOverride);
@@ -290,10 +292,13 @@ function buildBackend(p: Profile, nsecOverride?: string, storage?: AppStorage): 
   // 加密雲端快照（ADR-0071）：使用者開啟才發佈；企業政策 disableCloudBackup 由後端於名冊採用時再擋。
   const cloud =
     p.cloudSync && p.cloudSync !== "off" ? { cloudSync: { mode: p.cloudSync, deviceId: getDeviceId() } } : {};
+  // ADR-0164：本機記住的手動狀態，建構時 seed（離職接管身分不套用——它是查看用、不還原上次狀態）。
+  const presence = pref && !p.orgOffboarded ? { initialStatus: pref.status, initialStatusMessage: pref.statusMessage } : {};
   const opts = p.enterprise
     ? {
         relayUrl: p.relayUrl,
         ...cloud,
+        ...presence,
         ...(p.adminPubkey ? { orgAdminPubkey: p.adminPubkey } : {}),
         ...(p.orgJoinToken ? { orgJoinToken: p.orgJoinToken } : {}), // ADR-0156：開機自動入職
         ...(p.orgEscrow ? { orgEscrow: true } : {}), // ADR-0163：公司帳號金鑰託管
@@ -301,6 +306,7 @@ function buildBackend(p: Profile, nsecOverride?: string, storage?: AppStorage): 
     : {
         relayUrl: p.relayUrl,
         ...cloud,
+        ...presence,
         // 企業主（ADR-0155/0156）：訂自己的名冊找回狀態＋入職自動核准；其餘同個人身分。
         ...(p.orgOwner ? { orgOwner: true, ...(p.orgInviteToken ? { orgInviteToken: p.orgInviteToken } : {}) } : {}),
         ...(drain ? { drainUrl: drain.url } : {}),
@@ -741,10 +747,9 @@ export function App(): JSX.Element {
         storageRef.current = store ?? null;
         const b = buildBackend(active, override, store);
         setConn(active.relayUrl ? "connecting" : "online");
-        // ADR-0164：還原上次的手動狀態與自訂狀態文字（本機記憶；先塞進 self，讓稍後的
-        // 閒置初始化以此為基準）。後端側的同步與廣播在 start effect 完成。
-        const pref = loadPresence(b.self.pubkey);
-        setSelf(pref ? { ...b.self, status: pref.status, statusMessage: pref.statusMessage } : { ...b.self });
+        // ADR-0164：狀態已在 buildBackend 建構時 seed 進 b.self（initialStatus），故 setSelf 直接鏡射；
+        // 稍後的閒置初始化讀 selfRef 也以此為基準，不會被重置回 online。
+        setSelf({ ...b.self });
         setBackend(b);
       } catch {
         /* 忽略 */
@@ -981,10 +986,8 @@ export function App(): JSX.Element {
       onCallRemoteStream: setRemoteStream,
       onGroups: setGroups,
     });
-    // ADR-0164：後端建構時 self 一律 online/空白——啟動後把本機記住的手動狀態同步進後端
-    // 並廣播（setStatus 在 online 時 beat＋廣播；offline 則靜默，與「上次設離線」一致）。
-    const pref = loadPresence(backend.self.pubkey);
-    if (pref) backend.setStatus(pref.status, pref.statusMessage);
+    // ADR-0164：狀態已於 buildBackend 建構時 seed 進 self（initialStatus），start() 首拍 beat()
+    // 就尊重離線——不再事後 setStatus 補正（那會先漏一拍上線信標，見程式碼審查 CRITICAL 修正）。
     return () => backend.stop();
   }, [backend]);
 

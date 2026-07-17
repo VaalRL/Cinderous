@@ -300,6 +300,13 @@ export interface RelayPoolOptions {
   /** 企業組織名冊的管理者公鑰（ADR-0047）；設定後訂閱並自動採用名冊、同步通訊錄。 */
   orgAdminPubkey?: string;
   /**
+   * 開機初始狀態與自訂狀態文字（ADR-0164）：本機記住的手動狀態，**建構時就 seed 進 self**，
+   * 讓 `start()` 的首拍 `beat()` 直接尊重（尤其「離線」須靜默，不能事後補正——否則已漏一拍）。
+   * 未提供＝沿用預設 `online`／空字串。
+   */
+  initialStatus?: Status;
+  initialStatusMessage?: string;
+  /**
    * 入職權杖（ADR-0156，成員側）：來自邀請碼。設定後每次開機檢查——名冊尚未包含自己
    * 即把 `{name, token}` 加密送給管理者（冪等；管理者對已在冊者忽略）。
    */
@@ -540,7 +547,8 @@ export class RelayChatBackend implements ChatBackend {
     this.sk = nsecDecode(identity.nsec);
     const pubkey = getPublicKey(this.sk);
     if (pool?.expectPubkey && pubkey !== pool.expectPubkey) throw new Error(IDENTITY_MISMATCH);
-    this.self = { pubkey, name: identity.name, status: "online", statusMessage: "" };
+    // ADR-0164：以本機記住的狀態 seed（尤其離線須從第一拍就靜默）；未提供＝預設 online/空。
+    this.self = { pubkey, name: identity.name, status: pool?.initialStatus ?? "online", statusMessage: pool?.initialStatusMessage ?? "" };
     this.selfNpub = npubEncode(pubkey);
     this.selfNsec = identity.nsec;
     this.contacts = storage.loadContacts();
