@@ -4,41 +4,47 @@ import type { ChatMessage, Contact, Group, Self, Status } from "@cinder/engine";
 import type { MessageKey } from "@cinder/i18n";
 import { useI18n } from "../i18n.js";
 import { Avatar } from "./Avatar.js";
+import { loadNote, saveNote } from "./note-store.js";
 import { replyCounts } from "./thread-util.js";
 
-type AuxTab = "info" | "members" | "media" | "threads" | "calc";
+type AuxTab = "info" | "members" | "media" | "threads" | "note";
 
 /**
- * 右欄計算機（ADR-0097）：**自己的輸入框**，不碰主對話框草稿。純本地計算（禁用 eval），
- * 算完可選擇「插入」回主對話框——不會偷改你正在打的內容。
+ * 右欄便條（ADR-0182）：**每對話一張私人便條**，純本機、不廣播、不上雲。**計算是其中一個功能**
+ * （ADR-0097）——便條內容最後一個非空行若是算式，即時算出結果（禁用 eval），可選擇「插入」回
+ * 主對話框（不會偷改你正在打的內容）。以對話 id 為 key 持久化（本元件以 `key={activeId}` 重掛）。
  */
-function CalcPanel({ onInsert }: { onInsert?: ((text: string) => void) | undefined }): JSX.Element {
+function NotePanel({ convoId, onInsert }: { convoId: string; onInsert?: ((text: string) => void) | undefined }): JSX.Element {
   const { t } = useI18n();
-  const [input, setInput] = useState("");
-  const calc = calcPreview(input);
+  const [note, setNote] = useState(() => loadNote(convoId));
+  const update = (v: string): void => {
+    setNote(v);
+    saveNote(convoId, v);
+  };
+  // 計算功能（ADR-0097）：取最後一個非空行判定是否為算式；是則顯示結果、可插回對話。
+  const lastLine = note.split("\n").map((s) => s.trim()).filter(Boolean).pop() ?? "";
+  const calc = calcPreview(lastLine);
   return (
-    <div className="daux__calc">
-      <input
-        className="daux__calcin"
-        data-testid="aux-calc-input"
-        value={input}
-        onChange={(e) => setInput(e.target.value)}
-        placeholder={t("calc_placeholder")}
-        aria-label={t("aux_tabCalc")}
+    <div className="daux__note">
+      <textarea
+        className="daux__notein"
+        data-testid="aux-note-input"
+        value={note}
+        onChange={(e) => update(e.target.value)}
+        placeholder={t("note_placeholder")}
+        aria-label={t("aux_tabNote")}
       />
       {calc ? (
-        <>
-          <div className="daux__calcout" data-testid="aux-calc-result">
-            <span className="daux__calcexpr">{calc.expr}</span>
-            <span className="daux__calceq">=</span>
-            <b className="daux__calcval">{calc.result}</b>
-          </div>
+        <div className="daux__calcout" data-testid="aux-note-calc">
+          <span className="daux__calcexpr">{calc.expr}</span>
+          <span className="daux__calceq">=</span>
+          <b className="daux__calcval">{calc.result}</b>
           {onInsert ? (
             <div className="daux__calcbtns">
               <button
                 type="button"
                 className="daux__calcbtn"
-                data-testid="aux-calc-insert"
+                data-testid="aux-note-insert"
                 onClick={() => onInsert(`${calc.expr} = ${calc.result}`)}
               >
                 {t("calc_insertExpr")}
@@ -46,19 +52,16 @@ function CalcPanel({ onInsert }: { onInsert?: ((text: string) => void) | undefin
               <button
                 type="button"
                 className="daux__calcbtn"
-                data-testid="aux-calc-insert-result"
+                data-testid="aux-note-insert-result"
                 onClick={() => onInsert(calc.result)}
               >
                 {t("calc_insertResult")}
               </button>
             </div>
           ) : null}
-        </>
-      ) : input.trim() ? (
-        <div className="daux__calchint">{t("calc_notExpr")}</div>
-      ) : (
-        <div className="daux__calchint">{t("calc_hint")}</div>
-      )}
+        </div>
+      ) : null}
+      <div className="daux__notehint">{t("note_hint")}</div>
     </div>
   );
 }
@@ -103,7 +106,7 @@ export function DeckRight(props: DeckRightProps): JSX.Element {
     { key: "threads", label: t("aux_tabThreads"), count: threadRoots.length },
     { key: "members", label: t("aux_tabMembers"), count: members.length },
     { key: "media", label: t("aux_tabMedia"), count: images.length },
-    { key: "calc", label: t("aux_tabCalc") },
+    { key: "note", label: t("aux_tabNote") },
     { key: "info", label: t("aux_tabInfo") },
   ];
 
@@ -194,8 +197,8 @@ export function DeckRight(props: DeckRightProps): JSX.Element {
           )
         ) : null}
 
-        {/* 算式計算機（ADR-0097）：右欄自有輸入框，算完自行決定要不要插回主對話框。 */}
-        {tab === "calc" ? <CalcPanel onInsert={props.onInsert} /> : null}
+        {/* 便條（ADR-0182）：每對話一張私人便條；計算是其中一個功能。key＝對話 id → 切換即載對應便條。 */}
+        {tab === "note" ? <NotePanel key={activeId} convoId={activeId} onInsert={props.onInsert} /> : null}
       </div>
     </div>
   );

@@ -200,10 +200,6 @@ export interface Messages {
   /** 群組計數制已讀（6–10 人，ADR-0095）：`{count}`/`{total}`。 */
   readBy_count: string;
   // 算式預覽與右欄計算機（ADR-0097）
-  aux_tabCalc: string;
-  calc_placeholder: string;
-  calc_hint: string;
-  calc_notExpr: string;
   calc_insertExpr: string;
   calc_insertResult: string;
   calc_insertHint: string;
@@ -287,6 +283,9 @@ export interface Messages {
   aux_tabMembers: string;
   aux_tabMedia: string;
   aux_tabThreads: string;
+  aux_tabNote: string;
+  note_placeholder: string;
+  note_hint: string;
   aux_noMedia: string;
   aux_noThreads: string;
   aux_you: string;
@@ -819,10 +818,6 @@ const zhHant: Messages = {
   msgStatus_read: "已讀",
   readBy_list: "已讀：{names}",
   readBy_count: "已讀 {count}/{total}",
-  aux_tabCalc: "計算",
-  calc_placeholder: "輸入算式，例如 (12+8)*3",
-  calc_hint: "在此計算，不會動到你的對話草稿；算完可自行選擇插入。",
-  calc_notExpr: "這看起來不是算式。",
   calc_insertExpr: "插入算式與答案",
   calc_insertResult: "只插入答案",
   calc_insertHint: "點一下把「= 答案」加到訊息",
@@ -898,6 +893,9 @@ const zhHant: Messages = {
   aux_tabMembers: "成員",
   aux_tabMedia: "媒體",
   aux_tabThreads: "對話串",
+  aux_tabNote: "便條",
+  note_placeholder: "便條…（記筆記；最後一行輸入算式如 12*8 會自動算出）",
+  note_hint: "私人便條，每個對話一張，只存在這台裝置（不廣播、不上雲）。輸入算式會自動辨識，可插入對話。",
   aux_noMedia: "此對話尚無圖片",
   aux_noThreads: "此對話尚無對話串",
   aux_you: "你",
@@ -1414,10 +1412,6 @@ const en: Messages = {
   msgStatus_read: "Read",
   readBy_list: "Read by {names}",
   readBy_count: "Read {count}/{total}",
-  aux_tabCalc: "Calc",
-  calc_placeholder: "Type an expression, e.g. (12+8)*3",
-  calc_hint: "Scratch calculator — it won't touch your draft. Insert the answer only if you want to.",
-  calc_notExpr: "That doesn't look like an expression.",
   calc_insertExpr: "Insert expression and answer",
   calc_insertResult: "Insert answer only",
   calc_insertHint: "Click to append “= answer” to your message",
@@ -1493,6 +1487,9 @@ const en: Messages = {
   aux_tabMembers: "Members",
   aux_tabMedia: "Media",
   aux_tabThreads: "Threads",
+  aux_tabNote: "Notes",
+  note_placeholder: "Notes… (jot anything; type a calc like 12*8 on the last line to evaluate)",
+  note_hint: "Private notes, one per conversation, stored only on this device (never broadcast or synced). Calculations are auto-detected and can be inserted.",
   aux_noMedia: "No images in this conversation yet",
   aux_noThreads: "No threads in this conversation yet",
   aux_you: "You",
