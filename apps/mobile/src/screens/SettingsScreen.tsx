@@ -575,7 +575,8 @@ export function SettingsScreen({
                 </Pressable>
               ))}
             </View>
-            {/* 自訂狀態文字（ADR-0142／0168）：即時廣播（引擎節流心跳）＋本機記住。 */}
+            {/* 自訂狀態文字（ADR-0142／0168）：逐字即時廣播（與桌面一致；引擎 setStatus 無 debounce，
+                每次變更都廣播目前文字）＋本機記住。若日後要改成打完才送，須在共用引擎層加節流。 */}
             {onStatusMessage ? (
               <TextInput
                 style={styles.pwInput}

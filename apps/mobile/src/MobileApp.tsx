@@ -325,6 +325,9 @@ export function MobileApp({
     setSelfNowPlaying("");
     setOrgTitle(backend.selfTitle?.() ?? ""); // ADR-0170：還原這個身分已廣播的頭銜（供設定頁預填）
     setConnState("connecting"); // ADR-0169：換身分重連，先回連線中，待後端回報 online
+    // ADR-0169 審查修正：換身分清掉殘留的 typing 狀態與計時器（衛生性，避免舊值誤帶到新身分）。
+    setTypingFrom(null);
+    if (typingTimer.current) clearTimeout(typingTimer.current);
     setSelfPubkey(identity.pubkey);
     setSelfName(identity.name);
     setSelfNpub(identity.npub);
@@ -933,7 +936,7 @@ export function MobileApp({
     // → 上線狀態（與桌面同序）。typing 是易失提示，6 秒無新訊號自動退回一般副標。
     const subtitle =
       !group && typingFrom === activeId
-        ? translate(locale, "convo_typing")
+        ? translate(locale, "convo_typing", { name: contact ? contactLabel(contact) : "" })
         : group
           ? translate(locale, "group_membersCount", { count: group.members.length })
           : contact
@@ -989,6 +992,9 @@ export function MobileApp({
       <View style={shell.root}>
         {connBanner}
         <ConversationScreen
+          // ADR-0169 審查修正：以 activeId 作 key，換對話（含從通知直接跳另一對話、screen 不變）
+          // 時強制重掛，重置 ttl/draft/replyTarget/面板——避免燒毀效期殘留到別的對話。
+          key={activeId}
           name={group ? group.name : contact ? contactLabel(contact) : activeId}
           messages={convos[activeId] ?? []}
           onSend={send}
