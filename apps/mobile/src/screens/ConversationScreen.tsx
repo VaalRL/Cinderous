@@ -391,10 +391,14 @@ export function ConversationScreen({
   const [auxTab, setAuxTab] = useState<"media" | "threads" | "note">("media");
   // 便條（ADR-0183）：本畫面以 key={activeId} 重掛（App 層），故 useState 初值即載對應對話的便條。
   const [noteText, setNoteText] = useState(() => onNoteLoad?.() ?? "");
-  // 媒體相簿（ADR-0102/0183）：對話中可顯示的圖片（本 session 有原圖 blob 或有跨 session 縮圖）。
-  const auxImages = messages.filter((m) => m.file?.mime.startsWith("image/") && (m.file.url || m.file.thumb));
+  // 媒體相簿（ADR-0102/0183）：對話中可顯示的圖片。ADR-0184 審查修正：useMemo——只在 messages 變
+  // 時重算，避免每次打字（draft/便條 state 變）都對整份 messages 重跑 filter/replyCounts。
+  const auxImages = useMemo(
+    () => messages.filter((m) => m.file?.mime.startsWith("image/") && (m.file.url || m.file.thumb)),
+    [messages],
+  );
   // 對話串（ADR-0051/0183）：有回覆的串根＋回覆數。
-  const auxThreads = [...replyCounts(messages).entries()].filter(([, n]) => n > 0);
+  const auxThreads = useMemo(() => [...replyCounts(messages).entries()].filter(([, n]) => n > 0), [messages]);
   const auxTabStyle = (on: boolean) => [styles.auxTab, on ? styles.auxTabOn : null];
   const auxTabTxt = (on: boolean) => [styles.auxTabTxt, on ? styles.auxTabTxtOn : null];
   /** 貼圖挑選面板是否展開（ADR-0137）＋目前分頁。 */
@@ -713,7 +717,7 @@ export function ConversationScreen({
             <Pressable style={auxTabStyle(auxTab === "threads")} testID="aux-tab-threads" onPress={() => setAuxTab("threads")}>
               <Text style={auxTabTxt(auxTab === "threads")}>{t("aux_tabThreads")}（{auxThreads.length}）</Text>
             </Pressable>
-            {onNoteSave ? (
+            {onNoteLoad && onNoteSave ? (
               <Pressable style={auxTabStyle(auxTab === "note")} testID="aux-tab-note" onPress={() => setAuxTab("note")}>
                 <Text style={auxTabTxt(auxTab === "note")}>{t("aux_tabNote")}</Text>
               </Pressable>
@@ -758,7 +762,7 @@ export function ConversationScreen({
             )
           ) : null}
 
-          {auxTab === "note" && onNoteSave ? (
+          {auxTab === "note" && onNoteLoad && onNoteSave ? (
             <View>
               <TextInput
                 style={styles.auxNote}
@@ -768,12 +772,12 @@ export function ConversationScreen({
                   onNoteSave(v);
                 }}
                 multiline
-                placeholder={t("note_placeholder")}
+                placeholder={t("note_placeholderM")}
                 placeholderTextColor={tk.muted}
                 aria-label={t("aux_tabNote")}
                 testID="aux-note-input"
               />
-              <Text style={styles.auxEmpty}>{t("note_hint")}</Text>
+              <Text style={styles.auxEmpty}>{t("note_hintM")}</Text>
             </View>
           ) : null}
         </View>

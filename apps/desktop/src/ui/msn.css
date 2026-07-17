@@ -871,11 +871,8 @@ button:disabled { opacity: .5; cursor: default; filter: none; }
 .calcchip__val { font-weight: 700; font-variant-numeric: tabular-nums; }
 
 /* 右欄計算機（ADR-0097）。 */
-.daux__calc { display: flex; flex-direction: column; gap: 8px; padding: 10px; }
-.daux__calcin {
-  width: 100%; box-sizing: border-box; padding: 7px 10px; font-size: 13px;
-  border: 1px solid var(--border); border-radius: 8px; background: var(--field); color: var(--ink);
-}
+/* .daux__calcout 系列仍用於便條裡的算式結果（ADR-0182）；.daux__calc/.daux__calcin/.daux__calchint
+   隨 CalcPanel→NotePanel 已無引用，於 ADR-0184 審查清除。 */
 .daux__calcout {
   display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap;
   padding: 8px 10px; border-radius: 8px; background: var(--border);
@@ -890,7 +887,6 @@ button:disabled { opacity: .5; cursor: default; filter: none; }
   border: 1px solid var(--border); background: none; color: var(--ink);
 }
 .daux__calcbtn:hover { border-color: var(--accent); color: var(--accent); }
-.daux__calchint { font-size: 11px; color: var(--muted); line-height: 1.5; }
 /* 便條（ADR-0182）：多行輸入的私人便條；計算輸出沿用 .daux__calcout。 */
 .daux__note { display: flex; flex-direction: column; gap: 8px; padding: 10px; }
 .daux__notein {

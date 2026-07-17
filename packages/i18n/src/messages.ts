@@ -287,6 +287,8 @@ export interface Messages {
   aux_title: string;
   note_placeholder: string;
   note_hint: string;
+  note_placeholderM: string;
+  note_hintM: string;
   aux_noMedia: string;
   aux_noThreads: string;
   aux_you: string;
@@ -898,6 +900,8 @@ const zhHant: Messages = {
   aux_title: "對話輔助（媒體／對話串／便條）",
   note_placeholder: "便條…（記筆記；最後一行輸入算式如 12*8 會自動算出）",
   note_hint: "私人便條，每個對話一張，只存在這台裝置（不廣播、不上雲）。輸入算式會自動辨識，可插入對話。",
+  note_placeholderM: "便條…（記筆記，只存這台裝置）",
+  note_hintM: "私人便條，每個對話一張，加密存在這台裝置（不廣播、不上雲）。計算請直接在下方輸入框打算式。",
   aux_noMedia: "此對話尚無圖片",
   aux_noThreads: "此對話尚無對話串",
   aux_you: "你",
@@ -1493,6 +1497,8 @@ const en: Messages = {
   aux_title: "Conversation panels (media / threads / notes)",
   note_placeholder: "Notes… (jot anything; type a calc like 12*8 on the last line to evaluate)",
   note_hint: "Private notes, one per conversation, stored only on this device (never broadcast or synced). Calculations are auto-detected and can be inserted.",
+  note_placeholderM: "Notes… (jot anything; stored only on this device)",
+  note_hintM: "Private notes, one per conversation, encrypted on this device (never broadcast or synced). For calculations, just type an expression in the composer below.",
   aux_noMedia: "No images in this conversation yet",
   aux_noThreads: "No threads in this conversation yet",
   aux_you: "You",

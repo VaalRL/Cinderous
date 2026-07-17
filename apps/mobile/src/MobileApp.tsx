@@ -1222,7 +1222,8 @@ export function MobileApp({
         : {};
     // 檔案：真實 relay 才有 P2P 傳輸（示範後端無 sendFile）。
     const fileProps = backendRef.current?.sendFile ? { onSendFile: sendFileFromPicker } : {};
-    // 便條（ADR-0183）：有身分金鑰才提供（示範模式無）；讀/寫加密便條，App 層持金鑰、元件只碰明文。
+    // 便條（ADR-0183）：有作用中身分金鑰（selfNsec 導出）＋activeId 才提供；讀/寫加密便條，App 層
+    // 持金鑰、元件只碰明文。（金鑰只看 selfNsec，與是否示範後端無關——登入後恆有。）
     const noteProps =
       noteKey && activeId
         ? { onNoteLoad: () => loadNote(activeId, noteKey), onNoteSave: (text: string) => saveNote(activeId, noteKey, text) }
