@@ -1,7 +1,7 @@
 // 行動端對話畫面（ADR-0085）：從聊天清單點入的全螢幕對話，參考 LINE/Signal——
 // 頂部返回列（‹ 返回＋名稱＋副標）、訊息氣泡（自己靠右主色、對方靠左淺底；群組顯示發送者名）、
 // 底部輸入列（輸入框＋送出）。色彩吃 @cinder/theme。訊息與送出由呼叫端注入（接 ChatBackend）。
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   applyMention,
   calcPreview,
@@ -203,6 +203,14 @@ function makeStyles(tk: ThemeTokens) {
       borderTopWidth: 1,
       borderTopColor: tk.border,
     },
+    burnLabel: {
+      paddingHorizontal: 14,
+      paddingTop: 6,
+      fontSize: 11,
+      fontWeight: "700",
+      color: tk.accent,
+      backgroundColor: tk.surface2,
+    },
     input: {
       flex: 1,
       borderWidth: 1,
@@ -233,6 +241,7 @@ export function ConversationScreen({
   onReact,
   onUnsend,
   onSend,
+  onTyping,
   mentionCandidates,
   chatBg = null,
   onSetChatBg,
@@ -293,8 +302,13 @@ export function ConversationScreen({
   isGroupAdmin?: boolean;
   /** 自己的 pubkey（成員清單中不對自己顯示「移除」）。 */
   selfPubkey?: string;
-  /** 送出訊息；`mentions` 為解析出的 @提及公鑰（ADR-0050／0133）。 */
-  onSend: (text: string, mentions?: string[], replyTo?: string) => void;
+  /**
+   * 送出訊息；`mentions` 為解析出的 @提及公鑰（ADR-0050／0133）；`replyTo` 為對話串根 id
+   * （ADR-0136）；`ttlSeconds` 為限時訊息（閱後即焚，ADR-0057，1:1 才有）。
+   */
+  onSend: (text: string, mentions?: string[], replyTo?: string, ttlSeconds?: number) => void;
+  /** 通知對方「正在輸入」（ADR-0120）；1:1 才提供，元件內自行節流。未提供＝不送。 */
+  onTyping?: () => void;
   /** @提及候選（ADR-0133）：群組＝其他成員、1:1＝對方。未提供則不顯示提及建議。 */
   mentionCandidates?: MentionCandidate[];
   /** 目前對話背景（ADR-0134，本地個人化）；null＝用預設面板色。 */
@@ -368,6 +382,26 @@ export function ConversationScreen({
   };
 
   const [draft, setDraft] = useState("");
+  // 限時訊息（ADR-0057，1:1）：關→1 分→1 小時→1 天 循環。群組不支援（sendGroupMessage 不帶 ttl）。
+  const [ttl, setTtl] = useState(0);
+  const TTL_CYCLE = [0, 60, 3600, 86400];
+  const TTL_LABEL: Record<number, MessageKey> = {
+    0: "convo_timerOff",
+    60: "convo_timer1m",
+    3600: "convo_timer1h",
+    86400: "convo_timer1d",
+  };
+  const cycleTtl = (): void => setTtl((v) => TTL_CYCLE[(TTL_CYCLE.indexOf(v) + 1) % TTL_CYCLE.length] ?? 0);
+  // 輸入中節流（ADR-0120）：最多每 3 秒送一次「正在輸入」，避免每個按鍵都打中繼。
+  const lastTypingAt = useRef(0);
+  const onDraftChange = (text: string): void => {
+    setDraft(text);
+    if (!onTyping || !text.trim()) return;
+    const now = Date.now();
+    if (now - lastTypingAt.current < 3000) return;
+    lastTypingAt.current = now;
+    onTyping();
+  };
   // 算式預覽（ADR-0097）：純函式判定草稿是否為算式；不是就回 null（不顯示）。
   const calc = calcPreview(draft);
 
@@ -397,7 +431,8 @@ export function ConversationScreen({
     // 解析 @提及 → p tag（隨 Gift Wrap 加密，中繼看不到；ADR-0050）。
     const mentions = mentionCandidates ? parseMentions(text, mentionCandidates) : [];
     // 內嵌回覆（ADR-0136）：帶對話串根 id → NIP-10 reply e-tag（同樣隨 Gift Wrap 加密）。
-    onSend(text, mentions.length > 0 ? mentions : undefined, replyTarget ?? undefined);
+    // 限時（ADR-0057）：ttl>0＝閱後即焚；群組無此鈕故恒為 0。送出後保留 ttl 設定（連發同效期）。
+    onSend(text, mentions.length > 0 ? mentions : undefined, replyTarget ?? undefined, ttl > 0 ? ttl : undefined);
     setDraft("");
     setReplyTarget(null);
   };
@@ -867,6 +902,12 @@ export function ConversationScreen({
         </View>
       ) : null}
 
+      {/* 限時作用中提示（ADR-0057）：讓使用者清楚知道選了哪個效期，而非只有 🔥。 */}
+      {ttl > 0 && !groupMembers ? (
+        <Text style={styles.burnLabel} testID="burn-label">
+          🔥 {t(TTL_LABEL[ttl] ?? "convo_timerOff")}
+        </Text>
+      ) : null}
       <View style={styles.composer}>
         {/* 傳送檔案（ADR-0093/0100）：位元組走 P2P、metadata 走中繼。 */}
         {onSendFile ? (
@@ -884,10 +925,24 @@ export function ConversationScreen({
         >
           <Text style={styles.attachText}>😊</Text>
         </Pressable>
+        {/* 限時訊息（ADR-0057）：點一下循環關/1m/1h/1d；1:1 才有（群組扇出不帶 ttl）。 */}
+        {!groupMembers ? (
+          <Pressable
+            style={styles.attach}
+            accessibilityRole="button"
+            aria-label={t("convo_timerTitle")}
+            testID="burn-toggle"
+            onPress={cycleTtl}
+          >
+            <Text style={[styles.attachText, ttl > 0 ? { opacity: 1 } : { opacity: 0.4 }]}>
+              {ttl > 0 ? "🔥" : "⏱"}
+            </Text>
+          </Pressable>
+        ) : null}
         <TextInput
           style={styles.input}
           value={draft}
-          onChangeText={setDraft}
+          onChangeText={onDraftChange}
           placeholder={t("mobileConvo_input")}
           aria-label={t("mobileConvo_input")}
         />

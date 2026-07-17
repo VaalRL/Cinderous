@@ -55,6 +55,9 @@ function makeStyles(tk: ThemeTokens) {
     blockedName: { flex: 1, fontSize: 14, color: tk.muted },
     blockBtn: { marginLeft: "auto", borderWidth: 1, borderColor: tk.accent, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 2 },
     blockText: { fontSize: 11, color: tk.accent },
+    // 長按選單（ADR-0169）：移除／封鎖並排，整組靠右。
+    actRow: { marginLeft: "auto", flexDirection: "row", gap: 6 },
+    actBtn: { borderWidth: 1, borderColor: tk.accent, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 2 },
     // 訊息請求（ADR-0121）：警示色，因為它需要使用者做決定。
     reqHead: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingRight: 12 },
     reqSection: { fontSize: 11, fontWeight: "700", color: "#b45309", paddingHorizontal: 12, paddingTop: 10 },
@@ -75,6 +78,7 @@ export function ContactListScreen({
   contacts,
   onOpen,
   onBlock,
+  onRemove,
   blocked,
   onUnblock,
   requests = [],
@@ -93,6 +97,8 @@ export function ContactListScreen({
   onOpen?: (pubkey: string) => void;
   /** 封鎖某聯絡人（長按）。未提供則不顯示封鎖入口。 */
   onBlock?: (pubkey: string) => void;
+  /** 移除某聯絡人（長按，ADR-0121）：清掉對話但**不**封鎖，可再加回。未提供則不顯示。 */
+  onRemove?: (pubkey: string) => void;
   /** 已封鎖名單（可解除）。 */
   blocked?: { pubkey: string; name: string }[];
   /** 解除封鎖。 */
@@ -181,23 +187,40 @@ export function ContactListScreen({
                 style={styles.row}
                 accessibilityRole="button"
                 onPress={() => onOpen?.(c.pubkey)}
-                {...(onBlock ? { onLongPress: () => setPicked((p) => (p === c.pubkey ? null : c.pubkey)) } : {})}
+                {...(onBlock || onRemove ? { onLongPress: () => setPicked((p) => (p === c.pubkey ? null : c.pubkey)) } : {})}
               >
                 <View style={[styles.dot, { backgroundColor: STATUS_COLORS[c.status] }]} />
                 <Text style={styles.name}>{c.name}</Text>
-                {/* 長按＝手機上的「右鍵選單」。封鎖會移出聯絡人並清掉該對話（含封存）。 */}
-                {picked === c.pubkey && onBlock ? (
-                  <Pressable
-                    style={styles.blockBtn}
-                    accessibilityRole="button"
-                    testID={`block-${c.pubkey}`}
-                    onPress={() => {
-                      onBlock(c.pubkey);
-                      setPicked(null);
-                    }}
-                  >
-                    <Text style={styles.blockText}>{t("block")}</Text>
-                  </Pressable>
+                {/* 長按＝手機上的「右鍵選單」。移除＝清對話但不封鎖（可再加回）；封鎖＝移出並忽略後續訊息。 */}
+                {picked === c.pubkey && (onBlock || onRemove) ? (
+                  <View style={styles.actRow}>
+                    {onRemove ? (
+                      <Pressable
+                        style={styles.actBtn}
+                        accessibilityRole="button"
+                        testID={`remove-${c.pubkey}`}
+                        onPress={() => {
+                          onRemove(c.pubkey);
+                          setPicked(null);
+                        }}
+                      >
+                        <Text style={styles.blockText}>{t("contact_remove")}</Text>
+                      </Pressable>
+                    ) : null}
+                    {onBlock ? (
+                      <Pressable
+                        style={styles.actBtn}
+                        accessibilityRole="button"
+                        testID={`block-${c.pubkey}`}
+                        onPress={() => {
+                          onBlock(c.pubkey);
+                          setPicked(null);
+                        }}
+                      >
+                        <Text style={styles.blockText}>{t("block")}</Text>
+                      </Pressable>
+                    ) : null}
+                  </View>
                 ) : null}
               </Pressable>
             ))}

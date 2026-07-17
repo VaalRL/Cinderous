@@ -64,6 +64,24 @@ describe("封鎖（行動端）", () => {
     expect(html).not.toContain('data-testid="block-pk_bob"'); // 未長按 → 不顯示
   });
 
+  it("移除聯絡人（ADR-0169，非封鎖）：未提供 onRemove → 無移除入口；提供也需長按才出現", () => {
+    const without = renderToStaticMarkup(
+      <ContactListScreen selfPubkey={"aa".repeat(32)} selfName="我" contacts={[bob]} onBlock={() => {}} locale="en" />,
+    );
+    expect(without).not.toContain('data-testid="remove-pk_bob"'); // 未提供 onRemove
+    const withRemove = renderToStaticMarkup(
+      <ContactListScreen
+        selfPubkey={"aa".repeat(32)}
+        selfName="我"
+        contacts={[bob]}
+        onRemove={() => {}}
+        locale="en"
+      />,
+    );
+    expect(withRemove).toContain("Bob");
+    expect(withRemove).not.toContain('data-testid="remove-pk_bob"'); // 未長按 → 不顯示（避免誤觸）
+  });
+
   it("已封鎖名單可解除；被封鎖者不再出現在聯絡人區", () => {
     const html = renderToStaticMarkup(
       <ContactListScreen

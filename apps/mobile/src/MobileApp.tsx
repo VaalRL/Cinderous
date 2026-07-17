@@ -2,7 +2,7 @@
 // 接 @cinder/engine 的 ChatBackend（示範或真實 relay，見 backend.ts）；主題/主色/語言由本殼掌管，
 // 設定分頁即時切換。正式版把後端換成注入 RelayChatBackend＋原生安全儲存即可（同一套 UI）。
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { AppStorage, ChatBackend, ChatMessage, CloudSyncMode, Contact, Group, Status } from "@cinder/engine";
+import type { AppStorage, ChatBackend, ChatMessage, CloudSyncMode, ConnectionState, Contact, Group, Status } from "@cinder/engine";
 import {
   applyPairBundle,
   exportExtension,
@@ -33,7 +33,7 @@ import { CallScreen } from "./screens/CallScreen.js";
 import { type Locale, type MessageKey, translate } from "@cinder/i18n";
 import type { ChatBg, Theme } from "@cinder/theme";
 import { getChatBg, removeChatBg, setChatBg } from "./personalize.js";
-import { StyleSheet, View } from "react-native-web";
+import { StyleSheet, Text, View } from "react-native-web";
 import { changeRememberedPassword, type MobileIdentity, unlockRemembered } from "./auth.js";
 import {
   activeProfile,
@@ -82,6 +82,12 @@ const STATUS_KEY: Record<Status, MessageKey> = {
 };
 
 const shell = StyleSheet.create({ root: { flex: 1 } });
+// 連線狀態細條（ADR-0034／0169）：固定色（琥珀＝連線中、紅＝離線），兩主題皆清楚可辨。
+const bannerStyles = StyleSheet.create({
+  connecting: { paddingVertical: 4, paddingHorizontal: 12, backgroundColor: "#b45309" },
+  offline: { paddingVertical: 4, paddingHorizontal: 12, backgroundColor: "#b91c1c" },
+  text: { color: "#fff", fontSize: 12, fontWeight: "700", textAlign: "center" },
+});
 
 // 加密雲端備份（ADR-0071）：裝置本地偏好；off／basic／full。
 const CLOUD_SYNC_KEY = "nb.cloudSync";
@@ -449,7 +455,10 @@ export function MobileApp({
       },
       onCallLocalStream: setLocalStream,
       onCallRemoteStream: setRemoteStream,
-      onTyping: () => {},
+      // 對方正在輸入（ADR-0120；行動端於 ADR-0169 補齊）：記下來源，對話副標顯示「正在輸入…」。
+      onTyping: (pk) => markTyping(pk),
+      // 與中繼站連線狀態（ADR-0034；行動端於 ADR-0169 補齊）：非 online 時頂端顯示細條。
+      onConnection: (state) => setConnState(state),
       // 敲一下（ADR-0114）：收到就震動（行動端於 ADR-0168 補齊）。裝置不支援 Vibration API
       // （多數桌面瀏覽器、iOS Safari）時靜默略過——不是錯誤，只是沒有觸覺回饋。
       onNudge: () => {
@@ -495,7 +504,7 @@ export function MobileApp({
   /** 目前開啟的對話是不是群組。 */
   const isGroup = (id: string): boolean => groups.some((g) => g.id === id);
 
-  const send = (text: string, mentions?: string[], replyTo?: string): void => {
+  const send = (text: string, mentions?: string[], replyTo?: string, ttlSeconds?: number): void => {
     if (!activeId) return;
     const b = backendRef.current;
     // **群組必須走 sendGroupMessage**：`groupId` 是 16 bytes hex（32 字元），**不是** pubkey。
@@ -503,8 +512,21 @@ export function MobileApp({
     // → 點進群組送訊直接拋錯（`second arg must be public key`），訊息送不出去。
     // `mentions`＝@提及公鑰（ADR-0050／0133）；`replyTo`＝對話串根 id（ADR-0051／0136）；
     // 兩者皆隨 Gift Wrap 加密，中繼看不到社交圖譜/串結構。
+    // `ttlSeconds`＝限時訊息（ADR-0057，1:1 才有）；群組扇出不帶 ttl（介面無此參數）。
     if (isGroup(activeId)) b?.sendGroupMessage?.(activeId, text, mentions, replyTo);
-    else b?.sendMessage(activeId, text, undefined, mentions, replyTo);
+    else b?.sendMessage(activeId, text, ttlSeconds, mentions, replyTo);
+  };
+  /** 通知對方「正在輸入」（ADR-0120）：1:1 才送（群組不送 typing）。節流在對話畫面內。 */
+  const sendTyping = (): void => {
+    if (activeId && !isGroup(activeId)) backendRef.current?.sendTyping(activeId);
+  };
+  /** 移除聯絡人（ADR-0121，非封鎖）：清掉該對話（含封存）。正在看就退回主畫面。 */
+  const removeContact = (pubkey: string): void => {
+    if (typeof window !== "undefined" && typeof window.confirm === "function" && !window.confirm(translate(locale, "contact_removeConfirm"))) {
+      return;
+    }
+    backendRef.current?.removeContact?.(pubkey);
+    if (activeId === pubkey) back();
   };
   // 對話背景（ADR-0134）：純本地，寫 localStorage ＋ 即時反映到畫面（不廣播、不進雲端）。
   const applyChatBg = (bg: ChatBg): void => {
@@ -640,6 +662,16 @@ export function MobileApp({
     setSelfNowPlaying(t);
     backendRef.current?.setNowPlaying(t);
   };
+  /** 對方正在輸入（ADR-0120／0169）：只留最近一位；6 秒無新訊號自動清（typing 是易失提示）。 */
+  const [typingFrom, setTypingFrom] = useState<string | null>(null);
+  const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const markTyping = (pk: string): void => {
+    setTypingFrom(pk);
+    if (typingTimer.current) clearTimeout(typingTimer.current);
+    typingTimer.current = setTimeout(() => setTypingFrom(null), 6000);
+  };
+  /** 與中繼站連線狀態（ADR-0034）：非 online 時頂端顯示細條（連線中/離線）。 */
+  const [connState, setConnState] = useState<ConnectionState>("connecting");
   /**
    * 通知開關（ADR-0116）。**權限必須在使用者手勢裡請求**——瀏覽器會拒絕非手勢的
    * `Notification.requestPermission()`。使用者拒絕授權 → 開關不打開（不假裝成功）。
@@ -874,17 +906,31 @@ export function MobileApp({
     );
   }
 
+  // 連線狀態細條（ADR-0169）：只在真實 relay 且非 online 時顯示（示範模式無中繼、不顯示）。
+  const connBanner =
+    relayUrl && connState !== "online" ? (
+      <View style={connState === "offline" ? bannerStyles.offline : bannerStyles.connecting}>
+        <Text style={bannerStyles.text} testID="conn-banner">
+          {translate(locale, connState === "offline" ? "conn_offline" : "conn_connecting")}
+        </Text>
+      </View>
+    ) : null;
+
   if (screen === "conversation" && activeId) {
     const group = groups.find((g) => g.id === activeId);
     const contact = contacts.find((c) => c.pubkey === activeId);
-    // 副標題：群組＝成員數；1:1＝正在聽（♪）優先 → 自訂狀態文字 → 上線狀態（與桌面同序）。
-    const subtitle = group
-      ? translate(locale, "group_membersCount", { count: group.members.length })
-      : contact
-        ? contact.nowPlaying?.trim()
-          ? `♪ ${contact.nowPlaying}`
-          : contact.statusMessage || translate(locale, STATUS_KEY[contact.status])
-        : undefined;
+    // 副標題：對方正在輸入（ADR-0120）最優先；群組＝成員數；1:1＝正在聽（♪）→ 自訂狀態文字
+    // → 上線狀態（與桌面同序）。typing 是易失提示，6 秒無新訊號自動退回一般副標。
+    const subtitle =
+      !group && typingFrom === activeId
+        ? translate(locale, "convo_typing")
+        : group
+          ? translate(locale, "group_membersCount", { count: group.members.length })
+          : contact
+            ? contact.nowPlaying?.trim()
+              ? `♪ ${contact.nowPlaying}`
+              : contact.statusMessage || translate(locale, STATUS_KEY[contact.status])
+            : undefined;
     // 群組另傳成員名解析＋成員清單：供已讀分級（≤5 名單、6–10 計數、>10 不顯示，ADR-0095）。
     // 群組管理（ADR-0114）：任何成員都能離開；**只有管理者**能移除成員（ADR-0027）。
     const groupProps = group
@@ -922,6 +968,7 @@ export function MobileApp({
     const callProps = backendRef.current?.startCall && hasCallSupport() ? { onStartCall: startCall } : {};
     return (
       <View style={shell.root}>
+        {connBanner}
         <ConversationScreen
           name={group ? group.name : contact ? contactLabel(contact) : activeId}
           messages={convos[activeId] ?? []}
@@ -933,7 +980,7 @@ export function MobileApp({
           onUnsend={unsend}
           {...aliasProps}
           {...(subtitle ? { subtitle } : {})}
-          {...(relayUrl && !group ? { onNudge: nudge } : {})}
+          {...(relayUrl && !group ? { onNudge: nudge, onTyping: sendTyping } : {})}
           {...((archived[activeId] ?? 0) > 0 ? { onHistory: () => setScreen("history") } : {})}
           chatBg={chatBg}
           onSetChatBg={applyChatBg}
@@ -952,6 +999,7 @@ export function MobileApp({
   // 主畫面：分頁內容 + 底部分頁列。
   return (
     <View style={shell.root}>
+      {connBanner}
       {tab === "chats" ? (
         <ChatsListScreen
           entries={entries}
@@ -974,6 +1022,7 @@ export function MobileApp({
           contacts={mobileContacts}
           onOpen={openConvo}
           onBlock={block}
+          onRemove={removeContact}
           blocked={blocked}
           onUnblock={unblock}
           requests={requests}
