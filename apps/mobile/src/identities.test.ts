@@ -9,6 +9,7 @@ import {
   activeProfile,
   getRemembered,
   isOwnIdentity,
+  inviteToOrg,
   loadIdentities,
   profileOrg,
   putRemembered,
@@ -159,6 +160,19 @@ describe("企業身分跨重啟持久（ADR-0174）", () => {
     const p = activeProfile(rememberInProfile({ profiles: [], active: null }, a, "pw", RELAY)!.state)!;
     expect(p.enterprise).toBe(false);
     expect(profileOrg(p)).toBeUndefined();
+  });
+});
+
+describe("邀請碼入職（ADR-0176）", () => {
+  it("inviteToOrg：邀請碼 → 企業成員精華（管理者 pubkey＋入職權杖；escrow 帶託管旗標）", () => {
+    const admin = "a".repeat(64);
+    expect(inviteToOrg({ adminPubkey: admin, token: "tok" })).toEqual({ enterprise: true, adminPubkey: admin, orgJoinToken: "tok" });
+    expect(inviteToOrg({ adminPubkey: admin, token: "tok", escrow: true })).toEqual({
+      enterprise: true,
+      adminPubkey: admin,
+      orgJoinToken: "tok",
+      orgEscrow: true,
+    });
   });
 });
 

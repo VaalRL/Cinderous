@@ -2,6 +2,7 @@
 // 純 UI（RN 元件）：金鑰解碼/驗證在 ../auth（重用 @cinder/core）；色彩吃 @cinder/theme（與桌面同源）。
 // 私鑰只在本機解碼、絕不外流；輸入以 secureTextEntry 遮罩，並即時預覽導出的 npub 供確認。
 import { useMemo, useState } from "react";
+import { type OrgInvite, parseOrgInvite } from "@cinder/core";
 import { type Locale, type MessageKey, translate } from "@cinder/i18n";
 import { resolveTheme, STATUS_COLORS, type Theme, type ThemeTokens } from "@cinder/theme";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native-web";
@@ -43,6 +44,7 @@ function makeStyles(tk: ThemeTokens) {
 
 export function NsecSignInScreen({
   onSignIn,
+  onJoinOrg,
   nameTaken,
   onUsePairing,
   onBack,
@@ -57,6 +59,11 @@ export function NsecSignInScreen({
    * → 呼叫端以 Argon2id 包裹 nsec 落地（ADR-0117）。
    */
   onSignIn: (identity: MobileIdentity, password?: string) => void;
+  /**
+   * 邀請碼入職（ADR-0156／0176）：把邀請碼貼進顯示名稱欄即偵測 → 轉為「加入組織」（生成全新
+   * 企業成員身分）。未提供＝不顯示入職（如新增身分時）。
+   */
+  onJoinOrg?: (invite: OrgInvite, name: string, password?: string) => void;
   /**
    * ADR-0146：本機是否已有同名（可見）身分（排除同一把金鑰的重複匯入）。命中則擋下並提示改名，
    * 維持名稱唯一。未提供＝不檢查（初次登入無既有身分）。
@@ -82,9 +89,24 @@ export function NsecSignInScreen({
   const [password, setPassword] = useState("");
   /** 備份密碼（ADR-0070／0135）：貼的是備份碼時才需要，用來解開 NIP-49 信封。 */
   const [backupPw, setBackupPw] = useState("");
+  const [joinName, setJoinName] = useState(""); // 入職時的顯示名稱（同事看到的）
   const T = (k: MessageKey): string => translate(locale, k);
   const isBackup = looksLikeBackupCode(nsec); // 貼的是備份碼？→ 顯示備份密碼欄
   const npub = isBackup ? null : npubFromNsec(nsec); // 備份碼未解密前導不出 npub
+  // 入職邀請（ADR-0156／0176）：把邀請碼貼進顯示名稱欄 → 轉「加入組織」（生成全新企業成員身分）。
+  const invite = onJoinOrg ? parseOrgInvite(name) : null;
+  const joinTaken = !!invite && joinName.trim().length > 0 && !!nameTaken?.(joinName.trim(), "");
+  const submitJoin = (): void => {
+    if (!invite || !joinName.trim() || joinTaken) return;
+    setError(null);
+    onJoinOrg?.(invite, joinName.trim(), password || undefined);
+  };
+  let relayHost = "";
+  try {
+    if (invite) relayHost = new URL(invite.relayUrl).host;
+  } catch {
+    relayHost = invite?.relayUrl ?? "";
+  }
 
   const submit = (): void => {
     const r = identityFromSecret(nsec, name, backupPw);
@@ -110,22 +132,50 @@ export function NsecSignInScreen({
 
         <Text style={styles.label}>{T("mobileSignIn_nameLabel")}</Text>
         <TextInput style={styles.input} value={name} onChangeText={setName} aria-label={T("mobileSignIn_nameLabel")} />
+        {onJoinOrg && !invite ? <Text style={styles.hint}>{T("addId_invite")}</Text> : null}
 
-        <Text style={styles.label}>{T("rescue_secret")}</Text>
-        <TextInput
-          style={styles.input}
-          value={nsec}
-          onChangeText={setNsec}
-          placeholder={T("mobileSignIn_nsecPlaceholder")}
-          placeholderTextColor={tk.muted}
-          secureTextEntry
-          autoCapitalize="none"
-          autoCorrect={false}
-          aria-label={T("rescue_secret")}
-        />
+        {invite ? (
+          // 加入組織（ADR-0156／0176）：貼碼＝生成全新企業成員身分（不用現有 nsec）。
+          <>
+            <Text style={styles.hint}>{translate(locale, "signIn_joinHint", { host: relayHost })}</Text>
+            <Text style={styles.label}>{T("signIn_joinName")}</Text>
+            <TextInput
+              style={styles.input}
+              value={joinName}
+              onChangeText={setJoinName}
+              placeholder={T("signIn_joinName")}
+              placeholderTextColor={tk.muted}
+              autoCapitalize="none"
+              autoCorrect={false}
+              aria-label={T("signIn_joinName")}
+              testID="join-name"
+            />
+            {invite.escrow ? (
+              <Text style={styles.error} testID="join-escrow">
+                {T("signIn_joinEscrow")}
+              </Text>
+            ) : null}
+            {joinTaken ? <Text style={styles.error}>{T("mobileSignIn_nameTaken")}</Text> : null}
+          </>
+        ) : (
+          <>
+            <Text style={styles.label}>{T("rescue_secret")}</Text>
+            <TextInput
+              style={styles.input}
+              value={nsec}
+              onChangeText={setNsec}
+              placeholder={T("mobileSignIn_nsecPlaceholder")}
+              placeholderTextColor={tk.muted}
+              secureTextEntry
+              autoCapitalize="none"
+              autoCorrect={false}
+              aria-label={T("rescue_secret")}
+            />
+          </>
+        )}
 
-        {/* 貼的是加密備份碼（ADR-0070）→ 需要備份密碼才解得開 NIP-49 信封。 */}
-        {isBackup ? (
+        {/* 貼的是加密備份碼（ADR-0070）→ 需要備份密碼才解得開 NIP-49 信封。入職模式無 nsec 欄，不顯示。 */}
+        {!invite && isBackup ? (
           <>
             <Text style={styles.label}>{T("rescue_backupPw")}</Text>
             <TextInput
@@ -162,16 +212,22 @@ export function NsecSignInScreen({
           </>
         ) : null}
 
-        {npub ? (
+        {!invite && npub ? (
           <Text style={styles.npub}>
             {T("mobileSignIn_derived")}: {npub.slice(0, 20)}…
           </Text>
         ) : null}
         {error ? <Text style={styles.error}>{T(error)}</Text> : null}
 
-        <Pressable style={styles.button} onPress={submit} accessibilityRole="button">
-          <Text style={styles.buttonText}>{T("mobileSignIn_button")}</Text>
-        </Pressable>
+        {invite ? (
+          <Pressable style={styles.button} onPress={submitJoin} accessibilityRole="button" testID="join-org">
+            <Text style={styles.buttonText}>{T("signIn_joinButton")}</Text>
+          </Pressable>
+        ) : (
+          <Pressable style={styles.button} onPress={submit} accessibilityRole="button">
+            <Text style={styles.buttonText}>{T("mobileSignIn_button")}</Text>
+          </Pressable>
+        )}
 
         {onUsePairing ? (
           <Pressable onPress={onUsePairing} accessibilityRole="button">

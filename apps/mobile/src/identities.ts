@@ -128,6 +128,16 @@ export function rememberInProfile(
   return { state: next, remembered: r };
 }
 
+/** 邀請碼 → 企業身分精華（ADR-0176）：入職＝企業成員（帶管理者 pubkey、入職權杖、是否託管）。 */
+export function inviteToOrg(invite: { adminPubkey: string; token: string; escrow?: boolean }): PairBundleOrg {
+  return {
+    enterprise: true,
+    adminPubkey: invite.adminPubkey,
+    orgJoinToken: invite.token,
+    ...(invite.escrow ? { orgEscrow: true } : {}),
+  };
+}
+
 /** 從登錄 Profile 取回企業身分精華（ADR-0174）：供重啟解鎖後建後端用。無企業欄位回 undefined。 */
 export function profileOrg(p: Profile | undefined | null): PairBundleOrg | undefined {
   if (!p) return undefined;

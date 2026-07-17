@@ -15,7 +15,7 @@ import {
   type PairBundle,
   shouldMuteOrgNotification,
 } from "@cinder/engine";
-import { makeBackupCode, nsecDecode } from "@cinder/core";
+import { generateSecretKey, makeBackupCode, nsecDecode, nsecEncode, type OrgInvite } from "@cinder/core";
 import {
   contactLabel,
   createPairingOffer,
@@ -35,11 +35,12 @@ import { type Locale, type MessageKey, translate } from "@cinder/i18n";
 import type { ChatBg, Theme } from "@cinder/theme";
 import { getChatBg, removeChatBg, setChatBg } from "./personalize.js";
 import { StyleSheet, Text, View } from "react-native-web";
-import { changeRememberedPassword, type MobileIdentity, unlockRemembered } from "./auth.js";
+import { changeRememberedPassword, identityFromNsec, type MobileIdentity, unlockRemembered } from "./auth.js";
 import {
   activeProfile,
   getRemembered,
   isOwnIdentity,
+  inviteToOrg,
   loadIdentities,
   nameTaken,
   profileOrg,
@@ -262,6 +263,21 @@ export function MobileApp({
     signInWith(identity);
   };
 
+  /**
+   * 邀請碼入職（ADR-0156／0176）：貼碼 → **生成全新企業成員身分**（不是拿現有 nsec 轉），設顯示名，
+   * 鎖定公司座、帶入職權杖（開機自動向管理者提出入職）；公司帳號（escrow）則入職時把私鑰託管給
+   * 雇主（貼碼畫面已明示同意）。有密碼＝記住此身分（跨重啟持久，ADR-0174）。
+   */
+  const joinOrg = (invite: OrgInvite, name: string, password?: string): void => {
+    const r = identityFromNsec(nsecEncode(generateSecretKey()), name);
+    if (!r.ok) return; // 名稱空白等（貼碼畫面已擋，這裡防禦）
+    if (password) {
+      const res = rememberInProfile(profiles, r.identity, password, invite.relayUrl, inviteToOrg(invite));
+      if (res) setProfiles(res.state);
+    }
+    signInWith(r.identity, undefined, invite);
+  };
+
   // ── 多身分切換（ADR-0138）─────────────────────────────────────────────────
   /** 點切換器裡的某身分：同一個＝忽略；不同＝進切換解鎖畫面解該身分的密碼。 */
   const beginSwitch = (pubkey: string): void => {
@@ -300,13 +316,17 @@ export function MobileApp({
     signInWith(identity, bundle);
   };
 
-  const signInWith = (identity: MobileIdentity, bundle?: PairBundle): void => {
+  const signInWith = (identity: MobileIdentity, bundle?: PairBundle, joinInvite?: OrgInvite): void => {
     backendRef.current?.stop();
+    // ADR-0176：企業成員鎖定於公司座——入職當下取邀請碼的 relay；否則取已記住登錄的 relay
+    //（配對/入職時 rememberInProfile 存的是公司 relay）；再退回全域 prop。
+    const prof = profiles.profiles.find((p) => p.pubkey === identity.pubkey);
+    const idRelay = joinInvite?.relayUrl || prof?.relayUrl || relayUrl;
     // ADR-0094：真實 relay 用外部持有的儲存（供保留上限/導出）；示範模式無持久化。
     // ADR-0112：靜態加密——資料金鑰由 nsec 導出。行動端**從不持久化 nsec**（每次輸入），
     // 所以金鑰不在磁碟上 → localStorage/OPFS 上的訊息**真的**解不開。
     const sk = nsecDecode(identity.nsec);
-    const store = relayUrl ? new LocalStorage(identity.pubkey, readRetentionCap(), sk) : null;
+    const store = idRelay ? new LocalStorage(identity.pubkey, readRetentionCap(), sk) : null;
     // 配對搬家（ADR-0125）：把捆包的聯絡人/訊息/群組灌進**加密** store（DEK 由 nsec 導出），
     // **必須在建後端之前**——`backend.start()` 會回放 store 裡的聯絡人與 1:1 歷史（見 relay-backend）。
     // 然後把 identity 的 nsec 抹掉：`applyPairBundle` 會 `saveIdentity(含 nsec)`，但行動端**絕不
@@ -325,10 +345,10 @@ export function MobileApp({
     // ADR-0164／0168：本機記住的上次手動狀態＋自訂文字，上線即還原（隱身另有攔截，不經此）。
     const pref = loadPresence(identity.pubkey);
     // ADR-0100：帶上錨點/簽章清單（backend.ts 內）與加密雲端備份模式。
-    // ADR-0173／0174：企業身分精華——配對當下取捆包 org；重啟解鎖則取**已記住的登錄 Profile**
-    // （rememberInProfile 已把 org 寫進登錄）＝跨重啟持久。兩者皆無＝一般身分。
-    const org = bundle?.org ?? profileOrg(profiles.profiles.find((p) => p.pubkey === identity.pubkey));
-    const backend = createBackend(identity, relayUrl, {
+    // 企業身分精華：入職當下取邀請碼（ADR-0176）；配對取捆包 org（0173）；重啟解鎖取**已記住的
+    // 登錄 Profile**（0174，跨重啟持久）。皆無＝一般身分。
+    const org = joinInvite ? inviteToOrg(joinInvite) : (bundle?.org ?? profileOrg(prof));
+    const backend = createBackend(identity, idRelay, {
       store: store ?? undefined,
       cloudSync,
       ...(pref ? { initialStatus: pref.status, initialStatusMessage: pref.statusMessage } : {}),
@@ -925,6 +945,7 @@ export function MobileApp({
           setActiveId(null);
         }}
         nameTaken={(name, pubkey) => nameTaken(profiles, name, pubkey)}
+        onJoinOrg={joinOrg}
         onBack={() => setScreen("main")}
         canRemember
         {...themeProps}
@@ -953,6 +974,8 @@ export function MobileApp({
     return (
       <NsecSignInScreen
         onSignIn={handleSignIn}
+        onJoinOrg={joinOrg}
+        nameTaken={(name, pubkey) => nameTaken(profiles, name, pubkey)}
         onUsePairing={() => setScreen("pair")}
         canRemember
         {...themeProps}

@@ -22,6 +22,16 @@ describe("行動端登入畫面（ADR-0081）", () => {
     expect(html).toContain("Import from old device instead"); // mobileSignIn_toPair
   });
 
+  it("NsecSignInScreen：提供 onJoinOrg → 顯示「可貼入職邀請碼」提示（入職入口，ADR-0176）", () => {
+    const html = renderToStaticMarkup(<NsecSignInScreen onSignIn={() => {}} onJoinOrg={() => {}} locale="zh-Hant" />);
+    expect(html).toContain("邀請碼"); // addId_invite 提示
+  });
+
+  it("NsecSignInScreen：未提供 onJoinOrg → 無入職提示（純一般登入）", () => {
+    const html = renderToStaticMarkup(<NsecSignInScreen onSignIn={() => {}} locale="zh-Hant" />);
+    expect(html).not.toContain("邀請碼");
+  });
+
   it("PairImportScreen（B）：渲染標題與切換金鑰入口（zh）", () => {
     const html = renderToStaticMarkup(
       <PairImportScreen

@@ -33,9 +33,11 @@ export interface MobileBackendOptions {
   /** 上線時的初始自訂狀態文字（ADR-0164／0168）；未提供＝空。 */
   initialStatusMessage?: string | undefined;
   /**
-   * 企業身分精華（ADR-0172／0173）：來自配對搬家捆包。設了 `adminPubkey` → 後端訂閱並採用
-   * 公司名冊（同事、allowlist、政策、組織資訊）＝**唯讀採用**。本批**不**帶 orgJoinToken/orgEscrow
-   * （避免行動端重觸發入職/託管寫入流程；成員已在桌面入職，讀名冊即可）。
+   * 企業身分精華（ADR-0172／0173／0176）：來自配對搬家捆包、已記住登錄，或邀請碼入職。
+   * `adminPubkey` → 後端訂閱並採用公司名冊（同事、allowlist、政策、組織資訊）。
+   * `orgJoinToken`（＋ `orgEscrow`）→ 開機自動向管理者提出入職（ADR-0156）／公司帳號託管私鑰
+   * （ADR-0163）。入職與託管皆**冪等**（已在名冊/已託管者再送無副作用），故對搬入的成員亦帶——
+   * 確保成員一定在名冊、且託管一致。（ADR-0173 原本保守排除，ADR-0176 起放開＝行動端入職所需。）
    */
   org?: PairBundleOrg | undefined;
 }
@@ -73,9 +75,12 @@ export function createRelayChat(
       // （隱身時 App 另有攔截，不經此路徑）。缺省＝online、空文字。
       ...(opts.initialStatus ? { initialStatus: opts.initialStatus } : {}),
       ...(opts.initialStatusMessage ? { initialStatusMessage: opts.initialStatusMessage } : {}),
-      // ADR-0173：企業身分（配對搬來）唯讀採用公司名冊——訂閱管理者名冊＝同事/allowlist/政策/組織資訊。
-      // 桌面 buildBackend 的鏡像；不帶 orgJoinToken/orgEscrow（不從行動端重觸發入職/託管寫入）。
+      // ADR-0173／0176：企業身分——訂閱管理者名冊＝同事/allowlist/政策/組織資訊（桌面 buildBackend 鏡像）。
+      // ADR-0176：入職權杖／託管一併帶（冪等）：orgJoinToken → 開機自動入職（ADR-0156）；
+      // orgEscrow → 公司帳號私鑰託管（ADR-0163，貼碼時已明示同意）。
       ...(opts.org?.adminPubkey ? { orgAdminPubkey: opts.org.adminPubkey } : {}),
+      ...(opts.org?.orgJoinToken ? { orgJoinToken: opts.org.orgJoinToken } : {}),
+      ...(opts.org?.orgEscrow ? { orgEscrow: true } : {}),
       ...(opts.org?.orgOwner ? { orgOwner: true } : {}),
       nsecOverride: identity.nsec,
       // ADR-0122 守衛：拿到的身分與期待不符（毀損捆包／錯 nsec）→ 大聲失敗，不靜默換人。
