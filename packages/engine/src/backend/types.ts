@@ -12,6 +12,7 @@ import type {
   ReceivedFile,
 } from "@cinder/core";
 import type { MessageStatus } from "../storage/types.js";
+import { inWorkHours } from "@cinder/core";
 
 export type { Group, OrgGroup, OrgMember, OrgPolicy, OrgRosterDoc, OrgWorkHours };
 export type { MessageStatus };
@@ -26,6 +27,21 @@ export interface OrgInfo {
   welcome?: string;
   /** 表定上下班時間。 */
   workHours?: OrgWorkHours;
+}
+
+/**
+ * 下班自動靜音（ADR-0157）：非工時且來源為組織（企業同事 1:1／組織群組）→ 靜音（不彈通知、
+ * 不響音效；未讀照常）。未設班表、上班時間內、或非組織來源皆不靜音。桌面與行動端共用（原本
+ * 在桌面 App.tsx，ADR-0175 上移共用消除重複）。`minutesOfDay`＝當地時間的「時×60＋分」。
+ */
+export function shouldMuteOrgNotification(
+  info: Pick<OrgInfo, "members" | "workHours"> | null,
+  source: { senderContact?: string; orgGroup?: boolean },
+  minutesOfDay: number,
+): boolean {
+  if (!info?.workHours) return false;
+  if (inWorkHours(info.workHours, minutesOfDay)) return false;
+  return source.orgGroup === true || (!!source.senderContact && info.members.includes(source.senderContact));
 }
 
 /** 使用者可見狀態（避開商標，以中文呈現於 UI）。 */

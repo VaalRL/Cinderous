@@ -4,7 +4,6 @@ import {
   type CallState,
   generateSecretKey,
   getPublicKey,
-  inWorkHours,
   isBackupCode,
   makeOrgInvite,
   newGroupId,
@@ -24,7 +23,7 @@ import {
 import { isTauri } from "@tauri-apps/api/core";
 import { useEffect, useRef, useState } from "react";
 import { BrowserChatBackend } from "@cinder/engine";
-import { normalizeRelayUrl, RelayChatBackend, webSocketConnector } from "@cinder/engine";
+import { normalizeRelayUrl, RelayChatBackend, shouldMuteOrgNotification, webSocketConnector } from "@cinder/engine";
 import { browserStore } from "./native/browser-store.js";
 import { safeNsecDecode } from "./nsec.js";
 import { getKeyVault } from "./native/keyvault.js";
@@ -218,19 +217,9 @@ export function profileGlyph(p: Profile | null | undefined): string {
   return p?.orgOffboarded ? "🗄" : p?.orgOwner ? "🗂" : p?.enterprise ? "🏢" : "👤";
 }
 
-/**
- * 下班自動靜音（ADR-0157，純函式可測）：表定時間外、且來源是組織成員（1:1）或組織群組
- * → 靜音（不彈通知、不響音效；未讀照常）。未設班表、上班時間內、或非組織來源皆不靜音。
- */
-export function shouldMuteOrgNotification(
-  info: Pick<OrgInfo, "members" | "workHours"> | null,
-  source: { senderContact?: string; orgGroup?: boolean },
-  minutesOfDay: number,
-): boolean {
-  if (!info?.workHours) return false;
-  if (inWorkHours(info.workHours, minutesOfDay)) return false;
-  return source.orgGroup === true || (!!source.senderContact && info.members.includes(source.senderContact));
-}
+// 下班自動靜音（ADR-0157）：純函式已上移共用引擎（ADR-0175，消除桌面/行動端重複）；此處
+// 再匯出，讓既有 import 路徑（含 App.test.tsx）不動。
+export { shouldMuteOrgNotification };
 
 /**
  * 登入建立身分的命名空間（ADR-0140，純函式可測）：

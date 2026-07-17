@@ -2,7 +2,7 @@
 // 接 @cinder/engine 的 ChatBackend（示範或真實 relay，見 backend.ts）；主題/主色/語言由本殼掌管，
 // 設定分頁即時切換。正式版把後端換成注入 RelayChatBackend＋原生安全儲存即可（同一套 UI）。
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { AppStorage, ChatBackend, ChatMessage, CloudSyncMode, ConnectionState, Contact, Group, Status } from "@cinder/engine";
+import type { AppStorage, ChatBackend, ChatMessage, CloudSyncMode, ConnectionState, Contact, Group, OrgInfo, Status } from "@cinder/engine";
 import {
   applyPairBundle,
   exportExtension,
@@ -13,6 +13,7 @@ import {
   LocalStorage,
   openOpfsArchive,
   type PairBundle,
+  shouldMuteOrgNotification,
 } from "@cinder/engine";
 import { makeBackupCode, nsecDecode } from "@cinder/core";
 import {
@@ -231,6 +232,8 @@ export function MobileApp({
   contactsRef.current = contacts;
   const groupsRef = useRef(groups);
   groupsRef.current = groups;
+  // 組織資訊（ADR-0157）：下班靜音判定用（工時＋成員）。由 onOrgInfo 直接設，切身分清空。
+  const orgInfoRef = useRef<OrgInfo | null>(null);
   const localeRef = useRef(locale);
   localeRef.current = locale;
 
@@ -344,6 +347,7 @@ export function MobileApp({
     setTypingFrom(null);
     if (typingTimer.current) clearTimeout(typingTimer.current);
     if (statusBcTimer.current) clearTimeout(statusBcTimer.current); // ADR-0171：別把上個身分待送的狀態文字帶過來
+    orgInfoRef.current = null; // ADR-0157/0175：清上個身分的組織資訊（下次 onOrgInfo 重設）
     setSelfPubkey(identity.pubkey);
     setSelfName(identity.name);
     setSelfNpub(identity.npub);
@@ -372,7 +376,16 @@ export function MobileApp({
         // 通知（ADR-0116）：**只在他人訊息、且 App 在背景**時跳——正在看就別打擾。
         // 訊息請求（ADR-0121）**一律不跳通知**：讓陌生人能推播到你的鎖定畫面，那就是騷擾。
         const isRequest = requestsRef.current.some((r) => r.pubkey === pk);
-        if (!m.outgoing && !viewing && !isRequest && notifyRef.current && typeof document !== "undefined" && document.hidden) {
+        // 下班自動靜音（ADR-0157／0175）：非工時且來源為組織（企業同事 1:1／組織群組）→ 不彈通知
+        //（未讀照常）。與桌面共用 shouldMuteOrgNotification；minutesOfDay 取當地時間。
+        const grp = groupsRef.current.find((g) => g.id === pk);
+        const now = new Date();
+        const muted = shouldMuteOrgNotification(
+          orgInfoRef.current,
+          { ...(grp ? { orgGroup: !!grp.org } : { senderContact: pk }) },
+          now.getHours() * 60 + now.getMinutes(),
+        );
+        if (!m.outgoing && !viewing && !isRequest && !muted && notifyRef.current && typeof document !== "undefined" && document.hidden) {
           const group = groupsRef.current.find((g) => g.id === pk);
           const nameOf = (k: string): string =>
             groupsRef.current.find((g) => g.id === k)?.name ??
@@ -463,8 +476,29 @@ export function MobileApp({
         if (readCloudSync() === "off") changeCloudSync(mode);
       },
       // ADR-0173：後端採用公司名冊（企業身分）→ **實際會員身分確認**（比捆包旗標更穩健的設閘訊號）。
-      // 同事/allowlist/政策由引擎的 onContacts/onPolicy 自動帶入（onContacts 已接）。
-      onOrgInfo: () => setSelfEnterprise(true),
+      // 同事/allowlist/政策由引擎的 onContacts/onPolicy 與保留天數（引擎內部）自動帶入。
+      // ADR-0157（行動端 ADR-0175 補齊）：存工時＋成員供下班靜音；歡迎詞變更時顯示一次。
+      onOrgInfo: (info) => {
+        setSelfEnterprise(true);
+        orgInfoRef.current = info;
+        if (
+          info.welcome &&
+          typeof window !== "undefined" &&
+          typeof window.alert === "function" &&
+          typeof localStorage !== "undefined"
+        ) {
+          // keyed by 身分＋公司，內容變更才彈（不重複打擾）。用 identity.pubkey（此閉包內可靠）。
+          const key = `nb.orgWelcome.${identity.pubkey}`;
+          try {
+            if (localStorage.getItem(key) !== info.welcome) {
+              localStorage.setItem(key, info.welcome);
+              window.alert(`${info.org}\n\n${info.welcome}`);
+            }
+          } catch {
+            /* 配額/不可用時忽略 */
+          }
+        }
+      },
       // 通話狀態與串流（ADR-0101）：來電自動開通話畫面。
       onCallState: (peer, state, media) => {
         setCallState(state);
