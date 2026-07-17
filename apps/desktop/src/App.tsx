@@ -1335,7 +1335,22 @@ export function App(): JSX.Element {
       key,
       storage: store,
       identity: { nsec, name: p.name },
-      profile: { relayUrl: p.relayUrl, ...(p.cloudSync ? { cloudSync: p.cloudSync } : {}) },
+      profile: {
+        relayUrl: p.relayUrl,
+        ...(p.cloudSync ? { cloudSync: p.cloudSync } : {}),
+        // ADR-0172：搬家帶上企業身分精華，讓新機（尤其行動端）還原「這是工作/企業主身分」並設閘企業 UI。
+        ...(p.enterprise || p.orgOwner || p.adminPubkey || p.orgJoinToken || p.orgEscrow
+          ? {
+              org: {
+                ...(p.enterprise ? { enterprise: true } : {}),
+                ...(p.orgOwner ? { orgOwner: true } : {}),
+                ...(p.adminPubkey ? { adminPubkey: p.adminPubkey } : {}),
+                ...(p.orgJoinToken ? { orgJoinToken: p.orgJoinToken } : {}),
+                ...(p.orgEscrow ? { orgEscrow: true } : {}),
+              },
+            }
+          : {}),
+      },
       transport,
       confirmSas: (sas) =>
         new Promise<boolean>((resolve) => {

@@ -9,6 +9,25 @@
 
 import type { AppStorage, StorageSnapshot, StoredIdentity, StoredMessage } from "./types.js";
 
+/**
+ * 企業身分精華（ADR-0172）：搬家時把「這是不是工作/企業主身分」隨捆包帶到新機，
+ * 讓新機（尤其行動端——本身無入職流程）能還原企業身分脈絡、據以設閘企業專屬 UI（如頭銜編輯）。
+ * 這些欄位在 `Profile`（登錄）而非 `AppStorage`（快照）裡，故獨立帶。捆包本身走一次性金鑰
+ * E2E 加密＋SAS 人工比對，且都是使用者自己的資料/持有的權杖 → 帶自己的兩台裝置間無隱私顧慮。
+ */
+export interface PairBundleOrg {
+  /** 工作身分（受 allowlist、鎖漫遊）。 */
+  enterprise?: boolean;
+  /** 企業主（可管理名冊，ADR-0155）。 */
+  orgOwner?: boolean;
+  /** 企業名冊管理者 pubkey（ADR-0047）：新機據此訂閱並採用組織通訊錄。 */
+  adminPubkey?: string;
+  /** 成員入職權杖（ADR-0156）。 */
+  orgJoinToken?: string;
+  /** 公司帳號金鑰託管旗標（ADR-0163）。 */
+  orgEscrow?: boolean;
+}
+
 /** 配對捆包信封。 */
 export interface PairBundle {
   v: 1;
@@ -16,6 +35,8 @@ export interface PairBundle {
   relayUrl: string;
   /** 雲端快照模式（ADR-0071）：新機接續備份習慣；未設＝關閉。 */
   cloudSync?: "off" | "basic" | "full";
+  /** 企業身分精華（ADR-0172）：舊捆包無此欄＝一般身分（向後相容）。 */
+  org?: PairBundleOrg;
   snapshot: StorageSnapshot;
 }
 
@@ -62,20 +83,36 @@ export function exportFullSnapshot(storage: AppStorage, identity?: StoredIdentit
  */
 export function buildPairBundle(
   storage: AppStorage,
-  profile: { relayUrl: string; cloudSync?: "off" | "basic" | "full" },
+  profile: { relayUrl: string; cloudSync?: "off" | "basic" | "full"; org?: PairBundleOrg },
   identity?: StoredIdentity,
 ): string {
   const snapshot = exportFullSnapshot(storage, identity);
   if (!snapshot.identity?.nsec) {
     throw new Error("配對捆包缺少身分（nsec）：私鑰不在 AppStorage 時必須顯式傳入 identity");
   }
+  // ADR-0172：只在真的是企業身分時帶 org（有任一旗標/欄位才帶，避免一般身分捆包多一個空物件）。
+  const org = sanitizeBundleOrg(profile.org);
   const bundle: PairBundle = {
     v: 1,
     relayUrl: profile.relayUrl,
     ...(profile.cloudSync ? { cloudSync: profile.cloudSync } : {}),
+    ...(org ? { org } : {}),
     snapshot,
   };
   return JSON.stringify(bundle);
+}
+
+/** 淨化 org（ADR-0172）：只留合法欄位；全空回 undefined（＝一般身分，不帶）。 */
+function sanitizeBundleOrg(raw: unknown): PairBundleOrg | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const o = raw as Record<string, unknown>;
+  const org: PairBundleOrg = {};
+  if (o.enterprise === true) org.enterprise = true;
+  if (o.orgOwner === true) org.orgOwner = true;
+  if (typeof o.adminPubkey === "string" && o.adminPubkey) org.adminPubkey = o.adminPubkey;
+  if (typeof o.orgJoinToken === "string" && o.orgJoinToken) org.orgJoinToken = o.orgJoinToken;
+  if (o.orgEscrow === true) org.orgEscrow = true;
+  return Object.keys(org).length > 0 ? org : undefined;
 }
 
 /** 驗包（新機）：格式不符回 null（解密已由協定層 GCM 驗證，這裡驗形狀）。 */
@@ -89,7 +126,10 @@ export function parsePairBundle(json: string): PairBundle | null {
     if (!s.messages || typeof s.messages !== "object") return null;
     if (!Array.isArray(s.reactions) || !Array.isArray(s.deleted)) return null;
     if (!s.identity || typeof (s.identity as { nsec?: unknown }).nsec !== "string") return null;
-    return b as PairBundle;
+    // ADR-0172：淨化 org（不信任收到的形狀）——先剝掉原始 org，只回淨化後的；無/非法＝一般身分。
+    const { org: _rawOrg, ...rest } = b as PairBundle;
+    const org = sanitizeBundleOrg(_rawOrg);
+    return { ...rest, ...(org ? { org } : {}) } as PairBundle;
   } catch {
     return null;
   }

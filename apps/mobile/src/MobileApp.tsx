@@ -324,6 +324,8 @@ export function MobileApp({
     setSelfStatusMessage(pref?.statusMessage ?? "");
     setSelfNowPlaying("");
     setOrgTitle(backend.selfTitle?.() ?? ""); // ADR-0170：還原這個身分已廣播的頭銜（供設定頁預填）
+    // ADR-0172：企業身分旗標只從配對搬家捆包的 org 精華取得（行動端無入職流程）；一般身分＝false。
+    setSelfEnterprise(!!(bundle?.org?.enterprise || bundle?.org?.orgOwner));
     setConnState("connecting"); // ADR-0169：換身分重連，先回連線中，待後端回報 online
     // ADR-0169 審查修正：換身分清掉殘留的 typing 狀態與計時器（衛生性，避免舊值誤帶到新身分）。
     setTypingFrom(null);
@@ -652,6 +654,12 @@ export function MobileApp({
   const [selfStatusMessage, setSelfStatusMessage] = useState("");
   /** 正在聽（ADR-0142；行動端於 ADR-0168 補齊）：純易失，不持久化（換歌就換）。 */
   const [selfNowPlaying, setSelfNowPlaying] = useState("");
+  /**
+   * 是不是企業/企業主身分（ADR-0172）：行動端本身無入職流程，故此旗標**只**來自配對搬家捆包的
+   * org 精華（工作身分從桌面搬來時帶）。決定要不要顯示企業專屬 UI（目前＝頭銜編輯器）。
+   * 非企業身分（一般個人、示範）恒為 false → 不顯示頭銜編輯（與桌面設閘語意一致）。
+   */
+  const [selfEnterprise, setSelfEnterprise] = useState(false);
   /** 企業自報頭銜（ADR-0158；行動端於 ADR-0170 補齊）：≤24 字，變更即全量重播個人檔給聯絡人。 */
   const [orgTitle, setOrgTitle] = useState("");
   const changeOrgTitle = (title: string): void => {
@@ -1107,8 +1115,9 @@ export function MobileApp({
                 onStatusMessage: changeStatusMessage,
                 nowPlaying: selfNowPlaying,
                 onNowPlaying: changeNowPlaying,
-                // 企業自報頭銜（ADR-0170）：真實 relay 後端才接得上（setSelfTitle 廣播個人檔）。
-                ...(backendRef.current?.setSelfTitle ? { title: orgTitle, onSetTitle: changeOrgTitle } : {}),
+                // 企業自報頭銜（ADR-0170／0172）：**企業/企業主身分才顯示編輯器**（與桌面設閘一致；
+                // 旗標來自配對搬家捆包），且需真實 relay 後端（setSelfTitle 廣播個人檔）。
+                ...(selfEnterprise && backendRef.current?.setSelfTitle ? { title: orgTitle, onSetTitle: changeOrgTitle } : {}),
                 onPairExport: () => setScreen("pairExport"),
                 notify,
                 onNotify: (v: boolean) => void setNotify(v),

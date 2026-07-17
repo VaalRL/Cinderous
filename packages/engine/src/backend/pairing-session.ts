@@ -9,7 +9,7 @@ import {
   runPairingSource,
   runPairingTarget,
 } from "@cinder/core";
-import { buildPairBundle, type PairBundle, parsePairBundle } from "../storage/pair-bundle.js";
+import { buildPairBundle, type PairBundle, type PairBundleOrg, parsePairBundle } from "../storage/pair-bundle.js";
 import type { AppStorage, StoredIdentity } from "../storage/types.js";
 import { openPairingTransport } from "./pairing-transport.js";
 import type { RelayConnector } from "./relay-backend.js";
@@ -56,7 +56,7 @@ export function createPairingOffer(relayUrl: string, now = Date.now()): { offer:
 export async function runPairSource(opts: {
   key: Uint8Array;
   storage: AppStorage;
-  profile: { relayUrl: string; cloudSync?: "off" | "basic" | "full" };
+  profile: { relayUrl: string; cloudSync?: "off" | "basic" | "full"; org?: PairBundleOrg };
   /**
    * 來源身分（ADR-0118）。**私鑰不在 AppStorage 時必須傳**——Tauri 走 OS 金鑰庫、
    * 行動端不持久化 nsec、瀏覽器只存包裹過的 blob。不傳且 storage 裡也沒有 → `buildPairBundle` 拋錯。

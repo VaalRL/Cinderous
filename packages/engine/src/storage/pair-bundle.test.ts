@@ -41,6 +41,22 @@ describe("配對捆包（ADR-0072 D4a-2）", () => {
     expect(dst.loadBootstrapList()?.relays).toEqual(["wss://a"]);
   });
 
+  it("企業身分精華 org（ADR-0172）：往返保留；一般身分不帶；非法欄位淨化", () => {
+    const src = richStorage();
+    // 企業主＋管理者 pubkey → org 往返保留
+    const ent = parsePairBundle(
+      buildPairBundle(src, { relayUrl: "wss://home", org: { enterprise: true, orgOwner: true, adminPubkey: "admin_pk", orgJoinToken: "tok", orgEscrow: true } }),
+    )!;
+    expect(ent.org).toEqual({ enterprise: true, orgOwner: true, adminPubkey: "admin_pk", orgJoinToken: "tok", orgEscrow: true });
+    // 一般身分（未傳 org）→ 捆包不帶 org（向後相容，舊機讀不到就是一般身分）
+    expect(parsePairBundle(buildPairBundle(src, { relayUrl: "wss://home" })).org).toBeUndefined();
+    // 全空/非法 org → 不帶（不留空物件、不信任非布林/非字串）
+    expect(parsePairBundle(buildPairBundle(src, { relayUrl: "wss://home", org: {} })).org).toBeUndefined();
+    const dirty = JSON.parse(buildPairBundle(src, { relayUrl: "wss://home" })) as { org?: unknown };
+    dirty.org = { enterprise: "yes", adminPubkey: 42, bogus: true }; // 收到亂形狀
+    expect(parsePairBundle(JSON.stringify(dirty)).org).toBeUndefined(); // 淨化後全空→丟棄
+  });
+
   it("parsePairBundle：缺身分/壞形狀/壞 JSON 回 null", () => {
     const ok = buildPairBundle(richStorage(), { relayUrl: "wss://home" });
     expect(parsePairBundle(ok)?.cloudSync).toBeUndefined();
