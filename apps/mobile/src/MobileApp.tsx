@@ -55,6 +55,7 @@ import {
 import { createBackend } from "./backend.js";
 import { loadPresence, savePresence } from "./presence.js";
 import { enqueueSlot, type MobileSlotItem, nextPending, setSlotStatus } from "./slot-queue.js";
+import { type EscrowEntry, loadEscrow, offboardedEntries, removeEscrow, saveEscrow, upsertEscrow } from "./org-escrow.js";
 import { chatList } from "./chat-list.js";
 import { BottomTabs, type Tab } from "./screens/BottomTabs.js";
 import { ChatsListScreen } from "./screens/ChatsListScreen.js";
@@ -298,6 +299,28 @@ export function MobileApp({
     setScreen("roster"); // signInWith 末尾設 main；此行覆寫 → 落在名冊管理
   };
 
+  /**
+   * 離職接管（ADR-0163／0179，企業主）：以託管私鑰在本機登入該離職員工身分，指向其公司座**查看
+   * 中繼站仍保留的歷史**。純查看：立即設隱身（離職員工不應顯示在線、不再廣播/入職）。
+   */
+  const takeoverOffboarded = (entry: EscrowEntry): void => {
+    const r = identityFromNsec(entry.nsec, `離職·${entry.name}`);
+    if (!r.ok) return;
+    signInWith(r.identity, undefined, undefined, undefined, entry.relayUrl); // 指向該員工公司座
+    setInvisible(true);
+    backendRef.current?.setInvisible?.(true); // 不廣播（接管只為查看歷史）
+  };
+  /** 刪除一筆託管（ADR-0163）：企業主決定不再保留該離職員工的金鑰備份。重新加密落盤。 */
+  const deleteEscrow = (pubkey: string): void => {
+    if (!selfPubkey || !selfNsec) return;
+    const sk = nsecDecode(selfNsec);
+    setEscrowList((list) => {
+      const next = removeEscrow(list, pubkey);
+      saveEscrow(selfPubkey, sk, next);
+      return next;
+    });
+  };
+
   // ── 多身分切換（ADR-0138）─────────────────────────────────────────────────
   /** 點切換器裡的某身分：同一個＝忽略；不同＝進切換解鎖畫面解該身分的密碼。 */
   const beginSwitch = (pubkey: string): void => {
@@ -336,12 +359,13 @@ export function MobileApp({
     signInWith(identity, bundle);
   };
 
-  const signInWith = (identity: MobileIdentity, bundle?: PairBundle, joinInvite?: OrgInvite, overrideOrg?: PairBundleOrg): void => {
+  const signInWith = (identity: MobileIdentity, bundle?: PairBundle, joinInvite?: OrgInvite, overrideOrg?: PairBundleOrg, overrideRelay?: string): void => {
     backendRef.current?.stop();
     // ADR-0176：企業成員鎖定於公司座——入職當下取邀請碼的 relay；否則取已記住登錄的 relay
     //（配對/入職時 rememberInProfile 存的是公司 relay）；再退回全域 prop。
+    // ADR-0179：離職接管以 overrideRelay 指向該員工的公司座（純查看歷史）。
     const prof = profiles.profiles.find((p) => p.pubkey === identity.pubkey);
-    const idRelay = joinInvite?.relayUrl || prof?.relayUrl || relayUrl;
+    const idRelay = overrideRelay || joinInvite?.relayUrl || prof?.relayUrl || relayUrl;
     // ADR-0094：真實 relay 用外部持有的儲存（供保留上限/導出）；示範模式無持久化。
     // ADR-0112：靜態加密——資料金鑰由 nsec 導出。行動端**從不持久化 nsec**（每次輸入），
     // 所以金鑰不在磁碟上 → localStorage/OPFS 上的訊息**真的**解不開。
@@ -390,6 +414,8 @@ export function MobileApp({
     // ADR-0178：企業主身分＋核准權杖（供設定頁「組織名冊」入口與邀請碼）。
     setSelfOwner(!!org?.orgOwner);
     setSelfInviteToken(org?.orgInviteToken ?? null);
+    // ADR-0179：企業主載入加密的託管清單（供離職接管）；非企業主清空。sk＝企業主自己的私鑰。
+    setEscrowList(org?.orgOwner ? loadEscrow(identity.pubkey, sk) : []);
     setConnState("connecting"); // ADR-0169：換身分重連，先回連線中，待後端回報 online
     // ADR-0169 審查修正：換身分清掉殘留的 typing 狀態與計時器（衛生性，避免舊值誤帶到新身分）。
     setTypingFrom(null);
@@ -522,6 +548,16 @@ export function MobileApp({
       // ADR-0071：還原時採用快照傳播的備份模式（僅本機從未設定時）。
       onCloudSyncMode: (mode) => {
         if (readCloudSync() === "off") changeCloudSync(mode);
+      },
+      // 入職金鑰託管到達（ADR-0163／0179，企業主端）：把員工公司帳號私鑰**加密**落盤（以企業主自己
+      // 的 sk 導出金鑰），供日後離職接管。權杖已驗、nsec 已對回員工 pubkey（引擎端把關）。
+      onOrgEscrow: (e) => {
+        const entry: EscrowEntry = { pubkey: e.pubkey, name: e.name, nsec: e.nsec, relayUrl: e.relayUrl, at: Date.now() };
+        setEscrowList((list) => {
+          const next = upsertEscrow(list, entry);
+          saveEscrow(identity.pubkey, sk, next); // 加密：密文離開企業主 nsec 就解不開（ADR-0112 不破）
+          return next;
+        });
       },
       // ADR-0173：後端採用公司名冊（企業身分）→ **實際會員身分確認**（比捆包旗標更穩健的設閘訊號）。
       // 同事/allowlist/政策由引擎的 onContacts/onPolicy 與保留天數（引擎內部）自動帶入。
@@ -764,6 +800,8 @@ export function MobileApp({
   const [selfOwner, setSelfOwner] = useState(false);
   /** 企業主的核准權杖（ADR-0156）：嵌入邀請碼給員工；企業主才有。 */
   const [selfInviteToken, setSelfInviteToken] = useState<string | null>(null);
+  /** 入職金鑰託管清單（ADR-0163／0179，企業主端）：加密落盤；供離職接管。換身分重載。 */
+  const [escrowList, setEscrowList] = useState<EscrowEntry[]>([]);
   /** 公司儲存槽佇列（ADR-0161／0177，員工端）：session 內待傳；企業主上線由背景效果 P2P 逐一送。 */
   const [slotQueue, setSlotQueue] = useState<MobileSlotItem[]>([]);
   const slotBusyRef = useRef(false);
@@ -1200,6 +1238,10 @@ export function MobileApp({
 
   // 組織名冊管理（ADR-0178，企業主）：建立公司後或設定入口進入；發布名冊、複製邀請碼、設公司設定。
   if (screen === "roster" && selfOwner) {
+    const rosterDoc = backendRef.current?.currentRoster?.() ?? null;
+    // 離職＝在託管中但不在現行名冊在世成員（ADR-0163／0179）。
+    const liveMembers = new Set((rosterDoc?.members ?? []).filter((m) => !m.supersededBy).map((m) => m.pubkey));
+    const offboarded = offboardedEntries(escrowList, liveMembers);
     return (
       <RosterAdminScreen
         selfNpub={selfNpub}
@@ -1210,7 +1252,13 @@ export function MobileApp({
         {...(selfInviteToken && relayUrl
           ? { invite: { relayUrl, adminPubkey: selfPubkey, token: selfInviteToken } }
           : {})}
-        initial={backendRef.current?.currentRoster?.() ?? null}
+        initial={rosterDoc}
+        offboarded={offboarded.map((e) => ({ pubkey: e.pubkey, name: e.name }))}
+        onTakeover={(pubkey) => {
+          const e = escrowList.find((x) => x.pubkey === pubkey);
+          if (e) takeoverOffboarded(e);
+        }}
+        onDeleteEscrow={deleteEscrow}
         {...themeProps}
       />
     );

@@ -40,6 +40,9 @@ export function RosterAdminScreen({
   onBack,
   invite,
   initial,
+  offboarded,
+  onTakeover,
+  onDeleteEscrow,
   locale = "zh-Hant",
   theme = "light",
   accent = null,
@@ -58,6 +61,13 @@ export function RosterAdminScreen({
   invite?: { relayUrl: string; adminPubkey: string; token: string };
   /** 現行名冊（ADR-0157）：預填，修一項不必重打整份。 */
   initial?: OrgRosterDoc | null;
+  /**
+   * 離職接管（ADR-0163／0179）：已離職且託管中的員工（只帶 pubkey＋name，**不帶 nsec**——
+   * 私鑰留在 App 層加密儲存，不進 UI 元件）。未提供/空＝不顯示接管區。
+   */
+  offboarded?: { pubkey: string; name: string }[];
+  onTakeover?: (pubkey: string) => void;
+  onDeleteEscrow?: (pubkey: string) => void;
   locale?: Locale;
   theme?: Theme;
   accent?: string | null;
@@ -195,6 +205,33 @@ export function RosterAdminScreen({
         <Pressable style={styles.button} accessibilityRole="button" testID="roster-publish" onPress={publish}>
           <Text style={styles.buttonText}>{t("roster_publish")}</Text>
         </Pressable>
+
+        {/* 離職接管（ADR-0163／0179）：離職＝已從名冊移除但託管中的員工；接管＝以其金鑰查看歷史；或刪除託管。 */}
+        {offboarded && offboarded.length > 0 && onTakeover ? (
+          <View style={styles.section}>
+            <Text style={styles.label}>{t("settings_offboard")}</Text>
+            <Text style={styles.hint}>{t("settings_offboardHint")}</Text>
+            {offboarded.map((e) => (
+              <View key={e.pubkey} style={styles.row}>
+                <Text style={[styles.hint, { flex: 1 }]}>離職·{e.name}</Text>
+                <Pressable style={styles.copyBtn} accessibilityRole="button" testID={`takeover-${e.pubkey}`} onPress={() => onTakeover(e.pubkey)}>
+                  <Text style={styles.copyText}>{t("offboard_takeover")}</Text>
+                </Pressable>
+                {onDeleteEscrow ? (
+                  <Pressable style={styles.copyBtn} accessibilityRole="button" testID={`delete-escrow-${e.pubkey}`} onPress={() => onDeleteEscrow(e.pubkey)}>
+                    <Text style={[styles.copyText, { color: "#e5484d" }]}>{t("offboard_delete")}</Text>
+                  </Pressable>
+                ) : null}
+              </View>
+            ))}
+          </View>
+        ) : null}
+
+        {/* 公司儲存槽（ADR-0177／0179）：收檔落盤僅桌面（手機無檔案系統）——文字提示，讓企業主知道去哪收檔。 */}
+        <View style={styles.section}>
+          <Text style={styles.label}>{t("settings_slot")}</Text>
+          <Text style={styles.hint} testID="vault-desktop-only">{t("settings_vaultDesktopOnly")}</Text>
+        </View>
       </ScrollView>
     </View>
   );

@@ -46,4 +46,21 @@ describe("行動端組織名冊管理（ADR-0178）", () => {
     expect(html).toContain("Acme");
     expect(html).toContain("Bob");
   });
+
+  it("公司儲存槽收檔提示（ADR-0179）：一律顯示「僅桌面版」文字提示", () => {
+    const html = renderToStaticMarkup(<RosterAdminScreen {...base} />);
+    expect(html).toContain('data-testid="vault-desktop-only"');
+    expect(html).toContain("僅桌面版");
+  });
+
+  it("離職接管（ADR-0179）：有離職託管 → 顯示接管/刪除；無則不顯示", () => {
+    const withOff = renderToStaticMarkup(
+      <RosterAdminScreen {...base} offboarded={[{ pubkey: "m1", name: "Eve" }]} onTakeover={() => {}} onDeleteEscrow={() => {}} />,
+    );
+    expect(withOff).toContain('data-testid="takeover-m1"');
+    expect(withOff).toContain('data-testid="delete-escrow-m1"');
+    expect(withOff).toContain("Eve");
+    const withoutOff = renderToStaticMarkup(<RosterAdminScreen {...base} />);
+    expect(withoutOff).not.toContain('data-testid="takeover-');
+  });
 });

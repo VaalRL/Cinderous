@@ -135,6 +135,7 @@ export interface Messages {
   roster_publish: string;
   settings_orgRoster: string;
   settings_createCompany: string;
+  settings_vaultDesktopOnly: string;
   orgInfo_title: string;
   orgInfo_hours: string;
   orgInfo_muteNote: string;
@@ -756,6 +757,7 @@ const zhHant: Messages = {
   roster_publish: "發布名冊",
   settings_orgRoster: "組織名冊",
   settings_createCompany: "建立公司（企業主）",
+  settings_vaultDesktopOnly: "🖥 公司儲存槽「收檔落盤」僅桌面版支援（需檔案系統）。員工可從手機『存入』，但企業主端收檔／歸檔請用桌面版。",
   orgInfo_title: "組織資訊",
   orgInfo_hours: "表定上班時間：{start}–{end}",
   orgInfo_muteNote: "下班時間，來自公司成員與組織群組的通知會自動靜音（未讀照常累計）。",
@@ -1348,6 +1350,7 @@ const en: Messages = {
   roster_publish: "Publish roster",
   settings_orgRoster: "Organization roster",
   settings_createCompany: "Create a company (owner)",
+  settings_vaultDesktopOnly: "🖥 Receiving vault deposits to disk is desktop-only (needs a filesystem). Employees can deposit from mobile, but owners should receive/file on desktop.",
   orgInfo_title: "Organization",
   orgInfo_hours: "Work hours: {start}–{end}",
   orgInfo_muteNote: "Outside work hours, notifications from company members and org groups are muted automatically (unread still accrues).",
