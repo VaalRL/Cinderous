@@ -12,6 +12,7 @@ import {
   LocalStorage,
   MAINTAINER_PUBKEY,
   RelayChatBackend,
+  type Status,
   webSocketConnector,
 } from "@cinder/engine";
 import type { MobileIdentity } from "./auth.js";
@@ -26,6 +27,10 @@ export interface MobileBackendOptions {
   store?: AppStorage | undefined;
   /** 加密雲端備份模式（ADR-0071）；`off`／未提供＝不發佈快照。 */
   cloudSync?: CloudSyncMode | undefined;
+  /** 上線時的初始狀態（ADR-0164／0168：本機記住的上次手動狀態）；未提供＝online。 */
+  initialStatus?: Status | undefined;
+  /** 上線時的初始自訂狀態文字（ADR-0164／0168）；未提供＝空。 */
+  initialStatusMessage?: string | undefined;
 }
 
 /**
@@ -57,6 +62,10 @@ export function createRelayChat(
       anchors: [...new Set([relayUrl, ...ANCHOR_RELAYS])],
       ...(MAINTAINER_PUBKEY ? { maintainerPubkey: MAINTAINER_PUBKEY } : {}),
       ...cloud,
+      // ADR-0164／0168：本機記住的上次手動狀態，讓 start() 的首次心跳就照這個廣播
+      // （隱身時 App 另有攔截，不經此路徑）。缺省＝online、空文字。
+      ...(opts.initialStatus ? { initialStatus: opts.initialStatus } : {}),
+      ...(opts.initialStatusMessage ? { initialStatusMessage: opts.initialStatusMessage } : {}),
       nsecOverride: identity.nsec,
       // ADR-0122 守衛：拿到的身分與期待不符（毀損捆包／錯 nsec）→ 大聲失敗，不靜默換人。
       // 桌面已接，行動端在 ADR-0125 補上。

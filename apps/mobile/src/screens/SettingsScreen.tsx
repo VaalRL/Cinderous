@@ -82,6 +82,10 @@ export function SettingsScreen({
   onInvisible,
   status,
   onStatus,
+  statusMessage,
+  onStatusMessage,
+  nowPlaying,
+  onNowPlaying,
   notify,
   onNotify,
   notifyHidePreview,
@@ -121,6 +125,12 @@ export function SettingsScreen({
   /** 上線狀態（ADR-0114）：online/away/busy。未提供則不顯示（示範模式）。 */
   status?: Status;
   onStatus?: (s: Status) => void;
+  /** 自訂狀態文字（ADR-0142／0168）：隨心跳廣播、本機記住。與 onStatus 同時提供才顯示。 */
+  statusMessage?: string;
+  onStatusMessage?: (msg: string) => void;
+  /** 正在聽（ADR-0142／0168）：隨心跳廣播、易失不落地。與 onStatus 同時提供才顯示。 */
+  nowPlaying?: string;
+  onNowPlaying?: (text: string) => void;
   /** 通知（ADR-0116）。未提供則不顯示（示範模式）。 */
   notify?: boolean;
   onNotify?: (v: boolean) => void;
@@ -186,6 +196,9 @@ export function SettingsScreen({
   const [bkPw2, setBkPw2] = useState("");
   const [bkCode, setBkCode] = useState("");
   const [bkCopied, setBkCopied] = useState(false);
+  // 正在聽（ADR-0168）：草稿本地暫存，離開輸入框（送出/失焦）才廣播——不想把打到一半的
+  // 歌名一個字一個字廣播出去。狀態文字則照桌面即時（每次改動就更新，引擎自會節流心跳）。
+  const [npDraft, setNpDraft] = useState(nowPlaying ?? "");
 
   const changePassword = (): void => {
     if (!onChangePassword || !pwOld || !pwNew || pwNew !== pwNew2) {
@@ -549,6 +562,31 @@ export function SettingsScreen({
                 </Pressable>
               ))}
             </View>
+            {/* 自訂狀態文字（ADR-0142／0168）：即時廣播（引擎節流心跳）＋本機記住。 */}
+            {onStatusMessage ? (
+              <TextInput
+                style={styles.pwInput}
+                value={statusMessage ?? ""}
+                onChangeText={onStatusMessage}
+                placeholder={t("personalMessage_placeholder")}
+                placeholderTextColor={tk.muted}
+                aria-label={t("personalMessage_placeholder")}
+                testID="status-message"
+              />
+            ) : null}
+            {/* 正在聽（ADR-0142／0168）：離開輸入框才廣播（onEndEditing/失焦）；空＝不分享。 */}
+            {onNowPlaying ? (
+              <TextInput
+                style={styles.pwInput}
+                value={npDraft}
+                onChangeText={setNpDraft}
+                onBlur={() => onNowPlaying(npDraft.trim())}
+                placeholder={t("nowPlaying_placeholder")}
+                placeholderTextColor={tk.muted}
+                aria-label={t("nowPlaying_placeholder")}
+                testID="now-playing"
+              />
+            ) : null}
           </View>
         ) : null}
 

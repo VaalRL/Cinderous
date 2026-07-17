@@ -30,6 +30,8 @@ declare module "react-native-web" {
     autoCapitalize?: "none" | "sentences" | "words" | "characters";
     autoCorrect?: boolean;
     onChangeText?: (text: string) => void;
+    /** 失焦（ADR-0168）：react-native-web 對應 DOM blur——用於「離開輸入框才提交」。 */
+    onBlur?: () => void;
     "aria-label"?: string;
     /** react-native-web 渲染成 `data-testid`（測試用選擇器）。 */
     testID?: string;

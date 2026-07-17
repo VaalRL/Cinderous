@@ -50,6 +50,7 @@ import {
   visibleProfiles,
 } from "./identities.js";
 import { createBackend } from "./backend.js";
+import { loadPresence, savePresence } from "./presence.js";
 import { chatList } from "./chat-list.js";
 import { BottomTabs, type Tab } from "./screens/BottomTabs.js";
 import { ChatsListScreen } from "./screens/ChatsListScreen.js";
@@ -304,9 +305,18 @@ export function MobileApp({
     if (store) {
       void openOpfsArchive(identity.pubkey, store.storageKey()).then((a) => a && store.attachArchive?.(a));
     }
+    // ADR-0164／0168：本機記住的上次手動狀態＋自訂文字，上線即還原（隱身另有攔截，不經此）。
+    const pref = loadPresence(identity.pubkey);
     // ADR-0100：帶上錨點/簽章清單（backend.ts 內）與加密雲端備份模式。
-    const backend = createBackend(identity, relayUrl, { store: store ?? undefined, cloudSync });
+    const backend = createBackend(identity, relayUrl, {
+      store: store ?? undefined,
+      cloudSync,
+      ...(pref ? { initialStatus: pref.status, initialStatusMessage: pref.statusMessage } : {}),
+    });
     backendRef.current = backend;
+    setSelfStatus(pref?.status ?? "online");
+    setSelfStatusMessage(pref?.statusMessage ?? "");
+    setSelfNowPlaying("");
     setSelfPubkey(identity.pubkey);
     setSelfName(identity.name);
     setSelfNpub(identity.npub);
@@ -440,7 +450,13 @@ export function MobileApp({
       onCallLocalStream: setLocalStream,
       onCallRemoteStream: setRemoteStream,
       onTyping: () => {},
-      onNudge: () => {},
+      // 敲一下（ADR-0114）：收到就震動（行動端於 ADR-0168 補齊）。裝置不支援 Vibration API
+      // （多數桌面瀏覽器、iOS Safari）時靜默略過——不是錯誤，只是沒有觸覺回饋。
+      onNudge: () => {
+        if (typeof navigator !== "undefined" && typeof navigator.vibrate === "function") {
+          navigator.vibrate([120, 60, 120]);
+        }
+      },
     });
     backend.setReadReceipts?.(readReceipts); // ADR-0058：互惠開關（關＝不送也不顯示對方已讀）
     setTab("chats");
@@ -600,9 +616,29 @@ export function MobileApp({
   };
   /** 上線狀態（ADR-0114）。隱身優先——隱身時後端完全不廣播（ADR-0088）。 */
   const [selfStatus, setSelfStatus] = useState<Status>("online");
+  /** 自訂狀態文字（ADR-0142；行動端於 ADR-0168 補齊）：隨心跳廣播、本機持久化。 */
+  const [selfStatusMessage, setSelfStatusMessage] = useState("");
+  /** 正在聽（ADR-0142；行動端於 ADR-0168 補齊）：純易失，不持久化（換歌就換）。 */
+  const [selfNowPlaying, setSelfNowPlaying] = useState("");
+  const persistPresence = (status: Status, message: string): void => {
+    if (selfPubkey) savePresence(selfPubkey, { status, statusMessage: message }); // ADR-0164：本機記住手動狀態
+  };
   const changeStatus = (v: Status): void => {
     setSelfStatus(v);
-    backendRef.current?.setStatus(v);
+    backendRef.current?.setStatus(v, selfStatusMessage);
+    persistPresence(v, selfStatusMessage);
+  };
+  /** 改自訂狀態文字（ADR-0142／0168）：後端隨心跳帶出、本機記住，下次上線還原。 */
+  const changeStatusMessage = (msg: string): void => {
+    setSelfStatusMessage(msg);
+    backendRef.current?.setStatus(selfStatus, msg);
+    persistPresence(selfStatus, msg);
+  };
+  /** 改「正在聽」（ADR-0142／0168）：隨心跳廣播；易失、不落地。 */
+  const changeNowPlaying = (text: string): void => {
+    const t = text.trim();
+    setSelfNowPlaying(t);
+    backendRef.current?.setNowPlaying(t);
   };
   /**
    * 通知開關（ADR-0116）。**權限必須在使用者手勢裡請求**——瀏覽器會拒絕非手勢的
@@ -841,10 +877,13 @@ export function MobileApp({
   if (screen === "conversation" && activeId) {
     const group = groups.find((g) => g.id === activeId);
     const contact = contacts.find((c) => c.pubkey === activeId);
+    // 副標題：群組＝成員數；1:1＝正在聽（♪）優先 → 自訂狀態文字 → 上線狀態（與桌面同序）。
     const subtitle = group
       ? translate(locale, "group_membersCount", { count: group.members.length })
       : contact
-        ? contact.statusMessage || translate(locale, STATUS_KEY[contact.status])
+        ? contact.nowPlaying?.trim()
+          ? `♪ ${contact.nowPlaying}`
+          : contact.statusMessage || translate(locale, STATUS_KEY[contact.status])
         : undefined;
     // 群組另傳成員名解析＋成員清單：供已讀分級（≤5 名單、6–10 計數、>10 不顯示，ADR-0095）。
     // 群組管理（ADR-0114）：任何成員都能離開；**只有管理者**能移除成員（ADR-0027）。
@@ -973,6 +1012,10 @@ export function MobileApp({
             ? {
                 status: selfStatus,
                 onStatus: changeStatus,
+                statusMessage: selfStatusMessage,
+                onStatusMessage: changeStatusMessage,
+                nowPlaying: selfNowPlaying,
+                onNowPlaying: changeNowPlaying,
                 onPairExport: () => setScreen("pairExport"),
                 notify,
                 onNotify: (v: boolean) => void setNotify(v),

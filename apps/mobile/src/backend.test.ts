@@ -57,3 +57,22 @@ describe("行動端後端接線補齊（ADR-0100）", () => {
   });
 });
 
+describe("行動端上線狀態本機還原（ADR-0168）", () => {
+  it("帶入 initialStatus／initialStatusMessage → self 依此建構（首次心跳即照此廣播）", () => {
+    const backend = createBackend(identity(), "wss://relay.example", {
+      initialStatus: "busy",
+      initialStatusMessage: "趕稿中",
+    });
+    expect(backend.self.status).toBe("busy");
+    expect(backend.self.statusMessage).toBe("趕稿中");
+    backend.stop();
+  });
+
+  it("未帶 initial → 預設 online、空文字（不因缺省而洩漏舊狀態）", () => {
+    const backend = createBackend(identity(), "wss://relay.example");
+    expect(backend.self.status).toBe("online");
+    expect(backend.self.statusMessage).toBe("");
+    backend.stop();
+  });
+});
+
