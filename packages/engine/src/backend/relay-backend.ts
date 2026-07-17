@@ -66,6 +66,7 @@ import {
   wrapReaction,
   wrapReceipt,
   receiptOf,
+  FILE_CHUNK_BYTES,
   parseFileChunk,
   policyTtlSeconds,
   splitFileChunks,
@@ -404,13 +405,13 @@ export class RelayChatBackend implements ChatBackend {
   private readonly orgInviteToken: string | undefined;
   /** 首份名冊發佈前收到的入職請求（ADR-0156）：發佈時自動併入。 */
   private readonly pendingJoins = new Map<PubkeyHex, string>();
-  /** 待收位元組的儲存槽存放（ADR-0161，企業主端）：tid → 寄件人與 metadata。 */
-  private readonly pendingSlots = new Map<string, { sender: PubkeyHex; name: string; mime: string; origin: string }>();
   /** relay 檔案分塊重組（ADR-0162）：tid → 收到的塊。防禦上限見 receiveFileChunk。 */
   private readonly chunkAsm = new Map<
     string,
-    { sender: PubkeyHex; name: string; mime: string; total: number; parts: Map<number, Uint8Array> }
+    { sender: PubkeyHex; name: string; mime: string; total: number; parts: Map<number, Uint8Array>; at: number }
   >();
+  /** 不完整重組的逾時（秒，審查修正）：超時未收齊即回收，避免一格永久佔用卡死接收。 */
+  private static readonly CHUNK_ASM_TTL_SEC = 120;
   /** 企業 TURN 伺服器與強制 TURN 政策狀態（ADR-0048）：供 WebRTC ICE 設定。 */
   private readonly turnServers: RTCIceServer[] | undefined;
   private forceTurn = false;
@@ -1338,17 +1339,9 @@ export class RelayChatBackend implements ChatBackend {
 
     const fileMeta = parseFileMeta(rumor);
     if (fileMeta) {
-      if (fileMeta.slot !== undefined) {
-        // ADR-0161：儲存槽存放的 metadata——**不建聊天訊息**。企業主端且寄件人為名冊
-        // 在世成員才記下待收位元組；其餘身分/陌生人一律忽略（拒收非成員塞檔）。
-        if (
-          this.orgOwnerFlag &&
-          this.lastRoster?.members.some((m) => m.pubkey === sender && !m.supersededBy)
-        ) {
-          this.pendingSlots.set(fileMeta.tid, { sender, name: fileMeta.name, mime: fileMeta.mime, origin: fileMeta.slot });
-        }
-        return;
-      }
+      // 儲存槽存放（ADR-0161／審查修正）：改由 P2P file-begin 幀直接攜帶 `origin`，
+      // 不再走 relay metadata——舊格式若殘留帶 slot 的 metadata 一律忽略、不建訊息。
+      if (fileMeta.slot !== undefined) return;
       // 檔案 metadata（ADR-0093）：讓收件人**所有裝置**都知道有檔案；位元組另走 P2P。
       // 以 tid 去重（位元組可能已先到並建了訊息）；仍回送已送達回條讓 sender 有投遞可見度（G3）。
       // 自封副本 → 我的另一台裝置：看得到 metadata，但**沒有位元組、也沒有縮圖**
@@ -2570,10 +2563,15 @@ export class RelayChatBackend implements ChatBackend {
     if (this.isBlocked(sender) || !this.contacts.some((c) => c.pubkey === sender)) return;
     const chunk = parseFileChunk(rumor);
     if (!chunk) return;
+    // 審查修正：收端**重新驗證**組織政策的大小上限（發送端的 relayFilesMaxMb 只是自律，
+    // 改過的客戶端可繞過）。有政策時以其換算最大塊數；無政策（非組織聯絡人）沿用核心硬上限。
+    const maxMb = this.lastRoster?.policy?.relayFilesMaxMb;
+    if (maxMb !== undefined && chunk.total > Math.ceil((maxMb * 1024 * 1024) / FILE_CHUNK_BYTES)) return;
     let asm = this.chunkAsm.get(chunk.tid);
     if (!asm) {
+      this.sweepChunkAsm(); // 先回收逾時的不完整重組（審查修正：避免一格永久佔用卡死）
       if (this.chunkAsm.size >= 8) return; // 併發重組上限（防記憶體）
-      asm = { sender, name: chunk.name, mime: chunk.mime, total: chunk.total, parts: new Map() };
+      asm = { sender, name: chunk.name, mime: chunk.mime, total: chunk.total, parts: new Map(), at: nowSec() };
       this.chunkAsm.set(chunk.tid, asm);
     }
     if (asm.sender !== sender || asm.total !== chunk.total) return; // 塊間不一致＝丟棄
@@ -2594,17 +2592,22 @@ export class RelayChatBackend implements ChatBackend {
     this.onFileBytes(sender, { id: chunk.tid, name: asm.name, mime: asm.mime, bytes });
   }
 
+  /** 回收逾時未收齊的分塊重組（審查修正）：防單一聯絡人以殘缺傳輸永久佔滿 8 格。 */
+  private sweepChunkAsm(): void {
+    const cutoff = nowSec() - RelayChatBackend.CHUNK_ASM_TTL_SEC;
+    for (const [tid, asm] of this.chunkAsm) if (asm.at < cutoff) this.chunkAsm.delete(tid);
+  }
+
   private onFileBytes(peer: PubkeyHex, file: ReceivedFile): void {
-    // 儲存槽存放（ADR-0161）：位元組收齊 → 交 App 落盤，不進聊天訊息流。
-    const slotMeta = this.pendingSlots.get(file.id);
-    if (slotMeta) {
-      this.pendingSlots.delete(file.id);
-      if (slotMeta.sender === peer) {
+    // 儲存槽存放（ADR-0161／審查修正）：`origin` 隨 P2P 幀本身到達 → 直接判定為存放，
+    // 不進聊天訊息流、無競態。只收**名冊在世成員**（企業主端）；其餘忽略（不塞垃圾）。
+    if (file.origin !== undefined) {
+      if (this.orgOwnerFlag && this.lastRoster?.members.some((m) => m.pubkey === peer && !m.supersededBy)) {
         this.handlers?.onSlotDeposit?.(peer, {
           tid: file.id,
-          name: slotMeta.name,
-          mime: slotMeta.mime,
-          origin: slotMeta.origin,
+          name: file.name,
+          mime: file.mime,
+          origin: file.origin,
           bytes: file.bytes,
         });
       }
@@ -2639,16 +2642,10 @@ export class RelayChatBackend implements ChatBackend {
    * 兩端不建聊天訊息、不發自封副本（自己的其他裝置無需知道）。
    */
   depositFile(to: PubkeyHex, file: OutgoingFile, origin: string): string {
-    const tid = this.transfer.sendFile(to, file);
-    const meta = { tid, name: file.name, size: file.bytes.length, mime: file.mime, slot: origin };
-    const now = nowSec();
-    const wrapped = wrapFileMessage(this.sk, to, meta, {
-      now,
-      ...(this.homeUrl ? { relayHint: this.homeUrl } : {}),
-    });
-    this.seenMsg.add(wrapped.id);
-    for (const evt of wrapped.events) this.publishReliable(evt);
-    return tid;
+    // 審查修正：儲存槽存放的 `origin` **隨 P2P file-begin 幀傳**（不再另發 relay metadata）——
+    // 收端從幀本身即知是存放，消除「位元組先於 metadata 到達」的競態與 pendingSlots 無界成長。
+    // 存放只在企業主在線時 P2P 直送（ADR-0161 佇列），無離線遞送需求，故不需 relay metadata。
+    return this.transfer.sendFile(to, file, undefined, origin);
   }
 
   /**

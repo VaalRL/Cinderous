@@ -46,6 +46,24 @@ describe("Data Channel — 檔案分塊與重組", () => {
     expect(eq(got.bytes, file.bytes)).toBe(true);
   });
 
+  it("儲存槽 origin 隨 file-begin 幀往返（ADR-0161 審查修正）；一般檔案無此欄；過長截斷", () => {
+    const onFile = vi.fn();
+    const rx = new DataChannelReceiver({ onFile });
+    const file = { name: "報表.xlsx", mime: "application/x", bytes: bytes(1, 2, 3) };
+    for (const m of encodeFile(file, "s1", 1024, "與阿強的對話")) rx.receive(m);
+    expect(onFile.mock.calls[0]![0].origin).toBe("與阿強的對話");
+    // 一般檔案（無 origin）→ 收端不帶 origin 欄。
+    const onFile2 = vi.fn();
+    const rx2 = new DataChannelReceiver({ onFile: onFile2 });
+    for (const m of encodeFile(file, "s2", 1024)) rx2.receive(m);
+    expect(onFile2.mock.calls[0]![0].origin).toBeUndefined();
+    // 過長 origin（遠端可控）→ 收端截斷至 200 字。
+    const onFile3 = vi.fn();
+    const rx3 = new DataChannelReceiver({ onFile: onFile3 });
+    for (const m of encodeFile(file, "s3", 1024, "x".repeat(500))) rx3.receive(m);
+    expect(onFile3.mock.calls[0]![0].origin.length).toBe(200);
+  });
+
   it("多塊、亂序送達仍正確重組", () => {
     const onFile = vi.fn();
     const rx = new DataChannelReceiver({ onFile });

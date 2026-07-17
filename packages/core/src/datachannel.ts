@@ -13,7 +13,7 @@ export type DataMessage =
    * 「在線但閒置」的人誤判為離線。相容舊版：缺此欄位則退回預設容忍窗。
    */
   | { t: "presence"; s: string; m: string; np: string; hb?: number }
-  | { t: "file-begin"; id: string; name: string; mime: string; size: number; chunks: number };
+  | { t: "file-begin"; id: string; name: string; mime: string; size: number; chunks: number; origin?: string };
 
 /** 資料通道可能收到的原始資料（控制為字串、檔案分塊為二進位）。 */
 export type RawData = string | ArrayBuffer | Uint8Array;
@@ -67,6 +67,11 @@ export interface ReceivedFile {
   name: string;
   mime: string;
   bytes: Uint8Array;
+  /**
+   * 公司儲存槽存放來源標註（ADR-0161／審查修正）：**隨 file-begin 幀本身傳**——收端據此
+   * 直接判定為存放、不需等 relay metadata，消除位元組/metadata 兩傳輸的競態。一般檔案無此欄。
+   */
+  origin?: string;
 }
 
 const DEFAULT_CHUNK_SIZE = 16_384;
@@ -103,6 +108,8 @@ export function encodeFile(
   file: OutgoingFile,
   id: string,
   chunkSize = DEFAULT_CHUNK_SIZE,
+  /** 儲存槽存放來源標註（ADR-0161／審查修正）：隨 file-begin 傳，一般檔案省略。 */
+  origin?: string,
 ): (string | Uint8Array)[] {
   const total = Math.ceil(file.bytes.length / chunkSize);
   const messages: (string | Uint8Array)[] = [
@@ -113,6 +120,7 @@ export function encodeFile(
       mime: file.mime,
       size: file.bytes.length,
       chunks: total,
+      ...(origin !== undefined ? { origin } : {}),
     } satisfies DataMessage),
   ];
   for (let seq = 0; seq < total; seq++) {
@@ -146,7 +154,7 @@ const DEFAULT_MAX_CHUNKS = 1_000_000;
 const DEFAULT_MAX_CONCURRENT = 16;
 
 interface Partial {
-  meta: { name: string; mime: string; size: number; chunks: number };
+  meta: { name: string; mime: string; size: number; chunks: number; origin?: string };
   received: Map<number, Uint8Array>;
   receivedBytes: number;
 }
@@ -207,7 +215,14 @@ export class DataChannelReceiver {
           return;
         }
         this.partials.set(msg.id, {
-          meta: { name: msg.name, mime: msg.mime, size: msg.size, chunks: msg.chunks },
+          // origin 來自對方（遠端可控）→ 限型別與長度（審查修正）。
+          meta: {
+            name: msg.name,
+            mime: msg.mime,
+            size: msg.size,
+            chunks: msg.chunks,
+            ...(typeof msg.origin === "string" ? { origin: msg.origin.slice(0, 200) } : {}),
+          },
           received: new Map(),
           receivedBytes: 0,
         });
@@ -256,6 +271,12 @@ export class DataChannelReceiver {
       bytes.set(chunk, offset);
       offset += chunk.length;
     }
-    this.handlers.onFile?.({ id, name: partial.meta.name, mime: partial.meta.mime, bytes });
+    this.handlers.onFile?.({
+      id,
+      name: partial.meta.name,
+      mime: partial.meta.mime,
+      bytes,
+      ...(partial.meta.origin !== undefined ? { origin: partial.meta.origin } : {}),
+    });
   }
 }

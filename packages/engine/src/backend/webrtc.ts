@@ -41,6 +41,8 @@ export interface TransferHandlers {
 interface OutJob {
   id: string;
   file: OutgoingFile;
+  /** 儲存槽存放來源標註（ADR-0161／審查修正）：隨 file-begin 傳，讓收端無需 relay metadata。 */
+  origin?: string;
 }
 
 interface PeerConn {
@@ -125,10 +127,10 @@ export class WebRtcTransfer {
    * **群組的每位成員必須共用同一個 tid**：metadata 只有一個（rumor 跨成員共用），
    * 若每條 P2P 各自產 id，收件端就對不回同一則訊息——位元組到了，卻不知道它屬於哪一則。
    */
-  sendFile(peerPk: PubkeyHex, file: OutgoingFile, tid?: string): string {
+  sendFile(peerPk: PubkeyHex, file: OutgoingFile, tid?: string, origin?: string): string {
     const id = tid ?? this.newTransferId();
     const peer = this.ensurePeer(peerPk);
-    peer.outbox.push({ id, file });
+    peer.outbox.push({ id, file, ...(origin !== undefined ? { origin } : {}) });
     if (peer.dc && peer.dc.readyState === "open") {
       this.flush(peerPk, peer);
     } else if (!peer.started) {
@@ -283,7 +285,7 @@ export class WebRtcTransfer {
     if (!dc || dc.readyState !== "open") return;
     const job = peer.outbox.shift();
     if (!job) return;
-    const messages = encodeFile(job.file, job.id, CHUNK_SIZE);
+    const messages = encodeFile(job.file, job.id, CHUNK_SIZE, job.origin);
     const size = job.file.bytes.length;
     let i = 0;
     const pump = () => {

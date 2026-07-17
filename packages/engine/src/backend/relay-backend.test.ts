@@ -1331,30 +1331,28 @@ describe("檔案投遞與另存（ADR-0093）", () => {
     });
     a.start(noop);
 
-    // 存放：metadata（帶 slot 標記）經中繼到達企業主——**兩端都不建聊天訊息**。
-    const tid = a.depositFile(owner.self.pubkey, { name: "報表.xlsx", mime: "application/x", bytes: new Uint8Array([1, 2, 3]) }, "與阿強的對話");
+    // 審查修正：存放的 origin 隨 P2P file-begin 幀傳，不發 relay metadata → 兩端零聊天訊息。
+    a.depositFile(owner.self.pubkey, { name: "報表.xlsx", mime: "application/x", bytes: new Uint8Array([1, 2, 3]) }, "與阿強的對話");
     expect(storeO.loadMessages(a.self.pubkey)).toEqual([]);
     expect(storeA.loadMessages(owner.self.pubkey).filter((m) => m.file)).toEqual([]);
 
-    // P2P 位元組到齊（node 無真實 WebRTC → 直接餵 onFileBytes 模擬）→ onSlotDeposit。
-    (owner as unknown as { onFileBytes(peer: string, file: { id: string; name: string; mime: string; bytes: Uint8Array }): void }).onFileBytes(
-      a.self.pubkey,
-      { id: tid, name: "報表.xlsx", mime: "application/x", bytes: new Uint8Array([1, 2, 3]) },
-    );
+    // P2P 位元組（帶 origin）到齊（node 無真實 WebRTC → 直接餵 onFileBytes 模擬）→ onSlotDeposit。
+    type Feed = { onFileBytes(peer: string, file: { id: string; name: string; mime: string; bytes: Uint8Array; origin?: string }): void };
+    (owner as unknown as Feed).onFileBytes(a.self.pubkey, {
+      id: "t1", name: "報表.xlsx", mime: "application/x", bytes: new Uint8Array([1, 2, 3]), origin: "與阿強的對話",
+    });
     expect(deposits.length).toBe(1);
     expect(deposits[0]).toMatchObject({ sender: a.self.pubkey, name: "報表.xlsx", origin: "與阿強的對話" });
     expect([...deposits[0]!.bytes]).toEqual([1, 2, 3]);
     expect(storeO.loadMessages(a.self.pubkey)).toEqual([]); // 位元組到齊也不建訊息
 
-    // 非名冊成員（陌生人）帶 slot 標記塞檔 → metadata 直接被忽略（不記待收、不建訊息）。
+    // 非名冊成員（陌生人）帶 origin 的位元組 → 不入槽（onSlotDeposit 不觸發）。
     const evil = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("e", h), "壞人");
     evil.start(noop);
-    const evilTid = evil.depositFile(owner.self.pubkey, { name: "malware.exe", mime: "application/x", bytes: new Uint8Array([9]) }, "x");
-    (owner as unknown as { onFileBytes(peer: string, file: { id: string; name: string; mime: string; bytes: Uint8Array }): void }).onFileBytes(
-      evil.self.pubkey,
-      { id: evilTid, name: "malware.exe", mime: "application/x", bytes: new Uint8Array([9]) },
-    );
-    expect(deposits.length).toBe(1); // 不觸發 onSlotDeposit（位元組走一般陌生人流程，不入槽）
+    (owner as unknown as Feed).onFileBytes(evil.self.pubkey, {
+      id: "t2", name: "malware.exe", mime: "application/x", bytes: new Uint8Array([9]), origin: "x",
+    });
+    expect(deposits.length).toBe(1); // 不觸發 onSlotDeposit（非名冊成員）
 
     a.stop();
     evil.stop();
