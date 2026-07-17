@@ -12,7 +12,8 @@ export function Transparency({ c }: { c: Copy }): JSX.Element {
     let cancelled = false;
     void (async () => {
       try {
-        const res = await fetch("/funds.json", { cache: "no-store" });
+        // base-aware：專案頁部署於 /Cinder/，BASE_URL 帶尾斜線（根站時為 "/"）
+        const res = await fetch(`${import.meta.env.BASE_URL}funds.json`, { cache: "no-store" });
         const event = (await res.json()) as NostrEvent;
         const data = verifyFunds(event); // 用釘死的透明度公鑰驗簽（fail-closed）
         if (cancelled) return;
