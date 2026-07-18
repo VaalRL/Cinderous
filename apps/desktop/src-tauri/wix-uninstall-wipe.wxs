@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  ADR-0204: MSI uninstall optional wipe (WiX equivalent of NSIS ADR-0203).
+
+  MSI (especially silent enterprise deployment) should not pop an interactive dialog on
+  uninstall, as it would block unattended /qn flows. So this uses a property-driven opt-in
+  (the enterprise convention): keep data by default; wipe only when WIPEDATA=1 is passed.
+    Keep (default): msiexec /x Cinderous.msi
+    Wipe:           msiexec /x Cinderous.msi WIPEDATA=1
+
+  Wipe runs the still-installed main binary with the wipe-local flag (reusing the app keyring
+  logic to delete keyvault entries, %APPDATA% and the WebView2 profile), scheduled before
+  RemoveFiles and only on full removal (REMOVE=ALL). Impersonate="yes" so it runs in the
+  user context whose per-user Credential Manager keys and %APPDATA% must be deleted.
+
+  Linked via tauri.conf.json bundle.windows.wix fragmentPaths + componentGroupRefs (an empty
+  ComponentGroup is enough to pull the CustomAction and sequence into the product).
+-->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Fragment>
+    <!-- Referenced by wix.componentGroupRefs to link this whole fragment. -->
+    <ComponentGroup Id="CinderWipeComponentGroup" />
+
+    <!-- Passable from the command line (Secure = crosses into the execute sequence). Unset = no wipe. -->
+    <Property Id="WIPEDATA" Secure="yes" />
+
+    <!-- Run the installed main binary with the wipe-local flag. FileKey="Path" = main binary (see main.wxs). -->
+    <CustomAction Id="CinderWipeLocal"
+                  FileKey="Path"
+                  ExeCommand="--wipe-local"
+                  Execute="deferred"
+                  Impersonate="yes"
+                  Return="ignore" />
+
+    <InstallExecuteSequence>
+      <!-- Only on full removal and WIPEDATA=1, before files are deleted (binary still present). -->
+      <Custom Action="CinderWipeLocal" Before="RemoveFiles">(REMOVE="ALL") AND (WIPEDATA="1")</Custom>
+    </InstallExecuteSequence>
+  </Fragment>
+</Wix>
