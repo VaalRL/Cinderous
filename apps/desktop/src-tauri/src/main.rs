@@ -379,6 +379,63 @@ fn wipe_store_dir(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// 明文身分索引一列（pubkey/namespace 皆公開資訊）。
+#[derive(serde::Deserialize)]
+struct IdRef {
+    pubkey: String,
+    namespace: String,
+}
+
+/// 同步明文身分索引（ADR-0203）：寫 `<app_data>/identity-index.txt`（每行 `pubkey\tnamespace`）。
+/// 供反安裝「一併清空」時——app 未跑、讀不到 WebView 登錄——仍能知道要刪哪些金鑰庫條目。
+/// 前端於身分新增/移除/清空後呼叫。內容非機密（公鑰與命名空間皆公開）。
+#[tauri::command]
+fn sync_identity_index(app: tauri::AppHandle, identities: Vec<IdRef>) -> Result<(), String> {
+    let base = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&base).map_err(|e| e.to_string())?;
+    let body = identities
+        .iter()
+        .map(|i| format!("{}\t{}", i.pubkey, i.namespace))
+        .collect::<Vec<_>>()
+        .join("\n");
+    std::fs::write(base.join("identity-index.txt"), body).map_err(|e| e.to_string())
+}
+
+/// 反安裝「一併清空」CLI（ADR-0203）：以 `--wipe-local` 啟動時執行——app 未跑、無 AppHandle，
+/// 故由環境變數推路徑。讀明文身分索引逐一刪金鑰庫條目，再刪磁碟資料（store/file-authz/索引）
+/// 與 WebView2 設定檔。全程盡力而為（忽略個別失敗），不開視窗。
+#[cfg(feature = "keyring")]
+fn run_wipe_cli() {
+    if let Some(appdata) = std::env::var_os("APPDATA") {
+        let base = std::path::Path::new(&appdata).join("app.cinder.desktop");
+        let index = base.join("identity-index.txt");
+        if let Ok(body) = std::fs::read_to_string(&index) {
+            for line in body.lines() {
+                let mut it = line.splitn(2, '\t');
+                let pubkey = it.next().unwrap_or("");
+                let namespace = it.next().unwrap_or("");
+                if pubkey.is_empty() {
+                    continue;
+                }
+                for account in [
+                    pubkey.to_string(),
+                    format!("db:{namespace}"),
+                    format!("rescue:{namespace}"),
+                    format!("db-next:{namespace}"),
+                ] {
+                    let _ = cinder_desktop::keyvault::delete_key(&account);
+                }
+            }
+        }
+        let _ = std::fs::remove_dir_all(base.join("store"));
+        let _ = std::fs::remove_file(base.join("file-authz"));
+        let _ = std::fs::remove_file(&index);
+    }
+    if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+        let _ = std::fs::remove_dir_all(std::path::Path::new(&local).join("app.cinder.desktop").join("EBWebView"));
+    }
+}
+
 // ── H4 本地密碼 IPC（ADR-0067）：Argon2id KEK 包裹 nsec＋db 金鑰，取代金鑰庫明文條目 ──
 
 /// 是否已啟用本地密碼（以金鑰庫實況為準，而非前端旗標）。
@@ -948,6 +1005,12 @@ fn hide_to_tray(app: tauri::AppHandle) {
 }
 
 fn main() {
+    // 反安裝「一併清空」（ADR-0203）：以 `--wipe-local` 啟動＝headless 清資料後結束，不開視窗。
+    #[cfg(feature = "keyring")]
+    if std::env::args().any(|a| a == "--wipe-local") {
+        run_wipe_cli();
+        return;
+    }
     // 版本更新後首次啟動先清 WebView2 資產快取（在 webview 建立前），避免載到舊前端（ADR-0197）。
     clear_webview_cache_on_update();
     tauri::Builder::default()
@@ -1014,6 +1077,7 @@ fn main() {
             store_remove_part,
             wipe_identity,
             wipe_store_dir,
+            sync_identity_index,
             archive_append,
             archive_count,
             archive_load,

@@ -414,6 +414,13 @@ export function App(): JSX.Element {
   const { layout } = useLayout(); // 桌面佈局（ADR-0079）：classic 浮動視窗 ↔ modern 三欄。
   const [backend, setBackend] = useState<ChatBackend | null>(null);
   const [profilesState, setProfilesState] = useState<ProfilesState>(() => loadProfiles());
+  // 明文身分索引（ADR-0203）：身分清單變動時同步給 Rust，供反安裝「一併清空」時 app 未跑仍能
+  // 知道要刪哪些金鑰庫條目。pubkey/namespace 皆公開資訊；僅 Tauri。
+  useEffect(() => {
+    if (!isTauri()) return;
+    const identities = profilesState.profiles.map((p) => ({ pubkey: p.pubkey, namespace: p.namespace }));
+    void invoke("sync_identity_index", { identities }).catch(() => {});
+  }, [profilesState]);
   const [self, setSelf] = useState<Self | null>(null);
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [convos, setConvos] = useState<Record<string, ChatMessage[]>>({});
