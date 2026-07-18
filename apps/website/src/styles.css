@@ -1,6 +1,14 @@
 /* Cinderous 官網 — 「夜森林裡的一簇營火」。深夜森林為底、餘燼暖橙為光。Signal 式乾淨排版。 */
 
+/* 字型統一（ADR-0192）：英文一律 Manrope（自架 woff2、各平台一致、無第三方請求，維持零追蹤宣稱）；
+   中文一律走高品質繁中堆疊（Noto Sans TC → PingFang TC → Microsoft JhengHei）。以 --font 單一來源套用全站。 */
+@font-face { font-family: "Manrope"; font-style: normal; font-weight: 400; font-display: swap; src: url("./fonts/manrope-400.woff2") format("woff2"); }
+@font-face { font-family: "Manrope"; font-style: normal; font-weight: 600; font-display: swap; src: url("./fonts/manrope-600.woff2") format("woff2"); }
+@font-face { font-family: "Manrope"; font-style: normal; font-weight: 700; font-display: swap; src: url("./fonts/manrope-700.woff2") format("woff2"); }
+@font-face { font-family: "Manrope"; font-style: normal; font-weight: 800; font-display: swap; src: url("./fonts/manrope-800.woff2") format("woff2"); }
+
 :root {
+  --font: "Manrope", "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", "Microsoft YaHei", sans-serif;
   /* 白日：溫暖米色 */
   --bg: #f7f2ea;
   --bg2: #efe7d9;
@@ -50,10 +58,12 @@ html, body { margin: 0; padding: 0; }
 body {
   background: var(--bg);
   color: var(--ink);
-  font-family: "Segoe UI", "Microsoft JhengHei", system-ui, -apple-system, sans-serif;
+  font-family: var(--font);
   line-height: 1.65;
   -webkit-font-smoothing: antialiased;
 }
+/* 表單/互動元素預設不繼承字型家族——強制繼承，確保全站字型真正統一。 */
+button, input, textarea, select { font-family: inherit; }
 a { color: var(--accent); text-decoration: none; }
 h1, h2, h3 { text-wrap: balance; }
 

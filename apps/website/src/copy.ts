@@ -30,6 +30,14 @@ export interface Copy {
   tech_intro: string;
   tech_proto_t: string;
   tech_proto_b: string;
+  tech_multi_title: string;
+  tech_multi_lead: string;
+  md_list: string;
+  md_cipher: string;
+  md_anchorA: string;
+  md_anchorB: string;
+  md_community: string;
+  md_offline: string;
   features_title: string;
   feat_e2e_t: string;
   feat_e2e_b: string;
@@ -114,6 +122,15 @@ const zhHant: Copy = {
   tech_proto_t: "協定基線",
   tech_proto_b:
     "建構於 Nostr 開放協定：訊息以 NIP-17／44／59（Gift Wrap）加密封裝、NIP-42 驗證中繼連線、NIP-13 工作量證明抑制濫用。即時互動（檔案、在線、輸入中）改走 WebRTC P2P，直接點對點、完全不經中繼。全為開放標準，任何人都能自行實作與稽核。",
+  tech_multi_title: "多個節點時，如何協作",
+  tech_multi_lead:
+    "當網路裡有很多節點，沒有誰是必經之路。你和好友各自連上任一可用中繼——中繼只轉發密文；任何一座離線，訊息自動改走其他座。哪些節點可用，由維護者簽章的節點清單決定（登入自動選座），即時互動則走 WebRTC P2P 直連、完全不經中繼。",
+  md_list: "簽章節點清單 · 登入自動選座",
+  md_cipher: "密文可經任一節點轉發",
+  md_anchorA: "錨點 A",
+  md_anchorB: "錨點 B",
+  md_community: "社群節點",
+  md_offline: "離線 → 改走其他節點",
   features_title: "四大技術支柱",
   feat_e2e_t: "端到端加密",
   feat_e2e_b: "以 Nostr NIP-17/44/59（Gift Wrap）加密——中繼站看不到內容，也看不到寄件者。",
@@ -203,6 +220,15 @@ const en: Copy = {
   tech_proto_t: "Protocol baseline",
   tech_proto_b:
     "Built on the open Nostr protocol: messages are encrypted and wrapped with NIP-17/44/59 (Gift Wrap), relay connections are authenticated with NIP-42, and NIP-13 proof-of-work deters abuse. Real-time interactions (files, presence, typing) go over WebRTC P2P, straight peer-to-peer, bypassing relays entirely. All open standards — implementable and auditable by anyone.",
+  tech_multi_title: "How many nodes collaborate",
+  tech_multi_lead:
+    "With many nodes in the network, no single one is on the critical path. You and your friend each connect to any available relay — relays only forward ciphertext; if one goes offline, messages route via others automatically. Which nodes are available is decided by a maintainer-signed node list (auto-seat on sign-in), while real-time interactions go straight over WebRTC P2P, bypassing relays entirely.",
+  md_list: "Signed node list · auto-seat on sign-in",
+  md_cipher: "ciphertext via any node",
+  md_anchorA: "Anchor A",
+  md_anchorB: "Anchor B",
+  md_community: "Community node",
+  md_offline: "offline → route via others",
   features_title: "Four technical pillars",
   feat_e2e_t: "End-to-end encrypted",
   feat_e2e_b: "Encrypted with Nostr NIP-17/44/59 (Gift Wrap) — relays see neither the content nor the sender.",

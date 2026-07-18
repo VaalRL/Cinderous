@@ -1,5 +1,6 @@
 import type { Copy } from "../copy.js";
 import { FlowDiagram } from "../FlowDiagram.js";
+import { MultiNodeDiagram } from "../MultiNodeDiagram.js";
 
 // 技術原理頁（ADR-0187）：闡述 Cinderous 如何在不信任伺服器的前提下安全送達訊息。
 export function Tech({ c }: { c: Copy }): JSX.Element {
@@ -18,6 +19,10 @@ export function Tech({ c }: { c: Copy }): JSX.Element {
         <h2 style={{ fontSize: 22, marginTop: 34 }}>{c.how_title}</h2>
         <p className="sec__lead">{c.how_lead}</p>
         <FlowDiagram c={c} />
+
+        <h2 style={{ fontSize: 22, marginTop: 40 }}>{c.tech_multi_title}</h2>
+        <p className="sec__lead">{c.tech_multi_lead}</p>
+        <MultiNodeDiagram c={c} />
 
         <h2 style={{ fontSize: 22, marginTop: 40 }}>{c.features_title}</h2>
         <div className="grid grid--4">

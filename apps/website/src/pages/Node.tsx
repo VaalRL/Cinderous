@@ -41,7 +41,7 @@ export function Node({ c }: { c: Copy }): JSX.Element {
         </div>
 
         <div className="cta" style={{ justifyContent: "flex-start", marginTop: 26 }}>
-          <a className="btn btn--primary" href={`${GITHUB_URL}/tree/main/docs`} target="_blank" rel="noreferrer">
+          <a className="btn btn--primary" href={`${GITHUB_URL}/blob/main/docs/SELF-HOSTING.md`} target="_blank" rel="noreferrer">
             {c.node_docs}
           </a>
         </div>
