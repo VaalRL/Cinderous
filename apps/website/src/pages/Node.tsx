@@ -3,9 +3,9 @@ import { GITHUB_URL } from "../App.js";
 
 export function Node({ c }: { c: Copy }): JSX.Element {
   const steps = [
-    { t: "Cloudflare Worker", b: "relay/ 的 Worker 部署到 Cloudflare（免費層），wrangler deploy。" },
-    { t: "容器（Docker）", b: "node-relay 以容器自架於 VPS／Raspberry Pi（ADR-0075）。" },
-    { t: "填捐款欄位（可選）", b: "在 NIP-11 自報 GitHub Sponsors／BMC／Liberapay／Lightning（ADR-0089）。" },
+    { t: c.node_step1_t, b: c.node_step1_b },
+    { t: c.node_step2_t, b: c.node_step2_b },
+    { t: c.node_step3_t, b: c.node_step3_b },
   ];
   return (
     <section className="sec sec--plain" style={{ paddingTop: 56 }}>

@@ -62,6 +62,12 @@ export interface Copy {
   node_intro: string;
   node_how_t: string;
   node_how_b: string;
+  node_step1_t: string;
+  node_step1_b: string;
+  node_step2_t: string;
+  node_step2_b: string;
+  node_step3_t: string;
+  node_step3_b: string;
   node_pool_t: string;
   node_pool_b: string;
   node_donate_t: string;
@@ -158,6 +164,12 @@ const zhHant: Copy = {
   node_how_t: "怎麼架",
   node_how_b:
     "兩種方式：Cloudflare Worker（免費層即可）或容器（Docker，自架於 VPS／Raspberry Pi）。詳細步驟見自架文件。",
+  node_step1_t: "Cloudflare Worker",
+  node_step1_b: "relay/ 的 Worker 部署到 Cloudflare（免費層），wrangler deploy。",
+  node_step2_t: "容器（Docker）",
+  node_step2_b: "node-relay 以容器自架於 VPS／Raspberry Pi（ADR-0075）。",
+  node_step3_t: "填捐款欄位（可選）",
+  node_step3_b: "在 NIP-11 自報 GitHub Sponsors／BMC／Liberapay／Lightning（ADR-0089）。",
   node_pool_t: "我的節點會被別人用到嗎？",
   node_pool_b:
     "跑起來，它就是一座可用的中繼。要被「自動選座」的公共池採用，需由維護者把它加進『簽章節點清單』（防蹭曝光/釣魚）。在那之前，你的節點仍可被：手動填入網址的人、或把它設為 home 的聯絡人（會自動學到路由）使用。",
@@ -259,6 +271,12 @@ const en: Copy = {
   node_how_t: "How to host",
   node_how_b:
     "Two ways: a Cloudflare Worker (free tier is enough) or a container (Docker, self-hosted on a VPS / Raspberry Pi). See the self-hosting docs for steps.",
+  node_step1_t: "Cloudflare Worker",
+  node_step1_b: "Deploy the relay/ Worker to Cloudflare (free tier), wrangler deploy.",
+  node_step2_t: "Container (Docker)",
+  node_step2_b: "Self-host node-relay as a container on a VPS / Raspberry Pi (ADR-0075).",
+  node_step3_t: "Donation fields (optional)",
+  node_step3_b: "Self-report GitHub Sponsors / BMC / Liberapay / Lightning in NIP-11 (ADR-0089).",
   node_pool_t: "Will others use my node?",
   node_pool_b:
     "Running it makes it a working relay. To be picked up by the auto-assigned public pool, a maintainer must add it to the signed relay list (to prevent freeloading/phishing). Until then, your node is still usable by anyone who enters its URL manually, or by contacts who set it as their home (they learn the route automatically).",
