@@ -269,8 +269,18 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
 .window-chrome__hotzone:hover + .titlebar,
 .window-chrome--autohide .titlebar:hover,
 .window-chrome--autohide .titlebar:focus-within { transform: translateY(0); }
+/* 標題列滑入時，內容**往下讓位**而不是被蓋住（改善回報）：body 下移一條標題列高、
+   --viewport-h 同步縮回，flex 自動吸收＝內容整體下移且不溢出。滑開即彈回（同步過渡）。 */
+.window-chrome--autohide .window-chrome__body { transition: margin-top 0.15s ease; }
+.window-chrome--autohide:has(.window-chrome__hotzone:hover),
+.window-chrome--autohide:has(.titlebar:hover),
+.window-chrome--autohide:has(.titlebar:focus-within) { --viewport-h: calc(100vh - var(--titlebar-h)); }
+.window-chrome--autohide:has(.window-chrome__hotzone:hover) .window-chrome__body,
+.window-chrome--autohide:has(.titlebar:hover) .window-chrome__body,
+.window-chrome--autohide:has(.titlebar:focus-within) .window-chrome__body { margin-top: var(--titlebar-h); }
 @media (prefers-reduced-motion: reduce) {
-  .window-chrome--autohide .titlebar { transition: none; }
+  .window-chrome--autohide .titlebar,
+  .window-chrome--autohide .window-chrome__body { transition: none; }
 }
 /* 設定頁迷你預覽：縮一圈、整條不可互動。 */
 .titlebar--preview { border: 1px solid var(--border); border-radius: 6px; pointer-events: none; max-width: 320px; margin-bottom: 8px; }
@@ -742,8 +752,10 @@ button:disabled { opacity: .5; cursor: default; filter: none; }
 }
 .modal__box > .win__title { flex: 0 0 auto; }
 .modal__box > .win__title ~ * { overflow-y: auto; min-height: 0; }
-/* 設定彈窗較寬（表單/中繼站清單較多）；仍受 max-width: calc(100vw - 24px) 封頂。 */
-.modal__box.settings-modal { width: 480px; }
+/* 設定彈窗較寬（表單/中繼站清單較多）；仍受 max-width: calc(100vw - 24px) 封頂。
+   固定高度（改善回報）：切換分頁時整窗高度不變，由內文區卷軸調節——避免每次切頁彈窗跳動。
+   小視窗由 .modal__box 的 max-height: calc(var(--viewport-h) - 24px) 自動封頂。 */
+.modal__box.settings-modal { width: 480px; height: 560px; }
 /* 設定分頁列（ADR-0142）：固定在標題下、不隨內文捲動。 */
 .settings__tabs { flex: 0 0 auto; display: flex; gap: 2px; padding: 6px 8px 0; border-bottom: 1px solid var(--border); overflow-x: auto; }
 .settings__tab {
