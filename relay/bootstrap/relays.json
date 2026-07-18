@@ -6,12 +6,12 @@
   "entries": [
     {
       "url": "wss://cinder-relay.cinderous1.workers.dev",
-      "accepting": false
+      "weight": 2
     },
     {
       "url": "wss://cinder-relay.jt0856.workers.dev",
-      "accepting": false
+      "weight": 2
     }
   ],
-  "updatedAt": 1784313045
+  "updatedAt": 1784363346
 }
