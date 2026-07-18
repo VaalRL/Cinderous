@@ -1,6 +1,6 @@
 {
   "name": "@cinderous/desktop",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "private": true,
   "type": "module",
   "description": "Cinderous 桌面前端（Tauri + React/TS）",
