@@ -131,6 +131,14 @@ export function setActive(state: ProfilesState, pubkey: string): ProfilesState {
   return { ...state, active: pubkey };
 }
 
+/**
+ * 軟登出（ADR-0201）：清掉作用中選擇但**保留所有身分**於登錄——下次開機回登入頁、
+ * 可再登入（有密碼者需解鎖）。與 `removeProfile`（破壞性移除）刻意分開：登出不刪任何資料。
+ */
+export function clearActive(state: ProfilesState): ProfilesState {
+  return { ...state, active: null };
+}
+
 /** 目前作用中的設定檔（無則 null）。 */
 export function activeProfile(state: ProfilesState): Profile | null {
   return state.profiles.find((p) => p.pubkey === state.active) ?? null;

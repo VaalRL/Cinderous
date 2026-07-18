@@ -462,6 +462,9 @@ export interface Messages {
   settings_backupCodePw: string;
   settings_backupCodePw2: string;
   settings_backupCodeMake: string;
+  settings_logout: string;
+  settings_logoutHint: string;
+  settings_logoutConfirm: string;
   /** 行動端改密碼／備份碼（ADR-0135）。 */
   mobilePassword_changed: string;
   /** 多身分（ADR-0138）。 */
@@ -1075,6 +1078,9 @@ const zhHant: Messages = {
   settings_backupCodePw: "救援密碼",
   settings_backupCodePw2: "再輸入一次救援密碼",
   settings_backupCodeMake: "產生",
+  settings_logout: "登出",
+  settings_logoutHint: "結束目前登入、回到登入畫面。身分與資料仍留在這台裝置，可再次登入（若有本地密碼需再解鎖）。",
+  settings_logoutConfirm: "要登出嗎？身分與資料會保留在本機，可再次登入。",
   mobilePassword_changed: "密碼已更新",
   identities_title: "身分",
   identities_add: "新增身分",
@@ -1675,6 +1681,9 @@ const en: Messages = {
   settings_backupCodePw: "Rescue password",
   settings_backupCodePw2: "Repeat rescue password",
   settings_backupCodeMake: "Create",
+  settings_logout: "Log out",
+  settings_logoutHint: "End the current session and return to the sign-in screen. Your identity and data stay on this device — you can sign back in (unlock again if a local password is set).",
+  settings_logoutConfirm: "Log out? Your identity and data stay on this device and you can sign back in.",
   mobilePassword_changed: "Password updated",
   identities_title: "Identities",
   identities_add: "Add identity",

@@ -52,6 +52,7 @@ import {
   activeProfile,
   adoptCloudSyncMode,
   changeProfileRelay,
+  clearActive,
   loadProfiles,
   nameTaken,
   type Profile,
@@ -1456,6 +1457,18 @@ export function App(): JSX.Element {
     }
   };
 
+  // 軟登出（ADR-0201）：只結束作用中 session、清 active 後重載回登入頁；**保留所有身分與資料**
+  // 於本機（有密碼者下次需解鎖）。與「移除此身分／清空裝置」的破壞性動作刻意分開。
+  const logout = async () => {
+    if (!(await confirm({ message: t("settings_logoutConfirm"), confirmLabel: t("settings_logout") }))) return;
+    saveProfiles(clearActive(profilesState));
+    try {
+      location.reload();
+    } catch {
+      /* 忽略 */
+    }
+  };
+
   // 新增身分：產生或匯入 nsec → 存入該身分命名空間 → 登錄並切換（重載）。
   const addIdentity = async (
     name: string,
@@ -2052,6 +2065,7 @@ export function App(): JSX.Element {
         <SettingsPanel
           selfName={self.name}
           onRename={renameSelf}
+          onLogout={() => void logout()}
           {...(orgInfo ? { orgInfo } : {})}
           {...(() => {
             // 企業頭銜（ADR-0158）：企業成員與企業主身分才顯示編輯欄。

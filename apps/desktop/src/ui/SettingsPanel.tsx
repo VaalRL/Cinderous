@@ -110,6 +110,8 @@ export interface SettingsPanelProps {
   relayLocked?: boolean;
   /** 配對新裝置（ADR-0072 D4a）；未提供則不顯示（示範模式/企業身分）。 */
   onPairDevice?: () => void;
+  /** 軟登出（ADR-0201）：結束 session 回登入頁，保留身分；未提供則不顯示。 */
+  onLogout?: () => void;
   /** 加密雲端快照（ADR-0071）：三檔模式；未提供則不顯示（示範模式/政策禁用）。 */
   cloud?: {
     mode: CloudSyncMode;
@@ -1062,6 +1064,16 @@ export function SettingsPanel(props: SettingsPanelProps): JSX.Element {
           {tab === "relay" && props.cloud ? <CloudSyncSettings value={props.cloud} /> : null}
 
           {tab === "identity" && props.security ? <SecuritySettings value={props.security} /> : null}
+
+          {tab === "identity" && props.onLogout ? (
+            <section className="settings__sec" data-testid="logout">
+              <h4>{t("settings_logout")}</h4>
+              <p className="hint">{t("settings_logoutHint")}</p>
+              <button type="button" className="settings__reveal" data-testid="logout-btn" onClick={props.onLogout}>
+                {t("settings_logout")}
+              </button>
+            </section>
+          ) : null}
 
           {tab === "privacy" && props.onToggleCleanOnPaste ? (
             <section className="settings__sec">

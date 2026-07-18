@@ -5,6 +5,7 @@ import {
   activeProfile,
   adoptCloudSyncMode,
   changeProfileRelay,
+  clearActive,
   clearDrain,
   DRAIN_MS,
   loadProfiles,
@@ -51,6 +52,13 @@ describe("profiles 純登錄（ADR-0045）", () => {
     expect(s.active).toBe("a");
     s = removeProfile(s, "a");
     expect(s).toEqual({ profiles: [], active: null });
+  });
+
+  it("clearActive（軟登出 ADR-0201）：active→null 但身分全保留（可再登入）", () => {
+    const s = upsertProfile(upsertProfile(empty, mk("a")), mk("b")); // active=b
+    const out = clearActive(s);
+    expect(out.active).toBeNull();
+    expect(out.profiles.map((p) => p.pubkey)).toEqual(["a", "b"]); // 不刪任何身分
   });
 
   it("setActive：未知 pubkey 不變", () => {

@@ -660,8 +660,9 @@ export function MobileApp({
     setTypingFrom(null);
     if (typingTimer.current) clearTimeout(typingTimer.current);
     if (statusBcTimer.current) clearTimeout(statusBcTimer.current);
-    // 登出＝移除這個身分並清其密文（ADR-0138）；還有其他身分就去解下一個，沒有了才回登入。
-    forgetActive();
+    // 軟登出（ADR-0201）：只結束 session、保留身分於本機——有記住的身分回解鎖、否則回登入。
+    // 破壞性的「移除此身分」＝forgetActive（另由設定的移除入口負責，ADR-0138 不變）。
+    setScreen(activeProfile(profiles) ? "unlock" : "signin");
   };
   // 通知點擊（ADR-0116）：開啟該對話。掛載一次即可。
   useEffect(() => onNotifyClick((convo) => convo && openConvo(convo)), []); // eslint-disable-line react-hooks/exhaustive-deps
