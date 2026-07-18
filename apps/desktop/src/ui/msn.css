@@ -355,12 +355,20 @@ button:disabled { opacity: .5; cursor: default; filter: none; }
   display: flex; align-items: center; justify-content: center; gap: 8px; flex-wrap: wrap;
 }
 .signin__relay { display: flex; flex-direction: column; align-items: stretch; }
-.signin__relaytoggle {
-  background: none; border: none; padding: 0; margin: 2px auto 0;
-  color: var(--accent, #2f9e44); font-size: 12px; font-weight: 600; cursor: pointer;
-  text-decoration: underline; text-underline-offset: 2px; width: auto;
+/* 次要動作＝不搶眼（specificity 0,2,0 蓋過 .signin button 的主色實心 0,1,1）：
+   換中繼站＝中性底線連結；從其他裝置登入＝中性描邊幽靈鈕。與主色「登入」鈕明確區隔。 */
+.signin .signin__relaytoggle {
+  background: none; border: none; padding: 0; margin: 0; width: auto;
+  color: var(--muted); font-size: 12px; font-weight: 500; cursor: pointer;
+  text-decoration: underline; text-underline-offset: 2px;
 }
-.signin__relaytoggle:hover { opacity: .8; }
+.signin .signin__relaytoggle:hover { color: var(--ink); filter: none; opacity: 1; }
+.signin .signin__secondary {
+  background: transparent; color: var(--muted); border: 1px solid var(--border); font-weight: 500;
+}
+.signin .signin__secondary:hover { color: var(--ink); border-color: var(--accent); filter: none; }
+/* 登入頁按鈕間垂直間隔（主要動作之間留白，不再黏在一起）。 */
+.signin button { margin-top: 10px; }
 
 /* ── 聯絡人清單 ── */
 .contacts { width: 300px; display: flex; flex-direction: column; max-height: 80vh; }

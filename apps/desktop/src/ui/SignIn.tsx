@@ -415,7 +415,7 @@ export function SignIn({
           ) : null}
 
           {!invite && onPair && !pairOpen ? (
-            <button className="settings__reveal" data-testid="pair-import" onClick={() => setPairOpen(true)}>
+            <button className="signin__secondary" data-testid="pair-import" onClick={() => setPairOpen(true)}>
               {t("pair_importButton")}
             </button>
           ) : null}

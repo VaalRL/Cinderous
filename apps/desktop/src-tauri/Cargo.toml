@@ -1,6 +1,6 @@
 [package]
 name = "cinder-desktop"
-version = "0.0.6"
+version = "0.0.7"
 edition = "2021"
 publish = false
 description = "Cinderous 桌面原生橋（Rust）：relay 連線、重連、金鑰儲存、IPC"
