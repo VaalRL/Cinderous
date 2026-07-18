@@ -1,3 +1,5 @@
+> 🌐 **English** · [English version](./NODE-SUBMISSION.en.md)
+
 # 提交你的節點加入官方網路（ADR-0092）
 
 任何人都能**自架並使用** Cinderous 節點（見自架文件，ADR-0075）。本文件是想被**官方自動選座池**收錄

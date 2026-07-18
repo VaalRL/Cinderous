@@ -1,3 +1,5 @@
+> 🌐 **English** · [English version](./CONTRIBUTING.en.md)
+
 # 參與 Cinderous 開發
 
 歡迎社群開發者。Cinderous 是**去中心化、端到端加密**的即時通訊（Nostr + WebRTC），AGPL-3.0。這份文件是開發者的入口——不論你是想**接自己的前端**、**加一種語言**、**做擴充**，還是**貢獻核心**，都從這裡開始。

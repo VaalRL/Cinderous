@@ -1,3 +1,5 @@
+> 🌐 **English** · [English version](./SELF-HOSTING.en.md)
+
 # 自架 Cinderous（單一入口）
 
 這是自架的**總覽入口**——一頁看懂「有哪些部署方式、各自差在哪、該選哪個」，再點進對應的詳細文件。

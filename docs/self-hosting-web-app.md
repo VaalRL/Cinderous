@@ -1,3 +1,5 @@
+> 🌐 **English** · [English version](./self-hosting-web-app.en.md)
+
 # 自架 Cinderous 網頁版（瀏覽器 app，與官網分子網域）
 
 把 Cinderous 的**瀏覽器版**部署到你自己的網域：官網放一個「登入」入口，點了跳到 app 子網域，之後整個

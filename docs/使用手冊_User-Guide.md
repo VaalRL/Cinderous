@@ -1,3 +1,5 @@
+> 🌐 **English** · [English version](./User-Guide.en.md)
+
 # Cinderous 使用手冊
 
 > 給第一次使用去中心化即時通訊的你。這份手冊聚焦在「Cinderous 和 LINE / Messenger 這類軟體**不一樣**的地方」——這些不一樣不是刁難，而是「沒有一家公司掌管你的帳號與訊息」所必須付出的代價，換來的是**沒有人能偷看、封鎖或刪除你的對話**。

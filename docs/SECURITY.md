@@ -1,3 +1,5 @@
+> 🌐 **English** · [English version](./SECURITY.en.md)
+
 # 安全政策與自評（Security Policy & Self-Assessment）
 
 > 本文件為 **Phase F4** 的內部安全自評與漏洞回報政策，為未來第三方稽核鋪路。

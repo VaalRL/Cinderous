@@ -1,3 +1,5 @@
+> 🌐 **English** · [English version](./self-hosting-zeabur.en.md)
+
 # 在 Zeabur 上自架 Cinderous 中繼站（node-relay）
 
 在 [Zeabur](https://zeabur.com) 這類 PaaS 上跑一座 Cinderous 中繼站——比家用網路／樹莓派省事很多：**平台自動配 HTTPS（`wss://` 直接可用、免自己弄憑證）、有固定網域、可綁自訂網域**。跑的是**與 Cloudflare 版完全相同的 `RelayCore`**，只是外殼換成 Node.js + 本機 SQLite（同 `docs/self-hosting-raspberry-pi.md` 的 node-relay）。

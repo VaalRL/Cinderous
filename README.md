@@ -1,3 +1,5 @@
+> 🌐 **English** · [English version](./README.en.md)
+
 # Cinderous
 
 > **Life is short, connect buddies.**

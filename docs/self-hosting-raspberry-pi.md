@@ -1,3 +1,5 @@
+> 🌐 **English** · [English version](./self-hosting-raspberry-pi.en.md)
+
 # 在樹莓派自架 Cinderous 中繼站（node-relay）
 
 在你自己的樹莓派（或任何 Node 22+ 的機器）上跑一個 Cinderous 中繼站。它跑的是**與 Cloudflare 版完全相同的 `RelayCore`**，差別只是外殼換成 Node.js + 本機 SQLite。

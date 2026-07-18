@@ -1,3 +1,5 @@
+> 🌐 **English** · [English version](./MAINTAINER-ACTIVATION.en.md)
+
 # 啟用維護者角色（點亮簽章 relay 池）
 
 > 這份是**操作手冊**：把目前**已寫好但休眠**的「維護者簽章 relay 清單」機制（ADR-0039／0092）打開，
