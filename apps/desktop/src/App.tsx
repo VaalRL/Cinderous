@@ -28,6 +28,7 @@ import { normalizeRelayUrl, RelayChatBackend, shouldMuteOrgNotification, webSock
 import { browserStore } from "./native/browser-store.js";
 import { safeNsecDecode } from "./nsec.js";
 import { getKeyVault } from "./native/keyvault.js";
+import { wipeDeviceLocal, wipeIdentityLocal } from "./native/wipe.js";
 import { getNotifier, onNotificationClick } from "./native/notify.js";
 import { pickFileToSend, readFileAtPath, saveIncomingFile, saveTextFile } from "./native/save-file.js";
 import { onNativeFileDrop } from "./native/file-drop.js";
@@ -57,6 +58,7 @@ import {
   nameTaken,
   type Profile,
   type ProfilesState,
+  removeProfile,
   resolveSignIn,
   saveProfiles,
   setActive,
@@ -1469,6 +1471,38 @@ export function App(): JSX.Element {
     }
   };
 
+  // 移除此身分（ADR-0202，破壞性）：刪本機金鑰＋儲存＋登錄。若刪的是作用中，reload 後遞補或回登入。
+  const removeIdentity = async (pubkey: string) => {
+    const p = profilesState.profiles.find((x) => x.pubkey === pubkey);
+    if (!p) return;
+    if (!(await confirm({ message: t("settings_removeIdentityConfirm"), confirmLabel: t("settings_removeIdentity"), danger: true }))) return;
+    await wipeIdentityLocal(p);
+    saveProfiles(removeProfile(profilesState, pubkey));
+    try {
+      location.reload();
+    } catch {
+      /* 忽略 */
+    }
+  };
+
+  // 清空裝置（ADR-0202，破壞性、不可逆）：刪**所有**身分的金鑰＋儲存＋WebView 資料。
+  // 輸入片語（CLEAR）才執行——避免誤觸；提示先備妥救援登入碼。
+  const wipeDevice = async () => {
+    const word = t("wipe_confirmWord");
+    const typed = await prompt({ message: t("wipe_confirm", { word }), confirmLabel: t("wipe_device") });
+    if (typed === null) return; // 取消
+    if (typed.trim().toUpperCase() !== word.toUpperCase()) {
+      await alert(t("wipe_mismatch"));
+      return;
+    }
+    await wipeDeviceLocal(profilesState.profiles);
+    try {
+      location.reload();
+    } catch {
+      /* 忽略 */
+    }
+  };
+
   // 新增身分：產生或匯入 nsec → 存入該身分命名空間 → 登錄並切換（重載）。
   const addIdentity = async (
     name: string,
@@ -2066,6 +2100,8 @@ export function App(): JSX.Element {
           selfName={self.name}
           onRename={renameSelf}
           onLogout={() => void logout()}
+          {...(profilesState.active ? { onRemoveIdentity: () => void removeIdentity(profilesState.active!) } : {})}
+          onWipeDevice={() => void wipeDevice()}
           {...(orgInfo ? { orgInfo } : {})}
           {...(() => {
             // 企業頭銜（ADR-0158）：企業成員與企業主身分才顯示編輯欄。

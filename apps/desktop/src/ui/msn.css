@@ -771,6 +771,13 @@ button:disabled { opacity: .5; cursor: default; filter: none; }
 .settings__sec h4 { margin: 0 0 4px; font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
 .settings__relay { font-size: 12px; word-break: break-all; }
 .settings__warn { font-size: 11px; color: #c0392b; margin: 0 0 6px; line-height: 1.4; }
+/* 危險區動作鈕（ADR-0202）：移除身分／清空裝置——紅色外框、hover 填實，明示破壞性。 */
+.settings__danger {
+  display: block; width: fit-content; margin: 0 0 10px;
+  background: transparent; color: #c0392b; border: 1px solid #c0392b;
+  border-radius: 6px; padding: 6px 12px; font-size: 12px; font-weight: 600; cursor: pointer;
+}
+.settings__danger:hover { background: #c0392b; color: #fff; filter: none; }
 .settings__hint { font-size: 11px; color: var(--muted); margin: 6px 0 0; line-height: 1.4; }
 .settings__key code { display: block; font-size: 11px; word-break: break-all; background: var(--code-bg); padding: 6px; border-radius: 4px; }
 

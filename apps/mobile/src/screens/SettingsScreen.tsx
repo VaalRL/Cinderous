@@ -51,6 +51,8 @@ function makeStyles(tk: ThemeTokens) {
     revealText: { fontSize: 13, color: tk.accent, fontWeight: "600" },
     logout: { backgroundColor: "#e5484d", borderRadius: 8, paddingVertical: 10, alignItems: "center" },
     logoutText: { color: "#ffffff", fontWeight: "700", fontSize: 15 },
+    dangerTitle: { color: "#c0392b" },
+    dangerText: { color: "#c0392b", fontWeight: "700", fontSize: 15, paddingVertical: 10 },
     // 改密碼／備份碼（ADR-0135/0070）。
     pwInput: {
       borderWidth: 1,
@@ -119,6 +121,8 @@ export function SettingsScreen({
   selfAvatar,
   onAvatar,
   onLogout,
+  onRemoveIdentity,
+  onWipeDevice,
 }: {
   selfName: string;
   /** 更改顯示名稱（ADR-0144）：落地本機並廣播給聯絡人。未提供則不顯示改名欄。回 false＝撞本機同名（ADR-0146）。 */
@@ -187,6 +191,10 @@ export function SettingsScreen({
   /** 設定/移除廣播頭像（ADR-0154）；回 false＝引擎拒收。未提供則不顯示頭像區（示範模式）。 */
   onAvatar?: (uri: string | undefined) => boolean;
   onLogout: () => void;
+  /** 移除此身分（ADR-0202，破壞性）。 */
+  onRemoveIdentity?: () => void;
+  /** 清空裝置（ADR-0202，破壞性、不可逆）。 */
+  onWipeDevice?: () => void;
 }): JSX.Element {
   const tk = useMemo(() => resolveTheme({ theme, accent }), [theme, accent]);
   const styles = useMemo(() => makeStyles(tk), [tk]);
@@ -851,6 +859,23 @@ export function SettingsScreen({
         <Pressable style={styles.logout} accessibilityRole="button" onPress={onLogout}>
           <Text style={styles.logoutText}>{t("mobileSettings_logout")}</Text>
         </Pressable>
+
+        {/* 危險區域（ADR-0202）：破壞性、不可逆。 */}
+        {onRemoveIdentity || onWipeDevice ? (
+          <View style={styles.section}>
+            <Text style={[styles.sectionTitle, styles.dangerTitle]}>{t("settings_dangerZone")}</Text>
+            {onRemoveIdentity ? (
+              <Pressable accessibilityRole="button" onPress={onRemoveIdentity}>
+                <Text style={styles.dangerText}>{t("settings_removeIdentity")}</Text>
+              </Pressable>
+            ) : null}
+            {onWipeDevice ? (
+              <Pressable accessibilityRole="button" onPress={onWipeDevice}>
+                <Text style={styles.dangerText}>{t("wipe_device")}</Text>
+              </Pressable>
+            ) : null}
+          </View>
+        ) : null}
       </ScrollView>
     </View>
   );

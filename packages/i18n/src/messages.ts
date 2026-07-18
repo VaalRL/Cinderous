@@ -465,6 +465,15 @@ export interface Messages {
   settings_logout: string;
   settings_logoutHint: string;
   settings_logoutConfirm: string;
+  settings_dangerZone: string;
+  settings_removeIdentity: string;
+  settings_removeIdentityHint: string;
+  settings_removeIdentityConfirm: string;
+  settings_wipeDeviceHint: string;
+  wipe_device: string;
+  wipe_confirmWord: string;
+  wipe_confirm: string;
+  wipe_mismatch: string;
   /** 行動端改密碼／備份碼（ADR-0135）。 */
   mobilePassword_changed: string;
   /** 多身分（ADR-0138）。 */
@@ -1081,6 +1090,15 @@ const zhHant: Messages = {
   settings_logout: "登出",
   settings_logoutHint: "結束目前登入、回到登入畫面。身分與資料仍留在這台裝置，可再次登入（若有本地密碼需再解鎖）。",
   settings_logoutConfirm: "要登出嗎？身分與資料會保留在本機，可再次登入。",
+  settings_dangerZone: "危險區域",
+  settings_removeIdentity: "移除此身分",
+  settings_removeIdentityHint: "從這台裝置刪除目前身分的私鑰與所有本機資料（訊息、聯絡人）。其他身分不受影響。若沒有救援登入碼或備份，此身分將永遠無法登入。",
+  settings_removeIdentityConfirm: "確定要從這台裝置移除目前身分？私鑰與所有本機資料會被永久刪除、無法復原。若沒有救援登入碼，將無法再登入此身分。",
+  settings_wipeDeviceHint: "刪除這台裝置上「所有」身分的私鑰與全部本機資料，回到全新狀態。此動作無法復原——請先確認你已有救援登入碼。",
+  wipe_device: "清空裝置",
+  wipe_confirmWord: "CLEAR",
+  wipe_confirm: "此動作會永久刪除這台裝置上的所有身分、私鑰與訊息，且無法復原。若你沒有救援登入碼，這些身分將永遠消失。\n\n確定要清空，請輸入 {word}：",
+  wipe_mismatch: "輸入不符，已取消清空。",
   mobilePassword_changed: "密碼已更新",
   identities_title: "身分",
   identities_add: "新增身分",
@@ -1684,6 +1702,15 @@ const en: Messages = {
   settings_logout: "Log out",
   settings_logoutHint: "End the current session and return to the sign-in screen. Your identity and data stay on this device — you can sign back in (unlock again if a local password is set).",
   settings_logoutConfirm: "Log out? Your identity and data stay on this device and you can sign back in.",
+  settings_dangerZone: "Danger zone",
+  settings_removeIdentity: "Remove this identity",
+  settings_removeIdentityHint: "Delete the current identity's private key and all its local data (messages, contacts) from this device. Other identities are unaffected. Without a rescue login code or backup, this identity can never sign in again.",
+  settings_removeIdentityConfirm: "Remove the current identity from this device? Its private key and all local data will be permanently deleted and cannot be recovered. Without a rescue login code you won't be able to sign in to this identity again.",
+  settings_wipeDeviceHint: "Delete the private keys and all local data of EVERY identity on this device, returning it to a fresh state. This cannot be undone — make sure you have a rescue login code first.",
+  wipe_device: "Wipe device",
+  wipe_confirmWord: "CLEAR",
+  wipe_confirm: "This permanently deletes every identity, private key and message on this device and cannot be undone. Without a rescue login code, these identities are gone forever.\n\nType {word} to confirm:",
+  wipe_mismatch: "Text didn't match — wipe cancelled.",
   mobilePassword_changed: "Password updated",
   identities_title: "Identities",
   identities_add: "Add identity",

@@ -112,6 +112,10 @@ export interface SettingsPanelProps {
   onPairDevice?: () => void;
   /** 軟登出（ADR-0201）：結束 session 回登入頁，保留身分；未提供則不顯示。 */
   onLogout?: () => void;
+  /** 移除此身分（ADR-0202，破壞性）：刪本機金鑰＋資料＋登錄；未提供則不顯示（無作用中身分）。 */
+  onRemoveIdentity?: () => void;
+  /** 清空裝置（ADR-0202，破壞性）：刪所有身分＋所有本機資料；未提供則不顯示。 */
+  onWipeDevice?: () => void;
   /** 加密雲端快照（ADR-0071）：三檔模式；未提供則不顯示（示範模式/政策禁用）。 */
   cloud?: {
     mode: CloudSyncMode;
@@ -1072,6 +1076,28 @@ export function SettingsPanel(props: SettingsPanelProps): JSX.Element {
               <button type="button" className="settings__reveal" data-testid="logout-btn" onClick={props.onLogout}>
                 {t("settings_logout")}
               </button>
+            </section>
+          ) : null}
+
+          {tab === "identity" && (props.onRemoveIdentity || props.onWipeDevice) ? (
+            <section className="settings__sec" data-testid="danger-zone">
+              <h4 className="settings__warn">{t("settings_dangerZone")}</h4>
+              {props.onRemoveIdentity ? (
+                <>
+                  <p className="hint">{t("settings_removeIdentityHint")}</p>
+                  <button type="button" className="settings__danger" data-testid="remove-identity-btn" onClick={props.onRemoveIdentity}>
+                    {t("settings_removeIdentity")}
+                  </button>
+                </>
+              ) : null}
+              {props.onWipeDevice ? (
+                <>
+                  <p className="hint">{t("settings_wipeDeviceHint")}</p>
+                  <button type="button" className="settings__danger" data-testid="wipe-device-btn" onClick={props.onWipeDevice}>
+                    {t("wipe_device")}
+                  </button>
+                </>
+              ) : null}
             </section>
           ) : null}
 

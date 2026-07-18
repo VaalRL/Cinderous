@@ -343,6 +343,42 @@ fn store_remove_part(app: tauri::AppHandle, namespace: String, part: String) -> 
     }
 }
 
+// ── 移除身分 / 清空裝置 IPC（ADR-0202）：破壞性、不可逆 ────────────────────────────
+
+/// 移除單一身分：刪其 OS 金鑰庫條目（nsec＋db／rescue／改密碼暫存）與磁碟加密資料
+/// （legacy 單檔＋parts/archive 目錄）。冪等——不存在的條目/檔案視為成功。
+#[tauri::command]
+fn wipe_identity(app: tauri::AppHandle, pubkey: String, namespace: String) -> Result<(), String> {
+    // 1) 金鑰庫：nsec 與衍生金鑰。未啟用密碼時 rescue/db-next 不存在＝冪等刪除。
+    for account in [
+        pubkey.clone(),
+        format!("db:{namespace}"),
+        format!("rescue:{namespace}"),
+        format!("db-next:{namespace}"),
+    ] {
+        cinder_desktop::keyvault::delete_key(&account).map_err(|e| e.to_string())?;
+    }
+    // 2) 本次 session 解鎖快取的明文 db 金鑰。
+    unlocked_keys().lock().unwrap().remove(&namespace);
+    // 3) 磁碟：legacy 單檔 + parts/archive 目錄（名稱規則同 store_path/part_dir）。
+    let name = if namespace.is_empty() { "legacy" } else { &namespace };
+    let store = app.path().app_data_dir().map_err(|e| e.to_string())?.join("store");
+    let _ = std::fs::remove_file(store.join(format!("{name}.enc")));
+    let _ = std::fs::remove_dir_all(store.join(name));
+    Ok(())
+}
+
+/// 清空整台裝置的本機資料殘留：整個 store 目錄與檔案授權清單。各身分的金鑰庫條目
+/// 由前端逐一 `wipe_identity` 負責（金鑰庫無法枚舉）。WebView 的 localStorage/IndexedDB
+/// 由前端清除。冪等。
+#[tauri::command]
+fn wipe_store_dir(app: tauri::AppHandle) -> Result<(), String> {
+    let base = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    let _ = std::fs::remove_dir_all(base.join("store"));
+    let _ = std::fs::remove_file(base.join("file-authz"));
+    Ok(())
+}
+
 // ── H4 本地密碼 IPC（ADR-0067）：Argon2id KEK 包裹 nsec＋db 金鑰，取代金鑰庫明文條目 ──
 
 /// 是否已啟用本地密碼（以金鑰庫實況為準，而非前端旗標）。
@@ -976,6 +1012,8 @@ fn main() {
             store_load_parts,
             store_save_part,
             store_remove_part,
+            wipe_identity,
+            wipe_store_dir,
             archive_append,
             archive_count,
             archive_load,

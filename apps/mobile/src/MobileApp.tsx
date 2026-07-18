@@ -691,6 +691,36 @@ export function MobileApp({
     if (typeof window === "undefined" || typeof window.confirm !== "function") return true;
     return window.confirm(translate(locale, key));
   };
+  /** 移除此身分（ADR-0202，破壞性）：刪目前身分的私鑰 blob 與登錄。沿用 forgetActive（ADR-0138）。 */
+  const removeActiveIdentity = (): void => {
+    if (!confirmAction("settings_removeIdentityConfirm")) return;
+    backendRef.current?.stop();
+    backendRef.current = null;
+    forgetActive();
+  };
+  /** 清空裝置（ADR-0202，破壞性、不可逆）：刪所有身分＋所有本機資料，回全新狀態。輸入片語才執行。 */
+  const wipeDevice = (): void => {
+    const word = translate(locale, "wipe_confirmWord");
+    if (typeof window !== "undefined" && typeof window.prompt === "function") {
+      const typed = window.prompt(translate(locale, "wipe_confirm", { word }));
+      if (typed === null) return;
+      if (typed.trim().toUpperCase() !== word.toUpperCase()) {
+        window.alert?.(translate(locale, "wipe_mismatch"));
+        return;
+      }
+    } else if (!confirmAction("settings_wipeDeviceHint")) {
+      return;
+    }
+    backendRef.current?.stop();
+    backendRef.current = null;
+    try {
+      localStorage.clear();
+    } catch {
+      /* 略 */
+    }
+    setProfiles({ profiles: [], active: null });
+    setScreen("signin");
+  };
   /** 移除聯絡人（ADR-0121，非封鎖）：清掉該對話（含封存）。正在看就退回主畫面。 */
   const removeContact = (pubkey: string): void => {
     if (!confirmAction("contact_removeConfirm")) return;
@@ -1413,6 +1443,8 @@ export function MobileApp({
             : {})}
           {...(remembered ? { onChangePassword: changePassword } : {})}
           onLogout={logout}
+          onRemoveIdentity={removeActiveIdentity}
+          onWipeDevice={wipeDevice}
         />
       )}
       <BottomTabs active={tab} onSelect={setTab} unreadTotal={unreadTotal} {...themeProps} />
