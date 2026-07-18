@@ -16,7 +16,6 @@ export interface Messages {
   appName: string;
   signIn_title: string;
   signIn_hint: string;
-  signIn_hint2: string;
   /** 瀏覽器本地密碼（ADR-0122）：必填——沒有它，重新整理一次身分就沒了。 */
   signIn_password: string;
   signIn_passwordAgain: string;
@@ -651,7 +650,6 @@ const zhHant: Messages = {
   appName: "Cinderous",
   signIn_title: "登入 Cinderous",
   signIn_hint: "去中心化、端到端加密的即時通。輸入顯示名稱即可開始（你的身分是本機生成的 secp256k1 金鑰）。",
-  signIn_hint2: "本示範會在記憶體中模擬中繼站與幾位好友，方便你體驗。",
   signIn_password: "本機密碼",
   signIn_passwordAgain: "再輸入一次",
   signIn_passwordWhy:
@@ -1248,7 +1246,6 @@ const en: Messages = {
   appName: "Cinderous",
   signIn_title: "Sign in to Cinderous",
   signIn_hint: "A decentralized, end-to-end encrypted messenger. Just enter a display name to start (your identity is a secp256k1 key generated on this device).",
-  signIn_hint2: "This demo simulates a relay and a few buddies in memory so you can try it out.",
   signIn_password: "Local password",
   signIn_passwordAgain: "Repeat password",
   signIn_passwordWhy:

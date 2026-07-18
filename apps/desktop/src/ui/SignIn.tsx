@@ -384,10 +384,7 @@ export function SignIn({
           ) : null}
 
           {invite ? null : (
-            <>
-              <button onClick={submit}>{entering ? t("signIn_enterExisting") : t("signIn_button")}</button>
-              <p className="hint">{t("signIn_hint2")}</p>
-            </>
+            <button onClick={submit}>{entering ? t("signIn_enterExisting") : t("signIn_button")}</button>
           )}
 
           {/* 用既有 nsec 登入（ADR-0122）：忘記密碼、或在舊版被換掉身分的人的出路。 */}
