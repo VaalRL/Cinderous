@@ -254,6 +254,16 @@ export function convoVisibleIn(layout: Layout, activeConvo: string | null, pk: s
 }
 
 /**
+ * 是否呈現「解鎖隱藏身分」🔒 入口（ADR-0199）。閘在「本機存在任一**已啟用密碼**的身分」，
+ * 而**刻意不**閘在「存在隱藏身分」——否則 🔒 的出現本身就洩漏「這台裝置藏了帳號」，反噬
+ * 隱藏身分要保護的否認性（ADR-0067）。「有密碼」≠「有隱藏」（可能只開了開機解鎖、沒藏東西），
+ * 故此閘門既讓沒設密碼的常見情形看不到 🔒（UI 乾淨），又不洩漏是否真有隱藏身分。
+ */
+export function shouldOfferUnlockHidden(profiles: Profile[]): boolean {
+  return profiles.some((p) => p.locked);
+}
+
+/**
  * 把某分頁移出後，作用中分頁該遞補誰（ADR-0079 Q3 修正）：非作用中則不動；
  * 否則挑相鄰（右側優先、否則左側最後一個）；清空回 null。
  */
@@ -1913,7 +1923,7 @@ export function App(): JSX.Element {
               <button className="idbar__add" title={t("idbar_addIdentity")} onClick={() => setAddIdOpen(true)}>
                 ＋
               </button>
-              {isTauri() ? (
+              {isTauri() && shouldOfferUnlockHidden(profilesState.profiles) ? (
                 <button className="idbar__add" title={t("idbar_unlockHidden")} onClick={() => void unlockHidden()}>
                   🔒
                 </button>

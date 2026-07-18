@@ -10,6 +10,7 @@ import {
   relayChangeTarget,
   RosterAdminModal,
   shouldMuteOrgNotification,
+  shouldOfferUnlockHidden,
 } from "./App.js";
 import type { Profile } from "@cinderous/engine";
 
@@ -133,6 +134,19 @@ describe("convoVisibleIn（ADR-0079 三欄可視性修正）", () => {
     expect(convoVisibleIn("modern", "a", "a", false)).toBe(true);
     expect(convoVisibleIn("modern", "a", "b", false)).toBe(false);
     expect(convoVisibleIn("modern", null, "a", false)).toBe(false);
+  });
+});
+
+describe("shouldOfferUnlockHidden（ADR-0199：🔒 入口收斂＋否認性）", () => {
+  it("無任何身分／都沒啟用密碼 → 不顯示 🔒（乾淨 UI）", () => {
+    expect(shouldOfferUnlockHidden([])).toBe(false);
+    expect(shouldOfferUnlockHidden([prof(), prof({ pubkey: "b" })])).toBe(false);
+  });
+
+  it("有任一身分啟用密碼 → 顯示 🔒（不論是否真有隱藏身分，避免入口洩漏隱藏存在）", () => {
+    expect(shouldOfferUnlockHidden([prof({ locked: true })])).toBe(true);
+    // 有密碼但無隱藏（未 hidden）也顯示：與「有隱藏」不可區分＝保住否認性
+    expect(shouldOfferUnlockHidden([prof(), prof({ pubkey: "b", locked: true })])).toBe(true);
   });
 });
 
