@@ -2,7 +2,7 @@
 
 ## Project Summary
 
-Cinder 是一款結合 **Nostr 協議**、**WebRTC**、**Rust Tauri** 與 **React/TypeScript** 的去中心化即時通訊軟體。核心目標不是一般 Web CRUD，而是建立極致隱私、無中央資料庫、低延遲的雙軌混合通訊管線，並高度還原 MSN Messenger 的經典互動（離線留言、上線狀態、音樂狀態、震動 Nudge、檔案傳輸）。本機 SQLite 為唯一真相來源；明文與私鑰絕不離開裝置。
+Cinderous 是一款結合 **Nostr 協議**、**WebRTC**、**Rust Tauri** 與 **React/TypeScript** 的去中心化即時通訊軟體。核心目標不是一般 Web CRUD，而是建立極致隱私、無中央資料庫、低延遲的雙軌混合通訊管線，並高度還原 MSN Messenger 的經典互動（離線留言、上線狀態、音樂狀態、震動 Nudge、檔案傳輸）。本機 SQLite 為唯一真相來源；明文與私鑰絕不離開裝置。
 
 ## Read Order
 

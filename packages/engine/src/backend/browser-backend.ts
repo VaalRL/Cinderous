@@ -21,8 +21,8 @@ import {
   sanitizeTitle,
   type SecretKey,
   validAvatarDataUri,
-} from "@cinder/core";
-import { createInMemoryRelayNetwork, MessageStore } from "@cinder/relay";
+} from "@cinderous/core";
+import { createInMemoryRelayNetwork, MessageStore } from "@cinderous/relay";
 import type { ChatBackend, ChatBackendEvents, ChatMessage, Contact, Self, Status } from "./types.js";
 
 const HEARTBEAT_MS = 2_000;

@@ -1,10 +1,10 @@
-// 訊息狀態圖示（ADR-0095）：與桌面**同一套**幾何（@cinder/theme 的 MSG_STATUS_ICONS）。
+// 訊息狀態圖示（ADR-0095）：與桌面**同一套**幾何（@cinderous/theme 的 MSG_STATUS_ICONS）。
 //
 // 用 react-native-svg（Expo/RN 生態標準，且 react-native-web 亦可用）——不再內嵌 DOM <svg>，
 // 故本元件可原樣移植到真正的 React Native：Metro 會自行挑 native 實作，web 端則由
 // vite.config 的別名指到其 web 實作（見該檔註解）。
 
-import { MSG_STATUS_ICONS, type MsgStatusIconName } from "@cinder/theme";
+import { MSG_STATUS_ICONS, type MsgStatusIconName } from "@cinderous/theme";
 import Svg, { Circle, Path } from "react-native-svg";
 
 export function MsgStatusIcon({

@@ -23,7 +23,7 @@ describe("入職邀請碼（ADR-0156）", () => {
 
   it("嵌在整段邀請信文字中也抽得出來（員工貼整封信）", () => {
     const code = makeOrgInvite(invite);
-    const mail = `哈囉，歡迎加入！\n請開 Cinder 並在登入畫面貼上：\n${code}\n有問題找我。`;
+    const mail = `哈囉，歡迎加入！\n請開 Cinderous 並在登入畫面貼上：\n${code}\n有問題找我。`;
     expect(parseOrgInvite(mail)?.adminPubkey).toBe(adminPk);
     expect(parseOrgInvite(mail)?.relayUrl).toBe("wss://corp.example");
   });

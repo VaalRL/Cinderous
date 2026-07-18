@@ -1,4 +1,4 @@
-// @cinder/engine — 通訊引擎公開 API（ADR-0074）。
+// @cinderous/engine — 通訊引擎公開 API（ADR-0074）。
 // 與 UI 無關：前端只呼叫 ChatBackend 方法、訂閱 ChatBackendEvents，不直接碰加密/協定。
 // 平台特有基質（Tauri 金鑰庫/加密儲存）不在此——由前端經 AppStorage 介面注入。
 

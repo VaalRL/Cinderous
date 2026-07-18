@@ -3,9 +3,9 @@
 // 媒體全程 P2P（ADR-0025/0026），不經中繼。
 
 import { useEffect, useState } from "react";
-import type { CallMedia, CallState } from "@cinder/core";
-import { type Locale, type MessageKey, translate } from "@cinder/i18n";
-import { resolveTheme, type Theme, type ThemeTokens } from "@cinder/theme";
+import type { CallMedia, CallState } from "@cinderous/core";
+import { type Locale, type MessageKey, translate } from "@cinderous/i18n";
+import { resolveTheme, type Theme, type ThemeTokens } from "@cinderous/theme";
 import { Pressable, StyleSheet, Text, View } from "react-native-web";
 import { StreamView } from "../native/call-media.js";
 

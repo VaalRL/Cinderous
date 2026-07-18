@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { StorageSnapshot } from "@cinder/engine";
+import type { StorageSnapshot } from "@cinderous/engine";
 import { onStoreFailure, type StoreIo, TauriStorage } from "./tauri-storage.js";
 
 /**

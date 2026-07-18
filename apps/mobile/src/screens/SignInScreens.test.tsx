@@ -1,11 +1,11 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import type { PairBundle } from "@cinder/engine";
+import type { PairBundle } from "@cinderous/engine";
 import { NsecSignInScreen } from "./NsecSignInScreen.js";
 import { PairImportScreen } from "./PairImportScreen.js";
 
 // 畫面互動（輸入/按鈕）在 renderToStaticMarkup 下不會執行，登入邏輯由 auth.test.ts 把關；
-// 此處確保兩畫面在深色＋自訂主色下靜態渲染出標題/入口、且吃 @cinder/theme（ADR-0080/0081）。
+// 此處確保兩畫面在深色＋自訂主色下靜態渲染出標題/入口、且吃 @cinderous/theme（ADR-0080/0081）。
 describe("行動端登入畫面（ADR-0081）", () => {
   it("NsecSignInScreen（A）：渲染標題與切換配對入口（en）", () => {
     const html = renderToStaticMarkup(

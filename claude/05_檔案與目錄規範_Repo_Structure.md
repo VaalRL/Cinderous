@@ -2,7 +2,7 @@
 
 ## Root 允許的入口文件
 
-Cinder 的 root 允許以下專案入口文件與必要設定：
+Cinderous 的 root 允許以下專案入口文件與必要設定：
 
 - `README.md`
 - `PRD.md`

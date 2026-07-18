@@ -1,4 +1,4 @@
-// Cinder 品牌向量元件（原創，無第三方商標素材）。核心元素：一顆發光餘燼。
+// Cinderous 品牌向量元件（原創，無第三方商標素材）。核心元素：一顆發光餘燼。
 // CinderMark＝app 圖示/登入 logo（深藍夜底方磚 + 餘燼光球）；
 // CinderMascot＝吉祥物（MSN buddy 藍身 + 燭火頭），alert 態＝有新訊息（火更旺 + 紅點）。
 import { useId } from "react";
@@ -7,7 +7,7 @@ import { useId } from "react";
 export function CinderMark({ size = 64 }: { size?: number }): JSX.Element {
   const id = useId().replace(/:/g, "");
   return (
-    <svg width={size} height={size} viewBox="0 0 100 100" role="img" aria-label="Cinder">
+    <svg width={size} height={size} viewBox="0 0 100 100" role="img" aria-label="Cinderous">
       <defs>
         <radialGradient id={`${id}e`} cx="50%" cy="42%" r="58%">
           <stop offset="0%" stopColor="#fff1c4" />
@@ -54,7 +54,7 @@ export function CinderMascot({ alert = false, size = 48 }: { alert?: boolean; si
       height={height}
       viewBox="0 0 120 150"
       role="img"
-      aria-label={alert ? "Cinder（有新訊息）" : "Cinder"}
+      aria-label={alert ? "Cinderous（有新訊息）" : "Cinderous"}
     >
       <defs>
         <radialGradient id={`${id}e`} cx="50%" cy={alert ? "66%" : "64%"} r={alert ? "62%" : "60%"}>

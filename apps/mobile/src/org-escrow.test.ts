@@ -1,4 +1,4 @@
-import { generateSecretKey } from "@cinder/core";
+import { generateSecretKey } from "@cinderous/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { type EscrowEntry, loadEscrow, offboardedEntries, removeEscrow, saveEscrow, upsertEscrow } from "./org-escrow.js";
 

@@ -1,10 +1,10 @@
 // 行動端登入 A（ADR-0081）：nsec 匯入。貼上桌面「設定 → 身分備份」的 nsec 即以同帳號登入。
-// 純 UI（RN 元件）：金鑰解碼/驗證在 ../auth（重用 @cinder/core）；色彩吃 @cinder/theme（與桌面同源）。
+// 純 UI（RN 元件）：金鑰解碼/驗證在 ../auth（重用 @cinderous/core）；色彩吃 @cinderous/theme（與桌面同源）。
 // 私鑰只在本機解碼、絕不外流；輸入以 secureTextEntry 遮罩，並即時預覽導出的 npub 供確認。
 import { useMemo, useState } from "react";
-import { type OrgInvite, parseOrgInvite } from "@cinder/core";
-import { type Locale, type MessageKey, translate } from "@cinder/i18n";
-import { resolveTheme, STATUS_COLORS, type Theme, type ThemeTokens } from "@cinder/theme";
+import { type OrgInvite, parseOrgInvite } from "@cinderous/core";
+import { type Locale, type MessageKey, translate } from "@cinderous/i18n";
+import { resolveTheme, STATUS_COLORS, type Theme, type ThemeTokens } from "@cinderous/theme";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native-web";
 import { identityFromSecret, looksLikeBackupCode, type MobileIdentity, npubFromNsec } from "../auth.js";
 

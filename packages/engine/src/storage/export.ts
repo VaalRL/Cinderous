@@ -129,7 +129,7 @@ export async function exportRecords(
   if (format === "json") {
     return JSON.stringify(
       {
-        app: "Cinder",
+        app: "Cinderous",
         exportedAt: now,
         conversations: convos.map((c) => ({
           kind: c.kind,
@@ -155,7 +155,7 @@ export async function exportRecords(
   }
 
   const lines: string[] = [];
-  const header = format === "md" ? `# Cinder 對話紀錄導出\n\n_導出時間：${fmtTime(now)}_` : `Cinder 對話紀錄導出（${fmtTime(now)}）`;
+  const header = format === "md" ? `# Cinderous 對話紀錄導出\n\n_導出時間：${fmtTime(now)}_` : `Cinderous 對話紀錄導出（${fmtTime(now)}）`;
   lines.push(header);
   for (const convo of convos) {
     if (format === "md") {

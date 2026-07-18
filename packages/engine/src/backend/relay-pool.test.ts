@@ -1,5 +1,5 @@
-import { KIND, wrapMessage, type NostrEvent, type RelayClientHandlers } from "@cinder/core";
-import { createInMemoryRelayNetwork } from "@cinder/relay";
+import { KIND, wrapMessage, type NostrEvent, type RelayClientHandlers } from "@cinderous/core";
+import { createInMemoryRelayNetwork } from "@cinderous/relay";
 import { describe, expect, it, vi } from "vitest";
 import { MemoryStorage } from "../storage/memory.js";
 import type { ChatBackendEvents, ChatMessage } from "./types.js";

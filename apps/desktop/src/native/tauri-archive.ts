@@ -5,7 +5,7 @@
 // 走檔案則直接沿用同一把 db 金鑰與同一套加密，零新機制。
 
 import { invoke } from "@tauri-apps/api/core";
-import type { MessageArchive, StoredMessage } from "@cinder/engine";
+import type { MessageArchive, StoredMessage } from "@cinderous/engine";
 
 /** 封存 IO 管道（可注入以利測試）。 */
 export interface ArchiveIo {

@@ -1,9 +1,9 @@
 {
-  "name": "@cinder/i18n",
+  "name": "@cinderous/i18n",
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Cinder 共用多語系訊息目錄與翻譯函式（桌面與行動端共用）",
+  "description": "Cinderous 共用多語系訊息目錄與翻譯函式（桌面與行動端共用）",
   "license": "AGPL-3.0-only",
   "main": "./src/index.ts",
   "types": "./src/index.ts",

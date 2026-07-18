@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { I18nProvider } from "../i18n.js";
 import { ThemeProvider } from "../theme.js";
-import type { ChatMessage, Contact, MessageStatus, Self } from "@cinder/engine";
+import type { ChatMessage, Contact, MessageStatus, Self } from "@cinderous/engine";
 import { ConversationWindow } from "./ConversationWindow.js";
 import { CHIME_PRESETS } from "./ringtone.js";
 

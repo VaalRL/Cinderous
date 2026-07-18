@@ -1,10 +1,10 @@
 // 行動端聊天清單（ADR-0085/0086）：登入後的主畫面，參考 LINE/Signal——聯絡人＋群組合成單一清單、
 // 預設依最近互動排序，每列＝頭像＋名稱＋最後訊息預覽＋時間＋未讀徽章，點擊開啟對話。
 // 真實 relay 模式（ADR-0086）：標題列「＋」展開加好友面板（貼 npub），並顯示自己的 npub 供分享。
-// 色彩吃 @cinder/theme。清單資料由呼叫端以 chat-list.ts 的 chatList() 排好傳入。
+// 色彩吃 @cinderous/theme。清單資料由呼叫端以 chat-list.ts 的 chatList() 排好傳入。
 import { useMemo, useState } from "react";
-import { type Locale, type MessageKey, translate } from "@cinder/i18n";
-import { resolveTheme, STATUS_COLORS, type Theme, type ThemeTokens } from "@cinder/theme";
+import { type Locale, type MessageKey, translate } from "@cinderous/i18n";
+import { resolveTheme, STATUS_COLORS, type Theme, type ThemeTokens } from "@cinderous/theme";
 import { Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native-web";
 import { type ChatListEntry, chatTimeLabel } from "../chat-list.js";
 

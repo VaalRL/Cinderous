@@ -4,7 +4,7 @@
 
 ## Step 1：需求與架構理解
 
-- [ ] 我已閱讀 `PRD.md`，理解 Cinder 的產品目標、階段與核心功能。
+- [ ] 我已閱讀 `PRD.md`，理解 Cinderous 的產品目標、階段與核心功能。
 - [ ] 我已閱讀 `ARCHITECTURE.md`，知道這次變更應該落在 `packages/core/`、`apps/desktop/`、`relay/`、`tests/` 或 `docs/` 的哪一層。
 - [ ] 若任務涉及 Nostr 事件、加密、WebRTC 或網路流程，我已確認本地優先、低延遲與隱私要求（明文/私鑰不離開裝置）。
 

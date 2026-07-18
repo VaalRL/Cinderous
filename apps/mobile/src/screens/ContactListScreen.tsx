@@ -1,15 +1,15 @@
 // Phase D 起手：行動端聯絡人清單。以 react-native-web 的 RN 元件撰寫（可在此環境瀏覽器渲染
-// 與測試），重用 @cinder/core（npub 編碼）、@cinder/i18n（多語系）與 @cinder/theme（設計 token）。
+// 與測試），重用 @cinderous/core（npub 編碼）、@cinderous/i18n（多語系）與 @cinderous/theme（設計 token）。
 // 原生打包/端上 LLM 待有工具鏈時（見 ROADMAP Phase D）。
 //
-// 設計對齊（ADR-0080）：色彩不再硬編碼，改吃 `@cinder/theme` 的 `resolveTheme`——與桌面版
+// 設計對齊（ADR-0080）：色彩不再硬編碼，改吃 `@cinderous/theme` 的 `resolveTheme`——與桌面版
 // 同一份主色/副色/深淺主題推導，行動端與桌面共用視覺 SSOT。StyleSheet 依當前 token 動態產生。
 // 註：目前直接 import "react-native-web"；日後上原生時可加 bundler 別名（react-native→web）
 // 讓同一份原始碼跨 web/native。
 import { useMemo, useState } from "react";
-import { npubEncode } from "@cinder/core";
-import { type Locale, type MessageKey, translate } from "@cinder/i18n";
-import { resolveTheme, STATUS_COLORS, type Theme, type ThemeTokens } from "@cinder/theme";
+import { npubEncode } from "@cinderous/core";
+import { type Locale, type MessageKey, translate } from "@cinderous/i18n";
+import { resolveTheme, STATUS_COLORS, type Theme, type ThemeTokens } from "@cinderous/theme";
 import { Pressable, StyleSheet, Text, View } from "react-native-web";
 
 export type MobileStatus = "online" | "away" | "busy" | "offline";
@@ -41,7 +41,7 @@ function shortNpub(npub: string): string {
   return npub.length > 18 ? `${npub.slice(0, 12)}…` : npub;
 }
 
-/** 依當前主題 token 產生樣式（色彩全部來自 @cinder/theme，與桌面同源）。 */
+/** 依當前主題 token 產生樣式（色彩全部來自 @cinderous/theme，與桌面同源）。 */
 function makeStyles(tk: ThemeTokens) {
   return StyleSheet.create({
     root: { flex: 1, backgroundColor: tk.panel },

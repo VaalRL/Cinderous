@@ -2,16 +2,16 @@
 // 且 --titlebar 等由 --accent 以 color-mix 推導）。純本地儲存（localStorage），不上雲。
 // 深色主題下自動提亮以維持對比。
 //
-// 色彩推導（lightenHex/accentForTheme）已抽至 `@cinder/theme` 作為跨前端 SSOT（ADR-0080）；
+// 色彩推導（lightenHex/accentForTheme）已抽至 `@cinderous/theme` 作為跨前端 SSOT（ADR-0080）；
 // 此處只轉引，桌面與行動端共用同一份提亮邏輯。CSS 端的 --bg-a/b/c/--titlebar 仍由 msn.css 的
-// color-mix 於瀏覽器即時推導，其值與 `@cinder/theme` 以測試對齊。
+// color-mix 於瀏覽器即時推導，其值與 `@cinderous/theme` 以測試對齊。
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { accentForTheme } from "@cinder/theme";
+import { accentForTheme } from "@cinderous/theme";
 import { useTheme } from "./theme.js";
 import { scopedGet, scopedRemove, scopedSet } from "./identity-scoped.js";
 
 // 轉引 SSOT，供設定頁與測試沿用既有 import 路徑。
-export { accentForTheme, lightenHex } from "@cinder/theme";
+export { accentForTheme, lightenHex } from "@cinderous/theme";
 
 // ADR-0167：主色改為身分層覆寫、回退裝置層（`nb.<pubkey>.accent` → `nb.accent`）。
 const SUFFIX = "accent";

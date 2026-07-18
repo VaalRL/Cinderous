@@ -7,7 +7,7 @@
 
 use keyring::{Entry, Error as KeyringError};
 
-/// 金鑰庫服務名稱（同一使用者下所有 Cinder 身分共用；以 pubkey 區分帳號）。
+/// 金鑰庫服務名稱（同一使用者下所有 Cinderous 身分共用；以 pubkey 區分帳號）。
 const SERVICE: &str = "app.cinder.desktop";
 
 /// 金鑰庫存取失敗（包住後端錯誤字串，供 IPC 回傳前端）。

@@ -16,12 +16,12 @@ describe("行動端 ContactListScreen（Phase D 起手）", () => {
       <ContactListScreen selfPubkey={"aa".repeat(32)} selfName="我" contacts={[mk("Bob", "online")]} locale="en" />,
     );
     expect(html).toContain("Bob");
-    expect(html).toContain("Online"); // @cinder/i18n translate(en, status_online)
+    expect(html).toContain("Online"); // @cinderous/i18n translate(en, status_online)
     expect(html).toContain("我"); // self 名
   });
 
-  it("吃 @cinder/theme 主題 props（深色＋自訂主色/副色）仍正常渲染（ADR-0080）", () => {
-    // 色彩對齊由 @cinder/theme 的 tokens.test.ts 把關；此處確保新 props 路徑不炸、內容照渲染。
+  it("吃 @cinderous/theme 主題 props（深色＋自訂主色/副色）仍正常渲染（ADR-0080）", () => {
+    // 色彩對齊由 @cinderous/theme 的 tokens.test.ts 把關；此處確保新 props 路徑不炸、內容照渲染。
     const html = renderToStaticMarkup(
       <ContactListScreen
         selfPubkey={"bb".repeat(32)}

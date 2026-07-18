@@ -648,8 +648,8 @@ export interface Messages {
 }
 
 const zhHant: Messages = {
-  appName: "Cinder",
-  signIn_title: "登入 Cinder",
+  appName: "Cinderous",
+  signIn_title: "登入 Cinderous",
   signIn_hint: "去中心化、端到端加密的即時通。輸入顯示名稱即可開始（你的身分是本機生成的 secp256k1 金鑰）。",
   signIn_hint2: "本示範會在記憶體中模擬中繼站與幾位好友，方便你體驗。",
   signIn_password: "本機密碼",
@@ -1245,8 +1245,8 @@ const zhHant: Messages = {
 };
 
 const en: Messages = {
-  appName: "Cinder",
-  signIn_title: "Sign in to Cinder",
+  appName: "Cinderous",
+  signIn_title: "Sign in to Cinderous",
   signIn_hint: "A decentralized, end-to-end encrypted messenger. Just enter a display name to start (your identity is a secp256k1 key generated on this device).",
   signIn_hint2: "This demo simulates a relay and a few buddies in memory so you can try it out.",
   signIn_password: "Local password",

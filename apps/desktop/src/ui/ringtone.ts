@@ -4,7 +4,7 @@
 // - 外撥回鈴音（ringback）：長單響 + 長停頓，模擬「等待對方接聽」的回鈴，音色/節拍與來電有別。
 // 節拍為純函式（可測）；實際發聲的 Ringer 以 AudioContext 播放（瀏覽器限定，薄封裝）。
 
-import type { MessageKey } from "@cinder/i18n";
+import type { MessageKey } from "@cinderous/i18n";
 
 /** 來電雙音鈴聲頻率（經典電話鈴的和聲近似）。 */
 export const RING_FREQ_A = 440;

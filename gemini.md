@@ -1,6 +1,6 @@
-# Gemini Context & Rules (Cinder Gateway)
+# Gemini Context & Rules (Cinderous Gateway)
 
-> 本檔是 Cinder 的 Gemini 入口。產品需求以 `PRD.md` 為源頭，系統分層以 `ARCHITECTURE.md` 為源頭，工程規範以 `claude/` 目錄為共用準則。
+> 本檔是 Cinderous 的 Gemini 入口。產品需求以 `PRD.md` 為源頭，系統分層以 `ARCHITECTURE.md` 為源頭，工程規範以 `claude/` 目錄為共用準則。
 
 ## 建議閱讀順序
 

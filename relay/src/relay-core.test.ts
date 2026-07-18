@@ -5,7 +5,7 @@ import {
   generateSecretKey,
   getPublicKey,
   type NostrEvent,
-} from "@cinder/core";
+} from "@cinderous/core";
 import { MessageStore } from "./message-store.js";
 import { leadingZeroBits, RelayCore } from "./relay-core.js";
 

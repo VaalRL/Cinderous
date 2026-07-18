@@ -1,6 +1,6 @@
-# 參與 Cinder 開發
+# 參與 Cinderous 開發
 
-歡迎社群開發者。Cinder 是**去中心化、端到端加密**的即時通訊（Nostr + WebRTC），AGPL-3.0。這份文件是開發者的入口——不論你是想**接自己的前端**、**加一種語言**、**做擴充**，還是**貢獻核心**，都從這裡開始。
+歡迎社群開發者。Cinderous 是**去中心化、端到端加密**的即時通訊（Nostr + WebRTC），AGPL-3.0。這份文件是開發者的入口——不論你是想**接自己的前端**、**加一種語言**、**做擴充**，還是**貢獻核心**，都從這裡開始。
 
 > 一般使用者請看 [`docs/使用手冊_User-Guide.md`](../docs/使用手冊_User-Guide.md)。
 
@@ -8,22 +8,22 @@
 
 ## 三層架構（先懂這個）
 
-Cinder 刻意把「協定/加密」「通訊引擎」「畫面」分成三個 workspace 套件，讓你只碰需要的那層：
+Cinderous 刻意把「協定/加密」「通訊引擎」「畫面」分成三個 workspace 套件，讓你只碰需要的那層：
 
 ```
 你的前端（React / RN / Vue / 任何框架）        ← 蓋 UI，消費 ChatBackend
   ▲
-@cinder/engine   通訊後端（ChatBackend 實作）＋ 儲存抽象   ← 直接重用
+@cinderous/engine   通訊後端（ChatBackend 實作）＋ 儲存抽象   ← 直接重用
   ▲
-@cinder/core     金鑰/簽章/NIP-44/59/群組/WebRTC 信令     ← 零 UI 依賴
-@cinder/i18n     翻譯（純函式）
+@cinderous/core     金鑰/簽章/NIP-44/59/群組/WebRTC 信令     ← 零 UI 依賴
+@cinderous/i18n     翻譯（純函式）
 ```
 
 | 套件 | 職責 | 你會碰它嗎 |
 | --- | --- | --- |
-| `@cinder/core` | Nostr 事件/簽章/加密/協定原語（SSOT） | 重用，不改 |
-| `@cinder/i18n` | 翻譯；支援執行期語系包（K3） | 加語言時 |
-| `@cinder/engine` | `ChatBackend` 契約＋`RelayChatBackend`/`BrowserChatBackend`＋`AppStorage`/`LocalStorage`；換機/搬家/快照/擴充縫 | 建後端時 |
+| `@cinderous/core` | Nostr 事件/簽章/加密/協定原語（SSOT） | 重用，不改 |
+| `@cinderous/i18n` | 翻譯；支援執行期語系包（K3） | 加語言時 |
+| `@cinderous/engine` | `ChatBackend` 契約＋`RelayChatBackend`/`BrowserChatBackend`＋`AppStorage`/`LocalStorage`；換機/搬家/快照/擴充縫 | 建後端時 |
 | `apps/desktop` | Tauri + React 桌面前端 | 參考範本 |
 | `apps/mobile` | react-native-web 前端（已消費 engine，跨前端重用實證） | 參考範本 |
 | `relay` | Cloudflare Worker / Node 自架中繼站 | 自架時 |
@@ -44,8 +44,8 @@ pnpm -r typecheck     # 全部型別檢查
 跑桌面前端（瀏覽器開發、不需 Tauri）：
 
 ```bash
-pnpm --filter @cinder/relay build:dev && pnpm --filter @cinder/relay dev   # 本機真實 relay（ws://localhost:8787）
-pnpm --filter @cinder/desktop dev                                          # 前端；開 /?relay=ws://localhost:8787
+pnpm --filter @cinderous/relay build:dev && pnpm --filter @cinderous/relay dev   # 本機真實 relay（ws://localhost:8787）
+pnpm --filter @cinderous/desktop dev                                          # 前端；開 /?relay=ws://localhost:8787
 ```
 
 ---
@@ -57,7 +57,7 @@ pnpm --filter @cinder/desktop dev                                          # 前
 最常見的社群場景。完整教學見 **[`docs/前端開發指南_Frontend-Guide.md`](../docs/前端開發指南_Frontend-Guide.md)**。三句話版：
 
 ```ts
-import { RelayChatBackend, webSocketConnector, LocalStorage, type ChatBackend } from "@cinder/engine";
+import { RelayChatBackend, webSocketConnector, LocalStorage, type ChatBackend } from "@cinderous/engine";
 const backend: ChatBackend = new RelayChatBackend(new LocalStorage(""), webSocketConnector("wss://…"), "名稱", { relayUrl: "wss://…", connectorFor: webSocketConnector });
 backend.start({ onContacts: render, onMessage: append, onTyping: t, onNudge: n }); // 你只管畫面
 ```
@@ -69,7 +69,7 @@ backend.start({ onContacts: render, onMessage: append, onTyping: t, onNudge: n }
 不必改核心——執行期註冊即可：
 
 ```ts
-import { registerLocale, availableLocales } from "@cinder/i18n";
+import { registerLocale, availableLocales } from "@cinderous/i18n";
 registerLocale("ja", { /* 完整 Messages 物件 */ });
 // 之後 translate("ja", key) 生效；未覆蓋的鍵回退預設語系
 ```
@@ -82,10 +82,10 @@ registerLocale("ja", { /* 完整 Messages 物件 */ });
 
 ### D. 做擴充（K4，實驗性）
 
-`@cinder/engine` 預留了行程內、第一方的擴充註冊縫：
+`@cinderous/engine` 預留了行程內、第一方的擴充註冊縫：
 
 ```ts
-import { registerExtension, listExtensions } from "@cinder/engine";
+import { registerExtension, listExtensions } from "@cinderous/engine";
 registerExtension({ id: "my.renderer", name: "自訂訊染" /* …你的能力 */ });
 ```
 
@@ -115,7 +115,7 @@ registerExtension({ id: "my.renderer", name: "自訂訊染" /* …你的能力 *
 
 ## 授權（重要）
 
-Cinder 是 **AGPL-3.0**。你 fork、修改、散布的自由受保障——**但**只要你**散布**修改版、或把它**架成網路服務給別人用**，就**必須以 AGPL 公開你的原始碼**（含你的前端）。這代表**做不出閉源/商用的自訂客戶端**：對開放生態是保護，對想閉源者是硬門檻。提交 PR 即表示你同意以 AGPL-3.0 釋出你的貢獻。
+Cinderous 是 **AGPL-3.0**。你 fork、修改、散布的自由受保障——**但**只要你**散布**修改版、或把它**架成網路服務給別人用**，就**必須以 AGPL 公開你的原始碼**（含你的前端）。這代表**做不出閉源/商用的自訂客戶端**：對開放生態是保護，對想閉源者是硬門檻。提交 PR 即表示你同意以 AGPL-3.0 釋出你的貢獻。
 
 ---
 

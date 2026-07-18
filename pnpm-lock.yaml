@@ -10,10 +10,10 @@ importers:
 
   apps/cli:
     dependencies:
-      '@cinder/core':
+      '@cinderous/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@cinder/engine':
+      '@cinderous/engine':
         specifier: workspace:*
         version: link:../../packages/engine
     devDependencies:
@@ -32,16 +32,16 @@ importers:
 
   apps/desktop:
     dependencies:
-      '@cinder/core':
+      '@cinderous/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@cinder/engine':
+      '@cinderous/engine':
         specifier: workspace:*
         version: link:../../packages/engine
-      '@cinder/i18n':
+      '@cinderous/i18n':
         specifier: workspace:*
         version: link:../../packages/i18n
-      '@cinder/theme':
+      '@cinderous/theme':
         specifier: workspace:*
         version: link:../../packages/theme
       '@tauri-apps/api':
@@ -60,7 +60,7 @@ importers:
         specifier: ^18.3.1
         version: 18.3.1(react@18.3.1)
     devDependencies:
-      '@cinder/relay':
+      '@cinderous/relay':
         specifier: workspace:*
         version: link:../../relay
       '@tauri-apps/cli':
@@ -90,16 +90,16 @@ importers:
 
   apps/mobile:
     dependencies:
-      '@cinder/core':
+      '@cinderous/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@cinder/engine':
+      '@cinderous/engine':
         specifier: workspace:*
         version: link:../../packages/engine
-      '@cinder/i18n':
+      '@cinderous/i18n':
         specifier: workspace:*
         version: link:../../packages/i18n
-      '@cinder/theme':
+      '@cinderous/theme':
         specifier: workspace:*
         version: link:../../packages/theme
       react:
@@ -136,13 +136,13 @@ importers:
 
   apps/website:
     dependencies:
-      '@cinder/core':
+      '@cinderous/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@cinder/i18n':
+      '@cinderous/i18n':
         specifier: workspace:*
         version: link:../../packages/i18n
-      '@cinder/theme':
+      '@cinderous/theme':
         specifier: workspace:*
         version: link:../../packages/theme
       react:
@@ -201,10 +201,10 @@ importers:
 
   packages/engine:
     dependencies:
-      '@cinder/core':
+      '@cinderous/core':
         specifier: workspace:*
         version: link:../core
-      '@cinder/relay':
+      '@cinderous/relay':
         specifier: workspace:*
         version: link:../../relay
     devDependencies:
@@ -238,7 +238,7 @@ importers:
 
   relay:
     dependencies:
-      '@cinder/core':
+      '@cinderous/core':
         specifier: workspace:*
         version: link:../packages/core
     devDependencies:

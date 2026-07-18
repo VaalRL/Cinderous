@@ -1,4 +1,4 @@
-import { generateSecretKey, getPublicKey, nsecEncode } from "@cinder/core";
+import { generateSecretKey, getPublicKey, nsecEncode } from "@cinderous/core";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   activeDrain,

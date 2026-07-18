@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import type { Contact, Group, Self } from "@cinder/engine";
+import type { Contact, Group, Self } from "@cinderous/engine";
 import { I18nProvider } from "../i18n.js";
 import { DeckRight, type DeckRightProps } from "./DeckRight.js";
 

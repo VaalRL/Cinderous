@@ -10,7 +10,7 @@ import {
   type NostrEvent,
   unwrapMessage,
   wrapMessage,
-} from "@cinder/core";
+} from "@cinderous/core";
 import { createInMemoryRelayNetwork } from "./in-memory-network.js";
 import { MessageStore } from "./message-store.js";
 

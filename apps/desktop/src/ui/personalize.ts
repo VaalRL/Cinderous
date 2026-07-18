@@ -2,7 +2,7 @@
 // 不廣播、不進 Nostr 事件、不進雲端快照或備份。圖片一律本機縮圖壓縮成 data URI。
 //
 // 對話背景的**純資料與純函式**（預設漸層、CSS 產生、儲存鍵、尺寸上限）自 ADR-0134 起下沉
-// `@cinder/theme`，桌面與行動端共用一份。這裡沿用同一組並 re-export，桌面既有 import 不變。
+// `@cinderous/theme`，桌面與行動端共用一份。這裡沿用同一組並 re-export，桌面既有 import 不變。
 
 import {
   BG_PRESETS,
@@ -11,7 +11,7 @@ import {
   chatBgCss,
   type ChatBg,
   presetCss,
-} from "@cinder/theme";
+} from "@cinderous/theme";
 export { BG_PRESETS, CHATBG_MAX_EDGE, chatBgCss, type ChatBg, presetCss };
 
 const AVATAR_PREFIX = "nb.avatar.";
@@ -109,7 +109,7 @@ export function setBroadcastAvatars(entries: Iterable<[string, string]>): void {
   notify();
 }
 
-// ── O3 每對話背景：preset id 或圖片 data URI（型別/預設/CSS 產生見 @cinder/theme）──────────
+// ── O3 每對話背景：preset id 或圖片 data URI（型別/預設/CSS 產生見 @cinderous/theme）──────────
 export function getChatBg(pubkey: string): ChatBg | null {
   const raw = lsGet(CHATBG_PREFIX + pubkey);
   if (!raw) return null;
@@ -156,4 +156,4 @@ export async function downscaleImage(file: Blob, maxEdge: number, quality = 0.82
 
 /** 頭像縮圖邊長上限（px）。 */
 export const AVATAR_MAX_EDGE = 128;
-// 背景縮圖邊長上限 CHATBG_MAX_EDGE 已下沉 @cinder/theme（上方 re-export）。
+// 背景縮圖邊長上限 CHATBG_MAX_EDGE 已下沉 @cinderous/theme（上方 re-export）。

@@ -1,4 +1,4 @@
-import { AUTH_KIND, authChallengeOf, verifyEvent, type NostrEvent } from "@cinder/core";
+import { AUTH_KIND, authChallengeOf, verifyEvent, type NostrEvent } from "@cinderous/core";
 import { matchFilter } from "./filters.js";
 
 /**

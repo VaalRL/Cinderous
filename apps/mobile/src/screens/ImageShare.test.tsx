@@ -5,7 +5,7 @@
 
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import type { ChatMessage } from "@cinder/engine";
+import type { ChatMessage } from "@cinderous/engine";
 import { ConversationScreen } from "./ConversationScreen.js";
 
 const base = {

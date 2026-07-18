@@ -27,7 +27,7 @@ const PRUNE_INTERVAL_MS = 60 * 60 * 1000;
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     if (request.headers.get("Upgrade") !== "websocket") {
-      return new Response("Cinder relay", { status: 200 });
+      return new Response("Cinderous relay", { status: 200 });
     }
     const stub = env.RELAY_ROOM.get(env.RELAY_ROOM.idFromName("global"));
     return stub.fetch(request);

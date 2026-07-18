@@ -12,7 +12,7 @@
 // effect 來釘住它。
 
 import { describe, expect, it, vi } from "vitest";
-import type { ChatMessage, Contact, Self } from "@cinder/engine";
+import type { ChatMessage, Contact, Self } from "@cinderous/engine";
 import { I18nProvider } from "../i18n.js";
 import { ThemeProvider } from "../theme.js";
 import { ConversationWindow } from "./ConversationWindow.js";

@@ -1,4 +1,4 @@
-import { isBackupCode, parseBackupCode } from "@cinder/core";
+import { isBackupCode, parseBackupCode } from "@cinderous/core";
 import { useState } from "react";
 import { useI18n } from "../i18n.js";
 import { CinderMark } from "./Brand.js";

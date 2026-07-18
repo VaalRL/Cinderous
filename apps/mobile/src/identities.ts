@@ -1,4 +1,4 @@
-// 行動端多身分（ADR-0138）：沿用 @cinder/engine 的 profiles 登錄（純狀態轉換，ADR-0045），
+// 行動端多身分（ADR-0138）：沿用 @cinderous/engine 的 profiles 登錄（純狀態轉換，ADR-0045），
 // 行動端補上兩塊行動端專屬的儲存：
 //   1. **每身分一份密碼包裹的 nsec**（`nb.remembered.<pubkey>`）——行動端絕不明文存 nsec（ADR-0112），
 //      每身分各有本地密碼，切換即解該身分的密碼。
@@ -19,8 +19,8 @@ import {
   setActive,
   upsertProfile,
   visibleProfiles,
-} from "@cinder/engine";
-import { npubDecode } from "@cinder/core";
+} from "@cinderous/engine";
+import { npubDecode } from "@cinderous/core";
 import { isRemembered, type MobileIdentity, rememberIdentity, type RememberedIdentity } from "./auth.js";
 
 export { activeProfile, nameTaken, type Profile, type ProfilesState, visibleProfiles };

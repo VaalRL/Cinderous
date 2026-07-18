@@ -1,10 +1,10 @@
 import { useState } from "react";
-import { calcPreview } from "@cinder/core";
-import type { ChatMessage, Contact, Group, Self, Status } from "@cinder/engine";
-import type { MessageKey } from "@cinder/i18n";
+import { calcPreview } from "@cinderous/core";
+import type { ChatMessage, Contact, Group, Self, Status } from "@cinderous/engine";
+import type { MessageKey } from "@cinderous/i18n";
 import { useI18n } from "../i18n.js";
 import { Avatar } from "./Avatar.js";
-import { replyCounts } from "@cinder/engine";
+import { replyCounts } from "@cinderous/engine";
 import { loadNote, saveNote } from "./note-store.js";
 
 type AuxTab = "info" | "members" | "media" | "threads" | "note";

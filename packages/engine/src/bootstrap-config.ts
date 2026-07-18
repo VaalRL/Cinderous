@@ -12,7 +12,7 @@
 
 /** 硬編碼錨點 relay（恆連保底＋登入自動選座來源，ADR-0039/0069）。 */
 export const ANCHOR_RELAYS: string[] = [
-  "wss://cinder-relay.whoami885.workers.dev", // 生產站（Cloudflare，已部署驗證）
+  "wss://cinder-relay.cinderous1.workers.dev", // 生產站（Cloudflare，已部署驗證）
   "wss://cinder-relay.jt0856.workers.dev", // 第二錨點（另一 Cloudflare 帳號，ADR-0189）
   // 建議日後再綁一座自架/獨立網域或換平台，進一步降單點（ADR-0039 建議 2–3 座）。
 ];

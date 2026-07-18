@@ -1,7 +1,7 @@
-import { generateSecretKey, getPublicKey, npubEncode, nsecEncode } from "@cinder/core";
+import { generateSecretKey, getPublicKey, npubEncode, nsecEncode } from "@cinderous/core";
 import { describe, expect, it } from "vitest";
 import type { MobileIdentity } from "./auth.js";
-import { ANCHOR_RELAYS } from "@cinder/engine";
+import { ANCHOR_RELAYS } from "@cinderous/engine";
 import { createBackend, DEFAULT_RELAY } from "./backend.js";
 
 function identity(name = "我"): MobileIdentity {

@@ -17,8 +17,8 @@ import {
   type PubkeyHex,
   type RelayClient,
   type SecretKey,
-} from "@cinder/core";
-import { createInMemoryRelayNetwork, MessageStore } from "@cinder/relay";
+} from "@cinderous/core";
+import { createInMemoryRelayNetwork, MessageStore } from "@cinderous/relay";
 
 const DEMO_PRESENCE_TIMEOUT_MS = 5_000;
 const HEARTBEAT_EVERY_MS = 2_000;

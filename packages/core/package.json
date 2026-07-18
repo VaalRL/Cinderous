@@ -1,9 +1,9 @@
 {
-  "name": "@cinder/core",
+  "name": "@cinderous/core",
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Cinder 共用核心：Nostr 事件、secp256k1 簽章、NIP-44 加密、型別與常數（SSOT）",
+  "description": "Cinderous 共用核心：Nostr 事件、secp256k1 簽章、NIP-44 加密、型別與常數（SSOT）",
   "license": "AGPL-3.0-only",
   "main": "./src/index.ts",
   "types": "./src/index.ts",

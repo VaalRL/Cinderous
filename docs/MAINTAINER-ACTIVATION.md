@@ -21,7 +21,7 @@
 ## ① 產生維護者金鑰（本機，輸出不進聊天）
 
 ```bash
-pnpm --filter @cinder/relay genkey:maintainer
+pnpm --filter @cinderous/relay genkey:maintainer
 ```
 
 行為（`relay/bootstrap/genkey.ts`）：
@@ -86,7 +86,7 @@ export const MAINTAINER_PUBKEY = "<你的 64 字元 hex 公鑰>";
 
 `MAINTAINER_PUBKEY` 是**編譯期常數**，已出貨的舊 app 不會自動吃到，要重建：
 
-- 桌面：`pnpm --filter @cinder/desktop tauri build` → 重新發到 Releases
+- 桌面：`pnpm --filter @cinderous/desktop tauri build` → 重新發到 Releases
 - 官網 web app：push 觸發 GitHub Pages 重建（自動）
 - 行動端 / CLI：各自重建
 

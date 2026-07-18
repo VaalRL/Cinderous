@@ -1,7 +1,7 @@
-// 官網雙語文案（ADR-0090；ADR-0187 資訊架構改版）。重用 @cinder/i18n 的 Locale；行銷文案為官網專屬。
+// 官網雙語文案（ADR-0090；ADR-0187 資訊架構改版）。重用 @cinderous/i18n 的 Locale；行銷文案為官網專屬。
 // 意象：夜晚森林裡，一小簇營火旁圍坐的少數人——溫暖、私密、只有受邀者在場。
 // 首頁＝核心價值觀與「取回通訊自主權」願景；技術原理獨立一頁；下載直連 GitHub Releases。
-import type { Locale } from "@cinder/i18n";
+import type { Locale } from "@cinderous/i18n";
 
 export interface Copy {
   nav_home: string;
@@ -86,15 +86,15 @@ const zhHant: Copy = {
   nav_download: "下載",
   nav_transparency: "透明度",
   hero_eyebrow: "取回通訊自主權",
-  hero_title: "Cinder",
+  hero_title: "Cinderous",
   hero_subtitle:
-    "通訊本該屬於說話的人，而不是中間的平台。Cinder 讓你在沒有伺服器帳號、沒有守門人的前提下，安全地和你邀來的人說話——像夜裡森林深處的一簇營火，只有圍坐的人聽得見。",
+    "通訊本該屬於說話的人，而不是中間的平台。Cinderous 讓你在沒有伺服器帳號、沒有守門人的前提下，安全地和你邀來的人說話——像夜裡森林深處的一簇營火，只有圍坐的人聽得見。",
   hero_download: "下載桌面版",
   hero_tech: "看技術原理",
   hero_github: "在 GitHub 檢視原始碼",
   vision_title: "為什麼要取回通訊自主權",
   vision_body:
-    "今天你的對話幾乎都住在別人的伺服器上：平台掌握你的身分與社交圈，能讀取、審查、封鎖，甚至販售這些資料。帳號可以被停用，資料可以被傳喚，規則隨時會變。Cinder 反過來——身分是一把只存在你裝置上的金鑰，訊息在離開前就已加密，傳遞只靠任何人都能自架的中繼。沒有一間公司站在你和朋友中間，通訊的主導權回到說話的人手上。",
+    "今天你的對話幾乎都住在別人的伺服器上：平台掌握你的身分與社交圈，能讀取、審查、封鎖，甚至販售這些資料。帳號可以被停用，資料可以被傳喚，規則隨時會變。Cinderous 反過來——身分是一把只存在你裝置上的金鑰，訊息在離開前就已加密，傳遞只靠任何人都能自架的中繼。沒有一間公司站在你和朋友中間，通訊的主導權回到說話的人手上。",
   values_title: "我們相信什麼",
   val_autonomy_t: "你擁有你的身分",
   val_autonomy_b:
@@ -110,7 +110,7 @@ const zhHant: Copy = {
     "AGPL-3.0 授權、程式碼公開可稽核。沒有廣告、沒有帳號販售、沒有金流抽成；營運靠自願捐款與自架節點，而不是你的資料。",
   tech_title: "技術原理",
   tech_intro:
-    "價值觀要靠機制守住。以下是 Cinder 如何在不信任任何伺服器的前提下，安全地把一則訊息從你送到朋友手上。",
+    "價值觀要靠機制守住。以下是 Cinderous 如何在不信任任何伺服器的前提下，安全地把一則訊息從你送到朋友手上。",
   tech_proto_t: "協定基線",
   tech_proto_b:
     "建構於 Nostr 開放協定：訊息以 NIP-17／44／59（Gift Wrap）加密封裝、NIP-42 驗證中繼連線、NIP-13 工作量證明抑制濫用。即時互動（檔案、在線、輸入中）改走 WebRTC P2P，直接點對點、完全不經中繼。全為開放標準，任何人都能自行實作與稽核。",
@@ -137,7 +137,7 @@ const zhHant: Copy = {
   donate_disclaimer: "本站無站內錢包、無托管、無抽成、不採 Zap。捐款完全自願。",
   node_title: "建立你自己的節點",
   node_intro:
-    "這片森林靠許多小小的營火撐起。任何人都能自架一座 Cinder 中繼節點——中繼只轉發密文，看不到你的訊息內容，也看不到誰在跟誰說話。",
+    "這片森林靠許多小小的營火撐起。任何人都能自架一座 Cinderous 中繼節點——中繼只轉發密文，看不到你的訊息內容，也看不到誰在跟誰說話。",
   node_how_t: "怎麼架",
   node_how_b:
     "兩種方式：Cloudflare Worker（免費層即可）或容器（Docker，自架於 VPS／Raspberry Pi）。詳細步驟見自架文件。",
@@ -165,7 +165,7 @@ const zhHant: Copy = {
   tr_col_bonuses: "貢獻者獎金",
   tr_col_other: "其他",
   tr_col_note: "備註",
-  footer_privacy: "本站零追蹤、無 cookie、無第三方分析；與 Cinder 通訊平面完全隔離，永不接觸使用者資料或金鑰。",
+  footer_privacy: "本站零追蹤、無 cookie、無第三方分析；與 Cinderous 通訊平面完全隔離，永不接觸使用者資料或金鑰。",
 };
 
 const en: Copy = {
@@ -175,15 +175,15 @@ const en: Copy = {
   nav_download: "Download",
   nav_transparency: "Transparency",
   hero_eyebrow: "Own your conversations",
-  hero_title: "Cinder",
+  hero_title: "Cinderous",
   hero_subtitle:
-    "Conversations should belong to the people having them — not to the platform in the middle. Cinder lets you talk safely with the people you invite, with no server account and no gatekeeper — like a campfire deep in a night forest, heard only by those sitting around it.",
+    "Conversations should belong to the people having them — not to the platform in the middle. Cinderous lets you talk safely with the people you invite, with no server account and no gatekeeper — like a campfire deep in a night forest, heard only by those sitting around it.",
   hero_download: "Download desktop",
   hero_tech: "How it works",
   hero_github: "View source on GitHub",
   vision_title: "Why reclaim communication autonomy",
   vision_body:
-    "Today your conversations mostly live on someone else's servers: the platform owns your identity and your social graph, and can read, censor, block, or even sell it. Accounts get suspended, data gets subpoenaed, rules change overnight. Cinder inverts that — your identity is a key that exists only on your device, messages are encrypted before they ever leave, and delivery rides on relays anyone can self-host. No company sits between you and your friends; control over your conversations returns to the people having them.",
+    "Today your conversations mostly live on someone else's servers: the platform owns your identity and your social graph, and can read, censor, block, or even sell it. Accounts get suspended, data gets subpoenaed, rules change overnight. Cinderous inverts that — your identity is a key that exists only on your device, messages are encrypted before they ever leave, and delivery rides on relays anyone can self-host. No company sits between you and your friends; control over your conversations returns to the people having them.",
   values_title: "What we believe",
   val_autonomy_t: "You own your identity",
   val_autonomy_b:
@@ -199,7 +199,7 @@ const en: Copy = {
     "AGPL-3.0 licensed and fully auditable. No ads, no selling accounts, no cut of any transaction; it runs on voluntary donations and self-hosted nodes — not on your data.",
   tech_title: "How it works",
   tech_intro:
-    "Values only hold if the mechanism enforces them. Here is how Cinder gets a message from you to your friend safely — without trusting any server.",
+    "Values only hold if the mechanism enforces them. Here is how Cinderous gets a message from you to your friend safely — without trusting any server.",
   tech_proto_t: "Protocol baseline",
   tech_proto_b:
     "Built on the open Nostr protocol: messages are encrypted and wrapped with NIP-17/44/59 (Gift Wrap), relay connections are authenticated with NIP-42, and NIP-13 proof-of-work deters abuse. Real-time interactions (files, presence, typing) go over WebRTC P2P, straight peer-to-peer, bypassing relays entirely. All open standards — implementable and auditable by anyone.",
@@ -229,7 +229,7 @@ const en: Copy = {
   donate_disclaimer: "This site has no in-app wallet, no custody, no cut, and no Zaps. Donating is entirely voluntary.",
   node_title: "Run your own node",
   node_intro:
-    "This forest is held up by many small fires. Anyone can self-host a Cinder relay node — a relay only forwards ciphertext; it sees neither your message content nor who talks to whom.",
+    "This forest is held up by many small fires. Anyone can self-host a Cinderous relay node — a relay only forwards ciphertext; it sees neither your message content nor who talks to whom.",
   node_how_t: "How to host",
   node_how_b:
     "Two ways: a Cloudflare Worker (free tier is enough) or a container (Docker, self-hosted on a VPS / Raspberry Pi). See the self-hosting docs for steps.",
@@ -259,7 +259,7 @@ const en: Copy = {
   tr_col_other: "Other",
   tr_col_note: "Note",
   footer_privacy:
-    "This site has zero tracking, no cookies, and no third-party analytics; it is fully isolated from Cinder's messaging plane and never touches user data or keys.",
+    "This site has zero tracking, no cookies, and no third-party analytics; it is fully isolated from Cinderous's messaging plane and never touches user data or keys.",
 };
 
 const CATALOG: Record<Locale, Copy> = { "zh-Hant": zhHant, en };

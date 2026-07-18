@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import type { Contact, Group } from "@cinder/engine";
+import type { Contact, Group } from "@cinderous/engine";
 import { I18nProvider } from "../i18n.js";
 import { DeckTabs, type DeckTabsProps } from "./DeckTabs.js";
 

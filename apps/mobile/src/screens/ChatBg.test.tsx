@@ -1,9 +1,9 @@
 // 行動端對話背景 UI（ADR-0134）：背景入口鈕、挑選面板、預設漸層套用到訊息區。
-// 純資料/CSS 產生在 @cinder/theme 有測；這裡驗行動端接線（SSR 可斷言 testID 與 inline style）。
+// 純資料/CSS 產生在 @cinderous/theme 有測；這裡驗行動端接線（SSR 可斷言 testID 與 inline style）。
 
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { BG_PRESETS, presetCss } from "@cinder/theme";
+import { BG_PRESETS, presetCss } from "@cinderous/theme";
 import { ConversationScreen } from "./ConversationScreen.js";
 
 const base = {

@@ -1,4 +1,4 @@
-import { generateSecretKey } from "@cinder/core";
+import { generateSecretKey } from "@cinderous/core";
 import { beforeEach, describe, expect, it } from "vitest";
 import { LocalStorage } from "./local.js";
 

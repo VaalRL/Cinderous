@@ -1,8 +1,8 @@
 // 行動端多身分儲存（ADR-0138）：登錄採用、每身分密碼包裹 blob、舊單一身分遷移。
-// 純狀態轉換在 @cinder/engine（profiles）已測；這裡驗行動端的儲存/遷移接線。
+// 純狀態轉換在 @cinderous/engine（profiles）已測；這裡驗行動端的儲存/遷移接線。
 // node 無 localStorage → Map shim。Argon2id 包裹較慢，故盡量只包一次、其餘走 put/get。
 
-import { generateSecretKey, getPublicKey, npubEncode, nsecEncode } from "@cinder/core";
+import { generateSecretKey, getPublicKey, npubEncode, nsecEncode } from "@cinderous/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { identityFromNsec, type MobileIdentity, rememberIdentity, type RememberedIdentity } from "./auth.js";
 import {

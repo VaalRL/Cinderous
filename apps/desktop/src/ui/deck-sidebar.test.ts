@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { ChatMessage, Contact, Group } from "@cinder/engine";
+import type { ChatMessage, Contact, Group } from "@cinderous/engine";
 import type { GroupPrefsMap } from "./group-labels.js";
 import { buildEntries, lastInteraction, matchesQuery, sortEntries, visibleEntries } from "./deck-sidebar.js";
 

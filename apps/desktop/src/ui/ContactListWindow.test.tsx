@@ -2,7 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { I18nProvider } from "../i18n.js";
 import { ThemeProvider } from "../theme.js";
-import type { Contact, Group, Self, Status } from "@cinder/engine";
+import type { Contact, Group, Self, Status } from "@cinderous/engine";
 import { ContactListWindow, groupByStatus, shortId } from "./ContactListWindow.js";
 
 const self: Self = { pubkey: "aa", name: "我", status: "online", statusMessage: "" };

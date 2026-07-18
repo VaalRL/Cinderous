@@ -1,4 +1,4 @@
-import { makeOrgInvite } from "@cinder/core";
+import { makeOrgInvite } from "@cinderous/core";
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, describe, expect, it } from "vitest";
 import { I18nProvider } from "../i18n.js";
@@ -30,7 +30,7 @@ describe("relay 欄位預設值（記住上次使用的網址）", () => {
 
 describe("hostOf（relay 主機名顯示）", () => {
   it("去掉 scheme 與路徑，只留主機；空字串回空", () => {
-    expect(hostOf("wss://cinder-relay.whoami885.workers.dev")).toBe("cinder-relay.whoami885.workers.dev");
+    expect(hostOf("wss://cinder-relay.cinderous1.workers.dev")).toBe("cinder-relay.cinderous1.workers.dev");
     expect(hostOf("wss://relay.example.tw/path")).toBe("relay.example.tw");
     expect(hostOf("  ws://localhost:8787 ")).toBe("localhost:8787");
     expect(hostOf("")).toBe("");

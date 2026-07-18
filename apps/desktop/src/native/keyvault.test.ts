@@ -1,4 +1,4 @@
-import { wrapSecret } from "@cinder/core";
+import { wrapSecret } from "@cinderous/core";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { browserKeyVault } from "./keyvault.js";
 

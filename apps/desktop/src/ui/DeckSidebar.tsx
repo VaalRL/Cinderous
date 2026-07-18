@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { ChatMessage, Contact, Group, Self, Status } from "@cinder/engine";
+import type { ChatMessage, Contact, Group, Self, Status } from "@cinderous/engine";
 import { useI18n } from "../i18n.js";
 import { EditableAvatar } from "./Avatar.js";
 import { AddContact, StatusPicker } from "./ContactListWindow.js";

@@ -13,8 +13,8 @@ import {
   type RelayClient,
   type SecretKey,
   type Signal,
-} from "@cinder/core";
-import { createInMemoryRelayNetwork } from "@cinder/relay";
+} from "@cinderous/core";
+import { createInMemoryRelayNetwork } from "@cinderous/relay";
 
 export interface WebRtcResult {
   connected: boolean;

@@ -49,14 +49,14 @@ describe("明文紀錄導出（ADR-0094）", () => {
 
   it("Markdown：標題與清單格式", async () => {
     const md = await exportRecords(seed(), "md", {});
-    expect(md).toContain("# Cinder 對話紀錄導出");
+    expect(md).toContain("# Cinderous 對話紀錄導出");
     expect(md).toContain("## 對話：Bob");
     expect(md).toMatch(/- \*\*\[.+\] Bob：\*\* 好/);
   });
 
   it("JSON：結構化、含 file metadata 與回應、時間為原始毫秒", async () => {
     const json = JSON.parse(await exportRecords(seed(), "json", { now: 42 }));
-    expect(json.app).toBe("Cinder");
+    expect(json.app).toBe("Cinderous");
     expect(json.exportedAt).toBe(42);
     const bob = json.conversations.find((c: { name: string }) => c.name === "Bob");
     expect(bob.kind).toBe("contact");

@@ -7,8 +7,8 @@
 // 靠的是 nsec 本身，而這裡的前提正是「使用者手上只有密碼」）。所以提供「改用 nsec 登入」
 // 這條路——重貼 nsec 即可，記住的資料不會遺失（同一個 pubkey ＝ 同一個 namespace）。
 
-import { type Locale, type MessageKey, translate } from "@cinder/i18n";
-import { resolveTheme, type Theme, type ThemeTokens } from "@cinder/theme";
+import { type Locale, type MessageKey, translate } from "@cinderous/i18n";
+import { resolveTheme, type Theme, type ThemeTokens } from "@cinderous/theme";
 import { useMemo, useState } from "react";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native-web";
 

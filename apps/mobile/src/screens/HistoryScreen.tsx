@@ -7,9 +7,9 @@
 //
 // 補這個畫面之前，行動端的封存是「寫得進去、讀不出來」——資料沒遺失，但使用者看不到。
 
-import { type MessageArchive, nextOlderChunk, prependChunk, type StoredMessage } from "@cinder/engine";
-import { type Locale, type MessageKey, translate } from "@cinder/i18n";
-import { resolveTheme, type Theme, type ThemeTokens } from "@cinder/theme";
+import { type MessageArchive, nextOlderChunk, prependChunk, type StoredMessage } from "@cinderous/engine";
+import { type Locale, type MessageKey, translate } from "@cinderous/i18n";
+import { resolveTheme, type Theme, type ThemeTokens } from "@cinderous/theme";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native-web";
 

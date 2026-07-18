@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { finalizeEvent, generateSecretKey } from "@cinder/core";
+import { finalizeEvent, generateSecretKey } from "@cinderous/core";
 import { parseClientMessage } from "./protocol.js";
 
 const evt = finalizeEvent(

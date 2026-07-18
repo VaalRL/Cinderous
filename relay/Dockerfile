@@ -1,4 +1,4 @@
-# Cinder node-relay — 容器化部署（Zeabur / Railway / Fly / 任何 Docker 平台）。
+# Cinderous node-relay — 容器化部署（Zeabur / Railway / Fly / 任何 Docker 平台）。
 # 說明見 docs/self-hosting-zeabur.md。
 #
 # 重要：build context 必須是 **repo 根目錄**（pnpm workspace 需要根 lockfile 與
@@ -11,8 +11,8 @@ RUN npm install -g pnpm@10.33.0
 WORKDIR /app
 COPY . .
 RUN pnpm install --frozen-lockfile
-RUN pnpm --filter @cinder/relay build:node-relay
-# 產物：relay/dist/node-relay.js（97KB，已含 @cinder/core；僅 ws 為外部依賴）
+RUN pnpm --filter @cinderous/relay build:node-relay
+# 產物：relay/dist/node-relay.js（97KB，已含 @cinderous/core；僅 ws 為外部依賴）
 
 # ── 執行：只帶 bundle 與唯一 runtime 依賴 ws，映像精簡 ─────────────────────────
 FROM node:22-slim AS runtime

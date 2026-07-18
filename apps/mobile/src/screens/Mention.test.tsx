@@ -1,10 +1,10 @@
-// 行動端 @提及（ADR-0133）：送出側的建議/解析全用 @cinder/core 的純函式（已在
+// 行動端 @提及（ADR-0133）：送出側的建議/解析全用 @cinderous/core 的純函式（已在
 // packages/core/src/mention-suggest.test.ts、mention.test.ts 驗過）。這裡驗**行動端新加的可視行為**：
 // 收到「提及你」的訊息要凸顯（徽章＋主色邊條）；沒被提及的不凸顯。SSR 即可斷言。
 
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import type { ChatMessage } from "@cinder/engine";
+import type { ChatMessage } from "@cinderous/engine";
 import { ConversationScreen } from "./ConversationScreen.js";
 
 const base = {

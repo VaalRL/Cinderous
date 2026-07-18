@@ -33,7 +33,7 @@ jobs:
         env:
           # 維護者私鑰（nsec）；未設定時僅更新明文清單、不產生簽章事件。
           MAINTAINER_NSEC: ${{ secrets.MAINTAINER_NSEC }}
-        run: pnpm --filter @cinder/relay bootstrap:run
+        run: pnpm --filter @cinderous/relay bootstrap:run
 
       - name: 提交清單與一致性/uptime 記錄變更（若有）
         run: |

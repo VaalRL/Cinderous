@@ -1,6 +1,6 @@
 // 行動端對話畫面（ADR-0085）：從聊天清單點入的全螢幕對話，參考 LINE/Signal——
 // 頂部返回列（‹ 返回＋名稱＋副標）、訊息氣泡（自己靠右主色、對方靠左淺底；群組顯示發送者名）、
-// 底部輸入列（輸入框＋送出）。色彩吃 @cinder/theme。訊息與送出由呼叫端注入（接 ChatBackend）。
+// 底部輸入列（輸入框＋送出）。色彩吃 @cinderous/theme。訊息與送出由呼叫端注入（接 ChatBackend）。
 import { useMemo, useRef, useState } from "react";
 import {
   applyMention,
@@ -18,12 +18,12 @@ import {
   suggestMentions,
   svgToDataUri,
   validateStickerSvg,
-} from "@cinder/core";
-import type { CallMedia, MentionCandidate } from "@cinder/core";
-import { replyCounts } from "@cinder/engine";
-import type { ChatMessage, MessageStatus } from "@cinder/engine";
-import { type Locale, type MessageKey, translate } from "@cinder/i18n";
-import { BG_PRESETS, type ChatBg, chatBgStyle, resolveTheme, type Theme, type ThemeTokens } from "@cinder/theme";
+} from "@cinderous/core";
+import type { CallMedia, MentionCandidate } from "@cinderous/core";
+import { replyCounts } from "@cinderous/engine";
+import type { ChatMessage, MessageStatus } from "@cinderous/engine";
+import { type Locale, type MessageKey, translate } from "@cinderous/i18n";
+import { BG_PRESETS, type ChatBg, chatBgStyle, resolveTheme, type Theme, type ThemeTokens } from "@cinderous/theme";
 import { Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native-web";
 import { MsgStatusIcon } from "./MsgStatusIcon.js";
 import { downloadImageFromUrl, shareImageFromUrl } from "../native/share.js";

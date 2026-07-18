@@ -3,7 +3,7 @@
 // 系統的隱私防線是結構性的（E2E/TTL），不依賴信任營運者。
 //
 // I/O 層，模式同 bootstrap/health-check.ts 的 probe/publishEvent（同屬網路探測、非單元測試對象；
-// 純決策邏輯 evaluateAdmission 在 @cinder/core 已測）。
+// 純決策邏輯 evaluateAdmission 在 @cinderous/core 已測）。
 import {
   buildAuthEvent,
   finalizeEvent,
@@ -12,7 +12,7 @@ import {
   type NodeConformance,
   type NostrEvent,
   type SecretKey,
-} from "@cinder/core";
+} from "@cinderous/core";
 
 const TIMEOUT_MS = 8000;
 const nowSec = () => Math.floor(Date.now() / 1000);

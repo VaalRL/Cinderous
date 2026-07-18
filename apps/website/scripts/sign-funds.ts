@@ -6,7 +6,7 @@
 //   TRANSPARENCY_NSEC=nsec1... FUNDS_DRAFT=funds.draft.json tsx scripts/sign-funds.ts
 // funds.draft.json 形狀＝ FundsData（balance/currency/monthlyBurn/updatedAt/allocations）。
 import { readFileSync, writeFileSync } from "node:fs";
-import { nsecDecode } from "@cinder/core";
+import { nsecDecode } from "@cinderous/core";
 import { type FundsData, signFunds } from "../src/funds.js";
 
 const nsec = process.env.TRANSPARENCY_NSEC;

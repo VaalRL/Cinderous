@@ -1,6 +1,6 @@
 // NIP-42 客戶端認證（AUTH）。開放中繼以此要求「先證明掌握某 pubkey，才准讀寫」，
 // 關掉「第三方探測他人加密收件匣元資料」（ADR-0057）。此模組只管 AUTH 事件的
-// 建構與解析，純函式可測；relay 端的挑戰/驗證/閘門在 `@cinder/relay`。
+// 建構與解析，純函式可測；relay 端的挑戰/驗證/閘門在 `@cinderous/relay`。
 
 import type { NostrEvent } from "./event.js";
 import type { SecretKey } from "./keys.js";

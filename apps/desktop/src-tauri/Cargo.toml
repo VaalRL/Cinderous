@@ -3,7 +3,7 @@ name = "cinder-desktop"
 version = "0.0.0"
 edition = "2021"
 publish = false
-description = "Cinder 桌面原生橋（Rust）：relay 連線、重連、金鑰儲存、IPC"
+description = "Cinderous 桌面原生橋（Rust）：relay 連線、重連、金鑰儲存、IPC"
 
 # 這個 crate 同時是：
 #  1) 一個「與平台無關、可單元測試」的 lib（重連退避、IPC 資料契約）；

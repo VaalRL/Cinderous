@@ -2,7 +2,7 @@
 // provider 的 API key 存 OS 金鑰庫、不落 JS/localStorage）；瀏覽器 fetch 後備（僅本機 Ollama）。
 // 純函式（prompt/端點判斷）與客戶端分離，IO 可注入以利測試。
 import { invoke, isTauri } from "@tauri-apps/api/core";
-import type { MessageKey } from "@cinder/i18n";
+import type { MessageKey } from "@cinderous/i18n";
 
 /** LLM provider：本機 Ollama 或 OpenAI 相容線上服務（OpenAI/Groq/OpenRouter/LM Studio…）。 */
 export type AiProvider = "ollama" | "openai";

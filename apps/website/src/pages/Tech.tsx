@@ -1,7 +1,7 @@
 import type { Copy } from "../copy.js";
 import { FlowDiagram } from "../FlowDiagram.js";
 
-// 技術原理頁（ADR-0187）：闡述 Cinder 如何在不信任伺服器的前提下安全送達訊息。
+// 技術原理頁（ADR-0187）：闡述 Cinderous 如何在不信任伺服器的前提下安全送達訊息。
 export function Tech({ c }: { c: Copy }): JSX.Element {
   const pillars = [
     { t: c.feat_e2e_t, b: c.feat_e2e_b },

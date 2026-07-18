@@ -1,8 +1,8 @@
 // 行動端 app 殼與導覽（ADR-0085/0086/0087）：登入→底部分頁（聊天／聯絡人／設定）→點擊開對話（push）。
-// 接 @cinder/engine 的 ChatBackend（示範或真實 relay，見 backend.ts）；主題/主色/語言由本殼掌管，
+// 接 @cinderous/engine 的 ChatBackend（示範或真實 relay，見 backend.ts）；主題/主色/語言由本殼掌管，
 // 設定分頁即時切換。正式版把後端換成注入 RelayChatBackend＋原生安全儲存即可（同一套 UI）。
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { AppStorage, ChatBackend, ChatMessage, CloudSyncMode, ConnectionState, Contact, Group, OrgInfo, PairBundleOrg, Status } from "@cinder/engine";
+import type { AppStorage, ChatBackend, ChatMessage, CloudSyncMode, ConnectionState, Contact, Group, OrgInfo, PairBundleOrg, Status } from "@cinderous/engine";
 import {
   applyPairBundle,
   exportExtension,
@@ -14,8 +14,8 @@ import {
   openOpfsArchive,
   type PairBundle,
   shouldMuteOrgNotification,
-} from "@cinder/engine";
-import { deriveStorageKey, generateSecretKey, makeBackupCode, newInviteToken, nsecDecode, nsecEncode, type OrgInvite } from "@cinder/core";
+} from "@cinderous/engine";
+import { deriveStorageKey, generateSecretKey, makeBackupCode, newInviteToken, nsecDecode, nsecEncode, type OrgInvite } from "@cinderous/core";
 import {
   contactLabel,
   createPairingOffer,
@@ -24,15 +24,15 @@ import {
   runPairTarget,
   webRtcPairTransport,
   webSocketConnector,
-} from "@cinder/engine";
+} from "@cinderous/engine";
 import { notifier, onNotifyClick } from "./native/notify.js";
-import type { BlockedContact, ContactRequest } from "@cinder/engine";
-import type { CallMedia, CallState } from "@cinder/core";
+import type { BlockedContact, ContactRequest } from "@cinderous/engine";
+import type { CallMedia, CallState } from "@cinderous/core";
 import { makeThumbnail, pickFile, saveFile } from "./native/files.js";
 import { hasCallSupport } from "./native/call-media.js";
 import { CallScreen } from "./screens/CallScreen.js";
-import { type Locale, type MessageKey, translate } from "@cinder/i18n";
-import type { ChatBg, Theme } from "@cinder/theme";
+import { type Locale, type MessageKey, translate } from "@cinderous/i18n";
+import type { ChatBg, Theme } from "@cinderous/theme";
 import { getChatBg, removeChatBg, setChatBg } from "./personalize.js";
 import { StyleSheet, Text, View } from "react-native-web";
 import { changeRememberedPassword, identityFromNsec, type MobileIdentity, unlockRemembered } from "./auth.js";

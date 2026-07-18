@@ -7,7 +7,7 @@ import {
   STATUS_COLORS,
 } from "./tokens.js";
 
-describe("@cinder/theme 色彩推導（ADR-0080）", () => {
+describe("@cinderous/theme 色彩推導（ADR-0080）", () => {
   it("mixSrgb：sRGB 線性內插、權重夾限、非法原樣", () => {
     expect(mixSrgb("#000000", "#ffffff", 0.5)).toBe("#808080");
     expect(mixSrgb("#2f6cd6", "#ffffff", 1)).toBe("#2f6cd6"); // 權重 1＝第一色

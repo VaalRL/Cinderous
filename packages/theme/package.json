@@ -1,9 +1,9 @@
 {
-  "name": "@cinder/theme",
+  "name": "@cinderous/theme",
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Cinder 跨前端設計 token 單一真實來源（桌面 CSS 變數與行動端 StyleSheet 共吃，ADR-0080）",
+  "description": "Cinderous 跨前端設計 token 單一真實來源（桌面 CSS 變數與行動端 StyleSheet 共吃，ADR-0080）",
   "license": "AGPL-3.0-only",
   "main": "./src/index.ts",
   "types": "./src/index.ts",

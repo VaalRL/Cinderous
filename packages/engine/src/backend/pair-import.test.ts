@@ -4,8 +4,8 @@
 // ——換手機後聯絡人與訊息全部不見。這裡驗那條資料流的實質：
 // 源機建捆包 → 序列化過線 → 新機以**加密 store** 套用 → 抹 nsec → backend.start() 回放。
 
-import { generateSecretKey, getPublicKey, nsecDecode, nsecEncode } from "@cinder/core";
-import { createInMemoryRelayNetwork } from "@cinder/relay";
+import { generateSecretKey, getPublicKey, nsecDecode, nsecEncode } from "@cinderous/core";
+import { createInMemoryRelayNetwork } from "@cinderous/relay";
 import { beforeEach, describe, expect, it } from "vitest";
 import { LocalStorage } from "../storage/local.js";
 import { applyPairBundle, buildPairBundle, parsePairBundle } from "../storage/pair-bundle.js";

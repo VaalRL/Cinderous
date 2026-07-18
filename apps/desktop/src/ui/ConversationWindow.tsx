@@ -7,14 +7,14 @@ import {
   parseMentions,
   REACTION_EMOJIS,
   suggestMentions,
-} from "@cinder/core";
+} from "@cinderous/core";
 import { type MouseEvent as ReactMouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "../i18n.js";
-import type { CallMedia, MentionCandidate } from "@cinder/core";
-import { mainMessages, replyCounts, threadMessages } from "@cinder/engine";
-import type { MessageKey } from "@cinder/i18n";
-import type { ChatMessage, Contact, MessageStatus, Self } from "@cinder/engine";
-import { contactLabel } from "@cinder/engine";
+import type { CallMedia, MentionCandidate } from "@cinderous/core";
+import { mainMessages, replyCounts, threadMessages } from "@cinderous/engine";
+import type { MessageKey } from "@cinderous/i18n";
+import type { ChatMessage, Contact, MessageStatus, Self } from "@cinderous/engine";
+import { contactLabel } from "@cinderous/engine";
 import {
   formatCustomSticker,
   formatSticker,
@@ -26,7 +26,7 @@ import {
   STICKER_PACKS,
   stickerSvg,
   svgToDataUri,
-} from "@cinder/core";
+} from "@cinderous/core";
 import {
   addSticker,
   CUSTOM_PACK,
@@ -46,7 +46,7 @@ import {
   type StickerRef,
 } from "./sticker-prefs.js";
 import { StickerEditor } from "./StickerEditor.js";
-import { validateStickerSvg, wrapRasterAsSvg } from "@cinder/core";
+import { validateStickerSvg, wrapRasterAsSvg } from "@cinderous/core";
 import {
   buildTriggerIndex,
   loadTriggers,

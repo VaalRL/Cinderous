@@ -1,4 +1,4 @@
-import type { Theme } from "@cinder/theme";
+import type { Theme } from "@cinderous/theme";
 import type { Copy } from "../copy.js";
 import { CinderMark } from "../Brand.js";
 import { OFFICIAL_DONATIONS } from "../donations.js";

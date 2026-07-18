@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
-import { LOCALE_LABELS, LOCALES, type Locale } from "@cinder/i18n";
+import { LOCALE_LABELS, LOCALES, type Locale } from "@cinderous/i18n";
 import { useI18n } from "../i18n.js";
 import { menuKeydown, type MenuState } from "./lang-menu.js";
 

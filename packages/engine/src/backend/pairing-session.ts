@@ -8,7 +8,7 @@ import {
   parsePairing,
   runPairingSource,
   runPairingTarget,
-} from "@cinder/core";
+} from "@cinderous/core";
 import { buildPairBundle, type PairBundle, type PairBundleOrg, parsePairBundle } from "../storage/pair-bundle.js";
 import type { AppStorage, StoredIdentity } from "../storage/types.js";
 import { openPairingTransport } from "./pairing-transport.js";

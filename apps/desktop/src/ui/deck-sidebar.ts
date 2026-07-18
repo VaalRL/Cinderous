@@ -1,7 +1,7 @@
 // 三欄左側欄邏輯（ADR-0079 Q2）：聯絡人＋群組混合、依最近互動排序、
 // 搜尋（名稱＋訊息內容）、自訂標籤篩選。純函式、可測。
-import type { ChatMessage, Contact, Group, Status } from "@cinder/engine";
-import { contactLabel } from "@cinder/engine";
+import type { ChatMessage, Contact, Group, Status } from "@cinderous/engine";
+import { contactLabel } from "@cinderous/engine";
 import { labelsOf, type GroupPrefsMap } from "./group-labels.js";
 
 export interface SidebarEntry {

@@ -6,7 +6,7 @@ import {
   npubEncode,
   nsecEncode,
   type PairTransport,
-} from "@cinder/core";
+} from "@cinderous/core";
 import {
   createPairingOffer,
   MemoryStorage,
@@ -14,7 +14,7 @@ import {
   type PairTransportFactory,
   runPairSource,
   runPairTarget,
-} from "@cinder/engine";
+} from "@cinderous/engine";
 import { describe, expect, it } from "vitest";
 import { identityFromNsec, identityFromPairBundle, isRemembered, npubFromNsec, previewPairing, rememberIdentity, type MobileIdentity, unlockRemembered } from "./auth.js";
 

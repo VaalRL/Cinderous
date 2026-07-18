@@ -1,6 +1,6 @@
-# 在樹莓派自架 Cinder 中繼站（node-relay）
+# 在樹莓派自架 Cinderous 中繼站（node-relay）
 
-在你自己的樹莓派（或任何 Node 22+ 的機器）上跑一個 Cinder 中繼站。它跑的是**與 Cloudflare 版完全相同的 `RelayCore`**，差別只是外殼換成 Node.js + 本機 SQLite。
+在你自己的樹莓派（或任何 Node 22+ 的機器）上跑一個 Cinderous 中繼站。它跑的是**與 Cloudflare 版完全相同的 `RelayCore`**，差別只是外殼換成 Node.js + 本機 SQLite。
 
 > **重點**：自架＝**完全擺脫 Cloudflare 免費層限制**（沒有 10 萬請求/天、沒有 13,000 GB-s duration），成本只有電費（約 2–5W）。中繼站**只轉發密文**，看不到你的明文或私鑰——自架反而隱私更好。
 
@@ -30,13 +30,13 @@ git clone https://github.com/VaalRL/Nostr-buddy.git cinder
 cd cinder
 pnpm install
 # 建置並啟動 node-relay（預設 ws://0.0.0.0:8787、開啟 NIP-42 認證、SQLite 存於 cinder-relay.db）
-pnpm --filter @cinder/relay node-relay
+pnpm --filter @cinderous/relay node-relay
 ```
 
 看到這行就代表起來了：
 
 ```
-Cinder node-relay：ws://0.0.0.0:8787（DB=cinder-relay.db, requireAuth=true）
+Cinderous node-relay：ws://0.0.0.0:8787（DB=cinder-relay.db, requireAuth=true）
 ```
 
 本機自我測試（另開一個終端）：
@@ -60,7 +60,7 @@ wscat -c ws://localhost:8787
 範例：
 
 ```bash
-PORT=9000 DB_PATH=/home/pi/cinder/relay.db pnpm --filter @cinder/relay node-relay
+PORT=9000 DB_PATH=/home/pi/cinder/relay.db pnpm --filter @cinderous/relay node-relay
 ```
 
 ---
@@ -100,9 +100,9 @@ relay.你的網域 {
 
 ---
 
-## 5. 在 Cinder 用你的節點
+## 5. 在 Cinderous 用你的節點
 
-Cinder 內建多中繼路由（ADR-0034）：你分享的 ID 會帶上 relay 提示 `npub…@wss://…`。
+Cinderous 內建多中繼路由（ADR-0034）：你分享的 ID 會帶上 relay 提示 `npub…@wss://…`。
 
 - 登入時把中繼站網址填成你的：`wss://relay.你的網域`（或 trycloudflare 網址）。
 - 分享給好友的 ID 就會變成 `npub…@wss://relay.你的網域`，對方一加就會連到你的節點。
@@ -115,14 +115,14 @@ Cinder 內建多中繼路由（ADR-0034）：你分享的 ID 會帶上 relay 提
 先建置一次，再用 systemd 常駐（開機自動啟動、當掉自動重啟）：
 
 ```bash
-pnpm --filter @cinder/relay build:node-relay   # 產出 relay/dist/node-relay.js
+pnpm --filter @cinderous/relay build:node-relay   # 產出 relay/dist/node-relay.js
 ```
 
 `/etc/systemd/system/cinder-relay.service`：
 
 ```ini
 [Unit]
-Description=Cinder node-relay
+Description=Cinderous node-relay
 After=network-online.target
 
 [Service]

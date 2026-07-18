@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import type { Locale } from "@cinder/i18n";
-import type { Theme } from "@cinder/theme";
+import type { Locale } from "@cinderous/i18n";
+import type { Theme } from "@cinderous/theme";
 import { CinderMark } from "./Brand.js";
 import { useCopy } from "./copy.js";
 import { Home } from "./pages/Home.js";
@@ -9,7 +9,7 @@ import { Tech } from "./pages/Tech.js";
 // 透明度頁暫時下架（保留 pages/Transparency.tsx 與 tr_* 文案，還原＝復原此 import＋nav＋路由）
 // import { Transparency } from "./pages/Transparency.js";
 
-export const GITHUB_URL = "https://github.com/VaalRL/Cinder";
+export const GITHUB_URL = "https://github.com/VaalRL/Cinderous";
 
 type View = "home" | "tech" | "node";
 
@@ -45,7 +45,7 @@ export function App(): JSX.Element {
             style={{ background: "none", border: "none", cursor: "pointer", color: "inherit" }}
             onClick={() => setView("home")}
           >
-            <CinderMark size={28} theme={theme} /> Cinder
+            <CinderMark size={28} theme={theme} /> Cinderous
           </button>
           <span className="nav__spacer" />
           {link("home", c.nav_home)}

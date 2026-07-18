@@ -3,8 +3,8 @@
 //   B. 配對匯入：沿用桌面 D4a 配對克隆（ADR-0072）——舊機顯示配對碼，新機貼上、比對 SAS，
 //      收到全量捆包後由 `snapshot.identity.nsec` 得到同帳號。
 //
-// 本檔為純邏輯（無 UI、無 DOM）：金鑰解碼/公鑰導出重用 @cinder/core，配對載荷解析用 core
-// `parsePairing`，捆包身分萃取用 @cinder/engine `PairBundle`。錯誤以 i18n MessageKey 回報，
+// 本檔為純邏輯（無 UI、無 DOM）：金鑰解碼/公鑰導出重用 @cinderous/core，配對載荷解析用 core
+// `parsePairing`，捆包身分萃取用 @cinderous/engine `PairBundle`。錯誤以 i18n MessageKey 回報，
 // 交由畫面翻譯。傳輸層（WebRTC＋relay）不在此——由呼叫端注入（產線需原生/EAS，見 ADR-0063）。
 import {
   getPublicKey,
@@ -19,9 +19,9 @@ import {
   type SecretKey,
   unwrapSecret,
   wrapSecret,
-} from "@cinder/core";
-import type { PairBundle } from "@cinder/engine";
-import type { MessageKey } from "@cinder/i18n";
+} from "@cinderous/core";
+import type { PairBundle } from "@cinderous/engine";
+import type { MessageKey } from "@cinderous/i18n";
 
 /** 登入後的本機身分（同桌面帳號＝同一把 sk）。 */
 export interface MobileIdentity {

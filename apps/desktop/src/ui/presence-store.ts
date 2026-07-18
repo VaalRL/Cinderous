@@ -4,7 +4,7 @@
 // ——只是讓使用者自己的裝置記住「我上次把自己設成什麼」，免得每次上線重打。只記**手動**
 // 選擇；閒置自動 away 不落地（見 App 的 idle apply 不經此路徑）。
 
-import type { Status } from "@cinder/engine";
+import type { Status } from "@cinderous/engine";
 
 export interface PresencePref {
   status: Status;

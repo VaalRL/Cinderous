@@ -6,7 +6,7 @@
 //  - 任何指令都**不會**輸出私鑰。
 
 /** 生產中繼站預設值（可由 --relay 或 CINDER_RELAY 覆寫）。 */
-export const DEFAULT_RELAY = "wss://cinder-relay.whoami885.workers.dev";
+export const DEFAULT_RELAY = "wss://cinder-relay.cinderous1.workers.dev";
 
 /**
  * 本地啟動器的預設 port（ADR-0113）。**固定**——`localStorage`／OPFS 都以 origin 為鍵，
@@ -112,7 +112,7 @@ export function parseArgs(argv: string[], env: Record<string, string | undefined
   }
 }
 
-export const HELP = `Cinder CLI——無狀態的無頭收發工具（ADR-0098）＋本地啟動器（ADR-0113）。
+export const HELP = `Cinderous CLI——無狀態的無頭收發工具（ADR-0098）＋本地啟動器（ADR-0113）。
 
 用法：
   cinder serve [--port N] [--dir P]    本地啟動瀏覽器版（預設 http://127.0.0.1:${DEFAULT_PORT}/）

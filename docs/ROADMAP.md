@@ -1,4 +1,4 @@
-# Cinder 長期施工計畫（ROADMAP）
+# Cinderous 長期施工計畫（ROADMAP）
 
 > 本文件是「還有哪些要蓋、依什麼順序蓋」的單一入口。里程碑定義見 `ARCHITECTURE.md §7`，決策理由見 `docs/adr/`，產品規格見 `PRD.md`。功能實作前先立/查對應 ADR。
 
@@ -11,7 +11,7 @@
 
 ## 0. 現況快照
 
-> **產品名：Cinder**（slogan「Life is short, connect buddies.」；npm scope `@cinder/*`）。測試現況：**core 193 / relay 52 / desktop 250 / i18n 6，全綠**。
+> **產品名：Cinderous**（slogan「Life is short, connect buddies.」；npm scope `@cinderous/*`）。測試現況：**core 193 / relay 52 / desktop 250 / i18n 6，全綠**。
 
 - **共用協定/邏輯層（`packages/core`、`relay`）**：secp256k1 身分 → NIP-01 事件/簽章 → NIP-44 加密 → NIP-17/59 Gift Wrap → 心跳/輸入中/音樂 → 群組成對扇出 → WebRTC 信令/資料通道/降級 → QR 配對/競速/多設備收斂 → RelayClient → **節流外送匣 Outbox / 有界去重 BoundedSet** → 防濫用(PoW/訂閱上限/**企業 allowlist**)/時鐘·重放防護 → **@提及（p-tag）/對話串（reply e-tag）**。✅
 - **桌面前端（`apps/desktop`）**：登入、聯絡人清單、對話視窗、表情、Markdown、Nudge、輸入中、深色/明亮、多語系；**Phase A 產品化完成**——接真實 relay（含自動重連/連線狀態）、本機持久化、聯絡人管理（刪除/封鎖）、設定面板（身分備份/通知）、未讀徽章、音樂狀態、**WebRTC P2P 檔案傳輸**。示範模式（記憶體 relay + 機器人）仍保留供體驗。✅
@@ -83,7 +83,7 @@
 
 | # | 任務 | 說明 |
 | --- | --- | --- |
-| D1 | RN App 骨架 | 🔧 **起手完成（此環境）**：`apps/mobile`（react-native-web + 重用 `@cinder/core`/`@cinder/i18n`/`@cinder/theme`/`@cinder/engine`）；**app 殼與導覽（ADR-0085）**：登入→**聊天清單**（聯絡人＋群組合成、預設最近互動排序、LINE/Signal 風格列）→點擊開**對話**（氣泡＋輸入列），接 `ChatBackend`（示範後端）。另有 `ContactListScreen`（依上線狀態分區）＋**登入畫面**。**可在瀏覽器實跑的 web preview**：`pnpm --filter @cinder/mobile dev`（Vite＋react-native-web，手機外框＋主題/語系/主色切換＋示範 nsec）。**接真實 relay（ADR-0086）**：`backend.ts` 以 `RelayChatBackend`＋`webSocketConnector`＋`LocalStorage`（nsecOverride 注入身分）連生產中繼站；清單「＋」加好友（npub）＋分享自己 npub；preview 可切「示範 ↔ 真實 relay」。**底部分頁（ADR-0087）**：聊天／聯絡人／設定（`BottomTabs`＋`SettingsScreen`）；對話為 push；主題/主色/語言在設定分頁即時切換＋登出；聯絡人分頁點擊開對話。**設計對齊（ADR-0080）**：色彩改吃 `@cinder/theme` 的 `resolveTheme`，與桌面同一套主色/副色/深淺主題 SSOT。**登入（ADR-0081）**：`NsecSignInScreen`（nsec 匯入，A）＋`PairImportScreen`（配對匯入，B，沿用 D4a）——同帳號跨裝置；`auth.ts` 純邏輯＋真實配對協定整合測試綠。⏳ app 殼/導覽、RN 安全儲存（D2）、配對真實 WebRTC 傳輸（原生/EAS）、對話畫面。 |
+| D1 | RN App 骨架 | 🔧 **起手完成（此環境）**：`apps/mobile`（react-native-web + 重用 `@cinderous/core`/`@cinderous/i18n`/`@cinderous/theme`/`@cinderous/engine`）；**app 殼與導覽（ADR-0085）**：登入→**聊天清單**（聯絡人＋群組合成、預設最近互動排序、LINE/Signal 風格列）→點擊開**對話**（氣泡＋輸入列），接 `ChatBackend`（示範後端）。另有 `ContactListScreen`（依上線狀態分區）＋**登入畫面**。**可在瀏覽器實跑的 web preview**：`pnpm --filter @cinderous/mobile dev`（Vite＋react-native-web，手機外框＋主題/語系/主色切換＋示範 nsec）。**接真實 relay（ADR-0086）**：`backend.ts` 以 `RelayChatBackend`＋`webSocketConnector`＋`LocalStorage`（nsecOverride 注入身分）連生產中繼站；清單「＋」加好友（npub）＋分享自己 npub；preview 可切「示範 ↔ 真實 relay」。**底部分頁（ADR-0087）**：聊天／聯絡人／設定（`BottomTabs`＋`SettingsScreen`）；對話為 push；主題/主色/語言在設定分頁即時切換＋登出；聯絡人分頁點擊開對話。**設計對齊（ADR-0080）**：色彩改吃 `@cinderous/theme` 的 `resolveTheme`，與桌面同一套主色/副色/深淺主題 SSOT。**登入（ADR-0081）**：`NsecSignInScreen`（nsec 匯入，A）＋`PairImportScreen`（配對匯入，B，沿用 D4a）——同帳號跨裝置；`auth.ts` 純邏輯＋真實配對協定整合測試綠。⏳ app 殼/導覽、RN 安全儲存（D2）、配對真實 WebRTC 傳輸（原生/EAS）、對話畫面。 |
 | D2 | 行動持久化 | RN SQLite + Keystore/Secure Enclave。 |
 | D3 | 無聲推播喚醒 | Worker 存 APNs/FCM 憑證，Silent Push 喚醒背景拉取（PRD §3）。 |
 | D4a | **桌面配對克隆** | ✅ **完成（ADR-0072）**：core 協定（HELLO/CHALLENGE/BUNDLE/DONE/REJECT＋SAS 四位短碼）、`roomKeyFrom` 拋棄式信令會合（kind 21003、AEAD 密封、NIP-42 以房間金鑰通過）、WebRTC 資料通道長度前綴分塊、捆包＝StorageSnapshot 全量、兩端 UI（舊機 QR/碼/倒數/SAS 確認；新機 SignIn 匯入）。載荷帶會合 relay。✅ **實機 E2E 驗證通過（2026-07-10）**：真實 Chromium×3 context＋真實 WebRTC＋生產 relay，連續三次全綠（SAS 一致、捆包直傳、新舊機狀態收斂一致）。過程抓到並修掉三個真實缺陷（NIP-42 認證競態致信令遺失、ephemeral offer 無重放致間歇失敗、設定面板蓋住 SAS 確認鈕）。 |
@@ -202,9 +202,9 @@
 | # | 任務 | 環境 | 說明 / 驗證 |
 | --- | --- | --- | --- |
 | K1 | 前端開發指南（零程式） | 🌐 | ✅ **完成**：`docs/前端開發指南_Frontend-Guide.md`——三層心智模型、重用 core/i18n、實作/消費 `ChatBackend` 三步、介面速查、`apps/mobile` 活範本、主題/i18n、AGPL 含意。 |
-| K2 | 抽 `@cinder/engine` | 🌐 | ✅ **完成**：新 workspace 套件 `@cinder/engine`——整組上移 `backend/`（ChatBackend/DTO/RelayChatBackend/BrowserChatBackend/connector/WebRTC/配對）＋`storage/`（AppStorage/LocalStorage/MemoryStorage/profiles/快照）。依賴方向 `engine→relay→core` 無環；平台基質（TauriStorage/keyvault）留 desktop 經介面注入。desktop 12 檔改接、**mobile 新增 `chat.ts` 用 `BrowserChatBackend` 驅動——跨前端重用已實證**。零測試遺失（engine 104＋desktop 234＝原 338）；全 workspace typecheck 綠。 |
-| K3 | 執行期語系/主題包（選配） | 🌐 | 🔧 **縫已預留**：`@cinder/i18n` 加 `registerLocale`/`availableLocales`（執行期語系包、免重編，8 測試綠）；主題已 token 化（`--accent`＋`data-theme`）為配色縫。完整「drop-in 包載入器/市集」待需求。 |
-| K4 | 前端外掛/插槽（選配，另立 ADR） | 🌐 | 🔧 **縫已預留**：`@cinder/engine` 加 `registerExtension`/`getExtension`/`listExtensions`（行程內第一方註冊表，實驗性）。**第三方/遠端程式碼載入的沙箱與信任邊界待 K4 專屬 ADR**，尚未實作。 |
+| K2 | 抽 `@cinderous/engine` | 🌐 | ✅ **完成**：新 workspace 套件 `@cinderous/engine`——整組上移 `backend/`（ChatBackend/DTO/RelayChatBackend/BrowserChatBackend/connector/WebRTC/配對）＋`storage/`（AppStorage/LocalStorage/MemoryStorage/profiles/快照）。依賴方向 `engine→relay→core` 無環；平台基質（TauriStorage/keyvault）留 desktop 經介面注入。desktop 12 檔改接、**mobile 新增 `chat.ts` 用 `BrowserChatBackend` 驅動——跨前端重用已實證**。零測試遺失（engine 104＋desktop 234＝原 338）；全 workspace typecheck 綠。 |
+| K3 | 執行期語系/主題包（選配） | 🌐 | 🔧 **縫已預留**：`@cinderous/i18n` 加 `registerLocale`/`availableLocales`（執行期語系包、免重編，8 測試綠）；主題已 token 化（`--accent`＋`data-theme`）為配色縫。完整「drop-in 包載入器/市集」待需求。 |
+| K4 | 前端外掛/插槽（選配，另立 ADR） | 🌐 | 🔧 **縫已預留**：`@cinderous/engine` 加 `registerExtension`/`getExtension`/`listExtensions`（行程內第一方註冊表，實驗性）。**第三方/遠端程式碼載入的沙箱與信任邊界待 K4 專屬 ADR**，尚未實作。 |
 
 **完成定義**：社群裝 core/i18n/engine 三套件、實作 `ChatBackend` 前端即可運作；`apps/mobile` 接上後端為活範本。
 
@@ -219,7 +219,7 @@
 | N1 | 外掛依賴＋權限 | ✅ **完成**：`tauri-plugin-notification`（Rust，收進 `tauri-app` feature）＋`@tauri-apps/plugin-notification`（JS）；`main.rs` 註冊 plugin；`capabilities/default.json` 授 `notification:default`。`cargo check --features tauri-app` 乾淨（帶進 Windows `tauri-winrt-notification` toast 後端）。 |
 | N2 | 通知服務抽象 | ✅ **完成**：`src/native/notify.ts` 單一 `notify()`／`ensurePermission()`，`isTauri()` 走原生外掛否則 fallback Web Notification；App 送出點與權限請求改走它。既有「僅他人訊息＋視窗未聚焦才跳」判斷不變。7 單元測試（Tauri／瀏覽器／無權限／點擊）。 |
 | N3 | 點擊回跳＋開對話 | ✅ **完成（程式）**：新 IPC `focus_window`（薄包 `show_main`＝show+unminimize+set_focus）；`onNotificationClick` 接外掛 `onAction`＋`extra.convo` → 叫回視窗＋開該對話置前；瀏覽器 fallback 走 `Notification.onclick`。⏳ **桌面各 OS 點擊 action 支援度需打包版實機確認**（通知顯示本身不受影響）。 |
-| N4 | 傳訊者名稱＋提示音 | ✅ **完成**：通知標題＝群組/聯絡人顯示名（非固定 "Cinder"），群訊內文前綴傳訊者；提示音 `playChime`（Web Audio 上行雙音、無外部音檔、CSP 相容），**預設開可關**。 |
+| N4 | 傳訊者名稱＋提示音 | ✅ **完成**：通知標題＝群組/聯絡人顯示名（非固定 "Cinderous"），群訊內文前綴傳訊者；提示音 `playChime`（Web Audio 上行雙音、無外部音檔、CSP 相容），**預設開可關**。 |
 | N5 | 設定開關＋文件 | ✅ **完成**：設定面板通知區加「提示音」「隱藏內文預覽」兩子開關（本機持久化，比照 `nb.notify`；預設音開、預覽顯示＝LINE 風）；本表同步。 |
 
 **完成定義**：打包桌面版收到背景訊息時跳原生系統通知、顯示是誰傳的、點擊回到該對話；提示音與預覽可於設定調整。⏳ 真實 OS toast 與點擊 action 待打包版（`tauri:build`）實機驗收。
@@ -263,7 +263,7 @@ Phase A（前端產品化，可在此環境大量推進）
 
 ## 建議下一步
 
-此環境（🌐）**不需新決策就能做的規劃項目已全數完成**（Phase A/E 全部、G0–G4、M8 來電鈴聲、Cinder 更名）。往下推進需要：
+此環境（🌐）**不需新決策就能做的規劃項目已全數完成**（Phase A/E 全部、G0–G4、M8 來電鈴聲、Cinderous 更名）。往下推進需要：
 
 1. ~~已定案、可直接施工：Phase H~~ ✅ **H1–H3 完成、H4 核心完成**（ADR-0066/0067）——僅餘 H4 的 Tauri 實機驗證（`tauri:dev` 跑解鎖全流程）。
 2. ~~H5／H6／Phase J／Phase I~~ ✅ **全數完成**（ADR-0068/0069/0070/0071），**relay 端已 `wrangler deploy` 上線並實測**（2026-07-10）。剩一件營運事項：錨點前提（OPERATOR-TODO §A，Phase I 實效）。

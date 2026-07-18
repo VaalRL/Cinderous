@@ -3,8 +3,8 @@
 // 主題/主色/語言改由 app 內「設定」分頁掌管（ADR-0087）——此頁只留開發預覽用的外框控制。
 import { type CSSProperties, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { generateSecretKey, nsecEncode } from "@cinder/core";
-import type { Theme } from "@cinder/theme";
+import { generateSecretKey, nsecEncode } from "@cinderous/core";
+import type { Theme } from "@cinderous/theme";
 import { DEFAULT_RELAY } from "./backend.js";
 import { MobileApp } from "./MobileApp.js";
 
@@ -47,7 +47,7 @@ function Preview(): JSX.Element {
         boxSizing: "border-box",
       }}
     >
-      <h1 style={{ fontSize: 18, margin: 0 }}>Cinder 行動端 — Web Preview</h1>
+      <h1 style={{ fontSize: 18, margin: 0 }}>Cinderous 行動端 — Web Preview</h1>
 
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center", justifyContent: "center" }}>
         <span style={{ fontSize: 12, color: muted }}>頁面：</span>

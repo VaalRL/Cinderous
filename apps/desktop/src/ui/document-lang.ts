@@ -1,4 +1,4 @@
-import type { Locale } from "@cinder/i18n";
+import type { Locale } from "@cinderous/i18n";
 
 /** 可被同步 lang 的最小目標介面（方便測試注入假物件）。 */
 export interface LangTarget {

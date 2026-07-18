@@ -1,6 +1,6 @@
 import { createRequire } from "node:module";
 import type { DatabaseSync as DatabaseSyncType } from "node:sqlite";
-import type { NostrEvent } from "@cinder/core";
+import type { NostrEvent } from "@cinderous/core";
 import { describe, expect, it } from "vitest";
 import type { RelayFilter } from "./protocol.js";
 import { type SqlExec, SqlMessageStore } from "./sql-message-store.js";

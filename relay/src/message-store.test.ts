@@ -4,7 +4,7 @@ import {
   generateSecretKey,
   getPublicKey,
   type NostrEvent,
-} from "@cinder/core";
+} from "@cinderous/core";
 import { getExpiration, MessageStore } from "./message-store.js";
 
 const recipient = getPublicKey(generateSecretKey());

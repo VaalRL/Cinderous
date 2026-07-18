@@ -1,9 +1,9 @@
 {
-  "name": "@cinder/cli",
+  "name": "@cinderous/cli",
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Cinder CLI（ADR-0098）：無狀態的無頭收發工具（whoami/send/listen）。私鑰不落地、無本機明文歷史。",
+  "description": "Cinderous CLI（ADR-0098）：無狀態的無頭收發工具（whoami/send/listen）。私鑰不落地、無本機明文歷史。",
   "license": "AGPL-3.0-only",
   "scripts": {
     "build": "esbuild src/main.ts --bundle --platform=node --format=esm --outfile=dist/cinder.js",
@@ -13,8 +13,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@cinder/core": "workspace:*",
-    "@cinder/engine": "workspace:*"
+    "@cinderous/core": "workspace:*",
+    "@cinderous/engine": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

@@ -1,6 +1,6 @@
 # 研究：Discord/Slack 功能移植評估——自訂頻道、Emoji Reaction、自訂 Emoji
 
-> 目的：評估三項 Discord/Slack 常見功能是否適合移植到 Cinder。
+> 目的：評估三項 Discord/Slack 常見功能是否適合移植到 Cinderous。
 > 判準：是否相容本專案硬規則——**Serverless、E2E 加密、零伺服器狀態、
 > Gift Wrap 元資料隱藏、本地優先**。結論先行，細節在後。
 

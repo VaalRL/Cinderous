@@ -1,4 +1,4 @@
-import type { PairTransport } from "@cinder/core";
+import type { PairTransport } from "@cinderous/core";
 import { describe, expect, it } from "vitest";
 import { MemoryStorage } from "../storage/memory.js";
 import { createPairingOffer, PAIRING_TTL_MS, type PairTransportFactory, runPairSource, runPairTarget } from "./pairing-session.js";

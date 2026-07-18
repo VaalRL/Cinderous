@@ -1,4 +1,4 @@
-import { makeBackupCode } from "@cinder/core";
+import { makeBackupCode } from "@cinderous/core";
 import { useEffect, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { ACCENT_PRESETS, useAccent } from "../accent.js";
 import { useLayout } from "../layout.js";
@@ -9,7 +9,7 @@ import type { SlotItem } from "./slot-queue.js";
 import { placeControl, type ControlId, TITLEBAR_STYLES } from "./titlebar-controls.js";
 import { useTitlebar } from "../titlebar.js";
 import { qrSvg } from "../qr.js";
-import type { CloudSyncMode } from "@cinder/engine";
+import type { CloudSyncMode } from "@cinderous/engine";
 import {
   type AiProvider,
   hasApiKey,
@@ -429,7 +429,7 @@ function TitlebarSettings(): JSX.Element {
       {/* 編輯器即預覽：所見即所得，拖完真的外框立刻跟著變（同一個 Provider 狀態）。 */}
       <div className={`titlebarset__editor titlebar--style-${controls.style}`}>
         {zone("left")}
-        <span className="titlebarset__title">Cinder</span>
+        <span className="titlebarset__title">Cinderous</span>
         <span className="titlebarset__gap" />
         {zone("right")}
       </div>

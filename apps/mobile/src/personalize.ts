@@ -1,10 +1,10 @@
 // 行動端本地個人化（ADR-0077／0134）：每對話背景純存 localStorage，**不廣播**、不進 Nostr
-// 事件、不進雲端快照或備份——與桌面同一套隱私性質。型別/預設/CSS 產生共用 @cinder/theme。
+// 事件、不進雲端快照或備份——與桌面同一套隱私性質。型別/預設/CSS 產生共用 @cinderous/theme。
 //
 // 鍵與桌面同前綴（`nb.chatbg.<id>`），但各存各的裝置：背景是本機偏好，不隨帳號同步。
 // react-native-web 有 DOM localStorage；上真正 React Native 時換 AsyncStorage，介面不變。
 
-import { CHATBG_PREFIX, type ChatBg } from "@cinder/theme";
+import { CHATBG_PREFIX, type ChatBg } from "@cinderous/theme";
 
 function lsGet(key: string): string | null {
   try {

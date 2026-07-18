@@ -1,6 +1,6 @@
 // 官方資金透明度（ADR-0090）：純函式。funds.json ＝以「專屬透明度金鑰」簽章的 Nostr 事件
 // （同 relay-list 信任根模式，ADR-0039）。前端**驗簽通過才渲染數字**——CDN/host 被入侵也改不動。
-import { finalizeEvent, type NostrEvent, type PubkeyHex, type SecretKey, verifyEvent } from "@cinder/core";
+import { finalizeEvent, type NostrEvent, type PubkeyHex, type SecretKey, verifyEvent } from "@cinderous/core";
 
 /** funds.json 事件 kind：僅為靜態檔的結構標記，不發佈到任何 relay。 */
 export const FUNDS_KIND = 30088;

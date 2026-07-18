@@ -1,7 +1,7 @@
 // 行動端身分安全（ADR-0135）：備份碼登入／救援、改本地密碼。加密原語（NIP-49／Argon2id）
-// 由 @cinder/core 各自有測；這裡驗行動端的接線邏輯。備份碼用低 logn 產生以加速測試。
+// 由 @cinderous/core 各自有測；這裡驗行動端的接線邏輯。備份碼用低 logn 產生以加速測試。
 
-import { generateSecretKey, getPublicKey, makeBackupCode, nsecEncode } from "@cinder/core";
+import { generateSecretKey, getPublicKey, makeBackupCode, nsecEncode } from "@cinderous/core";
 import { describe, expect, it } from "vitest";
 import {
   changeRememberedPassword,

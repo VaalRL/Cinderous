@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { NostrEvent } from "@cinder/core";
+import type { NostrEvent } from "@cinderous/core";
 import type { Copy } from "../copy.js";
 import { type FundsData, runwayMonths, verifyFunds } from "../funds.js";
 
@@ -12,7 +12,7 @@ export function Transparency({ c }: { c: Copy }): JSX.Element {
     let cancelled = false;
     void (async () => {
       try {
-        // base-aware：專案頁部署於 /Cinder/，BASE_URL 帶尾斜線（根站時為 "/"）
+        // base-aware：專案頁部署於 /Cinderous/，BASE_URL 帶尾斜線（根站時為 "/"）
         const res = await fetch(`${import.meta.env.BASE_URL}funds.json`, { cache: "no-store" });
         const event = (await res.json()) as NostrEvent;
         const data = verifyFunds(event); // 用釘死的透明度公鑰驗簽（fail-closed）

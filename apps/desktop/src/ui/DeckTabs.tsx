@@ -1,4 +1,4 @@
-import type { Contact, Group } from "@cinder/engine";
+import type { Contact, Group } from "@cinderous/engine";
 import { useI18n } from "../i18n.js";
 
 export interface DeckTabsProps {

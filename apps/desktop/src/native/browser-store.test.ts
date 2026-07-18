@@ -6,7 +6,7 @@
 //
 // 這裡把那個不變量釘死。
 
-import { generateSecretKey, nsecEncode } from "@cinder/core";
+import { generateSecretKey, nsecEncode } from "@cinderous/core";
 import { beforeEach, describe, expect, it } from "vitest";
 import { browserStore } from "./browser-store.js";
 

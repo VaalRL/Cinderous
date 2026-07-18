@@ -3,7 +3,7 @@
     "probes": 11,
     "live": 11
   },
-  "wss://cinder-relay.whoami885.workers.dev": {
+  "wss://cinder-relay.cinderous1.workers.dev": {
     "probes": 11,
     "live": 11
   }

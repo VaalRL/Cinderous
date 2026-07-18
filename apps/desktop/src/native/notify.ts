@@ -2,13 +2,13 @@
 //
 // - Tauri 執行期：走 tauri-plugin-notification 的原生系統 toast（Windows WinRT toast /
 //   macOS UNUserNotification / Linux libnotify），打包後可靠、可帶 App 身分與點擊 action。
-// - 瀏覽器/開發：**Web Notification 基質來自 `@cinder/engine`**（ADR-0116）——行動端用的是
+// - 瀏覽器/開發：**Web Notification 基質來自 `@cinderous/engine`**（ADR-0116）——行動端用的是
 //   同一份，不各寫一遍。
 //
 // 「僅他人訊息＋視窗未聚焦才跳」的判斷仍在 App 端；本服務只負責權限與傳遞。
 // 介面為 async——原生外掛的權限查詢/傳遞天生非同步。
 
-import { type Notifier, type NotifyPayload, onWebNotificationClick, webNotifier } from "@cinder/engine";
+import { type Notifier, type NotifyPayload, onWebNotificationClick, webNotifier } from "@cinderous/engine";
 import { isTauri } from "@tauri-apps/api/core";
 
 export type { Notifier, NotifyPayload };

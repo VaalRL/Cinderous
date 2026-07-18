@@ -1,4 +1,4 @@
-import { deriveStorageKey, openValue, sealValue } from "@cinder/core";
+import { deriveStorageKey, openValue, sealValue } from "@cinderous/core";
 
 import { ArchiveWriter, type MessageArchive } from "./archive.js";
 import { MemoryStorage } from "./memory.js";

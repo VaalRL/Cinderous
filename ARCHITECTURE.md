@@ -1,4 +1,4 @@
-# ARCHITECTURE.md — Cinder 系統架構（草稿）
+# ARCHITECTURE.md — Cinderous 系統架構（草稿）
 
 > 本文件是模組邊界、資料流與初始化規劃的**單一真實來源（SSOT）**。產品行為以 [`PRD.md`](./PRD.md) 為準；本文件定義「落在哪一層、如何連接」。
 >
@@ -53,10 +53,10 @@
 | --- | --- | --- |
 | 共用核心 | `packages/core/` | Nostr 事件建構/驗證、簽章（secp256k1 Schnorr, BIP-340）、加密（NIP-44）、Gift Wrap 與群組扇出、儲存型別、事件 Kind 常數（含 `NUDGE`，ADR-0120）。跨平台共用，**SSOT 邏輯所在**。零 UI 依賴。 |
 | 通訊引擎 | `packages/engine/` | **可用的通訊後端（ADR-0074）**：`ChatBackend`/`ChatBackendEvents` 契約＋UI DTO、`RelayChatBackend`（真實 relay pool）/`BrowserChatBackend`（記憶體 demo）、WebRTC、`AppStorage`/`LocalStorage`、多身分/搬家/快照。與 UI 框架無關，供任意前端重用（desktop 與 mobile 皆消費）。 |
-| 桌面前端 | `apps/desktop/src/` | React/TS UI：好友列表、對話視窗、狀態列、Nudge 動畫。消費 `@cinder/engine`；平台基質（Tauri 金鑰庫/加密儲存）經 `AppStorage`/keyvault 介面注入。**同一份 `vite build` 亦為瀏覽器版**：`isTauri()=false` 走 web 路徑（金鑰以 Argon2id 本地密碼包裹存 localStorage，ADR-0112/0122），可自架於獨立子網域（ADR-0147，見 `docs/self-hosting-web-app.md`）。 |
+| 桌面前端 | `apps/desktop/src/` | React/TS UI：好友列表、對話視窗、狀態列、Nudge 動畫。消費 `@cinderous/engine`；平台基質（Tauri 金鑰庫/加密儲存）經 `AppStorage`/keyvault 介面注入。**同一份 `vite build` 亦為瀏覽器版**：`isTauri()=false` 走 web 路徑（金鑰以 Argon2id 本地密碼包裹存 localStorage，ADR-0112/0122），可自架於獨立子網域（ADR-0147，見 `docs/self-hosting-web-app.md`）。 |
 | 桌面原生橋 | `apps/desktop/src-tauri/` | Rust：**為引擎提供原生能力**（非重造通訊，ADR-0105）——`encstore`（AES-256-GCM 加密 blob）、`passlock`（Argon2id 本地密碼＋救援）、`keyvault`（OS 金鑰庫）、`partfile`（部位檔的原子寫入／檔名白名單／毀損隔離，ADR-0119）、IPC。中繼連線/Gift Wrap/WebRTC/狀態機**留在 `packages/engine`（TS）**；原本的 Rust 背景連線與 SQLite（ADR-0019/0020）已於 ADR-0105 退役。 |
-| 行動端 | `apps/mobile/` | react-native-web：接**真實中繼**（ADR-0086），重用 `@cinder/core`/`@cinder/i18n`/`@cinder/engine`/`@cinder/theme`。儲存走加密 localStorage＋OPFS 封存；「記住我」以 Argon2id 包裹 nsec（ADR-0117）。**不做推播（APNs/FCM）**（ADR-0116）。 |
-| 官方網站 | `apps/website/` | 純靜態站（Vite+React；ADR-0090）：開源/永久免費/隱私主張、下載、捐款導流、**簽章式資金透明度**（`funds.json` 前端 `verifyFunds` 對釘死透明度公鑰驗簽＋算 runway，fail-closed）。**與通訊平面硬隔離、零追蹤、無常駐後台**；重用 `@cinder/core`（驗簽）/`@cinder/theme`/`@cinder/i18n`。 |
+| 行動端 | `apps/mobile/` | react-native-web：接**真實中繼**（ADR-0086），重用 `@cinderous/core`/`@cinderous/i18n`/`@cinderous/engine`/`@cinderous/theme`。儲存走加密 localStorage＋OPFS 封存；「記住我」以 Argon2id 包裹 nsec（ADR-0117）。**不做推播（APNs/FCM）**（ADR-0116）。 |
+| 官方網站 | `apps/website/` | 純靜態站（Vite+React；ADR-0090）：開源/永久免費/隱私主張、下載、捐款導流、**簽章式資金透明度**（`funds.json` 前端 `verifyFunds` 對釘死透明度公鑰驗簽＋算 runway，fail-closed）。**與通訊平面硬隔離、零追蹤、無常駐後台**；重用 `@cinderous/core`（驗簽）/`@cinderous/theme`/`@cinderous/i18n`。 |
 | 中繼站 | `relay/` | Cloudflare Worker + **Durable Object 內建 SQLite**（ADR-0056）：Nostr relay，處理 Ephemeral 轉發與 NIP-40 過期留言；NIP-42 AUTH ＋具名訂閱 ACL（ADR-0057／0123）。`RelayCore` 傳輸無關，可自架於 Node/Deno/Bun/Docker。 |
 | 測試 | `tests/` | 跨層整合測試與共用 fixture。 |
 | 文件 | `docs/` | 設計決策與流程補充。 |

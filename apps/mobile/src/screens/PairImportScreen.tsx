@@ -1,14 +1,14 @@
 // 行動端登入 B（ADR-0081）：配對匯入。沿用桌面 D4a 配對克隆（ADR-0072）——
 // 舊機顯示配對碼，新機貼上、比對 SAS 短碼，收到全量捆包後由 snapshot.identity 得到同帳號。
 //
-// 純 UI（RN 元件）：載荷驗證/身分萃取在 ../auth（重用 @cinder/core `parsePairing`、@cinder/engine
-// `PairBundle`）；色彩吃 @cinder/theme。配對「傳輸」（WebRTC＋relay 會合）由呼叫端注入 `onPair`
+// 純 UI（RN 元件）：載荷驗證/身分萃取在 ../auth（重用 @cinderous/core `parsePairing`、@cinderous/engine
+// `PairBundle`）；色彩吃 @cinderous/theme。配對「傳輸」（WebRTC＋relay 會合）由呼叫端注入 `onPair`
 // ——產線走 engine `runPairTarget`＋`webRtcPairTransport`（需原生/EAS，見 ADR-0063）；測試可注入
 // 記憶體傳輸，故本畫面的驅動流程在此環境即可驗。
 import { useMemo, useState } from "react";
-import type { PairBundle } from "@cinder/engine";
-import { type Locale, type MessageKey, translate } from "@cinder/i18n";
-import { resolveTheme, STATUS_COLORS, type Theme, type ThemeTokens } from "@cinder/theme";
+import type { PairBundle } from "@cinderous/engine";
+import { type Locale, type MessageKey, translate } from "@cinderous/i18n";
+import { resolveTheme, STATUS_COLORS, type Theme, type ThemeTokens } from "@cinderous/theme";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native-web";
 import { identityFromPairBundle, type MobileIdentity, previewPairing } from "../auth.js";
 

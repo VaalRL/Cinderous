@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { asLocale, createT, detectLocale, type Locale, type TFunction } from "@cinder/i18n";
+import { asLocale, createT, detectLocale, type Locale, type TFunction } from "@cinderous/i18n";
 import { syncDocumentLang } from "./ui/document-lang.js";
 
 const STORAGE_KEY = "nb.locale";

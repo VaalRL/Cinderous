@@ -1,4 +1,4 @@
-import type { NostrEvent } from "@cinder/core";
+import type { NostrEvent } from "@cinderous/core";
 import { matchFilter } from "./filters.js";
 import {
   ADDRESSABLE_MAX_BYTES,

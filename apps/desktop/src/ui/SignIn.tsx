@@ -1,6 +1,6 @@
-import { listEntries, type OrgInvite, parseOrgInvite, weightedOrder } from "@cinder/core";
+import { listEntries, type OrgInvite, parseOrgInvite, weightedOrder } from "@cinderous/core";
 import { useEffect, useRef, useState } from "react";
-import { ANCHOR_RELAYS } from "@cinder/engine";
+import { ANCHOR_RELAYS } from "@cinderous/engine";
 import { useI18n } from "../i18n.js";
 import { CinderMark } from "./Brand.js";
 import { TitleControls } from "./TitleControls.js";

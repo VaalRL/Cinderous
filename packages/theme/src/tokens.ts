@@ -1,4 +1,4 @@
-// @cinder/theme — 跨前端設計 token 的單一真實來源（SSOT，ADR-0080）。
+// @cinderous/theme — 跨前端設計 token 的單一真實來源（SSOT，ADR-0080）。
 //
 // 純函式、無 DOM、框架無關：桌面（React-DOM/CSS 變數）與行動端（react-native-web /
 // 未來 RN StyleSheet）共吃同一份色彩定義與推導公式，避免兩邊各自硬編碼而漂移。

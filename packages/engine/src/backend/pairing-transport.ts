@@ -18,7 +18,7 @@ import {
   type PairTransport,
   roomKeyFrom,
   sealSignal,
-} from "@cinder/core";
+} from "@cinderous/core";
 import type { RelayConnector } from "./relay-backend.js";
 
 /** 8-byte 隨機 hex（Web Crypto；瀏覽器/webview/node 皆可用）。 */

@@ -1,7 +1,7 @@
 // Windows release 版隱藏主控台視窗。
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-//! Cinder 桌面 Tauri 二進位（B1 殼）。
+//! Cinderous 桌面 Tauri 二進位（B1 殼）。
 //!
 //! 目前包住 `apps/desktop` 前端（於 webview 執行既有 React UI + RelayChatBackend）。
 //! 原生服務（背景長連線 B3、SQLCipher 持久化 B4、OS 金鑰庫 B5）將以 `ipc` 契約
@@ -890,11 +890,11 @@ fn main() {
         })
         .setup(|app| {
             // 系統匣圖示 + 選單（顯示 / 結束）。左鍵點圖示＝顯示視窗。
-            let show = MenuItem::with_id(app, "show", "顯示 Cinder", true, None::<&str>)?;
-            let quit = MenuItem::with_id(app, "quit", "結束 Cinder", true, None::<&str>)?;
+            let show = MenuItem::with_id(app, "show", "顯示 Cinderous", true, None::<&str>)?;
+            let quit = MenuItem::with_id(app, "quit", "結束 Cinderous", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show, &quit])?;
             TrayIconBuilder::with_id("main")
-                .tooltip("Cinder")
+                .tooltip("Cinderous")
                 .icon(app.default_window_icon().cloned().expect("內建視窗圖示應存在"))
                 .menu(&menu)
                 .show_menu_on_left_click(false)

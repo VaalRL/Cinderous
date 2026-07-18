@@ -1,10 +1,10 @@
 // 行動端貼圖（ADR-0137）：收到的貼圖渲染成圖（非原始標記字串）＋挑選入口。
-// 貼圖的格式/解析/內建資料/SVG 驗證全在 @cinder/core（已測）；這裡驗行動端接線（SSR 可斷言）。
+// 貼圖的格式/解析/內建資料/SVG 驗證全在 @cinderous/core（已測）；這裡驗行動端接線（SSR 可斷言）。
 
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { formatCustomSticker, formatSticker } from "@cinder/core";
-import type { ChatMessage } from "@cinder/engine";
+import { formatCustomSticker, formatSticker } from "@cinderous/core";
+import type { ChatMessage } from "@cinderous/engine";
 import { ConversationScreen } from "./ConversationScreen.js";
 
 const base = {

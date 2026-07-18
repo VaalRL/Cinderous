@@ -1,9 +1,9 @@
 {
-  "name": "@cinder/desktop",
+  "name": "@cinderous/desktop",
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Cinder 桌面前端（Tauri + React/TS）",
+  "description": "Cinderous 桌面前端（Tauri + React/TS）",
   "license": "AGPL-3.0-only",
   "scripts": {
     "dev": "vite",
@@ -16,10 +16,10 @@
     "tauri:build": "tauri build -f tauri-app"
   },
   "dependencies": {
-    "@cinder/core": "workspace:*",
-    "@cinder/engine": "workspace:*",
-    "@cinder/i18n": "workspace:*",
-    "@cinder/theme": "workspace:*",
+    "@cinderous/core": "workspace:*",
+    "@cinderous/engine": "workspace:*",
+    "@cinderous/i18n": "workspace:*",
+    "@cinderous/theme": "workspace:*",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-notification": "^2",
     "qrcode-generator": "^2.0.4",
@@ -27,7 +27,7 @@
     "react-dom": "^18.3.1"
   },
   "devDependencies": {
-    "@cinder/relay": "workspace:*",
+    "@cinderous/relay": "workspace:*",
     "@tauri-apps/cli": "^2",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",

@@ -1,7 +1,7 @@
 // 訊息狀態圖示幾何（ADR-0095）：桌面（React）與行動端（RN-web）共用的 SSOT。
 //
 // 這裡只放**幾何與語義色角色**，不含渲染——各前端用自己的原語畫，顏色走 currentColor，
-// 由 CSS/style 依 `tone` 上色。放在 @cinder/theme 是因為它已是跨前端設計 token 的 SSOT（ADR-0080）。
+// 由 CSS/style 依 `tone` 上色。放在 @cinderous/theme 是因為它已是跨前端設計 token 的 SSOT（ADR-0080）。
 //
 // 視覺語言：以「眼睛的張合」表達**對方看到多少**——
 //   閉眼＝已送出（還沒看到） → 半開眼＝已送達裝置 → 張開眼＝已讀（主色＋加粗）。

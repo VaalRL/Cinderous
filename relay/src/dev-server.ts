@@ -6,7 +6,7 @@ import { RelayCore } from "./relay-core.js";
  * 本機開發用的真實 Nostr relay：以 `ws` 包住與生產同一套 `RelayCore`。
  * 供兩個瀏覽器分頁/客戶端經真實 WebSocket 對話（Cloudflare 部署見 worker.ts）。
  *
- * 用法：`pnpm --filter @cinder/relay build:dev && pnpm --filter @cinder/relay dev`
+ * 用法：`pnpm --filter @cinderous/relay build:dev && pnpm --filter @cinderous/relay dev`
  */
 const port = Number(process.env.PORT ?? 8787);
 const core = new RelayCore({ store: new MessageStore({ maxPerRecipient: 500 }) });
@@ -34,4 +34,4 @@ wss.on("connection", (ws) => {
   ws.on("error", cleanup);
 });
 
-console.log(`Cinder dev relay 於 ws://localhost:${port}`);
+console.log(`Cinderous dev relay 於 ws://localhost:${port}`);

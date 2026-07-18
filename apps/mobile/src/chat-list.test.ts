@@ -1,4 +1,4 @@
-import type { ChatMessage, Contact, Group } from "@cinder/engine";
+import type { ChatMessage, Contact, Group } from "@cinderous/engine";
 import { describe, expect, it } from "vitest";
 import { buildChatList, chatList, chatTimeLabel, lastMessageOf, previewText, sortByRecent } from "./chat-list.js";
 

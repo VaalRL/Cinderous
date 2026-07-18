@@ -5,8 +5,8 @@ import {
   type NostrEvent,
   type RelayClient,
   type RelayClientHandlers,
-} from "@cinder/core";
-import { createInMemoryRelayNetwork } from "@cinder/relay";
+} from "@cinderous/core";
+import { createInMemoryRelayNetwork } from "@cinderous/relay";
 import { describe, expect, it, vi } from "vitest";
 import { MemoryStorage } from "../storage/memory.js";
 import type { ChatBackendEvents, ChatMessage } from "./types.js";

@@ -1,9 +1,9 @@
 {
-  "name": "@cinder/mobile",
+  "name": "@cinderous/mobile",
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Cinder 行動端（Phase D）：Expo/RN，react-native-web 於瀏覽器開發驗證，重用 @cinder/core、@cinder/i18n",
+  "description": "Cinderous 行動端（Phase D）：Expo/RN，react-native-web 於瀏覽器開發驗證，重用 @cinderous/core、@cinderous/i18n",
   "license": "AGPL-3.0-only",
   "scripts": {
     "dev": "vite",
@@ -14,10 +14,10 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@cinder/core": "workspace:*",
-    "@cinder/engine": "workspace:*",
-    "@cinder/i18n": "workspace:*",
-    "@cinder/theme": "workspace:*",
+    "@cinderous/core": "workspace:*",
+    "@cinderous/engine": "workspace:*",
+    "@cinderous/i18n": "workspace:*",
+    "@cinderous/theme": "workspace:*",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-native-svg": "^15.15.5",

@@ -21,7 +21,7 @@ describe("TitleBar 自繪視窗標題列（ADR-0150/0151）", () => {
   it("預設：拖曳區＋標題＋右側依序 ─ □ ✕；未接 onOpenSettings 時不畫 ⚙", () => {
     const html = render();
     expect(html).toContain("data-tauri-drag-region"); // 拖曳＋雙擊最大化（Tauri 內建）
-    expect(html).toContain("Cinder");
+    expect(html).toContain("Cinderous");
     const iTitle = html.indexOf("titlebar__title");
     const iMin = html.indexOf('data-testid="titlebar-min"');
     const iMax = html.indexOf('data-testid="titlebar-max"');

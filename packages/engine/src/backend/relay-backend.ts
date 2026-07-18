@@ -99,7 +99,7 @@ import {
   type RelayListDoc,
   type Rumor,
   type SecretKey,
-} from "@cinder/core";
+} from "@cinderous/core";
 import { buildRtcConfig } from "./rtc-config.js";
 import { WebRtcCall } from "./webrtc-call.js";
 import { WebRtcTransfer } from "./webrtc.js";

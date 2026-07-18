@@ -11,7 +11,7 @@ import {
   RosterAdminModal,
   shouldMuteOrgNotification,
 } from "./App.js";
-import type { Profile } from "@cinder/engine";
+import type { Profile } from "@cinderous/engine";
 
 const renderModal = (
   defaultRelayUrl: string,

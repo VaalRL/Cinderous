@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { ExportFormat } from "@cinder/engine";
+import type { ExportFormat } from "@cinderous/engine";
 import { useI18n } from "../i18n.js";
 
 /** 可導出的對話（ADR-0094）。 */

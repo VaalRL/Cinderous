@@ -1,6 +1,6 @@
 # 架構決策紀錄（ADR）
 
-本目錄記錄 Cinder 的重大架構與設計決策（Architecture Decision Records）。
+本目錄記錄 Cinderous（原名 Cinder，ADR-0191 更名）的重大架構與設計決策（Architecture Decision Records）。
 
 > 自此之後，任何架構/設計層級的決策（模組邊界、加密與協定選型、資料流、隱私取捨、外部依賴等）都必須新增一份 ADR。`PRD.md` 與 `ARCHITECTURE.md` 描述「規格現況」，ADR 描述「為何如此決策」。
 
@@ -184,6 +184,7 @@
 | [0167](./0167-per-identity-appearance-and-titlebar-styles.md) | **外觀依身分覆寫、回退裝置層**：`identity-scoped` 儲存（`nb.<pubkey>.<suffix>` → `nb.<suffix>`）套用於**主色/佈局/標題列**；主題/語言維持全域（裝置偏好）；遷移零痛（舊全域值＝裝置層預設）；**標題列按鈕風格** `TitlebarControls.style`（flat/rounded/mac 交通燈/compact，隨身分層走）＋設定即時預覽 | 已接受 |
 | [0168](./0168-mobile-parity-batch-1-presence.md) | **行動端功能對齊批次一**（引擎已就緒、只差 UI）：**自訂狀態文字**（`setStatus(status,msg)` 接上＋設定頁輸入）、**正在聽**（`setNowPlaying`＋對話副標題 ♪ 優先）、**上線狀態本機還原**（移植 `presence.ts`＝桌面 ADR-0164 同契約，`initialStatus` 塞進後端建構→首次心跳即正確、不洩漏舊狀態）、**敲一下收到即震動**（`navigator.vibrate`，不支援則靜默）；全純本機／依身分，中繼鐵則不動；輸入中提示、限時訊息、移除聯絡人等留待後續批次 | 已接受 |
 | [0169](./0169-mobile-parity-batch-2-conversation.md) | **行動端功能對齊批次二**（對話／聯絡人層）：**輸入中提示**（送＝`onChangeText` 每 3 秒節流 `sendTyping`；收＝`onTyping` 6 秒易失、對話副標最優先顯示）、**限時訊息**（燒毀鈕循環 關/1m/1h/1d，`onSend` 帶 `ttlSeconds`→`sendMessage`，1:1 才有、群組扇出不帶 ttl）、**移除聯絡人**（長按「移除／封鎖」並排，`window.confirm` 後 `removeContact`＝清對話但不封鎖）、**連線狀態細條**（`onConnection`→非 online 顯示琥珀/紅細條，僅真實 relay）；SSR testID 斷言條件渲染 | 已接受 |
+| [0191](./0191-rename-cinderous.md) | **專案更名 Cinder→Cinderous（含 npm scope）＋錨點子網域 whoami885→cinderous1**：`@cinder/*`→`@cinderous/*`（9 套件＋全 import＋workflow filter＋lockfile 重產）、產品顯示名大寫 `Cinder`→`Cinderous`、relay 子網域＋`GITHUB_URL`＋Pages `base /Cinderous/`＋git remote。**刻意保留**小寫內部識別字（keyring `app.cinder.desktop`／bundle id／Rust crate `cinder-desktop`／worker `cinder-relay`）避免金鑰失聯/身分變動。ADR 0001–0190 歷史不動；BMC 帳號 whoami885 修回。typecheck 9/9＋1341 測試全綠。**舊 whoami885 relay 已死→客戶端需重建** | 已接受 |
 | [0190](./0190-relay-list-publish-auth-fix.md) | **修簽章清單帶內發佈的 NIP-42 AUTH 缺口**：首次實跑發現簽章清單（kind 10037）發佈全失敗（`⚠`）——因 relay `requireAuth`，`relay-core` 對 **EVENT 亦要求先 AUTH**，但 `health-check.ts` 的 `publishEvent` 直接送 EVENT 未認證 → 被回 `OK false`（探測 `conformance.ts` 早有 AUTH、發佈這支漏了）。改為**重用** `conformance.ts` 匯出的 `withWs`/`autoAuth`/`parse`，先臨時鑰 NIP-42 AUTH 再發佈（公共站不限事件作者）；契約已由 `relay-core.test.ts` 覆蓋，I/O 以真實 workflow 重跑驗證。typecheck＋88 測試綠 | 已接受 |
 | [0189](./0189-second-anchor-relay.md) | **第二座錨點 relay＋簽章池收錄**：部署第二座 Cloudflare Worker relay 於**獨立帳號**（隔離帳號層故障、不重用 `whoami885`；預設 email 推導子網域已改中性 `jt0856` 後才對外）；`ANCHOR_RELAYS` 加入 `wss://cinder-relay.jt0856.workers.dev`→ 錨點 2 座（ADR-0039 最低韌性）；`relays.json` 收錄兩座為候選（每小時探測＋分級＋簽章發佈）。殘留：兩座皆 CF（全域故障仍同倒，第三座宜換平台）、中性子網域降低但未全消關聯；生效需設 `MAINTAINER_NSEC`＋重建客戶端 | 已接受 |
 | [0188](./0188-maintainer-trust-root-activation.md) | **啟用維護者信任根**（填入 `MAINTAINER_PUBKEY`）：把休眠的簽章 relay 池（ADR-0039/0092）轉為運作——`bootstrap-config.ts` 填入**專用**維護者公鑰（`genkey:maintainer` 本機產、nsec 只落地＋離線備份、絕不進 code）；客戶端重建後訂閱 `kind 10037`＋`verifyRelayList` 驗簽採用。**非破壞**：relays.json 仍空/secret 未設時退回 `ANCHOR_RELAYS`。信任根風險＋輪替需重建客戶端，防護見 `MAINTAINER-ACTIVATION.md`。待辦：設 `MAINTAINER_NSEC` secret→收錄首座→重建客戶端→驗證 | 已接受 |

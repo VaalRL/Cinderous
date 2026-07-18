@@ -7,8 +7,8 @@
 //   - saveFile  → expo-file-system + Sharing
 // 介面與呼叫端皆不變（比照桌面的 native/save-file.ts）。
 
-import type { OutgoingFile } from "@cinder/core";
-import { isThumbnailable, THUMB_MAX_BYTES, THUMB_MAX_EDGE, THUMB_QUALITY } from "@cinder/engine";
+import type { OutgoingFile } from "@cinderous/core";
+import { isThumbnailable, THUMB_MAX_BYTES, THUMB_MAX_EDGE, THUMB_QUALITY } from "@cinderous/engine";
 
 /** 讓使用者選一個檔案；取消回 null。 */
 export async function pickFile(): Promise<OutgoingFile | null> {
@@ -40,7 +40,7 @@ export async function pickFile(): Promise<OutgoingFile | null> {
 
 /**
  * 由圖片位元組產生縮圖 data URL（ADR-0102）——衍生的小預覽圖，**不是原檔**（原檔位元組仍不保存）。
- * 政策常數取自 @cinder/engine，與桌面同一份，不會漂移。
+ * 政策常數取自 @cinderous/engine，與桌面同一份，不會漂移。
  * 移植真 RN：改用 expo-image-manipulator（介面不變）。
  */
 export async function makeThumbnail(bytes: Uint8Array, mime: string): Promise<string | null> {

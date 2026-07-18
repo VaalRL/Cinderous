@@ -8,9 +8,9 @@
 // 所以這裡不渲染任何東西，直接跑那條路徑的**實質**：真的 `LocalStorage`（Argon2id/AES 都是真的）、
 // 真的 `RelayChatBackend`、真的 localStorage 替身。App.tsx 的 boot effect 做的就是這幾步。
 
-import { generateSecretKey, getPublicKey, nsecDecode, nsecEncode } from "@cinder/core";
-import { IDENTITY_UNAVAILABLE, LocalStorage, RelayChatBackend } from "@cinder/engine";
-import { createInMemoryRelayNetwork } from "@cinder/relay";
+import { generateSecretKey, getPublicKey, nsecDecode, nsecEncode } from "@cinderous/core";
+import { IDENTITY_UNAVAILABLE, LocalStorage, RelayChatBackend } from "@cinderous/engine";
+import { createInMemoryRelayNetwork } from "@cinderous/relay";
 import { beforeEach, describe, expect, it } from "vitest";
 import { browserIsRemembered, browserPassEnable, browserPassForget, browserPassUnlock } from "./passlock.js";
 

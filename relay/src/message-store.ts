@@ -1,4 +1,4 @@
-import type { NostrEvent } from "@cinder/core";
+import type { NostrEvent } from "@cinderous/core";
 import { matchFilter } from "./filters.js";
 import type { RelayFilter } from "./protocol.js";
 
@@ -55,7 +55,7 @@ export function isAddressableKind(kind: number): boolean {
 /**
  * NIP-01 可取代範圍（ADR-0035）：kind 0／3／10000–19999——每 (kind, pubkey) 只保留最新一顆。
  *
- * Cinder 用到：`RELAY_LIST_KIND`(10037)、`ORG_ROSTER_KIND`(10038)、`NODE_ATTEST_KIND`(10039)。
+ * Cinderous 用到：`RELAY_LIST_KIND`(10037)、`ORG_ROSTER_KIND`(10038)、`NODE_ATTEST_KIND`(10039)。
  * 過去這些走一般 `put` 而**不斷累積**：health-check cron 每小時發佈一次簽章清單，7 天 TTL 內
  * 就囤了上百份重複——客戶端每次連線都得全部下載一遍。
  */

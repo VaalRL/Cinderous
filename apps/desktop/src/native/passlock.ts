@@ -9,7 +9,7 @@
 // 它擋不住頁面內的惡意 JS，但桌面的 webview 同樣擋不住；差別只在 OS 帳號那道邊界。
 // ADR-0112 修正這一點。
 
-import { isWrapped, unwrapSecret, wrapSecret } from "@cinder/core";
+import { isWrapped, unwrapSecret, wrapSecret } from "@cinderous/core";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 
 import { browserKeyVault } from "./keyvault.js";

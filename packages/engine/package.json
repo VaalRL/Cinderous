@@ -1,9 +1,9 @@
 {
-  "name": "@cinder/engine",
+  "name": "@cinderous/engine",
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Cinder 通訊引擎：ChatBackend 契約＋實作（真實 relay／記憶體 demo）、本機儲存抽象、換機/搬家/快照——與 UI 無關，供任意前端重用（ADR-0074）",
+  "description": "Cinderous 通訊引擎：ChatBackend 契約＋實作（真實 relay／記憶體 demo）、本機儲存抽象、換機/搬家/快照——與 UI 無關，供任意前端重用（ADR-0074）",
   "license": "AGPL-3.0-only",
   "main": "./src/index.ts",
   "types": "./src/index.ts",
@@ -16,8 +16,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@cinder/core": "workspace:*",
-    "@cinder/relay": "workspace:*"
+    "@cinderous/core": "workspace:*",
+    "@cinderous/relay": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",

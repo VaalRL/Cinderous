@@ -19,11 +19,11 @@ import {
   parseOrgInvite,
   peekBackupRelay,
   type PubkeyHex,
-} from "@cinder/core";
+} from "@cinderous/core";
 import { isTauri } from "@tauri-apps/api/core";
 import { useEffect, useRef, useState } from "react";
-import { BrowserChatBackend } from "@cinder/engine";
-import { normalizeRelayUrl, RelayChatBackend, shouldMuteOrgNotification, webSocketConnector } from "@cinder/engine";
+import { BrowserChatBackend } from "@cinderous/engine";
+import { normalizeRelayUrl, RelayChatBackend, shouldMuteOrgNotification, webSocketConnector } from "@cinderous/engine";
 import { browserStore } from "./native/browser-store.js";
 import { safeNsecDecode } from "./nsec.js";
 import { getKeyVault } from "./native/keyvault.js";
@@ -62,9 +62,9 @@ import {
   setProfileSecurity,
   upsertProfile,
   visibleProfiles,
-} from "@cinder/engine";
-import { getDeviceId } from "@cinder/engine";
-import type { CloudSyncMode } from "@cinder/engine";
+} from "@cinderous/engine";
+import { getDeviceId } from "@cinderous/engine";
+import type { CloudSyncMode } from "@cinderous/engine";
 import type {
   BlockedContact,
   ContactRequest,
@@ -79,12 +79,12 @@ import type {
   OrgRosterDoc,
   Self,
   Status,
-} from "@cinder/engine";
-import { LocalStorage, onStorageQuota, exportRecords, exportExtension, exportMime, type ExportFormat } from "@cinder/engine";
+} from "@cinderous/engine";
+import { LocalStorage, onStorageQuota, exportRecords, exportExtension, exportMime, type ExportFormat } from "@cinderous/engine";
 import { TauriArchive } from "./native/tauri-archive.js";
 import { HistoryWindow } from "./ui/HistoryWindow.js";
 import { TauriStorage } from "./native/tauri-storage.js";
-import type { AppStorage } from "@cinder/engine";
+import type { AppStorage } from "@cinderous/engine";
 import { cleanOnPasteEnabled, setCleanOnPasteEnabled } from "./ui/url-hygiene.js";
 import {
   allLabels,
@@ -98,7 +98,7 @@ import {
   withoutLabel,
   withPinned,
 } from "./ui/group-labels.js";
-import { ANCHOR_RELAYS, MAINTAINER_PUBKEY } from "@cinder/engine";
+import { ANCHOR_RELAYS, MAINTAINER_PUBKEY } from "@cinderous/engine";
 import { initIdle, reduceIdle, type IdleState } from "./ui/idle-status.js";
 import { setBroadcastAvatars } from "./ui/personalize.js";
 import {
@@ -128,8 +128,8 @@ import {
   ollamaSummarize,
   type OllamaConfig,
 } from "./native/ollama.js";
-import { createPairingOffer, runPairSource, runPairTarget, webRtcPairTransport } from "@cinder/engine";
-import { applyPairBundle } from "@cinder/engine";
+import { createPairingOffer, runPairSource, runPairTarget, webRtcPairTransport } from "@cinderous/engine";
+import { applyPairBundle } from "@cinderous/engine";
 import { PairDeviceModal, type PairPhase } from "./ui/PairDeviceModal.js";
 import { SettingsPanel } from "./ui/SettingsPanel.js";
 import { useRegisterSettingsOpener } from "./titlebar.js";
@@ -796,7 +796,7 @@ export function App(): JSX.Element {
             ) {
               return;
             }
-            const title = group?.name ?? contactsRef.current.find((c) => c.pubkey === pk)?.name ?? "Cinder";
+            const title = group?.name ?? contactsRef.current.find((c) => c.pubkey === pk)?.name ?? "Cinderous";
             let body: string;
             if (notifyHidePreviewRef.current) {
               body = tRef.current("notify_newMessage");

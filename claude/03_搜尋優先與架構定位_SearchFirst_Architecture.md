@@ -6,7 +6,7 @@
 - **先搜尋**：用 `rg` / `fd` 搜尋既有實作、相似命名與相關資料流。
 - **延伸，不複製**：不要產生平行 relay client、加密封裝、連線管理或事件處理邏輯。
 
-## Cinder 常見搜尋落點
+## Cinderous 常見搜尋落點
 
 - 共用核心（Nostr 事件、加密、SQLite schema、型別）：`packages/core/`
 - Tauri UI：`apps/desktop/src/`

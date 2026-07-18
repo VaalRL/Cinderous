@@ -5,12 +5,12 @@
 //   - 私鑰 nsec → 只寫入本機檔案（預設 ./maintainer.nsec，已 gitignore、chmod 600），
 //     **永不印到 stdout／日誌**——避免被截圖、貼上、或進到任何共享情境。
 //
-// 執行：pnpm --filter @cinder/relay genkey:maintainer
+// 執行：pnpm --filter @cinderous/relay genkey:maintainer
 //   自訂輸出路徑：MAINTAINER_NSEC_OUT=/path/to/file
 //   覆寫既有檔：  MAINTAINER_NSEC_FORCE=1
 import { chmodSync, existsSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { generateSecretKey, getPublicKey, nsecEncode } from "@cinder/core";
+import { generateSecretKey, getPublicKey, nsecEncode } from "@cinderous/core";
 
 const outPath = resolve(process.env.MAINTAINER_NSEC_OUT ?? "maintainer.nsec");
 

@@ -6,7 +6,7 @@
 // 它是**非同步**的，而主視窗是同步的——這正是冷熱分離最漂亮的地方：非同步只存在於這裡，
 // 完全不污染主視窗。
 
-import { type MessageArchive, nextOlderChunk, prependChunk, type StoredMessage } from "@cinder/engine";
+import { type MessageArchive, nextOlderChunk, prependChunk, type StoredMessage } from "@cinderous/engine";
 import { useCallback, useEffect, useState } from "react";
 import { useI18n } from "../i18n.js";
 

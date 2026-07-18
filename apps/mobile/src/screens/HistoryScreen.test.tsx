@@ -1,4 +1,4 @@
-import type { MessageArchive, StoredMessage } from "@cinder/engine";
+import type { MessageArchive, StoredMessage } from "@cinderous/engine";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { ConversationScreen } from "./ConversationScreen.js";

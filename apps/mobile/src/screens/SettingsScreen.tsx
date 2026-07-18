@@ -1,9 +1,9 @@
 // 行動端設定分頁（ADR-0087）：身分備份（npub/nsec）、外觀（主題/主色/語言）、中繼站、登出。
-// 主題/主色/語言由 MobileApp 掌管、經 callback 即時切換；色彩吃 @cinder/theme。
+// 主題/主色/語言由 MobileApp 掌管、經 callback 即時切換；色彩吃 @cinderous/theme。
 import { useMemo, useState } from "react";
-import type { CloudSyncMode, Status } from "@cinder/engine";
-import { type Locale, type MessageKey, translate } from "@cinder/i18n";
-import { resolveTheme, type Theme, type ThemeTokens } from "@cinder/theme";
+import type { CloudSyncMode, Status } from "@cinderous/engine";
+import { type Locale, type MessageKey, translate } from "@cinderous/i18n";
+import { resolveTheme, type Theme, type ThemeTokens } from "@cinderous/theme";
 
 /** 上線狀態的 i18n 鍵（與桌面同一組）。 */
 const STATUS_KEY: Record<"online" | "away" | "busy", MessageKey> = {

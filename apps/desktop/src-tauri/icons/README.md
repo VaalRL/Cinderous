@@ -3,7 +3,7 @@
 `icon.png` 為 512×512 佔位圖示（藍色漸層）。在具 Tauri 工具鏈的環境，執行：
 
 ```bash
-pnpm --filter @cinder/desktop tauri icon apps/desktop/src-tauri/icons/icon.png
+pnpm --filter @cinderous/desktop tauri icon apps/desktop/src-tauri/icons/icon.png
 ```
 
 即可由此來源產生各平台所需的完整圖示集（`32x32.png`、`128x128.png`、

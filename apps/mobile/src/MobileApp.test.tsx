@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import type { ChatMessage } from "@cinder/engine";
+import type { ChatMessage } from "@cinderous/engine";
 import type { ChatListEntry } from "./chat-list.js";
 import { MobileApp } from "./MobileApp.js";
 import { BottomTabs } from "./screens/BottomTabs.js";

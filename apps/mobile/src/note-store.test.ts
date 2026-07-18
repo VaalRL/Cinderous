@@ -1,4 +1,4 @@
-import { deriveStorageKey, generateSecretKey } from "@cinder/core";
+import { deriveStorageKey, generateSecretKey } from "@cinderous/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { loadNote, saveNote } from "./note-store.js";
 

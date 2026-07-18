@@ -3,9 +3,9 @@
 // 重要界線：這**不是**在保存檔案本身（ADR-0093 的裁示不變）——原檔位元組依然不落地，
 // 收到的檔案仍是另存到使用者選定路徑。縮圖只是一張幾十 KB 的預覽圖。
 //
-// 政策常數（尺寸/品質/上限/允許 mime）一律取自 @cinder/engine，避免桌面與行動端各自漂移。
+// 政策常數（尺寸/品質/上限/允許 mime）一律取自 @cinderous/engine，避免桌面與行動端各自漂移。
 
-import { isThumbnailable, THUMB_MAX_BYTES, THUMB_MAX_EDGE, THUMB_QUALITY } from "@cinder/engine";
+import { isThumbnailable, THUMB_MAX_BYTES, THUMB_MAX_EDGE, THUMB_QUALITY } from "@cinderous/engine";
 
 /**
  * 由圖片位元組產生縮圖 data URL；不是可縮圖的 mime、解碼失敗、或超過上限時回 null

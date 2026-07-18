@@ -7,7 +7,7 @@
 // 以 pubkey 為鍵，支援多身分（ADR-0045）。介面為 async——原生 IPC 天生非同步；
 // 上層在開機時一次載入後交給同步引擎（見 App 開機流程）。
 
-import { isWrapped } from "@cinder/core";
+import { isWrapped } from "@cinderous/core";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 
 /** 私鑰保管庫：以 pubkey 存取該身分的 nsec。 */

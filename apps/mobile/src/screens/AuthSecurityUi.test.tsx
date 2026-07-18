@@ -1,6 +1,6 @@
 // 行動端身分安全 UI 分流（ADR-0135/0070）：改密碼、備份碼、備份碼登入欄位的顯示條件。
 // 互動（打字→產碼→複製）需 jsdom，行動端目前純 SSR；這裡驗 SSR 可斷言的**顯示分流**，
-// 產碼/改密碼的核心邏輯在 auth-security.test.ts、@cinder/core 已測。
+// 產碼/改密碼的核心邏輯在 auth-security.test.ts、@cinderous/core 已測。
 
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";

@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import type { Group, Self } from "@cinder/engine";
+import type { Group, Self } from "@cinderous/engine";
 import { I18nProvider } from "../i18n.js";
 import { DeckSidebar, type DeckSidebarProps } from "./DeckSidebar.js";
 

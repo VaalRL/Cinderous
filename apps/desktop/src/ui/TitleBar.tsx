@@ -66,7 +66,7 @@ export function TitleBar(props: {
     >
       {strip(controls.left)}
       <span className="titlebar__title" data-tauri-drag-region>
-        Cinder
+        Cinderous
       </span>
       <span className="titlebar__spacer" data-tauri-drag-region />
       {strip(controls.right)}

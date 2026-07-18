@@ -1,8 +1,8 @@
 // 行動端底部分頁列（ADR-0087）：聊天／聯絡人／設定，參考 LINE/Signal。
 // 作用中分頁＝主色、其餘＝灰；聊天分頁帶未讀總數徽章。對話為 push 全螢幕（不在此列）。
 import { useMemo } from "react";
-import { type Locale, type MessageKey, translate } from "@cinder/i18n";
-import { resolveTheme, type Theme, type ThemeTokens } from "@cinder/theme";
+import { type Locale, type MessageKey, translate } from "@cinderous/i18n";
+import { resolveTheme, type Theme, type ThemeTokens } from "@cinderous/theme";
 import { Pressable, StyleSheet, Text, View } from "react-native-web";
 
 export type Tab = "chats" | "contacts" | "settings";

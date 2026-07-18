@@ -2,8 +2,8 @@
 // 訊息預覽與未讀數——LINE/Signal 風格清單所需。純函式、無 UI、可測。
 // 概念同桌面 `deck-sidebar.ts`（最近互動排序），但這裡是「聊天列」超集（多帶 lastText/未讀），
 // 且不含桌面的標籤/搜尋；日後若要單一化可把 lastInteraction/sort 抽到共用套件。
-import type { ChatMessage, Contact, Group, Status } from "@cinder/engine";
-import { contactLabel } from "@cinder/engine";
+import type { ChatMessage, Contact, Group, Status } from "@cinderous/engine";
+import { contactLabel } from "@cinderous/engine";
 
 export interface ChatListEntry {
   id: string;

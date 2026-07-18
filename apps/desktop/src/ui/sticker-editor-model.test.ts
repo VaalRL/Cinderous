@@ -11,7 +11,7 @@ import {
   undo,
   type Stroke,
 } from "./sticker-editor-model.js";
-import { validateStickerSvg } from "@cinder/core";
+import { validateStickerSvg } from "@cinderous/core";
 
 const stroke = (pts: Array<[number, number]>, color = "#222", width = 6): Stroke => ({
   color,

@@ -1,9 +1,9 @@
 {
-  "name": "@cinder/website",
+  "name": "@cinderous/website",
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Cinder 官方網站（ADR-0090）：靜態站——開源/永久免費/隱私主張、下載、捐款導流、簽章透明度（funds.json 前端驗簽＋runway）。與 E2E 通訊平面硬隔離、零追蹤。",
+  "description": "Cinderous 官方網站（ADR-0090）：靜態站——開源/永久免費/隱私主張、下載、捐款導流、簽章透明度（funds.json 前端驗簽＋runway）。與 E2E 通訊平面硬隔離、零追蹤。",
   "license": "AGPL-3.0-only",
   "scripts": {
     "dev": "vite",
@@ -14,9 +14,9 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@cinder/core": "workspace:*",
-    "@cinder/i18n": "workspace:*",
-    "@cinder/theme": "workspace:*",
+    "@cinderous/core": "workspace:*",
+    "@cinderous/i18n": "workspace:*",
+    "@cinderous/theme": "workspace:*",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },

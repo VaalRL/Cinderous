@@ -1,6 +1,6 @@
-# CLAUDE.md（Cinder 任務路由）
+# CLAUDE.md（Cinderous 任務路由）
 
-> 本文件是 Cinder 的任務分配入口。開始任何工作前，先讀 `PRD.md` 與 `ARCHITECTURE.md`，再依任務情境進入 `claude/` 對應指南。
+> 本文件是 Cinderous 的任務分配入口。開始任何工作前，先讀 `PRD.md` 與 `ARCHITECTURE.md`，再依任務情境進入 `claude/` 對應指南。
 
 ## 快速路由
 
@@ -35,7 +35,7 @@
 
 ## Root 目錄例外
 
-Cinder 的 root 允許存在少量專案入口文件與設定檔：
+Cinderous 的 root 允許存在少量專案入口文件與設定檔：
 
 - `README.md`
 - `PRD.md`（產品技術規格）

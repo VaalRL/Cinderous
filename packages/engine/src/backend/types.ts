@@ -10,9 +10,9 @@ import type {
   OutgoingFile,
   PubkeyHex,
   ReceivedFile,
-} from "@cinder/core";
+} from "@cinderous/core";
 import type { MessageStatus } from "../storage/types.js";
-import { inWorkHours } from "@cinder/core";
+import { inWorkHours } from "@cinderous/core";
 
 export type { Group, OrgGroup, OrgMember, OrgPolicy, OrgRosterDoc, OrgWorkHours };
 export type { MessageStatus };

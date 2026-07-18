@@ -1,4 +1,4 @@
-import type { Status } from "@cinder/engine";
+import type { Status } from "@cinderous/engine";
 
 /**
  * 閒置自動「離開」的純狀態機（無 DOM／計時器依賴，方便單元測試）。

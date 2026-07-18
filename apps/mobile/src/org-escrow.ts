@@ -6,7 +6,7 @@
 // 以**企業主自己 nsec 導出的金鑰**（ADR-0112 `deriveStorageKey`）`sealValue` 封裝——密文離開
 // 企業主的 nsec 就解不開，且企業主 nsec 本就不明文落盤（ADR-0112 紅線不破）。
 
-import { deriveStorageKey, openValue, sealValue } from "@cinder/core";
+import { deriveStorageKey, openValue, sealValue } from "@cinderous/core";
 
 export interface EscrowEntry {
   /** 成員 hex pubkey。 */

@@ -50,7 +50,7 @@ export const MAINTAINER_PUBKEY = "你的維護者公鑰 hex（64 字元）";
 
 ### A6. 驗證上線
 - 本機模擬：`PORT=8899 node relay/dist/dev-server.js` 起一座、把它填進 relays.json、
-  `MAINTAINER_NSEC=<nsec> pnpm --filter @cinder/relay bootstrap:run`，
+  `MAINTAINER_NSEC=<nsec> pnpm --filter @cinderous/relay bootstrap:run`，
   應看到 `✅ 探測` → `已簽章 kind 10037` → `📡 發佈至 …`。
 - 真機：兩台裝置填好 A3 設定，其一 home 指向會下架的節點，關掉該節點後觀察訊息是否仍送達（經錨點），5 分鐘後 home 是否自動遞補（設定面板連線狀態）。
 
@@ -74,9 +74,9 @@ export const MAINTAINER_PUBKEY = "你的維護者公鑰 hex（64 字元）";
 
 ### §B-Tauri：程式碼簽章與自動更新（Phase B ③）
 
-安裝檔已可產出（`pnpm --filter @cinder/desktop tauri:build` → NSIS `.exe` + MSI），但**未簽章**、**無自動更新**。要補這兩項（皆需「你持有的信任根」，此環境無法代辦）：
+安裝檔已可產出（`pnpm --filter @cinderous/desktop tauri:build` → NSIS `.exe` + MSI），但**未簽章**、**無自動更新**。要補這兩項（皆需「你持有的信任根」，此環境無法代辦）：
 
-> **決定（2026-07-08）**：**目前不簽章**——開發/自用階段，SmartScreen「未知發行者→仍要執行」可接受，安裝檔照常可用。**未來對外發行時走 SignPath Foundation**（開源專案免費、公信；Cinder 為 AGPL 符合資格）。自動更新一併等有簽章後再接。
+> **決定（2026-07-08）**：**目前不簽章**——開發/自用階段，SmartScreen「未知發行者→仍要執行」可接受，安裝檔照常可用。**未來對外發行時走 SignPath Foundation**（開源專案免費、公信；Cinderous 為 AGPL 符合資格）。自動更新一併等有簽章後再接。
 
 **① 程式碼簽章（去掉 SmartScreen「未知發行者」警告）**
 - 取得 **Windows 程式碼簽章憑證**（Authenticode；OV 約 US$100–400/年，EV 較貴但 SmartScreen 信譽較佳）。測試可用自簽（`New-SelfSignedCertificate`），但他人安裝仍會警告。
@@ -93,7 +93,7 @@ export const MAINTAINER_PUBKEY = "你的維護者公鑰 hex（64 字元）";
 
 ## C. 版本控制
 
-- 功能開發在分支 `claude/audit-unused-directives-72ftvr`；已多次 fast-forward 合併到 `main`（最新含 Cinder 更名、@提及、對話串、G2 強制 TURN、M8 來電鈴聲）。
+- 功能開發在分支 `claude/audit-unused-directives-72ftvr`；已多次 fast-forward 合併到 `main`（最新含 Cinderous 更名、@提及、對話串、G2 強制 TURN、M8 來電鈴聲）。
 - 後續變更沿用同流程：分支開發 → 驗證全綠 → 經你同意再 `git merge --ff-only` 合回 `main`。
 
 ---

@@ -5,7 +5,7 @@
 // 對本機資料一律更嚴（ADR-0112），故便條**加密落盤**——以該身分 nsec 導出金鑰 `sealValue` 封裝
 // （比照離職託管 ADR-0179）。密文離開該身分 nsec 就解不開，且 nsec 本就不明文落盤，紅線不破。
 
-import { openValue, sealValue } from "@cinder/core";
+import { openValue, sealValue } from "@cinderous/core";
 
 const PREFIX = "nb.note.";
 

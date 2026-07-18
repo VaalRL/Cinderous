@@ -1,4 +1,4 @@
-// Cinder CLI（ADR-0098）：無狀態的無頭收發工具。
+// Cinderous CLI（ADR-0098）：無狀態的無頭收發工具。
 //
 // 刻意的設計取捨：
 //  - **無本機儲存**（用 MemoryStorage）：不留私鑰、不留明文歷史。歷史請用桌面版的導出（ADR-0094）。
@@ -11,9 +11,9 @@ import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { getPublicKey, npubDecode, npubEncode, nsecDecode } from "@cinder/core";
-import { MemoryStorage, RelayChatBackend, webSocketConnector } from "@cinder/engine";
-import type { ChatBackendEvents } from "@cinder/engine";
+import { getPublicKey, npubDecode, npubEncode, nsecDecode } from "@cinderous/core";
+import { MemoryStorage, RelayChatBackend, webSocketConnector } from "@cinderous/engine";
+import type { ChatBackendEvents } from "@cinderous/engine";
 import { ArgError, HELP, parseArgs, type Command, type NsecSource } from "./args.js";
 import { HOST, portBusyMessage, startServer } from "./serve.js";
 
@@ -90,7 +90,7 @@ async function serve(cmd: Extract<Command, { cmd: "serve" }>): Promise<number> {
   }
 
   const url = `http://${HOST}:${cmd.port}/`;
-  console.log(`Cinder 本地版：${url}`);
+  console.log(`Cinderous 本地版：${url}`);
   console.log(`  資源目錄：${root}`);
   console.log("");
   // 誠實告知兩個瀏覽器版特有的取捨（ADR-0113）。

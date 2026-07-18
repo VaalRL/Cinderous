@@ -1,4 +1,4 @@
-// Cinder 標記（原創）：一簇營火餘燼。隨明暗主題切換外框色，並帶暖光暈（夜裡的火光）。
+// Cinderous 標記（原創）：一簇營火餘燼。隨明暗主題切換外框色，並帶暖光暈（夜裡的火光）。
 import { useId } from "react";
 
 export function CinderMark({ size = 40, theme = "dark" }: { size?: number; theme?: "light" | "dark" }): JSX.Element {

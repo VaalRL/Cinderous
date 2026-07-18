@@ -13,7 +13,7 @@
 //
 // 移植到真正的 React Native 時換掉本檔即可（expo-file-system），介面不變。
 
-import { openValue, sealValue } from "@cinder/core";
+import { openValue, sealValue } from "@cinderous/core";
 
 import type { MessageArchive } from "./archive.js";
 import type { StoredMessage } from "./types.js";

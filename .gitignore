@@ -47,7 +47,7 @@ android/local.properties
 relay/dist/
 
 # === Local data / secrets (NEVER commit keys or local DB) ===
-# Cinder stores private keys and SQLite locally — keep them out of git.
+# Cinderous stores private keys and SQLite locally — keep them out of git.
 *.sqlite
 *.sqlite3
 *.db

@@ -1,4 +1,4 @@
-# Cinder
+# Cinderous
 
 > **Life is short, connect buddies.**
 
@@ -6,7 +6,7 @@
 
 ## 簡介
 
-Cinder 透過「狀態信令」與「巨量資料傳輸」雙軌混合網路，達成極致隱私與低延遲：
+Cinderous 透過「狀態信令」與「巨量資料傳輸」雙軌混合網路，達成極致隱私與低延遲：
 
 - **零知識身分**：首次啟動於本機生成 secp256k1 金鑰對（Nostr/NIP-01），公鑰（`npub`）即為全網唯一 ID，無帳號密碼。同一裝置可並存多個身分（工作／個人）。
 - **本機優先・靜態加密**：對話與私鑰留在裝置；localStorage／OPFS 上的資料以**裝置金鑰（由 nsec 導出）AES-256-GCM 加密**（ADR-0112），Tauri 桌面另把私鑰託給 OS 金鑰庫。明文永不上雲。
@@ -88,8 +88,8 @@ pnpm -r test            # 全部 TS 測試（core / engine / i18n / relay / desk
 pnpm -r typecheck       # 全部型別檢查
 
 # 3. 起本機真實 relay，再跑桌面前端（瀏覽器開發、不需 Tauri）
-pnpm --filter @cinder/relay build:dev && pnpm --filter @cinder/relay dev   # ws://localhost:8787
-pnpm --filter @cinder/desktop dev                                          # 前端；開 /?relay=ws://localhost:8787
+pnpm --filter @cinderous/relay build:dev && pnpm --filter @cinderous/relay dev   # ws://localhost:8787
+pnpm --filter @cinderous/desktop dev                                          # 前端；開 /?relay=ws://localhost:8787
 ```
 
 > **想接自己的前端、加語言、做擴充或貢獻核心？** 開發者入口見 [`.github/CONTRIBUTING.md`](./.github/CONTRIBUTING.md)（三層架構、環境、參與方式、規範），接前端的完整教學見 [`docs/前端開發指南_Frontend-Guide.md`](./docs/前端開發指南_Frontend-Guide.md)。
@@ -98,13 +98,13 @@ pnpm --filter @cinder/desktop dev                                          # 前
 
 | 任務 | 指令 |
 | --- | --- |
-| 桌面前端（懷舊即時通風格） | `pnpm --filter @cinder/desktop dev`，開啟 `/`（另有端到端 demo `/demo.html`、真實 WebRTC `/webrtc.html`） |
-| 前端建置 | `pnpm --filter @cinder/desktop build` |
-| 共用核心測試 | `pnpm --filter @cinder/core test` |
-| 中繼站測試 | `pnpm --filter @cinder/relay test` |
-| 本機真實 relay（開發用） | `pnpm --filter @cinder/relay build:dev && pnpm --filter @cinder/relay dev`（起 `ws://localhost:8787`；前端開 `/?relay=ws://localhost:8787` 即連真實 relay） |
+| 桌面前端（懷舊即時通風格） | `pnpm --filter @cinderous/desktop dev`，開啟 `/`（另有端到端 demo `/demo.html`、真實 WebRTC `/webrtc.html`） |
+| 前端建置 | `pnpm --filter @cinderous/desktop build` |
+| 共用核心測試 | `pnpm --filter @cinderous/core test` |
+| 中繼站測試 | `pnpm --filter @cinderous/relay test` |
+| 本機真實 relay（開發用） | `pnpm --filter @cinderous/relay build:dev && pnpm --filter @cinderous/relay dev`（起 `ws://localhost:8787`；前端開 `/?relay=ws://localhost:8787` 即連真實 relay） |
 | Rust 測試 | `cargo test`（於 `apps/desktop/src-tauri/`） |
-| 桌面端開發（需 Tauri 工具鏈） | `pnpm --filter @cinder/desktop tauri dev` |
+| 桌面端開發（需 Tauri 工具鏈） | `pnpm --filter @cinderous/desktop tauri dev` |
 | 中繼站本地開發 / 部署（需 wrangler） | `wrangler dev` / `wrangler deploy`（於 `relay/`） |
 
 ## 🚀 在 Cloudflare Workers 架設中繼站（Nostr / WebRTC 信令 relay）
@@ -149,10 +149,10 @@ TypeScript，無需額外建置步驟。可在 `wrangler.toml` 修改 `name` 換
 
 ### 連線測試
 
-relay 講標準 Nostr 的 `REQ` / `EVENT` / `CLOSE` 協定，可用 `@cinder/core` 的 `RelayClient`：
+relay 講標準 Nostr 的 `REQ` / `EVENT` / `CLOSE` 協定，可用 `@cinderous/core` 的 `RelayClient`：
 
 ```ts
-import { RelayClient, createHeartbeat, generateSecretKey } from "@cinder/core";
+import { RelayClient, createHeartbeat, generateSecretKey } from "@cinderous/core";
 
 const ws = new WebSocket("wss://cinder-relay.<你的帳號>.workers.dev");
 const sk = generateSecretKey();
@@ -215,4 +215,4 @@ Ephemeral 心跳會隨上線人數扇出，請參考 [`docs/adr/0006`](./docs/ad
 這代表你可以自由使用、修改與散布；但若你**散布修改版，或將修改版作為網路服務（例如自架本中繼站）提供給他人**，
 就必須以相同授權公開你的原始碼（AGPL 第 13 條）。此選擇是為了確保所有衍生版本與自架的 relay 都對使用者保持透明、可審計，貫徹本專案的隱私與去中心化精神。
 
-Copyright (C) 2026 Cinder contributors.
+Copyright (C) 2026 Cinderous contributors.

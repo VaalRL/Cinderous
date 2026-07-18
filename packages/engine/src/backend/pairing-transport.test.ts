@@ -1,5 +1,5 @@
-import { createPairing, type NostrEvent, type RelayClientHandlers } from "@cinder/core";
-import { createInMemoryRelayNetwork } from "@cinder/relay";
+import { createPairing, type NostrEvent, type RelayClientHandlers } from "@cinderous/core";
+import { createInMemoryRelayNetwork } from "@cinderous/relay";
 import { describe, expect, it } from "vitest";
 import { createPairingSignal } from "./pairing-transport.js";
 import type { RelayConnector } from "./relay-backend.js";

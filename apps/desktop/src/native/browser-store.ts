@@ -18,7 +18,7 @@
 //  2. **封存共用同一把金鑰**：OPFS 封存（ADR-0111）拿 `store.storageKey()`——否則熱區加密、
 //     冷區明文，等於沒加密。
 
-import { LocalStorage, openOpfsArchive } from "@cinder/engine";
+import { LocalStorage, openOpfsArchive } from "@cinderous/engine";
 import { safeNsecDecode } from "../nsec.js";
 
 /**

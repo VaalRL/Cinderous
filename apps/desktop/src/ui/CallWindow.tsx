@@ -1,4 +1,4 @@
-import type { CallMedia, CallState } from "@cinder/core";
+import type { CallMedia, CallState } from "@cinderous/core";
 import { useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n.js";
 import { avatarColor, initial } from "./util.js";

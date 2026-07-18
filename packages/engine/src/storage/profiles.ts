@@ -4,7 +4,7 @@
 // 誰在作用中」的全域登錄（`nb.profiles`），純邏輯可測；載入時把既有單一身分
 // （舊 `nb.identity`）遷移為 namespace 為空的 legacy 設定檔，向後相容。
 
-import { getPublicKey, nsecDecode } from "@cinder/core";
+import { getPublicKey, nsecDecode } from "@cinderous/core";
 
 export interface Profile {
   /** hex pubkey，作為身分主鍵。 */

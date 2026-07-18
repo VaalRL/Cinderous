@@ -1,4 +1,4 @@
-# @cinder/website — Cinder 官方網站（ADR-0090）
+# @cinderous/website — Cinderous 官方網站（ADR-0090）
 
 純靜態站：**開源・永久免費・隱私**主張、下載、捐款導流、**簽章式資金透明度**。
 
@@ -11,10 +11,10 @@
 ## 開發
 
 ```bash
-pnpm --filter @cinder/website dev        # 本機預覽（Vite）
-pnpm --filter @cinder/website build      # 產出 dist/（靜態託管，如 Pages）
-pnpm --filter @cinder/website test       # funds 驗簽/ runway 測試
-pnpm --filter @cinder/website typecheck
+pnpm --filter @cinderous/website dev        # 本機預覽（Vite）
+pnpm --filter @cinderous/website build      # 產出 dist/（靜態託管，如 Pages）
+pnpm --filter @cinderous/website test       # funds 驗簽/ runway 測試
+pnpm --filter @cinderous/website typecheck
 ```
 
 ## 資金透明度（funds.json）

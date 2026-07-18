@@ -4,7 +4,7 @@ name: Deploy website to GitHub Pages
 # 只在網站或其 workspace 相依（i18n/theme/core）變動時重建，避免每次 push 都跑。
 #
 # 前置（在 GitHub 一次性設定）：Settings → Pages → Build and deployment → Source = "GitHub Actions"。
-# 部署為「專案頁」https://<user>.github.io/Cinder/（ADR-0186）：vite.config 設 base "/Cinder/"，
+# 部署為「專案頁」https://<user>.github.io/Cinderous/（ADR-0186）：vite.config 設 base "/Cinderous/"，
 # funds.json 的 fetch 走 base-aware（import.meta.env.BASE_URL）。
 # 若改掛自訂網域或改走 user page（根站），把 base 改回 "/" 即可（fetch 已 base-aware，無需再動）。
 on:
@@ -42,7 +42,7 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @cinder/website build
+      - run: pnpm --filter @cinderous/website build
       - uses: actions/upload-pages-artifact@v3
         with:
           path: apps/website/dist

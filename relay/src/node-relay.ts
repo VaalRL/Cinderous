@@ -52,7 +52,7 @@ const dispatch = (out: Outbound[]): void => {
 // WebSocket 升級請求交給 ws。純 WS 伺服器對 GET / 不回應會被健康檢查誤判為離線。
 const httpServer = createServer((_req, res) => {
   res.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
-  res.end("Cinder relay");
+  res.end("Cinderous relay");
 });
 const wss = new WebSocketServer({ server: httpServer });
 wss.on("connection", (ws) => {
@@ -72,5 +72,5 @@ wss.on("connection", (ws) => {
 setInterval(() => store.prune(Math.floor(Date.now() / 1000)), PRUNE_INTERVAL_MS);
 
 httpServer.listen(port, () => {
-  console.log(`Cinder node-relay：ws://0.0.0.0:${port}（DB=${dbPath}, requireAuth=${requireAuth}）`);
+  console.log(`Cinderous node-relay：ws://0.0.0.0:${port}（DB=${dbPath}, requireAuth=${requireAuth}）`);
 });

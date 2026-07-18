@@ -12,8 +12,8 @@
 // SAS 是這個流程的**安全核心**：沒有它，中間人可以冒充新機把你的整包資料（含 nsec）騙走。
 // 所以「確認」必須是**使用者的明確動作**，不能自動通過。
 
-import { type Locale, type MessageKey, translate } from "@cinder/i18n";
-import { resolveTheme, type Theme, type ThemeTokens } from "@cinder/theme";
+import { type Locale, type MessageKey, translate } from "@cinderous/i18n";
+import { resolveTheme, type Theme, type ThemeTokens } from "@cinderous/theme";
 import { useMemo, useState } from "react";
 import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native-web";
 

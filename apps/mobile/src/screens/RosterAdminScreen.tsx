@@ -3,10 +3,10 @@
 // 與桌面 RosterAdminModal（App.tsx）同一份 onPublish 契約；發布＝管理者簽章 replaceable 名冊。
 // 落盤（企業主收儲存槽）仍限桌面（原生 FS）——本畫面只做名冊/邀請/設定，不涉檔案落盤。
 import { useMemo, useState } from "react";
-import { makeOrgInvite, npubDecode, npubEncode } from "@cinder/core";
-import type { OrgMember, OrgPolicy, OrgRosterDoc } from "@cinder/engine";
-import { type Locale, type MessageKey, translate } from "@cinder/i18n";
-import { resolveTheme, type Theme, type ThemeTokens } from "@cinder/theme";
+import { makeOrgInvite, npubDecode, npubEncode } from "@cinderous/core";
+import type { OrgMember, OrgPolicy, OrgRosterDoc } from "@cinderous/engine";
+import { type Locale, type MessageKey, translate } from "@cinderous/i18n";
+import { resolveTheme, type Theme, type ThemeTokens } from "@cinderous/theme";
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native-web";
 import { copyText } from "../native/clipboard.js";
 

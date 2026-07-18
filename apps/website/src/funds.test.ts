@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { generateSecretKey, getPublicKey } from "@cinder/core";
+import { generateSecretKey, getPublicKey } from "@cinderous/core";
 import { describe, expect, it } from "vitest";
 import { type FundsData, runwayMonths, signFunds, TRANSPARENCY_PUBKEY, verifyFunds } from "./funds.js";
 

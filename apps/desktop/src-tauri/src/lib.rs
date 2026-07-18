@@ -1,4 +1,4 @@
-//! Cinder 桌面原生服務（ADR-0105）。
+//! Cinderous 桌面原生服務（ADR-0105）。
 //!
 //! 這個 crate 的定位是**為 TypeScript 引擎提供原生能力**，而不是重新實作它：
 //!   - `encstore`：加密儲存 blob（AES-256-GCM，ADR-0054）
