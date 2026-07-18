@@ -1,6 +1,6 @@
 {
   "name": "@cinderous/mobile",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "private": true,
   "type": "module",
   "description": "Cinderous 行動端（Phase D）：Expo/RN，react-native-web 於瀏覽器開發驗證，重用 @cinderous/core、@cinderous/i18n",
