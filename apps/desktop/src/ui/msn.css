@@ -361,14 +361,6 @@ button:disabled { opacity: .5; cursor: default; filter: none; }
   text-decoration: underline; text-underline-offset: 2px; width: auto;
 }
 .signin__relaytoggle:hover { opacity: .8; }
-/* 「使用其他中繼站」——模擬視窗右下角、低調（預設不搶眼，hover 才浮現主色底線）。 */
-.signin__relaycorner {
-  position: absolute; right: 8px; bottom: 6px;
-  background: none; border: none; padding: 3px 5px; margin: 0; width: auto;
-  font-size: 14px; line-height: 1; cursor: pointer; opacity: .45;
-  filter: grayscale(.4);
-}
-.signin__relaycorner:hover { opacity: 1; filter: none; }
 
 /* ── 聯絡人清單 ── */
 .contacts { width: 300px; display: flex; flex-direction: column; max-height: 80vh; }
