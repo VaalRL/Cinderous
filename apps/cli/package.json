@@ -1,6 +1,6 @@
 {
   "name": "@cinderous/cli",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "private": true,
   "type": "module",
   "description": "Cinderous CLI（ADR-0098）：無狀態的無頭收發工具（whoami/send/listen）。私鑰不落地、無本機明文歷史。",

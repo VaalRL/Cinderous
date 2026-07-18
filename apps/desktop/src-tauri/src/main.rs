@@ -931,6 +931,10 @@ fn main() {
             }
         })
         .setup(|app| {
+            // 標題列顯示版本——一眼確認執行中的 build 版本（診斷用；亦為透明）。
+            if let Some(w) = app.get_webview_window("main") {
+                let _ = w.set_title(&format!("Cinderous v{}", env!("CARGO_PKG_VERSION")));
+            }
             // 系統匣圖示 + 選單（顯示 / 結束）。左鍵點圖示＝顯示視窗。
             let show = MenuItem::with_id(app, "show", "顯示 Cinderous", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "結束 Cinderous", true, None::<&str>)?;
