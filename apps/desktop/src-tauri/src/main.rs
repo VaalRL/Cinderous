@@ -29,6 +29,27 @@ fn show_main(app: &tauri::AppHandle) {
     }
 }
 
+/// 版本更新後首次啟動：清 WebView2 資產快取（避免載到殘留舊前端）；只刪
+/// Cache/Code Cache/GPUCache，**保留 Local Storage/IndexedDB**（使用者資料/設定）。
+/// 僅 Windows（其他平台無 `LOCALAPPDATA` → 早退，no-op）。ADR-0197。
+fn clear_webview_cache_on_update() {
+    let Some(local) = std::env::var_os("LOCALAPPDATA") else {
+        return;
+    };
+    let base = std::path::Path::new(&local).join("app.cinder.desktop");
+    let ver_file = base.join("app-version.txt");
+    let current = env!("CARGO_PKG_VERSION");
+    if std::fs::read_to_string(&ver_file).unwrap_or_default().trim() == current {
+        return; // 同版，不動快取
+    }
+    let webview = base.join("EBWebView").join("Default");
+    for c in ["Cache", "Code Cache", "GPUCache"] {
+        let _ = std::fs::remove_dir_all(webview.join(c));
+    }
+    let _ = std::fs::create_dir_all(&base);
+    let _ = std::fs::write(&ver_file, current);
+}
+
 /// 橋接健康檢查：供前端確認原生層就緒（B2 IPC 契約的首個 command）。
 #[tauri::command]
 fn native_ready() -> String {
@@ -877,15 +898,36 @@ fn pick_existing_file(app: tauri::AppHandle, name: String) -> Option<String> {
 }
 
 fn main() {
+    // 版本更新後首次啟動先清 WebView2 資產快取（在 webview 建立前），避免載到舊前端（ADR-0197）。
+    clear_webview_cache_on_update();
     tauri::Builder::default()
+        // 單一實體（ADR-0197）：第二次啟動 → 聚焦既有視窗、不開新程序。須最先註冊。
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            show_main(app);
+        }))
         // 桌面原生通知（ADR-0076）：可靠系統 toast、點擊 action 回跳；瀏覽器路徑另走 Web Notification。
         .plugin(tauri_plugin_notification::init())
         // 背景在線（Phase B ②）：關閉視窗＝隱藏到系統匣，保留 webview 存活＝引擎續連、
         // 仍收得到訊息；真正結束走系統匣選單「結束」。
         .on_window_event(|window, event| {
             if let WindowEvent::CloseRequested { api, .. } = event {
-                let _ = window.hide();
+                // 關閉＝縮到系統匣（背景續連、仍收訊息），並提示程式未真的結束、可選擇直接結束（ADR-0197）。
                 api.prevent_close();
+                let _ = window.hide();
+                let w = window.clone();
+                // 另起執行緒問，避免阻塞事件迴圈。
+                std::thread::spawn(move || {
+                    let ans = rfd::MessageDialog::new()
+                        .set_title("Cinderous")
+                        .set_description(
+                            "程式尚未關閉——已縮到系統匣，仍在背景執行（會繼續收訊息）。\n要直接結束程式嗎？",
+                        )
+                        .set_buttons(rfd::MessageButtons::YesNo)
+                        .show();
+                    if ans == rfd::MessageDialogResult::Yes {
+                        w.app_handle().exit(0);
+                    }
+                });
             }
         })
         .setup(|app| {
