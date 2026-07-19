@@ -1,0 +1,15 @@
+{
+	// Cloudflare Workers「Static Assets」部署設定（ADR-0208）：把 apps/desktop 的靜態建置
+	// （dist）當純靜態資產伺服，無 Worker 腳本（無 main）。CSP/安全標頭走 dist 內的 _headers、
+	// SPA fallback 由 not_found_handling 處理（dist 內的 _redirects 為雙保險）。
+	//
+	// monorepo 用法：在 Cloudflare 專案設定把「Root directory」設為 apps/desktop，這樣 wrangler
+	// 在單一 app 目錄執行（避開「在 workspace 根跑偵測」的錯誤）；directory 的 ./dist 即相對此處。
+	// 建置命令仍是 pnpm --filter @cinderous/desktop build（可於 workspace 任一處執行）。
+	"name": "cinderous-app",
+	"compatibility_date": "2024-12-01",
+	"assets": {
+		"directory": "./dist",
+		"not_found_handling": "single-page-application"
+	}
+}
