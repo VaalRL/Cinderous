@@ -214,7 +214,9 @@ export class WebRtcTransfer {
       }
     };
     pc.onconnectionstatechange = () => {
-      if (pc.connectionState === "failed") this.handlers.onError(peerPk, "P2P 連線失敗");
+      // P2P 是盡力而為的加值通道（檔案／在線／輸入中）；失敗**不影響訊息**（文字走 relay）。
+      // 跨網路／對稱型 NAT 連不起來屬預期，故**不對使用者報錯**、只記錄降級（ADR-0210）。
+      if (pc.connectionState === "failed") console.debug("[webrtc] P2P failed → degraded to relay", peerPk);
     };
     // 由對方發起時，透過 ondatachannel 取得通道
     pc.ondatachannel = (ev) => this.attachChannel(peerPk, conn, ev.channel);
