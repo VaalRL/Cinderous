@@ -6,7 +6,7 @@
 	// monorepo 用法：在 Cloudflare 專案設定把「Root directory」設為 apps/desktop，這樣 wrangler
 	// 在單一 app 目錄執行（避開「在 workspace 根跑偵測」的錯誤）；directory 的 ./dist 即相對此處。
 	// 建置命令仍是 pnpm --filter @cinderous/desktop build（可於 workspace 任一處執行）。
-	"name": "cinderous-app",
+	"name": "cinderous",
 	"compatibility_date": "2024-12-01",
 	"assets": {
 		"directory": "./dist",
