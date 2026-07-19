@@ -1,0 +1,25 @@
+# Cinderous web app 靜態伺服（ADR-0207）。Zeabur/Railway 等在邊緣終結 TLS → 容器只跑 HTTP。
+{
+	admin off
+	auto_https off
+}
+
+:{$PORT:8080} {
+	root * /srv
+	encode gzip zstd
+
+	# 嚴格 CSP（ADR-0090/0147）：只允許自己的資源；connect-src 允許 relay 的 wss。
+	# 預設 {$CSP_CONNECT:wss:}＝允許任意安全 WebSocket（配合 app 可自選 relay 的彈性）；
+	# 要鎖死自己的 relay，就在部署平台設環境變數 CSP_CONNECT=wss://relay.你的網域。
+	# frame-ancestors 只有**真標頭**才有效（<meta> 版做不到）——這是用 Caddy／不用 GitHub Pages 的關鍵。
+	header {
+		Content-Security-Policy "default-src 'self'; connect-src 'self' {$CSP_CONNECT:wss:}; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		-Server
+	}
+
+	# 單頁 app：找不到實體檔案就回 index.html（指紋化資產走實體檔、其餘落到入口）。
+	try_files {path} /index.html
+	file_server
+}
