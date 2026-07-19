@@ -104,16 +104,13 @@ lockfile 與 `packages/*`）、**輸出目錄 `apps/desktop/dist`**。下面 CSP
 以下 `_headers`／`netlify.toml`／`vercel.json` 都是**部署專屬**（內含你的 relay 網址）——放在**你自己的
 fork／部署**，不要 PR 回共用 repo（共用 repo 保持與 relay 網域無關）。
 
-**Cloudflare Pages**
+**Cloudflare Pages**（ADR-0208：repo 已內建設定檔）
 - 連結 repo → Framework preset 選 **None**。
 - Build command：`pnpm --filter @cinderous/desktop build`（CF 會自動先 install）
 - Build output directory：`apps/desktop/dist`；Root directory：repo 根（`/`）。
-- CSP：在你的 fork 放 `apps/desktop/public/_headers`（Vite 會複製進 `dist`；無 `public/` 就新建）：
-  ```
-  /*
-    Content-Security-Policy: default-src 'self'; connect-src 'self' wss://relay.example.com; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'
-  ```
-- 自訂網域：加 `app.example.com`。
+- **CSP／SPA fallback 免自己寫**：repo 已附 `apps/desktop/public/_headers`（嚴格 CSP 真標頭）與 `apps/desktop/public/_redirects`（`/* /index.html 200`），Vite 會複製進 `dist`，Pages 自動套用。
+- **收斂 connect-src（建議）**：內建 `_headers` 用通用 `connect-src 'self' wss:`（允許任意 relay，保持共用 repo 與 relay 無關）。要**鎖死到你的 relay**，把 `_headers` 的 `connect-src` 改成 `'self' wss://relay.你的網域`（Pages `_headers` 為靜態、無環境變數插值）。
+- 自訂網域：加 `app.example.com`（網域已在 Cloudflare → 原生綁定、自動 TLS、免手動 CNAME）。
 
 **Netlify**
 - 在你的 fork 放 repo 根 `netlify.toml`：
