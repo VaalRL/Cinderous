@@ -13,6 +13,7 @@ export interface Copy {
   hero_title: string;
   hero_subtitle: string;
   hero_download: string;
+  hero_webapp: string;
   hero_tech: string;
   hero_github: string;
   vision_title: string;
@@ -55,6 +56,16 @@ export interface Copy {
   fd_relay_note: string;
   fd_encrypt: string;
   fd_p2p: string;
+  store_title: string;
+  store_lead: string;
+  store_desktop_t: string;
+  store_desktop_b: string;
+  store_web_t: string;
+  store_web_b: string;
+  store_mobile_t: string;
+  store_mobile_b: string;
+  store_relay_t: string;
+  store_relay_b: string;
   donate_title: string;
   donate_intro: string;
   donate_disclaimer: string;
@@ -104,6 +115,7 @@ const zhHant: Copy = {
   hero_subtitle:
     "通訊本該屬於說話的人，而不是中間的平台。Cinderous 讓你在沒有伺服器帳號、沒有守門人的前提下，安全地和你邀來的人說話——像夜裡森林深處的一簇營火，只有圍坐的人聽得見。",
   hero_download: "下載桌面版",
+  hero_webapp: "在瀏覽器開啟",
   hero_tech: "看技術原理",
   hero_github: "在 GitHub 檢視原始碼",
   vision_title: "為什麼要取回通訊自主權",
@@ -155,6 +167,21 @@ const zhHant: Copy = {
   fd_relay_note: "只轉發密文·看不到內容與寄件者",
   fd_encrypt: "🔒 Gift Wrap 密文（NIP-17/44/59）",
   fd_p2p: "WebRTC P2P — 檔案／在線／輸入中，不經中繼",
+  store_title: "你的資料存在哪裡",
+  store_lead:
+    "不管用哪個版本，明文與私鑰都只留在你的裝置——沒有中央資料庫、沒有可被傳喚的帳號。差別只在「私鑰用什麼保管」。",
+  store_desktop_t: "桌面版（原生）",
+  store_desktop_b:
+    "私鑰交給作業系統金鑰庫（Windows 認證管理員／macOS 鑰匙圈／Linux Secret Service）；訊息與聯絡人以 AES-256-GCM 加密存本機磁碟。明文不上雲。",
+  store_web_t: "網頁版（瀏覽器）",
+  store_web_b:
+    "瀏覽器沒有 OS 金鑰庫——私鑰以你設的本地密碼（Argon2id）包成密文存瀏覽器；訊息與聯絡人加密存在瀏覽器（localStorage／IndexedDB／OPFS），綁在該網域、留在你這台裝置。托管網站只發送程式碼、零使用者資料。清除網站資料或忘記密碼＝身分消失，請務必備份 nsec／救援登入碼。",
+  store_mobile_t: "行動版",
+  store_mobile_b:
+    "與網頁版同屬本地優先：私鑰以本地密碼包裹存裝置本機（未設密碼＝不落地、僅暫時 session）；資料留在裝置。",
+  store_relay_t: "所有版本共通：中繼站看不到你的資料",
+  store_relay_b:
+    "中繼站只暫存密文離線留言（有保留上限、逾期自動汰除），看不到內容也看不到寄件者。只有開啟「多裝置狀態同步」時，才有一份加密狀態快照存在你的中繼站——仍是密文，中繼看不到明文。",
   donate_title: "為營火添柴",
   donate_intro: "捐款用於官方節點營運與部分貢獻者獎金。以下皆為純外部連結，交由你的第三方帳號/錢包處理。",
   donate_disclaimer: "本站無站內錢包、無托管、無抽成、不採 Zap。捐款完全自願。",
@@ -208,6 +235,7 @@ const en: Copy = {
   hero_subtitle:
     "Conversations should belong to the people having them — not to the platform in the middle. Cinderous lets you talk safely with the people you invite, with no server account and no gatekeeper — like a campfire deep in a night forest, heard only by those sitting around it.",
   hero_download: "Download desktop",
+  hero_webapp: "Open in browser",
   hero_tech: "How it works",
   hero_github: "View source on GitHub",
   vision_title: "Why reclaim communication autonomy",
@@ -261,6 +289,21 @@ const en: Copy = {
   fd_relay_note: "Forwards ciphertext only · no content, no sender",
   fd_encrypt: "🔒 Gift Wrap ciphertext (NIP-17/44/59)",
   fd_p2p: "WebRTC P2P — files / presence / typing, no relay",
+  store_title: "Where your data lives",
+  store_lead:
+    "Whichever version you use, plaintext and your private key stay on your device — no central database, no account to subpoena. The only difference is how the private key is kept.",
+  store_desktop_t: "Desktop (native)",
+  store_desktop_b:
+    "The private key is held in the OS keychain (Windows Credential Manager / macOS Keychain / Linux Secret Service); messages and contacts sit in AES-256-GCM–encrypted files on your local disk. Plaintext never touches the cloud.",
+  store_web_t: "Web (browser)",
+  store_web_b:
+    "A browser has no OS keychain — the private key is wrapped with your local password (Argon2id) and stored in the browser; messages and contacts are encrypted in the browser (localStorage / IndexedDB / OPFS), scoped to the site and kept on your device. The hosting site only serves code and stores zero user data. Clearing site data or forgetting the password erases the identity — back up your nsec / rescue login code.",
+  store_mobile_t: "Mobile",
+  store_mobile_b:
+    "Local-first like the web version: the private key is password-wrapped on the device (no password = not persisted, session-only); data stays on the device.",
+  store_relay_t: "Across all versions: relays can't see your data",
+  store_relay_b:
+    "Relays only briefly hold ciphertext offline messages (capped and auto-expired), seeing neither content nor sender. Only if you enable multi-device state sync does an encrypted state snapshot live on your relay — still ciphertext; the relay never sees plaintext.",
   donate_title: "Feed the fire",
   donate_intro:
     "Donations fund official node operations and some contributor bonuses. All links below are external and handled by your own third-party account or wallet.",

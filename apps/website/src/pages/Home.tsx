@@ -2,7 +2,7 @@ import type { Theme } from "@cinderous/theme";
 import type { Copy } from "../copy.js";
 import { CinderMark } from "../Brand.js";
 import { OFFICIAL_DONATIONS } from "../donations.js";
-import { GITHUB_URL } from "../App.js";
+import { GITHUB_URL, WEBAPP_URL } from "../App.js";
 
 // 首頁（ADR-0187）：闡述核心價值觀與「取回通訊自主權」的願景。技術細節移至技術原理頁。
 export function Home({
@@ -41,6 +41,9 @@ export function Home({
             >
               {c.hero_download}
             </a>
+            <a className="btn" href={WEBAPP_URL} target="_blank" rel="noreferrer">
+              {c.hero_webapp}
+            </a>
             <button type="button" className="btn" onClick={onTech}>
               {c.hero_tech} →
             </button>
@@ -72,6 +75,31 @@ export function Home({
               </div>
             ))}
           </div>
+        </div>
+      </section>
+
+      <section className="sec">
+        <div className="wrap">
+          <h2>{c.store_title}</h2>
+          <p className="sec__lead" style={{ maxWidth: 760 }}>
+            {c.store_lead}
+          </p>
+          <div className="grid">
+            {[
+              { t: c.store_desktop_t, b: c.store_desktop_b },
+              { t: c.store_web_t, b: c.store_web_b },
+              { t: c.store_mobile_t, b: c.store_mobile_b },
+            ].map((s) => (
+              <div className="card" key={s.t}>
+                <div className="card__ember" />
+                <h3>{s.t}</h3>
+                <p>{s.b}</p>
+              </div>
+            ))}
+          </div>
+          <p className="hint" style={{ marginTop: 14 }}>
+            <strong>{c.store_relay_t}</strong> — {c.store_relay_b}
+          </p>
         </div>
       </section>
 

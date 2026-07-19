@@ -10,6 +10,9 @@ import { Tech } from "./pages/Tech.js";
 // import { Transparency } from "./pages/Transparency.js";
 
 export const GITHUB_URL = "https://github.com/VaalRL/Cinderous";
+// 官方網頁版（瀏覽器 app）入口（ADR-0209）：與官網分 origin（ADR-0090/0147），只是一條跨 origin 連結。
+// 換網域只改這一行。
+export const WEBAPP_URL = "https://cinderous.propfolk.com";
 
 type View = "home" | "tech" | "node";
 
