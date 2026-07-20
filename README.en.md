@@ -6,6 +6,8 @@
 
 > A decentralized instant messenger with no central database. It fuses the **Nostr protocol** with **WebRTC** to faithfully recreate the classic interaction experience of early MSN Messenger (nudges, music status, offline messages), with "zero server maintenance cost" as its operating goal.
 
+**🔥 Website: <https://vaalrl.github.io/Cinderous/>** · **🌐 Open in browser (web app): <https://cinderous.cinderous1.workers.dev>** · **💻 Download desktop: [GitHub Releases](https://github.com/VaalRL/Cinderous/releases)**
+
 ## Introduction
 
 Cinderous achieves extreme privacy and low latency through a dual-track hybrid network of "state signaling" and "bulk data transfer":
@@ -82,7 +84,7 @@ Requirements: **Node 22+**, **pnpm 10+** (Rust tests also require the stable too
 
 ```bash
 # 1. 取得原始碼並安裝 workspace 相依
-git clone https://github.com/VaalRL/Nostr-buddy.git cinder && cd cinder
+git clone https://github.com/VaalRL/Cinderous.git && cd Cinderous
 pnpm install
 
 # 2. 驗證環境（全綠代表就緒）
