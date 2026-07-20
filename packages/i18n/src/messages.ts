@@ -571,6 +571,11 @@ export interface Messages {
   sticker_invalid: string;
   sticker_importFail: string;
   emoji_manifestTooLarge: string;
+  emoji_tab: string;
+  emoji_import: string;
+  emoji_shortcodePrompt: string;
+  emoji_empty: string;
+  emoji_insert: string;
   editor_title: string;
   editor_new: string;
   editor_fromBase: string;
@@ -1214,6 +1219,11 @@ const zhHant: Messages = {
   sticker_invalid: "（無效貼圖）",
   sticker_importFail: "無法加入貼圖：{reason}",
   emoji_manifestTooLarge: "這則訊息的自訂 emoji 太大，請減少數量或換小一點的圖",
+  emoji_tab: "自訂 emoji",
+  emoji_import: "匯入 emoji（指定短碼）",
+  emoji_shortcodePrompt: "為這顆 emoji 取一個短碼（之後打 :短碼: 使用）",
+  emoji_empty: "還沒有自訂 emoji。按＋匯入圖片並指定短碼。",
+  emoji_insert: "插入 {code}",
   editor_title: "貼圖編輯器",
   editor_new: "繪製新貼圖",
   editor_fromBase: "以此貼圖為底繪製",
@@ -1852,6 +1862,11 @@ const en: Messages = {
   sticker_invalid: "(invalid sticker)",
   sticker_importFail: "Could not add sticker: {reason}",
   emoji_manifestTooLarge: "This message's custom emoji are too large — use fewer or smaller images",
+  emoji_tab: "Custom emoji",
+  emoji_import: "Import emoji (set shortcode)",
+  emoji_shortcodePrompt: "Name a shortcode for this emoji (type :code: to use it)",
+  emoji_empty: "No custom emoji yet. Tap + to import an image and set a shortcode.",
+  emoji_insert: "Insert {code}",
   editor_title: "Sticker editor",
   editor_new: "Draw a new sticker",
   editor_fromBase: "Draw on this sticker",

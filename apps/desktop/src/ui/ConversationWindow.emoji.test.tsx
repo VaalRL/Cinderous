@@ -3,6 +3,7 @@
 // 行內自訂 emoji（ADR-0220）端到端接線：渲染（收到含資產清單的訊息 → 行內小圖）與
 // 收到自動收藏（effect 寫入本機庫）。這些走 useEffect / DOM，SSR 測不到，故於 jsdom 掛載。
 
+import { act } from "react";
 import { describe, expect, it } from "vitest";
 import { appendAssetManifest, contentHash } from "@cinderous/core";
 import type { ChatMessage, Contact, Self } from "@cinderous/engine";
@@ -70,6 +71,42 @@ describe("行內自訂 emoji 渲染與自動收藏（ADR-0220）", () => {
     const text = appendAssetManifest(":party:", { party: { label: "派對", svg: smiley } });
     const m = mount(render([{ id: "m4", outgoing: true, text, at: 1 }]));
     expect(localStorage.getItem("nb.stickers.custom")).toBeNull();
+    m.unmount();
+  });
+});
+
+const click = async (m: { container: HTMLElement }, testid: string): Promise<void> => {
+  await act(async () => {
+    m.container
+      .querySelector(`[data-testid="${testid}"]`)
+      ?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  });
+};
+
+describe("emoji 挑選器分頁（ADR-0220，步驟 3）", () => {
+  it("開挑選器 → emoji 分頁：匯入鈕呈現、點選已擁有 emoji 插入 :shortcode: 到輸入框", async () => {
+    localStorage.clear();
+    localStorage.setItem(
+      "nb.stickers.custom",
+      JSON.stringify([{ id: contentHash(smiley), label: "派對", svg: smiley, kind: "both", shortcode: "party" }]),
+    );
+    const m = mount(render([]));
+    await click(m, "sticker-toggle");
+    await click(m, "emoji-tab");
+    expect(m.container.querySelector('[data-testid="emoji-import"]')).not.toBeNull();
+    expect(m.container.querySelector('[data-testid="emoji-item"]')).not.toBeNull();
+    await click(m, "emoji-item");
+    expect(m.container.querySelector("textarea")?.value ?? "").toContain(":party:");
+    m.unmount();
+  });
+
+  it("emoji 分頁尚無自訂 emoji 時顯示空狀態＋匯入鈕", async () => {
+    localStorage.clear();
+    const m = mount(render([]));
+    await click(m, "sticker-toggle");
+    await click(m, "emoji-tab");
+    expect(m.container.querySelector('[data-testid="emoji-import"]')).not.toBeNull();
+    expect(m.container.querySelector('[data-testid="emoji-item"]')).toBeNull();
     m.unmount();
   });
 });

@@ -436,6 +436,7 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
   const [favorites, setFavorites] = useState<StickerRef[]>([]);
   const [library, setLibrary] = useState<CustomSticker[]>(() => loadLibrary());
   const stickerFileRef = useRef<HTMLInputElement>(null);
+  const emojiFileRef = useRef<HTMLInputElement>(null);
   /** 貼圖編輯器（ADR-0033）：null=關閉；base 為底圖（空白畫布時省略）。 */
   const [editor, setEditor] = useState<{ base?: string; label?: string } | null>(null);
   /** 文字觸發貼圖（ADR-0037）。 */
@@ -596,6 +597,19 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
     setRecent(recordRecent({ pack: CUSTOM_PACK, id: s.id }));
     setShowStickers(false);
   };
+  // 自訂 emoji（ADR-0220）：插入 :shortcode: 到游標處（非送出）；隨後由送出路徑內嵌資產清單。
+  const insertEmoji = (shortcode: string): void => {
+    const token = `:${shortcode}:`;
+    const el = composerRef.current;
+    const at = el?.selectionStart ?? text.length;
+    const end = el?.selectionEnd ?? text.length;
+    setText(text.slice(0, at) + token + text.slice(end));
+    const caret = at + token.length;
+    requestAnimationFrame(() => {
+      el?.focus();
+      el?.setSelectionRange(caret, caret);
+    });
+  };
   const flipFavorite = (ref: StickerRef): void => {
     const next = toggleFavorite(favorites, ref);
     setFavorites(next);
@@ -706,31 +720,57 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
     saveTriggers(next);
   };
 
-  // 匯入：SVG 檔直接驗證；點陣圖經 canvas 縮圖重編碼後包成 SVG（ADR-0032）。
-  const importStickerFile = async (f: File): Promise<void> => {
-    const stem = f.name.replace(/\.[^.]+$/, "");
+  // 檔案 → SVG（SVG 檔直接用；點陣圖經 canvas 等比置中縮放重編碼後包成 SVG）。非圖片回 null（並提示）。
+  // side 決定點陣圖輸出尺寸：貼圖用 256、emoji 用小尺寸（省頻寬，ADR-0220）。
+  const fileToStickerSvg = async (f: File, side = 256): Promise<string | null> => {
     if (f.type === "image/svg+xml" || f.name.toLowerCase().endsWith(".svg")) {
-      acquireSticker(stem, (await f.text()).trim());
-      return;
+      return (await f.text()).trim();
     }
     if (!f.type.startsWith("image/")) {
       void alert(t("sticker_importFail", { reason: "not-image" }));
-      return;
+      return null;
     }
     const bitmap = await createImageBitmap(f);
-    const side = 256;
     const canvas = document.createElement("canvas");
     canvas.width = side;
     canvas.height = side;
     const ctx = canvas.getContext("2d")!;
-    // 等比置中縮放
     const scale = Math.min(side / bitmap.width, side / bitmap.height);
     const w = bitmap.width * scale;
     const h = bitmap.height * scale;
     ctx.drawImage(bitmap, (side - w) / 2, (side - h) / 2, w, h);
     bitmap.close();
-    const dataUri = canvas.toDataURL("image/webp", 0.85);
-    acquireSticker(stem, wrapRasterAsSvg(dataUri, side));
+    return wrapRasterAsSvg(canvas.toDataURL("image/webp", 0.85), side);
+  };
+
+  // 匯入為貼圖（ADR-0032）。
+  const importStickerFile = async (f: File): Promise<void> => {
+    const svg = await fileToStickerSvg(f);
+    if (svg !== null) acquireSticker(f.name.replace(/\.[^.]+$/, ""), svg);
+  };
+
+  // 檔名 → 建議短碼：小寫、非法字元併為底線、去開頭符號、限 32；空則回退 emoji。
+  const toShortcode = (stem: string): string =>
+    stem
+      .toLowerCase()
+      .replace(/[^a-z0-9_+-]+/g, "_")
+      .replace(/^[_+-]+/, "")
+      .slice(0, 32) || "emoji";
+
+  // 匯入為自訂 emoji（ADR-0220）：小尺寸＋指定短碼（打 :短碼: 使用）。
+  const importEmojiFile = async (f: File): Promise<void> => {
+    const svg = await fileToStickerSvg(f, 64);
+    if (svg === null) return;
+    const stem = f.name.replace(/\.[^.]+$/, "");
+    const input = await prompt({ message: t("emoji_shortcodePrompt"), defaultValue: toShortcode(stem) });
+    if (input === null) return;
+    const r = addSticker(library, stem, svg, { shortcode: input });
+    if (!r.ok) {
+      void alert(t("sticker_importFail", { reason: r.reason }));
+      return;
+    }
+    setLibrary(r.list);
+    saveLibrary(r.list);
   };
 
   const dropFiles = (files: FileList | null) => {
@@ -1150,6 +1190,7 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
           <button
             className="tool"
             title={t("sticker_title")}
+            data-testid="sticker-toggle"
             onClick={() => setShowStickers((v) => !v)}
           >
             🧸
@@ -1227,6 +1268,7 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
                 ? library.map((s) => ({ pack: CUSTOM_PACK, id: s.id }))
                 : Object.keys(STICKER_PACKS[stickerTab] ?? {}).map((id) => ({ pack: stickerTab, id }));
         const visible = currentRefs.filter((r) => resolveAny(r) !== undefined);
+        const emojiList = library.filter((a) => a.shortcode);
         return (
           <div className="stickerpick" data-testid="stickerpick">
             <div className="stickerpick__tabs" role="tablist" aria-label={t("sticker_title")}>
@@ -1263,6 +1305,18 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
               >
                 ✏️
               </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={stickerTab === "__emoji"}
+                className={`stickerpick__tab${stickerTab === "__emoji" ? " on" : ""}`}
+                title={t("emoji_tab")}
+                aria-label={t("emoji_tab")}
+                data-testid="emoji-tab"
+                onClick={() => setStickerTab("__emoji")}
+              >
+                😀
+              </button>
               {STICKER_PACK_ORDER.map((pack) => {
                 const meta = STICKER_PACK_META[pack]!;
                 const coverSvg = stickerSvg(pack, meta.cover);
@@ -1293,7 +1347,65 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
               </button>
             </div>
             <div className="stickerpick__grid">
-              {stickerTab === "__mine" ? (
+              {stickerTab === "__emoji" ? (
+                <>
+                  <button
+                    type="button"
+                    className="stickerpick__item stickerpick__import"
+                    title={t("emoji_import")}
+                    aria-label={t("emoji_import")}
+                    data-testid="emoji-import"
+                    onClick={() => emojiFileRef.current?.click()}
+                  >
+                    ＋
+                  </button>
+                  <input
+                    ref={emojiFileRef}
+                    type="file"
+                    accept=".svg,image/*"
+                    hidden
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) void importEmojiFile(f);
+                      e.target.value = "";
+                    }}
+                  />
+                  {emojiList.length === 0 ? (
+                    <div className="stickerpick__empty">{t("emoji_empty")}</div>
+                  ) : (
+                    emojiList.map((a) => (
+                      <div className="stickerpick__cell" key={a.id}>
+                        <button
+                          type="button"
+                          className="stickerpick__item"
+                          title={`:${a.shortcode}:`}
+                          aria-label={t("emoji_insert", { code: `:${a.shortcode}:` })}
+                          data-testid="emoji-item"
+                          onClick={() => insertEmoji(a.shortcode!)}
+                        >
+                          <img src={svgToDataUri(a.svg)} alt={`:${a.shortcode}:`} />
+                        </button>
+                        <button
+                          type="button"
+                          className="stickerpick__act"
+                          aria-label={t("sticker_delete")}
+                          title={t("sticker_delete")}
+                          onClick={() => {
+                            void confirm({
+                              message: t("sticker_deleteConfirm", { name: `:${a.shortcode}:` }),
+                              danger: true,
+                            }).then((ok) => {
+                              if (ok) deleteCustom(a.id);
+                            });
+                          }}
+                        >
+                          ✕
+                        </button>
+                      </div>
+                    ))
+                  )}
+                </>
+              ) : stickerTab === "__mine" ? (
                 <>
                   <button
                     type="button"
@@ -1327,7 +1439,7 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
                   />
                 </>
               ) : null}
-              {visible.length === 0 && stickerTab !== "__mine" ? (
+              {visible.length === 0 && stickerTab !== "__mine" && stickerTab !== "__emoji" ? (
                 <div className="stickerpick__empty">{t("sticker_empty")}</div>
               ) : (
                 visible.map((ref) => {
