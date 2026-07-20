@@ -5,6 +5,7 @@
 // （舊 `nb.identity`）遷移為 namespace 為空的 legacy 設定檔，向後相容。
 
 import { getPublicKey, nsecDecode } from "@cinderous/core";
+import { getKv } from "../kv.js";
 
 export interface Profile {
   /** hex pubkey，作為身分主鍵。 */
@@ -247,17 +248,18 @@ function validate(value: unknown): ProfilesState | null {
  */
 export function loadProfiles(): ProfilesState {
   try {
-    const raw = localStorage.getItem(KEY);
+    const kv = getKv();
+    const raw = kv.getItem(KEY);
     if (raw) {
       const parsed = validate(JSON.parse(raw));
       if (parsed) return parsed;
     }
     // 遷移既有單一身分
-    const idRaw = localStorage.getItem("nb.identity");
+    const idRaw = kv.getItem("nb.identity");
     if (idRaw) {
       const id = JSON.parse(idRaw) as { nsec: string; name: string };
       const pubkey = getPublicKey(nsecDecode(id.nsec));
-      const relayUrl = localStorage.getItem("nb.relayUrl") ?? "";
+      const relayUrl = kv.getItem("nb.relayUrl") ?? "";
       const legacy: Profile = { pubkey, name: id.name, relayUrl, enterprise: false, namespace: "" };
       const state: ProfilesState = { profiles: [legacy], active: pubkey };
       saveProfiles(state);
@@ -270,9 +272,5 @@ export function loadProfiles(): ProfilesState {
 }
 
 export function saveProfiles(state: ProfilesState): void {
-  try {
-    localStorage.setItem(KEY, JSON.stringify(state));
-  } catch {
-    /* 配額或不可用時忽略 */
-  }
+  getKv().setItem(KEY, JSON.stringify(state));
 }
