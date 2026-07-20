@@ -1,7 +1,14 @@
 import { contentHash } from "@cinderous/core";
 import { describe, expect, it } from "vitest";
 import { formatCustomSticker, parseCustomSticker } from "@cinderous/core";
-import { addSticker, LIBRARY_MAX, removeSticker, type CustomSticker } from "./sticker-library.js";
+import {
+  addSticker,
+  findByShortcode,
+  LIBRARY_MAX,
+  removeSticker,
+  setShortcode,
+  type CustomSticker,
+} from "./sticker-library.js";
 import { STICKER_LABEL_MAX } from "@cinderous/core";
 
 const SVG_A = '<svg xmlns="http://www.w3.org/2000/svg"><circle r="4"/></svg>';
@@ -48,6 +55,45 @@ describe("自製貼圖庫（ADR-0032）", () => {
   it("空白標籤回退預設", () => {
     const r = addSticker([], "  ", SVG_A);
     expect(r.ok && r.sticker.label).toBe("貼圖");
+  });
+
+  it("預設 kind 為 sticker", () => {
+    const r = addSticker([], "a", SVG_A);
+    expect(r.ok && r.sticker.kind).toBe("sticker");
+  });
+});
+
+describe("統一資產：emoji 短碼（ADR-0220）", () => {
+  it("帶短碼加入：kind 為 both、可依短碼查得", () => {
+    const r = addSticker([], "派對", SVG_A, { shortcode: "party" });
+    if (!r.ok) throw new Error("unexpected");
+    expect(r.sticker.kind).toBe("both");
+    expect(r.sticker.shortcode).toBe("party");
+    expect(findByShortcode(r.list, "party")).toBe(r.sticker);
+    expect(findByShortcode(r.list, "nope")).toBeUndefined();
+  });
+
+  it("不合法短碼被拒", () => {
+    expect(addSticker([], "x", SVG_A, { shortcode: "has space" })).toEqual({ ok: false, reason: "bad-shortcode" });
+  });
+
+  it("短碼被別的資產佔用時被拒", () => {
+    const first = addSticker([], "a", SVG_A, { shortcode: "party" });
+    if (!first.ok) throw new Error("unexpected");
+    expect(addSticker(first.list, "b", SVG_B, { shortcode: "party" })).toEqual({
+      ok: false,
+      reason: "shortcode-taken",
+    });
+  });
+
+  it("setShortcode：指派給既有資產（kind→both）、唯一性檢查", () => {
+    const base = addSticker([], "圓", SVG_A);
+    if (!base.ok) throw new Error("unexpected");
+    const r = setShortcode(base.list, base.sticker.id, "circle");
+    if (!r.ok) throw new Error("unexpected");
+    expect(r.sticker.shortcode).toBe("circle");
+    expect(r.sticker.kind).toBe("both");
+    expect(setShortcode(r.list, "no-such-id", "x")).toEqual({ ok: false, reason: "not-found" });
   });
 });
 
