@@ -5,6 +5,7 @@ import { CinderMark } from "./Brand.js";
 import { useCopy } from "./copy.js";
 import { Home } from "./pages/Home.js";
 import { Node } from "./pages/Node.js";
+import { Roadmap } from "./pages/Roadmap.js";
 import { Tech } from "./pages/Tech.js";
 // 透明度頁暫時下架（保留 pages/Transparency.tsx 與 tr_* 文案，還原＝復原此 import＋nav＋路由）
 // import { Transparency } from "./pages/Transparency.js";
@@ -14,7 +15,7 @@ export const GITHUB_URL = "https://github.com/VaalRL/Cinderous";
 // 暫用 Cloudflare Worker 預設網址；日後綁自訂網域（cinderous.propfolk.com）只改這一行。
 export const WEBAPP_URL = "https://cinderous.cinderous1.workers.dev";
 
-type View = "home" | "tech" | "node";
+type View = "home" | "tech" | "node" | "roadmap";
 
 function initialTheme(): Theme {
   if (typeof window !== "undefined" && window.matchMedia?.("(prefers-color-scheme: dark)").matches) return "dark";
@@ -54,6 +55,7 @@ export function App(): JSX.Element {
           {link("home", c.nav_home)}
           {link("tech", c.nav_tech)}
           {link("node", c.nav_node)}
+          {link("roadmap", c.nav_roadmap)}
           <button type="button" className="nav__toggle" onClick={() => setLocale(locale === "zh-Hant" ? "en" : "zh-Hant")}>
             {locale === "zh-Hant" ? "EN" : "繁中"}
           </button>
@@ -70,6 +72,8 @@ export function App(): JSX.Element {
         <Home c={c} theme={theme} onNode={() => setView("node")} onTech={() => setView("tech")} />
       ) : view === "tech" ? (
         <Tech c={c} />
+      ) : view === "roadmap" ? (
+        <Roadmap c={c} />
       ) : (
         <Node c={c} />
       )}

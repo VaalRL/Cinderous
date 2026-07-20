@@ -7,8 +7,22 @@ export interface Copy {
   nav_home: string;
   nav_tech: string;
   nav_node: string;
+  nav_roadmap: string;
   nav_download: string;
   nav_transparency: string;
+  roadmap_title: string;
+  roadmap_intro: string;
+  roadmap_shipped_t: string;
+  roadmap_shipped_b: string;
+  roadmap_planned_t: string;
+  roadmap_p_mobile_t: string;
+  roadmap_p_mobile_b: string;
+  roadmap_p_push_t: string;
+  roadmap_p_push_b: string;
+  roadmap_p_desktop_t: string;
+  roadmap_p_desktop_b: string;
+  roadmap_p_domain_t: string;
+  roadmap_p_domain_b: string;
   hero_eyebrow: string;
   hero_title: string;
   hero_subtitle: string;
@@ -108,8 +122,25 @@ const zhHant: Copy = {
   nav_home: "首頁",
   nav_tech: "技術原理",
   nav_node: "建立節點",
+  nav_roadmap: "藍圖",
   nav_download: "下載",
   nav_transparency: "透明度",
+  roadmap_title: "產品藍圖",
+  roadmap_intro: "Cinderous 已上線桌面版與網頁版。以下是已完成的能力，以及正在規劃的未來待辦。",
+  roadmap_shipped_t: "✅ 已上線",
+  roadmap_shipped_b:
+    "桌面版（Windows）、網頁版（瀏覽器・本地優先加密）、端到端加密訊息（Nostr NIP-17/44/59）與去中心化中繼、WebRTC P2P（檔案／在線／通話）、群組、多身分、企業名冊、通知細分開關與每對話靜音、經典 MSN 佈局（浮動視窗、聯絡人分組）。",
+  roadmap_planned_t: "🗓️ 未來待辦",
+  roadmap_p_mobile_t: "行動版原生 App（Android／iOS）",
+  roadmap_p_mobile_b:
+    "目前行動端為 React Native Web（可攜底子與原生 shim 已備）；原生打包（Expo／RN）、系統金鑰庫、原生通知等待接。iOS 需 macOS 建置。",
+  roadmap_p_push_t: "背景推播（APNs／FCM）",
+  roadmap_p_push_b:
+    "行動端要「關 App 也能收通知」需接推播＋一個推播中繼；含隱私取捨（可只推「有新訊息」、不含內容）。",
+  roadmap_p_desktop_t: "macOS／Linux 桌面版",
+  roadmap_p_desktop_b: "Tauri 已支援；目前釋出為 Windows，macOS／Linux 打包待補。",
+  roadmap_p_domain_t: "自訂網域",
+  roadmap_p_domain_b: "網頁版目前用 Cloudflare Worker 預設網址，日後綁自訂網域。",
   hero_eyebrow: "取回通訊自主權",
   hero_title: "Cinderous",
   hero_subtitle:
@@ -228,8 +259,25 @@ const en: Copy = {
   nav_home: "Home",
   nav_tech: "How it works",
   nav_node: "Run a node",
+  nav_roadmap: "Roadmap",
   nav_download: "Download",
   nav_transparency: "Transparency",
+  roadmap_title: "Roadmap",
+  roadmap_intro: "Cinderous already ships desktop and web. Here's what's done, and what's planned next.",
+  roadmap_shipped_t: "✅ Shipped",
+  roadmap_shipped_b:
+    "Desktop (Windows), web app (browser, local-first encrypted), end-to-end encrypted messaging (Nostr NIP-17/44/59) with decentralized relays, WebRTC P2P (files / presence / calls), groups, multi-identity, enterprise roster, per-event notification toggles and per-conversation mute, and the classic MSN layout (floating windows, contact grouping).",
+  roadmap_planned_t: "🗓️ Planned",
+  roadmap_p_mobile_t: "Native mobile apps (Android / iOS)",
+  roadmap_p_mobile_b:
+    "Mobile is currently React Native Web (the portable base and native shims are in place); native packaging (Expo / RN), OS keychain, and native notifications remain to be wired. iOS requires a macOS build.",
+  roadmap_p_push_t: "Background push (APNs / FCM)",
+  roadmap_p_push_b:
+    'For mobile to notify while the app is closed, we need push plus a relay; this involves a privacy trade-off (can push only "new message" without content).',
+  roadmap_p_desktop_t: "macOS / Linux desktop",
+  roadmap_p_desktop_b: "Tauri already supports them; current releases are Windows — macOS / Linux packaging is pending.",
+  roadmap_p_domain_t: "Custom domain",
+  roadmap_p_domain_b: "The web app currently uses the default Cloudflare Worker URL; a custom domain will be bound later.",
   hero_eyebrow: "Own your conversations",
   hero_title: "Cinderous",
   hero_subtitle:

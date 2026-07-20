@@ -31,7 +31,7 @@ The data lifecycle relies on **NIP-40** (7-day expiration) and **Ephemeral Event
 ### Client Platforms
 
 - **Desktop (first priority)**: Rust **Tauri** + **React/TypeScript**, packageable into Windows (MSI / NSIS) / macOS / Linux installers; the private key is entrusted to the OS keychain, with a background WebSocket long-lived connection and native file access (company storage vault, etc.). **The same React UI can also run directly in the browser** (development and web runtime environments), landing on encrypted localStorage / OPFS—this is not abandoning the web, but bringing "plaintext never touches disk" to the browser (ADR-0112).
-- **Mobile**: **React Native Web**, sharing **the same `RelayChatBackend`** (engine) as desktop, so features are highly aligned—messages, groups, calls, files, enterprise mode, and more are all available; the few items requiring OS-level capabilities (a real file system, native keychain) await native packaging (EAS).
+- **Mobile (planned)**: currently **React Native Web** (sharing **the same `RelayChatBackend`** engine as desktop, so features are highly aligned); **native Android / iOS apps have not shipped yet** and are on the [roadmap](https://vaalrl.github.io/Cinderous/) — native packaging (Expo / RN), OS keychain, native notifications, and background push remain to be wired (iOS also needs a macOS build).
 - **Relay**: Cloudflare Worker (Durable Objects fan-out), with a Node version also available for self-hosting in a container.
 
 For the full technical specification see [`PRD.md`](./PRD.md), and for module boundaries and data flows see [`ARCHITECTURE.md`](./ARCHITECTURE.md).
