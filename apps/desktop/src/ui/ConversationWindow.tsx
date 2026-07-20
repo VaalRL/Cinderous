@@ -41,6 +41,7 @@ import {
 } from "@cinderous/core";
 import {
   addSticker,
+  autoAcquireEnabled,
   CUSTOM_PACK,
   findByShortcode,
   findSticker,
@@ -640,7 +641,7 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
   // 企業停用時不收藏；最愛不被淘汰。自建保護待 origin 旗標（後續）。已處理 id 以 ref 去重防重跑。
   const acquiredRef = useRef<Set<string>>(new Set());
   useEffect(() => {
-    if (props.stickersDisabled) return;
+    if (props.stickersDisabled || !autoAcquireEnabled()) return;
     const favIds = new Set(favorites.filter((f) => f.pack === CUSTOM_PACK).map((f) => f.id));
     let cur = library;
     let changed = false;

@@ -102,6 +102,9 @@ export interface SettingsPanelProps {
   /** 貼上時清除網址追蹤參數（ADR-0038）；未提供則不顯示該區塊。 */
   cleanOnPaste?: boolean;
   onToggleCleanOnPaste?: () => void;
+  /** 收到別人的自訂 emoji／貼圖時自動收藏（ADR-0220）；未提供則不顯示。 */
+  autoAcquireAssets?: boolean;
+  onToggleAutoAcquire?: () => void;
   onClose: () => void;
   /** 清除指向某座 stale relay 的聯絡人 hint（ADR-0036）。 */
   onRelayClear?: (url: string) => void;
@@ -1118,18 +1121,31 @@ export function SettingsPanel(props: SettingsPanelProps): JSX.Element {
             </section>
           ) : null}
 
-          {tab === "privacy" && props.onToggleCleanOnPaste ? (
+          {tab === "privacy" && (props.onToggleCleanOnPaste || props.onToggleAutoAcquire) ? (
             <section className="settings__sec">
               <h4>{t("settings_privacy")}</h4>
-              <label className="settings__toggle">
-                <input
-                  type="checkbox"
-                  data-testid="clean-on-paste"
-                  checked={props.cleanOnPaste ?? true}
-                  onChange={props.onToggleCleanOnPaste}
-                />
-                <span>{t("settings_cleanOnPaste")}</span>
-              </label>
+              {props.onToggleCleanOnPaste ? (
+                <label className="settings__toggle">
+                  <input
+                    type="checkbox"
+                    data-testid="clean-on-paste"
+                    checked={props.cleanOnPaste ?? true}
+                    onChange={props.onToggleCleanOnPaste}
+                  />
+                  <span>{t("settings_cleanOnPaste")}</span>
+                </label>
+              ) : null}
+              {props.onToggleAutoAcquire ? (
+                <label className="settings__toggle">
+                  <input
+                    type="checkbox"
+                    data-testid="auto-acquire-assets"
+                    checked={props.autoAcquireAssets ?? true}
+                    onChange={props.onToggleAutoAcquire}
+                  />
+                  <span>{t("settings_autoAcquireAssets")}</span>
+                </label>
+              ) : null}
             </section>
           ) : null}
 

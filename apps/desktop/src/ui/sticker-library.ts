@@ -120,3 +120,16 @@ export function loadLibrary(): CustomAsset[] {
 export function saveLibrary(list: CustomAsset[]): void {
   getKv().setItem(LIB_KEY, JSON.stringify(list));
 }
+
+// ── 收到自動收藏開關（ADR-0220，步驟 5）；預設開 ──
+
+const AUTO_ACQUIRE_KEY = "nb.stickers.autoAcquire";
+
+/** 收到別人的自訂 emoji／貼圖時是否自動收藏進庫（預設開）。 */
+export function autoAcquireEnabled(): boolean {
+  return getKv().getItem(AUTO_ACQUIRE_KEY) !== "0";
+}
+
+export function setAutoAcquireEnabled(on: boolean): void {
+  getKv().setItem(AUTO_ACQUIRE_KEY, on ? "1" : "0");
+}

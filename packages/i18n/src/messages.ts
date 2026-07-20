@@ -624,6 +624,7 @@ export interface Messages {
   urlrisk_unparsable: string;
   settings_privacy: string;
   settings_cleanOnPaste: string;
+  settings_autoAcquireAssets: string;
   voice_record: string;
   voice_stop: string;
   voice_recording: string;
@@ -1272,6 +1273,7 @@ const zhHant: Messages = {
   urlrisk_unparsable: "網址格式異常",
   settings_privacy: "隱私",
   settings_cleanOnPaste: "貼上時自動清除網址追蹤參數（含 redirect 拆殼）",
+  settings_autoAcquireAssets: "收到別人的自訂 emoji／貼圖時自動收藏進我的庫",
   voice_record: "錄語音訊息",
   voice_stop: "停止並傳送",
   voice_recording: "錄音中…點擊停止並傳送",
@@ -1916,6 +1918,7 @@ const en: Messages = {
   urlrisk_unparsable: "Malformed URL",
   settings_privacy: "Privacy",
   settings_cleanOnPaste: "Strip tracking parameters from pasted links (incl. redirect unwrapping)",
+  settings_autoAcquireAssets: "Auto-save others' custom emoji / stickers to my library",
   voice_record: "Record voice message",
   voice_stop: "Stop & send",
   voice_recording: "Recording… click to stop & send",

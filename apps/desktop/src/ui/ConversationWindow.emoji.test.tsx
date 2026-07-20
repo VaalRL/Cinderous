@@ -73,6 +73,16 @@ describe("行內自訂 emoji 渲染與自動收藏（ADR-0220）", () => {
     expect(localStorage.getItem("nb.stickers.custom")).toBeNull();
     m.unmount();
   });
+
+  it("關閉自動收藏（設定）後：收到含清單訊息不入庫，但仍行內渲染", () => {
+    localStorage.clear();
+    localStorage.setItem("nb.stickers.autoAcquire", "0");
+    const text = appendAssetManifest("嗨 :party:", { party: { label: "派對", svg: smiley } });
+    const m = mount(render([{ id: "m5", outgoing: false, text, at: 1 }]));
+    expect(localStorage.getItem("nb.stickers.custom")).toBeNull();
+    expect(m.container.querySelector("img.emoji")).not.toBeNull();
+    m.unmount();
+  });
 });
 
 const click = async (m: { container: HTMLElement }, testid: string): Promise<void> => {

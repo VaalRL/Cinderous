@@ -91,6 +91,7 @@ import { HistoryWindow } from "./ui/HistoryWindow.js";
 import { TauriStorage } from "./native/tauri-storage.js";
 import type { AppStorage } from "@cinderous/engine";
 import { cleanOnPasteEnabled, setCleanOnPasteEnabled } from "./ui/url-hygiene.js";
+import { autoAcquireEnabled, setAutoAcquireEnabled } from "./ui/sticker-library.js";
 import {
   allLabels,
   arrangeGroups,
@@ -459,6 +460,7 @@ export function App(): JSX.Element {
   const [conn, setConn] = useState<ConnectionState>("online");
   const [relays, setRelays] = useState<{ url: string; state: ConnectionState; home: boolean; stale: boolean }[]>([]);
   const [cleanPaste, setCleanPaste] = useState<boolean>(() => cleanOnPasteEnabled());
+  const [autoAcquire, setAutoAcquire] = useState<boolean>(() => autoAcquireEnabled());
   const [groups, setGroups] = useState<Group[]>([]);
   const [groupPrefs, setGroupPrefs] = useState<GroupPrefsMap>(() => loadGroupPrefs());
   const [labelFilter, setLabelFilter] = useState<string | undefined>(undefined);
@@ -2458,6 +2460,11 @@ export function App(): JSX.Element {
           onToggleCleanOnPaste={() => {
             setCleanOnPasteEnabled(!cleanPaste);
             setCleanPaste(!cleanPaste);
+          }}
+          autoAcquireAssets={autoAcquire}
+          onToggleAutoAcquire={() => {
+            setAutoAcquireEnabled(!autoAcquire);
+            setAutoAcquire(!autoAcquire);
           }}
           notifications={notify}
           onToggleNotifications={toggleNotifications}
