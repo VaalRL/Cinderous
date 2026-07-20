@@ -6,6 +6,17 @@
 	// monorepo 用法：在 Cloudflare 專案設定把「Root directory」設為 apps/desktop，這樣 wrangler
 	// 在單一 app 目錄執行（避開「在 workspace 根跑偵測」的錯誤）；directory 的 ./dist 即相對此處。
 	// 建置命令仍是 pnpm --filter @cinderous/desktop build（可於 workspace 任一處執行）。
+	//
+	// Build watch paths（ADR-0212；**CF 儀表板設定，非 wrangler 欄位**）：
+	// 若把此 Worker 的 Git 連線接回並開啟「push 即自動建置」（Workers Builds），relay-health
+	// 每小時的 bot commit（只動 relay/bootstrap/relays.json、health-history.json）會白白觸發
+	// 整站重建（≈720 次/月，超過免費層額度，且產物與上一小時完全相同——清單走 Nostr 分發、
+	// 不進 worker 產物）。對策：CF → 此 Worker → Settings → Build → Build watch paths：
+	//   Include paths：*            （預設：全部）
+	//   Exclude paths：relay/bootstrap/*
+	// 路徑以 **repo 根** 為基準（即使 Root directory 設在 apps/desktop）；驗證對象＝變更檔
+	// relay/bootstrap/health-history.json。效果：只改到 relay/bootstrap/ 的 commit 不建置，
+	// 改到客戶端（apps/desktop、packages/*）才建。Git 目前未連線＝無自動建置，此設定接回後生效。
 	"name": "cinderous",
 	"compatibility_date": "2024-12-01",
 	"assets": {
