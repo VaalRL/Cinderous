@@ -1,11 +1,13 @@
 import type { MessageKey } from "@cinderous/i18n";
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment, type ReactNode, useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n.js";
-import { useDialog } from "./Dialog.js";
-import type { BlockedContact, ConnectionState, Contact, ContactRequest, Group, Self, Status } from "@cinderous/engine";
+import type { BlockedContact, ChatMessage, ConnectionState, Contact, ContactRequest, Group, Self, Status } from "@cinderous/engine";
 import { contactLabel } from "@cinderous/engine";
 import { qrDataUri } from "../qr.js";
 import { CinderMascot } from "./Brand.js";
+import { type ContactSection, groupContacts, type SortMode } from "./contact-grouping.js";
+import { ContactRow } from "./ContactRow.js";
+import { messagePreview } from "./deck-sidebar.js";
 import { hasRichStatus, renderStatus } from "./status-text.js";
 import { TitleControls } from "./TitleControls.js";
 import { avatarColor, initial } from "./util.js";
@@ -27,6 +29,81 @@ export function groupByStatus(contacts: Contact[]): { status: Status; contacts: 
     status,
     contacts: contacts.filter((c) => c.status === status).sort((a, b) => a.name.localeCompare(b.name)),
   })).filter((sec) => sec.contacts.length > 0);
+}
+
+/** 排序模式切換（ADR-0215）：MSN 風「依 群組/狀態/名稱」。 */
+const SORT_MODES: { mode: SortMode; key: MessageKey }[] = [
+  { mode: "status", key: "sort_byStatus" },
+  { mode: "group", key: "sort_byGroup" },
+  { mode: "name", key: "sort_byName" },
+];
+const SORT_LS = "nb.contactSort";
+const COLLAPSE_LS = "nb.contactCollapsed";
+
+function loadSortMode(): SortMode {
+  try {
+    const v = localStorage.getItem(SORT_LS);
+    return v === "group" || v === "name" ? v : "status";
+  } catch {
+    return "status";
+  }
+}
+function saveSortMode(m: SortMode): void {
+  try {
+    localStorage.setItem(SORT_LS, m);
+  } catch {
+    /* 配額/不可用忽略 */
+  }
+}
+function loadCollapsed(): Set<string> {
+  try {
+    const raw = localStorage.getItem(COLLAPSE_LS);
+    const arr: unknown = raw ? JSON.parse(raw) : [];
+    return new Set(Array.isArray(arr) ? arr.filter((x): x is string => typeof x === "string") : []);
+  } catch {
+    return new Set();
+  }
+}
+function saveCollapsed(s: Set<string>): void {
+  try {
+    localStorage.setItem(COLLAPSE_LS, JSON.stringify([...s]));
+  } catch {
+    /* 配額/不可用忽略 */
+  }
+}
+
+/** 可收合區塊標頭（ADR-0215）：▸/▾＋標題（＋計數）；children 供群聊區的 ＋建立群組 等額外控制。 */
+function SectionHead({
+  title,
+  count,
+  collapsed,
+  onToggle,
+  children,
+}: {
+  title: string;
+  count?: string;
+  collapsed: boolean;
+  onToggle: () => void;
+  children?: ReactNode;
+}): JSX.Element {
+  return (
+    <div className="group group--head">
+      <button
+        type="button"
+        className="group__collapse"
+        aria-expanded={!collapsed}
+        data-testid="collapse-toggle"
+        onClick={onToggle}
+      >
+        <span className="group__tri" aria-hidden="true">{collapsed ? "▸" : "▾"}</span>
+        <span className="group__title">
+          {title}
+          {count !== undefined ? `（${count}）` : ""}
+        </span>
+      </button>
+      {children}
+    </div>
+  );
 }
 
 /** 縮短 npub / 分享字串供顯示（保留頭尾、中間省略）；完整值仍供複製、QR 與 title。 */
@@ -75,6 +152,12 @@ export interface ContactListProps {
   unread?: Record<string, number>;
   /** 點開對話前以本機 AI 摘要未讀（ADR-0060）；提供且有未讀時顯示 🧠。 */
   onSummarize?: (pubkey: string) => void;
+  /** 各對話訊息（ADR-0214）：算聯絡人列末則預覽用（情境切換副線）。 */
+  convos?: Record<string, ChatMessage[]>;
+  /** 各聯絡人的本地標籤（ADR-0214：統一列，經典版聯絡人也支援標籤 chip 與編輯）。 */
+  contactLabels?: Record<string, string[]>;
+  onAddContactLabel?: (pubkey: string, label: string) => void;
+  onRemoveContactLabel?: (pubkey: string, label: string) => void;
   /** 與中繼站的連線狀態（非 online 時顯示提示）。 */
   connection?: ConnectionState;
   /** 群組清單（M9）。 */
@@ -157,18 +240,50 @@ export function StatusPicker({ value, onChange }: { value: Status; onChange: (s:
 export function ContactListWindow(props: ContactListProps): JSX.Element {
   const { t } = useI18n();
   const { self, contacts } = props;
-  const sections = groupByStatus(contacts);
+  // 排序模式與收合狀態（ADR-0215）：皆持久化本機。
+  const [sortMode, setSortMode] = useState<SortMode>(() => loadSortMode());
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => loadCollapsed());
+  const sections = groupContacts(contacts, sortMode, props.contactLabels ?? {});
+  const changeSort = (m: SortMode): void => {
+    setSortMode(m);
+    saveSortMode(m);
+  };
+  const toggleCollapse = (key: string): void =>
+    setCollapsed((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      saveCollapsed(next);
+      return next;
+    });
+  const sectionTitle = (sec: ContactSection): string =>
+    sec.status
+      ? t(STATUS_KEY[sec.status])
+      : sec.labelName !== undefined
+        ? sec.labelName
+        : sec.ungrouped
+          ? t("contactGroup_ungrouped")
+          : t("contactGroup_all");
   const totalUnread = Object.values(props.unread ?? {}).reduce((a, b) => a + b, 0);
   const renderRow = (c: Contact): JSX.Element => (
     <ContactRow
       key={c.pubkey}
-      contact={c}
-      onOpen={props.onOpen}
-      hint={t("contact_openHint")}
+      id={c.pubkey}
+      name={contactLabel(c)}
+      status={c.status}
       unread={props.unread?.[c.pubkey] ?? 0}
+      hint={t("contact_openHint")}
+      {...(c.statusMessage ? { statusMessage: c.statusMessage } : {})}
+      {...(c.nowPlaying ? { nowPlaying: c.nowPlaying } : {})}
+      {...(props.convos ? { preview: messagePreview(c.pubkey, props.convos) } : {})}
+      {...(c.title ? { title: c.title } : {})}
+      labels={props.contactLabels?.[c.pubkey] ?? []}
+      onOpen={props.onOpen}
       {...(props.onRemoveContact ? { onRemove: props.onRemoveContact } : {})}
       {...(props.onBlockContact ? { onBlock: props.onBlockContact } : {})}
       {...(props.onSummarize ? { onSummarize: props.onSummarize } : {})}
+      {...(props.onAddContactLabel ? { onAddLabel: props.onAddContactLabel } : {})}
+      {...(props.onRemoveContactLabel ? { onRemoveLabel: props.onRemoveContactLabel } : {})}
     />
   );
   const [groupModal, setGroupModal] = useState(false);
@@ -313,14 +428,35 @@ export function ContactListWindow(props: ContactListProps): JSX.Element {
       ) : null}
 
       <div className="roster">
+        {/* 排序切換（ADR-0215）：依 狀態/分組/名稱，只影響下方聯絡人分區。 */}
+        <div className="sortbar" data-testid="sortbar">
+          <span className="sortbar__label">{t("sort_label")}</span>
+          {SORT_MODES.map(({ mode, key }) => (
+            <button
+              key={mode}
+              type="button"
+              className={`chip chip--filter ${sortMode === mode ? "chip--on" : ""}`}
+              data-testid={`sort-${mode}`}
+              onClick={() => changeSort(mode)}
+            >
+              {t(key)}
+            </button>
+          ))}
+        </div>
         {props.onCreateGroup ? (
           <>
-            <div className="group group--groups">
-              <span>{t("group_section")}（{groups.length}）</span>
+            <SectionHead
+              title={t("group_section")}
+              count={`${groups.length}`}
+              collapsed={collapsed.has("__groups__")}
+              onToggle={() => toggleCollapse("__groups__")}
+            >
               <button className="group__add" data-testid="create-group" onClick={() => setGroupModal(true)}>
                 ＋ {t("group_create")}
               </button>
-            </div>
+            </SectionHead>
+            {!collapsed.has("__groups__") ? (
+              <>
             {props.labelOptions && props.labelOptions.length > 0 ? (
               <div className="labelbar" data-testid="label-filter">
                 <button
@@ -352,32 +488,46 @@ export function ContactListWindow(props: ContactListProps): JSX.Element {
                 {...(props.onToggleGroupPin ? { onTogglePin: () => props.onToggleGroupPin?.(g.id) } : {})}
               />
             ))}
+              </>
+            ) : null}
           </>
         ) : null}
-        {sections.map((sec) => (
-          <Fragment key={sec.status}>
-            <div className="group">
-              {t(STATUS_KEY[sec.status])}（{sec.contacts.length}）
-            </div>
-            {sec.contacts.map(renderRow)}
-          </Fragment>
-        ))}
+        {sections.map((sec) => {
+          const isCollapsed = collapsed.has(sec.key);
+          return (
+            <Fragment key={sec.key}>
+              <SectionHead
+                title={sectionTitle(sec)}
+                count={sec.showOnlineCount ? `${sec.online}/${sec.total}` : `${sec.total}`}
+                collapsed={isCollapsed}
+                onToggle={() => toggleCollapse(sec.key)}
+              />
+              {!isCollapsed ? sec.contacts.map(renderRow) : null}
+            </Fragment>
+          );
+        })}
         {props.blocked && props.blocked.length > 0 ? (
           <>
-            <div className="group">{t("group_blocked", { count: props.blocked.length })}</div>
-            {props.blocked.map((b) => (
-              <div className="contact blocked" key={b.pubkey}>
-                <div className="avatar sm" style={{ background: avatarColor(b.pubkey) }}>{initial(b.name)}</div>
-                <div className="contact__info">
-                  <div className="contact__name">{b.name}</div>
-                </div>
-                {props.onUnblockContact ? (
-                  <button className="contact__act" onClick={() => props.onUnblockContact?.(b.pubkey)}>
-                    {t("contact_unblock")}
-                  </button>
-                ) : null}
-              </div>
-            ))}
+            <SectionHead
+              title={t("group_blocked", { count: props.blocked.length })}
+              collapsed={collapsed.has("__blocked__")}
+              onToggle={() => toggleCollapse("__blocked__")}
+            />
+            {!collapsed.has("__blocked__")
+              ? props.blocked.map((b) => (
+                  <div className="contact blocked" key={b.pubkey}>
+                    <div className="avatar sm" style={{ background: avatarColor(b.pubkey) }}>{initial(b.name)}</div>
+                    <div className="contact__info">
+                      <div className="contact__name">{b.name}</div>
+                    </div>
+                    {props.onUnblockContact ? (
+                      <button className="contact__act" onClick={() => props.onUnblockContact?.(b.pubkey)}>
+                        {t("contact_unblock")}
+                      </button>
+                    ) : null}
+                  </div>
+                ))
+              : null}
           </>
         ) : null}
       </div>
@@ -630,72 +780,6 @@ export function AddContact({
           {error}
         </div>
       ) : null}
-    </div>
-  );
-}
-
-function ContactRow({
-  contact,
-  onOpen,
-  hint,
-  unread,
-  onRemove,
-  onBlock,
-  onSummarize,
-}: {
-  contact: Contact;
-  onOpen: (pk: string) => void;
-  hint: string;
-  unread: number;
-  onRemove?: ((pubkey: string) => void) | undefined;
-  onBlock?: ((pubkey: string) => void) | undefined;
-  onSummarize?: ((pubkey: string) => void) | undefined;
-}): JSX.Element {
-  const { t } = useI18n();
-  const { confirm } = useDialog();
-  // 精簡單行清單（UI 改善）：次要狀態不再佔一行，改進 title 供滑鼠停留檢視。
-  const secondaryText = contact.nowPlaying?.trim()
-    ? `♪ ${contact.nowPlaying}`
-    : contact.statusMessage?.trim() ?? "";
-  const remove = async () => {
-    if (await confirm({ message: t("contact_removeConfirm", { name: contact.name }), danger: true })) {
-      onRemove?.(contact.pubkey);
-    }
-  };
-  const block = async () => {
-    if (await confirm({ message: t("contact_blockConfirm", { name: contact.name }), danger: true })) {
-      onBlock?.(contact.pubkey);
-    }
-  };
-  return (
-    <div
-      className={`contact contact--compact ${contact.status === "offline" ? "offline" : ""}`}
-      onDoubleClick={() => onOpen(contact.pubkey)}
-      title={secondaryText || hint}
-    >
-      <span className={`dot ${contact.status}`} />
-      <span className="contact__name">{contactLabel(contact)}</span>
-      {unread > 0 ? (
-        <span className="unread-badge" title={t("unread_title", { count: unread })}>{unread}</span>
-      ) : null}
-      <span className="contact__acts">
-        {onSummarize && unread > 0 ? (
-          <button
-            className="contact__act"
-            title={t("ai_summarize")}
-            data-testid="summarize-btn"
-            onClick={() => onSummarize(contact.pubkey)}
-          >
-            🧠
-          </button>
-        ) : null}
-        {onBlock ? (
-          <button className="contact__act" title={t("contact_block")} onClick={block}>🚫</button>
-        ) : null}
-        {onRemove ? (
-          <button className="contact__act" title={t("contact_remove")} onClick={remove}>🗑</button>
-        ) : null}
-      </span>
     </div>
   );
 }

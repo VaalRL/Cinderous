@@ -497,6 +497,13 @@ button:disabled { opacity: .5; cursor: default; filter: none; }
 .contact--compact { padding: 4px 10px; }
 .contact--compact .contact__name { flex: 1; }
 .contact--compact.offline .dot { opacity: 0.55; }
+/* 統一聯絡人列（ADR-0214）：兩行（名＋情境切換副線：末則預覽/正在聽/狀態訊息），單行 ellipsis。 */
+.contact__sec { font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.contact__sec-ic { color: #9a6cd4; }
+.contact--row.offline .dot { opacity: 0.55; }
+.contact--row.offline .contact__sec { opacity: 0.7; }
+/* 三欄清單內：統一列與群組列（.dsb__row）左右對齊，去掉 .contact 的側邊 margin。 */
+.dsb__list .contact { margin: 0; }
 .connbar { padding: 4px 10px; font-size: 11px; text-align: center; color: #fff; }
 .connbar--connecting { background: #d9932b; }
 .connbar--offline { background: #c0392b; }
@@ -696,6 +703,15 @@ button:disabled { opacity: .5; cursor: default; filter: none; }
 .group--groups { display: flex; align-items: center; justify-content: space-between; }
 .group__add { font-size: 10px; border: 1px solid var(--border); background: var(--field); color: var(--accent); border-radius: 6px; cursor: pointer; padding: 1px 5px; }
 .group__add:hover { background: var(--hover); }
+/* 可收合區塊標頭（ADR-0215）：▸/▾ 收合鈕＋標題；children（如 ＋建立群組）靠右。 */
+.group--head { display: flex; align-items: center; justify-content: space-between; }
+.group__collapse { display: flex; align-items: center; gap: 4px; flex: 1; min-width: 0; background: none; border: none; padding: 0; margin: 0; cursor: pointer; font: inherit; color: var(--accent); font-size: 11px; font-weight: 700; text-align: left; }
+.group__collapse:hover { color: var(--ink); }
+.group__tri { font-size: 9px; width: 10px; flex: none; }
+.group__title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* 排序切換列（ADR-0215）：依 狀態/分組/名稱。 */
+.sortbar { display: flex; align-items: center; gap: 4px; padding: 6px 8px 4px; flex-wrap: wrap; }
+.sortbar__label { font-size: 10px; color: var(--muted); font-weight: 700; }
 .group-row .avatar { font-weight: bold; }
 .pin-ic { font-size: 10px; margin-right: 3px; }
 .labelbar { display: flex; flex-wrap: wrap; gap: 4px; padding: 3px 8px 5px; }

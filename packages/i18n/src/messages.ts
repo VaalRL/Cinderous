@@ -665,6 +665,12 @@ export interface Messages {
   group_pin: string;
   group_unpin: string;
   group_filterAll: string;
+  sort_label: string;
+  sort_byStatus: string;
+  sort_byGroup: string;
+  sort_byName: string;
+  contactGroup_ungrouped: string;
+  contactGroup_all: string;
 }
 
 const zhHant: Messages = {
@@ -1282,6 +1288,12 @@ const zhHant: Messages = {
   group_pin: "置頂",
   group_unpin: "取消置頂",
   group_filterAll: "全部",
+  sort_label: "排序",
+  sort_byStatus: "依狀態",
+  sort_byGroup: "依分組",
+  sort_byName: "依名稱",
+  contactGroup_ungrouped: "未分組",
+  contactGroup_all: "全部",
 };
 
 const en: Messages = {
@@ -1899,6 +1911,12 @@ const en: Messages = {
   group_pin: "Pin",
   group_unpin: "Unpin",
   group_filterAll: "All",
+  sort_label: "Sort",
+  sort_byStatus: "By status",
+  sort_byGroup: "By group",
+  sort_byName: "By name",
+  contactGroup_ungrouped: "Ungrouped",
+  contactGroup_all: "All",
 };
 
 export const catalog: Record<Locale, Messages> = { "zh-Hant": zhHant, en };

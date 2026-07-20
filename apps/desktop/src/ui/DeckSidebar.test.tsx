@@ -71,7 +71,7 @@ describe("企業頭銜 chip（ADR-0158）", () => {
     const html = render({
       contacts: [{ pubkey: "p1", name: "Amy", status: "online", statusMessage: "", nowPlaying: "", title: "設計師" }],
     });
-    expect(html).toContain('data-testid="sidebar-title-chip"');
+    expect(html).toContain('data-testid="contact-title-chip"'); // ADR-0214：改用共用 ContactRow 的 chip
     expect(html).toContain("chip--role");
     expect(html).toContain("設計師");
   });

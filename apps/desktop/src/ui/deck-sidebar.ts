@@ -14,6 +14,17 @@ export interface SidebarEntry {
   labels: string[];
   /** 對方廣播的企業頭銜（ADR-0158；聯絡人才有）——顯示為 chip--role，與私標色彩區隔。 */
   title?: string;
+  /** 對方狀態訊息與正在聽（ADR-0214；聯絡人才有）——供統一列的情境切換副線。 */
+  statusMessage?: string;
+  nowPlaying?: string;
+}
+
+/** 某對話末則訊息的預覽文字（ADR-0214，經典/三欄共用）；檔案以 `📎 檔名` 佔位；無訊息回空字串。 */
+export function messagePreview(id: string, convos: Record<string, ChatMessage[]>): string {
+  const msgs = convos[id];
+  if (!msgs || msgs.length === 0) return "";
+  const last = msgs[msgs.length - 1]!;
+  return last.file ? `📎 ${last.file.name}` : last.text;
 }
 
 /** 某對話的最近互動時間＝其訊息中最大時間戳；無訊息回 0。 */
@@ -41,6 +52,8 @@ export function buildEntries(
     lastAt: lastInteraction(x.pubkey, convos),
     labels: labelsOf(prefs, x.pubkey),
     ...(x.title ? { title: x.title } : {}), // ADR-0158：企業頭銜
+    ...(x.statusMessage ? { statusMessage: x.statusMessage } : {}), // ADR-0214：狀態訊息上列
+    ...(x.nowPlaying ? { nowPlaying: x.nowPlaying } : {}),
   }));
   const g: SidebarEntry[] = groups.map((x) => ({
     id: x.id,

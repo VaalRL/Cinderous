@@ -2116,6 +2116,9 @@ export function App(): JSX.Element {
             activeLabel={labelFilter}
             onFilterLabel={setLabelFilter}
             onSelfAvatar={broadcastSelfAvatar}
+            {...(activeBackend.removeContact ? { onRemoveContact: removeContact } : {})}
+            {...(activeBackend.blockContact ? { onBlockContact: blockContact } : {})}
+            {...(ollama.enabled ? { onSummarize: summarizeUnread } : {})}
             {...addContactProps}
           />
         ) : (
@@ -2131,6 +2134,10 @@ export function App(): JSX.Element {
             unread={unread}
             {...(ollama.enabled ? { onSummarize: summarizeUnread } : {})}
             connection={conn}
+            convos={convos}
+            contactLabels={Object.fromEntries(contacts.map((c) => [c.pubkey, labelsOf(groupPrefs, c.pubkey)]))}
+            onAddContactLabel={(pk, label) => updatePrefs(withLabel(groupPrefs, pk, label))}
+            onRemoveContactLabel={(pk, label) => updatePrefs(withoutLabel(groupPrefs, pk, label))}
             {...addContactProps}
             {...manageProps}
             {...groupProps}

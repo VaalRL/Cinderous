@@ -3,8 +3,9 @@ import type { ChatMessage, Contact, Group, Self, Status } from "@cinderous/engin
 import { useI18n } from "../i18n.js";
 import { EditableAvatar } from "./Avatar.js";
 import { AddContact, StatusPicker } from "./ContactListWindow.js";
+import { ContactRow } from "./ContactRow.js";
 import { hasRichStatus, renderStatus } from "./status-text.js";
-import { buildEntries, type SidebarEntry, visibleEntries } from "./deck-sidebar.js";
+import { buildEntries, messagePreview, type SidebarEntry, visibleEntries } from "./deck-sidebar.js";
 import type { GroupPrefsMap } from "./group-labels.js";
 
 export interface DeckSidebarProps {
@@ -29,14 +30,12 @@ export interface DeckSidebarProps {
   onAddContact?: (npub: string) => void;
   /** 設定/移除自己的廣播頭像（ADR-0154）；三欄版過去連本地換圖入口都缺，一併補上。 */
   onSelfAvatar?: (uri: string | undefined) => boolean;
-}
-
-/** 某對話最後一則訊息的預覽文字（檔案訊息以佔位表示）。 */
-function preview(id: string, convos: Record<string, ChatMessage[]>): string {
-  const msgs = convos[id];
-  if (!msgs || msgs.length === 0) return "";
-  const last = msgs[msgs.length - 1]!;
-  return last.file ? `📎 ${last.file.name}` : last.text;
+  /** 刪除聯絡人（ADR-0214：統一列操作鈕，三欄版補上 🗑）。 */
+  onRemoveContact?: (pubkey: string) => void;
+  /** 封鎖聯絡人（ADR-0214：三欄版補上 🚫）。 */
+  onBlockContact?: (pubkey: string) => void;
+  /** 點開前以本機 AI 摘要未讀（ADR-0060/0214：三欄版補上 🧠，有未讀才顯示）。 */
+  onSummarize?: (pubkey: string) => void;
 }
 
 /** 三欄左側欄（ADR-0079 Q2）：聯絡人＋群組混合、最近互動排序、搜尋、標籤篩選、雙擊開對話。 */
@@ -144,25 +143,48 @@ export function DeckSidebar(props: DeckSidebarProps): JSX.Element {
 
       <div className="dsb__list" data-testid="sidebar-list">
         {entries.length === 0 ? <div className="dsb__empty">{t("sidebar_empty")}</div> : null}
-        {entries.map((e) => (
-          <DeckRow
-            key={e.id}
-            entry={e}
-            preview={preview(e.id, props.convos)}
-            unread={props.unread[e.id] ?? 0}
-            editing={labelEditId === e.id}
-            labelDraft={labelDraft}
-            onOpen={() => props.onOpen(e.id)}
-            onStartLabel={() => {
-              setLabelEditId(e.id);
-              setLabelDraft("");
-            }}
-            onLabelDraft={setLabelDraft}
-            onSubmitLabel={() => submitLabel(e.id)}
-            onCancelLabel={() => setLabelEditId(null)}
-            onRemoveLabel={(l) => props.onRemoveLabel(e.id, l)}
-          />
-        ))}
+        {entries.map((e) =>
+          e.kind === "contact" ? (
+            // ADR-0214：聯絡人列改用共用 ContactRow（與經典版同一份規格：情境切換副線＋統一操作鈕）。
+            <ContactRow
+              key={e.id}
+              id={e.id}
+              name={e.name}
+              status={e.status ?? "offline"}
+              unread={props.unread[e.id] ?? 0}
+              hint={t("contact_openHint")}
+              {...(e.statusMessage ? { statusMessage: e.statusMessage } : {})}
+              {...(e.nowPlaying ? { nowPlaying: e.nowPlaying } : {})}
+              preview={messagePreview(e.id, props.convos)}
+              {...(e.title ? { title: e.title } : {})}
+              labels={e.labels}
+              onOpen={props.onOpen}
+              {...(props.onRemoveContact ? { onRemove: props.onRemoveContact } : {})}
+              {...(props.onBlockContact ? { onBlock: props.onBlockContact } : {})}
+              {...(props.onSummarize ? { onSummarize: props.onSummarize } : {})}
+              onAddLabel={props.onAddLabel}
+              onRemoveLabel={props.onRemoveLabel}
+            />
+          ) : (
+            <DeckRow
+              key={e.id}
+              entry={e}
+              preview={messagePreview(e.id, props.convos)}
+              unread={props.unread[e.id] ?? 0}
+              editing={labelEditId === e.id}
+              labelDraft={labelDraft}
+              onOpen={() => props.onOpen(e.id)}
+              onStartLabel={() => {
+                setLabelEditId(e.id);
+                setLabelDraft("");
+              }}
+              onLabelDraft={setLabelDraft}
+              onSubmitLabel={() => submitLabel(e.id)}
+              onCancelLabel={() => setLabelEditId(null)}
+              onRemoveLabel={(l) => props.onRemoveLabel(e.id, l)}
+            />
+          ),
+        )}
       </div>
     </div>
   );
