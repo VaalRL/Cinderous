@@ -176,6 +176,18 @@ export function assetManifestBytes(manifest: AssetManifest): number {
 }
 
 /**
+ * 找出文字尾端「正在打的」自訂 emoji 短碼片段（供 `:` 自動補全；ADR-0220）。
+ * 需 `:` 位於開頭或非英數字元之後（避免 `10:30` 之類誤觸），其後至少一個合法短碼字元、
+ * 且尚未打出結尾 `:`。回傳 `{ query, start }`（start＝`:` 的索引）；不在補全情境回 null。
+ */
+export function activeEmojiQuery(text: string): { query: string; start: number } | null {
+  const m = /(?:^|[^A-Za-z0-9])(:[A-Za-z0-9][A-Za-z0-9_+-]*)$/.exec(text);
+  const token = m?.[1];
+  if (token === undefined) return null;
+  return { query: token.slice(1), start: text.length - token.length };
+}
+
+/**
  * 收到自動收藏＋LRU 淘汰（ADR-0220）。把 `incoming` 併入 `library`：最近收到者置於前端
  * （前＝最新），同 `id`（內容雜湊）者移到最前並刷新（保留 incoming 版本的標籤/短碼），
  * 不重複。超過 `max` 時，從尾端淘汰「未受保護」者；`protect`（通常＝最愛或自建）永不淘汰，

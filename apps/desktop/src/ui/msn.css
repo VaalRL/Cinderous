@@ -612,6 +612,11 @@ button:disabled { opacity: .5; cursor: default; filter: none; }
 .menbar__item { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); color: var(--ink); font-size: 12px; padding: 2px 8px 2px 3px; cursor: pointer; flex: none; }
 .menbar__item.on, .menbar__item:hover { border-color: var(--accent); background: var(--hover); }
 .menbar__avatar { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 50%; color: #fff; font-size: 11px; font-weight: 700; }
+/* :自訂 emoji 短碼自動補全（ADR-0220）：與 trigbar/menbar 同風格。 */
+.emojibar { display: flex; align-items: center; gap: 6px; padding: 4px 8px; background: var(--surface2); border-top: 1px solid var(--border); overflow-x: auto; }
+.emojibar__item { display: inline-flex; align-items: center; gap: 4px; border: 1px solid var(--border); border-radius: 6px; background: var(--panel); color: var(--ink); font-size: 11px; padding: 2px 6px; cursor: pointer; flex: none; }
+.emojibar__item img { width: 20px; height: 20px; }
+.emojibar__item.on, .emojibar__item:hover { border-color: var(--accent); background: var(--hover); }
 .member__row { display: flex; align-items: center; gap: 8px; padding: 4px 2px; font-size: 13px; }
 .member__name { flex: 1; color: var(--ink); }
 .member__remove { border: 1px solid var(--border); background: var(--field); color: var(--muted); border-radius: 10px; width: 18px; height: 18px; line-height: 14px; font-size: 11px; cursor: pointer; padding: 0; }

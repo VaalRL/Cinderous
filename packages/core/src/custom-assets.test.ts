@@ -4,6 +4,7 @@ import {
   ASSET_MANIFEST_MAX_COUNT,
   ASSET_MANIFEST_PREFIX,
   acquireAssets,
+  activeEmojiQuery,
   appendAssetManifest,
   assetFromManifestEntry,
   assetManifestBytes,
@@ -184,5 +185,27 @@ describe("收到自動收藏＋LRU 淘汰（acquireAssets）", () => {
     const snapshot = [...lib];
     acquireAssets(lib, [asset("b")], { max: 10 });
     expect(lib).toEqual(snapshot);
+  });
+});
+
+describe("行內 : 自動補全的作用中短碼（activeEmojiQuery）", () => {
+  it("抓文字尾端正在打的 :query", () => {
+    expect(activeEmojiQuery("嗨 :par")).toEqual({ query: "par", start: 2 });
+    expect(activeEmojiQuery(":smile")).toEqual({ query: "smile", start: 0 });
+    expect(activeEmojiQuery("(:cat")).toEqual({ query: "cat", start: 1 });
+  });
+
+  it("結尾已是完整 :shortcode:（含結尾冒號）不再補全", () => {
+    expect(activeEmojiQuery("嗨 :party:")).toBeNull();
+  });
+
+  it("避免誤觸：時間 10:30、單字內 a:b、空 : 皆不補全", () => {
+    expect(activeEmojiQuery("時間 10:30")).toBeNull();
+    expect(activeEmojiQuery("email a:b")).toBeNull();
+    expect(activeEmojiQuery("嗨 :")).toBeNull();
+  });
+
+  it("只認尾端片段（前面已完成者不影響）", () => {
+    expect(activeEmojiQuery(":done: 再打 :ne")).toEqual({ query: "ne", start: 10 });
   });
 });

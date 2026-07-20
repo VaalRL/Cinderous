@@ -110,3 +110,53 @@ describe("emoji 挑選器分頁（ADR-0220，步驟 3）", () => {
     m.unmount();
   });
 });
+
+const seedEmoji = (): void =>
+  localStorage.setItem(
+    "nb.stickers.custom",
+    JSON.stringify([{ id: contentHash(smiley), label: "派對", svg: smiley, kind: "both", shortcode: "party" }]),
+  );
+
+const typeInComposer = async (m: { container: HTMLElement }, val: string): Promise<void> => {
+  const el = m.container.querySelector("textarea");
+  const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value")!.set!;
+  await act(async () => {
+    if (el) setter.call(el, val);
+    el?.dispatchEvent(new Event("input", { bubbles: true }));
+  });
+};
+
+describe(": 自訂 emoji 短碼自動補全（ADR-0220，步驟 4）", () => {
+  it("打 :par → 出現候選列、點選插入 :party:", async () => {
+    localStorage.clear();
+    seedEmoji();
+    const m = mount(render([]));
+    await typeInComposer(m, "嗨 :par");
+    const bar = m.container.querySelector('[data-testid="emoji-bar"]');
+    expect(bar).not.toBeNull();
+    expect(bar?.textContent ?? "").toContain(":party:");
+    await act(async () => {
+      bar?.querySelector(".emojibar__item")?.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    });
+    expect(m.container.querySelector("textarea")?.value ?? "").toBe("嗨 :party:");
+    m.unmount();
+  });
+
+  it("無比對短碼時不出現候選列", async () => {
+    localStorage.clear();
+    seedEmoji();
+    const m = mount(render([]));
+    await typeInComposer(m, "嗨 :zzz");
+    expect(m.container.querySelector('[data-testid="emoji-bar"]')).toBeNull();
+    m.unmount();
+  });
+
+  it("完整 :party:（已含結尾冒號）不再跳候選", async () => {
+    localStorage.clear();
+    seedEmoji();
+    const m = mount(render([]));
+    await typeInComposer(m, "嗨 :party:");
+    expect(m.container.querySelector('[data-testid="emoji-bar"]')).toBeNull();
+    m.unmount();
+  });
+});

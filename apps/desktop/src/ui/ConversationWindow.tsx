@@ -27,6 +27,7 @@ import {
   STICKER_PACKS,
   stickerSvg,
   svgToDataUri,
+  activeEmojiQuery,
   appendAssetManifest,
   assetFromManifestEntry,
   assetManifestBytes,
@@ -447,6 +448,9 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
   /** @提及建議（ADR-0050）。 */
   const [menSel, setMenSel] = useState(0);
   const [menDismissed, setMenDismissed] = useState(false);
+  /** :自訂 emoji 短碼自動補全（ADR-0220，步驟 4）。 */
+  const [emojiSel, setEmojiSel] = useState(0);
+  const [emojiDismissed, setEmojiDismissed] = useState(false);
   /** 對話串面板（ADR-0051）：開啟中的串根訊息 id（null＝未開）。 */
   const [threadRoot, setThreadRoot] = useState<string | null>(null);
   const [threadText, setThreadText] = useState("");
@@ -836,6 +840,26 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
   const acceptMention = (cand: MentionCandidate): void => {
     setText(applyMention(text, menSuggest!, cand));
     setMenSel(0);
+  };
+
+  // :自訂 emoji 短碼自動補全（ADR-0220）：尾端 :query → 依短碼前綴比對本機庫（企業停用時不補全）。
+  const emojiSuggest = !props.stickersDisabled && !emojiDismissed ? activeEmojiQuery(text) : null;
+  const emojiMatches: CustomSticker[] = emojiSuggest
+    ? library
+        .filter((a) => a.shortcode && a.shortcode.toLowerCase().startsWith(emojiSuggest.query.toLowerCase()))
+        .slice(0, 8)
+    : [];
+  const emojiActive = Math.min(emojiSel, Math.max(emojiMatches.length - 1, 0));
+  const acceptEmoji = (a: CustomSticker): void => {
+    if (!emojiSuggest || !a.shortcode) return;
+    const next = text.slice(0, emojiSuggest.start) + `:${a.shortcode}:`;
+    setText(next);
+    setEmojiSel(0);
+    const el = composerRef.current;
+    requestAnimationFrame(() => {
+      el?.focus();
+      el?.setSelectionRange(next.length, next.length);
+    });
   };
 
   // 送出前附上行內自訂 emoji 資產清單（ADR-0220）；超過每則預算回 null（呼叫端提示）。
@@ -1548,6 +1572,27 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
         </div>
       ) : null}
 
+      {emojiMatches.length > 0 ? (
+        <div className="emojibar" data-testid="emoji-bar">
+          {emojiMatches.map((a, i) => (
+            <button
+              key={a.id}
+              type="button"
+              className={`emojibar__item${i === emojiActive ? " on" : ""}`}
+              title={`:${a.shortcode}:`}
+              onMouseDown={(e) => {
+                e.preventDefault(); // 避免 textarea 失焦
+                acceptEmoji(a);
+              }}
+            >
+              <img src={svgToDataUri(a.svg)} alt="" />
+              <span>:{a.shortcode}:</span>
+            </button>
+          ))}
+          <span className="trigbar__hint">{t("emoji_hint")}</span>
+        </div>
+      ) : null}
+
       {trigMatches.length > 0 ? (
         <div className="trigbar" data-testid="trigger-bar">
           {trigMatches.map((m, i) => {
@@ -1599,6 +1644,8 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
             setTrigDismissed(false);
             setMenSel(0);
             setMenDismissed(false);
+            setEmojiSel(0);
+            setEmojiDismissed(false);
             props.onTyping();
           }}
           onPaste={(e) => {
@@ -1633,6 +1680,23 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
               }
               if (e.key === "Escape") {
                 setMenDismissed(true);
+                return;
+              }
+            }
+            if (emojiMatches.length > 0) {
+              if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
+                e.preventDefault();
+                acceptEmoji(emojiMatches[emojiActive]!);
+                return;
+              }
+              if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+                e.preventDefault();
+                const delta = e.key === "ArrowDown" ? 1 : -1;
+                setEmojiSel((emojiActive + delta + emojiMatches.length) % emojiMatches.length);
+                return;
+              }
+              if (e.key === "Escape") {
+                setEmojiDismissed(true);
                 return;
               }
             }

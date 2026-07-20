@@ -576,6 +576,7 @@ export interface Messages {
   emoji_shortcodePrompt: string;
   emoji_empty: string;
   emoji_insert: string;
+  emoji_hint: string;
   editor_title: string;
   editor_new: string;
   editor_fromBase: string;
@@ -1224,6 +1225,7 @@ const zhHant: Messages = {
   emoji_shortcodePrompt: "為這顆 emoji 取一個短碼（之後打 :短碼: 使用）",
   emoji_empty: "還沒有自訂 emoji。按＋匯入圖片並指定短碼。",
   emoji_insert: "插入 {code}",
+  emoji_hint: "↵/Tab 插入 · ↑↓ 選擇 · Esc 關閉",
   editor_title: "貼圖編輯器",
   editor_new: "繪製新貼圖",
   editor_fromBase: "以此貼圖為底繪製",
@@ -1867,6 +1869,7 @@ const en: Messages = {
   emoji_shortcodePrompt: "Name a shortcode for this emoji (type :code: to use it)",
   emoji_empty: "No custom emoji yet. Tap + to import an image and set a shortcode.",
   emoji_insert: "Insert {code}",
+  emoji_hint: "↵/Tab insert · ↑↓ choose · Esc close",
   editor_title: "Sticker editor",
   editor_new: "Draw a new sticker",
   editor_fromBase: "Draw on this sticker",
