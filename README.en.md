@@ -23,7 +23,7 @@ Dual-track hybrid network (dynamically switching by connection state):
 
 | Engine | Technology | Role |
 | --- | --- | --- |
-| **Engine A: State & Signaling** | Nostr protocol (Cloudflare Workers + D1) | Offline message buffering, online status broadcasting, WebRTC initial SDP signaling exchange |
+| **Engine A: State & Signaling** | Nostr protocol (Cloudflare Workers; SQLite-backed Durable Objects) | Offline message buffering, online status broadcasting, WebRTC initial SDP signaling exchange |
 | **Engine B: Bulk Data Transfer** | WebRTC direct connection (P2P) | Real-time interaction: nudges (Nudge), animation delivery, large file transfer—bypassing the relay to achieve millisecond-level latency |
 
 The data lifecycle relies on **NIP-40** (7-day expiration) and **Ephemeral Events** (Kind 20000-29999, pure in-memory forwarding, not written to the database), ensuring that Cloudflare's permanent free tier is never exhausted.
@@ -47,7 +47,7 @@ For the full technical specification see [`PRD.md`](./PRD.md), and for module bo
 │   └── mobile/         # React Native + SQLite（輔助平台，預留）
 ├── packages/
 │   └── core/           # 共用 TS：Nostr 事件、secp256k1 簽章、NIP-44/17/59、型別、Kind 常數
-├── relay/              # Cloudflare Worker（Nostr 中繼站；Durable Objects 扇出，離線留言預留 D1）
+├── relay/              # Cloudflare Worker（Nostr 中繼站；Durable Objects 扇出，離線留言預留 DO SQLite）
 ├── docs/adr/           # 架構決策紀錄（ADR）
 └── claude/             # AI 協作規範與開發指南
 ```
@@ -118,7 +118,7 @@ The relay (`relay/`) is a self-built minimal Nostr relay running on Cloudflare W
 
 - **Online status broadcasting** (heartbeat Kind 20000), **typing indicator** (20001), **music status** (20002);
 - **WebRTC SDP / ICE signaling exchange** (NIP-59-wrapped ephemeral events, Kind 21000-21999);
-- **Offline message** buffering (NIP-17/59 Gift Wrap + NIP-40 expiration; the `message-store` logic is implemented and tested—per-recipient quota, indexed by `#p`. Persistence: the Cloudflare version connects to D1, the Node self-hosted version uses built-in SQL).
+- **Offline message** buffering (NIP-17/59 Gift Wrap + NIP-40 expiration; the `message-store` logic is implemented and tested—per-recipient quota, indexed by `#p`. Persistence: the Cloudflare version uses a SQLite-backed Durable Object (`new_sqlite_classes`), the Node self-hosted version uses built-in SQL).
 
 > Once WebRTC P2P is established, **data such as nudges and file transfers travels entirely peer-to-peer and never passes through the relay**.
 > Ephemeral events are only forwarded in memory and never land on disk; the relay cannot see the message plaintext, nor the (Gift Wrap-hidden) social graph.
@@ -179,10 +179,10 @@ The desktop/frontend can set this `wss://` address as its connection endpoint (s
 Ephemeral heartbeats fan out as the number of online users grows; please refer to the capacity estimates in [`docs/adr/0006`](./docs/adr/0006-heartbeat-capacity-and-free-tier.md)
 (the free tier can support roughly a few dozen concurrent users, and it lists tunable knobs such as heartbeat interval / coalescing / jitter).
 
-### Adding Offline Messages (D1, next step)
+### Adding Offline Messages (DO SQLite, next step)
 
-Offline messages require persistence. Add a D1 binding in `wrangler.toml`, and in `worker.ts` connect
-`RelayCore` to a `MessageStore` backed by D1 (the behavior is already defined and tested by `relay/src/message-store.ts`:
+Offline messages require persistence. The DO is already SQLite-backed (`new_sqlite_classes` in `wrangler.toml`); in `worker.ts` connect
+`RelayCore` to a `MessageStore` backed by DO SQLite (the behavior is already defined and tested by `relay/src/message-store.ts`:
 NIP-40 expiration, per-recipient quota, indexed by `#p`). For details see
 [`docs/adr/0005`](./docs/adr/0005-relay-self-built-worker.md).
 
