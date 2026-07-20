@@ -129,6 +129,17 @@ describe("ADR-0146：登入名稱命中本機既有身分", () => {
   it("未提供 lookupName（示範/無登錄）→ 維持建新流程（不顯示登入既有提示）", () => {
     expect(render({ requirePassword: true })).not.toContain('data-testid="signin-enter-existing"');
   });
+
+  it("名稱是新的（create）且已輸入 → 顯示「將建立新身分」提示＋按鈕改「建立新身分」（ADR-0218）", () => {
+    const html = render({ initialName: "新名字", lookupName: () => "create" });
+    expect(html).toContain('data-testid="signin-create-new"');
+    expect(html).toContain("建立新身分"); // 提示與按鈕都應出現
+    expect(html).not.toContain('data-testid="signin-enter-existing"');
+  });
+
+  it("名稱空白 → 不顯示建新提示（避免還沒打字就跳）", () => {
+    expect(render({ lookupName: () => "create" })).not.toContain('data-testid="signin-create-new"');
+  });
 });
 
 describe("ADR-0156：登入畫面貼入職邀請碼 → 加入組織面板", () => {

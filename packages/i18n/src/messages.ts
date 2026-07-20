@@ -39,6 +39,8 @@ export interface Messages {
   /** ADR-0146：登入名稱命中本機既有身分。 */
   signIn_enterExisting: string;
   signIn_enterExistingHint: string;
+  signIn_createHint: string;
+  signIn_createButton: string;
   signIn_ambiguousName: string;
   // ── 行動端登入（ADR-0081）：nsec 匯入（A）＋配對匯入（B）──
   mobileSignIn_title: string;
@@ -710,6 +712,8 @@ const zhHant: Messages = {
   signIn_button: "登入",
   signIn_enterExisting: "登入既有身分",
   signIn_enterExistingHint: "本機已有這個名稱的身分，將直接登入「{name}」（若有本地密碼會請你解鎖）。",
+  signIn_createHint: "這個名稱是新的，將建立新身分（本機生成金鑰）。",
+  signIn_createButton: "建立新身分",
   signIn_ambiguousName: "本機有多個同名身分（可能是舊資料），無法自動判斷。請改用「用 nsec 登入」，或稍後在設定裡改名區分。",
   mobileSignIn_title: "用私鑰登入",
   mobileSignIn_nameLabel: "顯示名稱",
@@ -1345,6 +1349,8 @@ const en: Messages = {
   signIn_button: "Sign in",
   signIn_enterExisting: "Sign in to existing identity",
   signIn_enterExistingHint: "An identity with this name already exists on this device; you'll sign in to \"{name}\" (you'll be asked to unlock if it has a local password).",
+  signIn_createHint: "This name is new — a new identity will be created (key generated on your device).",
+  signIn_createButton: "Create new identity",
   signIn_ambiguousName: "Multiple identities on this device share this name (likely old data), so it can't be resolved automatically. Use \"Sign in with nsec\" instead, or rename them later in Settings.",
   mobileSignIn_title: "Sign in with secret key",
   mobileSignIn_nameLabel: "Display name",

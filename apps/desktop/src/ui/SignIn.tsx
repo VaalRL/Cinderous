@@ -312,6 +312,10 @@ export function SignIn({
                 : t("signIn_enterExistingHint", { name: name.trim() })}
             </p>
           ) : null}
+          {/* ADR-0218：名稱是新的（沒用過）→ 明示「將建立新身分」，與「登入既有」對稱、消除誤解。 */}
+          {!invite && !entering && name.trim() ? (
+            <p className="hint signin__createhint" data-testid="signin-create-new">{t("signIn_createHint")}</p>
+          ) : null}
           {invite || entering ? null : showRelay ? (
             <div className="signin__relay" data-testid="relay-field">
               <input
@@ -384,7 +388,7 @@ export function SignIn({
           ) : null}
 
           {invite ? null : (
-            <button onClick={submit}>{entering ? t("signIn_enterExisting") : t("signIn_button")}</button>
+            <button onClick={submit}>{entering ? t("signIn_enterExisting") : t("signIn_createButton")}</button>
           )}
 
           {/* 用既有 nsec 登入（ADR-0122）：忘記密碼、或在舊版被換掉身分的人的出路。 */}
