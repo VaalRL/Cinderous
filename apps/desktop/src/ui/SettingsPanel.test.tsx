@@ -253,6 +253,19 @@ describe("通知音效下拉（ADR-0149）", () => {
     const { onSelectNotifyChime: _drop, ...noSelect } = base;
     expect(render(noSelect)).not.toContain('data-testid="notify-chime-select"');
   });
+
+  it("提供 notifyEvents → 顯示「要通知哪些事件」子區與各事件開關（ADR-0217）", () => {
+    const out = render({
+      ...base,
+      notifyEvents: { dm: true, group: true, mention: true, nudge: true, call: true, request: false, reaction: false },
+      onToggleNotifyEvent: () => {},
+    });
+    expect(out).toContain('data-testid="notify-events"');
+    expect(out).toContain("要通知哪些事件");
+    expect(out).toContain('data-testid="notify-event-dm"');
+    expect(out).toContain('data-testid="notify-event-mention"');
+    expect(out).toContain('data-testid="notify-event-request"');
+  });
 });
 
 describe("視窗外框設定（ADR-0150）", () => {

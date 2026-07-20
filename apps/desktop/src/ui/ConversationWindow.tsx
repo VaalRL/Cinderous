@@ -261,6 +261,9 @@ export interface ConversationProps {
   p2pConnected?: boolean;
   /** 浮動視窗（ADR-0216）：經典佈局右側自由拖曳/縮放/置頂；提供時套用絕對定位與拖放把手。 */
   floating?: FloatingWindow;
+  /** 此對話是否已靜音（ADR-0217）；提供 onToggleMute 才顯示 🔕 入口。 */
+  muted?: boolean;
+  onToggleMute?: () => void;
   /** 發起語音/視訊通話（未提供則不顯示通話按鈕）。 */
   onStartCall?: (media: CallMedia) => void;
   /** 群組模式：以發送者公鑰解析顯示暱稱（提供即為群組視窗）。 */
@@ -813,6 +816,18 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
             onClick={() => setSoundEditing((v) => !v)}
           >
             🔔
+          </span>
+        ) : null}
+        {props.onToggleMute ? (
+          <span
+            className={`win__btn convo__mute${props.muted ? " on" : ""}`}
+            role="button"
+            data-testid="convo-mute"
+            title={props.muted ? t("convo_unmute") : t("convo_mute")}
+            aria-label={props.muted ? t("convo_unmute") : t("convo_mute")}
+            onClick={props.onToggleMute}
+          >
+            {props.muted ? "🔕" : "🔔"}
           </span>
         ) : null}
         <span className="spacer" />

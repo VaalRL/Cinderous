@@ -9,7 +9,7 @@ import type { SlotItem } from "./slot-queue.js";
 import { placeControl, type ControlId, TITLEBAR_STYLES } from "./titlebar-controls.js";
 import { useTitlebar } from "../titlebar.js";
 import { qrSvg } from "../qr.js";
-import type { CloudSyncMode } from "@cinderous/engine";
+import type { CloudSyncMode, NotifyPrefs } from "@cinderous/engine";
 import {
   type AiProvider,
   hasApiKey,
@@ -84,6 +84,9 @@ export interface SettingsPanelProps {
   /** 通知隱藏內文預覽（ADR-0076）；未提供則不顯示該子開關。 */
   notifyHidePreview?: boolean;
   onToggleNotifyHidePreview?: () => void;
+  /** 各事件通知開關（ADR-0217）；未提供則不顯示該子區。 */
+  notifyEvents?: NotifyPrefs;
+  onToggleNotifyEvent?: (ev: keyof NotifyPrefs) => void;
   readReceipts?: boolean;
   onToggleReadReceipts?: () => void;
   /** 訊息保留上限（ADR-0094）；未提供則不顯示。`cap` 0＝無上限。 */
@@ -1183,6 +1186,36 @@ export function SettingsPanel(props: SettingsPanelProps): JSX.Element {
                 />
                 <span>{t("settings_notifyHidePreview")}</span>
               </label>
+            ) : null}
+            {/* ADR-0217：要通知哪些事件（總開關開時才顯示）。 */}
+            {props.notifications && props.notifyEvents && props.onToggleNotifyEvent ? (
+              <div className="settings__subsec" data-testid="notify-events">
+                <div className="settings__subhead">{t("settings_notifyEvents")}</div>
+                <label className="settings__toggle">
+                  <input type="checkbox" data-testid="notify-event-dm" checked={props.notifyEvents.dm} onChange={() => props.onToggleNotifyEvent!("dm")} />
+                  <span>{t("notify_event_dm")}</span>
+                </label>
+                <label className="settings__toggle">
+                  <input type="checkbox" data-testid="notify-event-group" checked={props.notifyEvents.group} onChange={() => props.onToggleNotifyEvent!("group")} />
+                  <span>{t("notify_event_group")}</span>
+                </label>
+                <label className="settings__toggle">
+                  <input type="checkbox" data-testid="notify-event-mention" checked={props.notifyEvents.mention} onChange={() => props.onToggleNotifyEvent!("mention")} />
+                  <span>{t("notify_event_mention")}</span>
+                </label>
+                <label className="settings__toggle">
+                  <input type="checkbox" data-testid="notify-event-nudge" checked={props.notifyEvents.nudge} onChange={() => props.onToggleNotifyEvent!("nudge")} />
+                  <span>{t("notify_event_nudge")}</span>
+                </label>
+                <label className="settings__toggle">
+                  <input type="checkbox" data-testid="notify-event-call" checked={props.notifyEvents.call} onChange={() => props.onToggleNotifyEvent!("call")} />
+                  <span>{t("notify_event_call")}</span>
+                </label>
+                <label className="settings__toggle">
+                  <input type="checkbox" data-testid="notify-event-request" checked={props.notifyEvents.request} onChange={() => props.onToggleNotifyEvent!("request")} />
+                  <span>{t("notify_event_request")}</span>
+                </label>
+              </div>
             ) : null}
           </section>
           ) : null}

@@ -223,6 +223,38 @@ describe("P2P 直連品質晶片（ADR-0213）", () => {
   });
 });
 
+describe("每對話靜音（ADR-0217）", () => {
+  const renderMute = (extra: Record<string, unknown>) =>
+    renderToStaticMarkup(
+      <I18nProvider locale="zh-Hant">
+        <ThemeProvider>
+          <ConversationWindow
+            self={self}
+            contact={contact}
+            messages={[]}
+            typing={false}
+            nudgeSignal={0}
+            onSend={() => {}}
+            onTyping={() => {}}
+            onNudge={() => {}}
+            onClose={() => {}}
+            {...extra}
+          />
+        </ThemeProvider>
+      </I18nProvider>,
+    );
+
+  it("提供 onToggleMute → 顯示靜音入口；muted 時顯示 🔕", () => {
+    const on = renderMute({ onToggleMute: () => {}, muted: true });
+    expect(on).toContain('data-testid="convo-mute"');
+    expect(on).toContain("🔕");
+  });
+
+  it("未提供 onToggleMute → 無靜音入口", () => {
+    expect(renderMute({})).not.toContain('data-testid="convo-mute"');
+  });
+});
+
 describe("浮動視窗（ADR-0216）", () => {
   const floating = {
     style: { position: "absolute" as const, left: 10, top: 20, width: 400, height: 500, zIndex: 3 },

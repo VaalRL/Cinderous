@@ -408,6 +408,17 @@ export interface Messages {
   titlebarStyle_compact: string;
   settings_notifyHidePreview: string;
   notify_newMessage: string;
+  notify_nudge: string;
+  notify_call: string;
+  settings_notifyEvents: string;
+  notify_event_dm: string;
+  notify_event_group: string;
+  notify_event_mention: string;
+  notify_event_nudge: string;
+  notify_event_call: string;
+  notify_event_request: string;
+  convo_mute: string;
+  convo_unmute: string;
   settings_close: string;
   unread_title: string;
   conn_connecting: string;
@@ -1045,6 +1056,17 @@ const zhHant: Messages = {
   titlebarStyle_compact: "精簡",
   settings_notifyHidePreview: "隱藏內文預覽（只顯示有新訊息）",
   notify_newMessage: "有新訊息",
+  notify_nudge: "敲了你一下",
+  notify_call: "來電",
+  settings_notifyEvents: "要通知哪些事件",
+  notify_event_dm: "私訊",
+  notify_event_group: "群組訊息",
+  notify_event_mention: "有人 @我（群組關也通知）",
+  notify_event_nudge: "敲一敲",
+  notify_event_call: "來電",
+  notify_event_request: "陌生人訊息請求",
+  convo_mute: "靜音此對話",
+  convo_unmute: "取消靜音",
   settings_close: "關閉",
   unread_title: "{count} 則未讀",
   conn_connecting: "連線中…",
@@ -1669,6 +1691,17 @@ const en: Messages = {
   titlebarStyle_compact: "Compact",
   settings_notifyHidePreview: "Hide message preview (show only \"New message\")",
   notify_newMessage: "New message",
+  notify_nudge: "Nudged you",
+  notify_call: "Incoming call",
+  settings_notifyEvents: "Which events to notify",
+  notify_event_dm: "Direct messages",
+  notify_event_group: "Group messages",
+  notify_event_mention: "When @mentioned (even if group off)",
+  notify_event_nudge: "Nudge",
+  notify_event_call: "Incoming call",
+  notify_event_request: "Stranger message requests",
+  convo_mute: "Mute this conversation",
+  convo_unmute: "Unmute",
   settings_close: "Close",
   unread_title: "{count} unread",
   conn_connecting: "Connecting…",

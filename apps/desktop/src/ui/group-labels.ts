@@ -4,10 +4,12 @@
 // 完全解耦——群組成員/名稱由後端權威維護，這裡只疊加使用者個人的檢視偏好。
 // 持久化寫法對齊 url-hygiene.ts（直接用 localStorage，node 測試以 stub 覆蓋）。
 
-/** 單一群組的本地偏好。 */
+/** 單一對話（群組或聯絡人）的本地偏好。 */
 export interface GroupPrefs {
   labels: string[];
   pinned: boolean;
+  /** 每對話靜音（ADR-0217）：此對話不跳通知（仍收訊、仍算未讀）。舊資料無此欄＝未靜音。 */
+  muted?: boolean;
 }
 
 /** groupId → 偏好。未出現的群組視為無標籤、未置頂。 */
@@ -54,6 +56,16 @@ export function withoutLabel(map: GroupPrefsMap, id: string, label: string): Gro
 /** 設定置頂狀態；回傳新 map。 */
 export function withPinned(map: GroupPrefsMap, id: string, pinned: boolean): GroupPrefsMap {
   return { ...map, [id]: { ...entry(map, id), pinned } };
+}
+
+/** 某對話是否靜音（ADR-0217：不跳通知）。預設否。 */
+export function isMuted(map: GroupPrefsMap, id: string): boolean {
+  return map[id]?.muted ?? false;
+}
+
+/** 設定靜音狀態；回傳新 map。 */
+export function withMuted(map: GroupPrefsMap, id: string, muted: boolean): GroupPrefsMap {
+  return { ...map, [id]: { ...entry(map, id), muted } };
 }
 
 /** 清除某群組的所有偏好（離開/解散時呼叫，避免殘留）。 */

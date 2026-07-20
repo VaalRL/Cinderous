@@ -25,6 +25,7 @@ import { listen } from "@tauri-apps/api/event";
 import { useEffect, useRef, useState } from "react";
 import { BrowserChatBackend } from "@cinderous/engine";
 import { normalizeRelayUrl, RelayChatBackend, shouldMuteOrgNotification, webSocketConnector } from "@cinderous/engine";
+import { DEFAULT_NOTIFY_PREFS, type NotifyPrefs, shouldNotify } from "@cinderous/engine";
 import { browserStore } from "./native/browser-store.js";
 import { safeNsecDecode } from "./nsec.js";
 import { getKeyVault } from "./native/keyvault.js";
@@ -94,11 +95,13 @@ import {
   allLabels,
   arrangeGroups,
   type GroupPrefsMap,
+  isMuted,
   labelsOf,
   loadGroupPrefs,
   pruneGroup,
   saveGroupPrefs,
   withLabel,
+  withMuted,
   withoutLabel,
   withPinned,
 } from "./ui/group-labels.js";
@@ -164,6 +167,7 @@ const NOTIFY_SOUND_KEY = "nb.notifySound";
 // 全域通知音效（ADR-0149）：合成預設集 id；未設＝經典叮咚。
 const NOTIFY_CHIME_KEY = "nb.notifyChime";
 const NOTIFY_PREVIEW_KEY = "nb.notifyHidePreview";
+const NOTIFY_EVENTS_KEY = "nb.notifyEvents"; // ADR-0217：各事件通知開關
 const READ_RECEIPTS_KEY = "nb.readReceipts";
 // 企業主首次進入自動開名冊管理（ADR-0155）：建立時寫入、開啟一次即清除（跨 Tauri reload）。
 const ROSTER_INTRO_PREFIX = "nb.rosterIntro.";
@@ -533,6 +537,26 @@ export function App(): JSX.Element {
       return false;
     }
   });
+  // 各事件通知開關（ADR-0217）；與舊 blob 合併 DEFAULT 以相容新增鍵。
+  const [notifyPrefs, setNotifyPrefs] = useState<NotifyPrefs>(() => {
+    try {
+      const raw = localStorage.getItem(NOTIFY_EVENTS_KEY);
+      return raw ? { ...DEFAULT_NOTIFY_PREFS, ...(JSON.parse(raw) as Partial<NotifyPrefs>) } : DEFAULT_NOTIFY_PREFS;
+    } catch {
+      return DEFAULT_NOTIFY_PREFS;
+    }
+  });
+  const toggleNotifyEvent = (ev: keyof NotifyPrefs): void => {
+    setNotifyPrefs((prev) => {
+      const next = { ...prev, [ev]: !prev[ev] };
+      try {
+        localStorage.setItem(NOTIFY_EVENTS_KEY, JSON.stringify(next));
+      } catch {
+        /* 配額/不可用忽略 */
+      }
+      return next;
+    });
+  };
   const [notifySound, setNotifySound] = useState<boolean>(() => {
     try {
       return localStorage.getItem(NOTIFY_SOUND_KEY) !== "0"; // 預設開
@@ -631,6 +655,9 @@ export function App(): JSX.Element {
   notifyChimeRef.current = notifyChime;
   const notifyHidePreviewRef = useRef(notifyHidePreview);
   notifyHidePreviewRef.current = notifyHidePreview;
+  // ADR-0217：各事件通知開關與每對話靜音也走通知閉包 → ref。
+  const notifyPrefsRef = useRef(notifyPrefs);
+  notifyPrefsRef.current = notifyPrefs;
   const contactsRef = useRef(contacts);
   contactsRef.current = contacts;
   // ADR-0157：通知路徑（onMessage 閉包）要讀最新組織資訊 → ref。
@@ -683,6 +710,8 @@ export function App(): JSX.Element {
   }, [backend, profilesState.active]);
   const groupsRef = useRef(groups);
   groupsRef.current = groups;
+  const groupPrefsRef = useRef(groupPrefs); // ADR-0217：每對話靜音查詢（onMessage 閉包）
+  groupPrefsRef.current = groupPrefs;
   const requestsRef = useRef(requests);
   requestsRef.current = requests;
   const tRef = useRef(t);
@@ -849,39 +878,46 @@ export function App(): JSX.Element {
           if (convoVisibleIn(layoutRef.current, activeConvoRef.current, pk, hidden)) {
             backend.clearUnread?.(pk);
           }
-          if (hidden && notifyRef.current) {
-            // 標題＝該對話（群組/聯絡人）顯示名；隱藏預覽時只顯示提示語，
-            // 群組訊息在內文前綴傳訊者名（ADR-0076）。以 ref 取現值避免 [backend] 閉包陳舊。
+          if (hidden) {
             const group = groupsRef.current.find((g) => g.id === pk);
-            // 下班自動靜音（ADR-0157）：組織來源在表定時間外不彈通知、不響音效；未讀照常。
+            // 下班自動靜音（ADR-0157）：組織來源在表定時間外不彈通知；未讀照常。
             const nowMin = (() => {
               const d = new Date();
               return d.getHours() * 60 + d.getMinutes();
             })();
+            const offHoursMuted = shouldMuteOrgNotification(
+              orgInfoRef.current,
+              group ? { orgGroup: group.org === true } : { senderContact: pk },
+              nowMin,
+            );
+            // ADR-0217：事件開關（1:1/群組，含 @我 override）＋每對話靜音，收斂於 shouldNotify。
             if (
-              shouldMuteOrgNotification(
-                orgInfoRef.current,
-                group ? { orgGroup: group.org === true } : { senderContact: pk },
-                nowMin,
-              )
+              shouldNotify(notifyPrefsRef.current, {
+                event: group ? "group" : "dm",
+                masterOn: notifyRef.current,
+                windowHidden: hidden,
+                offHoursMuted,
+                convoMuted: isMuted(groupPrefsRef.current, pk),
+                mentionsMe: !!msg.mentionsMe,
+              })
             ) {
-              return;
-            }
-            const title = group?.name ?? contactsRef.current.find((c) => c.pubkey === pk)?.name ?? "Cinderous";
-            let body: string;
-            if (notifyHidePreviewRef.current) {
-              body = tRef.current("notify_newMessage");
-            } else if (group && msg.sender) {
-              const sn = contactsRef.current.find((c) => c.pubkey === msg.sender)?.name ?? `${msg.sender.slice(0, 8)}…`;
-              body = `${sn}: ${msg.text}`;
-            } else {
-              body = msg.text;
-            }
-            void getNotifier().notify({ title, body, convo: pk });
-            if (notifySoundRef.current) {
-              // ADR-0149：1:1 依聯絡人音效（未設→全域預設）；群組一律全域預設。
-              const perContact = group ? undefined : contactsRef.current.find((c) => c.pubkey === pk)?.notifySound;
-              playChime(perContact ?? notifyChimeRef.current);
+              // 標題＝該對話顯示名；隱藏預覽只顯示提示語；群訊前綴傳訊者名（ADR-0076）。
+              const title = group?.name ?? contactsRef.current.find((c) => c.pubkey === pk)?.name ?? "Cinderous";
+              let body: string;
+              if (notifyHidePreviewRef.current) {
+                body = tRef.current("notify_newMessage");
+              } else if (group && msg.sender) {
+                const sn = contactsRef.current.find((c) => c.pubkey === msg.sender)?.name ?? `${msg.sender.slice(0, 8)}…`;
+                body = `${sn}: ${msg.text}`;
+              } else {
+                body = msg.text;
+              }
+              void getNotifier().notify({ title, body, convo: pk });
+              if (notifySoundRef.current) {
+                // ADR-0149：1:1 依聯絡人音效（未設→全域預設）；群組一律全域預設。
+                const perContact = group ? undefined : contactsRef.current.find((c) => c.pubkey === pk)?.notifySound;
+                playChime(perContact ?? notifyChimeRef.current);
+              }
             }
           }
         }
@@ -903,6 +939,20 @@ export function App(): JSX.Element {
       onNudge: (pk) => {
         setOpen((prev) => (prev.includes(pk) ? prev : [...prev, pk]));
         setNudge((prev) => ({ ...prev, [pk]: (prev[pk] ?? 0) + 1 }));
+        // ADR-0217：敲一敲通知（視窗未聚焦＋事件開關＋此對話未靜音）。
+        const hidden = typeof document !== "undefined" && document.hidden;
+        if (
+          shouldNotify(notifyPrefsRef.current, {
+            event: "nudge",
+            masterOn: notifyRef.current,
+            windowHidden: hidden,
+            offHoursMuted: false,
+            convoMuted: isMuted(groupPrefsRef.current, pk),
+          })
+        ) {
+          const name = contactsRef.current.find((c) => c.pubkey === pk)?.name ?? "Cinderous";
+          void getNotifier().notify({ title: name, body: tRef.current("notify_nudge"), convo: pk });
+        }
       },
       onReaction: (messageId, emoji) =>
         setReactions((prev) => {
@@ -932,7 +982,28 @@ export function App(): JSX.Element {
           return changed ? { ...prev, [pk]: next } : prev;
         }),
       onBlocked: setBlocked,
-      onRequests: setRequests, // ADR-0121
+      onRequests: (reqs) => {
+        // ADR-0121 清單設定 ＋ ADR-0217 opt-in 通知：僅對「新出現」的請求者提示一次（預設關）。
+        const prev = new Set(requestsRef.current.map((r) => r.pubkey));
+        const fresh = reqs.find((r) => !prev.has(r.pubkey));
+        setRequests(reqs);
+        const hidden = typeof document !== "undefined" && document.hidden;
+        if (
+          fresh &&
+          shouldNotify(notifyPrefsRef.current, {
+            event: "request",
+            masterOn: notifyRef.current,
+            windowHidden: hidden,
+            offHoursMuted: false,
+            convoMuted: false,
+          })
+        ) {
+          void getNotifier().notify({
+            title: tRef.current("request_section"),
+            body: notifyHidePreviewRef.current ? tRef.current("notify_newMessage") : fresh.name,
+          });
+        }
+      },
       onConnection: setConn,
       onRelayPool: setRelays,
       onPolicy: setPolicy,
@@ -1053,6 +1124,22 @@ export function App(): JSX.Element {
         } else {
           setCallPeer(peer);
           if (peer) setOpen((prev) => (prev.includes(peer) ? prev : [...prev, peer]));
+        }
+        // ADR-0217：來電通知（視窗未聚焦＋事件開關＋此對話未靜音）；響鈴仍由下方 useEffect 處理。
+        if (state === "incoming" && peer) {
+          const hidden = typeof document !== "undefined" && document.hidden;
+          if (
+            shouldNotify(notifyPrefsRef.current, {
+              event: "call",
+              masterOn: notifyRef.current,
+              windowHidden: hidden,
+              offHoursMuted: false,
+              convoMuted: isMuted(groupPrefsRef.current, peer),
+            })
+          ) {
+            const name = contactsRef.current.find((c) => c.pubkey === peer)?.name ?? "Cinderous";
+            void getNotifier().notify({ title: name, body: tRef.current("notify_call"), convo: peer });
+          }
         }
       },
       onCallLocalStream: setLocalStream,
@@ -2381,6 +2468,8 @@ export function App(): JSX.Element {
           showTitlebarSettings={isTauri()}
           notifyHidePreview={notifyHidePreview}
           onToggleNotifyHidePreview={toggleNotifyHidePreview}
+          notifyEvents={notifyPrefs}
+          onToggleNotifyEvent={toggleNotifyEvent}
           readReceipts={readReceipts}
           onToggleReadReceipts={toggleReadReceipts}
           invisible={invisible}
@@ -2475,6 +2564,8 @@ export function App(): JSX.Element {
             <ConversationWindow
               embedded={layout === "modern"}
               {...(floating ? { floating } : {})}
+              muted={isMuted(groupPrefs, pk)}
+              onToggleMute={() => updatePrefs(withMuted(groupPrefs, pk, !isMuted(groupPrefs, pk)))}
               self={self}
               contact={groupContact}
               messages={convos[pk] ?? []}
@@ -2562,6 +2653,8 @@ export function App(): JSX.Element {
             self={self}
             contact={contact}
             p2pConnected={p2pConnected.has(pk)}
+            muted={isMuted(groupPrefs, pk)}
+            onToggleMute={() => updatePrefs(withMuted(groupPrefs, pk, !isMuted(groupPrefs, pk)))}
             {...(activeBackend.setContactAlias
               ? { onSetAlias: (cp: string, alias: string | undefined) => activeBackend.setContactAlias!(cp, alias) }
               : {})}
