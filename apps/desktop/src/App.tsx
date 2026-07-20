@@ -1243,6 +1243,16 @@ export function App(): JSX.Element {
     }
   };
 
+  // 用其他身分登入（ADR-0211）：在解鎖畫面清掉作用中選擇→回登入頁的名稱欄，讓使用者以
+  // 顯示名稱挑另一把私鑰（名稱選、密碼解）。等同軟登出（clearActive）但不重載——直接回 SignIn。
+  // 不刪任何身分：所有已記住的身分仍在登錄，打對名稱即可命中並解鎖。
+  const switchIdentity = (): void => {
+    const next = clearActive(profilesState);
+    saveProfiles(next);
+    setProfilesState(next);
+    setLockedProfile(null);
+  };
+
   // 解鎖隱藏身分（H4）：以密碼逐一嘗試隱藏身分，符合者切換過去（重載後再過解鎖閘門）。
   const unlockHidden = async (): Promise<void> => {
     const password = await prompt({ message: t("hiddenId_prompt"), password: true });
@@ -1624,7 +1634,8 @@ export function App(): JSX.Element {
   }, [layout, profilesState, backend]);
 
   // H4（ADR-0067）：作用中身分已上鎖→解鎖畫面（不落 SignIn，避免誤建新身分）。
-  if (lockedProfile && !backend) return <UnlockScreen name={lockedProfile.name} onUnlock={unlock} onRescue={rescue} />;
+  if (lockedProfile && !backend)
+    return <UnlockScreen name={lockedProfile.name} onUnlock={unlock} onRescue={rescue} onSwitch={switchIdentity} />;
   if (!backend || !self) {
     // ADR-0122：瀏覽器的登入畫面**必填本地密碼**（nsec 是本機產生的，使用者沒看過，
     // 而這裡沒有 OS 金鑰庫——不包裹它，重新整理一次身分就沒了）。

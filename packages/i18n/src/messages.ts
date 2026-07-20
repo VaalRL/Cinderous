@@ -446,6 +446,7 @@ export interface Messages {
   unlock_button: string;
   unlock_error: string;
   unlock_forgot: string;
+  unlock_switch: string;
   rescue_title: string;
   rescue_hint: string;
   rescue_secret: string;
@@ -1071,6 +1072,7 @@ const zhHant: Messages = {
   unlock_button: "解鎖",
   unlock_error: "密碼錯誤，請再試一次。",
   unlock_forgot: "忘記密碼？用私鑰或救援登入碼登入回來",
+  unlock_switch: "用其他身分登入",
   rescue_title: "救援 {name} 的資料",
   rescue_hint: "輸入你的私鑰（nsec）或救援登入碼，設一組新密碼，即可救回這台裝置上的完整資料。忘記舊密碼沒關係——舊密碼無法找回，這裡是設一組全新的。",
   rescue_secret: "私鑰（nsec1…）或救援登入碼",
@@ -1683,6 +1685,7 @@ const en: Messages = {
   unlock_button: "Unlock",
   unlock_error: "Wrong password — try again.",
   unlock_forgot: "Forgot password? Log back in with your key or rescue login code",
+  unlock_switch: "Sign in as someone else",
   rescue_title: "Recover {name}'s data",
   rescue_hint: "Enter your private key (nsec) or rescue login code and set a new password to recover all data on this device. Forgetting the old password is fine — it can't be retrieved; you're setting a brand-new one.",
   rescue_secret: "Private key (nsec1…) or rescue login code",

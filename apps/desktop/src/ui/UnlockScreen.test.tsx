@@ -36,4 +36,11 @@ describe("UnlockScreen（ADR-0067 本地密碼解鎖）", () => {
     expect(render({ onRescue: async () => true })).toContain('data-testid="unlock-forgot"');
     expect(render()).not.toContain('data-testid="unlock-forgot"');
   });
+
+  it("提供 onSwitch（ADR-0211）時顯示「用其他身分登入」入口；未提供則無", () => {
+    const out = render({ onSwitch: () => {} });
+    expect(out).toContain('data-testid="unlock-switch"');
+    expect(out).toContain("用其他身分登入");
+    expect(render()).not.toContain('data-testid="unlock-switch"');
+  });
 });

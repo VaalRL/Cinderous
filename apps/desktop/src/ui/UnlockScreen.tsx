@@ -17,15 +17,19 @@ export const RESCUE_RESET_OK = "RESCUE_RESET_OK";
 /**
  * 解鎖畫面（H4，ADR-0067）：作用中身分啟用本地密碼時，開機先驗密碼再建後端。
  * `onRescue`（ADR-0073）提供時顯示「忘記密碼？」逃生口——以 nsec／備份碼救回。
+ * `onSwitch`（ADR-0211）提供時顯示「用其他身分登入」——清掉作用中選擇回登入頁的名稱欄，
+ * 讓使用者以顯示名稱挑另一把私鑰（名稱選、密碼解；不刪任何身分）。
  */
 export function UnlockScreen({
   name,
   onUnlock,
   onRescue,
+  onSwitch,
 }: {
   name: string;
   onUnlock: (password: string) => Promise<boolean>;
   onRescue?: RescueFn;
+  onSwitch?: () => void;
 }): JSX.Element {
   const { t } = useI18n();
   const [password, setPassword] = useState("");
@@ -74,6 +78,11 @@ export function UnlockScreen({
           {onRescue ? (
             <button className="settings__reveal" data-testid="unlock-forgot" onClick={() => setRescue(true)}>
               {t("unlock_forgot")}
+            </button>
+          ) : null}
+          {onSwitch ? (
+            <button className="settings__reveal" data-testid="unlock-switch" onClick={onSwitch} disabled={busy}>
+              {t("unlock_switch")}
             </button>
           ) : null}
         </div>
