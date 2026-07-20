@@ -88,7 +88,7 @@ export function Home({
             {[
               { t: c.store_desktop_t, b: c.store_desktop_b },
               { t: c.store_web_t, b: c.store_web_b },
-              { t: c.store_mobile_t, b: c.store_mobile_b },
+              // 行動版尚未推出：暫時不顯示此卡（copy 鍵保留於 copy.ts，推出後把此列加回即可）。
             ].map((s) => (
               <div className="card" key={s.t}>
                 <div className="card__ember" />

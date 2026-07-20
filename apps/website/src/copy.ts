@@ -175,7 +175,7 @@ const zhHant: Copy = {
     "私鑰交給作業系統金鑰庫（Windows 認證管理員／macOS 鑰匙圈／Linux Secret Service）；訊息與聯絡人以 AES-256-GCM 加密存本機磁碟。明文不上雲。",
   store_web_t: "網頁版（瀏覽器）",
   store_web_b:
-    "瀏覽器沒有 OS 金鑰庫——私鑰以你設的本地密碼（Argon2id）包成密文存瀏覽器；訊息與聯絡人加密存在瀏覽器（localStorage／IndexedDB／OPFS），綁在該網域、留在你這台裝置。托管網站只發送程式碼、零使用者資料。清除網站資料或忘記密碼＝身分消失，請務必備份 nsec／救援登入碼。",
+    "瀏覽器沒有 OS 金鑰庫——私鑰以你設的本地密碼（Argon2id）包成密文存瀏覽器；訊息與聯絡人加密存在瀏覽器（localStorage／OPFS），綁在該網域、留在你這台裝置。托管網站只發送程式碼、零使用者資料。清除網站資料或忘記密碼＝身分消失，請務必備份 nsec／救援登入碼。",
   store_mobile_t: "行動版",
   store_mobile_b:
     "與網頁版同屬本地優先：私鑰以本地密碼包裹存裝置本機（未設密碼＝不落地、僅暫時 session）；資料留在裝置。",
@@ -297,7 +297,7 @@ const en: Copy = {
     "The private key is held in the OS keychain (Windows Credential Manager / macOS Keychain / Linux Secret Service); messages and contacts sit in AES-256-GCM–encrypted files on your local disk. Plaintext never touches the cloud.",
   store_web_t: "Web (browser)",
   store_web_b:
-    "A browser has no OS keychain — the private key is wrapped with your local password (Argon2id) and stored in the browser; messages and contacts are encrypted in the browser (localStorage / IndexedDB / OPFS), scoped to the site and kept on your device. The hosting site only serves code and stores zero user data. Clearing site data or forgetting the password erases the identity — back up your nsec / rescue login code.",
+    "A browser has no OS keychain — the private key is wrapped with your local password (Argon2id) and stored in the browser; messages and contacts are encrypted in the browser (localStorage / OPFS), scoped to the site and kept on your device. The hosting site only serves code and stores zero user data. Clearing site data or forgetting the password erases the identity — back up your nsec / rescue login code.",
   store_mobile_t: "Mobile",
   store_mobile_b:
     "Local-first like the web version: the private key is password-wrapped on the device (no password = not persisted, session-only); data stays on the device.",
