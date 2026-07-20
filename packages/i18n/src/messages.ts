@@ -570,6 +570,7 @@ export interface Messages {
   sticker_owned: string;
   sticker_invalid: string;
   sticker_importFail: string;
+  emoji_manifestTooLarge: string;
   editor_title: string;
   editor_new: string;
   editor_fromBase: string;
@@ -1212,6 +1213,7 @@ const zhHant: Messages = {
   sticker_owned: "已收藏",
   sticker_invalid: "（無效貼圖）",
   sticker_importFail: "無法加入貼圖：{reason}",
+  emoji_manifestTooLarge: "這則訊息的自訂 emoji 太大，請減少數量或換小一點的圖",
   editor_title: "貼圖編輯器",
   editor_new: "繪製新貼圖",
   editor_fromBase: "以此貼圖為底繪製",
@@ -1849,6 +1851,7 @@ const en: Messages = {
   sticker_owned: "Saved",
   sticker_invalid: "(invalid sticker)",
   sticker_importFail: "Could not add sticker: {reason}",
+  emoji_manifestTooLarge: "This message's custom emoji are too large — use fewer or smaller images",
   editor_title: "Sticker editor",
   editor_new: "Draw a new sticker",
   editor_fromBase: "Draw on this sticker",

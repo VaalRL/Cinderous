@@ -8,7 +8,7 @@ import {
   REACTION_EMOJIS,
   suggestMentions,
 } from "@cinderous/core";
-import { type MouseEvent as ReactMouseEvent, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, type MouseEvent as ReactMouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "../i18n.js";
 import type { FloatingWindow } from "./useFloatingWindow.js";
 import type { CallMedia, MentionCandidate } from "@cinderous/core";
@@ -27,11 +27,23 @@ import {
   STICKER_PACKS,
   stickerSvg,
   svgToDataUri,
+  appendAssetManifest,
+  assetFromManifestEntry,
+  assetManifestBytes,
+  ASSET_MANIFEST_MAX_BYTES,
+  collectReferencedShortcodes,
+  resolveInlineEmoji,
+  splitAssetManifest,
+  acquireAssets,
+  type AssetManifest,
+  type CustomAsset,
 } from "@cinderous/core";
 import {
   addSticker,
   CUSTOM_PACK,
+  findByShortcode,
   findSticker,
+  LIBRARY_MAX,
   loadLibrary,
   removeSticker,
   saveLibrary,
@@ -328,6 +340,28 @@ const MESSAGE_WINDOW = 200;
 /** 主頻道單則訊息文字截斷門檻（字數）；超過即只顯示前段 + 「展開全文」開右側詳情面板。 */
 const MESSAGE_TRUNCATE_CHARS = 600;
 
+/** 由訊息文字內引用到的 :shortcode: 組出行內資產清單（送出用；ADR-0220）。 */
+function buildAssetManifest(text: string, library: CustomAsset[]): AssetManifest {
+  const manifest: AssetManifest = {};
+  for (const code of collectReferencedShortcodes(text)) {
+    const asset = findByShortcode(library, code);
+    if (asset) manifest[code] = { label: asset.label, svg: asset.svg };
+  }
+  return manifest;
+}
+
+/** 渲染含行內自訂 emoji 的訊息文字（文字段走 markdown＋emoticon，emoji 段為小圖；ADR-0220）。 */
+function renderRichText(text: string, manifest: AssetManifest): JSX.Element[] {
+  const segs = resolveInlineEmoji(text, (code) => manifest[code]);
+  return segs.map((seg, i) =>
+    seg.type === "text" ? (
+      <Fragment key={i}>{renderMarkdown(applyEmoticons(seg.value))}</Fragment>
+    ) : (
+      <img key={i} className="emoji" src={svgToDataUri(seg.svg)} alt={`:${seg.shortcode}:`} title={`:${seg.shortcode}:`} />
+    ),
+  );
+}
+
 export function ConversationWindow(props: ConversationProps): JSX.Element {
   const { t } = useI18n();
   const { confirm, alert, prompt } = useDialog(); // 統一自訂對話框（ADR-0139）
@@ -584,6 +618,34 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
     setLibrary(next);
     saveLibrary(next);
   };
+  // 收到自動收藏（ADR-0220）：掃描收到訊息尾端的資產清單，信任來源（此對話對象）自動入庫（LRU）。
+  // 企業停用時不收藏；最愛不被淘汰。自建保護待 origin 旗標（後續）。已處理 id 以 ref 去重防重跑。
+  const acquiredRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (props.stickersDisabled) return;
+    const favIds = new Set(favorites.filter((f) => f.pack === CUSTOM_PACK).map((f) => f.id));
+    let cur = library;
+    let changed = false;
+    for (const m of messages) {
+      if (m.outgoing || acquiredRef.current.has(m.id)) continue;
+      acquiredRef.current.add(m.id);
+      const incoming = Object.entries(splitAssetManifest(m.text).manifest).map(([code, e]) =>
+        assetFromManifestEntry(code, e),
+      );
+      if (incoming.length === 0) continue;
+      const next = acquireAssets(cur, incoming, { max: LIBRARY_MAX, protect: (a) => favIds.has(a.id) });
+      if (next !== cur) {
+        cur = next;
+        changed = true;
+      }
+    }
+    if (changed) {
+      setLibrary(cur);
+      saveLibrary(cur);
+    }
+    // 僅依 messages/停用旗標觸發；library/favorites 取當下值。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages, props.stickersDisabled]);
   // 統一解析：內建包或自製庫（供最近/最愛分頁）。
   const resolveAny = (ref: StickerRef): { label: string; svg: string } | undefined =>
     ref.pack === CUSTOM_PACK ? findSticker(library, ref.id) : resolveSticker(ref.pack, ref.id);
@@ -736,11 +798,25 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
     setMenSel(0);
   };
 
+  // 送出前附上行內自訂 emoji 資產清單（ADR-0220）；超過每則預算回 null（呼叫端提示）。
+  // 企業停用（disableStickers）時不附清單＝不送自訂 emoji（原樣送純文字）。
+  const attachManifest = (body: string): string | null => {
+    if (props.stickersDisabled) return body;
+    const manifest = buildAssetManifest(body, library);
+    if (assetManifestBytes(manifest) > ASSET_MANIFEST_MAX_BYTES) return null;
+    return appendAssetManifest(body, manifest);
+  };
+
   const send = () => {
     const body = text.trim();
     if (!body) return;
+    const content = attachManifest(body);
+    if (content === null) {
+      void alert(t("emoji_manifestTooLarge"));
+      return;
+    }
     const mentions = props.mentionCandidates ? parseMentions(body, props.mentionCandidates) : [];
-    props.onSend(body, ttl > 0 ? ttl : undefined, mentions.length > 0 ? mentions : undefined);
+    props.onSend(content, ttl > 0 ? ttl : undefined, mentions.length > 0 ? mentions : undefined);
     setText("");
   };
 
@@ -750,8 +826,13 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
   const sendThread = () => {
     const body = threadText.trim();
     if (!body || threadRoot === null) return;
+    const content = attachManifest(body);
+    if (content === null) {
+      void alert(t("emoji_manifestTooLarge"));
+      return;
+    }
     const mentions = props.mentionCandidates ? parseMentions(body, props.mentionCandidates) : [];
-    props.onSend(body, undefined, mentions.length > 0 ? mentions : undefined, threadRoot);
+    props.onSend(content, undefined, mentions.length > 0 ? mentions : undefined, threadRoot);
     setThreadText("");
   };
   // 串內 @提及自動完成（ADR-0050/0051）。
@@ -1811,10 +1892,12 @@ function MessageLine({
     onReact?.(message.id, emoji);
     setPicking(false);
   };
-  const ref = parseSticker(message.text);
+  // 行內自訂 emoji（ADR-0220）：先拆出可見文字與資產清單；貼圖判定與文字渲染皆用可見文字。
+  const { text: bodyText, manifest } = splitAssetManifest(message.text);
+  const ref = parseSticker(bodyText);
   const sticker = ref ? stickerSvg(ref.pack, ref.id) : undefined;
   // 自製貼圖（v2）：內容隨訊息；渲染前必過驗證（ADR-0032）。
-  const custom = sticker === undefined ? parseCustomSticker(message.text) : null;
+  const custom = sticker === undefined ? parseCustomSticker(bodyText) : null;
   const customOk = custom !== null && validateStickerSvg(custom.svg).ok;
   const owned = customOk && ownedIds.has(contentHash(custom.svg));
 
@@ -1921,9 +2004,9 @@ function MessageLine({
         </span>
       ) : custom !== null ? (
         <span className="text expired__text">{t("sticker_invalid")}</span>
-      ) : !expanded && message.text.length > MESSAGE_TRUNCATE_CHARS ? (
+      ) : !expanded && bodyText.length > MESSAGE_TRUNCATE_CHARS ? (
         <span className="text">
-          {renderMarkdown(applyEmoticons(message.text.slice(0, MESSAGE_TRUNCATE_CHARS)))}
+          {renderRichText(bodyText.slice(0, MESSAGE_TRUNCATE_CHARS), manifest)}
           <span className="text__ellip">… </span>
           {onExpand ? (
             <button type="button" className="text__more" data-testid="expand-msg" onClick={onExpand}>
@@ -1932,7 +2015,7 @@ function MessageLine({
           ) : null}
         </span>
       ) : (
-        <span className="text">{renderMarkdown(applyEmoticons(message.text))}</span>
+        <span className="text">{renderRichText(bodyText, manifest)}</span>
       )}
       {reactions.length > 0 ? (
         <span className="reactions">

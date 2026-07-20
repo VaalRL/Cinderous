@@ -673,6 +673,8 @@ button:disabled { opacity: .5; cursor: default; filter: none; }
 .stickered__save:disabled { opacity: .5; cursor: default; }
 .sticker { display: block; margin-top: 2px; }
 .sticker img { width: 96px; height: 96px; }
+/* 行內自訂 emoji（ADR-0220）：混在文字裡的小圖，隨字高。 */
+.line .text .emoji { display: inline-block; width: 1.4em; height: 1.4em; vertical-align: -0.3em; margin: 0 1px; }
 
 /* 語音訊息 */
 .tool--recording { background: #e0483d; color: #fff; border-color: #e0483d; }
