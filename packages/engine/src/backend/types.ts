@@ -196,6 +196,11 @@ export interface ChatBackendEvents {
   onRequests?(requests: ContactRequest[]): void;
   /** 與中繼站的連線狀態改變。 */
   onConnection?(state: ConnectionState): void;
+  /**
+   * 與某聯絡人的 P2P 直連狀態改變（ADR-0213）：`connected`＝資料通道開啟（直連可用）。
+   * 對話標題列據此顯示連線品質晶片；P2P 失敗不影響文字訊息（走 relay）。
+   */
+  onPeerConnection?(contact: PubkeyHex, connected: boolean): void;
   /** Relay pool（home + 外部座）各自的連線狀態；`stale`＝連續離線過久，hint 可能過期（ADR-0034/0036）。 */
   onRelayPool?(relays: { url: string; state: ConnectionState; home: boolean; stale: boolean }[]): void;
   /** P2P 送檔進度（`id` 對應 sendFile 回傳值；`sent`/`total` 為位元組）。 */

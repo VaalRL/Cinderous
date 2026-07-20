@@ -179,6 +179,50 @@ describe("ConversationWindow 訊息列視窗化（P0-3）", () => {
   });
 });
 
+describe("P2P 直連品質晶片（ADR-0213）", () => {
+  const renderP2p = (p2pConnected: boolean | undefined, over: Partial<Contact> = {}) =>
+    renderToStaticMarkup(
+      <I18nProvider locale="zh-Hant">
+        <ThemeProvider>
+          <ConversationWindow
+            self={self}
+            contact={{ ...contact, ...over }}
+            messages={[]}
+            typing={false}
+            nudgeSignal={0}
+            {...(p2pConnected !== undefined ? { p2pConnected } : {})}
+            onSend={() => {}}
+            onTyping={() => {}}
+            onNudge={() => {}}
+            onClose={() => {}}
+          />
+        </ThemeProvider>
+      </I18nProvider>,
+    );
+
+  it("已建立直連 → ⚡直連（綠 chip--p2p on）", () => {
+    const html = renderP2p(true);
+    expect(html).toContain('data-testid="convo-p2p-chip"');
+    expect(html).toContain("chip--p2p on");
+    expect(html).not.toContain("直連未建立");
+  });
+
+  it("未建立直連 → ⚪直連未建立（低調 chip，無 on）", () => {
+    const html = renderP2p(false);
+    expect(html).toContain('data-testid="convo-p2p-chip"');
+    expect(html).toContain("直連未建立");
+    expect(html).not.toContain("chip--p2p on");
+  });
+
+  it("未提供 p2pConnected（群組/示範）→ 不顯示晶片", () => {
+    expect(renderP2p(undefined)).not.toContain('data-testid="convo-p2p-chip"');
+  });
+
+  it("對方離線 → 不顯示晶片（避免與離線提示重複、無意義）", () => {
+    expect(renderP2p(false, { status: "offline" })).not.toContain('data-testid="convo-p2p-chip"');
+  });
+});
+
 describe("ConversationWindow 送出狀態圖示（ADR-0058／0095 眼睛語言）", () => {
   const out = (status: MessageStatus): ChatMessage => ({ id: "x", outgoing: true, text: "hi", at: 1, status });
 

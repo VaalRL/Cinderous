@@ -253,6 +253,11 @@ export interface ConversationProps {
   onAttach?: () => void;
   /** 原生拖放（ADR-0104）正懸停在本對話上：與 HTML5 拖放共用同一個 highlight。 */
   dropActive?: boolean;
+  /**
+   * 與此聯絡人的 P2P 直連是否已建立（ADR-0213）：標題列顯示連線品質晶片。
+   * 僅 1:1 提供（群組為多對端、無單一直連概念）；`undefined`＝不顯示晶片。
+   */
+  p2pConnected?: boolean;
   /** 發起語音/視訊通話（未提供則不顯示通話按鈕）。 */
   onStartCall?: (media: CallMedia) => void;
   /** 群組模式：以發送者公鑰解析顯示暱稱（提供即為群組視窗）。 */
@@ -799,6 +804,17 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
           </span>
         ) : null}
         <span className="spacer" />
+        {/* ADR-0213：P2P 直連品質晶片（僅 1:1 且對方非離線）。⚡直連＝檔案/通話/輸入中走 P2P；
+            ⚪未建立＝降級走 relay（文字不受影響）。放通話鈕左側，語意相關。 */}
+        {props.p2pConnected !== undefined && contact.status !== "offline" ? (
+          <span
+            className={`chip chip--p2p${props.p2pConnected ? " on" : ""}`}
+            data-testid="convo-p2p-chip"
+            title={t(props.p2pConnected ? "convo_p2pDirectHint" : "convo_p2pNoneHint")}
+          >
+            {props.p2pConnected ? `⚡ ${t("convo_p2pDirect")}` : `⚪ ${t("convo_p2pNone")}`}
+          </span>
+        ) : null}
         {props.onStartCall ? (
           <>
             <span

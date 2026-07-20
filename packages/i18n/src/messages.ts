@@ -323,6 +323,10 @@ export interface Messages {
   personalMessage_placeholder: string;
   contact_openHint: string;
   convo_offlineNotice: string;
+  convo_p2pDirect: string;
+  convo_p2pNone: string;
+  convo_p2pDirectHint: string;
+  convo_p2pNoneHint: string;
   convo_typing: string;
   /** 本地暱稱（ADR-0148）：私下給聯絡人取的顯示名，點標頭可切換對方廣播名。 */
   alias_set: string;
@@ -952,6 +956,10 @@ const zhHant: Messages = {
   personalMessage_placeholder: "輸入個人訊息…",
   contact_openHint: "雙擊開啟對話",
   convo_offlineNotice: "目前離線——訊息將於對方上線時送達",
+  convo_p2pDirect: "直連",
+  convo_p2pNone: "直連未建立",
+  convo_p2pDirectHint: "已與對方建立點對點直連——檔案、通話、輸入中走 P2P（更快、不經中繼）。",
+  convo_p2pNoneHint: "尚未建立直連；文字訊息照常送達，但檔案與通話可能無法使用。",
   convo_typing: "{name} 正在輸入訊息…",
   alias_set: "設定暱稱",
   alias_edit: "編輯暱稱",
@@ -1565,6 +1573,10 @@ const en: Messages = {
   personalMessage_placeholder: "Type a personal message…",
   contact_openHint: "Double-click to open a conversation",
   convo_offlineNotice: "Currently offline — your message will be delivered when they come online",
+  convo_p2pDirect: "Direct",
+  convo_p2pNone: "No direct link",
+  convo_p2pDirectHint: "Direct peer-to-peer link established — files, calls and typing go P2P (faster, no relay).",
+  convo_p2pNoneHint: "No direct link yet; text messages arrive normally, but files and calls may be unavailable.",
   convo_typing: "{name} is typing…",
   alias_set: "Set nickname",
   alias_edit: "Edit nickname",

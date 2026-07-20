@@ -707,6 +707,9 @@ button:disabled { opacity: .5; cursor: default; filter: none; }
 .chip--add { cursor: pointer; color: var(--accent); border-style: dashed; }
 /* 企業頭銜（ADR-0158）：實心強調色，與私有標籤（outline）一眼區隔；對方自填、不可移除。 */
 .chip--role { background: var(--accent); color: #fff; border-color: var(--accent); font-weight: 600; }
+/* P2P 直連品質晶片（ADR-0213）：未建立＝沿用 .chip 低調灰；已建立（.on）＝線上綠（對齊 .dot.online）。 */
+.chip--p2p { gap: 3px; }
+.chip--p2p.on { background: rgba(54, 196, 107, 0.15); color: #36c46b; border-color: rgba(54, 196, 107, 0.5); }
 /* 對話視窗對方頭像旁的標籤列（ADR-0158 經典佈局入口）：窄欄直排、置中、可換行。 */
 .pics__labels { max-width: 96px; justify-content: center; flex-wrap: wrap; gap: 3px; margin: 2px 0 6px; }
 /* 下班提示（ADR-0159）：輸入區上方的非阻斷淡色橫幅。 */

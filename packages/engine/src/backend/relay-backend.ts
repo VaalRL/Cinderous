@@ -616,6 +616,7 @@ export class RelayChatBackend implements ChatBackend {
         }
       },
       onError: (peer, reason) => this.handlers?.onFileError?.(peer, reason),
+      onConnectionState: (peer, connected) => this.handlers?.onPeerConnection?.(peer, connected), // ADR-0213
       },
       () => this.rtcConfig(),
     );

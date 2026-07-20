@@ -35,6 +35,11 @@ export interface TransferHandlers {
   onPresence?: (peer: PubkeyHex, p: { s: string; m: string; np: string; hb?: number }) => void;
   /** 錯誤（傳輸失敗、對方不可達等）。 */
   onError: (peer: PubkeyHex, reason: string) => void;
+  /**
+   * P2P 直連狀態改變（ADR-0213）：`connected`＝資料通道開啟（直連可用，檔案/通話/輸入中可走 P2P），
+   * `false`＝通道關閉或連線失敗（降級走 relay）。供對話標題列顯示連線品質晶片。
+   */
+  onConnectionState?: (peer: PubkeyHex, connected: boolean) => void;
 }
 
 /** 進行中的送檔工作（供進度回報）。 */
@@ -216,7 +221,10 @@ export class WebRtcTransfer {
     pc.onconnectionstatechange = () => {
       // P2P 是盡力而為的加值通道（檔案／在線／輸入中）；失敗**不影響訊息**（文字走 relay）。
       // 跨網路／對稱型 NAT 連不起來屬預期，故**不對使用者報錯**、只記錄降級（ADR-0210）。
-      if (pc.connectionState === "failed") console.debug("[webrtc] P2P failed → degraded to relay", peerPk);
+      if (pc.connectionState === "failed") {
+        console.debug("[webrtc] P2P failed → degraded to relay", peerPk);
+        this.handlers.onConnectionState?.(peerPk, false); // ADR-0213：標題列晶片轉「直連未建立」
+      }
     };
     // 由對方發起時，透過 ondatachannel 取得通道
     pc.ondatachannel = (ev) => this.attachChannel(peerPk, conn, ev.channel);
@@ -241,9 +249,14 @@ export class WebRtcTransfer {
     peer.dc = dc;
     dc.binaryType = "arraybuffer"; // 檔案分塊以二進位框架送達（省 base64 膨脹）
     dc.onmessage = (m) => peer.rx.receive(m.data as string | ArrayBuffer);
-    dc.onopen = () => this.flush(peerPk, peer);
+    const onOpen = () => {
+      this.handlers.onConnectionState?.(peerPk, true); // ADR-0213：直連可用 → 標題列晶片轉「直連」
+      this.flush(peerPk, peer);
+    };
+    dc.onopen = onOpen;
+    dc.onclose = () => this.handlers.onConnectionState?.(peerPk, false); // ADR-0213：直連中斷
     dc.onerror = () => this.handlers.onError(peerPk, "資料通道錯誤");
-    if (dc.readyState === "open") this.flush(peerPk, peer);
+    if (dc.readyState === "open") onOpen();
   }
 
   private async addIce(peer: PeerConn, c: IceCandidateData): Promise<void> {

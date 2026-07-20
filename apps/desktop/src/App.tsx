@@ -425,6 +425,8 @@ export function App(): JSX.Element {
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [convos, setConvos] = useState<Record<string, ChatMessage[]>>({});
   const [typingAt, setTypingAt] = useState<Record<string, number>>({});
+  /** P2P 直連已建立的聯絡人（ADR-0213）：對話標題列據此顯示連線品質晶片。 */
+  const [p2pConnected, setP2pConnected] = useState<Set<string>>(new Set());
   const [nudge, setNudge] = useState<Record<string, number>>({});
   const [reactions, setReactions] = useState<Record<string, string[]>>({});
   const [unsent, setUnsent] = useState<Set<string>>(new Set());
@@ -812,6 +814,7 @@ export function App(): JSX.Element {
   useEffect(() => {
     if (!backend) return;
     setOrgInfo(null); // ADR-0157：換身分/後端時重置，避免沿用上一個身分的組織資訊
+    setP2pConnected(new Set()); // ADR-0213：換身分/後端時清空 P2P 直連狀態，避免沿用上一個身分
     backend.start({
       onContacts: setContacts,
       onMessage: (pk, msg) => {
@@ -874,6 +877,15 @@ export function App(): JSX.Element {
         setConvos((prev) => (prev[pk] ? prev : { ...prev, [pk]: msgs }));
       },
       onTyping: (pk) => setTypingAt((prev) => ({ ...prev, [pk]: Date.now() })),
+      // ADR-0213：P2P 直連狀態 → 對話標題列晶片。connected 加入集合、斷線移除。
+      onPeerConnection: (pk, connected) =>
+        setP2pConnected((prev) => {
+          if (prev.has(pk) === connected) return prev; // 無變化不重繪
+          const next = new Set(prev);
+          if (connected) next.add(pk);
+          else next.delete(pk);
+          return next;
+        }),
       onNudge: (pk) => {
         setOpen((prev) => (prev.includes(pk) ? prev : [...prev, pk]));
         setNudge((prev) => ({ ...prev, [pk]: (prev[pk] ?? 0) + 1 }));
@@ -2514,6 +2526,7 @@ export function App(): JSX.Element {
             embedded={layout === "modern"}
             self={self}
             contact={contact}
+            p2pConnected={p2pConnected.has(pk)}
             {...(activeBackend.setContactAlias
               ? { onSetAlias: (cp: string, alias: string | undefined) => activeBackend.setContactAlias!(cp, alias) }
               : {})}
