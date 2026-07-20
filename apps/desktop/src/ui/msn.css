@@ -91,6 +91,9 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
 .desktop .deckwrap--left > .win { width: 100%; box-sizing: border-box; }
 /* 右側浮動畫布：對話窗（.convo-dock）以絕對定位落在此（position:relative 為定位基準）。 */
 .desktop .deckwrap--center { grid-area: canvas; position: relative; overflow: hidden; min-height: 0; }
+/* 登入/解鎖等全螢幕置中畫面（ADR-0216 修正）：沿用 .desktop 的背景，但覆寫回 flex 置中
+   （grid 化後單一視窗會落在左欄，故這些畫面另用此修飾）。 */
+.desktop--center { display: flex; align-items: center; justify-content: center; padding: 24px; }
 .deck {
   height: var(--viewport-h);
   background: radial-gradient(120% 100% at 50% 0%, var(--bg-a) 0%, var(--bg-b) 60%, var(--bg-c) 100%);

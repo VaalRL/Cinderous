@@ -233,7 +233,7 @@ export function SignIn({
     });
   };
   return (
-    <div className="desktop" style={{ justifyContent: "center" }}>
+    <div className="desktop desktop--center">
       <div className="win signin">
         <div className="win__title">
           <span>{t("appName")}</span>
