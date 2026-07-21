@@ -1,0 +1,38 @@
+[
+  {
+    "version": "0.0.13",
+    "date": "2026-07-21",
+    "zh": [
+      "經典 MSN 佈局：統一聯絡人列與狀態訊息、可收合分組、左側固定主視窗＋右側浮動對話窗",
+      "自訂 emoji／貼圖：匯入圖片自製 emoji、打 `:短碼:` 插入、批次匯入 Slack 式 emoji 包、收到自動收藏並加密保存",
+      "動畫 GIF emoji：支援會動的 GIF；大圖走內容定址傳遞、省頻寬",
+      "emoji／貼圖庫跨裝置同步：你自己的資產庫（含刪除）在各裝置間保持一致",
+      "通知更細緻：事件細分開關＋每對話靜音",
+      "安全強化：匯入圖片加上格式（magic-byte）與尺寸／像素把關",
+      "內部：全平台版號統一（單一來源）＋app 內可顯示版本"
+    ],
+    "en": [
+      "Classic MSN layout: unified contact list with status message, collapsible groups, fixed main window + floating chat windows",
+      "Custom emoji/stickers: import images as emoji, insert with `:shortcode:`, batch-import Slack-style packs, auto-collect received ones (encrypted at rest)",
+      "Animated GIF emoji: animated GIFs now supported; large ones are delivered content-addressed to save bandwidth",
+      "Cross-device emoji/sticker library sync: your own library (including deletions) stays consistent across your devices",
+      "Finer notifications: per-event toggles + per-conversation mute",
+      "Security hardening: format (magic-byte) and size/pixel guards on imported images",
+      "Internal: unified version across all platforms (single source) + in-app version display"
+    ]
+  },
+  {
+    "version": "0.0.12",
+    "date": "2026-07-20",
+    "zh": [
+      "對話標題列新增「直連品質」晶片，一眼看出是否已建立 P2P 直連（文字訊息一律送達、不受影響）",
+      "解鎖畫面可直接「用其他身分登入」，不必先解鎖目前身分",
+      "跨網路 P2P 直連可靠性改進（一般模式加入預設 STUN）；企業強制 TURN 模式維持 relay-only、不外洩 IP"
+    ],
+    "en": [
+      "Direct-connection quality chip in the chat header — see P2P status at a glance (text messages always deliver regardless)",
+      "Sign in as another identity directly from the unlock screen, without unlocking the current one first",
+      "More reliable cross-network P2P (default STUN in normal mode); enterprise TURN-only mode stays relay-only and never leaks IPs"
+    ]
+  }
+]
