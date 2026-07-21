@@ -16,6 +16,10 @@ export const KIND = {
   ORG_JOIN: 42,
   /** 檔案分塊（app 內部 rumor kind，經 FILE_WRAP 外層；ADR-0162）。 */
   FILE_CHUNK: 43,
+  /** 自訂 emoji blob 請求（backfill；app 內部 rumor kind，經 Gift Wrap；ADR-0223）。 */
+  ASSET_REQUEST: 44,
+  /** 自訂 emoji blob 分塊回應（經 FILE_WRAP 外層，與 FILE_CHUNK 區分；ADR-0223）。 */
+  ASSET_CHUNK: 45,
   /** 離線留言：NIP-17/59 Gift Wrap。 */
   OFFLINE_DM_GIFT_WRAP: 1059,
   /**
