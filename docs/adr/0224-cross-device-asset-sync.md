@@ -1,6 +1,6 @@
 # 0224. 跨裝置自訂資產同步（emoji／貼圖庫與 blob）
 
-- 狀態：提議中
+- 狀態：已接受
 - 日期：2026-07-21
 - 相關文件：ADR-0220（統一自訂資產）、0222（動畫 GIF）、0223（內容定址 blob backfill/push）、0071（加密雲端快照）、0009（多裝置同步）、0107（NIP-17 自封副本）、0054/0112（加密落地）、0221（審查修正：mine/最愛保護）
 
@@ -76,3 +76,10 @@ ADR-0220～0223 讓自訂 emoji（含大動畫 GIF）在單裝置＋1:1／群組
   - **M3（desktop，觸發＋墓碑＋佔位）**：遇「自封/自庫 `ref` 無 blob」→ `requestAsset(self, ref)`；刪除資產寫墓碑；佔位 UX 沿用 P2a；設定同步。
   - **收尾**：同步 `ARCHITECTURE.md`（快照契約新增 customAssets/assetTombstones、blob 自我 backfill）；三層測試綠後轉「已接受」。
   - **仍列後續**：增量廣播（選項 C）、超大庫分片、墓碑上限的更精緻淘汰。
+
+## 實作註記（2026-07-21，已落地）
+
+- **M1（core／engine，commit aa390aa）**：`CustomAsset.at`、`AssetTombstone`／`ASSET_TOMBSTONE_MAX`、`mergeAssetLibrary`（LWW＋墓碑交換律，mine/最愛保護）；`CloudSnapshotContent.customAssets`＋`assetTombstones`（90KB 子預算、mine 優先截斷、大圖只帶 ref）、build/parse/merge；AppStorage `load/saveAssetTombstones`（MemoryStorage／LocalStorage 加密／TauriStorage）。
+- **M2（engine，commit 9025159）**：`sendAssetBlob` 放行 `sender===self`＝向自己 backfill；`resyncAssets()`（庫變更重發快照，搭 ADR-0071 節流）。
+- **M3（desktop，commit 0340251）**：`addSticker/setShortcode` 帶 `at`、`addTombstone`；`deleteCustom` 先記墓碑再存庫；匯入／收藏統一帶 `at`；自庫 `ref` 缺 blob→`requestAsset(self)`；`persistLib`→`onLibraryChanged`→`resyncAssets`。
+- 測試：core 383／engine 291／desktop 480 綠；三層 typecheck 綠。**桌面互動（跨裝置實機）待驗收**——自動化只涵蓋純函式與 in-memory 網路 round-trip。

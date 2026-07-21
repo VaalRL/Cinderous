@@ -68,7 +68,7 @@
 - **身分**：首次啟動生成 secp256k1 金鑰對（Nostr/NIP-01，簽章採 BIP-340 Schnorr）；公鑰 `npub` 為全網唯一 ID。私鑰**桌面**寫入 OS 安全儲存（Keychain/Credential Manager/Secret Service，ADR-0053）、**web/mobile** 以 Argon2id 本地密碼包裹（ADR-0112／0117／0122）。**協定層不提供金鑰輪替/撤銷**（取捨見 PRD §4、§7；企業範圍的名冊輪替見 §8）。多身分以 pubkey 命名空間隔離（ADR-0045）。
 - **加密儲存（SSOT）**：好友（npub、顯示名稱、上線狀態）、對話訊息（明文僅存本機）、設定、聯絡人同意/**訊息請求**（ADR-0121）/封鎖清單、群組。狀態常駐記憶體＋逐部位加密持久化（ADR-0110，桌面 AES blob 檔／web/mobile 加密 localStorage）；超出熱區上限的舊訊息移入**封存**而非刪除（ADR-0111，OPFS/塊檔）。對外傳輸前一律以 NIP-44 加密。
 - **換機搬家（配對克隆）**：實作採 **WebRTC 配對傳輸**（ADR-0072／0118）——舊機產生一次性載荷（會合 relay ＋ 一次性 AES-256-GCM 金鑰），新機貼上後經 WebRTC 打通、把全量捆包（身分＋聯絡人＋熱區歷史）端到端加密傳輸，雙方比對 **SAS** 相符才送出。（早期規劃的「QR＋LAN 內網 IP＋Happy Eyeballs 競速」未實作。）行動端送出端亦已補上（ADR-0118）。
-- **多設備同步（持續）**：各設備就「新訊息、已讀位置、聯絡人/封鎖變更」持續對帳（自封 NIP-17 同步事件、ADR-0107；加密雲端快照、ADR-0071）。訊息以 rumor.id 去重；已讀水位本機持久化（ADR-0108）。
+- **多設備同步（持續）**：各設備就「新訊息、已讀位置、聯絡人/封鎖變更」持續對帳（自封 NIP-17 同步事件、ADR-0107；加密雲端快照、ADR-0071）。訊息以 rumor.id 去重；已讀水位本機持久化（ADR-0108）。**自訂資產庫（emoji/貼圖）與刪除墓碑亦隨雲端快照跨自己裝置同步（LWW＋墓碑交換律、重匯自動復活，ADR-0224）；大 emoji blob 不進快照，改「向自己 backfill」（`ASSET_REQUEST` 定址給自己 pubkey、任一持有裝置回應）。**
 
 ## 5. 事件契約（Nostr Kind 對照）
 
@@ -142,7 +142,7 @@
 
 **客戶端 — 多身分與資料隔離**
 - `packages/engine/src/storage/profiles.ts`：全域設定檔登錄（`nb.profiles`＋作用中 pubkey）；首次載入把既有單一身分遷移為 namespace 為空的 legacy 設定檔（向後相容）。（ADR-0074 起隨引擎抽出至 `packages/engine`。）
-- `packages/engine/src/storage/local.ts`：`LocalStorage(namespace)` 以 `nb.<pubkey>.<key>` 隔離各身分資料（聯絡人/訊息/群組/自訂資產庫 emoji＋貼圖…），空 namespace＝舊鍵；web 以 nsec 導出金鑰加密、Tauri 走 Rust AES-256-GCM（ADR-0112/0054）。自訂資產庫（emoji＋貼圖，ADR-0220）存於 `customAssets`＝每身分加密落地；自訂 emoji 走既有加密訊息通道，內容尾端附 `nb-assets:v1:{shortcode:{label,svg}}` 行內清單。
+- `packages/engine/src/storage/local.ts`：`LocalStorage(namespace)` 以 `nb.<pubkey>.<key>` 隔離各身分資料（聯絡人/訊息/群組/自訂資產庫 emoji＋貼圖…），空 namespace＝舊鍵；web 以 nsec 導出金鑰加密、Tauri 走 Rust AES-256-GCM（ADR-0112/0054）。自訂資產庫（emoji＋貼圖，ADR-0220）存於 `customAssets`＝每身分加密落地；自訂 emoji 走既有加密訊息通道，內容尾端附 `nb-assets:v1:{shortcode:{label,svg}}` 行內清單。大動畫 GIF 走內容定址 blob（`assetBlobs`＋清單只帶 `ref`，backfill/推播，ADR-0223）。跨裝置：庫（含 `assetTombstones` 刪除墓碑）隨加密雲端快照同步、大 blob 向自己 backfill（ADR-0224）。
 - `apps/desktop/src/App.tsx`：`buildBackend(profile)` 依身分建立後端——**工作身分（enterprise）鎖定單座**（不給 `connectorFor`/`anchors`/`onHomeSwitched` → 不漫遊、不遞補，ADR-0044/0045）；個人身分走開放模式（relay pool/錨點/漫遊）。切換身分以 reload 乾淨重建 per-身分 狀態。
 
 **資料流（工作身分送一則群訊）**
