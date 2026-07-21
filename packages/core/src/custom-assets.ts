@@ -60,10 +60,46 @@ export interface CustomAsset {
   mine?: boolean;
   /** 資產格式（ADR-0222）：`svg`（預設，向後相容）或 `raster`（動畫 GIF/WebP 等，直接 `<img>` 渲染）。 */
   format?: "svg" | "raster";
+  /**
+   * 內容定址參照（ADR-0223 Model B）：有值時渲染內容不在行內 `svg`，而在 blob 快取的 `data`
+   * （`hash===ref`）。用於大動畫 GIF——圖走 out-of-band、庫只記參照。
+   */
+  ref?: string;
+}
+
+/** 內容定址 blob（ADR-0223）：`hash===contentHash(data)`；`data` 為 `data:image/*` data URI。 */
+export interface AssetBlob {
+  hash: string;
+  data: string;
+}
+
+/** blob 快取上限（顆）；獨立於策展庫 LIBRARY_MAX，收到的大 emoji 存這裡不佔庫（ADR-0223）。 */
+export const BLOB_CACHE_MAX = 64;
+
+/** blob 整合性：`hash` 是否等於內容雜湊（ADR-0223；防惡意寄件者/中繼掉包）。 */
+export function blobHashOk(hash: string, data: string): boolean {
+  return contentHash(data) === hash;
+}
+
+/** blob 快取 LRU（ADR-0223）：incoming 置前（最新）、同 hash 去重、超過 max 尾端淘汰。純函式。 */
+export function cacheBlobs(cache: AssetBlob[], incoming: AssetBlob[], max: number): AssetBlob[] {
+  const inSeen = new Set<string>();
+  const fresh: AssetBlob[] = [];
+  for (const b of incoming) {
+    if (inSeen.has(b.hash)) continue;
+    inSeen.add(b.hash);
+    fresh.push(b);
+  }
+  const kept = cache.filter((b) => !inSeen.has(b.hash));
+  const result = [...fresh, ...kept];
+  return result.length > max ? result.slice(0, max) : result;
 }
 
 /** 行內清單負載（隨訊息）：shortcode → { 標籤, SVG }。 */
-export type AssetManifest = Record<string, { label: string; svg: string; format?: "raster" }>;
+export type AssetManifest = Record<string, { label: string; svg?: string; ref?: string; format?: "raster" }>;
+
+/** 內容雜湊（sha256 hex）格式：64 個小寫十六進位。 */
+const HASH_RE = /^[0-9a-f]{64}$/;
 
 /**
  * 短碼合法字元（Slack 風格）：字母數字開頭，後續可含 `_ + -`，總長 ≤32。
@@ -106,8 +142,19 @@ export function parseAssetManifest(s: string): AssetManifest {
     if (!val || typeof val !== "object") continue;
     const label = (val as { label?: unknown }).label;
     const svg = (val as { svg?: unknown }).svg;
+    const ref = (val as { ref?: unknown }).ref;
     const raster = (val as { format?: unknown }).format === "raster";
-    if (typeof label !== "string" || typeof svg !== "string") continue;
+    if (typeof label !== "string") continue;
+    // 參照筆（ADR-0223）：blob 另傳，此處只驗 ref 為合法 hash＋raster；不含 svg。
+    if (typeof ref === "string" && HASH_RE.test(ref)) {
+      if (!raster) continue;
+      bytes += ref.length + label.length;
+      if (bytes > ASSET_MANIFEST_MAX_BYTES) break;
+      out[key] = { label: clampStickerLabel(label), ref, format: "raster" };
+      count++;
+      continue;
+    }
+    if (typeof svg !== "string") continue;
     // raster：型別＋尺寸把關（無腳本面，不套 validateStickerSvg）；svg：拒收制驗證（ADR-0222）。
     if (raster ? !(isValidRasterDataUri(svg) && svg.length <= RASTER_MAX_BYTES) : !validateStickerSvg(svg).ok) continue;
     bytes += svg.length + label.length;
@@ -203,16 +250,47 @@ export function resolveInlineEmoji(
 /** 由清單一筆造出 emoji 用途的 `CustomAsset`（id＝內容雜湊，供去重）。 */
 export function assetFromManifestEntry(
   shortcode: string,
-  entry: { label: string; svg: string; format?: "raster" },
+  entry: { label: string; svg?: string; ref?: string; format?: "raster" },
 ): CustomAsset {
+  // 參照筆（ADR-0223）：內容在 blob 快取；id＝ref（＝blob 內容雜湊），svg 留空占位。
+  if (entry.ref) {
+    return {
+      id: entry.ref,
+      label: clampStickerLabel(entry.label),
+      svg: "",
+      kind: "emoji",
+      shortcode,
+      format: "raster",
+      ref: entry.ref,
+    };
+  }
   return {
-    id: contentHash(entry.svg),
+    id: contentHash(entry.svg ?? ""),
     label: clampStickerLabel(entry.label),
-    svg: entry.svg,
+    svg: entry.svg ?? "",
     kind: "emoji",
     shortcode,
     ...(entry.format === "raster" ? { format: "raster" as const } : {}),
   };
+}
+
+/**
+ * 把清單一筆解析為可渲染內容（ADR-0223）：行內→直接內容；參照→查 blob 快取取內容；
+ * 參照但 blob 未到→`pending`（呼叫端據此顯示占位並觸發 backfill）。
+ */
+export function resolveManifestEntry(
+  entry: { label: string; svg?: string; ref?: string; format?: "raster" },
+  getBlob: (hash: string) => string | undefined,
+): { label: string; svg: string; format?: "raster" } | { label: string; pending: true; ref: string } | undefined {
+  if (entry.ref) {
+    const data = getBlob(entry.ref);
+    if (data === undefined) return { label: entry.label, pending: true, ref: entry.ref };
+    return { label: entry.label, svg: data, format: "raster" };
+  }
+  if (typeof entry.svg === "string") {
+    return { label: entry.label, svg: entry.svg, ...(entry.format === "raster" ? { format: "raster" as const } : {}) };
+  }
+  return undefined;
 }
 
 /** 資產清單序列化後的位元組數（供送出端檢查每則預算）。 */

@@ -129,6 +129,16 @@ describe("LocalStorage 靜態加密（ADR-0112）", () => {
     expect(new LocalStorage("ns", 0, sk).loadCustomAssets().map((a) => a.shortcode)).toEqual(["party"]);
   });
 
+  it("blob 快取（ADR-0223）：磁碟密文、同鑰重載讀得回", () => {
+    const s = new LocalStorage("ns", 0, sk);
+    const blob = { hash: "abc123", data: "data:image/gif;base64,ZZZSECRET" };
+    s.saveAssetBlobs([blob]);
+    const raw = backing.get("nb.ns.assetBlobs")!;
+    expect(raw).not.toContain("ZZZSECRET"); // blob 位元組不以明文出現
+    expect(raw.startsWith("c1:")).toBe(true);
+    expect(new LocalStorage("ns", 0, sk).loadAssetBlobs()).toEqual([blob]);
+  });
+
   it("不給 nsec → 沿用明文（相容既有呼叫，不強制破壞）", () => {
     const s = new LocalStorage("ns");
     s.appendMessage(secret("m1"));

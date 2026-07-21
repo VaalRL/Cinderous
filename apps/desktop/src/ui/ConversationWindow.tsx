@@ -35,6 +35,7 @@ import {
   ASSET_MANIFEST_MAX_COUNT,
   collectReferencedShortcodes,
   resolveInlineEmoji,
+  resolveManifestEntry,
   splitAssetManifest,
   acquireAssets,
   type AssetManifest,
@@ -373,7 +374,13 @@ function assetSrc(svg: string, format?: "svg" | "raster"): string {
 }
 
 function renderRichText(text: string, manifest: AssetManifest): JSX.Element[] {
-  const segs = resolveInlineEmoji(text, (code) => manifest[code]);
+  const segs = resolveInlineEmoji(text, (code) => {
+    const entry = manifest[code];
+    if (!entry) return undefined;
+    // ADR-0223：參照筆需 blob 快取解析（P2a-2 接）；目前無快取＝暫不渲染（留字面）。
+    const r = resolveManifestEntry(entry, () => undefined);
+    return r && !("pending" in r) ? r : undefined;
+  });
   return segs.map((seg, i) =>
     seg.type === "text" ? (
       <Fragment key={i}>{renderMarkdown(applyEmoticons(seg.value))}</Fragment>

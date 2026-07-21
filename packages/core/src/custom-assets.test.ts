@@ -5,8 +5,11 @@ import {
   ASSET_MANIFEST_PREFIX,
   acquireAssets,
   activeEmojiQuery,
+  blobHashOk,
+  cacheBlobs,
   detectRasterType,
   isValidRasterDataUri,
+  resolveManifestEntry,
   appendAssetManifest,
   assetFromManifestEntry,
   assetManifestBytes,
@@ -288,5 +291,66 @@ describe("ADR-0222 raster 資產（動畫 GIF）", () => {
     const segs = resolveInlineEmoji("嗨 :dance:", (c) => (c === "dance" ? { label: "跳舞", svg: gif, format: "raster" } : undefined));
     const emoji = segs.find((s) => s.type === "emoji");
     expect(emoji && emoji.type === "emoji" && emoji.format).toBe("raster");
+  });
+});
+
+describe("ADR-0223 Model B（內容定址 blob）", () => {
+  const gif = "data:image/gif;base64,R0lGODlhAQABAAAAACwAAAAAAQABAAA=";
+  const hash = contentHash(gif);
+
+  it("blobHashOk：整合性驗證", () => {
+    expect(blobHashOk(hash, gif)).toBe(true);
+    expect(blobHashOk("0".repeat(64), gif)).toBe(false);
+  });
+
+  it("cacheBlobs：置前、去重刷新、LRU 尾端淘汰", () => {
+    const cache = [
+      { hash: "a", data: "x" },
+      { hash: "b", data: "y" },
+    ];
+    expect(cacheBlobs(cache, [{ hash: "c", data: "z" }], 2).map((b) => b.hash)).toEqual(["c", "a"]);
+    const dedup = cacheBlobs(cache, [{ hash: "a", data: "x2" }], 5);
+    expect(dedup.map((b) => b.hash)).toEqual(["a", "b"]);
+    expect(dedup[0]?.data).toBe("x2");
+  });
+
+  it("parseAssetManifest：接受參照筆（ref＝hash＋raster、無 svg）", () => {
+    const raw = ASSET_MANIFEST_PREFIX + JSON.stringify({ dance: { label: "跳舞", ref: hash, format: "raster" } });
+    expect(parseAssetManifest(raw)).toEqual({ dance: { label: "跳舞", ref: hash, format: "raster" } });
+  });
+
+  it("parseAssetManifest：非法 ref（非 64hex 或無 raster）丟棄", () => {
+    expect(parseAssetManifest(ASSET_MANIFEST_PREFIX + JSON.stringify({ x: { label: "x", ref: "zzz", format: "raster" } }))).toEqual({});
+    expect(parseAssetManifest(ASSET_MANIFEST_PREFIX + JSON.stringify({ x: { label: "x", ref: hash } }))).toEqual({});
+  });
+
+  it("resolveManifestEntry：行內／參照有 blob／參照無 blob(pending)", () => {
+    expect(resolveManifestEntry({ label: "a", svg: gif, format: "raster" }, () => undefined)).toEqual({
+      label: "a",
+      svg: gif,
+      format: "raster",
+    });
+    expect(resolveManifestEntry({ label: "d", ref: hash, format: "raster" }, (h) => (h === hash ? gif : undefined))).toEqual({
+      label: "d",
+      svg: gif,
+      format: "raster",
+    });
+    expect(resolveManifestEntry({ label: "d", ref: hash, format: "raster" }, () => undefined)).toEqual({
+      label: "d",
+      pending: true,
+      ref: hash,
+    });
+  });
+
+  it("assetFromManifestEntry：參照筆 id＝ref、format raster、svg 留空", () => {
+    expect(assetFromManifestEntry("dance", { label: "跳舞", ref: hash, format: "raster" })).toEqual({
+      id: hash,
+      label: "跳舞",
+      svg: "",
+      kind: "emoji",
+      shortcode: "dance",
+      format: "raster",
+      ref: hash,
+    });
   });
 });

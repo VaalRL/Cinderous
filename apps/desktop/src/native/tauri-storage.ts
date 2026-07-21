@@ -3,7 +3,7 @@
 // 記憶體 + **防抖**持久化（store_save）。同步介面不變＝後端零改（解 async/sync 摩擦）。
 
 import { invoke } from "@tauri-apps/api/core";
-import type { CustomAsset } from "@cinderous/core";
+import type { AssetBlob, CustomAsset } from "@cinderous/core";
 import { ArchiveWriter, MemoryStorage, type MessageArchive } from "@cinderous/engine";
 import type {
   AppStorage,
@@ -433,6 +433,14 @@ export class TauriStorage implements AppStorage {
   saveCustomAssets(list: CustomAsset[]): void {
     // ADR-0220：customAssets 屬快照非 messages → 隨 metaOf 落在 META 部位（Rust AES-256-GCM 加密）。
     this.mem.saveCustomAssets(list);
+    this.persist(META);
+  }
+  loadAssetBlobs(): AssetBlob[] {
+    return this.mem.loadAssetBlobs();
+  }
+  saveAssetBlobs(list: AssetBlob[]): void {
+    // ADR-0223：assetBlobs 同屬快照非 messages → 隨 META 部位加密落地。
+    this.mem.saveAssetBlobs(list);
     this.persist(META);
   }
 }
