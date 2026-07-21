@@ -1,5 +1,9 @@
+import { readFileSync } from "node:fs";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
+
+// 版號注入（ADR-0227 P2）：自 root package.json（SSOT）讀取為 build-time 常數 __APP_VERSION__。
+const version = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")).version as string;
 
 // 行動端 web preview（ADR-0085）：以 react-native-web 在瀏覽器實跑 MobileApp（手機外框示範）。
 // 同一份 vite 設定亦供 vitest 使用（test 區塊，環境 node）。
@@ -21,6 +25,7 @@ const rnWeb = {
 };
 
 export default defineConfig({
+  define: { __APP_VERSION__: JSON.stringify(version) },
   plugins: [react()],
   resolve: rnWeb,
   test: {
