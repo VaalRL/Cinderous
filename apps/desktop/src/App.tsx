@@ -19,6 +19,7 @@ import {
   parseOrgInvite,
   peekBackupRelay,
   type AssetBlob,
+  type AssetTombstone,
   type CustomAsset,
   type PubkeyHex,
 } from "@cinderous/core";
@@ -788,6 +789,14 @@ export function App(): JSX.Element {
       ? {
           load: (): AssetBlob[] => storageRef.current!.loadAssetBlobs(),
           save: (l: AssetBlob[]): void => storageRef.current!.saveAssetBlobs(l),
+        }
+      : undefined;
+  // 資產墓碑儲存（ADR-0224）：刪除時記墓碑、隨快照跨自己裝置傳播刪除。
+  const tombstoneStore =
+    self && storageRef.current
+      ? {
+          load: (): AssetTombstone[] => storageRef.current!.loadAssetTombstones(),
+          save: (l: AssetTombstone[]): void => storageRef.current!.saveAssetTombstones(l),
         }
       : undefined;
   const idleRef = useRef<IdleState>(initIdle(Date.now()));
@@ -2600,6 +2609,9 @@ export function App(): JSX.Element {
               {...(assetStore ? { assetStore } : {})}
               {...(blobStore ? { blobStore } : {})}
               onRequestAsset={(to, hash) => activeBackend.requestAsset?.(to, hash)}
+              {...(self ? { selfPubkey: self.pubkey } : {})}
+              {...(tombstoneStore ? { tombstoneStore } : {})}
+              onLibraryChanged={() => activeBackend.resyncAssets?.()}
               blobsNonce={blobsNonce}
               contact={groupContact}
               messages={convos[pk] ?? []}
@@ -2688,6 +2700,9 @@ export function App(): JSX.Element {
             {...(assetStore ? { assetStore } : {})}
               {...(blobStore ? { blobStore } : {})}
               onRequestAsset={(to, hash) => activeBackend.requestAsset?.(to, hash)}
+              {...(self ? { selfPubkey: self.pubkey } : {})}
+              {...(tombstoneStore ? { tombstoneStore } : {})}
+              onLibraryChanged={() => activeBackend.resyncAssets?.()}
               blobsNonce={blobsNonce}
             contact={contact}
             p2pConnected={p2pConnected.has(pk)}

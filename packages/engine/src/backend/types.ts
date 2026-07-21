@@ -333,6 +333,8 @@ export interface ChatBackend {
    * 對端查得後以加密分塊回傳；收齊、驗整合性、入快取後觸發 `onAssetCached`。
    */
   requestAsset?(to: PubkeyHex, hash: string): void;
+  /** 自訂資產庫／墓碑變更後呼叫（ADR-0224）：重發雲端快照，讓自己其他裝置同步庫與刪除。 */
+  resyncAssets?(): void;
   /** 記錄某圖片訊息的縮圖（ADR-0102）：收檔端產生縮圖後回填。 */
   setFileThumb?(contact: PubkeyHex, messageId: string, thumb: string): void;
   /**

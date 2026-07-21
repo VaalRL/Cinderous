@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { formatCustomSticker, parseCustomSticker } from "@cinderous/core";
 import {
   addSticker,
+  addTombstone,
   findByShortcode,
   LIBRARY_MAX,
   removeSticker,
@@ -156,5 +157,40 @@ describe("ADR-0222 raster 資產", () => {
   });
   it("raster 宣稱但非圖 data URI 被拒", () => {
     expect(addSticker([], "x", "<svg></svg>", { format: "raster" })).toEqual({ ok: false, reason: "bad-image" });
+  });
+});
+
+describe("ADR-0224 at 標記與墓碑", () => {
+  it("addSticker 帶 now → 資產有 at；無 now → 無 at（相容）", () => {
+    expect(addSticker([], "圓", SVG_A, { now: 1234 }).ok && addSticker([], "圓", SVG_A, { now: 1234 }).ok).toBe(true);
+    const withAt = addSticker([], "圓", SVG_A, { now: 1234 });
+    expect(withAt.ok && withAt.sticker.at).toBe(1234);
+    const noAt = addSticker([], "圓", SVG_A);
+    expect(noAt.ok && noAt.sticker.at).toBeUndefined();
+  });
+
+  it("setShortcode 帶 now → 刷新 at", () => {
+    const base = addSticker([], "圓", SVG_A, { now: 1 });
+    if (!base.ok) throw new Error("unexpected");
+    const r = setShortcode(base.list, base.sticker.id, "smile", 999);
+    expect(r.ok && r.sticker.at).toBe(999);
+  });
+
+  it("addTombstone：新增置前、新到舊排序", () => {
+    expect(addTombstone([{ id: "old", at: 1 }], "new", 5)).toEqual([
+      { id: "new", at: 5 },
+      { id: "old", at: 1 },
+    ]);
+  });
+
+  it("addTombstone：同 id 更新為較新 at（去重）", () => {
+    expect(addTombstone([{ id: "x", at: 1 }], "x", 9)).toEqual([{ id: "x", at: 9 }]);
+  });
+
+  it("addTombstone：超過上限裁切、保留最新", () => {
+    let t: { id: string; at: number }[] = [];
+    for (let i = 0; i < 200; i++) t = addTombstone(t, `id${i}`, i);
+    expect(t.length).toBeLessThanOrEqual(128);
+    expect(t[0]?.at).toBe(199); // 最新在前
   });
 });

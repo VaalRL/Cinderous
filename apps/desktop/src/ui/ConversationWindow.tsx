@@ -43,10 +43,12 @@ import {
   acquireAssets,
   type AssetBlob,
   type AssetManifest,
+  type AssetTombstone,
   type CustomAsset,
 } from "@cinderous/core";
 import {
   addSticker,
+  addTombstone,
   autoAcquireEnabled,
   clearLegacyLibrary,
   CUSTOM_PACK,
@@ -351,6 +353,15 @@ export interface ConversationProps {
   };
   /** 向某人索取缺少的 emoji blob（ADR-0223 backfill）：pending 參照觸發。 */
   onRequestAsset?: (to: string, hash: string) => void;
+  /** 自己的 pubkey（ADR-0224）：自庫參照缺 blob 時向自己其他裝置 backfill。 */
+  selfPubkey?: string;
+  /** 資產墓碑儲存（ADR-0224）：刪除時記墓碑、隨快照跨自己裝置傳播刪除。 */
+  tombstoneStore?: {
+    load: () => AssetTombstone[];
+    save: (list: AssetTombstone[]) => void;
+  };
+  /** 庫／墓碑變更後通知（ADR-0224）：App 據此呼叫 backend.resyncAssets() 重發雲端快照。 */
+  onLibraryChanged?: () => void;
   /** blob 快取版本；後端 onAssetCached 後由 App bump → 本窗重讀快取、把占位重繪為動畫。 */
   blobsNonce?: number;
   /** 公告頻道唯讀（ADR-0049）：非管理者隱藏輸入區。 */
@@ -489,6 +500,7 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
   const persistLib = (list: CustomSticker[]): void => {
     if (props.assetStore) props.assetStore.save(list);
     else saveLibrary(list);
+    props.onLibraryChanged?.(); // ADR-0224：庫變更後重發雲端快照（跨自己裝置同步庫/墓碑）
   };
   const [library, setLibrary] = useState<CustomSticker[]>(() => loadLib());
   // 內容定址 blob 快取（ADR-0223）：有 blobStore（加密）走它，否則本 session 記憶體。
@@ -713,7 +725,7 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
 
   // 加一顆 raster（ADR-0223）：小的行內、大的存 blob 快取＋庫記 ref（放開 Phase 1 的 48KiB 硬擋）。
   const addRaster = (list: CustomSticker[], label: string, dataUri: string, shortcode?: string): AddResult => {
-    const opts = shortcode ? { shortcode } : {};
+    const opts = shortcode ? { shortcode, now: Date.now() } : { now: Date.now() }; // ADR-0224：帶加入時間
     if (dataUri.length <= RASTER_MAX_BYTES) return addSticker(list, label, dataUri, { format: "raster", ...opts });
     const hash = contentHash(dataUri);
     cacheBlob({ hash, data: dataUri });
@@ -723,7 +735,8 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
   // 貼圖庫寫入（匯入 / fork / 點擊收藏共用）；失敗以 alert 呈現拒收原因。
   const acquireSticker = (label: string, svg: string, format?: "svg" | "raster"): boolean => {
     // 讀最新再寫（ADR-0221 C1/C2）；raster 走 addRaster（大檔存 blob，ADR-0223）。
-    const r = format === "raster" ? addRaster(loadLib(), label, svg) : addSticker(loadLib(), label, svg);
+    const r =
+      format === "raster" ? addRaster(loadLib(), label, svg) : addSticker(loadLib(), label, svg, { now: Date.now() });
     if (!r.ok) {
       void alert(t("sticker_importFail", { reason: r.reason }));
       return false;
@@ -733,6 +746,9 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
     return true;
   };
   const deleteCustom = (id: string): void => {
+    // 先記刪除墓碑（ADR-0224），再存庫——persistLib 會觸發重發快照，此時墓碑須已在 storage。
+    const ts = props.tombstoneStore;
+    if (ts) ts.save(addTombstone(ts.load(), id, Date.now()));
     const next = removeSticker(loadLib(), id); // 讀最新再寫（ADR-0221 C1/C2）
     setLibrary(next);
     persistLib(next);
@@ -748,9 +764,11 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
     for (const m of messages) {
       if (m.outgoing || acquiredRef.current.has(m.id)) continue;
       acquiredRef.current.add(m.id);
-      const incoming = Object.entries(splitAssetManifest(m.text).manifest).map(([code, e]) =>
-        assetFromManifestEntry(code, e),
-      );
+      const now = Date.now(); // ADR-0224：收藏時間，供跨裝置 LWW/墓碑復活比較
+      const incoming = Object.entries(splitAssetManifest(m.text).manifest).map(([code, e]) => ({
+        ...assetFromManifestEntry(code, e),
+        at: now,
+      }));
       if (incoming.length === 0) continue;
       // 保護：最愛 或 自建/自匯入（mine）——不被別人的來圖擠掉（ADR-0221 M1）。
       const next = acquireAssets(cur, incoming, {
@@ -792,6 +810,21 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages, blobs]);
+
+  // 自己庫裡的參照資產缺 blob（ADR-0224）：多半是別台匯入、經雲端快照同步來的 ref。
+  // 向自己其他裝置索取 blob（backfill from self）；每 hash 一次（共用 requestedRef，後端另有節流）。
+  useEffect(() => {
+    const req = props.onRequestAsset;
+    const me = props.selfPubkey;
+    if (!req || !me) return;
+    for (const a of library) {
+      if (a.ref && !getBlob(a.ref) && !requestedRef.current.has(a.ref)) {
+        requestedRef.current.add(a.ref);
+        req(me, a.ref);
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [library, blobs]);
   // 統一解析：內建包或自製庫（供最近/最愛分頁）。
   const resolveAny = (
     ref: StickerRef,
@@ -919,7 +952,7 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
     const r =
       res.format === "raster"
         ? addRaster(loadLib(), stem, res.svg, input)
-        : addSticker(loadLib(), stem, res.svg, { shortcode: input });
+        : addSticker(loadLib(), stem, res.svg, { shortcode: input, now: Date.now() });
     if (!r.ok) {
       void alert(t("sticker_importFail", { reason: r.reason }));
       return;
@@ -950,7 +983,7 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
         const r =
           res.format === "raster"
             ? addRaster(list, stem, res.svg, toShortcode(stem))
-            : addSticker(list, stem, res.svg, { shortcode: toShortcode(stem) });
+            : addSticker(list, stem, res.svg, { shortcode: toShortcode(stem), now: Date.now() });
         if (!r.ok) skipped++;
         else if (r.list !== list) {
           list = r.list; // 真正新增（去重命中則清單不變、不計）

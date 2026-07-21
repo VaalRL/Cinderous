@@ -6,12 +6,14 @@
 // 儲存改走 ADR-0219 getKv()（RN 可換式），取代原本直呼 localStorage（ADR-0220）。
 
 import {
+  ASSET_TOMBSTONE_MAX,
   clampStickerLabel,
   contentHash,
   isValidRasterDataUri,
   isValidShortcode,
   RASTER_MAX_BYTES,
   validateStickerSvg,
+  type AssetTombstone,
   type CustomAsset,
   type CustomAssetKind,
   type SvgVerdict,
@@ -41,7 +43,7 @@ export function addSticker(
   list: CustomAsset[],
   label: string,
   svg: string,
-  opts: { shortcode?: string; kind?: CustomAssetKind; format?: "svg" | "raster"; ref?: string } = {},
+  opts: { shortcode?: string; kind?: CustomAssetKind; format?: "svg" | "raster"; ref?: string; now?: number } = {},
 ): AddResult {
   const ref = opts.ref;
   const raster = opts.format === "raster";
@@ -75,6 +77,7 @@ export function addSticker(
     ...(shortcode ? { shortcode } : {}),
     ...(raster || ref ? { format: "raster" as const } : {}),
     ...(ref ? { ref } : {}),
+    ...(opts.now ? { at: opts.now } : {}), // 加入時間（ADR-0224 LWW／墓碑復活）
   };
   return { ok: true, list: [sticker, ...list], sticker };
 }
@@ -82,6 +85,15 @@ export function addSticker(
 /** 移除資產（純函式）。 */
 export function removeSticker(list: CustomAsset[], id: string): CustomAsset[] {
   return list.filter((s) => s.id !== id);
+}
+
+/**
+ * 記一筆刪除墓碑（ADR-0224）：同 id 更新為較新 `at`、新到舊排序、上限裁切。
+ * 隨庫進雲端快照，跨自己其他裝置傳播刪除（LWW；重匯同資產其 `at` 較大即自動復活）。純函式。
+ */
+export function addTombstone(tombs: AssetTombstone[], id: string, now: number): AssetTombstone[] {
+  const rest = tombs.filter((t) => t.id !== id);
+  return [{ id, at: now }, ...rest].sort((a, b) => b.at - a.at).slice(0, ASSET_TOMBSTONE_MAX);
 }
 
 export function findSticker(list: CustomAsset[], id: string): CustomAsset | undefined {
@@ -96,13 +108,14 @@ export function findByShortcode(list: CustomAsset[], shortcode: string): CustomA
 }
 
 /** 指派／更換既有資產的短碼（純函式）：驗證合法＋唯一；成功回新 list（kind→both）。 */
-export function setShortcode(list: CustomAsset[], id: string, shortcode: string): AddResult {
+export function setShortcode(list: CustomAsset[], id: string, shortcode: string, now?: number): AddResult {
   const code = shortcode.trim().toLowerCase(); // 正規化小寫（ADR-0221 M2）
   if (!isValidShortcode(code)) return { ok: false, reason: "bad-shortcode" };
   if (list.some((s) => s.shortcode === code && s.id !== id)) return { ok: false, reason: "shortcode-taken" };
   const target = list.find((s) => s.id === id);
   if (!target) return { ok: false, reason: "not-found" };
-  const updated: CustomAsset = { ...target, shortcode: code, kind: "both", mine: true };
+  // touch at（ADR-0224）：更新短碼＝一次寫入，刷新 at 讓本地版在跨裝置 LWW 勝出。
+  const updated: CustomAsset = { ...target, shortcode: code, kind: "both", mine: true, ...(now ? { at: now } : {}) };
   return { ok: true, list: list.map((s) => (s.id === id ? updated : s)), sticker: updated };
 }
 
@@ -126,6 +139,7 @@ function normalize(s: unknown): CustomAsset | null {
     ...(shortcode ? { shortcode } : {}),
     ...(o.format === "raster" ? { format: "raster" as const } : {}), // 保留 raster 格式（ADR-0222）
     ...(typeof o.ref === "string" ? { ref: o.ref } : {}), // 保留內容定址參照（ADR-0223）
+    ...(typeof o.at === "number" ? { at: o.at } : {}), // 保留加入時間（ADR-0224 LWW）
   };
 }
 
