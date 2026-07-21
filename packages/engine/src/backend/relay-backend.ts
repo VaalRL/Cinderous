@@ -77,6 +77,7 @@ import {
   parseAssetRequest,
   reassembleAssetChunks,
   splitAssetChunks,
+  splitAssetManifest,
   wrapAssetChunk,
   wrapAssetRequest,
   type AssetChunk,
@@ -435,6 +436,11 @@ export class RelayChatBackend implements ChatBackend {
   >();
   /** backfill 請求重試節流（秒）：同 hash 此窗內不重送請求，避免放大。 */
   private static readonly ASSET_REQUEST_TTL_SEC = 60;
+  /** 已推播過的 blob（per 對象 hash 集，ADR-0223 P2b 首次推播）：避免重推。 */
+  private readonly sentBlobs = new Map<PubkeyHex, Set<string>>();
+  /** 收到訊息引用過的 blob hash（ADR-0223 P2b）：據此接受寄件者主動推播（非只已請求）。 */
+  private readonly expectedBlobs = new Set<string>();
+  private static readonly EXPECTED_BLOBS_MAX = 256;
   /** 企業 TURN 伺服器與強制 TURN 政策狀態（ADR-0048）：供 WebRTC ICE 設定。 */
   private readonly turnServers: RTCIceServer[] | undefined;
   private forceTurn = false;
@@ -1417,6 +1423,7 @@ export class RelayChatBackend implements ChatBackend {
       ...(status ? { status } : {}),
       ...extra,
     };
+    if (!selfCopy) this.trackExpectedRefs(rumor.content); // ADR-0223 P2b：據此接受寄件者主動推播的 blob。
     this.storage.appendMessage(message);
     this.handlers?.onMessage(convo, {
       id: rumor.id,
@@ -1545,6 +1552,7 @@ export class RelayChatBackend implements ChatBackend {
       ...(status ? { status } : {}),
       ...extra,
     };
+    if (!selfCopy) this.trackExpectedRefs(rumor.content); // ADR-0223 P2b：接受寄件者推播的 blob。
     this.storage.appendMessage({ ...body, contact: groupId });
     this.handlers?.onMessage(groupId, body);
     if (!selfCopy) this.bumpUnread(groupId, body.at); // 未讀 +1（O(1)，ADR-0110）
@@ -2060,6 +2068,7 @@ export class RelayChatBackend implements ChatBackend {
     this.handlers?.onMessage(to, { id, outgoing: true, text, at: message.at, status: "sending" as const, ...extra });
     // 先存後送：確保同步（測試網路）回來的 OK/回條找得到已存訊息才更新狀態（ADR-0058）。
     this.publishWrapped(to, id, wrapped);
+    this.pushReferencedBlobs(to, text); // ADR-0223 P2b：首次推播引用到的 blob（免對端等 backfill）。
   }
 
   /**
@@ -2656,7 +2665,8 @@ export class RelayChatBackend implements ChatBackend {
 
   /** 收 blob 分塊：只收自己請求過的 hash；收齊→驗整合性→入快取→通知重繪。 */
   private receiveAssetChunk(sender: PubkeyHex, chunk: AssetChunk): void {
-    if (!this.assetRequested.has(chunk.hash)) return; // 未請求＝不收（防未請求灌入）
+    // 只收「已請求」或「訊息曾引用」的 hash（ADR-0223）：擋未經參照的主動灌入。
+    if (!this.assetRequested.has(chunk.hash) && !this.expectedBlobs.has(chunk.hash)) return;
     let asm = this.assetAsm.get(chunk.hash);
     if (!asm) {
       this.sweepChunkAsm();
@@ -2677,9 +2687,46 @@ export class RelayChatBackend implements ChatBackend {
     const data = reassembleAssetChunks(chunks); // 內含 contentHash 整合性驗證
     if (data === null) return; // 不齊/掉包
     this.assetRequested.delete(chunk.hash);
+    this.expectedBlobs.delete(chunk.hash);
     const next = cacheBlobs(this.storage.loadAssetBlobs(), [{ hash: chunk.hash, data }], BLOB_CACHE_MAX);
     this.storage.saveAssetBlobs(next);
     this.handlers?.onAssetCached?.(chunk.hash);
+  }
+
+  /** 收到訊息時記下其引用的 blob hash（ADR-0223 P2b）：據此接受寄件者的主動推播。有界 FIFO。 */
+  private trackExpectedRefs(text: string): void {
+    for (const entry of Object.values(splitAssetManifest(text).manifest)) {
+      if (!entry.ref) continue;
+      if (this.expectedBlobs.size >= RelayChatBackend.EXPECTED_BLOBS_MAX) {
+        const oldest = this.expectedBlobs.values().next().value;
+        if (oldest !== undefined) this.expectedBlobs.delete(oldest);
+      }
+      this.expectedBlobs.add(entry.ref);
+    }
+  }
+
+  /** 首次推播（ADR-0223 P2b）：送訊息時把引用到的 blob 主動推給對象（per 對象去重）。 */
+  private pushReferencedBlobs(to: PubkeyHex, text: string): void {
+    const refs = Object.values(splitAssetManifest(text).manifest)
+      .map((e) => e.ref)
+      .filter((r): r is string => typeof r === "string");
+    if (refs.length === 0) return;
+    let sent = this.sentBlobs.get(to);
+    const blobs = this.storage.loadAssetBlobs();
+    for (const ref of refs) {
+      if (sent?.has(ref)) continue;
+      const blob = blobs.find((b) => b.hash === ref);
+      if (!blob) continue;
+      const parts = splitAssetChunks(blob.data);
+      parts.forEach((data, seq) => {
+        this.publishReliable(wrapAssetChunk({ hash: ref, seq, total: parts.length, data }, this.sk, to));
+      });
+      if (!sent) {
+        sent = new Set();
+        this.sentBlobs.set(to, sent);
+      }
+      sent.add(ref);
+    }
   }
 
   /** 回收逾時未收齊的分塊重組（審查修正）：防單一聯絡人以殘缺傳輸永久佔滿 8 格。 */
@@ -2915,6 +2962,8 @@ export class RelayChatBackend implements ChatBackend {
     this.handlers?.onMessage(groupId, { id, outgoing: true, text, at: message.at, status, ...extra });
     // 扇出腿計狀態（ADR-0095）；另含一份自封副本讓自己的其他裝置也看得到（ADR-0107）。
     this.publishWrapped(groupId, id, wrapped);
+    // ADR-0223 P2b：把引用到的 blob 推給每位成員（per 成員去重；無群播故逐一）。
+    for (const m of group.members) if (m !== this.self.pubkey) this.pushReferencedBlobs(m, text);
   }
 
   /**

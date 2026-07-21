@@ -83,6 +83,31 @@ describe("RelayChatBackend（真實後端 + 持久化）", () => {
     b.stop();
   });
 
+  it("emoji blob 首次推播（ADR-0223 P2b）：A 送含 ref 訊息 → B 主動收到 blob（不需索取）", () => {
+    const net = createInMemoryRelayNetwork();
+    const storeA = new MemoryStorage();
+    const storeB = new MemoryStorage();
+    const a = new RelayChatBackend(storeA, (h) => net.connect("a", h), "Alice");
+    const b = new RelayChatBackend(storeB, (h) => net.connect("b", h), "Bob");
+    const data = "data:image/gif;base64," + "A".repeat(ASSET_CHUNK_CHARS + 300);
+    const hash = contentHash(data);
+    storeA.saveAssetBlobs([{ hash, data }]); // A 有 blob（emoji 作者）
+    const cached: string[] = [];
+    a.start(noop);
+    b.start({ ...noop, onAssetCached: (h) => cached.push(h) });
+    a.addContact(b.selfNpub);
+    b.addContact(a.selfNpub);
+
+    const text = `嗨 :dance:\nnb-assets:v1:${JSON.stringify({ dance: { label: "跳舞", ref: hash, format: "raster" } })}`;
+    a.sendMessage(b.self.pubkey, text); // A 送含 ref 的訊息 → 主動推 blob
+
+    expect(cached).toContain(hash); // B 主動收到（沒呼叫 requestAsset）
+    expect(storeB.loadAssetBlobs()).toEqual([{ hash, data }]);
+
+    a.stop();
+    b.stop();
+  });
+
   it("setSelfName（ADR-0144）：更新 self.name、落地本機、把新名廣播給聯絡人（ADR-0061）", () => {
     const net = createInMemoryRelayNetwork();
     const storeA = new MemoryStorage();
