@@ -139,6 +139,15 @@ describe("LocalStorage 靜態加密（ADR-0112）", () => {
     expect(new LocalStorage("ns", 0, sk).loadAssetBlobs()).toEqual([blob]);
   });
 
+  it("資產墓碑（ADR-0224）：磁碟密文、同鑰重載讀得回", () => {
+    const s = new LocalStorage("ns", 0, sk);
+    s.saveAssetTombstones([{ id: "deadbeef", at: 12345 }]);
+    const raw = backing.get("nb.ns.assetTombstones")!;
+    expect(raw).not.toContain("deadbeef"); // 墓碑 id 不以明文出現
+    expect(raw.startsWith("c1:")).toBe(true);
+    expect(new LocalStorage("ns", 0, sk).loadAssetTombstones()).toEqual([{ id: "deadbeef", at: 12345 }]);
+  });
+
   it("不給 nsec → 沿用明文（相容既有呼叫，不強制破壞）", () => {
     const s = new LocalStorage("ns");
     s.appendMessage(secret("m1"));

@@ -8,6 +8,7 @@ import {
 } from "./cloud-snapshot.js";
 import { MemoryStorage } from "./memory.js";
 import type { StoredMessage } from "./types.js";
+import type { CustomAsset } from "@cinderous/core";
 
 const msg = (id: string, contact: string, at: number, text = id): StoredMessage => ({
   id,
@@ -122,5 +123,95 @@ describe("快照合併（交換律、補缺不覆蓋）", () => {
     expect(parseSnapshotContent("not json")).toBeNull();
     expect(parseSnapshotContent(JSON.stringify({ v: 2 }))).toBeNull();
     expect(parseSnapshotContent(JSON.stringify({ v: 1, mode: "basic" }))).toBeNull();
+  });
+});
+
+describe("跨裝置資產同步（ADR-0224）", () => {
+  const asset = (id: string, extra: Partial<CustomAsset> = {}): CustomAsset => ({
+    id,
+    label: id,
+    svg: `<svg>${id}</svg>`,
+    kind: "emoji",
+    ...extra,
+  });
+
+  it("build 帶入自訂資產庫與墓碑；大 raster 只帶 ref（svg 空）", () => {
+    const s = new MemoryStorage();
+    s.saveCustomAssets([
+      asset("a1", { shortcode: "smile", at: 10 }),
+      { id: "h64", label: "跳舞", svg: "", kind: "emoji", shortcode: "dance", format: "raster", ref: "h64", at: 20 },
+    ]);
+    s.saveAssetTombstones([{ id: "gone", at: 5 }]);
+    const snap = buildSnapshotContent(s, "basic");
+    expect(snap.customAssets?.map((a) => a.id).sort()).toEqual(["a1", "h64"]);
+    expect(snap.customAssets?.find((a) => a.id === "h64")?.svg).toBe("");
+    expect(snap.customAssets?.find((a) => a.id === "h64")?.ref).toBe("h64");
+    expect(snap.assetTombstones).toEqual([{ id: "gone", at: 5 }]);
+  });
+
+  it("merge 補缺聯集（LWW）：對端庫進本機", () => {
+    const src = new MemoryStorage();
+    src.saveCustomAssets([asset("a1", { at: 1 }), asset("a2", { at: 2 })]);
+    const dst = new MemoryStorage();
+    dst.saveCustomAssets([asset("a1", { at: 1 })]);
+    const { changed } = mergeSnapshotContent(dst, buildSnapshotContent(src, "basic"));
+    expect(changed).toBe(true);
+    expect(
+      dst
+        .loadCustomAssets()
+        .map((a) => a.id)
+        .sort(),
+    ).toEqual(["a1", "a2"]);
+  });
+
+  it("墓碑刪除傳播：對端較新墓碑 → 本機資產移除、墓碑留存", () => {
+    const src = new MemoryStorage();
+    src.saveAssetTombstones([{ id: "a1", at: 100 }]);
+    const dst = new MemoryStorage();
+    dst.saveCustomAssets([asset("a1", { at: 50 })]);
+    const { changed } = mergeSnapshotContent(dst, buildSnapshotContent(src, "basic"));
+    expect(changed).toBe(true);
+    expect(dst.loadCustomAssets().some((a) => a.id === "a1")).toBe(false);
+    expect(dst.loadAssetTombstones().map((t) => t.id)).toEqual(["a1"]);
+  });
+
+  it("重匯復活：本機墓碑舊、對端資產新 → 資產回來、墓碑清除", () => {
+    const src = new MemoryStorage();
+    src.saveCustomAssets([asset("a1", { at: 100 })]);
+    const dst = new MemoryStorage();
+    dst.saveAssetTombstones([{ id: "a1", at: 50 }]);
+    mergeSnapshotContent(dst, buildSnapshotContent(src, "basic"));
+    expect(dst.loadCustomAssets().some((a) => a.id === "a1")).toBe(true);
+    expect(dst.loadAssetTombstones()).toEqual([]);
+  });
+
+  it("mine／shortcode 保留、順序不誤報：相同集合再合併 changed=false", () => {
+    const src = new MemoryStorage();
+    src.saveCustomAssets([asset("a1", { at: 1 }), asset("a2", { at: 2 })]);
+    const dst = new MemoryStorage();
+    dst.saveCustomAssets([asset("a1", { mine: true, shortcode: "mine1", at: 1 }), asset("a2", { at: 2 })]);
+    const { changed } = mergeSnapshotContent(dst, buildSnapshotContent(src, "basic"));
+    expect(changed).toBe(false);
+    expect(dst.loadCustomAssets().find((a) => a.id === "a1")?.mine).toBe(true);
+    expect(dst.loadCustomAssets().find((a) => a.id === "a1")?.shortcode).toBe("mine1");
+  });
+
+  it("build→parse→merge round-trip 保留庫與墓碑", () => {
+    const src = new MemoryStorage();
+    src.saveCustomAssets([asset("a1", { at: 1 })]);
+    src.saveAssetTombstones([{ id: "dead", at: 9 }]);
+    const parsed = parseSnapshotContent(JSON.stringify(buildSnapshotContent(src, "basic")));
+    expect(parsed).not.toBeNull();
+    const dst = new MemoryStorage();
+    if (parsed) mergeSnapshotContent(dst, parsed);
+    expect(dst.loadCustomAssets().map((a) => a.id)).toEqual(["a1"]);
+    expect(dst.loadAssetTombstones().map((t) => t.id)).toEqual(["dead"]);
+  });
+
+  it("parseSnapshotContent：customAssets／assetTombstones 非陣列 → null", () => {
+    const bad1 = { v: 1, mode: "basic", contacts: [], groups: [], blocked: [], customAssets: "x" };
+    const bad2 = { v: 1, mode: "basic", contacts: [], groups: [], blocked: [], assetTombstones: 3 };
+    expect(parseSnapshotContent(JSON.stringify(bad1))).toBeNull();
+    expect(parseSnapshotContent(JSON.stringify(bad2))).toBeNull();
   });
 });

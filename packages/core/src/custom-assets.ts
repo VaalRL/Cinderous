@@ -65,6 +65,11 @@ export interface CustomAsset {
    * （`hash===ref`）。用於大動畫 GIF——圖走 out-of-band、庫只記參照。
    */
   ref?: string;
+  /**
+   * 加入／最後更新時間（毫秒；ADR-0224）：跨裝置庫合併的 LWW 比較基準，亦與墓碑 `at` 比大小
+   * （資產較新＝復活、墓碑較新＝刪除）。舊資料可能缺 → 合併時視為 `0`（最舊）。
+   */
+  at?: number;
 }
 
 /** 內容定址 blob（ADR-0223）：`hash===contentHash(data)`；`data` 為 `data:image/*` data URI。 */
@@ -356,4 +361,112 @@ export function acquireAssets(
     result = result.filter((_, i) => i !== idx);
   }
   return result;
+}
+
+/** 資產刪除墓碑（ADR-0224）：`id`＝內容雜湊、`at`＝刪除時間（毫秒）。隨庫一同跨裝置同步。 */
+export interface AssetTombstone {
+  id: string;
+  at: number;
+}
+
+/** 墓碑保留上限（顆）；超過取新到舊前 N（ADR-0224）。 */
+export const ASSET_TOMBSTONE_MAX = 128;
+
+/** 取多組墓碑中每個 id 的最新（最大 `at`）。 */
+function latestTombstones(...lists: AssetTombstone[][]): Map<string, number> {
+  const m = new Map<string, number>();
+  for (const list of lists) {
+    for (const t of list) {
+      const prev = m.get(t.id);
+      if (prev === undefined || t.at > prev) m.set(t.id, t.at);
+    }
+  }
+  return m;
+}
+
+/**
+ * 跨裝置庫合併（ADR-0224）：LWW＋墓碑，交換律（多台任意順序合併結果一致）。
+ *
+ * - 對每個 `id`：取資產的最大 `at` 版本；比對該 id 墓碑的最大 `at`——資產 `at` **嚴格大於**
+ *   墓碑 `at` → 資產存活（含「重匯自動復活」）並丟棄該墓碑；否則資產出局、保留墓碑（刪除傳播）。
+ * - 合併同 `id` 資產時 `shortcode`／`mine` **保留本地**（別台不覆蓋本地自訂/自建旗標，ADR-0221）。
+ * - 存活資產按 `at` 新到舊（前＝最新），套 `max` LRU 淘汰（`protect` 永不淘汰）；
+ *   墓碑按 `at` 新到舊取前 `tombstoneMax`。純函式，不變更輸入。
+ */
+export function mergeAssetLibrary(
+  local: CustomAsset[],
+  remote: CustomAsset[],
+  localTombstones: AssetTombstone[],
+  remoteTombstones: AssetTombstone[],
+  opts: { max: number; tombstoneMax?: number; protect?: (a: CustomAsset) => boolean },
+): { assets: CustomAsset[]; tombstones: AssetTombstone[] } {
+  const protect = opts.protect ?? ((): boolean => false);
+  const tombstoneMax = opts.tombstoneMax ?? ASSET_TOMBSTONE_MAX;
+  const localById = new Map(local.map((a) => [a.id, a]));
+
+  // 1) 併資產：對每個 id 取「最大 at 版本」為內容基底。
+  const mergedById = new Map<string, CustomAsset>();
+  const order: string[] = []; // 首見序（穩定輸出用）
+  for (const a of [...local, ...remote]) {
+    const existing = mergedById.get(a.id);
+    if (!existing) {
+      order.push(a.id);
+      mergedById.set(a.id, a);
+      continue;
+    }
+    mergedById.set(a.id, (a.at ?? 0) > (existing.at ?? 0) ? a : existing);
+  }
+  // 本地 shortcode/mine 保留＋取 at 最大值。
+  for (const id of order) {
+    const merged = mergedById.get(id);
+    if (!merged) continue;
+    const loc = localById.get(id);
+    const at = Math.max(merged.at ?? 0, loc?.at ?? 0);
+    mergedById.set(id, {
+      ...merged,
+      ...(loc?.shortcode ? { shortcode: loc.shortcode } : {}),
+      ...(loc?.mine ? { mine: true } : {}),
+      ...(at ? { at } : {}),
+    });
+  }
+
+  // 2) 墓碑：每個 id 取最新 at。
+  const tombAt = latestTombstones(localTombstones, remoteTombstones);
+
+  // 3) 存活判定＋墓碑清理：資產 at 嚴格大於墓碑 at → 存活並丟棄墓碑；否則出局、留墓碑。
+  const survivors: CustomAsset[] = [];
+  for (const id of order) {
+    const a = mergedById.get(id);
+    if (!a) continue;
+    const t = tombAt.get(id);
+    if (t !== undefined && (a.at ?? 0) <= t) continue; // 出局（墓碑勝平手＝刪除優先）
+    if (t !== undefined) tombAt.delete(id); // 復活：丟棄過時墓碑
+    survivors.push(a);
+  }
+
+  // 4) 排序（at 新到舊，同 at 維持首見序）＋ max LRU 淘汰。
+  const rank = new Map(order.map((id, i) => [id, i]));
+  const ix = (id: string): number => rank.get(id) ?? 0;
+  survivors.sort((x, y) => (y.at ?? 0) - (x.at ?? 0) || ix(x.id) - ix(y.id));
+  let assets = survivors;
+  while (assets.length > opts.max) {
+    let idx = -1;
+    for (let i = assets.length - 1; i >= 0; i--) {
+      const a = assets[i];
+      if (a && !protect(a)) {
+        idx = i;
+        break;
+      }
+    }
+    if (idx === -1) break; // 全受保護：不淘汰
+    assets = assets.filter((_, i) => i !== idx);
+  }
+
+  // 5) 墓碑輸出：新到舊、取前 tombstoneMax。
+  const tombstones = [...tombAt.entries()]
+    .map(([id, at]) => ({ id, at }))
+    .sort((a, b) => b.at - a.at)
+    .slice(0, tombstoneMax);
+
+  return { assets, tombstones };
 }

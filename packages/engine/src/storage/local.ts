@@ -1,4 +1,11 @@
-import { deriveStorageKey, openValue, sealValue, type AssetBlob, type CustomAsset } from "@cinderous/core";
+import {
+  deriveStorageKey,
+  openValue,
+  sealValue,
+  type AssetBlob,
+  type AssetTombstone,
+  type CustomAsset,
+} from "@cinderous/core";
 
 import { ArchiveWriter, type MessageArchive } from "./archive.js";
 import { MemoryStorage } from "./memory.js";
@@ -153,6 +160,7 @@ export class LocalStorage implements AppStorage {
       bootstrapList: read<StoredBootstrapList | null>(this.k("bootstrapList"), null, this.dek),
       customAssets: read<CustomAsset[]>(this.k("customAssets"), [], this.dek), // ADR-0220
       assetBlobs: read<AssetBlob[]>(this.k("assetBlobs"), [], this.dek), // ADR-0223
+      assetTombstones: read<AssetTombstone[]>(this.k("assetTombstones"), [], this.dek), // ADR-0224
       readAt: read<Record<string, number>>(this.k("readAt"), {}, this.dek),
     };
   }
@@ -386,6 +394,13 @@ export class LocalStorage implements AppStorage {
   saveAssetBlobs(list: AssetBlob[]): void {
     this.mem.saveAssetBlobs(list);
     write(this.k("assetBlobs"), list, this.dek); // ADR-0223：以 dek 加密落地
+  }
+  loadAssetTombstones(): AssetTombstone[] {
+    return this.mem.loadAssetTombstones();
+  }
+  saveAssetTombstones(list: AssetTombstone[]): void {
+    this.mem.saveAssetTombstones(list);
+    write(this.k("assetTombstones"), list, this.dek); // ADR-0224：以 dek 加密落地
   }
   exportSnapshot(): StorageSnapshot {
     return this.mem.exportSnapshot();

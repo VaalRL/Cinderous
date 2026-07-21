@@ -5,6 +5,7 @@
 // 封鎖聯集（安全優先，封鎖者同時移出聯絡人）、訊息以 id 去重補回——
 // 多台裝置的快照以任意順序合併，結果一致。
 
+import { mergeAssetLibrary, type AssetTombstone, type CustomAsset } from "@cinderous/core";
 import type { AppStorage, StoredContact, StoredGroup, StoredMessage } from "./types.js";
 
 /** 雲端同步模式（ADR-0071 三檔）。 */
@@ -19,6 +20,12 @@ export const SNAPSHOT_MESSAGE_CAP = 500;
  */
 export const SNAPSHOT_PLAINTEXT_BUDGET = 180_000;
 
+/** 快照內自訂資產庫的子預算（ADR-0224）：與訊息共用 180KB 明文，庫最多吃這麼多、其餘留給訊息。 */
+export const SNAPSHOT_ASSET_BUDGET = 90_000;
+
+/** 快照合併時本地庫的寬鬆上限（ADR-0224）；權威策展上限在 UI 層（ADR-0220），此處只防灌爆。 */
+export const SNAPSHOT_LIBRARY_MAX = 256;
+
 /** 快照明文內容（NIP-44 加密前）。 */
 export interface CloudSnapshotContent {
   v: 1;
@@ -31,6 +38,10 @@ export interface CloudSnapshotContent {
   blocked: StoredContact[];
   /** 完整模式才有：近期訊息（跨對話、以 at 新到舊取前 N 則）。 */
   messages?: StoredMessage[];
+  /** 自訂資產庫（ADR-0224）：小圖帶行內 svg、大 raster 只帶 ref（blob 另走自我 backfill）；預算內截斷。 */
+  customAssets?: CustomAsset[];
+  /** 資產刪除墓碑（ADR-0224）：LWW 交換律合併，跨自機傳播刪除。 */
+  assetTombstones?: AssetTombstone[];
 }
 
 /** 組裝快照內容：基本＝聯絡人/群組/封鎖；完整＝＋近期訊息。 */
@@ -51,7 +62,28 @@ export function buildSnapshotContent(
   const contacts = storage.loadContacts().map(stripAvatar);
   const groups = storage.loadGroups();
   const blocked = storage.loadBlocked().map(stripAvatar);
-  const base: CloudSnapshotContent = { v: 1, at: opts.now ?? Date.now(), mode, contacts, groups, blocked };
+  // 自訂資產庫（ADR-0224）：mine（自建）優先、逐筆累加至子預算即停；
+  // 大 raster 的內容本就不在庫（svg 已空、只帶 ref），blob 走自我 backfill。
+  const orderedAssets = [...storage.loadCustomAssets()].sort((a, b) => (b.mine ? 1 : 0) - (a.mine ? 1 : 0));
+  const customAssets: CustomAsset[] = [];
+  let assetBytes = 0;
+  for (const a of orderedAssets) {
+    const len = JSON.stringify(a).length + 1;
+    if (assetBytes + len > SNAPSHOT_ASSET_BUDGET) break;
+    customAssets.push(a);
+    assetBytes += len;
+  }
+  const assetTombstones = storage.loadAssetTombstones();
+  const base: CloudSnapshotContent = {
+    v: 1,
+    at: opts.now ?? Date.now(),
+    mode,
+    contacts,
+    groups,
+    blocked,
+    ...(customAssets.length ? { customAssets } : {}),
+    ...(assetTombstones.length ? { assetTombstones } : {}),
+  };
   if (mode !== "full") return base;
   const all: StoredMessage[] = [];
   for (const key of [...contacts.map((c) => c.pubkey), ...groups.map((g) => g.id)]) {
@@ -79,6 +111,8 @@ export function parseSnapshotContent(json: string): CloudSnapshotContent | null 
     if (s.v !== 1 || (s.mode !== "basic" && s.mode !== "full")) return null;
     if (!Array.isArray(s.contacts) || !Array.isArray(s.groups) || !Array.isArray(s.blocked)) return null;
     if (s.messages !== undefined && !Array.isArray(s.messages)) return null;
+    if (s.customAssets !== undefined && !Array.isArray(s.customAssets)) return null; // ADR-0224
+    if (s.assetTombstones !== undefined && !Array.isArray(s.assetTombstones)) return null; // ADR-0224
     return s as CloudSnapshotContent;
   } catch {
     return null;
@@ -135,6 +169,31 @@ export function mergeSnapshotContent(
       storage.appendMessage(m);
       ids.add(m.id);
       if (!convos.includes(m.contact)) convos.push(m.contact);
+      changed = true;
+    }
+  }
+  // 自訂資產庫（ADR-0224）：LWW＋墓碑交換律合併；mine 受保護；僅集合/內容有變才寫回
+  // （順序變不算變更，避免 acquireAssets 的 LRU 序與合併的 at 序不同而誤報 changed）。
+  if (content.customAssets !== undefined || content.assetTombstones !== undefined) {
+    const localAssets = storage.loadCustomAssets();
+    const localTombs = storage.loadAssetTombstones();
+    const merged = mergeAssetLibrary(
+      localAssets,
+      content.customAssets ?? [],
+      localTombs,
+      content.assetTombstones ?? [],
+      { max: SNAPSHOT_LIBRARY_MAX, protect: (a) => a.mine === true },
+    );
+    const akey = (a: CustomAsset): string => `${a.id}:${a.at ?? 0}:${a.shortcode ?? ""}:${a.mine ? 1 : 0}`;
+    const beforeA = new Set(localAssets.map(akey));
+    if (merged.assets.length !== localAssets.length || merged.assets.some((a) => !beforeA.has(akey(a)))) {
+      storage.saveCustomAssets(merged.assets);
+      changed = true;
+    }
+    const tkey = (t: AssetTombstone): string => `${t.id}:${t.at}`;
+    const beforeT = new Set(localTombs.map(tkey));
+    if (merged.tombstones.length !== localTombs.length || merged.tombstones.some((t) => !beforeT.has(tkey(t)))) {
+      storage.saveAssetTombstones(merged.tombstones);
       changed = true;
     }
   }

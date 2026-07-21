@@ -18,8 +18,10 @@ import {
   isValidShortcode,
   parseAssetManifest,
   resolveInlineEmoji,
+  mergeAssetLibrary,
   splitAssetManifest,
   type AssetManifest,
+  type AssetTombstone,
   type CustomAsset,
 } from "./custom-assets.js";
 
@@ -352,5 +354,94 @@ describe("ADR-0223 Model B（內容定址 blob）", () => {
       format: "raster",
       ref: hash,
     });
+  });
+});
+
+describe("mergeAssetLibrary（跨裝置庫合併，ADR-0224）", () => {
+  const mk = (id: string, extra: Partial<CustomAsset> = {}): CustomAsset => ({
+    id,
+    label: id,
+    svg: `<svg>${id}</svg>`,
+    kind: "emoji",
+    ...extra,
+  });
+  const ids = (r: { assets: CustomAsset[] }): string[] => r.assets.map((a) => a.id).sort();
+  const tids = (r: { tombstones: AssetTombstone[] }): string[] => r.tombstones.map((t) => t.id).sort();
+
+  it("補缺聯集：兩台各有的都留下", () => {
+    const r = mergeAssetLibrary([mk("a")], [mk("b")], [], [], { max: 50 });
+    expect(ids(r)).toEqual(["a", "b"]);
+    expect(r.tombstones).toEqual([]);
+  });
+
+  it("同 id 取較新 at 的內容", () => {
+    const r = mergeAssetLibrary([mk("x", { label: "old", at: 1 })], [mk("x", { label: "new", at: 2 })], [], [], {
+      max: 50,
+    });
+    expect(r.assets).toHaveLength(1);
+    expect(r.assets[0]?.label).toBe("new");
+    expect(r.assets[0]?.at).toBe(2);
+  });
+
+  it("墓碑刪除：對端墓碑較新 → 資產出局並保留墓碑", () => {
+    const r = mergeAssetLibrary([mk("x", { at: 1 })], [], [], [{ id: "x", at: 2 }], { max: 50 });
+    expect(ids(r)).toEqual([]);
+    expect(tids(r)).toEqual(["x"]);
+  });
+
+  it("重匯自動復活：資產 at 大於舊墓碑 → 存活並丟棄墓碑", () => {
+    const r = mergeAssetLibrary([], [mk("x", { at: 5 })], [{ id: "x", at: 1 }], [], { max: 50 });
+    expect(ids(r)).toEqual(["x"]);
+    expect(r.tombstones).toEqual([]);
+  });
+
+  it("平手＝墓碑優先（刪除優先）", () => {
+    const r = mergeAssetLibrary([mk("x", { at: 3 })], [], [{ id: "x", at: 3 }], [], { max: 50 });
+    expect(ids(r)).toEqual([]);
+    expect(tids(r)).toEqual(["x"]);
+  });
+
+  it("本地 shortcode／mine 保留（別台不覆蓋），內容仍取較新", () => {
+    const r = mergeAssetLibrary(
+      [mk("x", { shortcode: "me", mine: true, at: 1 })],
+      [mk("x", { shortcode: "them", label: "new", at: 9 })],
+      [],
+      [],
+      { max: 50 },
+    );
+    const a = r.assets[0];
+    expect(a?.label).toBe("new");
+    expect(a?.shortcode).toBe("me");
+    expect(a?.mine).toBe(true);
+    expect(a?.at).toBe(9);
+  });
+
+  it("交換律：merge(A,B) 與 merge(B,A) 結果一致", () => {
+    const A = [mk("a", { at: 2 }), mk("x", { at: 1 })];
+    const B = [mk("b", { at: 3 }), mk("x", { at: 5, label: "newer" })];
+    const ta: AssetTombstone[] = [{ id: "a", at: 10 }];
+    const r1 = mergeAssetLibrary(A, B, ta, [], { max: 50 });
+    const r2 = mergeAssetLibrary(B, A, [], ta, { max: 50 });
+    expect(ids(r1)).toEqual(ids(r2));
+    expect(tids(r1)).toEqual(tids(r2));
+    expect(ids(r1)).toEqual(["b", "x"]); // a 被墓碑刪、x 取較新
+    expect(r1.assets.find((z) => z.id === "x")?.label).toBe("newer");
+  });
+
+  it("max 淘汰未受保護者、protect 永不淘汰", () => {
+    const local = [mk("keep", { mine: true, at: 1 }), mk("drop", { at: 2 }), mk("drop2", { at: 3 })];
+    const r = mergeAssetLibrary(local, [], [], [], { max: 1, protect: (a) => a.mine === true });
+    expect(r.assets.some((a) => a.id === "keep")).toBe(true);
+    expect(r.assets.every((a) => a.mine === true)).toBe(true);
+  });
+
+  it("墓碑上限：取新到舊前 N", () => {
+    const tomb: AssetTombstone[] = [
+      { id: "old", at: 1 },
+      { id: "mid", at: 2 },
+      { id: "new", at: 3 },
+    ];
+    const r = mergeAssetLibrary([], [], tomb, [], { max: 50, tombstoneMax: 2 });
+    expect(tids(r)).toEqual(["mid", "new"]);
   });
 });

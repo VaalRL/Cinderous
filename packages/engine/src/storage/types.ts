@@ -1,6 +1,6 @@
 /** 本機持久化的資料型別（身分、聯絡人、訊息）。 */
 
-import type { AssetBlob, CustomAsset } from "@cinderous/core";
+import type { AssetBlob, AssetTombstone, CustomAsset } from "@cinderous/core";
 import type { MessageArchive } from "./archive.js";
 
 /**
@@ -301,6 +301,9 @@ export interface AppStorage {
   /** 內容定址 blob 快取（大動畫 emoji，ADR-0223）：加密落地；未設過回傳 []。 */
   loadAssetBlobs(): AssetBlob[];
   saveAssetBlobs(list: AssetBlob[]): void;
+  /** 資產刪除墓碑（跨裝置刪除傳播，ADR-0224）：加密落地、每身分獨立；未設過回傳 []。 */
+  loadAssetTombstones(): AssetTombstone[];
+  saveAssetTombstones(list: AssetTombstone[]): void;
 }
 
 /** 已採用的引導 relay 清單（ADR-0039）。 */
@@ -337,6 +340,8 @@ export interface StorageSnapshot {
   customAssets?: CustomAsset[];
   /** 內容定址 blob 快取（ADR-0223）；舊快照沒有 → 匯入時退回 `[]`。 */
   assetBlobs?: AssetBlob[];
+  /** 資產刪除墓碑（ADR-0224）；舊快照沒有 → 匯入時退回 `[]`。 */
+  assetTombstones?: AssetTombstone[];
   /**
    * 已讀水位（ADR-0108）：對話 → 已讀到的最新訊息時間（毫秒）。
    *
