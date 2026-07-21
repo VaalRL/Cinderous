@@ -120,6 +120,15 @@ describe("LocalStorage 靜態加密（ADR-0112）", () => {
     expect(new LocalStorage("ns", 0, sk).loadMessages("bob").map((m) => m.id)).toEqual(["old", "new"]);
   });
 
+  it("自訂資產庫（ADR-0220）：磁碟上是密文、同鑰重載讀得回", () => {
+    const s = new LocalStorage("ns", 0, sk);
+    s.saveCustomAssets([{ id: "h1", label: "派對", svg: "<svg>x</svg>", kind: "emoji", shortcode: "party" }]);
+    const raw = backing.get("nb.ns.customAssets")!;
+    expect(raw).not.toContain("party"); // 短碼不以明文出現
+    expect(raw.startsWith("c1:")).toBe(true);
+    expect(new LocalStorage("ns", 0, sk).loadCustomAssets().map((a) => a.shortcode)).toEqual(["party"]);
+  });
+
   it("不給 nsec → 沿用明文（相容既有呼叫，不強制破壞）", () => {
     const s = new LocalStorage("ns");
     s.appendMessage(secret("m1"));

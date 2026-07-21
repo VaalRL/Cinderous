@@ -1,4 +1,4 @@
-import { deriveStorageKey, openValue, sealValue } from "@cinderous/core";
+import { deriveStorageKey, openValue, sealValue, type CustomAsset } from "@cinderous/core";
 
 import { ArchiveWriter, type MessageArchive } from "./archive.js";
 import { MemoryStorage } from "./memory.js";
@@ -151,6 +151,7 @@ export class LocalStorage implements AppStorage {
       deleted: read<string[]>(this.k("deleted"), [], this.dek),
       groups,
       bootstrapList: read<StoredBootstrapList | null>(this.k("bootstrapList"), null, this.dek),
+      customAssets: read<CustomAsset[]>(this.k("customAssets"), [], this.dek), // ADR-0220
       readAt: read<Record<string, number>>(this.k("readAt"), {}, this.dek),
     };
   }
@@ -370,6 +371,13 @@ export class LocalStorage implements AppStorage {
   saveBootstrapList(list: StoredBootstrapList): void {
     this.mem.saveBootstrapList(list);
     write(this.k("bootstrapList"), list, this.dek);
+  }
+  loadCustomAssets(): CustomAsset[] {
+    return this.mem.loadCustomAssets();
+  }
+  saveCustomAssets(list: CustomAsset[]): void {
+    this.mem.saveCustomAssets(list);
+    write(this.k("customAssets"), list, this.dek); // ADR-0220：以 dek 加密落地
   }
   exportSnapshot(): StorageSnapshot {
     return this.mem.exportSnapshot();

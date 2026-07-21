@@ -1,5 +1,6 @@
 /** 本機持久化的資料型別（身分、聯絡人、訊息）。 */
 
+import type { CustomAsset } from "@cinderous/core";
 import type { MessageArchive } from "./archive.js";
 
 /**
@@ -294,6 +295,9 @@ export interface AppStorage {
   /** last-known-good 引導 relay 清單（ADR-0039）；未採用過回傳 null。 */
   loadBootstrapList(): StoredBootstrapList | null;
   saveBootstrapList(doc: StoredBootstrapList): void;
+  /** 自訂資產庫（emoji＋貼圖，ADR-0220）：加密落地、每身分獨立；未設過回傳 []。 */
+  loadCustomAssets(): CustomAsset[];
+  saveCustomAssets(list: CustomAsset[]): void;
 }
 
 /** 已採用的引導 relay 清單（ADR-0039）。 */
@@ -326,6 +330,8 @@ export interface StorageSnapshot {
   deleted: string[];
   groups: StoredGroup[];
   bootstrapList: StoredBootstrapList | null;
+  /** 自訂資產庫（ADR-0220）；舊快照沒有這個欄位 → 匯入時容忍 `undefined`（退回 `[]`）。 */
+  customAssets?: CustomAsset[];
   /**
    * 已讀水位（ADR-0108）：對話 → 已讀到的最新訊息時間（毫秒）。
    *
