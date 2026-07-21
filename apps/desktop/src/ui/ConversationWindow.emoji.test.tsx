@@ -50,6 +50,58 @@ describe("行內自訂 emoji 渲染與自動收藏（ADR-0220）", () => {
     m.unmount();
   });
 
+  it("ADR-0222：收到 raster emoji → 行內 <img> 直接用 data URI（會動、非 svgToDataUri）", () => {
+    localStorage.clear();
+    const gif = "data:image/gif;base64,R0lGODlhAQABAAAAACwAAAAAAQABAAA=";
+    const text = appendAssetManifest("嗨 :dance:", { dance: { label: "跳舞", svg: gif, format: "raster" } });
+    const m = mount(render([{ id: "r1", outgoing: false, text, at: 1 }]));
+    const img = m.container.querySelector("img.emoji");
+    expect(img).not.toBeNull();
+    expect(img?.getAttribute("src")).toBe(gif); // 直接 data URI
+    m.unmount();
+  });
+
+  it("ADR-0222：送出帶 raster emoji 的訊息 → 內容清單含 format:raster", async () => {
+    localStorage.clear();
+    const gif = "data:image/gif;base64,R0lGODlhAQABAAAAACwAAAAAAQABAAA=";
+    localStorage.setItem(
+      "nb.stickers.custom",
+      JSON.stringify([{ id: "g1", label: "跳舞", svg: gif, kind: "both", shortcode: "dance", format: "raster" }]),
+    );
+    let sent = "";
+    const m = mount(
+      <I18nProvider>
+        <ThemeProvider>
+          <ConversationWindow
+            self={self}
+            contact={bob}
+            messages={[]}
+            typing={false}
+            nudgeSignal={0}
+            onSend={(txt) => {
+              sent = txt;
+            }}
+            onTyping={() => {}}
+            onNudge={() => {}}
+            onClose={() => {}}
+          />
+        </ThemeProvider>
+      </I18nProvider>,
+    );
+    const ta = m.container.querySelector("textarea") as HTMLTextAreaElement;
+    const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value")!.set!;
+    await act(async () => {
+      setter.call(ta, ":dance:");
+      ta.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => {
+      ta.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    });
+    expect(sent).toContain("nb-assets:v1:");
+    expect(sent).toContain('"format":"raster"');
+    m.unmount();
+  });
+
   it("未知短碼保留字面（無對應資產＝不誤渲染）", () => {
     localStorage.clear();
     const m = mount(render([{ id: "m2", outgoing: false, text: "沒有 :nope: 這顆", at: 1 }]));

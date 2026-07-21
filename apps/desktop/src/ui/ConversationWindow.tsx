@@ -355,19 +355,30 @@ function buildAssetManifest(text: string, library: CustomAsset[]): AssetManifest
   const manifest: AssetManifest = {};
   for (const code of collectReferencedShortcodes(text)) {
     const asset = findByShortcode(library, code);
-    if (asset) manifest[code] = { label: asset.label, svg: asset.svg };
+    if (asset) {
+      // raster（動畫）須帶 format，否則收端當 SVG 驗證會丟棄（ADR-0222）。
+      manifest[code] =
+        asset.format === "raster"
+          ? { label: asset.label, svg: asset.svg, format: "raster" }
+          : { label: asset.label, svg: asset.svg };
+    }
   }
   return manifest;
 }
 
 /** 渲染含行內自訂 emoji 的訊息文字（文字段走 markdown＋emoticon，emoji 段為小圖；ADR-0220）。 */
+/** 資產的 `<img src>`：raster（GIF/動畫）直接用 data URI（會動）；svg 包成 data URI（ADR-0222）。 */
+function assetSrc(svg: string, format?: "svg" | "raster"): string {
+  return format === "raster" ? svg : svgToDataUri(svg);
+}
+
 function renderRichText(text: string, manifest: AssetManifest): JSX.Element[] {
   const segs = resolveInlineEmoji(text, (code) => manifest[code]);
   return segs.map((seg, i) =>
     seg.type === "text" ? (
       <Fragment key={i}>{renderMarkdown(applyEmoticons(seg.value))}</Fragment>
     ) : (
-      <img key={i} className="emoji" src={svgToDataUri(seg.svg)} alt={`:${seg.shortcode}:`} title={`:${seg.shortcode}:`} />
+      <img key={i} className="emoji" src={assetSrc(seg.svg, seg.format)} alt={`:${seg.shortcode}:`} title={`:${seg.shortcode}:`} />
     ),
   );
 }
@@ -660,8 +671,8 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
   };
 
   // 貼圖庫寫入（匯入 / fork / 點擊收藏共用）；失敗以 alert 呈現拒收原因。
-  const acquireSticker = (label: string, svg: string): boolean => {
-    const r = addSticker(loadLib(), label, svg); // 讀最新再寫（ADR-0221 C1/C2）
+  const acquireSticker = (label: string, svg: string, format?: "svg" | "raster"): boolean => {
+    const r = addSticker(loadLib(), label, svg, format ? { format } : {}); // 讀最新再寫（ADR-0221 C1/C2）
     if (!r.ok) {
       void alert(t("sticker_importFail", { reason: r.reason }));
       return false;
@@ -708,7 +719,7 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages, props.stickersDisabled]);
   // 統一解析：內建包或自製庫（供最近/最愛分頁）。
-  const resolveAny = (ref: StickerRef): { label: string; svg: string } | undefined =>
+  const resolveAny = (ref: StickerRef): { label: string; svg: string; format?: "svg" | "raster" } | undefined =>
     ref.pack === CUSTOM_PACK ? findSticker(library, ref.id) : resolveSticker(ref.pack, ref.id);
 
   // 文字觸發貼圖（ADR-0037）：尾端比對（字首索引）、Tab/點擊送出、⌨ 設定。
@@ -769,13 +780,30 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
 
   // 檔案 → SVG（SVG 檔直接用；點陣圖經 canvas 等比置中縮放重編碼後包成 SVG）。非圖片回 null（並提示）。
   // side 決定點陣圖輸出尺寸：貼圖用 256、emoji 用小尺寸（省頻寬，ADR-0220）。
-  const fileToStickerSvg = async (f: File, side = 256): Promise<string | null> => {
+  // 檔案 → data URI（保留原始位元組，供 raster 動畫如 GIF 直接渲染，ADR-0222）。
+  const fileToDataUri = (f: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = (): void => resolve(String(r.result));
+      r.onerror = (): void => reject(r.error ?? new Error("read-failed"));
+      r.readAsDataURL(f);
+    });
+
+  // 檔案 → 可渲染資產：SVG 直用；GIF 保留原位元組走 raster（動畫）；其他點陣圖壓成小靜態 SVG（ADR-0222）。
+  const fileToStickerSvg = async (
+    f: File,
+    side = 256,
+  ): Promise<{ svg: string; format: "svg" | "raster" } | null> => {
     if (f.type === "image/svg+xml" || f.name.toLowerCase().endsWith(".svg")) {
-      return (await f.text()).trim();
+      return { svg: (await f.text()).trim(), format: "svg" };
     }
     if (!f.type.startsWith("image/")) {
       void alert(t("sticker_importFail", { reason: "not-image" }));
       return null;
+    }
+    if (f.type === "image/gif" || f.name.toLowerCase().endsWith(".gif")) {
+      // GIF 可能是動畫：保留原始位元組（不 canvas 壓平，否則只剩第一格）。
+      return { svg: await fileToDataUri(f), format: "raster" };
     }
     const bitmap = await createImageBitmap(f);
     const canvas = document.createElement("canvas");
@@ -787,13 +815,13 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
     const h = bitmap.height * scale;
     ctx.drawImage(bitmap, (side - w) / 2, (side - h) / 2, w, h);
     bitmap.close();
-    return wrapRasterAsSvg(canvas.toDataURL("image/webp", 0.85), side);
+    return { svg: wrapRasterAsSvg(canvas.toDataURL("image/webp", 0.85), side), format: "svg" };
   };
 
   // 匯入為貼圖（ADR-0032）。
   const importStickerFile = async (f: File): Promise<void> => {
-    const svg = await fileToStickerSvg(f);
-    if (svg !== null) acquireSticker(f.name.replace(/\.[^.]+$/, ""), svg);
+    const res = await fileToStickerSvg(f);
+    if (res) acquireSticker(f.name.replace(/\.[^.]+$/, ""), res.svg, res.format);
   };
 
   // 檔名 → 建議短碼：小寫、非法字元併為底線、去開頭符號、限 32；空則回退 emoji。
@@ -806,12 +834,12 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
 
   // 匯入為自訂 emoji（ADR-0220）：小尺寸＋指定短碼（打 :短碼: 使用）。
   const importEmojiFile = async (f: File): Promise<void> => {
-    const svg = await fileToStickerSvg(f, 64);
-    if (svg === null) return;
+    const res = await fileToStickerSvg(f, 64);
+    if (res === null) return;
     const stem = f.name.replace(/\.[^.]+$/, "");
     const input = await prompt({ message: t("emoji_shortcodePrompt"), defaultValue: toShortcode(stem) });
     if (input === null) return;
-    const r = addSticker(loadLib(), stem, svg, { shortcode: input }); // 讀最新再寫（ADR-0221）
+    const r = addSticker(loadLib(), stem, res.svg, { shortcode: input, format: res.format }); // 讀最新再寫（ADR-0221）
     if (!r.ok) {
       void alert(t("sticker_importFail", { reason: r.reason }));
       return;
@@ -833,13 +861,13 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
         continue;
       }
       try {
-        const svg = await fileToStickerSvg(f, 64);
-        if (svg === null) {
+        const res = await fileToStickerSvg(f, 64);
+        if (res === null) {
           skipped++;
           continue;
         }
         const stem = f.name.replace(/\.[^.]+$/, "");
-        const r = addSticker(list, stem, svg, { shortcode: toShortcode(stem) });
+        const r = addSticker(list, stem, res.svg, { shortcode: toShortcode(stem), format: res.format });
         if (!r.ok) skipped++;
         else if (r.list !== list) {
           list = r.list; // 真正新增（去重命中則清單不變、不計）
@@ -1510,7 +1538,7 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
                           data-testid="emoji-item"
                           onClick={() => insertEmoji(a.shortcode!)}
                         >
-                          <img src={svgToDataUri(a.svg)} alt={`:${a.shortcode}:`} />
+                          <img src={assetSrc(a.svg, a.format)} alt={`:${a.shortcode}:`} />
                         </button>
                         <button
                           type="button"
@@ -1586,7 +1614,7 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
                             : sendSticker(ref.pack, ref.id)
                         }
                       >
-                        <img src={svgToDataUri(s.svg)} alt={s.label} />
+                        <img src={assetSrc(s.svg, s.format)} alt={s.label} />
                       </button>
                       <button
                         type="button"
@@ -1688,7 +1716,7 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
                 acceptEmoji(a);
               }}
             >
-              <img src={svgToDataUri(a.svg)} alt="" />
+              <img src={assetSrc(a.svg, a.format)} alt="" />
               <span>:{a.shortcode}:</span>
             </button>
           ))}
@@ -1708,7 +1736,7 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
                 title={m.entry.trigger}
                 onClick={() => acceptTrigger(m)}
               >
-                <img src={svgToDataUri(st.svg)} alt={st.label} />
+                <img src={assetSrc(st.svg, st.format)} alt={st.label} />
                 <span>{m.entry.trigger}</span>
               </button>
             );
@@ -1956,7 +1984,7 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
                     return (
                       <div className="trigpanel__row" key={e.trigger}>
                         {st ? (
-                          <img src={svgToDataUri(st.svg)} alt={st.label} />
+                          <img src={assetSrc(st.svg, st.format)} alt={st.label} />
                         ) : (
                           <span className="trigpanel__gone" title={t("trigger_deleted")}>🚫</span>
                         )}

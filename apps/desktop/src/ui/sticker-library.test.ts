@@ -145,3 +145,16 @@ describe("ADR-0221 審查修正", () => {
     expect(r.ok && r.sticker.mine).toBe(true);
   });
 });
+
+describe("ADR-0222 raster 資產", () => {
+  const gif = "data:image/gif;base64,R0lGODlhAQABAAAAACwAAAAAAQABAAA=";
+  it("addSticker 收 raster（合法 GIF data URI）並帶 format", () => {
+    const r = addSticker([], "跳舞", gif, { shortcode: "dance", format: "raster" });
+    if (!r.ok) throw new Error("unexpected");
+    expect(r.sticker.format).toBe("raster");
+    expect(r.sticker.svg).toBe(gif);
+  });
+  it("raster 宣稱但非圖 data URI 被拒", () => {
+    expect(addSticker([], "x", "<svg></svg>", { format: "raster" })).toEqual({ ok: false, reason: "bad-image" });
+  });
+});

@@ -8,7 +8,9 @@
 import {
   clampStickerLabel,
   contentHash,
+  isValidRasterDataUri,
   isValidShortcode,
+  RASTER_MAX_BYTES,
   validateStickerSvg,
   type CustomAsset,
   type CustomAssetKind,
@@ -39,10 +41,17 @@ export function addSticker(
   list: CustomAsset[],
   label: string,
   svg: string,
-  opts: { shortcode?: string; kind?: CustomAssetKind } = {},
+  opts: { shortcode?: string; kind?: CustomAssetKind; format?: "svg" | "raster" } = {},
 ): AddResult {
-  const verdict: SvgVerdict = validateStickerSvg(svg);
-  if (!verdict.ok) return { ok: false, reason: verdict.reason };
+  const raster = opts.format === "raster";
+  if (raster) {
+    // raster（動畫 GIF 等）：型別＋尺寸把關（無腳本面，不套 SVG 拒收制，ADR-0222）。
+    if (!isValidRasterDataUri(svg)) return { ok: false, reason: "bad-image" };
+    if (svg.length > RASTER_MAX_BYTES) return { ok: false, reason: "too-large" };
+  } else {
+    const verdict: SvgVerdict = validateStickerSvg(svg);
+    if (!verdict.ok) return { ok: false, reason: verdict.reason };
+  }
   const id = contentHash(svg);
   const shortcode = opts.shortcode?.trim().toLowerCase(); // 正規化小寫（ADR-0221 M2）
   if (shortcode) {
@@ -61,6 +70,7 @@ export function addSticker(
     kind,
     mine: true, // 自建/自匯入，LRU 受保護（ADR-0221 M1）
     ...(shortcode ? { shortcode } : {}),
+    ...(raster ? { format: "raster" as const } : {}),
   };
   return { ok: true, list: [sticker, ...list], sticker };
 }
@@ -110,6 +120,7 @@ function normalize(s: unknown): CustomAsset | null {
     kind,
     ...(o.mine === true ? { mine: true } : {}), // 保留自建標記（ADR-0221 M1）
     ...(shortcode ? { shortcode } : {}),
+    ...(o.format === "raster" ? { format: "raster" as const } : {}), // 保留 raster 格式（ADR-0222）
   };
 }
 
