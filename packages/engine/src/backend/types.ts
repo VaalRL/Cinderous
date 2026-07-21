@@ -214,6 +214,11 @@ export interface ChatBackendEvents {
   /** 某圖片訊息的縮圖已產生/更新（ADR-0102）：UI 據此即時顯示，不必等重載。 */
   onFileThumb?(contact: PubkeyHex, messageId: string, thumb: string): void;
   /**
+   * 自訂 emoji blob 已收齊並入快取（ADR-0223 backfill）：backend 已驗整合性＋存進
+   * `assetBlobs`，UI 據此重新讀快取、把先前的占位重繪為動畫。
+   */
+  onAssetCached?(hash: string): void;
+  /**
    * 公司儲存槽存放到達（ADR-0161，企業主端）：名冊成員的存放位元組已收齊。
    * App 負責落盤（槽目錄＋索引），**不建聊天訊息、不跳通知**。
    */
@@ -323,6 +328,11 @@ export interface ChatBackend {
    * （瀏覽器 `<input type=file>` 基於安全不給完整路徑）；有了它，自己送出的圖片重載後也能看原圖。
    */
   sendFile?(to: PubkeyHex, file: OutgoingFile, opts?: { thumb?: string; savedPath?: string }): string;
+  /**
+   * 向 `to` 索取自訂 emoji blob（ADR-0223 backfill）：收端見訊息的 `ref` 但快取無此 hash 時呼叫。
+   * 對端查得後以加密分塊回傳；收齊、驗整合性、入快取後觸發 `onAssetCached`。
+   */
+  requestAsset?(to: PubkeyHex, hash: string): void;
   /** 記錄某圖片訊息的縮圖（ADR-0102）：收檔端產生縮圖後回填。 */
   setFileThumb?(contact: PubkeyHex, messageId: string, thumb: string): void;
   /**

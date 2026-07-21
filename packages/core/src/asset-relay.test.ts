@@ -38,14 +38,10 @@ describe("emoji blob backfill 協定（ADR-0223）", () => {
     expect(() => openWrap(wrap, generateSecretKey())).toThrow();
   });
 
-  it("ASSET_CHUNK wrap/parse round-trip（外層 FILE_WRAP＋#p＋過期章）", () => {
-    const wrap = wrapAssetChunk({ hash: HASH, seq: 0, total: 2, data: "abc" }, aliceSk, bobPk, {
-      now: 1_700_000_000,
-      expiration: 1_700_086_400,
-    });
-    expect(wrap.kind).toBe(KIND.FILE_WRAP);
+  it("ASSET_CHUNK wrap/parse round-trip（外層 Gift Wrap＋#p）", () => {
+    const wrap = wrapAssetChunk({ hash: HASH, seq: 0, total: 2, data: "abc" }, aliceSk, bobPk, { now: 1_700_000_000 });
+    expect(wrap.kind).toBe(KIND.OFFLINE_DM_GIFT_WRAP);
     expect(wrap.tags).toContainEqual(["p", bobPk]);
-    expect(wrap.tags).toContainEqual(["expiration", "1700086400"]);
     expect(parseAssetChunk(openWrap(wrap, bobSk).rumor)).toEqual({ hash: HASH, seq: 0, total: 2, data: "abc" });
   });
 

@@ -1,4 +1,4 @@
-import { KIND, RelayClient, applyRosterRotations, generateSecretKey, getPublicKey, npubEncode, nsecDecode, nsecEncode, signOrgRoster, type NostrEvent, type RelayClientHandlers, wrapGroupControl, wrapGroupMessage, wrapMessage, wrapReceipt } from "@cinderous/core";
+import { ASSET_CHUNK_CHARS, contentHash, KIND, RelayClient, applyRosterRotations, generateSecretKey, getPublicKey, npubEncode, nsecDecode, nsecEncode, signOrgRoster, type NostrEvent, type RelayClientHandlers, wrapGroupControl, wrapGroupMessage, wrapMessage, wrapReceipt } from "@cinderous/core";
 import { createInMemoryRelayNetwork, MessageStore } from "@cinderous/relay";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryStorage } from "../storage/memory.js";
@@ -36,6 +36,48 @@ describe("RelayChatBackend（真實後端 + 持久化）", () => {
     expect(storeB.loadContacts()).toEqual([]);
     expect(storeB.loadRequests().map((c) => c.pubkey)).toContain(a.self.pubkey);
     expect(storeB.loadMessages(a.self.pubkey).map((m) => m.text)).toEqual(["嗨 Bob"]);
+
+    a.stop();
+    b.stop();
+  });
+
+  it("emoji blob backfill（ADR-0223）：A 索取 → B 回分塊 → A 驗整合性入快取＋onAssetCached", () => {
+    const net = createInMemoryRelayNetwork();
+    const storeA = new MemoryStorage();
+    const storeB = new MemoryStorage();
+    const a = new RelayChatBackend(storeA, (h) => net.connect("a", h), "Alice");
+    const b = new RelayChatBackend(storeB, (h) => net.connect("b", h), "Bob");
+    const data = "data:image/gif;base64," + "A".repeat(ASSET_CHUNK_CHARS + 500); // 跨 2 塊
+    const hash = contentHash(data);
+    storeB.saveAssetBlobs([{ hash, data }]); // B 有 blob（emoji 寄件者）
+    const cached: string[] = [];
+    a.start({ ...noop, onAssetCached: (h) => cached.push(h) });
+    b.start(noop);
+    a.addContact(b.selfNpub);
+    b.addContact(a.selfNpub); // 互為聯絡人（B 才回應）
+
+    a.requestAsset(b.self.pubkey, hash);
+    expect(cached).toContain(hash); // A 收齊＋整合性通過＋通知
+    expect(storeA.loadAssetBlobs()).toEqual([{ hash, data }]); // 入快取
+
+    a.stop();
+    b.stop();
+  });
+
+  it("emoji blob backfill：B 沒有該 blob → A 快取仍空、不觸發 onAssetCached", () => {
+    const net = createInMemoryRelayNetwork();
+    const storeA = new MemoryStorage();
+    const a = new RelayChatBackend(storeA, (h) => net.connect("a", h), "Alice");
+    const b = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("b", h), "Bob");
+    const cached: string[] = [];
+    a.start({ ...noop, onAssetCached: (h) => cached.push(h) });
+    b.start(noop);
+    a.addContact(b.selfNpub);
+    b.addContact(a.selfNpub);
+
+    a.requestAsset(b.self.pubkey, "a".repeat(64));
+    expect(cached).toEqual([]);
+    expect(storeA.loadAssetBlobs()).toEqual([]);
 
     a.stop();
     b.stop();

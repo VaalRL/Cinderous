@@ -71,6 +71,15 @@ import {
   policyTtlSeconds,
   splitFileChunks,
   wrapFileChunk,
+  BLOB_CACHE_MAX,
+  cacheBlobs,
+  parseAssetChunk,
+  parseAssetRequest,
+  reassembleAssetChunks,
+  splitAssetChunks,
+  wrapAssetChunk,
+  wrapAssetRequest,
+  type AssetChunk,
   wrapProfile,
   parseProfile,
   sanitizeTitle,
@@ -417,6 +426,15 @@ export class RelayChatBackend implements ChatBackend {
   >();
   /** 不完整重組的逾時（秒，審查修正）：超時未收齊即回收，避免一格永久佔用卡死接收。 */
   private static readonly CHUNK_ASM_TTL_SEC = 120;
+  /** emoji blob backfill（ADR-0223）：已請求的 hash → 請求時間（秒）；只收自己請求過的 blob（防未請求灌入）。 */
+  private readonly assetRequested = new Map<string, number>();
+  /** emoji blob 分塊重組：hash → 收到的塊。 */
+  private readonly assetAsm = new Map<
+    string,
+    { sender: PubkeyHex; total: number; parts: Map<number, string>; at: number }
+  >();
+  /** backfill 請求重試節流（秒）：同 hash 此窗內不重送請求，避免放大。 */
+  private static readonly ASSET_REQUEST_TTL_SEC = 60;
   /** 企業 TURN 伺服器與強制 TURN 政策狀態（ADR-0048）：供 WebRTC ICE 設定。 */
   private readonly turnServers: RTCIceServer[] | undefined;
   private forceTurn = false;
@@ -1253,6 +1271,18 @@ export class RelayChatBackend implements ChatBackend {
     const groupId = groupTarget(rumor);
     if (groupId && (rumor.kind === KIND.CHAT || rumor.kind === KIND.GROUP_CONTROL)) {
       this.receiveGroup(sender, rumor, groupId);
+      return;
+    }
+
+    // emoji blob 請求／分塊（ADR-0223 backfill）：控制訊息、無對話目標——先處理，避免走下方
+    // ensureKnown 而把「純索圖／收圖」誤生成訊息請求。回應/收取皆只對已知聯絡人。
+    if (rumor.kind === KIND.ASSET_REQUEST) {
+      this.sendAssetBlob(sender, rumor);
+      return;
+    }
+    if (rumor.kind === KIND.ASSET_CHUNK) {
+      const chunk = parseAssetChunk(rumor);
+      if (chunk) this.receiveAssetChunk(sender, chunk);
       return;
     }
 
@@ -2599,10 +2629,64 @@ export class RelayChatBackend implements ChatBackend {
     this.onFileBytes(sender, { id: chunk.tid, name: asm.name, mime: asm.mime, bytes });
   }
 
+  // ── emoji blob backfill（ADR-0223 Model B P2a-3b）──────────────────────────
+
+  /** 向 `to` 索取 blob（收端見 ref 但快取無）；同 hash 節流窗內不重送，記入已請求集。 */
+  requestAsset(to: PubkeyHex, hash: string): void {
+    if (!/^[0-9a-f]{64}$/.test(hash)) return;
+    const prev = this.assetRequested.get(hash);
+    const now = nowSec();
+    if (prev !== undefined && now - prev < RelayChatBackend.ASSET_REQUEST_TTL_SEC) return; // 節流
+    this.assetRequested.set(hash, now);
+    this.publishReliable(wrapAssetRequest(hash, this.sk, to));
+  }
+
+  /** 回應 blob 請求：查本機快取命中即分塊回傳（只回已知聯絡人）。 */
+  private sendAssetBlob(sender: PubkeyHex, rumor: Rumor): void {
+    if (!this.contacts.some((c) => c.pubkey === sender)) return;
+    const req = parseAssetRequest(rumor);
+    if (!req) return;
+    const blob = this.storage.loadAssetBlobs().find((b) => b.hash === req.hash);
+    if (!blob) return; // 沒有就不回（收端會退回占位/字面）
+    const parts = splitAssetChunks(blob.data);
+    parts.forEach((data, seq) => {
+      this.publishReliable(wrapAssetChunk({ hash: req.hash, seq, total: parts.length, data }, this.sk, sender));
+    });
+  }
+
+  /** 收 blob 分塊：只收自己請求過的 hash；收齊→驗整合性→入快取→通知重繪。 */
+  private receiveAssetChunk(sender: PubkeyHex, chunk: AssetChunk): void {
+    if (!this.assetRequested.has(chunk.hash)) return; // 未請求＝不收（防未請求灌入）
+    let asm = this.assetAsm.get(chunk.hash);
+    if (!asm) {
+      this.sweepChunkAsm();
+      if (this.assetAsm.size >= 8) return; // 併發重組上限（防記憶體）
+      asm = { sender, total: chunk.total, parts: new Map(), at: nowSec() };
+      this.assetAsm.set(chunk.hash, asm);
+    }
+    if (asm.sender !== sender || asm.total !== chunk.total) return; // 塊間不一致＝丟棄
+    asm.parts.set(chunk.seq, chunk.data);
+    if (asm.parts.size < asm.total) return;
+    this.assetAsm.delete(chunk.hash);
+    const chunks: AssetChunk[] = [...asm.parts.entries()].map(([seq, data]) => ({
+      hash: chunk.hash,
+      seq,
+      total: asm!.total,
+      data,
+    }));
+    const data = reassembleAssetChunks(chunks); // 內含 contentHash 整合性驗證
+    if (data === null) return; // 不齊/掉包
+    this.assetRequested.delete(chunk.hash);
+    const next = cacheBlobs(this.storage.loadAssetBlobs(), [{ hash: chunk.hash, data }], BLOB_CACHE_MAX);
+    this.storage.saveAssetBlobs(next);
+    this.handlers?.onAssetCached?.(chunk.hash);
+  }
+
   /** 回收逾時未收齊的分塊重組（審查修正）：防單一聯絡人以殘缺傳輸永久佔滿 8 格。 */
   private sweepChunkAsm(): void {
     const cutoff = nowSec() - RelayChatBackend.CHUNK_ASM_TTL_SEC;
     for (const [tid, asm] of this.chunkAsm) if (asm.at < cutoff) this.chunkAsm.delete(tid);
+    for (const [hash, asm] of this.assetAsm) if (asm.at < cutoff) this.assetAsm.delete(hash); // ADR-0223
   }
 
   private onFileBytes(peer: PubkeyHex, file: ReceivedFile): void {

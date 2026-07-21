@@ -14,9 +14,6 @@ import type { PubkeyHex, SecretKey } from "./keys.js";
 import type { Rumor } from "./nip59.js";
 import { sealAndWrap } from "./nip59.js";
 
-const DAY_SECONDS = 86_400;
-const DEFAULT_TTL_SECONDS = 7 * DAY_SECONDS;
-
 /** 單塊字串上限；JSON 後仍在 NIP-44 單則 65535 明文上限內留餘裕。 */
 export const ASSET_CHUNK_CHARS = 48_000;
 /** 單 blob 塊數上限（收端防禦）；≈48 塊 × 48000 ≈ 2.3MB 原圖。 */
@@ -70,15 +67,14 @@ export function parseAssetRequest(rumor: Rumor): { hash: string } | null {
   }
 }
 
-/** 包一塊 blob：內層 kind ASSET_CHUNK、外層 FILE_WRAP（帶 #p 與過期章）。 */
+/** 包一塊 blob：內層 kind ASSET_CHUNK、外層 Gift Wrap(1059)（與 ASSET_REQUEST 同路徑，經 receiveDm）。 */
 export function wrapAssetChunk(
   chunk: AssetChunk,
   senderSk: SecretKey,
   recipientPk: PubkeyHex,
-  opts: { now?: number; expiration?: number } = {},
+  opts: { now?: number } = {},
 ): NostrEvent {
   const nowSec = opts.now ?? Math.floor(Date.now() / 1000);
-  const expiration = opts.expiration ?? nowSec + DEFAULT_TTL_SECONDS;
   return sealAndWrap(
     {
       kind: KIND.ASSET_CHUNK,
@@ -88,13 +84,7 @@ export function wrapAssetChunk(
     },
     senderSk,
     recipientPk,
-    {
-      kind: KIND.FILE_WRAP,
-      tags: [
-        ["p", recipientPk],
-        ["expiration", String(expiration)],
-      ],
-    },
+    { kind: KIND.OFFLINE_DM_GIFT_WRAP, tags: [["p", recipientPk]] },
   );
 }
 
