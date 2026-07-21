@@ -9,6 +9,7 @@ import {
   cacheBlobs,
   detectRasterType,
   isValidRasterDataUri,
+  rasterMagicOk,
   resolveManifestEntry,
   appendAssetManifest,
   assetFromManifestEntry,
@@ -293,6 +294,41 @@ describe("ADR-0222 raster 資產（動畫 GIF）", () => {
     const segs = resolveInlineEmoji("嗨 :dance:", (c) => (c === "dance" ? { label: "跳舞", svg: gif, format: "raster" } : undefined));
     const emoji = segs.find((s) => s.type === "emoji");
     expect(emoji && emoji.type === "emoji" && emoji.format).toBe("raster");
+  });
+});
+
+describe("ADR-0225 raster magic-byte 內容嗅探", () => {
+  const uri = (mime: string, b64: string): string => `data:image/${mime};base64,${b64}`;
+  const GIF = "R0lGODlhAAA=";
+  const PNG = "iVBORw0KGgo=";
+  const JPEG = "/9j/4AAQSkY=";
+  const WEBP = "UklGRhoAAABXRUJQ";
+
+  it("宣告與實際 magic 一致 → 通過", () => {
+    expect(isValidRasterDataUri(uri("gif", GIF))).toBe(true);
+    expect(isValidRasterDataUri(uri("png", PNG))).toBe(true);
+    expect(isValidRasterDataUri(uri("jpeg", JPEG))).toBe(true);
+    expect(isValidRasterDataUri(uri("webp", WEBP))).toBe(true);
+  });
+
+  it("宣告 gif 但實際是 PNG 位元組 → 擋下（偽裝副檔名/MIME）", () => {
+    expect(isValidRasterDataUri(uri("gif", PNG))).toBe(false);
+    expect(rasterMagicOk(uri("gif", PNG))).toBe(false);
+  });
+
+  it("型別交叉錯配一律擋下", () => {
+    expect(isValidRasterDataUri(uri("png", GIF))).toBe(false);
+    expect(isValidRasterDataUri(uri("webp", JPEG))).toBe(false);
+    expect(isValidRasterDataUri(uri("jpeg", WEBP))).toBe(false);
+  });
+
+  it("假 base64（decode 全 0）／非圖 MIME → 擋下", () => {
+    expect(isValidRasterDataUri(uri("gif", "AAAAAAAA"))).toBe(false);
+    expect(rasterMagicOk("data:text/html;base64,AAAA")).toBe(false);
+  });
+
+  it("detectRasterType 維持只看宣告（供渲染分流，不受 magic 影響）", () => {
+    expect(detectRasterType(uri("gif", PNG))).toBe("gif");
   });
 });
 

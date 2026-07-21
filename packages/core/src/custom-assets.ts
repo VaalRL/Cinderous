@@ -37,9 +37,70 @@ export function detectRasterType(dataUri: string): "gif" | "png" | "webp" | "jpe
   return m ? (m[1] as "gif" | "png" | "webp" | "jpeg") : null;
 }
 
-/** raster data URI 是否結構合法（宣告圖片型別＋合法 base64）。raster 無腳本面，以型別＋尺寸把關。 */
+const B64_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+/**
+ * 解出 base64 字串的前 `want` 個 bytes（ADR-0225）。手寫極簡解碼、只解需要的前綴——
+ * 不用 `atob`／`Buffer`（避免 node／瀏覽器環境差異），純函式可完整於 node 測試。
+ * 遇 `=`（padding）或非法字元即停；不足 `want` 時回傳較短陣列。
+ */
+function firstBytes(b64: string, want: number): number[] {
+  const out: number[] = [];
+  let buf = 0;
+  let bits = 0;
+  for (const ch of b64) {
+    const v = B64_ALPHABET.indexOf(ch);
+    if (v < 0) break; // padding 或非法字元
+    buf = (buf << 6) | v;
+    bits += 6;
+    if (bits >= 8) {
+      bits -= 8;
+      out.push((buf >> bits) & 0xff);
+      if (out.length >= want) break;
+    }
+  }
+  return out;
+}
+
+/**
+ * raster 的 magic-byte 內容嗅探（ADR-0225）：解 base64 前 12 bytes，比對宣告型別的檔頭，
+ * 要求**宣告 MIME 與實際位元組一致**。擋偽裝副檔名/MIME；型別無法辨識或檔頭不符即 false。
+ */
+export function rasterMagicOk(dataUri: string): boolean {
+  const type = detectRasterType(dataUri);
+  if (!type) return false;
+  const comma = dataUri.indexOf(",");
+  if (comma < 0) return false;
+  const b = firstBytes(dataUri.slice(comma + 1), 12);
+  switch (type) {
+    case "gif": // "GIF8"（GIF87a/89a 共同前綴）
+      return b[0] === 0x47 && b[1] === 0x49 && b[2] === 0x46 && b[3] === 0x38;
+    case "png": // \x89 P N G
+      return b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47;
+    case "jpeg": // FF D8 FF
+      return b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff;
+    case "webp": // "RIFF"…（byte 8–11）"WEBP"
+      return (
+        b[0] === 0x52 &&
+        b[1] === 0x49 &&
+        b[2] === 0x46 &&
+        b[3] === 0x46 &&
+        b[8] === 0x57 &&
+        b[9] === 0x45 &&
+        b[10] === 0x42 &&
+        b[11] === 0x50
+      );
+    default:
+      return false;
+  }
+}
+
+/**
+ * raster data URI 是否合法（ADR-0222 結構＋ADR-0225 內容）：宣告圖片型別＋合法 base64＋
+ * **magic-byte 與宣告一致**。raster 無腳本面，以「型別內容一致＋尺寸」把關。
+ */
 export function isValidRasterDataUri(dataUri: string): boolean {
-  return RASTER_DATA_URI.test(dataUri);
+  return RASTER_DATA_URI.test(dataUri) && rasterMagicOk(dataUri);
 }
 
 /** 自訂資產種類（ADR-0220）。 */
