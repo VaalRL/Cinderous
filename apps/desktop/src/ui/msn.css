@@ -680,6 +680,8 @@ button:disabled { opacity: .5; cursor: default; filter: none; }
 .sticker img { width: 96px; height: 96px; }
 /* 行內自訂 emoji（ADR-0220）：混在文字裡的小圖，隨字高。 */
 .line .text .emoji { display: inline-block; width: 1.4em; height: 1.4em; vertical-align: -0.3em; margin: 0 1px; }
+/* 參照 emoji 但 blob 未到（ADR-0223）：淡色占位，backfill 到貨後重繪。 */
+.line .text .emoji--pending { width: auto; height: auto; color: var(--muted); opacity: 0.6; font-size: 0.85em; }
 
 /* 語音訊息 */
 .tool--recording { background: #e0483d; color: #fff; border-color: #e0483d; }

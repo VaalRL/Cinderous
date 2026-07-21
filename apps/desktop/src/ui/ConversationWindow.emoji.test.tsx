@@ -102,6 +102,46 @@ describe("行內自訂 emoji 渲染與自動收藏（ADR-0220）", () => {
     m.unmount();
   });
 
+  it("ADR-0223：收到 ref emoji＋blob 在快取 → 渲染動畫 <img>（src＝blob）", () => {
+    localStorage.clear();
+    const gif = "data:image/gif;base64,R0lGODlhAQABAAAAACwAAAAAAQABAAA=";
+    const hash = contentHash(gif);
+    const store = new MemoryStorage();
+    store.saveAssetBlobs([{ hash, data: gif }]);
+    const text = appendAssetManifest("嗨 :dance:", { dance: { label: "跳舞", ref: hash, format: "raster" } });
+    const m = mount(
+      <I18nProvider>
+        <ThemeProvider>
+          <ConversationWindow
+            self={self}
+            contact={bob}
+            messages={[{ id: "b1", outgoing: false, text, at: 1 }]}
+            typing={false}
+            nudgeSignal={0}
+            onSend={() => {}}
+            onTyping={() => {}}
+            onNudge={() => {}}
+            onClose={() => {}}
+            blobStore={{ load: () => store.loadAssetBlobs(), save: (l) => store.saveAssetBlobs(l) } as never}
+          />
+        </ThemeProvider>
+      </I18nProvider>,
+    );
+    expect(m.container.querySelector("img.emoji")?.getAttribute("src")).toBe(gif);
+    m.unmount();
+  });
+
+  it("ADR-0223：收到 ref emoji＋blob 未到 → 占位（emoji--pending，顯示 :shortcode:）", () => {
+    localStorage.clear();
+    const hash = "a".repeat(64);
+    const text = appendAssetManifest("嗨 :dance:", { dance: { label: "跳舞", ref: hash, format: "raster" } });
+    const m = mount(render([{ id: "b2", outgoing: false, text, at: 1 }]));
+    expect(m.container.querySelector("img.emoji")).toBeNull();
+    const pending = m.container.querySelector(".emoji--pending");
+    expect(pending?.textContent).toBe(":dance:");
+    m.unmount();
+  });
+
   it("未知短碼保留字面（無對應資產＝不誤渲染）", () => {
     localStorage.clear();
     const m = mount(render([{ id: "m2", outgoing: false, text: "沒有 :nope: 這顆", at: 1 }]));

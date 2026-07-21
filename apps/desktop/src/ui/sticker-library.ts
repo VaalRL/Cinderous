@@ -41,10 +41,13 @@ export function addSticker(
   list: CustomAsset[],
   label: string,
   svg: string,
-  opts: { shortcode?: string; kind?: CustomAssetKind; format?: "svg" | "raster" } = {},
+  opts: { shortcode?: string; kind?: CustomAssetKind; format?: "svg" | "raster"; ref?: string } = {},
 ): AddResult {
+  const ref = opts.ref;
   const raster = opts.format === "raster";
-  if (raster) {
+  if (ref) {
+    // 參照資產（ADR-0223）：內容在 blob 快取，此處只記 metadata（svg 留空）；不驗 svg。
+  } else if (raster) {
     // raster（動畫 GIF 等）：型別＋尺寸把關（無腳本面，不套 SVG 拒收制，ADR-0222）。
     if (!isValidRasterDataUri(svg)) return { ok: false, reason: "bad-image" };
     if (svg.length > RASTER_MAX_BYTES) return { ok: false, reason: "too-large" };
@@ -52,7 +55,7 @@ export function addSticker(
     const verdict: SvgVerdict = validateStickerSvg(svg);
     if (!verdict.ok) return { ok: false, reason: verdict.reason };
   }
-  const id = contentHash(svg);
+  const id = ref ?? contentHash(svg);
   const shortcode = opts.shortcode?.trim().toLowerCase(); // 正規化小寫（ADR-0221 M2）
   if (shortcode) {
     if (!isValidShortcode(shortcode)) return { ok: false, reason: "bad-shortcode" };
@@ -66,11 +69,12 @@ export function addSticker(
   const sticker: CustomAsset = {
     id,
     label: clampStickerLabel(label) || "貼圖",
-    svg,
+    svg: ref ? "" : svg, // 參照資產 svg 留空，內容在 blob 快取（ADR-0223）
     kind,
     mine: true, // 自建/自匯入，LRU 受保護（ADR-0221 M1）
     ...(shortcode ? { shortcode } : {}),
-    ...(raster ? { format: "raster" as const } : {}),
+    ...(raster || ref ? { format: "raster" as const } : {}),
+    ...(ref ? { ref } : {}),
   };
   return { ok: true, list: [sticker, ...list], sticker };
 }
@@ -121,6 +125,7 @@ function normalize(s: unknown): CustomAsset | null {
     ...(o.mine === true ? { mine: true } : {}), // 保留自建標記（ADR-0221 M1）
     ...(shortcode ? { shortcode } : {}),
     ...(o.format === "raster" ? { format: "raster" as const } : {}), // 保留 raster 格式（ADR-0222）
+    ...(typeof o.ref === "string" ? { ref: o.ref } : {}), // 保留內容定址參照（ADR-0223）
   };
 }
 

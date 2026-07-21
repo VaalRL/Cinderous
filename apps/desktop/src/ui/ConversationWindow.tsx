@@ -33,11 +33,15 @@ import {
   assetManifestBytes,
   ASSET_MANIFEST_MAX_BYTES,
   ASSET_MANIFEST_MAX_COUNT,
+  BLOB_CACHE_MAX,
+  cacheBlobs,
+  RASTER_MAX_BYTES,
   collectReferencedShortcodes,
   resolveInlineEmoji,
   resolveManifestEntry,
   splitAssetManifest,
   acquireAssets,
+  type AssetBlob,
   type AssetManifest,
   type CustomAsset,
 } from "@cinderous/core";
@@ -52,6 +56,7 @@ import {
   loadLibrary,
   removeSticker,
   saveLibrary,
+  type AddResult,
   type CustomSticker,
 } from "./sticker-library.js";
 import {
@@ -339,6 +344,11 @@ export interface ConversationProps {
     save: (list: CustomSticker[]) => void;
     namespace: string;
   };
+  /** 內容定址 blob 快取的加密儲存後端（ADR-0223）；未提供則本 session 記憶體。 */
+  blobStore?: {
+    load: () => AssetBlob[];
+    save: (list: AssetBlob[]) => void;
+  };
   /** 公告頻道唯讀（ADR-0049）：非管理者隱藏輸入區。 */
   readOnly?: boolean;
   /** 內嵌模式（ADR-0079 Q3）：三欄中欄用——填滿容器、無浮動標題列/縮放把手。 */
@@ -357,9 +367,11 @@ function buildAssetManifest(text: string, library: CustomAsset[]): AssetManifest
   for (const code of collectReferencedShortcodes(text)) {
     const asset = findByShortcode(library, code);
     if (asset) {
-      // raster（動畫）須帶 format，否則收端當 SVG 驗證會丟棄（ADR-0222）。
-      manifest[code] =
-        asset.format === "raster"
+      manifest[code] = asset.ref
+        ? // 參照筆（ADR-0223）：只帶 ref，blob 另傳（P2a-3）。
+          { label: asset.label, ref: asset.ref, format: "raster" }
+        : // raster（動畫）須帶 format，否則收端當 SVG 驗證會丟棄（ADR-0222）。
+          asset.format === "raster"
           ? { label: asset.label, svg: asset.svg, format: "raster" }
           : { label: asset.label, svg: asset.svg };
     }
@@ -373,17 +385,23 @@ function assetSrc(svg: string, format?: "svg" | "raster"): string {
   return format === "raster" ? svg : svgToDataUri(svg);
 }
 
-function renderRichText(text: string, manifest: AssetManifest): JSX.Element[] {
+function renderRichText(
+  text: string,
+  manifest: AssetManifest,
+  getBlob: (hash: string) => string | undefined,
+): JSX.Element[] {
   const segs = resolveInlineEmoji(text, (code) => {
     const entry = manifest[code];
-    if (!entry) return undefined;
-    // ADR-0223：參照筆需 blob 快取解析（P2a-2 接）；目前無快取＝暫不渲染（留字面）。
-    const r = resolveManifestEntry(entry, () => undefined);
-    return r && !("pending" in r) ? r : undefined;
+    return entry ? resolveManifestEntry(entry, getBlob) : undefined;
   });
   return segs.map((seg, i) =>
     seg.type === "text" ? (
       <Fragment key={i}>{renderMarkdown(applyEmoticons(seg.value))}</Fragment>
+    ) : seg.type === "emoji-pending" ? (
+      // ADR-0223：參照筆 blob 未到＝占位（backfill 由 P2a-3 送達後重繪）。
+      <span key={i} className="emoji emoji--pending" title={`:${seg.shortcode}:`}>
+        :{seg.shortcode}:
+      </span>
     ) : (
       <img key={i} className="emoji" src={assetSrc(seg.svg, seg.format)} alt={`:${seg.shortcode}:`} title={`:${seg.shortcode}:`} />
     ),
@@ -469,6 +487,18 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
     else saveLibrary(list);
   };
   const [library, setLibrary] = useState<CustomSticker[]>(() => loadLib());
+  // 內容定址 blob 快取（ADR-0223）：有 blobStore（加密）走它，否則本 session 記憶體。
+  const [blobs, setBlobs] = useState<AssetBlob[]>(() => props.blobStore?.load() ?? []);
+  const getBlob = (hash: string): string | undefined => blobs.find((b) => b.hash === hash)?.data;
+  /** 存一顆 blob 進快取（LRU）＋落地。 */
+  const cacheBlob = (blob: AssetBlob): void => {
+    const next = cacheBlobs(props.blobStore?.load() ?? blobs, [blob], BLOB_CACHE_MAX);
+    setBlobs(next);
+    props.blobStore?.save(next);
+  };
+  /** 資產 `<img src>`（含 ref 解析，ADR-0223）：ref→blob 快取；否則走 assetSrc；缺 blob 回空字串。 */
+  const assetImgSrc = (a: { svg: string; format?: "svg" | "raster"; ref?: string }): string =>
+    a.ref ? (getBlob(a.ref) ?? "") : assetSrc(a.svg, a.format);
   // 一次性遷移（ADR-0220 步驟 6）：舊全域明文庫 → 加密 AppStorage（每身分一次，flag 防重跑）。
   const migratedRef = useRef(false);
   useEffect(() => {
@@ -677,9 +707,19 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
     saveFavorites(next);
   };
 
+  // 加一顆 raster（ADR-0223）：小的行內、大的存 blob 快取＋庫記 ref（放開 Phase 1 的 48KiB 硬擋）。
+  const addRaster = (list: CustomSticker[], label: string, dataUri: string, shortcode?: string): AddResult => {
+    const opts = shortcode ? { shortcode } : {};
+    if (dataUri.length <= RASTER_MAX_BYTES) return addSticker(list, label, dataUri, { format: "raster", ...opts });
+    const hash = contentHash(dataUri);
+    cacheBlob({ hash, data: dataUri });
+    return addSticker(list, label, "", { format: "raster", ref: hash, ...opts });
+  };
+
   // 貼圖庫寫入（匯入 / fork / 點擊收藏共用）；失敗以 alert 呈現拒收原因。
   const acquireSticker = (label: string, svg: string, format?: "svg" | "raster"): boolean => {
-    const r = addSticker(loadLib(), label, svg, format ? { format } : {}); // 讀最新再寫（ADR-0221 C1/C2）
+    // 讀最新再寫（ADR-0221 C1/C2）；raster 走 addRaster（大檔存 blob，ADR-0223）。
+    const r = format === "raster" ? addRaster(loadLib(), label, svg) : addSticker(loadLib(), label, svg);
     if (!r.ok) {
       void alert(t("sticker_importFail", { reason: r.reason }));
       return false;
@@ -726,7 +766,9 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages, props.stickersDisabled]);
   // 統一解析：內建包或自製庫（供最近/最愛分頁）。
-  const resolveAny = (ref: StickerRef): { label: string; svg: string; format?: "svg" | "raster" } | undefined =>
+  const resolveAny = (
+    ref: StickerRef,
+  ): { label: string; svg: string; format?: "svg" | "raster"; ref?: string } | undefined =>
     ref.pack === CUSTOM_PACK ? findSticker(library, ref.id) : resolveSticker(ref.pack, ref.id);
 
   // 文字觸發貼圖（ADR-0037）：尾端比對（字首索引）、Tab/點擊送出、⌨ 設定。
@@ -846,7 +888,11 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
     const stem = f.name.replace(/\.[^.]+$/, "");
     const input = await prompt({ message: t("emoji_shortcodePrompt"), defaultValue: toShortcode(stem) });
     if (input === null) return;
-    const r = addSticker(loadLib(), stem, res.svg, { shortcode: input, format: res.format }); // 讀最新再寫（ADR-0221）
+    // 讀最新再寫（ADR-0221）；raster 走 addRaster（大檔存 blob＋ref，ADR-0223）。
+    const r =
+      res.format === "raster"
+        ? addRaster(loadLib(), stem, res.svg, input)
+        : addSticker(loadLib(), stem, res.svg, { shortcode: input });
     if (!r.ok) {
       void alert(t("sticker_importFail", { reason: r.reason }));
       return;
@@ -874,7 +920,10 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
           continue;
         }
         const stem = f.name.replace(/\.[^.]+$/, "");
-        const r = addSticker(list, stem, res.svg, { shortcode: toShortcode(stem), format: res.format });
+        const r =
+          res.format === "raster"
+            ? addRaster(list, stem, res.svg, toShortcode(stem))
+            : addSticker(list, stem, res.svg, { shortcode: toShortcode(stem) });
         if (!r.ok) skipped++;
         else if (r.list !== list) {
           list = r.list; // 真正新增（去重命中則清單不變、不計）
@@ -1247,7 +1296,7 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
               onReact={props.onReact}
               onUnsend={props.onUnsend}
               onView={setLightbox}
-              ownedIds={ownedIds}
+              ownedIds={ownedIds} getBlob={getBlob}
               onOwnSticker={acquireSticker}
               replyCount={counts.get(m.id) ?? 0}
               onOpenThread={props.readOnly ? undefined : () => openThread(m.id)}
@@ -1545,7 +1594,7 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
                           data-testid="emoji-item"
                           onClick={() => insertEmoji(a.shortcode!)}
                         >
-                          <img src={assetSrc(a.svg, a.format)} alt={`:${a.shortcode}:`} />
+                          <img src={assetImgSrc(a)} alt={`:${a.shortcode}:`} />
                         </button>
                         <button
                           type="button"
@@ -1621,7 +1670,7 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
                             : sendSticker(ref.pack, ref.id)
                         }
                       >
-                        <img src={assetSrc(s.svg, s.format)} alt={s.label} />
+                        <img src={assetImgSrc(s)} alt={s.label} />
                       </button>
                       <button
                         type="button"
@@ -1723,7 +1772,7 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
                 acceptEmoji(a);
               }}
             >
-              <img src={assetSrc(a.svg, a.format)} alt="" />
+              <img src={assetImgSrc(a)} alt="" />
               <span>:{a.shortcode}:</span>
             </button>
           ))}
@@ -1743,7 +1792,7 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
                 title={m.entry.trigger}
                 onClick={() => acceptTrigger(m)}
               >
-                <img src={assetSrc(st.svg, st.format)} alt={st.label} />
+                <img src={assetImgSrc(st)} alt={st.label} />
                 <span>{m.entry.trigger}</span>
               </button>
             );
@@ -1991,7 +2040,7 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
                     return (
                       <div className="trigpanel__row" key={e.trigger}>
                         {st ? (
-                          <img src={assetSrc(st.svg, st.format)} alt={st.label} />
+                          <img src={assetImgSrc(st)} alt={st.label} />
                         ) : (
                           <span className="trigpanel__gone" title={t("trigger_deleted")}>🚫</span>
                         )}
@@ -2058,7 +2107,7 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
                 onReact={props.onReact}
                 onUnsend={props.onUnsend}
                 onView={setLightbox}
-                ownedIds={ownedIds}
+                ownedIds={ownedIds} getBlob={getBlob}
                 onOwnSticker={acquireSticker}
               />
             ))}
@@ -2147,7 +2196,7 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
               onReact={props.onReact}
               onUnsend={props.onUnsend}
               onView={setLightbox}
-              ownedIds={ownedIds}
+              ownedIds={ownedIds} getBlob={getBlob}
               onOwnSticker={acquireSticker}
               expanded
             />
@@ -2170,6 +2219,7 @@ function MessageLine({
   onView,
   ownedIds,
   onOwnSticker,
+  getBlob,
   replyCount = 0,
   onOpenThread,
   onExpand,
@@ -2187,6 +2237,8 @@ function MessageLine({
   onView?: ((item: LightboxItem) => void) | undefined;
   ownedIds: Set<string>;
   onOwnSticker: (label: string, svg: string) => void;
+  /** 內容定址 blob 查找（ADR-0223）：參照筆據此解析；未提供＝參照顯示占位。 */
+  getBlob?: ((hash: string) => string | undefined) | undefined;
   /** 此訊息作為串根的回覆數（ADR-0051）。 */
   replyCount?: number;
   /** 開啟此訊息的對話串面板；未提供則不顯示串入口。 */
@@ -2320,7 +2372,7 @@ function MessageLine({
         <span className="text expired__text">{t("sticker_invalid")}</span>
       ) : !expanded && bodyText.length > MESSAGE_TRUNCATE_CHARS ? (
         <span className="text">
-          {renderRichText(bodyText.slice(0, MESSAGE_TRUNCATE_CHARS), manifest)}
+          {renderRichText(bodyText.slice(0, MESSAGE_TRUNCATE_CHARS), manifest, getBlob ?? (() => undefined))}
           <span className="text__ellip">… </span>
           {onExpand ? (
             <button type="button" className="text__more" data-testid="expand-msg" onClick={onExpand}>
@@ -2329,7 +2381,7 @@ function MessageLine({
           ) : null}
         </span>
       ) : (
-        <span className="text">{renderRichText(bodyText, manifest)}</span>
+        <span className="text">{renderRichText(bodyText, manifest, getBlob ?? (() => undefined))}</span>
       )}
       {reactions.length > 0 ? (
         <span className="reactions">

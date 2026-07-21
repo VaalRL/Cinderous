@@ -18,6 +18,7 @@ import {
   parseBackupCode,
   parseOrgInvite,
   peekBackupRelay,
+  type AssetBlob,
   type CustomAsset,
   type PubkeyHex,
 } from "@cinderous/core";
@@ -778,6 +779,14 @@ export function App(): JSX.Element {
           load: (): CustomAsset[] => storageRef.current!.loadCustomAssets(),
           save: (l: CustomAsset[]): void => storageRef.current!.saveCustomAssets(l),
           namespace: self.pubkey,
+        }
+      : undefined;
+  // 內容定址 blob 快取的加密後端（ADR-0223）。
+  const blobStore =
+    self && storageRef.current
+      ? {
+          load: (): AssetBlob[] => storageRef.current!.loadAssetBlobs(),
+          save: (l: AssetBlob[]): void => storageRef.current!.saveAssetBlobs(l),
         }
       : undefined;
   const idleRef = useRef<IdleState>(initIdle(Date.now()));
@@ -2586,6 +2595,7 @@ export function App(): JSX.Element {
               onToggleMute={() => updatePrefs(withMuted(groupPrefs, pk, !isMuted(groupPrefs, pk)))}
               self={self}
               {...(assetStore ? { assetStore } : {})}
+              {...(blobStore ? { blobStore } : {})}
               contact={groupContact}
               messages={convos[pk] ?? []}
               typing={false}
@@ -2671,6 +2681,7 @@ export function App(): JSX.Element {
             {...(floating ? { floating } : {})}
             self={self}
             {...(assetStore ? { assetStore } : {})}
+              {...(blobStore ? { blobStore } : {})}
             contact={contact}
             p2pConnected={p2pConnected.has(pk)}
             muted={isMuted(groupPrefs, pk)}

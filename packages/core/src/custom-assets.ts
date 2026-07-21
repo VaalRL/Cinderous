@@ -204,7 +204,9 @@ export function collectReferencedShortcodes(text: string): string[] {
 /** 行內解析後的片段：純文字或一顆 emoji。 */
 export type InlineSegment =
   | { type: "text"; value: string }
-  | { type: "emoji"; shortcode: string; label: string; svg: string; format?: "raster" };
+  | { type: "emoji"; shortcode: string; label: string; svg: string; format?: "raster" }
+  /** 參照筆但 blob 未到（ADR-0223）：呼叫端顯示占位並觸發 backfill。 */
+  | { type: "emoji-pending"; shortcode: string; label: string; ref: string };
 
 /**
  * 把含 `:shortcode:` 的文字切成片段序列。`resolve` 由呼叫端提供（通常＝本則清單優先、
@@ -212,7 +214,9 @@ export type InlineSegment =
  */
 export function resolveInlineEmoji(
   text: string,
-  resolve: (shortcode: string) => { label: string; svg: string; format?: "raster" } | undefined,
+  resolve: (
+    shortcode: string,
+  ) => { label: string; svg: string; format?: "raster" } | { label: string; pending: true; ref: string } | undefined,
   maxEmoji: number = INLINE_EMOJI_MAX,
 ): InlineSegment[] {
   const segs: InlineSegment[] = [];
@@ -233,13 +237,17 @@ export function resolveInlineEmoji(
     const asset = resolve(code);
     if (!asset) continue; // 未解析：併入後續文字（不移動 last）
     pushText(text.slice(last, m.index));
-    segs.push({
-      type: "emoji",
-      shortcode: code,
-      label: asset.label,
-      svg: asset.svg,
-      ...(asset.format === "raster" ? { format: "raster" as const } : {}),
-    });
+    if ("pending" in asset) {
+      segs.push({ type: "emoji-pending", shortcode: code, label: asset.label, ref: asset.ref });
+    } else {
+      segs.push({
+        type: "emoji",
+        shortcode: code,
+        label: asset.label,
+        svg: asset.svg,
+        ...(asset.format === "raster" ? { format: "raster" as const } : {}),
+      });
+    }
     last = m.index + m[0].length;
     emojiCount++;
   }
