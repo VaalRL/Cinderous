@@ -469,6 +469,7 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
   }, []);
   const stickerFileRef = useRef<HTMLInputElement>(null);
   const emojiFileRef = useRef<HTMLInputElement>(null);
+  const emojiPackRef = useRef<HTMLInputElement>(null);
   /** 貼圖編輯器（ADR-0033）：null=關閉；base 為底圖（空白畫布時省略）。 */
   const [editor, setEditor] = useState<{ base?: string; label?: string } | null>(null);
   /** 文字觸發貼圖（ADR-0037）。 */
@@ -806,6 +807,42 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
     }
     setLibrary(r.list);
     persistLib(r.list);
+  };
+
+  // 批次匯入 Slack 式 emoji 包（ADR-0220）：多檔／整個資料夾，檔名（去副檔名）＝短碼、自動降尺寸。
+  // 非圖片、非法短碼、短碼已被佔用、超過庫上限者略過；最後彙報加入/略過數。
+  const importEmojiPack = async (fileList: FileList): Promise<void> => {
+    let list = library;
+    let added = 0;
+    let skipped = 0;
+    for (const f of Array.from(fileList)) {
+      const isImg = f.type.startsWith("image/") || f.name.toLowerCase().endsWith(".svg");
+      if (!isImg) {
+        skipped++;
+        continue;
+      }
+      try {
+        const svg = await fileToStickerSvg(f, 64);
+        if (svg === null) {
+          skipped++;
+          continue;
+        }
+        const stem = f.name.replace(/\.[^.]+$/, "");
+        const r = addSticker(list, stem, svg, { shortcode: toShortcode(stem) });
+        if (!r.ok) skipped++;
+        else if (r.list !== list) {
+          list = r.list; // 真正新增（去重命中則清單不變、不計）
+          added++;
+        }
+      } catch {
+        skipped++; // 毀損圖片等
+      }
+    }
+    if (list !== library) {
+      setLibrary(list);
+      persistLib(list);
+    }
+    void alert(t("emoji_packImported", { added: String(added), skipped: String(skipped) }));
   };
 
   const dropFiles = (files: FileList | null) => {
@@ -1422,6 +1459,28 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
                     onChange={(e) => {
                       const f = e.target.files?.[0];
                       if (f) void importEmojiFile(f);
+                      e.target.value = "";
+                    }}
+                  />
+                  <button
+                    type="button"
+                    className="stickerpick__item stickerpick__import"
+                    title={t("emoji_importPack")}
+                    aria-label={t("emoji_importPack")}
+                    data-testid="emoji-import-pack"
+                    onClick={() => emojiPackRef.current?.click()}
+                  >
+                    📁
+                  </button>
+                  <input
+                    ref={emojiPackRef}
+                    type="file"
+                    accept=".svg,image/*"
+                    multiple
+                    hidden
+                    onChange={(e) => {
+                      const files = e.target.files;
+                      if (files && files.length > 0) void importEmojiPack(files);
                       e.target.value = "";
                     }}
                   />

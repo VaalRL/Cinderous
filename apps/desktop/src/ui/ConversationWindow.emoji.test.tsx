@@ -17,6 +17,8 @@ const self: Self = { pubkey: "aa".repeat(32), name: "我", status: "online", sta
 const bob: Contact = { pubkey: "bb".repeat(32), name: "Bob", status: "online", statusMessage: "", nowPlaying: "" };
 const smiley =
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><circle cx="50" cy="50" r="40" fill="#ffd84d"/></svg>';
+const heart =
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"><path d="M50 82 C10 54 22 22 50 40 C78 22 90 54 50 82 Z" fill="#e8567a"/></svg>';
 
 const render = (messages: ChatMessage[]): JSX.Element => (
   <I18nProvider>
@@ -118,6 +120,27 @@ describe("emoji 挑選器分頁（ADR-0220，步驟 3）", () => {
     await click(m, "emoji-tab");
     expect(m.container.querySelector('[data-testid="emoji-import"]')).not.toBeNull();
     expect(m.container.querySelector('[data-testid="emoji-item"]')).toBeNull();
+    m.unmount();
+  });
+
+  it("批次匯入 Slack 包：多個 SVG 檔 → 檔名成為短碼、一次入庫", async () => {
+    localStorage.clear();
+    const m = mount(render([]));
+    await click(m, "sticker-toggle");
+    await click(m, "emoji-tab");
+    const input = m.container.querySelector('input[type="file"][multiple]') as HTMLInputElement;
+    expect(input).not.toBeNull();
+    const files = [
+      new File([smiley], "party.svg", { type: "image/svg+xml" }),
+      new File([heart], "heart-blob.svg", { type: "image/svg+xml" }),
+    ];
+    Object.defineProperty(input, "files", { value: files, configurable: true });
+    await act(async () => {
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+      await new Promise((r) => setTimeout(r, 30));
+    });
+    const saved = JSON.parse(localStorage.getItem("nb.stickers.custom") ?? "[]") as Array<{ shortcode?: string }>;
+    expect(saved.map((a) => a.shortcode).sort()).toEqual(["heart-blob", "party"]);
     m.unmount();
   });
 });

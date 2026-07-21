@@ -577,6 +577,8 @@ export interface Messages {
   emoji_empty: string;
   emoji_insert: string;
   emoji_hint: string;
+  emoji_importPack: string;
+  emoji_packImported: string;
   editor_title: string;
   editor_new: string;
   editor_fromBase: string;
@@ -1227,6 +1229,8 @@ const zhHant: Messages = {
   emoji_empty: "還沒有自訂 emoji。按＋匯入圖片並指定短碼。",
   emoji_insert: "插入 {code}",
   emoji_hint: "↵/Tab 插入 · ↑↓ 選擇 · Esc 關閉",
+  emoji_importPack: "批次匯入（多檔，檔名＝短碼）",
+  emoji_packImported: "已匯入 {added} 顆，略過 {skipped} 顆",
   editor_title: "貼圖編輯器",
   editor_new: "繪製新貼圖",
   editor_fromBase: "以此貼圖為底繪製",
@@ -1872,6 +1876,8 @@ const en: Messages = {
   emoji_empty: "No custom emoji yet. Tap + to import an image and set a shortcode.",
   emoji_insert: "Insert {code}",
   emoji_hint: "↵/Tab insert · ↑↓ choose · Esc close",
+  emoji_importPack: "Batch import (many files, filename = shortcode)",
+  emoji_packImported: "Imported {added}, skipped {skipped}",
   editor_title: "Sticker editor",
   editor_new: "Draw a new sticker",
   editor_fromBase: "Draw on this sticker",
