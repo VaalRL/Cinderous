@@ -349,6 +349,10 @@ export interface ConversationProps {
     load: () => AssetBlob[];
     save: (list: AssetBlob[]) => void;
   };
+  /** 向某人索取缺少的 emoji blob（ADR-0223 backfill）：pending 參照觸發。 */
+  onRequestAsset?: (to: string, hash: string) => void;
+  /** blob 快取版本；後端 onAssetCached 後由 App bump → 本窗重讀快取、把占位重繪為動畫。 */
+  blobsNonce?: number;
   /** 公告頻道唯讀（ADR-0049）：非管理者隱藏輸入區。 */
   readOnly?: boolean;
   /** 內嵌模式（ADR-0079 Q3）：三欄中欄用——填滿容器、無浮動標題列/縮放把手。 */
@@ -765,6 +769,29 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
     // 僅依 messages/停用旗標觸發；library/favorites 取當下值。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages, props.stickersDisabled]);
+
+  // 後端把 backfill 收到的 blob 存進快取後（onAssetCached→App bump nonce），重讀快取以重繪占位。
+  useEffect(() => {
+    if (props.blobStore) setBlobs(props.blobStore.load());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.blobsNonce]);
+
+  // 缺 blob 的參照（ADR-0223）：向該訊息寄件者索取；每 hash 一次（後端另有節流）。
+  const requestedRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const req = props.onRequestAsset;
+    if (!req) return;
+    for (const m of messages) {
+      if (m.outgoing) continue; // 自己送的 blob 本就在自己快取
+      for (const e of Object.values(splitAssetManifest(m.text).manifest)) {
+        if (e.ref && !getBlob(e.ref) && !requestedRef.current.has(e.ref)) {
+          requestedRef.current.add(e.ref);
+          req(m.sender ?? contact.pubkey, e.ref);
+        }
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages, blobs]);
   // 統一解析：內建包或自製庫（供最近/最愛分頁）。
   const resolveAny = (
     ref: StickerRef,

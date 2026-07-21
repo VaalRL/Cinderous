@@ -463,6 +463,7 @@ export function App(): JSX.Element {
   const [relays, setRelays] = useState<{ url: string; state: ConnectionState; home: boolean; stale: boolean }[]>([]);
   const [cleanPaste, setCleanPaste] = useState<boolean>(() => cleanOnPasteEnabled());
   const [autoAcquire, setAutoAcquire] = useState<boolean>(() => autoAcquireEnabled());
+  const [blobsNonce, setBlobsNonce] = useState(0); // ADR-0223：backfill 到貨時 bump → 對話窗重讀 blob 快取
   const [groups, setGroups] = useState<Group[]>([]);
   const [groupPrefs, setGroupPrefs] = useState<GroupPrefsMap>(() => loadGroupPrefs());
   const [labelFilter, setLabelFilter] = useState<string | undefined>(undefined);
@@ -1132,6 +1133,8 @@ export function App(): JSX.Element {
       // 縮圖產生完成（ADR-0102）：不等重載就顯示。
       onFileThumb: (pk, messageId, thumb) =>
         setConvos((prev) => patchFileByMsgId(prev, pk, messageId, { thumb })),
+      // ADR-0223：backfill 收到的 blob 已入加密快取 → bump nonce 讓對話窗重讀快取、把占位重繪為動畫。
+      onAssetCached: () => setBlobsNonce((n) => n + 1),
       onFileError: (pk, reason) => {
         const msg: ChatMessage = { id: uid("fe"), outgoing: false, text: `⚠️ ${reason}`, at: Date.now() };
         setConvos((prev) => ({ ...prev, [pk]: [...(prev[pk] ?? []), msg] }));
@@ -2596,6 +2599,8 @@ export function App(): JSX.Element {
               self={self}
               {...(assetStore ? { assetStore } : {})}
               {...(blobStore ? { blobStore } : {})}
+              onRequestAsset={(to, hash) => activeBackend.requestAsset?.(to, hash)}
+              blobsNonce={blobsNonce}
               contact={groupContact}
               messages={convos[pk] ?? []}
               typing={false}
@@ -2682,6 +2687,8 @@ export function App(): JSX.Element {
             self={self}
             {...(assetStore ? { assetStore } : {})}
               {...(blobStore ? { blobStore } : {})}
+              onRequestAsset={(to, hash) => activeBackend.requestAsset?.(to, hash)}
+              blobsNonce={blobsNonce}
             contact={contact}
             p2pConnected={p2pConnected.has(pk)}
             muted={isMuted(groupPrefs, pk)}

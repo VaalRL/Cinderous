@@ -122,12 +122,39 @@ describe("行內自訂 emoji 渲染與自動收藏（ADR-0220）", () => {
             onTyping={() => {}}
             onNudge={() => {}}
             onClose={() => {}}
-            blobStore={{ load: () => store.loadAssetBlobs(), save: (l) => store.saveAssetBlobs(l) } as never}
+            blobStore={{ load: () => store.loadAssetBlobs(), save: () => {} } as never}
           />
         </ThemeProvider>
       </I18nProvider>,
     );
     expect(m.container.querySelector("img.emoji")?.getAttribute("src")).toBe(gif);
+    m.unmount();
+  });
+
+  it("ADR-0223 P2a-3c：收到 pending ref → 觸發 onRequestAsset(寄件者, hash)", () => {
+    localStorage.clear();
+    const hash = "a".repeat(64);
+    const text = appendAssetManifest("嗨 :dance:", { dance: { label: "跳舞", ref: hash, format: "raster" } });
+    const requests: Array<[string, string]> = [];
+    const m = mount(
+      <I18nProvider>
+        <ThemeProvider>
+          <ConversationWindow
+            self={self}
+            contact={bob}
+            messages={[{ id: "p1", outgoing: false, text, at: 1 }]}
+            typing={false}
+            nudgeSignal={0}
+            onSend={() => {}}
+            onTyping={() => {}}
+            onNudge={() => {}}
+            onClose={() => {}}
+            onRequestAsset={(to, h) => requests.push([to, h])}
+          />
+        </ThemeProvider>
+      </I18nProvider>,
+    );
+    expect(requests).toContainEqual([bob.pubkey, hash]);
     m.unmount();
   });
 

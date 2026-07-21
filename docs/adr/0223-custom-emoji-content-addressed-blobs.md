@@ -1,6 +1,6 @@
 # 0223. 自訂 emoji 內容定址 blob 傳遞（Model B，ADR-0222 Phase 2 細部設計）
 
-- 狀態：提議中
+- 狀態：提議中（P2a 已實作；P2b 待）
 - 日期：2026-07-21
 - 相關文件：ADR-0222（動畫 GIF／Phase 1）、0220（統一自訂資產）、0221（審查修正）、0093（多裝置投遞與檔案持久化）、0017（WebRTC 檔案傳輸）、0124（群組檔案）、0162（org relay 檔案 `FILE_WRAP`）、0042（自製貼圖容量限制）、0054/0112（加密落地）
 
@@ -62,7 +62,7 @@ ADR-0222 Phase 1 讓**小**（≤48 KiB）動畫 GIF emoji 能行內（`nb-asset
   - 跨裝置：自己的大 emoji blob 需能從任一裝置送出——metadata（庫）走既有多裝置同步，blob 以「向自己 backfill」或多裝置投遞（ADR-0093）補齊（細節待 P2b）。
   - backfill 洩漏「我收到你訊息但沒這顆 emoji」給寄件者（輕微、寄件者本知情）。
 - **後續行動／待辦（Phase 2 分段）**：
-  1. **P2a**：`assetBlobs` 加密快取＋`ref`（庫/清單/CustomAsset）＋由 blob 渲染＋整合性驗證＋1:1 backfill（`ASSET_REQUEST`）＋狀態機/占位。core 純函式＋元件測試。
+  1. **P2a**（✅ 已實作）：`assetBlobs` 加密快取＋`ref`（庫/清單/CustomAsset）＋由 blob 渲染＋整合性驗證＋1:1 backfill（`ASSET_REQUEST`/`ASSET_CHUNK`，外層皆 Gift Wrap 1059 經 receiveDm）＋pending 占位＋觸發/重繪。core 374＋engine 281＋desktop 475 綠。**實作註**：`ASSET_CHUNK` 未用 `FILE_WRAP` 外層（測試網不路由；改與請求同走 1059，emoji blob 為有界 backfill 流量、共用 DM 路徑可接受）。
   2. **P2b**：首次推播集合＋離線 relay 信箱（`FILE_WRAP`）＋群組去重（ADR-0124）＋跨裝置 blob 補齊＋節流。
   3. 匯入：放開 Phase 1 的 48 KiB 硬擋——大 GIF 存 `assetBlobs`＋庫記 `ref`（可自用/預覽/送出）。
   4. 實作時同步 `ARCHITECTURE.md`（`assetBlobs` 分部、`ref` 清單契約、`ASSET_REQUEST` kind）；落地＋測試後轉「已接受」。
