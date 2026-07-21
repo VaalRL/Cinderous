@@ -19,6 +19,12 @@ export const ASSET_CHUNK_CHARS = 48_000;
 /** 單 blob 塊數上限（收端防禦）；≈48 塊 × 48000 ≈ 2.3MB 原圖。 */
 export const ASSET_CHUNK_MAX_TOTAL = 64;
 
+/**
+ * 單顆 blob 位元組（字元）上限（ADR-0226）：＝可在分塊上限內送達的最大長度。
+ * 產生端超過即拒收、送端超過不送——讓產生端與傳輸能力對齊，消除「本機成功、對端靜默失敗」。
+ */
+export const BLOB_MAX_BYTES = ASSET_CHUNK_CHARS * ASSET_CHUNK_MAX_TOTAL;
+
 const HASH_RE = /^[0-9a-f]{64}$/;
 
 /** 解密後的 blob 分塊。 */

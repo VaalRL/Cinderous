@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { contentHash } from "./event.js";
+import { ASSET_CHUNK_CHARS, ASSET_CHUNK_MAX_TOTAL, BLOB_MAX_BYTES, splitAssetChunks } from "./asset-relay.js";
 import {
   ASSET_MANIFEST_MAX_COUNT,
   ASSET_MANIFEST_PREFIX,
@@ -8,8 +9,11 @@ import {
   blobHashOk,
   cacheBlobs,
   detectRasterType,
+  gifDimensions,
   isValidRasterDataUri,
   rasterMagicOk,
+  RASTER_MAX_EDGE,
+  rasterWithinPixelBounds,
   resolveManifestEntry,
   appendAssetManifest,
   assetFromManifestEntry,
@@ -329,6 +333,44 @@ describe("ADR-0225 raster magic-byte 內容嗅探", () => {
 
   it("detectRasterType 維持只看宣告（供渲染分流，不受 magic 影響）", () => {
     expect(detectRasterType(uri("gif", PNG))).toBe("gif");
+  });
+});
+
+describe("ADR-0226 尺寸把關（blob 位元組＋GIF 像素）", () => {
+  const G = (b64: string): string => `data:image/gif;base64,${b64}`;
+  const GIF_1x1 = "R0lGODlhAQABAAAA";
+  const GIF_1000 = "R0lGODlh6APoAwAA";
+  const GIF_513 = "R0lGODlhAQIBAgAA";
+  const PNG = "data:image/png;base64,iVBORw0KGgo=";
+
+  it("BLOB_MAX_BYTES ＝ 傳輸能力上限（chunk 字元 × 塊數）", () => {
+    expect(BLOB_MAX_BYTES).toBe(ASSET_CHUNK_CHARS * ASSET_CHUNK_MAX_TOTAL);
+  });
+
+  it("超過 BLOB_MAX_BYTES 即超過分塊上限（故產生/送端須擋，收端會拒）", () => {
+    expect(splitAssetChunks("x".repeat(BLOB_MAX_BYTES + 1)).length).toBeGreaterThan(ASSET_CHUNK_MAX_TOTAL);
+    expect(splitAssetChunks("x".repeat(BLOB_MAX_BYTES)).length).toBeLessThanOrEqual(ASSET_CHUNK_MAX_TOTAL);
+  });
+
+  it("gifDimensions 讀 GIF 寬高；非 GIF 回 null", () => {
+    expect(gifDimensions(G(GIF_1x1))).toEqual({ w: 1, h: 1 });
+    expect(gifDimensions(G(GIF_1000))).toEqual({ w: 1000, h: 1000 });
+    expect(gifDimensions(PNG)).toBeNull();
+  });
+
+  it("rasterWithinPixelBounds：GIF 超過上限擋、界內/非 GIF 放行", () => {
+    expect(RASTER_MAX_EDGE).toBe(512);
+    expect(rasterWithinPixelBounds(G(GIF_1x1))).toBe(true);
+    expect(rasterWithinPixelBounds(G(GIF_513))).toBe(false); // 剛超過 512
+    expect(rasterWithinPixelBounds(G(GIF_1000))).toBe(false);
+    expect(rasterWithinPixelBounds(PNG)).toBe(true); // 非 GIF 不適用
+  });
+
+  it("parseAssetManifest：行內超大像素 GIF 被擋、界內 GIF 通過", () => {
+    const big = ASSET_MANIFEST_PREFIX + JSON.stringify({ big: { label: "大", svg: G(GIF_1000), format: "raster" } });
+    expect(parseAssetManifest(big)).toEqual({});
+    const ok = ASSET_MANIFEST_PREFIX + JSON.stringify({ ok: { label: "小", svg: G(GIF_1x1), format: "raster" } });
+    expect(Object.keys(parseAssetManifest(ok))).toEqual(["ok"]);
   });
 });
 

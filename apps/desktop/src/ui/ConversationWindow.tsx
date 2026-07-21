@@ -34,8 +34,10 @@ import {
   ASSET_MANIFEST_MAX_BYTES,
   ASSET_MANIFEST_MAX_COUNT,
   BLOB_CACHE_MAX,
+  BLOB_MAX_BYTES,
   cacheBlobs,
   RASTER_MAX_BYTES,
+  rasterWithinPixelBounds,
   collectReferencedShortcodes,
   resolveInlineEmoji,
   resolveManifestEntry,
@@ -726,7 +728,9 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
   // 加一顆 raster（ADR-0223）：小的行內、大的存 blob 快取＋庫記 ref（放開 Phase 1 的 48KiB 硬擋）。
   const addRaster = (list: CustomSticker[], label: string, dataUri: string, shortcode?: string): AddResult => {
     const opts = shortcode ? { shortcode, now: Date.now() } : { now: Date.now() }; // ADR-0224：帶加入時間
+    if (!rasterWithinPixelBounds(dataUri)) return { ok: false, reason: "too-large" }; // ADR-0226：超大像素 GIF
     if (dataUri.length <= RASTER_MAX_BYTES) return addSticker(list, label, dataUri, { format: "raster", ...opts });
+    if (dataUri.length > BLOB_MAX_BYTES) return { ok: false, reason: "too-large" }; // ADR-0226：超過傳輸能力，拒收（免靜默失敗）
     const hash = contentHash(dataUri);
     cacheBlob({ hash, data: dataUri });
     return addSticker(list, label, "", { format: "raster", ref: hash, ...opts });

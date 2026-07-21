@@ -103,6 +103,34 @@ export function isValidRasterDataUri(dataUri: string): boolean {
   return RASTER_DATA_URI.test(dataUri) && rasterMagicOk(dataUri);
 }
 
+/** GIF 像素寬/高上限（ADR-0226）：GIF 保留原尺寸（不像非 GIF 匯入時 canvas 正規化），故需上限防撐爆。 */
+export const RASTER_MAX_EDGE = 512;
+
+/**
+ * 讀 GIF 的寬高（ADR-0226）：Logical Screen Descriptor——header 6 bytes 後，byte 6–7＝寬、
+ * 8–9＝高（little-endian uint16）。非 GIF 或讀不到回 null。沿用 ADR-0225 `firstBytes`（不用 atob）。
+ */
+export function gifDimensions(dataUri: string): { w: number; h: number } | null {
+  if (detectRasterType(dataUri) !== "gif") return null;
+  const comma = dataUri.indexOf(",");
+  if (comma < 0) return null;
+  const b = firstBytes(dataUri.slice(comma + 1), 10);
+  if (b.length < 10) return null;
+  const w = (b[6] ?? 0) | ((b[7] ?? 0) << 8);
+  const h = (b[8] ?? 0) | ((b[9] ?? 0) << 8);
+  return { w, h };
+}
+
+/**
+ * raster 像素尺寸是否在上限內（ADR-0226）：**目前只查 GIF**（PNG/WEBP/JPEG 匯入時已 canvas
+ * 正規化到 64/256、收端行內亦 ≤48KB）；非 GIF 一律 `true`。寬高需 >0 且 ≤ `maxEdge`。
+ */
+export function rasterWithinPixelBounds(dataUri: string, maxEdge: number = RASTER_MAX_EDGE): boolean {
+  const d = gifDimensions(dataUri);
+  if (!d) return true; // 非 GIF：不適用
+  return d.w > 0 && d.h > 0 && d.w <= maxEdge && d.h <= maxEdge;
+}
+
 /** 自訂資產種類（ADR-0220）。 */
 export type CustomAssetKind = "sticker" | "emoji" | "both";
 
@@ -221,8 +249,13 @@ export function parseAssetManifest(s: string): AssetManifest {
       continue;
     }
     if (typeof svg !== "string") continue;
-    // raster：型別＋尺寸把關（無腳本面，不套 validateStickerSvg）；svg：拒收制驗證（ADR-0222）。
-    if (raster ? !(isValidRasterDataUri(svg) && svg.length <= RASTER_MAX_BYTES) : !validateStickerSvg(svg).ok) continue;
+    // raster：型別＋位元組＋像素尺寸把關（無腳本面，不套 validateStickerSvg，ADR-0225/0226）；svg：拒收制。
+    if (
+      raster
+        ? !(isValidRasterDataUri(svg) && svg.length <= RASTER_MAX_BYTES && rasterWithinPixelBounds(svg))
+        : !validateStickerSvg(svg).ok
+    )
+      continue;
     bytes += svg.length + label.length;
     if (bytes > ASSET_MANIFEST_MAX_BYTES) break;
     out[key] = raster ? { label: clampStickerLabel(label), svg, format: "raster" } : { label: clampStickerLabel(label), svg };

@@ -47,7 +47,7 @@ describe("RelayChatBackend（真實後端 + 持久化）", () => {
     const storeB = new MemoryStorage();
     const a = new RelayChatBackend(storeA, (h) => net.connect("a", h), "Alice");
     const b = new RelayChatBackend(storeB, (h) => net.connect("b", h), "Bob");
-    const data = "data:image/gif;base64," + "A".repeat(ASSET_CHUNK_CHARS + 500); // 跨 2 塊
+    const data = "data:image/gif;base64,R0lGODlhAQABAAAA" + "A".repeat(ASSET_CHUNK_CHARS + 500); // 合法 GIF 頭＋跨 2 塊
     const hash = contentHash(data);
     storeB.saveAssetBlobs([{ hash, data }]); // B 有 blob（emoji 寄件者）
     const cached: string[] = [];
@@ -89,7 +89,7 @@ describe("RelayChatBackend（真實後端 + 持久化）", () => {
     const storeB = new MemoryStorage();
     const a = new RelayChatBackend(storeA, (h) => net.connect("a", h), "Alice");
     const b = new RelayChatBackend(storeB, (h) => net.connect("b", h), "Bob");
-    const data = "data:image/gif;base64," + "A".repeat(ASSET_CHUNK_CHARS + 300);
+    const data = "data:image/gif;base64,R0lGODlhAQABAAAA" + "A".repeat(ASSET_CHUNK_CHARS + 300); // 合法 GIF 頭
     const hash = contentHash(data);
     storeA.saveAssetBlobs([{ hash, data }]); // A 有 blob（emoji 作者）
     const cached: string[] = [];
@@ -118,7 +118,7 @@ describe("RelayChatBackend（真實後端 + 持久化）", () => {
     storeD2.saveIdentity({ nsec, name: "我" });
     const d1 = new RelayChatBackend(storeD1, (h) => net.connect("d1", h), "我");
     const d2 = new RelayChatBackend(storeD2, (h) => net.connect("d2", h), "我");
-    const data = "data:image/gif;base64," + "A".repeat(ASSET_CHUNK_CHARS + 400); // 跨 2 塊
+    const data = "data:image/gif;base64,R0lGODlhAQABAAAA" + "A".repeat(ASSET_CHUNK_CHARS + 400); // 合法 GIF 頭＋跨 2 塊
     const hash = contentHash(data);
     storeD1.saveAssetBlobs([{ hash, data }]); // 裝置 1 有 blob；裝置 2 沒有
     const cached: string[] = [];
@@ -132,6 +132,29 @@ describe("RelayChatBackend（真實後端 + 持久化）", () => {
 
     d1.stop();
     d2.stop();
+  });
+
+  it("超大像素 GIF blob（ADR-0226）：收端重組後不入快取", () => {
+    const net = createInMemoryRelayNetwork();
+    const storeA = new MemoryStorage();
+    const storeB = new MemoryStorage();
+    const a = new RelayChatBackend(storeA, (h) => net.connect("a", h), "Alice");
+    const b = new RelayChatBackend(storeB, (h) => net.connect("b", h), "Bob");
+    const data = "data:image/gif;base64,R0lGODlh6APoAwAA"; // 1000x1000 GIF（超過 512）
+    const hash = contentHash(data);
+    storeA.saveAssetBlobs([{ hash, data }]);
+    const cached: string[] = [];
+    b.start({ ...noop, onAssetCached: (h) => cached.push(h) });
+    a.start(noop);
+    b.addContact(a.selfNpub);
+    a.addContact(b.selfNpub);
+
+    b.requestAsset(a.self.pubkey, hash);
+    expect(cached).toEqual([]); // 收端像素超限、丟棄
+    expect(storeB.loadAssetBlobs()).toEqual([]);
+
+    a.stop();
+    b.stop();
   });
 
   it("setSelfName（ADR-0144）：更新 self.name、落地本機、把新名廣播給聯絡人（ADR-0061）", () => {

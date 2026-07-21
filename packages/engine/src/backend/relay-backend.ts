@@ -72,9 +72,11 @@ import {
   splitFileChunks,
   wrapFileChunk,
   BLOB_CACHE_MAX,
+  BLOB_MAX_BYTES,
   cacheBlobs,
   parseAssetChunk,
   parseAssetRequest,
+  rasterWithinPixelBounds,
   reassembleAssetChunks,
   splitAssetChunks,
   splitAssetManifest,
@@ -2665,6 +2667,7 @@ export class RelayChatBackend implements ChatBackend {
     if (!req) return;
     const blob = this.storage.loadAssetBlobs().find((b) => b.hash === req.hash);
     if (!blob) return; // 沒有就不回（收端會退回占位/字面）
+    if (blob.data.length > BLOB_MAX_BYTES) return; // ADR-0226：超過傳輸能力，不做註定被丟棄的傳輸
     const parts = splitAssetChunks(blob.data);
     parts.forEach((data, seq) => {
       this.publishReliable(wrapAssetChunk({ hash: req.hash, seq, total: parts.length, data }, this.sk, sender));
@@ -2694,6 +2697,7 @@ export class RelayChatBackend implements ChatBackend {
     }));
     const data = reassembleAssetChunks(chunks); // 內含 contentHash 整合性驗證
     if (data === null) return; // 不齊/掉包
+    if (!rasterWithinPixelBounds(data)) return; // ADR-0226：超大像素 GIF 不入快取
     this.assetRequested.delete(chunk.hash);
     this.expectedBlobs.delete(chunk.hash);
     const next = cacheBlobs(this.storage.loadAssetBlobs(), [{ hash: chunk.hash, data }], BLOB_CACHE_MAX);
@@ -2725,6 +2729,7 @@ export class RelayChatBackend implements ChatBackend {
       if (sent?.has(ref)) continue;
       const blob = blobs.find((b) => b.hash === ref);
       if (!blob) continue;
+      if (blob.data.length > BLOB_MAX_BYTES) continue; // ADR-0226：超過傳輸能力，不送（維持占位）
       const parts = splitAssetChunks(blob.data);
       parts.forEach((data, seq) => {
         this.publishReliable(wrapAssetChunk({ hash: ref, seq, total: parts.length, data }, this.sk, to));
