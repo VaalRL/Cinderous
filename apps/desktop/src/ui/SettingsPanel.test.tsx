@@ -79,6 +79,14 @@ describe("SettingsPanel 分頁（ADR-0142）", () => {
     expect(out).toMatch(/aria-selected="true"[^>]*data-testid="settings-tab-appearance"/);
   });
 
+  it("關於分頁：顯示版號與本版更新記錄（ADR-0227 P4）", () => {
+    expect(render()).toContain('data-testid="settings-tab-about"'); // 分頁恆在
+    const out = render({ initialTab: "about" });
+    expect(out).toContain('data-testid="about"');
+    expect(out).toContain(__APP_VERSION__); // build-time 注入的版號
+    expect(out).toContain("本版更新內容"); // zh-Hant（provider 固定語系）
+  });
+
   it("身分分頁只在有內容時出現（selfNsec/security/配對）；進階同理（retention/export/ollama）", () => {
     expect(render()).not.toContain('data-testid="settings-tab-identity"');
     expect(render({ selfNsec: "nsec1x" })).toContain('data-testid="settings-tab-identity"');

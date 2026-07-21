@@ -3,6 +3,8 @@ import { useEffect, useState, type PointerEvent as ReactPointerEvent } from "rea
 import { ACCENT_PRESETS, useAccent } from "../accent.js";
 import { useLayout } from "../layout.js";
 import { useI18n } from "../i18n.js";
+import { APP_VERSION } from "../version.js";
+import { releaseFor } from "../releases.js";
 import { useDialog } from "./Dialog.js";
 import { CHIME_PRESETS, DEFAULT_CHIME_ID, playChime } from "./ringtone.js";
 import type { SlotItem } from "./slot-queue.js";
@@ -817,7 +819,29 @@ function SecuritySettings({ value }: { value: NonNullable<SettingsPanelProps["se
 
 /** 設定面板：主題色、中繼站、身分備份（私鑰）、桌面通知。 */
 /** 設定分頁（ADR-0142）：把長設定頁切成分頁，減少捲動。 */
-type SettingsTab = "appearance" | "identity" | "relay" | "privacy" | "advanced";
+/** 關於／版本區（ADR-0227 P4）：版號（build-time 注入）＋依語系顯示本版更新記錄。 */
+function AboutSettings(): JSX.Element {
+  const { t, locale } = useI18n();
+  const rel = releaseFor(APP_VERSION);
+  const notes = rel ? (locale === "en" ? rel.en : rel.zh) : [];
+  return (
+    <section className="settings__sec" data-testid="about">
+      <h4>{t("settingsTab_about")}</h4>
+      <p className="settings__hint">
+        <strong>{t("settings_aboutVersion")}</strong> {APP_VERSION}
+        {rel ? ` · ${rel.date}` : ""}
+      </p>
+      <p className="settings__hint">{t("settings_aboutWhatsNew")}</p>
+      <ul className="settings__notes">
+        {notes.map((n) => (
+          <li key={n}>{n}</li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+type SettingsTab = "appearance" | "identity" | "relay" | "privacy" | "advanced" | "about";
 
 export function SettingsPanel(props: SettingsPanelProps): JSX.Element {
   const { t } = useI18n();
@@ -848,6 +872,7 @@ export function SettingsPanel(props: SettingsPanelProps): JSX.Element {
     { key: "relay", label: t("settingsTab_relay") },
     { key: "privacy", label: t("settingsTab_privacy") },
     ...(hasAdvanced ? [{ key: "advanced" as const, label: t("settingsTab_advanced") }] : []),
+    { key: "about", label: t("settingsTab_about") },
   ];
 
   return (
@@ -888,6 +913,7 @@ export function SettingsPanel(props: SettingsPanelProps): JSX.Element {
               {props.showTitlebarSettings ? <TitlebarSettings /> : null}
             </>
           ) : null}
+          {tab === "about" ? <AboutSettings /> : null}
           {tab === "relay" ? (
           <section className="settings__sec">
             <h4>{t("settings_relayUrl")}</h4>

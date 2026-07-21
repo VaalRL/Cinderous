@@ -1,6 +1,6 @@
 # 0227. 統一版號、runtime 版號顯示與雙語 release note
 
-- 狀態：提議中
+- 狀態：已接受
 - 日期：2026-07-21
 - 相關文件：ADR-0071（雲端快照）、i18n（`packages/i18n`，`Locale: "zh-Hant" | "en"`）、既有雙語檔名慣例（`X.md` / `X.en.md`）
 
@@ -63,3 +63,11 @@
   3. **P3**：`docs/releases.json` ＋ `release-notes.mjs`（生成 gh 雙語 body）＋回填 v0.0.12/0.0.13 條目。
   4. **P4**：desktop 設定「關於／版本」區 UI ＋ i18n 鍵（zh/en）。
   - 落地後同步 `ARCHITECTURE.md`／發版文件，轉「已接受」。
+
+## 實作註記（2026-07-21，已落地）
+
+- **P1（commit 83ec161）**：root `package.json` version＝SSOT（設 `0.0.13`）；`scripts/version-sync.mjs`（`pnpm run version:sync`）精準字串替換同步 desktop（package.json/tauri.conf.json/Cargo.toml/**Cargo.lock**）＋mobile/cli/website；CI 加 `pnpm version:check` 防漂移。四端一次對齊（cli/mobile 原 0.0.11、website 原 0.0.0）。
+- **P2（commit 6b4e0b9）**：desktop/mobile/website vite `define __APP_VERSION__`（讀 root package.json）；cli 改 esbuild API `build.mjs`＋define。desktop `src/version.ts`（`APP_VERSION`）＋`globals.d.ts` 型別＋`version.test`。
+- **P3（commit eba4e70）**：`docs/releases.json`（雙語 `{version,date,zh[],en[]}`，回填 v0.0.13/v0.0.12）；`scripts/release-notes.mjs` 生成 GitHub release 雙語 body（`release:notes`／`release:check`）。
+- **P4（本次）**：desktop vite `define __RELEASES__`（讀 docs/releases.json）；`src/releases.ts`（`RELEASES`/`releaseFor`）；SettingsPanel 新增「關於」分頁（顯示 `APP_VERSION`＋依 `locale` 顯示本版 note）；i18n 新增 `settingsTab_about`／`settings_aboutVersion`／`settings_aboutWhatsNew`（zh/en）。＋releases/about UI 測試。
+- 測試：i18n 8／desktop 484 綠，九處 typecheck 綠、四端 build 綠。**仍未發版**（v0.0.13 hold；對外已發布仍 v0.0.12）。發版時：改 root version → `pnpm run version:sync` → 補 releases.json 該版條目/日期 → build → `node scripts/release-notes.mjs vX.Y.Z > notes.md` → `gh release create --notes-file notes.md`。

@@ -504,6 +504,10 @@ export interface Messages {
   settingsTab_relay: string;
   settingsTab_privacy: string;
   settingsTab_advanced: string;
+  /** 關於／版本分頁（ADR-0227）。 */
+  settingsTab_about: string;
+  settings_aboutVersion: string;
+  settings_aboutWhatsNew: string;
   /** 統一自訂對話框（ADR-0139）。 */
   dialog_titleConfirm: string;
   dialog_titleAlert: string;
@@ -1161,6 +1165,9 @@ const zhHant: Messages = {
   settingsTab_relay: "連線與備份",
   settingsTab_privacy: "隱私與通知",
   settingsTab_advanced: "進階",
+  settingsTab_about: "關於",
+  settings_aboutVersion: "版本",
+  settings_aboutWhatsNew: "本版更新內容",
   dialog_titleConfirm: "確認",
   dialog_titleAlert: "提示",
   dialog_titlePrompt: "輸入",
@@ -1808,6 +1815,9 @@ const en: Messages = {
   settingsTab_relay: "Connection & Backup",
   settingsTab_privacy: "Privacy & Notifications",
   settingsTab_advanced: "Advanced",
+  settingsTab_about: "About",
+  settings_aboutVersion: "Version",
+  settings_aboutWhatsNew: "What's new",
   dialog_titleConfirm: "Confirm",
   dialog_titleAlert: "Notice",
   dialog_titlePrompt: "Enter",

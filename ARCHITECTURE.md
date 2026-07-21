@@ -158,6 +158,7 @@
 - ~~中繼站採自建 Worker relay 還是相容既有 Nostr relay？~~（已定案 ADR-0005：**自建 Worker relay**，且客戶端與任何標準 Nostr relay 互通，ADR-0034。）
 - ~~`packages/core` 的加密原語選型與跨平台一致性？~~（已定案：core 用 `@noble/*`（TS）、Rust 用 `aes-gcm`/`argon2`/`sha2`（純 Rust、免 OpenSSL）；SSOT 在 `packages/core`。）
 - ~~monorepo 工具與行動端共用程度？~~（已定案：**pnpm workspace**；行動端共用 core/engine/i18n/theme，ADR-0086。）
+- ~~各平台版號分歧、runtime 無版號、無 release note？~~（已定案 ADR-0227：**版號 SSOT＝root `package.json`**，`pnpm run version:sync` 同步四端 app＋desktop 三處，CI `version:check` 防漂移；runtime 經 vite `define __APP_VERSION__`；release note 單一雙語來源 `docs/releases.json`——app 依 locale 顯示、`release-notes.mjs` 生成 GitHub release 雙語 body。）
 - ~~Ephemeral 心跳的容量估算與批次/合併？~~（已由 ADR-0109 定案並實作：**自適應心跳 60/300s ＋ 合併 REQ ＋ 增量收件箱**，取代 ADR-0006 的 30s。）
 - **（仍開放）** 是否導入棘輪（Double Ratchet）以取得前向保密／後妥協安全，或維持 Nostr 靜態金鑰模型？
 - 多設備同步的衝突解法：訊息以 rumor.id 去重、已讀水位 LWW（ADR-0108）已定；其餘可變狀態的 CRDT 化仍可評估。
