@@ -178,7 +178,7 @@ export interface UrlRisk {
   reasons: UrlRiskReason[];
 }
 
-const DANGER: ReadonlySet<UrlRiskReason> = new Set(["text-mismatch", "userinfo", "punycode", "ip-host"]);
+const DANGER: ReadonlySet<UrlRiskReason> = new Set(["text-mismatch", "userinfo", "punycode", "ip-host", "known-malicious"]);
 
 /** 已知短網址服務（無法預覽目的地 → 提示級）。 */
 const SHORTENERS = new Set([

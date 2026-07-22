@@ -150,3 +150,22 @@ describe("高風險評估 assessUrl（ADR-0038）", () => {
     expect(r.reasons).toEqual(expect.arrayContaining(["text-mismatch", "ip-host", "odd-port", "http"]));
   });
 });
+
+describe("assessUrl known-malicious（ADR-0231）", () => {
+  const match = (host: string): { id: string; name: string }[] =>
+    host === "evil.com" || host.endsWith(".evil.com") ? [{ id: "urlhaus", name: "URLhaus" }] : [];
+  it("命中威脅情報 → danger＋known-malicious＋sources", () => {
+    const r = assessUrl("https://evil.com/x", undefined, match);
+    expect(r.level).toBe("danger");
+    expect(r.reasons).toContain("known-malicious");
+    expect(r.sources?.[0]?.id).toBe("urlhaus");
+  });
+  it("未命中 → 無 known-malicious", () => {
+    const r = assessUrl("https://safe.com", undefined, match);
+    expect(r.reasons).not.toContain("known-malicious");
+    expect(r.sources).toBeUndefined();
+  });
+  it("未提供 matcher → 不比對（向後相容）", () => {
+    expect(assessUrl("https://evil.com").reasons).not.toContain("known-malicious");
+  });
+});
