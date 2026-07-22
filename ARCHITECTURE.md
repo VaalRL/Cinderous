@@ -56,7 +56,7 @@
 | 桌面前端 | `apps/desktop/src/` | React/TS UI：好友列表、對話視窗、狀態列、Nudge 動畫。消費 `@cinderous/engine`；平台基質（Tauri 金鑰庫/加密儲存）經 `AppStorage`/keyvault 介面注入。**同一份 `vite build` 亦為瀏覽器版**：`isTauri()=false` 走 web 路徑（金鑰以 Argon2id 本地密碼包裹存 localStorage，ADR-0112/0122），可自架於獨立子網域（ADR-0147，見 `docs/self-hosting-web-app.md`）。 |
 | 桌面原生橋 | `apps/desktop/src-tauri/` | Rust：**為引擎提供原生能力**（非重造通訊，ADR-0105）——`encstore`（AES-256-GCM 加密 blob）、`passlock`（Argon2id 本地密碼＋救援）、`keyvault`（OS 金鑰庫）、`partfile`（部位檔的原子寫入／檔名白名單／毀損隔離，ADR-0119）、IPC。中繼連線/Gift Wrap/WebRTC/狀態機**留在 `packages/engine`（TS）**；原本的 Rust 背景連線與 SQLite（ADR-0019/0020）已於 ADR-0105 退役。 |
 | 行動端 | `apps/mobile/` | react-native-web：接**真實中繼**（ADR-0086），重用 `@cinderous/core`/`@cinderous/i18n`/`@cinderous/engine`/`@cinderous/theme`。儲存走加密 localStorage＋OPFS 封存；「記住我」以 Argon2id 包裹 nsec（ADR-0117）。**不做推播（APNs/FCM）**（ADR-0116）。 |
-| 官方網站 | `apps/website/` | 純靜態站（Vite+React；ADR-0090）：開源/永久免費/隱私主張、下載、捐款導流、**簽章式資金透明度**（`funds.json` 前端 `verifyFunds` 對釘死透明度公鑰驗簽＋算 runway，fail-closed）。**與通訊平面硬隔離、零追蹤、無常駐後台**；重用 `@cinderous/core`（驗簽）/`@cinderous/theme`/`@cinderous/i18n`。另發佈 app 查詢用靜態資料檔：`releases.json`（更新偵測，ADR-0228）與 `threat-intel.json`（威脅情報 snapshot，ADR-0231，CI 每日重建）。 |
+| 官方網站 | `apps/website/` | 純靜態站（Vite+React；ADR-0090）：開源/永久免費/隱私主張、下載、捐款導流、**簽章式資金透明度**（`funds.json` 前端 `verifyFunds` 對釘死透明度公鑰驗簽＋算 runway，fail-closed）。**與通訊平面硬隔離、零追蹤、無常駐後台**；重用 `@cinderous/core`（驗簽）/`@cinderous/theme`/`@cinderous/i18n`。**每頁真實 URL ＋建置時預渲染**（ADR-0235）：`routes.ts` 定義 (頁面 × 語言) 路由（預設語言走根路徑、英文走 `/en/`），`entry-server.tsx`＋`scripts/prerender.mjs` 於 `vite build` 後把每條路由渲染成實體目錄下的 `index.html`，客戶端 `hydrateRoot` 接手——不執行 JS 的答案引擎也看得到完整內容；`seo.ts` 產出每頁 canonical/hreflang/OG/JSON-LD 與 `robots.txt`/`sitemap.xml`。另發佈 app 查詢用靜態資料檔：`releases.json`（更新偵測，ADR-0228）與 `threat-intel.json`（威脅情報 snapshot，ADR-0231，CI 每日重建；ADR-0235 加絕不封鎖清單與變動量護欄）。 |
 | 中繼站 | `relay/` | Cloudflare Worker + **Durable Object 內建 SQLite**（ADR-0056）：Nostr relay，處理 Ephemeral 轉發與 NIP-40 過期留言；NIP-42 AUTH ＋具名訂閱 ACL（ADR-0057／0123）。`RelayCore` 傳輸無關，可自架於 Node/Deno/Bun/Docker。 |
 | 測試 | `tests/` | 跨層整合測試與共用 fixture。 |
 | 文件 | `docs/` | 設計決策與流程補充。 |
@@ -72,7 +72,9 @@
 
 ## 5. 事件契約（Nostr Kind 對照）
 
-> 內容一律 NIP-44 加密；私訊以 NIP-17（kind 14 → kind 13 seal → kind 1059 Gift Wrap）隱藏收發雙方。中繼站要求 **NIP-42 AUTH ＋ 具名訂閱**（帶 `#p`／`authors`，ADR-0057／0123）。持久化事件可要求 NIP-13 PoW（`minPow`，**生產目前未強制**）並設每 pubkey 速率/大小上限與訂閱數上限（ADR-0119）。
+> 內容一律 NIP-44 加密；私訊以 NIP-17（kind 14 → kind 13 seal → kind 1059 Gift Wrap）隱藏收發雙方。中繼站要求 **NIP-42 AUTH ＋ 具名訂閱**（帶 `#p`／`authors`，ADR-0057／0123）；AUTH 另驗 `relay` tag 指向本站與事件新鮮度（ADR-0235，擋中間人轉發挑戰）。持久化事件可要求 NIP-13 PoW（`minPow`，**生產仍未強制——客戶端無挖礦實作，啟用會讓現有安裝無法發訊息**）。
+>
+> **濫用防護（ADR-0235，產線已啟用）**：解析層驗事件結構（`tags` 必為字串陣列的陣列——畸形結構可通過驗簽卻讓中繼拋例外）；單則訊息 384KB、單顆事件 256KB、tag 128 個、`p` tag 16 個；每 pubkey 120 事件/分；每連線 16 個訂閱；查詢一律有 `LIMIT`（1024）且條件下推 SQL。**時鐘窗是非對稱的**——未來 15 分、過去 `TIMESTAMP_JITTER_SECONDS + 1h`，因為 NIP-59 刻意把外層 `created_at` 往前推最多 2 天（對稱窗會擋掉幾乎每一則 Gift Wrap）；重放去重只涵蓋近 1 小時（封裝事件由收件端以 `rumor.id` 去重，真正要擋的是裸心跳被重放偽造在線）。
 
 | 功能 | Kind | 持久化 | 機制 |
 | --- | --- | --- | --- |
