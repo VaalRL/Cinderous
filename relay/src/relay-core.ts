@@ -1,4 +1,4 @@
-import { AUTH_KIND, authChallengeOf, verifyEvent, type NostrEvent } from "@cinderous/core";
+import { AUTH_KIND, authChallengeOf, authRelayMatches, verifyEvent, type NostrEvent } from "@cinderous/core";
 import { matchFilter } from "./filters.js";
 
 /**
@@ -6,7 +6,42 @@ import { matchFilter } from "./filters.js";
  * 1024 遠大於任何真實聯絡人清單／組織名冊，也遠小於枚舉所需。
  */
 const MAX_AUTHORS = 1024;
-import { FILE_EVENT_MAX_BYTES, FILE_WRAP_KIND, isAddressableKind, isReplaceableOrAddressable, type OfflineStore } from "./message-store.js";
+
+/**
+ * 單則客戶端訊息的原始位元組上限（ADR-0235 C3）：**在 `JSON.parse` 之前**檢查，是最便宜的
+ * 一道閘。上界取自最大合法訊息——可尋址快照事件 256KB（{@link ADDRESSABLE_MAX_BYTES}）
+ * 加上 1024 個 author 的 REQ（約 70KB）都落在此值內。
+ */
+const MAX_MESSAGE_BYTES = 384 * 1024;
+
+/**
+ * 單顆事件序列化後的大小上限（ADR-0235 C3）。原本**只有** kind 1060 有大小檢查，其餘
+ * kind（含 gift wrap）完全無界。對齊可尋址事件上限 256KB——那是協定內最大的合法事件。
+ */
+const MAX_EVENT_BYTES = 262_144;
+
+/**
+ * 單顆事件的 tag 總數上限（ADR-0235 C3）。外層事件的 tag 極少（`p`／`expiration`／`d`），
+ * 128 已是數十倍餘裕。
+ */
+const MAX_TAGS = 128;
+
+/**
+ * 單顆事件的 `p` tag（收件人）數上限（ADR-0235 C3）。
+ *
+ * 客戶端的**外層**事件一律只有 **1 個** `p`——群組是逐位成員各發一顆 Gift Wrap（ADR-0027），
+ * 多重提及的 `p` 在加密 rumor 內層、中繼根本看不到。16 留給未來，同時把
+ * 「一則事件 → 15,000 列 INSERT ＋ 15,000 輪 enforceCap」的放大倍率壓回個位數。
+ */
+const MAX_P_TAGS = 16;
+import {
+  FILE_EVENT_MAX_BYTES,
+  FILE_WRAP_KIND,
+  isAddressableKind,
+  isReplaceableOrAddressable,
+  recipientsOf,
+  type OfflineStore,
+} from "./message-store.js";
 import {
   parseClientMessage,
   type RelayFilter,
@@ -50,6 +85,8 @@ export interface ConnSnapshot {
   challenge?: string;
   /** 已認證的 pubkey（認證後）。 */
   pubkey?: string;
+  /** 本站主機（NIP-42 `relay` tag 比對用，ADR-0235 H2）；DO 休眠後需還原。 */
+  relayHost?: string;
   /** 此連線目前的訂閱（subId + filters）。 */
   subs: { subId: string; filters: RelayFilter[] }[];
 }
@@ -67,11 +104,38 @@ export interface RelayCoreOptions {
   /** 持久化事件所需的最小 NIP-13 PoW 難度（0 = 不要求）。 */
   minPowDifficulty?: number;
   /**
-   * 允許的時鐘偏移（秒）。設定後：拒收 `created_at` 偏離本機時鐘超過此值的
-   * 事件，並在此時間窗內以 event id 去重（防重放偽造上線/重送舊 SDP）。
-   * 未設定時不啟用（維持原行為）。
+   * 允許的時鐘偏移（秒），**對稱**窗。
+   *
+   * @deprecated 對稱窗與 NIP-59 不相容（ADR-0235 H1）——外層 `created_at` 會被隨機往前推
+   * 最多 `TIMESTAMP_JITTER_SECONDS`（2 天），對稱設一個小值會把幾乎每一則 Gift Wrap 擋掉。
+   * 請改用 {@link maxFutureSkewSec} ／ {@link maxPastSkewSec}。設此值等同兩者都設為它。
    */
   maxClockSkewSec?: number;
+  /**
+   * 未來方向的時鐘容忍（秒；ADR-0235 H1）。**沒有任何合法事件會是未來的**，
+   * 所以這個方向可以收得很緊，只留給客戶端時鐘誤差。
+   */
+  maxFutureSkewSec?: number;
+  /**
+   * 過去方向的時鐘容忍（秒；ADR-0235 H1）。**必須大於 `TIMESTAMP_JITTER_SECONDS`（2 天）**
+   * ——NIP-59 刻意把外層時戳往前推以免中繼從時序關聯出社交圖譜，那是隱私設計而非異常。
+   */
+  maxPastSkewSec?: number;
+  /**
+   * 重放去重窗（秒；ADR-0235 H1）：只有 `created_at` 落在「現在 ± 此值」內的事件才進去重快取。
+   *
+   * 為什麼不涵蓋整個過去窗：那是 2 天份的 event id，DO 記憶體撐不住。而且對封裝事件也沒必要
+   * ——收件端本來就以 `rumor.id` 去重（ARCHITECTURE §4）。真正需要擋的是**裸的即時信標**
+   * （kind 20000 心跳，用真實時戳），重放它就能偽造「某人在線」。
+   */
+  replayWindowSec?: number;
+  /**
+   * 每個 pubkey 每分鐘可發布的事件數上限（ADR-0235 H1）。
+   *
+   * 修正前**完全沒有**速率限制：任何人自產一把金鑰通過 AUTH，就能對單一全域房間的 DO
+   * 無限灌事件。以 pubkey（而非連線）計數——否則換條連線就繞過去了。
+   */
+  maxEventsPerMinute?: number;
   /**
    * 企業封閉模式（ADR-0044）：僅允許名單內 pubkey（hex）發布事件的 allowlist。
    * 未設＝開放中繼（現況）。設定後非名單成員的任何事件（含心跳）一律拒收，
@@ -96,6 +160,11 @@ export interface RelayCoreOptions {
   requireAuth?: boolean;
   /** 產生 AUTH 挑戰字串（測試可注入以求確定性）；預設 `crypto.randomUUID()`。 */
   authChallenge?: () => string;
+  /**
+   * AUTH 事件的最大年齡（秒；ADR-0235 H2）。限制側錄到的簽名可被使用的時間窗。
+   * 未設＝不檢查（維持原行為）。NIP-42 建議 10 分鐘。
+   */
+  authMaxAgeSec?: number;
 }
 
 interface SubEntry {
@@ -120,14 +189,16 @@ export class RelayCore {
   private readonly byKind = new Map<number, Set<SubEntry>>();
   /** 未限制 kind（可匹配任何 kind）的訂閱。 */
   private readonly anyKindSubs = new Set<SubEntry>();
-  /** 已處理事件 id → created_at（時鐘窗內去重，防重放）。 */
+  /** 已處理事件 id → created_at（重放窗內去重，防重放）。 */
   private readonly seenIds = new Map<string, number>();
+  /** pubkey → 該時間窗內的發布數與窗起點（ADR-0235 H1 速率限制）。 */
+  private readonly rate = new Map<string, { windowStart: number; count: number }>();
   /** 企業封閉模式的發布 allowlist（hex pubkey）；undefined＝開放（ADR-0044）。 */
   private readonly allowed: Set<string> | undefined;
   /** 企業政策的事件類型 allowlist（kind）；undefined＝不限制（ADR-0048）。 */
   private readonly allowedKinds: Set<number> | undefined;
-  /** connId → NIP-42 認證狀態（此連線的挑戰與已認證 pubkey）；ADR-0057。 */
-  private readonly authState = new Map<string, { challenge: string; pubkey?: string }>();
+  /** connId → NIP-42 認證狀態（挑戰、已認證 pubkey、本站主機）；ADR-0057／0235 H2。 */
+  private readonly authState = new Map<string, { challenge: string; pubkey?: string; relayHost?: string }>();
   /** 是否要求 NIP-42 AUTH（開放中繼；ADR-0057）。 */
   private readonly requireAuth: boolean;
 
@@ -149,15 +220,21 @@ export class RelayCore {
     return this.opts.now?.() ?? Math.floor(Date.now() / 1000);
   }
 
-  /** 建立連線；`requireAuth` 時回 NIP-42 AUTH 挑戰供宿主送出（否則空）。 */
-  connect(connId: string): Outbound[] {
+  /**
+   * 建立連線；`requireAuth` 時回 NIP-42 AUTH 挑戰供宿主送出（否則空）。
+   *
+   * `relayHost`＝**本次請求打到的主機**（宿主從 request 取得）。給了它，AUTH 就會驗證
+   * `relay` tag 指向本站（ADR-0235 H2）；不給則不強制（自架／測試維持原行為）。
+   * 由宿主提供而非設定檔：同一份 Worker 可能同時服務多個網域，寫死會誤擋。
+   */
+  connect(connId: string, relayHost?: string): Outbound[] {
     if (!this.subs.has(connId)) this.subs.set(connId, new Map());
     if (!this.requireAuth) return [];
     // 已有挑戰（含已認證）者只重發、不重置——避免重複呼叫把認證狀態洗掉。
     const existing = this.authState.get(connId);
     if (existing) return [{ to: connId, message: ["AUTH", existing.challenge] }];
     const challenge = this.newChallenge();
-    this.authState.set(connId, { challenge });
+    this.authState.set(connId, { challenge, ...(relayHost ? { relayHost } : {}) });
     return [{ to: connId, message: ["AUTH", challenge] }];
   }
 
@@ -180,6 +257,8 @@ export class RelayCore {
       connId,
       ...(auth?.challenge !== undefined ? { challenge: auth.challenge } : {}),
       ...(auth?.pubkey !== undefined ? { pubkey: auth.pubkey } : {}),
+      // 少了這一行，DO 休眠喚醒後 `relayHost` 就消失 → relay tag 檢查靜默失效（ADR-0235 H2）。
+      ...(auth?.relayHost !== undefined ? { relayHost: auth.relayHost } : {}),
       subs,
     };
   }
@@ -188,10 +267,11 @@ export class RelayCore {
   rehydrate(snapshot: ConnSnapshot): void {
     if (!this.subs.has(snapshot.connId)) this.subs.set(snapshot.connId, new Map());
     const conn = this.subs.get(snapshot.connId)!;
-    if (snapshot.challenge !== undefined || snapshot.pubkey !== undefined) {
+    if (snapshot.challenge !== undefined || snapshot.pubkey !== undefined || snapshot.relayHost !== undefined) {
       this.authState.set(snapshot.connId, {
         challenge: snapshot.challenge ?? "",
         ...(snapshot.pubkey !== undefined ? { pubkey: snapshot.pubkey } : {}),
+        ...(snapshot.relayHost !== undefined ? { relayHost: snapshot.relayHost } : {}),
       });
     }
     for (const { subId, filters } of snapshot.subs) {
@@ -201,7 +281,26 @@ export class RelayCore {
     }
   }
 
+  /**
+   * 客戶端訊息入口。**整段包在例外圍籬內**（ADR-0235 C1）：`RelayCore` 是傳輸無關核心，
+   * 宿主（Cloudflare DO / Node ws）各自 try/catch 只會漏掉其中一邊，且 DO 的未捕捉例外
+   * 會中止整個 Durable Object——那是**單一全域房間**，等於全站連線一起斷。圍籬放在唯一
+   * 入口，兩個宿主自動受保護。
+   */
   handle(connId: string, raw: string): Outbound[] {
+    try {
+      return this.dispatch(connId, raw);
+    } catch {
+      // 不回傳例外細節（不給探測訊號）；宿主連線維持存活。
+      return [{ to: connId, message: ["NOTICE", "error: 內部錯誤，請稍後再試"] }];
+    }
+  }
+
+  private dispatch(connId: string, raw: string): Outbound[] {
+    // 最便宜的一道閘（ADR-0235 C3）：在 JSON.parse 之前擋掉超大訊息。
+    if (raw.length > MAX_MESSAGE_BYTES) {
+      return [{ to: connId, message: ["NOTICE", "invalid: 訊息過大"] }];
+    }
     const msg = parseClientMessage(raw);
     switch (msg.type) {
       case "AUTH":
@@ -240,7 +339,15 @@ export class RelayCore {
     }
   }
 
-  /** 處理客戶端的 NIP-42 AUTH 回應：驗簽 + kind + 挑戰相符 → 標記此連線認證身分。 */
+  /**
+   * 處理客戶端的 NIP-42 AUTH 回應：驗簽 ＋ kind ＋ 挑戰相符 ＋ **`relay` tag 指向本站**
+   * ＋ 事件新鮮度 → 標記此連線認證身分。
+   *
+   * `relay` tag 那一項是 NIP-42 規範要求、而修正前**沒有做**的檢查（ADR-0235 H2）。
+   * 少了它，惡意中繼 M 可以：連上真中繼 R 取得挑戰 C → 把 C 當成自己的挑戰丟給受害者 →
+   * 受害者簽名回給 M → M 轉送給 R → **以受害者身分通過 R 的認證**，進而訂閱其加密收件匣。
+   * 內容仍是密文，但「誰在何時收到幾則」已是完整的流量分析輸入。
+   */
   private handleAuth(connId: string, event: NostrEvent): Outbound[] {
     const state = this.authState.get(connId);
     if (!state) {
@@ -248,6 +355,13 @@ export class RelayCore {
     }
     if (event.kind !== AUTH_KIND || !verifyEvent(event) || authChallengeOf(event) !== state.challenge) {
       return [{ to: connId, message: ["OK", event.id, false, "auth-failed: 認證事件無效或挑戰不符"] }];
+    }
+    if (state.relayHost !== undefined && !authRelayMatches(event, state.relayHost)) {
+      return [{ to: connId, message: ["OK", event.id, false, "auth-failed: relay tag 未指向本站"] }];
+    }
+    const maxAge = this.opts.authMaxAgeSec;
+    if (maxAge !== undefined && Math.abs(this.now() - event.created_at) > maxAge) {
+      return [{ to: connId, message: ["OK", event.id, false, "auth-failed: 認證事件已過期"] }];
     }
     state.pubkey = event.pubkey;
     return [{ to: connId, message: ["OK", event.id, true, ""] }];
@@ -348,6 +462,18 @@ export class RelayCore {
   }
 
   private handleEvent(connId: string, event: NostrEvent): Outbound[] {
+    // 資源上限（ADR-0235 C3）擺在**驗簽之前**——這些檢查比 Schnorr 驗證便宜一個數量級，
+    // 讓灌大量垃圾的攻擊者付不出放大效果。
+    if (event.tags.length > MAX_TAGS) {
+      return [{ to: connId, message: ["OK", event.id, false, "blocked: tag 數超過上限"] }];
+    }
+    if (recipientsOf(event).length > MAX_P_TAGS) {
+      return [{ to: connId, message: ["OK", event.id, false, "blocked: 收件人數超過上限"] }];
+    }
+    if (JSON.stringify(event).length > MAX_EVENT_BYTES) {
+      return [{ to: connId, message: ["OK", event.id, false, "blocked: 事件過大"] }];
+    }
+
     if (!verifyEvent(event)) {
       return [{ to: connId, message: ["OK", event.id, false, "invalid: 簽章驗證失敗"] }];
     }
@@ -362,18 +488,32 @@ export class RelayCore {
       return [{ to: connId, message: ["OK", event.id, false, "blocked: 此事件類型已被政策停用"] }];
     }
 
-    // C2：時鐘偏移與重放防護（啟用時）。
-    const skew = this.opts.maxClockSkewSec;
-    if (skew !== undefined) {
-      const now = this.now();
-      if (Math.abs(event.created_at - now) > skew) {
-        return [{ to: connId, message: ["OK", event.id, false, "invalid: 時間戳超出允許範圍"] }];
-      }
+    // 時鐘窗（非對稱，ADR-0235 H1）＋重放去重（近期事件才進快取）。
+    const now = this.now();
+    const future = this.opts.maxFutureSkewSec ?? this.opts.maxClockSkewSec;
+    const past = this.opts.maxPastSkewSec ?? this.opts.maxClockSkewSec;
+    if (
+      (future !== undefined && event.created_at - now > future) ||
+      (past !== undefined && now - event.created_at > past)
+    ) {
+      return [{ to: connId, message: ["OK", event.id, false, "invalid: 時間戳超出允許範圍"] }];
+    }
+    // 舊的 `maxClockSkewSec` 同時兼具「時鐘窗」與「去重窗」兩種語意——沿用它作為
+    // `replayWindowSec` 的預設值，既有呼叫端行為不變。
+    const replayWindow = this.opts.replayWindowSec ?? this.opts.maxClockSkewSec;
+    if (replayWindow !== undefined && Math.abs(event.created_at - now) <= replayWindow) {
       if (this.seenIds.has(event.id)) {
         return [{ to: connId, message: ["OK", event.id, false, "duplicate: 事件重複"] }];
       }
       this.seenIds.set(event.id, event.created_at);
-      if (this.seenIds.size > 1024) this.pruneSeen(now - skew);
+      if (this.seenIds.size > 4096) this.pruneSeen(now - replayWindow);
+    }
+
+    // 速率限制（ADR-0235 H1）：以 pubkey 計，換連線繞不過。放在驗簽之後——pubkey 必須
+    // 是**經證明**的，否則任何人都能冒用別人的 pubkey 把對方的配額燒光。
+    const perMinute = this.opts.maxEventsPerMinute;
+    if (perMinute !== undefined && !this.allowRate(event.pubkey, now, perMinute)) {
+      return [{ to: connId, message: ["OK", event.id, false, "rate-limited: 發送過於頻繁，請稍後再試"] }];
     }
 
     // 檔案塊（FILE_WRAP=1060，ADR-0162）：企業限定——`acceptFileEvents` 未啟用整類拒收
@@ -432,11 +572,33 @@ export class RelayCore {
     if (entry.anyKind) this.anyKindSubs.add(entry);
   }
 
-  /** 移除時鐘窗外、不再可能重放的已見 id，避免無限成長。 */
+  /** 移除重放窗外、不再可能重放的已見 id，避免無限成長。 */
   private pruneSeen(cutoffSec: number): void {
     for (const [id, createdAt] of this.seenIds) {
       if (createdAt < cutoffSec) this.seenIds.delete(id);
     }
+  }
+
+  /**
+   * 固定時間窗計數（ADR-0235 H1）：同一 pubkey 在 60 秒窗內超過上限即拒。
+   *
+   * 刻意用固定窗而非令牌桶：DO 會在訊息之間休眠，記憶體狀態隨時可能消失——複雜的
+   * 累積式演算法在這種環境下只是假象。固定窗即使被休眠重置，也仍然把「單次爆量」
+   * 壓在上限以內，而那正是要防的東西。
+   */
+  private allowRate(pubkey: string, nowSec: number, perMinute: number): boolean {
+    const entry = this.rate.get(pubkey);
+    if (!entry || nowSec - entry.windowStart >= 60) {
+      this.rate.set(pubkey, { windowStart: nowSec, count: 1 });
+      // 順帶清掉早已過窗的條目，避免 map 隨著陌生 pubkey 無限成長。
+      if (this.rate.size > 4096) {
+        for (const [pk, e] of this.rate) if (nowSec - e.windowStart >= 60) this.rate.delete(pk);
+      }
+      return true;
+    }
+    if (entry.count >= perMinute) return false;
+    entry.count += 1;
+    return true;
   }
 
   private unindex(entry: SubEntry): void {

@@ -28,6 +28,19 @@ export interface MessageStoreOptions {
 /** 預設留言壽命上限：7 天（對齊 client 端 gift wrap 的預設 TTL）。 */
 export const DEFAULT_MAX_TTL_SECONDS = 7 * 86_400;
 
+/**
+ * 單次查詢的回傳筆數硬上限（ADR-0235 C2）。客戶端每收件人最多 500 則
+ * （`MAX_PER_RECIPIENT`），1024 已是兩倍餘裕。**這是把「一次 REQ 撈爆 DO 記憶體」
+ * 變成不可能的那一行**——`OfflineStore` 的兩個實作都必須遵守。
+ */
+export const MAX_QUERY_ROWS = 1024;
+
+/** 有效筆數上限：尊重 `filter.limit`（NIP-01），但一律夾在 {@link MAX_QUERY_ROWS} 之內。 */
+export function queryLimit(requested?: number): number {
+  if (typeof requested !== "number" || !Number.isFinite(requested) || requested <= 0) return MAX_QUERY_ROWS;
+  return Math.min(Math.floor(requested), MAX_QUERY_ROWS);
+}
+
 /** 檔案塊外層 kind（ADR-0162）；**必須鏡射 core `KIND.FILE_WRAP`**（relay 不依賴 core runtime）。 */
 export const FILE_WRAP_KIND = 1060;
 /** 檔案塊每收件人預設配額（≈500MB 密文；企業站自己的儲存自己決策）。 */
@@ -199,10 +212,19 @@ export class MessageStore implements OfflineStore {
     return true;
   }
 
-  /** 查詢符合 filter 且未過期的留言。 */
+  /**
+   * 查詢符合 filter 且未過期的留言。
+   *
+   * 回傳筆數與 SQL 版一樣有界（ADR-0235 C2）——兩個實作共用同一份 `OfflineStore` 契約，
+   * 行為分歧會讓「用記憶體版寫的測試」保證不了產線的 SQL 版。
+   */
   query(filter: RelayFilter, nowSec: number): NostrEvent[] {
     const candidates = this.candidatesFor(filter);
-    return candidates.filter((e) => !this.isExpired(e, nowSec) && matchFilter(filter, e));
+    const hit = candidates.filter((e) => !this.isExpired(e, nowSec) && matchFilter(filter, e));
+    const limit = queryLimit(filter.limit);
+    if (hit.length <= limit) return hit;
+    // 超量時取**最新**的（與 SQL 版的 `ORDER BY created_at DESC LIMIT ?` 一致）。
+    return [...hit].sort((a, b) => b.created_at - a.created_at).slice(0, limit);
   }
 
   /** 清除所有已過期留言。 */

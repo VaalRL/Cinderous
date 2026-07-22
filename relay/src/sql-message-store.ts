@@ -11,8 +11,10 @@ import {
   dTagOf,
   effectiveExpiration,
   getExpiration,
+  MAX_QUERY_ROWS,
   type MessageStoreOptions,
   type OfflineStore,
+  queryLimit,
   recipientsOf,
   shouldReplace,
 } from "./message-store.js";
@@ -23,6 +25,16 @@ import type { RelayFilter } from "./protocol.js";
  * （同步）；測試以 `node:sqlite` 包出真 SQLite。回傳每列為欄名→值的物件陣列。
  */
 export type SqlExec = (query: string, ...bindings: (string | number | null)[]) => Record<string, unknown>[];
+
+/** 把值陣列轉成 `IN (?,?,…)` 佔位字串。 */
+const placeholders = (values: readonly unknown[]): string => values.map(() => "?").join(",");
+
+/** 附加一條 WHERE 子句與其繫結值。 */
+const push2 = (where: string[], bind: (string | number)[], clause: string, values: readonly (string | number)[]): void => {
+  where.push(clause);
+  bind.push(...values);
+};
+
 
 /**
  * 離線留言持久層的 SQL 版（ADR-0056）：以 DO 內建 SQLite 落地，行為對齊記憶體版
@@ -66,6 +78,24 @@ export class SqlMessageStore implements OfflineStore {
       `UPDATE offline_msgs SET expiration = created_at + ? WHERE expiration IS NULL`,
       opts.maxTtlSeconds ?? DEFAULT_MAX_TTL_SECONDS,
     );
+    // ADR-0235 C2 遷移：新增 `pubkey`／`kind` 欄與索引，讓 authors/kinds 過濾能下推到 SQL。
+    // 舊 DB 沒有這兩欄；`ADD COLUMN` 已存在時會拋，吞掉即可（等冪）。回填由 json 抽出。
+    for (const ddl of [
+      `ALTER TABLE offline_msgs ADD COLUMN pubkey TEXT`,
+      `ALTER TABLE offline_msgs ADD COLUMN kind INTEGER`,
+    ]) {
+      try {
+        this.sql(ddl);
+      } catch {
+        /* 欄位已存在 */
+      }
+    }
+    this.sql(
+      `UPDATE offline_msgs SET pubkey = json_extract(json, '$.pubkey'), kind = json_extract(json, '$.kind')
+       WHERE pubkey IS NULL OR kind IS NULL`,
+    );
+    this.sql(`CREATE INDEX IF NOT EXISTS idx_offline_pubkey ON offline_msgs(pubkey)`);
+    this.sql(`CREATE INDEX IF NOT EXISTS idx_offline_kind ON offline_msgs(kind)`);
   }
 
   put(event: NostrEvent, nowSec: number): boolean {
@@ -78,12 +108,15 @@ export class SqlMessageStore implements OfflineStore {
     const json = JSON.stringify(event);
     for (const recipient of targets) {
       this.sql(
-        `INSERT OR IGNORE INTO offline_msgs (id, recipient, expiration, created_at, json) VALUES (?, ?, ?, ?, ?)`,
+        `INSERT OR IGNORE INTO offline_msgs (id, recipient, expiration, created_at, json, pubkey, kind)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
         event.id,
         recipient,
         effExp,
         event.created_at,
         json,
+        event.pubkey,
+        event.kind,
       );
     }
     if (this.opts.maxPerRecipient !== undefined) this.enforceCap(targets);
@@ -131,23 +164,77 @@ export class SqlMessageStore implements OfflineStore {
     return true;
   }
 
+  /**
+   * 查詢符合 filter 且未過期的留言。
+   *
+   * ## 為什麼過濾條件必須下推到 SQL（ADR-0235 C2）
+   *
+   * 修正前，沒有 `#p` 的 filter 會走
+   * `SELECT json FROM offline_msgs WHERE expiration > ?`——**整張表**（所有使用者的離線留言）
+   * 撈進記憶體、逐筆 `JSON.parse`，再於 JS 端 `matchFilter` 過濾。
+   *
+   * 而 `relay-core` 的 `scoped()` 明文允許「沒有 `#p`、但有 `authors`」的訂閱（ADR-0071 的
+   * 快照查詢正是這個形狀），連 `authors: []` 都放行——它匹配不到任何事件，卻會完整跑一次
+   * 全表掃描。也就是說 `{"authors":[]}` 是一個**零成本、零收穫、全代價**的 payload。
+   * Durable Object 記憶體上限 128MB，而這是**單一全域房間**：重複送幾次就 OOM，全站掉線。
+   *
+   * 現在 `#p`／`authors`／`ids`／`kinds`／`since`／`until` 全部進 WHERE（有索引），並一律帶
+   * `LIMIT`。`matchFilter` 仍是最終權威（`#e` 等標籤 filter 只能在 JS 判），但它現在跑在
+   * **有界且已縮小**的候選集上。
+   *
+   * 「訂閱必須具名」則**不**在這一層——那是 `relay-core.scoped()` 的職責（ADR-0123）。
+   * 儲存層若也擋，會讓「Ephemeral 不入庫」這類**否定斷言**變成恆真的空轉測試。
+   * 這裡只負責一件事：**任何查詢的代價都有界**。
+   */
   query(filter: RelayFilter, nowSec: number): NostrEvent[] {
     const pValues = filter["#p"];
-    let rows: Record<string, unknown>[];
-    if (pValues && pValues.length > 0) {
-      const placeholders = pValues.map(() => "?").join(",");
-      rows = this.sql(
-        `SELECT json FROM offline_msgs WHERE recipient IN (${placeholders}) AND (expiration IS NULL OR expiration > ?)`,
-        ...pValues,
-        nowSec,
-      );
-    } else {
-      rows = this.sql(`SELECT json FROM offline_msgs WHERE (expiration IS NULL OR expiration > ?)`, nowSec);
-      // 快照走 authors+kinds 查詢（無 `#p`）：可尋址列一併納入候選。
-      rows = rows.concat(this.sql(`SELECT json FROM addressable WHERE expiration > ?`, nowSec));
+    const { authors, ids, kinds } = filter;
+    // 空陣列＝匹配不到任何事件（`matchFilter` 語意）。提前回傳，連 DB 都不用打
+    // ——`{"authors":[]}` 正是最便宜的消防水管 payload。
+    if ((pValues && pValues.length === 0) || (authors && authors.length === 0) || (ids && ids.length === 0)) {
+      return [];
     }
+
+    const where: string[] = [];
+    const bind: (string | number)[] = [];
+    const push = (clause: string, values: readonly (string | number)[]): void => {
+      where.push(clause);
+      bind.push(...values);
+    };
+    if (pValues && pValues.length > 0) push(`recipient IN (${placeholders(pValues)})`, pValues);
+    if (authors && authors.length > 0) push(`pubkey IN (${placeholders(authors)})`, authors);
+    if (ids && ids.length > 0) push(`id IN (${placeholders(ids)})`, ids);
+    if (kinds && kinds.length > 0) push(`kind IN (${placeholders(kinds)})`, kinds);
+    if (filter.since !== undefined) push(`created_at >= ?`, [filter.since]);
+    if (filter.until !== undefined) push(`created_at <= ?`, [filter.until]);
+    where.push(`(expiration IS NULL OR expiration > ?)`);
+    bind.push(nowSec);
+
+    const limit = queryLimit(filter.limit);
+    let rows = this.sql(
+      `SELECT json FROM offline_msgs WHERE ${where.join(" AND ")} ORDER BY created_at DESC LIMIT ?`,
+      ...bind,
+      limit,
+    );
+
+    // 快照（可尋址）走 authors+kinds 查詢、不帶 `#p`——它是獨立的表，同樣把條件下推＋LIMIT。
+    if (!(pValues && pValues.length > 0)) {
+      const aWhere: string[] = [`expiration > ?`];
+      const aBind: (string | number)[] = [nowSec];
+      if (authors && authors.length > 0) push2(aWhere, aBind, `pubkey IN (${placeholders(authors)})`, authors);
+      if (ids && ids.length > 0) push2(aWhere, aBind, `id IN (${placeholders(ids)})`, ids);
+      if (kinds && kinds.length > 0) push2(aWhere, aBind, `kind IN (${placeholders(kinds)})`, kinds);
+      rows = rows.concat(
+        this.sql(
+          `SELECT json FROM addressable WHERE ${aWhere.join(" AND ")} ORDER BY created_at DESC LIMIT ?`,
+          ...aBind,
+          limit,
+        ),
+      );
+    }
+
     const events = dedupById(rows.map((r) => JSON.parse(r.json as string) as NostrEvent));
-    return events.filter((e) => matchFilter(filter, e));
+    return events.filter((e) => matchFilter(filter, e)).slice(0, limit);
   }
 
   prune(nowSec: number): void {

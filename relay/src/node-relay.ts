@@ -5,6 +5,7 @@
 import { createServer } from "node:http";
 import { createRequire } from "node:module";
 import type { DatabaseSync as DatabaseSyncType } from "node:sqlite";
+import { TIMESTAMP_JITTER_SECONDS } from "@cinderous/core";
 import { WebSocketServer, type WebSocket } from "ws";
 import { RelayCore, type Outbound } from "./relay-core.js";
 import { type SqlExec, SqlMessageStore } from "./sql-message-store.js";
@@ -36,9 +37,18 @@ const store = new SqlMessageStore(exec, {
   maxPerRecipient,
   ...(Number.isFinite(maxTtlDays) && maxTtlDays >= 1 ? { maxTtlSeconds: Math.floor(maxTtlDays) * 86_400 } : {}),
 });
+// 濫用防護（ADR-0235 H1）：與 Cloudflare 版同一組參數。過去窗必須大於 NIP-59 的 2 天
+// 抖動窗，否則會擋掉幾乎每一則 Gift Wrap。速率上限可用 MAX_EVENTS_PER_MINUTE 覆寫。
+const maxEventsPerMinute = Number(process.env.MAX_EVENTS_PER_MINUTE ?? 120);
 const core = new RelayCore({
   store,
   requireAuth,
+  maxSubscriptions: 16,
+  authMaxAgeSec: 600, // NIP-42 建議（ADR-0235 H2）
+  ...(Number.isFinite(maxEventsPerMinute) && maxEventsPerMinute >= 1 ? { maxEventsPerMinute } : {}),
+  maxFutureSkewSec: 15 * 60,
+  maxPastSkewSec: TIMESTAMP_JITTER_SECONDS + 60 * 60,
+  replayWindowSec: 60 * 60,
   ...(Number.isFinite(maxFileMb) && maxFileMb >= 1 ? { acceptFileEvents: true } : {}),
 });
 
@@ -55,10 +65,13 @@ const httpServer = createServer((_req, res) => {
   res.end("Cinderous relay");
 });
 const wss = new WebSocketServer({ server: httpServer });
-wss.on("connection", (ws) => {
+wss.on("connection", (ws, req) => {
   const id = `c${counter++}`;
   sockets.set(id, ws);
-  dispatch(core.connect(id)); // NIP-42 AUTH 挑戰（requireAuth 時；否則空）
+  // 本次連線打到的主機（ADR-0235 H2）：AUTH 的 `relay` tag 必須指向它。反向代理後方以
+  // `X-Forwarded-Host` 為準（否則會拿到內網的 `localhost:8787`，把所有客戶端擋在門外）。
+  const host = (req.headers["x-forwarded-host"] ?? req.headers.host) as string | undefined;
+  dispatch(core.connect(id, host?.split(",")[0]?.trim().toLowerCase())); // NIP-42 AUTH 挑戰
   ws.on("message", (data) => dispatch(core.handle(id, data.toString())));
   const cleanup = (): void => {
     core.disconnect(id);

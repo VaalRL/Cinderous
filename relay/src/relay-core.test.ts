@@ -4,6 +4,7 @@ import {
   finalizeEvent,
   generateSecretKey,
   getPublicKey,
+  TIMESTAMP_JITTER_SECONDS,
   type NostrEvent,
 } from "@cinderous/core";
 import { MessageStore } from "./message-store.js";
@@ -612,5 +613,278 @@ describe("檔案塊事件（FILE_WRAP=1060，ADR-0162）", () => {
     const huge = fileEvent("b".repeat(64), "z".repeat(210_000));
     const out2 = core.handle("c1", EVENT(huge));
     expect(out2).toContainEqual({ to: "c1", message: ["OK", huge.id, false, "blocked: 檔案塊過大"] });
+  });
+});
+
+// ADR-0235 C1：例外圍籬。解析層已擋掉畸形事件，但持久層／宿主仍可能拋（磁碟滿、SQLite 錯誤、
+// 未來新增的解析路徑）。`handle` 是傳輸無關核心的唯一入口，把圍籬放這裡就同時保護
+// Cloudflare Worker（DO 未捕捉例外＝全站斷線）與 Node 自架站。
+describe("RelayCore — 例外圍籬（ADR-0235 C1）", () => {
+  const throwingStore = {
+    put: () => {
+      throw new TypeError("boom");
+    },
+    putAddressable: () => {
+      throw new TypeError("boom");
+    },
+    query: () => {
+      throw new TypeError("boom");
+    },
+    prune: () => {},
+  };
+
+  it("持久層拋例外時回 NOTICE，不向宿主逸出", () => {
+    const core = new RelayCore({ store: throwingStore });
+    core.connect("c1");
+    const e = finalizeEvent(
+      { kind: 1059, created_at: 1700000000, tags: [["p", "ab"]], content: "x" },
+      generateSecretKey(),
+    );
+    let out: ReturnType<RelayCore["handle"]> = [];
+    expect(() => {
+      out = core.handle("c1", EVENT(e));
+    }).not.toThrow();
+    expect(out).toEqual([{ to: "c1", message: ["NOTICE", "error: 內部錯誤，請稍後再試"] }]);
+  });
+
+  it("查詢拋例外時同樣被攔下（REQ 路徑）", () => {
+    const core = new RelayCore({ store: throwingStore });
+    core.connect("c1");
+    expect(() => core.handle("c1", REQ("s1", { "#p": ["ab"] }))).not.toThrow();
+  });
+
+  it("畸形事件（tags 非陣列）在解析層即被擋，回 NOTICE invalid", () => {
+    const core = new RelayCore();
+    core.connect("c1");
+    const e = finalizeEvent({ kind: 20000, created_at: 1700000000, tags: [], content: "" }, generateSecretKey());
+    const out = core.handle("c1", JSON.stringify(["EVENT", { ...e, tags: {} }]));
+    expect(out).toEqual([{ to: "c1", message: ["NOTICE", "invalid: malformed event"] }]);
+  });
+});
+
+// ADR-0235 C3：寫入放大防護。`recipientsOf` 回傳**所有** `p` tag，`SqlMessageStore.put` 對每個
+// 收件人各 INSERT 一列、再各跑一次 `enforceCap`（SELECT + N 次 DELETE）。原本只有 kind 1060
+// 有大小上限，其餘 kind 完全無界——一則 1MB 事件可塞約 15,000 個 `p` tag，換算 15,000 次
+// INSERT ＋ 15,000 輪 SELECT/DELETE。客戶端外層事件一律只有 1 個 `p`（多重提及在加密 rumor
+// 內層，中繼看不到），故上限可訂得很緊。
+describe("RelayCore — 事件大小與 tag 上限（ADR-0235 C3）", () => {
+  const sk = generateSecretKey();
+  const ev = (tags: string[][], content = "x"): NostrEvent =>
+    finalizeEvent({ kind: 1059, created_at: 1700000000, tags, content }, sk);
+
+  it("p tag 數超過上限 → OK false、不入庫", () => {
+    const store = new MessageStore();
+    const core = new RelayCore({ store });
+    core.connect("c1");
+    const e = ev(Array.from({ length: 64 }, (_, i) => ["p", `${i}`.padStart(64, "0")]));
+    const out = core.handle("c1", EVENT(e));
+    expect(out).toContainEqual({ to: "c1", message: ["OK", e.id, false, "blocked: 收件人數超過上限"] });
+    expect(store.query({ kinds: [1059] }, 1700000001)).toEqual([]);
+  });
+
+  it("tag 總數超過上限 → OK false", () => {
+    const core = new RelayCore();
+    core.connect("c1");
+    const e = ev(Array.from({ length: 300 }, (_, i) => ["e", `${i}`]));
+    const out = core.handle("c1", EVENT(e));
+    expect(out).toContainEqual({ to: "c1", message: ["OK", e.id, false, "blocked: tag 數超過上限"] });
+  });
+
+  it("事件序列化超過全域大小上限 → OK false", () => {
+    const core = new RelayCore();
+    core.connect("c1");
+    const e = ev([["p", "ab"]], "z".repeat(300_000));
+    const out = core.handle("c1", EVENT(e));
+    expect(out).toContainEqual({ to: "c1", message: ["OK", e.id, false, "blocked: 事件過大"] });
+  });
+
+  it("原始訊息超過上限 → NOTICE，且不進 JSON.parse", () => {
+    const core = new RelayCore();
+    core.connect("c1");
+    const out = core.handle("c1", "x".repeat(500_000));
+    expect(out).toEqual([{ to: "c1", message: ["NOTICE", "invalid: 訊息過大"] }]);
+  });
+
+  it("正常事件（1 個 p tag）不受影響", () => {
+    const store = new MessageStore();
+    const core = new RelayCore({ store, now: () => 1_700_000_001 });
+    core.connect("c1");
+    const e = ev([["p", "ab"]]);
+    expect(core.handle("c1", EVENT(e))).toContainEqual({ to: "c1", message: ["OK", e.id, true, ""] });
+    expect(store.query({ "#p": ["ab"] }, 1700000001).map((x) => x.id)).toEqual([e.id]);
+  });
+});
+
+// ADR-0235 H1：速率限制與時鐘偏移。
+//
+// 產線 worker 建立 RelayCore 時只給了 `requireAuth` 與 `maxSubscriptions`：
+//   - 沒有任何 per-pubkey 事件速率限制（ARCHITECTURE §5 宣稱有，程式碼裡不存在）
+//   - `maxClockSkewSec` 未設 → `seenIds` 永遠是空的 → **零重放防護**
+//
+// 時鐘窗必須**非對稱**：NIP-59 把外層 `created_at` 隨機往前推最多 2 天（隱私設計，
+// `TIMESTAMP_JITTER_SECONDS`），對稱窗會把幾乎每一則 Gift Wrap 都擋掉。
+describe("RelayCore — 速率限制與時鐘窗（ADR-0235 H1）", () => {
+  const sk = generateSecretKey();
+  const at = (createdAt: number, kind = 20000): NostrEvent =>
+    finalizeEvent({ kind, created_at: createdAt, tags: [], content: "" }, sk);
+  const NOW = 1_700_000_000;
+
+  it("超過每分鐘事件上限 → OK false rate-limited", () => {
+    const core = new RelayCore({ now: () => NOW, maxEventsPerMinute: 3 });
+    core.connect("c1");
+    for (let i = 0; i < 3; i++) {
+      const e = at(NOW - i);
+      expect(core.handle("c1", EVENT(e))).toContainEqual({ to: "c1", message: ["OK", e.id, true, ""] });
+    }
+    const over = at(NOW - 99);
+    expect(core.handle("c1", EVENT(over))).toContainEqual({
+      to: "c1",
+      message: ["OK", over.id, false, "rate-limited: 發送過於頻繁，請稍後再試"],
+    });
+  });
+
+  it("配額按時間窗回補（不是永久封鎖）", () => {
+    let clock = NOW;
+    const core = new RelayCore({ now: () => clock, maxEventsPerMinute: 2 });
+    core.connect("c1");
+    core.handle("c1", EVENT(at(clock)));
+    core.handle("c1", EVENT(at(clock - 1)));
+    const blocked = at(clock - 2);
+    expect(core.handle("c1", EVENT(blocked))[0]?.message[3]).toContain("rate-limited");
+    clock += 61; // 窗過了
+    const after = at(clock);
+    expect(core.handle("c1", EVENT(after))).toContainEqual({ to: "c1", message: ["OK", after.id, true, ""] });
+  });
+
+  it("速率以 pubkey 計，不是以連線計——換條連線繞不過", () => {
+    const core = new RelayCore({ now: () => NOW, maxEventsPerMinute: 1 });
+    core.connect("c1");
+    core.connect("c2");
+    core.handle("c1", EVENT(at(NOW)));
+    const second = at(NOW - 1);
+    expect(core.handle("c2", EVENT(second))[0]?.message[3]).toContain("rate-limited");
+  });
+
+  it("未來時戳被拒（沒有合法事件會是未來的）", () => {
+    const core = new RelayCore({ now: () => NOW, maxFutureSkewSec: 900 });
+    core.connect("c1");
+    const future = at(NOW + 901);
+    expect(core.handle("c1", EVENT(future))).toContainEqual({
+      to: "c1",
+      message: ["OK", future.id, false, "invalid: 時間戳超出允許範圍"],
+    });
+    const ok = at(NOW + 60);
+    expect(core.handle("c1", EVENT(ok))).toContainEqual({ to: "c1", message: ["OK", ok.id, true, ""] });
+  });
+
+  it("🔴 NIP-59 抖動窗內的舊時戳必須放行——否則 Gift Wrap 全掛", () => {
+    const core = new RelayCore({ now: () => NOW, maxFutureSkewSec: 900, maxPastSkewSec: TIMESTAMP_JITTER_SECONDS + 3600 });
+    core.connect("c1");
+    // 外層時戳被往前推將近兩天：這是**正常且必要**的隱私設計。
+    const jittered = at(NOW - TIMESTAMP_JITTER_SECONDS + 10, 1059);
+    expect(core.handle("c1", EVENT(jittered))).toContainEqual({ to: "c1", message: ["OK", jittered.id, true, ""] });
+  });
+
+  it("遠超抖動窗的古老時戳仍被拒", () => {
+    const core = new RelayCore({ now: () => NOW, maxPastSkewSec: TIMESTAMP_JITTER_SECONDS + 3600 });
+    core.connect("c1");
+    const ancient = at(NOW - TIMESTAMP_JITTER_SECONDS - 7200, 1059);
+    expect(core.handle("c1", EVENT(ancient))[0]?.message[3]).toContain("時間戳超出允許範圍");
+  });
+
+  it("近期事件重放（同一 id 再送一次）被擋——偽造上線的主要手法", () => {
+    const core = new RelayCore({ now: () => NOW, maxFutureSkewSec: 900, replayWindowSec: 3600 });
+    core.connect("c1");
+    const beat = at(NOW);
+    expect(core.handle("c1", EVENT(beat))).toContainEqual({ to: "c1", message: ["OK", beat.id, true, ""] });
+    expect(core.handle("c1", EVENT(beat))).toContainEqual({
+      to: "c1",
+      message: ["OK", beat.id, false, "duplicate: 事件重複"],
+    });
+  });
+
+  it("抖動窗內的舊事件不進重放快取（否則 2 天份的 id 會撐爆記憶體）", () => {
+    const core = new RelayCore({
+      now: () => NOW,
+      maxPastSkewSec: TIMESTAMP_JITTER_SECONDS + 3600,
+      replayWindowSec: 3600,
+    });
+    core.connect("c1");
+    const old = at(NOW - 7200, 1059);
+    core.handle("c1", EVENT(old));
+    // 重送同一顆不被當成重複（收件端本來就以 rumor.id 去重）。
+    expect(core.handle("c1", EVENT(old))).toContainEqual({ to: "c1", message: ["OK", old.id, true, ""] });
+  });
+});
+
+// ADR-0235 H2：AUTH 的 relay tag 與新鮮度驗證。
+describe("RelayCore — NIP-42 relay tag 驗證（ADR-0235 H2）", () => {
+  const HOST = "relay.example.com";
+  const NOW = 1_700_000_000;
+  const sk = generateSecretKey();
+  const auth = (e: NostrEvent) => JSON.stringify(["AUTH", e]);
+  // 假時鐘：AUTH 事件的 created_at 必須對齊 `now`，否則會撞上新鮮度檢查。
+  const authEvent = (challenge: string, relayUrl: string, createdAt = NOW) =>
+    buildAuthEvent(challenge, relayUrl, sk, { created_at: createdAt });
+  const chal = (out: ReturnType<RelayCore["connect"]>): string => String(out[0]?.message[1]);
+
+  const newCore = () =>
+    new RelayCore({ requireAuth: true, now: () => NOW, authChallenge: () => "fixed-challenge", authMaxAgeSec: 600 });
+
+  it("relay tag 指向本站 → 認證成功", () => {
+    const core = newCore();
+    const c = chal(core.connect("c1", HOST));
+    const e = authEvent(c, `wss://${HOST}`);
+    expect(core.handle("c1", auth(e))).toEqual([{ to: "c1", message: ["OK", e.id, true, ""] }]);
+  });
+
+  it("🔴 relay tag 指向別站 → 拒絕（擋下中間人把挑戰轉發的攻擊）", () => {
+    const core = newCore();
+    const c = chal(core.connect("c1", HOST));
+    // 受害者以為自己在對 evil.example 認證。challenge 是對的（攻擊者從真中繼轉來的）。
+    const e = authEvent(c, "wss://evil.example");
+    const out = core.handle("c1", auth(e));
+    expect(out[0]?.message[2]).toBe(false);
+    expect(String(out[0]?.message[3])).toContain("auth-failed");
+  });
+
+  it("缺少 relay tag → 拒絕", () => {
+    const core = newCore();
+    const c = chal(core.connect("c1", HOST));
+    const base = authEvent(c, `wss://${HOST}`);
+    const stripped = finalizeEvent(
+      { kind: base.kind, created_at: base.created_at, tags: [["challenge", c]], content: "" },
+      sk,
+    );
+    expect(core.handle("c1", auth(stripped))[0]?.message[2]).toBe(false);
+  });
+
+  it("過期的 AUTH 事件 → 拒絕（限制側錄簽名的可用時間）", () => {
+    const core = newCore();
+    const c = chal(core.connect("c1", HOST));
+    const stale = finalizeEvent(
+      { kind: 22242, created_at: NOW - 601, tags: [["relay", `wss://${HOST}`], ["challenge", c]], content: "" },
+      sk,
+    );
+    expect(core.handle("c1", auth(stale))[0]?.message[2]).toBe(false);
+  });
+
+  it("未提供本站主機時不強制（自架/測試環境維持原行為）", () => {
+    const core = new RelayCore({ requireAuth: true, now: () => NOW, authChallenge: () => "fixed" });
+    const c = chal(core.connect("c1"));
+    const e = authEvent(c, "wss://whatever.example");
+    expect(core.handle("c1", auth(e))[0]?.message[2]).toBe(true);
+  });
+
+  it("本站主機隨連線快照存活（DO 休眠喚醒後仍會驗證）", () => {
+    const core = newCore();
+    core.connect("c1", HOST);
+    const snap = core.exportConn("c1");
+    expect(snap.relayHost).toBe(HOST);
+
+    const revived = newCore();
+    revived.rehydrate(snap);
+    const e = authEvent(String(snap.challenge), "wss://evil.example");
+    expect(revived.handle("c1", auth(e))[0]?.message[2]).toBe(false);
   });
 });

@@ -3,6 +3,7 @@ import type { DatabaseSync as DatabaseSyncType } from "node:sqlite";
 import type { NostrEvent } from "@cinderous/core";
 import { describe, expect, it } from "vitest";
 import type { RelayFilter } from "./protocol.js";
+import { MAX_QUERY_ROWS } from "./message-store.js";
 import { type SqlExec, SqlMessageStore } from "./sql-message-store.js";
 
 // node:sqlite 太新、vite 的內建模組表尚未收錄 → 靜態 import 會解析失敗（找 "sqlite"）。
@@ -173,5 +174,119 @@ describe("SQL 可尋址事件（NIP-33，ADR-0071 快照）", () => {
     expect(s.putAddressable(snap({ d: "dev2", createdAt: 3000, content: "x".repeat(300_000) }), 3000)).toBe(false);
     s.prune(1000 + MONTH + 1);
     expect(s.query(f({ kinds: [30078], authors: ["author"] }), 1000)).toHaveLength(1); // 只剩 2000 寫入的 dev1
+  });
+});
+
+// ADR-0235 C2：查詢條件下推 SQL。
+//
+// 修正前，`query()` 在沒有 `#p` 時執行 `SELECT json FROM offline_msgs WHERE expiration > ?`
+// ——**整張表**（所有使用者的離線留言）撈進記憶體、逐筆 JSON.parse，再於 JS 端 matchFilter。
+// 而 relay-core 的 `scoped()` 明文允許「沒有 `#p`、但有 authors」的訂閱（快照查詢就是這個
+// 形狀），連 `authors: []` 都放行。於是 `{"authors":[]}` 是零成本 payload：匹配不到任何事件，
+// 卻完整跑一次全表掃描。DO 記憶體上限 128MB，重複送幾次就 OOM——而這是單一全域房間。
+describe("SqlMessageStore — 查詢下推與筆數上限（ADR-0235 C2）", () => {
+  /** 記錄所有 SELECT 語句，用來證明過濾**發生在 SQL 而非 JS**。 */
+  function spyExec(): { exec: SqlExec; selects: string[] } {
+    const inner = nodeSqlExec();
+    const selects: string[] = [];
+    return {
+      selects,
+      exec: (query, ...bindings) => {
+        if (/^\s*select/i.test(query)) selects.push(query);
+        return inner(query, ...bindings);
+      },
+    };
+  }
+
+  const authored = (id: string, pubkey: string, createdAt = 1000): NostrEvent =>
+    ({ ...ev(id, { p: ["r"], createdAt }), pubkey }) as NostrEvent;
+
+  it("authors 下推到 SQL：WHERE 帶 pubkey 條件，不是撈全表再過濾", () => {
+    const { exec, selects } = spyExec();
+    const s = new SqlMessageStore(exec);
+    s.put(authored("m1", "alice"), 1000);
+    s.put(authored("m2", "bob"), 1000);
+    selects.length = 0;
+
+    expect(s.query(f({ authors: ["alice"] }), 1000).map((e) => e.id)).toEqual(["m1"]);
+    expect(selects.some((q) => /pubkey\s+IN/i.test(q))).toBe(true);
+  });
+
+  it("kinds 下推到 SQL", () => {
+    const { exec, selects } = spyExec();
+    const s = new SqlMessageStore(exec);
+    s.put(ev("g", { p: ["r"], kind: 1059 }), 1000);
+    s.put(ev("o", { p: ["r"], kind: 1060 }), 1000);
+    selects.length = 0;
+
+    expect(s.query(f({ authors: ["author"], kinds: [1060] }), 1000).map((e) => e.id)).toEqual(["o"]);
+    expect(selects.some((q) => /kind\s+IN/i.test(q))).toBe(true);
+  });
+
+  it("authors 為空陣列：直接回空，完全不打 DB（最便宜的消防水管 payload）", () => {
+    const { exec, selects } = spyExec();
+    const s = new SqlMessageStore(exec);
+    s.put(authored("m1", "alice"), 1000);
+    selects.length = 0;
+
+    expect(s.query(f({ authors: [] }), 1000)).toEqual([]);
+    expect(selects).toEqual([]);
+  });
+
+  it("ids 下推到 SQL", () => {
+    const { exec, selects } = spyExec();
+    const s = new SqlMessageStore(exec);
+    s.put(authored("m1", "alice"), 1000);
+    s.put(authored("m2", "alice"), 1000);
+    selects.length = 0;
+
+    expect(s.query(f({ ids: ["m2"] }), 1000).map((e) => e.id)).toEqual(["m2"]);
+    expect(selects.some((q) => /\bid\s+IN/i.test(q))).toBe(true);
+  });
+
+  // 「訂閱必須具名」是 relay-core `scoped()` 的職責（ADR-0123），不放在儲存層——儲存層若也
+  // 擋，「Ephemeral 不入庫」那類**否定斷言**會變成恆真的空轉測試。這一層保證的是「有界」。
+  it("不具名的 filter 仍可查（不改語意），但一律帶 LIMIT——代價有界", () => {
+    const { exec, selects } = spyExec();
+    const s = new SqlMessageStore(exec, { maxPerRecipient: 10_000 });
+    for (let i = 0; i < 2000; i++) s.put(ev(`m${i}`, { p: ["r"], createdAt: 1000 + i }), 1000);
+    selects.length = 0;
+
+    const got = s.query(f({ kinds: [1059] }), 1000);
+    expect(got.length).toBeLessThanOrEqual(MAX_QUERY_ROWS);
+    expect(selects.every((q) => /LIMIT \?/.test(q))).toBe(true);
+  });
+
+  it("回傳筆數有硬上限，且取最新的", () => {
+    const s = new SqlMessageStore(nodeSqlExec(), { maxPerRecipient: 10_000 });
+    for (let i = 0; i < 60; i++) s.put(ev(`m${i}`, { p: ["r"], createdAt: 1000 + i }), 1000);
+    const got = s.query(f({ "#p": ["r"], limit: 10 }), 1000);
+    expect(got).toHaveLength(10);
+    // 最新的 10 筆（created_at 1050–1059）
+    expect(got.map((e) => e.created_at).sort((a, b) => a - b)[0]).toBe(1050);
+  });
+
+  it("filter.limit 超過硬上限時被夾住", () => {
+    const s = new SqlMessageStore(nodeSqlExec(), { maxPerRecipient: 10_000 });
+    for (let i = 0; i < 1200; i++) s.put(ev(`m${i}`, { p: ["r"], createdAt: 1000 + i }), 1000);
+    expect(s.query(f({ "#p": ["r"], limit: 999_999 }), 1000).length).toBeLessThanOrEqual(MAX_QUERY_ROWS);
+  });
+
+  it("舊資料（升級前寫入、無 pubkey/kind 欄）也查得到——遷移有回填", () => {
+    const db = nodeSqlExec();
+    // 模擬舊 schema：先由舊版建表寫入，再以新版開啟同一個 DB。
+    db(`CREATE TABLE IF NOT EXISTS offline_msgs (
+      id TEXT NOT NULL, recipient TEXT NOT NULL, expiration INTEGER,
+      created_at INTEGER NOT NULL, json TEXT NOT NULL, PRIMARY KEY (id, recipient))`);
+    db(
+      `INSERT INTO offline_msgs (id, recipient, expiration, created_at, json) VALUES (?, ?, ?, ?, ?)`,
+      "old1",
+      "r",
+      9_999_999,
+      1000,
+      JSON.stringify(authored("old1", "alice")),
+    );
+    const s = new SqlMessageStore(db);
+    expect(s.query(f({ authors: ["alice"] }), 1000).map((e) => e.id)).toEqual(["old1"]);
   });
 });

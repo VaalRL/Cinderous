@@ -1,3 +1,4 @@
+import { TIMESTAMP_JITTER_SECONDS } from "@cinderous/core";
 import { RelayCore, type ConnSnapshot, type Outbound } from "./relay-core.js";
 import { SqlMessageStore } from "./sql-message-store.js";
 
@@ -22,6 +23,30 @@ const MAX_SUBSCRIPTIONS = 16;
 
 /** NIP-40 過期留言的清理間隔（C2）：DO alarm 每小時 prune 一次。 */
 const PRUNE_INTERVAL_MS = 60 * 60 * 1000;
+
+/**
+ * 每 pubkey 每分鐘事件上限（ADR-0235 H1）。
+ *
+ * 真實用量遠低於此：自適應心跳 60s／300s 一次（ADR-0109）、typing 有節流、
+ * 訊息由人手動送。120 給檔案分塊與群組扇出留了充分餘裕，同時把「單一金鑰灌爆
+ * 單一全域房間 DO」壓成不可能。
+ */
+const MAX_EVENTS_PER_MINUTE = 120;
+
+/** 未來方向時鐘容忍（秒）：沒有合法事件是未來的，只留客戶端時鐘誤差。 */
+const MAX_FUTURE_SKEW_SEC = 15 * 60;
+
+/**
+ * 過去方向時鐘容忍（秒）：**必須大於 NIP-59 的 2 天抖動窗**——外層 `created_at` 被刻意
+ * 往前推是隱私設計（`TIMESTAMP_JITTER_SECONDS`），設小了會擋掉幾乎每一則 Gift Wrap。
+ */
+const MAX_PAST_SKEW_SEC = TIMESTAMP_JITTER_SECONDS + 60 * 60;
+
+/**
+ * 重放去重窗（秒）：只快取近期事件的 id。封裝事件不需要（收件端以 rumor.id 去重），
+ * 真正要擋的是裸心跳（kind 20000）被重放來偽造「某人在線」。
+ */
+const REPLAY_WINDOW_SEC = 60 * 60;
 
 /** Worker 進入點：WebSocket 升級後交給單一 Durable Object 房間以共享連線狀態。 */
 export default {
@@ -65,10 +90,18 @@ export class RelayRoom {
     // 回應），但**從來沒被啟用**——而這是**單一全域房間 DO**（所有人共用），任何人自產一把金鑰
     // 通過 AUTH 後即可開無限訂閱把 DO 記憶體撐爆 → **全站掛掉**。
     // 客戶端合併後只需 1 個 REQ（ADR-0109），16 已是非常寬鬆的上限。
+    // ADR-0235 H1：這些防護 `relay-core` 大多早就實作好了，但**產線一直沒有啟用**
+    // ——`maxClockSkewSec` 沒設，於是 `seenIds` 永遠是空的、零重放防護；速率限制則是
+    // 從頭到尾不存在。實作了卻沒接上，和沒實作的效果完全一樣。
     this.core = new RelayCore({
       store: this.store,
       requireAuth: true,
       maxSubscriptions: MAX_SUBSCRIPTIONS,
+      authMaxAgeSec: 600, // NIP-42 建議：限制側錄簽名的可用時間（ADR-0235 H2）
+      maxEventsPerMinute: MAX_EVENTS_PER_MINUTE,
+      maxFutureSkewSec: MAX_FUTURE_SKEW_SEC,
+      maxPastSkewSec: MAX_PAST_SKEW_SEC,
+      replayWindowSec: REPLAY_WINDOW_SEC,
       ...(Number.isFinite(fileMb) && fileMb >= 1 ? { acceptFileEvents: true } : {}),
     });
     // C2：排程 NIP-40 過期清理（DO 休眠仍會被 alarm 喚醒執行）。
@@ -85,7 +118,7 @@ export class RelayRoom {
     await this.ctx.storage.setAlarm(Date.now() + PRUNE_INTERVAL_MS);
   }
 
-  fetch(_request: Request): Response {
+  fetch(request: Request): Response {
     const pair = new WebSocketPair();
     const client = pair[0];
     const server = pair[1];
@@ -93,7 +126,10 @@ export class RelayRoom {
     // 休眠式接受：以 connId 為 tag 供路由；DO 於訊息間可休眠（ADR-0059）。
     this.ctx.acceptWebSocket(server, [connId]);
     this.ensureHydrated();
-    const out = this.core.connect(connId); // 產生 NIP-42 AUTH 挑戰
+    // 本次請求打到的主機（ADR-0235 H2）：AUTH 的 `relay` tag 必須指向它。取自 request 而非
+    // 設定檔——同一份 Worker 可能同時服務 workers.dev 與自訂網域，寫死任一個都會誤擋另一個。
+    const relayHost = hostOf(request);
+    const out = this.core.connect(connId, relayHost); // 產生 NIP-42 AUTH 挑戰
     this.persist(server, connId); // 存回 attachment（含挑戰），休眠後可還原
     this.dispatch(out);
     return new Response(null, { status: 101, webSocket: client });
@@ -151,4 +187,15 @@ export class RelayRoom {
 function connIdOf(ws: WebSocket): string | undefined {
   const snap = ws.deserializeAttachment() as ConnSnapshot | null;
   return snap?.connId;
+}
+
+/** 本次請求的主機（含 port）；優先取 `Host` 標頭，退回 URL。解析失敗回 undefined＝不強制。 */
+function hostOf(request: Request): string | undefined {
+  const header = request.headers.get("Host");
+  if (header) return header.toLowerCase();
+  try {
+    return new URL(request.url).host.toLowerCase() || undefined;
+  } catch {
+    return undefined;
+  }
 }
