@@ -1,61 +1,32 @@
-# 待完成 ADR 與內容（session 幻覺校正後的真實工作清單）
+# 待完成 ADR 與內容
 
-> 背景：本 session 後段工具輸出多次不可靠（Write 靜默 drop、Read 回假內容、複雜 Bash 幻覺成功）。
-> 以下為用可信命令（git log / ls / rg）核實後的真實狀態與待辦。往後每個 commit 後以
-> `git log --oneline -1` 確認 HEAD 真的前進，並用 `git cat-file -e HEAD:<檔>` 驗證檔案進了 commit。
+> 本清單源自先前 session 的幻覺校正（詳見 git 歷史）。**2026-07-22 本清單全部完成並清零**。
 
-## 真實狀態（2026-07-22）
-- **main HEAD = `08cbabe`（ADR-0228 P2）**。
-- 真的在 main：到 ADR-0228 P2（含 0224/0225/0226＋審查修正、**0227 全部 P1–P4**、**0228 P1＋P2**）。
-- ADR-0227 P4 已在 main：`apps/desktop/src/version.ts`、`releases.ts`、SettingsPanel「關於」分頁、`docs/releases.json` 皆存在。
-- ADR-0228 P1 已在 main：`packages/core/src/version-check.ts`（compareVersion / newerRelease）存在。
+## 完成記錄（2026-07-22）
 
-## working tree 目前未提交的「真實」變更（測試綠，勿丟失）
-- `packages/core/src/threat-intel.ts`(+`.test.ts`) — ADR-0231 P1 core（8 測試綠）
-- `apps/desktop/src/ui/url-hygiene.ts`(+`.test.ts`) — ADR-0231 P1：assessUrl 延伸（26 測試綠）
-- `packages/core/src/index.ts` — barrel 加 `export * from "./threat-intel.js"`
-- `packages/i18n/src/messages.ts` — ADR-0228 P3 的 i18n `settings_update*`（zh/en）
-- `docs/adr/0231-url-threat-intel-mask.md` — ADR-0231 文件（已 heredoc 寫回，2626 bytes）
+先前 session 留下的五項待辦已全部落地（每項一 commit、commit 後皆以 `git log`＋`git cat-file` 驗證）：
 
----
+1. **修復 main**（`9a31d9e`）：發現前一 session 提交的 ADR-0231 P1 不完整——`url-hygiene.ts` 缺 `known-malicious` 型別與 `assessUrl` matcher 參數、`markdown.tsx` 引用不存在的 i18n 鍵、`Messages` 型別缺 `settings_update*`，main typecheck 是紅的。已補完並全綠。
+2. **ADR-0231 文件**（`6f8a2b1`）：`docs/adr/0231-url-threat-intel-mask.md`＋README 索引。
+3. **ADR-0228 P3**（`fb697aa`）：`update-check.ts`（shouldCheck／fetchLatest／opt-in／狀態，9 測試）＋App 開機查詢＋SettingsPanel 關於區徽章與開關（CSP 為 null 不需放行）。
+4. **ADR-0229**（`90b68d0`）：官網 hero SVG icon 按鈕列（分平台下載、disabled tooltip「即將推出」、手機可見標籤）＋doc＋9 測試。
+5. **ADR-0230**（`faf589f`）：官網手機可用性（觸控 44px／clamp 字級／overflow-x:clip）＋doc。
+6. **ADR-0231 P2**（`d5faf0b`）：`scripts/threat-snapshot.mjs`＋`docs/threat-intel.json`（20,525 網域）＋`threat-intel.yml` 每日排程＋官網 dist 複製＋desktop `threat-db.ts` 拉取快取。
+7. **ADR-0231 P3**（`f932ff4`）：`ThreatProvider`＋markdown 遮罩（來源標示、一般可展開/嚴格不可展開）＋送出端警示/阻止＋設定四項＋i18n。
+8. **ADR-0231 P4**（`c7177c8`）：官網技術原理頁威脅防護介紹卡。
 
-## 待完成（依序）
+ADR-0228／0231 已轉「已接受」，`ARCHITECTURE.md` 已同步。最終測試：desktop 513／core 411／website 10／mobile 197 全綠、全 repo typecheck 綠。
 
-### 1) ADR-0228 P3 — 更新偵測提醒 UI（未落地；P1/P2 已在 main）
-決策：僅偵測+提醒、查官網 `releases.json`、比對 `APP_VERSION`、關於區「可更新 vX.Y.Z」徽章+前往下載、opt-in 可關、每日節流、失敗靜默、純本地不送 URL。
-待做：
-- `apps/desktop/src/update-check.ts`：`UPDATE_ENDPOINT`=https://vaalrl.github.io/Cinderous/releases.json、`GITHUB_RELEASES`、`shouldCheck`(每日節流純函式)、`fetchLatest`(fetch 注入→core `newerRelease`、失敗靜默 null)、`updateCheckEnabled`/`setUpdateCheckEnabled`(getKv opt-in)、`load/saveUpdateState`。
-- `App.tsx`：開機查詢(opt-in+節流+失敗靜默)、state `updateAvailable`/`updateCheckOn`、`toggleUpdateCheck`、傳 SettingsPanel。
-- `SettingsPanel.tsx` AboutSettings：加 `updateAvailable` 徽章+前往下載(GITHUB_RELEASES `<a target=_blank>`)+opt-in 開關(prop `onToggleUpdateCheck`)。
-- i18n `settings_updateAvailable/Download/Check/CheckHint`（zh/en）— **messages 已在 working tree**。
-- 測試：update-check(shouldCheck/fetchLatest) + SettingsPanel about 徽章。
+## 後續（非阻塞）
 
-### 2) ADR-0229 — 官網 hero icon 按鈕（doc＋實作都缺）
-決策（已定案）：
-- hero 文字按鈕 → **SVG 品牌 icon 按鈕列**（Windows/Apple/手機/地球/GitHub、currentColor 隨主題）。
-- 下載**區分平台**：🪟 Windows 可用(連 releases)、macOS **disabled**、行動版 **disabled**。
-- **自訂 CSS tooltip**（hover 顯示）；「看技術原理」**保留文字連結**。
-- disabled 灰階+`aria-disabled`+tooltip「即將推出」。
-- **手機≤640px：icon+可見標籤**（觸控無 hover）。
-- i18n zh/en、`aria-label`、鍵盤可聚焦；nav 右上下載鈕不動。
-待做：`docs/adr/0229-website-hero-icon-actions.md` + `apps/website/src/icons.tsx` + `pages/Home.tsx` hero + `styles.css`(iconbtn/tooltip/disabled/手機標籤) + `copy.ts` i18n。
+- ADR-0231 snapshot 首次 CI 排程跑完後，確認 abuse.ch 主 feed 在 Actions 可達（本地被擋、已有 GitHub 鏡像 fallback）。
+- macOS／行動版推出時，官網 hero disabled 鈕轉可用（ADR-0229 後果節）。
+- 經典 UI 驗收與 v0.0.13 發版仍 hold（見 memory）。
 
-### 3) ADR-0230 — 官網手機可用性（doc＋實作都缺）
-決策：觸控目標 ≥44px(nav link/toggle/cta min-height)、hero h1 用 `clamp(36px,9vw,64px)`、`html,body{overflow-x:clip}`+長字串 `overflow-wrap`、nav 維持 flex-wrap(不做漢堡)；與 0229 協同(icon 手機標籤+觸控≥44)。
-待做：`docs/adr/0230-website-mobile-usability.md` + `styles.css` RWD 強化。
+## 工作守則（此環境，保留備查）
 
-### 4) ADR-0231 — 威脅情報遮罩（doc 已寫、P1 已做；P2–P4 待做）
-決策：見 `docs/adr/0231-url-threat-intel-mask.md`（開源 CC0/MIT 來源、渲染遮罩顯示來源可展開、自訂清單、啟用開關、送出端警示可控、嚴格/企業模式不可展開+送出阻止、P4 官網介紹、純本地不送 URL）。
-- **P1**（core threat-intel + url-hygiene assessUrl 延伸）：**working tree 已有，待提交**。
-- **P2**：選定來源(URLhaus CC0 + StevenBlack MIT)→build snapshot→官網部署+定期更新(複用 ADR-0228)。
-- **P3**：desktop 遮罩 UI(遮住+來源+一般可展開/嚴格不可展開)+送出端警示+嚴格模式+設定(啟用/送出警示/嚴格/自訂清單 四項)+i18n。
-- **P4**：官網介紹(主打「純本地、不送 URL」、可自訂可關)。
-
----
-
-## 教訓 / 工作守則（避免再度幻覺）
-1. 只信**最簡單的單一命令**輸出（`git log --oneline -N`、`ls -la`、`rg -c`）；複雜 `&&`/for/heredoc 鏈的成功訊息不可信。
-2. 新檔一律用 **bash heredoc** 寫，寫完 `ls -la` + `rg -c` 驗證位元組與關鍵字。
-3. 既有檔用 Edit 後，用 **`rg -n`** 驗證改動真的在檔案裡（Read 可能回假內容）。
-4. 每次 commit 後：`git log --oneline -1` 確認 HEAD 前進 + `git cat-file -e HEAD:<檔>` 確認檔案進了 commit。
-5. 一次一個原子步驟，別把「驗證+commit+push」塞進同一條長命令。
+1. 只信**最簡單的單一命令**輸出；複雜鏈的成功訊息不可信。
+2. 寫檔後以 `ls -la`＋`rg -c` 驗證；Edit 後以 `rg -n` 驗證。
+3. 每次 commit 後：`git log --oneline -1` 確認 HEAD 前進＋`git cat-file -e HEAD:<檔>` 確認檔案進了 commit。
+4. 直接在 main commit；push 用 fetch＋merge（勿 pull --rebase）。
+5. 一次一個原子步驟。
