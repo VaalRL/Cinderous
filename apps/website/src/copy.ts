@@ -25,6 +25,15 @@ export interface Copy {
   roadmap_p_domain_b: string;
   hero_eyebrow: string;
   hero_title: string;
+  /**
+   * H1 內的**平述句**（ADR-0235 SEO-5）。
+   *
+   * 修正前 `<h1>` 就是 `"Cinderous"`——頁面最強的語意訊號只放一個沒人認識的品牌名，
+   * 而整個 hero（eyebrow「取回通訊自主權」、subtitle「夜裡森林的營火」）都是意象。
+   * 結果：**全站沒有任何一句話直接說出這是什麼產品**。搜尋引擎排不上、答案引擎也無從引用。
+   * 這一行負責把「是什麼」講清楚，詩意留給 subtitle。
+   */
+  hero_h1_tagline: string;
   hero_subtitle: string;
   /** hero icon 按鈕列（ADR-0229）：可見標籤（手機）＋tooltip／aria-label 文案。 */
   hero_ic_windows: string;
@@ -153,6 +162,7 @@ const zhHant: Copy = {
   roadmap_p_domain_b: "網頁版目前用 Cloudflare Worker 預設網址，日後綁自訂網域。",
   hero_eyebrow: "取回通訊自主權",
   hero_title: "Cinderous",
+  hero_h1_tagline: "開源、端對端加密的去中心化即時通訊",
   hero_subtitle: "你的對話像夜裡森林深處的一簇營火，只有圍坐的人聽得見。",
   hero_ic_windows: "Windows",
   hero_ic_mac: "macOS",
@@ -298,6 +308,7 @@ const en: Copy = {
   roadmap_p_domain_b: "The web app currently uses the default Cloudflare Worker URL; a custom domain will be bound later.",
   hero_eyebrow: "Own your conversations",
   hero_title: "Cinderous",
+  hero_h1_tagline: "Open-source, end-to-end encrypted decentralized messaging",
   hero_subtitle: "Your conversations are a campfire deep in a night forest — heard only by those sitting around it.",
   hero_ic_windows: "Windows",
   hero_ic_mac: "macOS",

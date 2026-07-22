@@ -7,9 +7,10 @@
   "license": "AGPL-3.0-only",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "vite build && vite build --ssr src/entry-server.tsx --outDir dist-ssr && node scripts/prerender.mjs",
     "preview": "vite preview",
     "sign-funds": "node --experimental-strip-types scripts/sign-funds.ts",
+    "og:image": "node scripts/og-image.mjs",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

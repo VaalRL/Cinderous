@@ -99,6 +99,8 @@ h1, h2, h3 { text-wrap: balance; }
 .eyebrow { text-transform: uppercase; letter-spacing: 3px; font-size: 12px; font-weight: 700; color: var(--ember); margin-bottom: 12px; }
 /* 流式字級（ADR-0230）：手機不再靠斷點硬切，36px～64px 隨視窗寬度縮放。 */
 .hero h1 { font-size: clamp(36px, 9vw, 64px); margin: 0 0 14px; letter-spacing: -2px; line-height: 1; }
+/* H1 內的平述句（ADR-0235 SEO-5）：字標維持巨大，說明句以正常字級另起一行。 */
+.hero__tagline { display: block; font-size: clamp(15px, 3.4vw, 20px); font-weight: 600; letter-spacing: 0; line-height: 1.4; margin-top: 14px; color: var(--muted); }
 .hero__sub { font-size: 19px; color: var(--muted); max-width: 640px; margin: 0 auto 30px; }
 /* 「看技術原理」列（ADR-0229 修訂）：p＝區塊級→必定自成一列（.cta 為 inline-flex 會與 icon 列擠同行）。 */
 .hero__tech { margin: 0 0 18px; }

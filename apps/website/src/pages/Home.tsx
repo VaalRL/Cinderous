@@ -31,7 +31,11 @@ export function Home({
             <CinderMark size={84} theme={theme} />
           </div>
           <p className="eyebrow">{c.hero_eyebrow}</p>
-          <h1>{c.hero_title}</h1>
+          {/* ADR-0235 SEO-5：H1 除了品牌字標，還要有一句**說得出這是什麼**的平述句。 */}
+          <h1>
+            {c.hero_title}
+            <span className="hero__tagline">{c.hero_h1_tagline}</span>
+          </h1>
           <p className="hero__sub">{c.hero_subtitle}</p>
           {/* 「看技術原理」保留文字連結（ADR-0229）：置於 icon 列上方、自成一列（區塊級容器；
               .cta 是 inline-flex，兩個並排會擠同一行）。 */}

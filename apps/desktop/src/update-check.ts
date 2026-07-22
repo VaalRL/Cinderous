@@ -4,10 +4,11 @@
 
 import { newerRelease, type RemoteRelease } from "@cinderous/core";
 import { getKv } from "@cinderous/engine";
+import { siteFile } from "./site.js";
 import { APP_VERSION } from "./version.js";
 
-/** 最新版本查詢來源（官網 GitHub Pages；發版時才部署＝已發布權威）。 */
-export const UPDATE_ENDPOINT = "https://vaalrl.github.io/Cinderous/releases.json";
+/** 最新版本查詢來源（官網 GitHub Pages；發版時才部署＝已發布權威）。網域見 `site.ts`（ADR-0235 SEO-6）。 */
+export const UPDATE_ENDPOINT = siteFile("releases.json");
 
 /** 「前往下載」目的地（GitHub releases 頁）。 */
 export const GITHUB_RELEASES = "https://github.com/VaalRL/Cinderous/releases";

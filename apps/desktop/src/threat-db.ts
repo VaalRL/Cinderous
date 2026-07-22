@@ -4,10 +4,11 @@
 
 import { parseThreatSnapshot, type ThreatDb } from "@cinderous/core";
 import { getKv } from "@cinderous/engine";
+import { siteFile } from "./site.js";
 import { shouldCheck } from "./update-check.js";
 
-/** snapshot 來源（官網 GitHub Pages；排程每日重建，ADR-0231 P2）。 */
-export const THREAT_ENDPOINT = "https://vaalrl.github.io/Cinderous/threat-intel.json";
+/** snapshot 來源（官網 GitHub Pages；排程每日重建，ADR-0231 P2）。網域見 `site.ts`（ADR-0235 SEO-6）。 */
+export const THREAT_ENDPOINT = siteFile("threat-intel.json");
 
 const ENABLED_KEY = "nb.threatIntel.enabled";
 const CACHE_KEY = "nb.threatIntel.snapshot";

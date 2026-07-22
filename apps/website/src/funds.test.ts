@@ -47,3 +47,34 @@ describe("funds 簽章透明度（ADR-0090）", () => {
     expect(data?.currency).toBe("USD");
   });
 });
+
+// ADR-0235 M3：佔位金鑰絆線。
+//
+// `TRANSPARENCY_PUBKEY` 目前是**開發用佔位金鑰**，`public/funds.json` 也是示範資料。
+// 現況安全，因為透明度頁已下架（App.tsx 的 import／路由都註解掉了）。危險的是「某天有人
+// 把頁面接回去、卻忘了換金鑰」——那時官網會用一把來歷不明的金鑰驗簽並顯示假的資金數字，
+// 而「簽章式資金透明度」這個賣點會變成純粹的裝飾。
+//
+// 這份測試把那個順序鎖死：頁面接回去的**同一刻**，這裡就會紅。
+describe("透明度佔位金鑰絆線（ADR-0235 M3）", () => {
+  const PLACEHOLDER = "7fb989c676cce640d545919144ef1f9a65009a79c573cea451e822bd16b5f5a3";
+  const appSource = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
+  /** 透明度頁是否已接回 App（非註解的 import）。 */
+  const wired = /^\s*import\s+\{\s*Transparency\s*\}/m.test(appSource);
+
+  it("若透明度頁已接回 App，TRANSPARENCY_PUBKEY 就不得再是佔位金鑰", () => {
+    if (wired) {
+      expect(TRANSPARENCY_PUBKEY).not.toBe(PLACEHOLDER);
+    } else {
+      // 頁面仍下架：佔位金鑰可以留著，但要確認它真的還是那一把（避免默默換成別的東西）。
+      expect(TRANSPARENCY_PUBKEY).toBe(PLACEHOLDER);
+    }
+  });
+
+  it("佔位資料只在頁面下架時可接受", () => {
+    const funds = JSON.parse(readFileSync(new URL("../public/funds.json", import.meta.url), "utf8")) as {
+      content: string;
+    };
+    if (wired) expect(funds.content).not.toContain("佔位");
+  });
+});
