@@ -52,6 +52,9 @@ export interface Copy {
   tech_intro: string;
   tech_proto_t: string;
   tech_proto_b: string;
+  /** 威脅防護介紹（ADR-0231 P4）：主打純本地比對、URL 不外送、可自訂可關。 */
+  tech_threat_t: string;
+  tech_threat_b: string;
   tech_multi_title: string;
   tech_multi_lead: string;
   md_list: string;
@@ -184,6 +187,9 @@ const zhHant: Copy = {
   tech_proto_t: "協定基線",
   tech_proto_b:
     "建構於 Nostr 開放協定：訊息以 NIP-17／44／59（Gift Wrap）加密封裝、NIP-42 驗證中繼連線、NIP-13 工作量證明抑制濫用。即時互動（檔案、在線、輸入中）改走 WebRTC P2P，直接點對點、完全不經中繼。全為開放標準，任何人都能自行實作與稽核。",
+  tech_threat_t: "威脅防護：純本地、不送 URL",
+  tech_threat_b:
+    "訊息中的連結會與開源威脅情報清單（URLhaus、StevenBlack）比對——比對完全在你的裝置上進行，網址絕不外送到任何伺服器。命中的連結預設遮罩並標示來源；可自訂封鎖清單、可加嚴（不可展開、阻止送出），也可完全關閉。",
   tech_multi_title: "多個節點時，如何協作",
   tech_multi_lead:
     "當網路裡有很多節點，沒有誰是必經之路。你和好友各自連上任一可用中繼——中繼只轉發密文；任何一座離線，訊息自動改走其他座。哪些節點可用，由維護者簽章的節點清單決定（登入自動選座），即時互動則走 WebRTC P2P 直連、完全不經中繼。",
@@ -327,6 +333,9 @@ const en: Copy = {
   tech_proto_t: "Protocol baseline",
   tech_proto_b:
     "Built on the open Nostr protocol: messages are encrypted and wrapped with NIP-17/44/59 (Gift Wrap), relay connections are authenticated with NIP-42, and NIP-13 proof-of-work deters abuse. Real-time interactions (files, presence, typing) go over WebRTC P2P, straight peer-to-peer, bypassing relays entirely. All open standards — implementable and auditable by anyone.",
+  tech_threat_t: "Threat protection: local-only, no URL ever sent",
+  tech_threat_b:
+    "Links in messages are checked against open-source threat-intelligence lists (URLhaus, StevenBlack) — matching happens entirely on your device; URLs are never sent to any server. Flagged links are masked with their source shown; you can add your own blocklist, go strict (no reveal, block sending), or turn it off entirely.",
   tech_multi_title: "How many nodes collaborate",
   tech_multi_lead:
     "With many nodes in the network, no single one is on the critical path. You and your friend each connect to any available relay — relays only forward ciphertext; if one goes offline, messages route via others automatically. Which nodes are available is decided by a maintainer-signed node list (auto-seat on sign-in), while real-time interactions go straight over WebRTC P2P, bypassing relays entirely.",

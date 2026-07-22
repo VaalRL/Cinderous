@@ -40,6 +40,13 @@ export function Tech({ c }: { c: Copy }): JSX.Element {
           <h3>{c.tech_proto_t}</h3>
           <p>{c.tech_proto_b}</p>
         </div>
+
+        {/* 威脅防護介紹（ADR-0231 P4）：主打純本地比對、URL 不外送、可自訂可關。 */}
+        <div className="card" style={{ marginTop: 16 }} data-testid="tech-threat">
+          <div className="card__ember" />
+          <h3>{c.tech_threat_t}</h3>
+          <p>{c.tech_threat_b}</p>
+        </div>
       </div>
     </section>
   );
