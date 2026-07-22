@@ -5,6 +5,7 @@ import { useLayout } from "../layout.js";
 import { useI18n } from "../i18n.js";
 import { APP_VERSION } from "../version.js";
 import { releaseFor } from "../releases.js";
+import { GITHUB_RELEASES } from "../update-check.js";
 import { useDialog } from "./Dialog.js";
 import { CHIME_PRESETS, DEFAULT_CHIME_ID, playChime } from "./ringtone.js";
 import type { SlotItem } from "./slot-queue.js";
@@ -107,6 +108,11 @@ export interface SettingsPanelProps {
   /** 收到別人的自訂 emoji／貼圖時自動收藏（ADR-0220）；未提供則不顯示。 */
   autoAcquireAssets?: boolean;
   onToggleAutoAcquire?: () => void;
+  /** 可更新版本（ADR-0228 P3）；null／未提供＝無新版，關於區不顯示徽章。 */
+  updateAvailable?: string | null;
+  /** 自動檢查更新 opt-in（ADR-0228 P3）；與 onToggleUpdateCheck 一起提供才顯示開關。 */
+  updateCheck?: boolean;
+  onToggleUpdateCheck?: () => void;
   onClose: () => void;
   /** 清除指向某座 stale relay 的聯絡人 hint（ADR-0036）。 */
   onRelayClear?: (url: string) => void;
@@ -820,7 +826,12 @@ function SecuritySettings({ value }: { value: NonNullable<SettingsPanelProps["se
 /** 設定面板：主題色、中繼站、身分備份（私鑰）、桌面通知。 */
 /** 設定分頁（ADR-0142）：把長設定頁切成分頁，減少捲動。 */
 /** 關於／版本區（ADR-0227 P4）：版號（build-time 注入）＋依語系顯示本版更新記錄。 */
-function AboutSettings(): JSX.Element {
+/** ＋更新偵測（ADR-0228 P3）：可更新徽章＋前往下載＋自動檢查 opt-in 開關。 */
+function AboutSettings(props: {
+  updateAvailable?: string | null;
+  updateCheck?: boolean;
+  onToggleUpdateCheck?: () => void;
+}): JSX.Element {
   const { t, locale } = useI18n();
   const rel = releaseFor(APP_VERSION);
   const notes = rel ? (locale === "en" ? rel.en : rel.zh) : [];
@@ -831,6 +842,28 @@ function AboutSettings(): JSX.Element {
         <strong>{t("settings_aboutVersion")}</strong> {APP_VERSION}
         {rel ? ` · ${rel.date}` : ""}
       </p>
+      {props.updateAvailable ? (
+        <p className="settings__update" data-testid="update-badge">
+          <strong>{t("settings_updateAvailable", { version: props.updateAvailable })}</strong>{" "}
+          <a href={GITHUB_RELEASES} target="_blank" rel="noopener noreferrer">
+            {t("settings_updateDownload")}
+          </a>
+        </p>
+      ) : null}
+      {props.onToggleUpdateCheck ? (
+        <>
+          <label className="settings__toggle">
+            <input
+              type="checkbox"
+              data-testid="update-check-toggle"
+              checked={props.updateCheck ?? true}
+              onChange={props.onToggleUpdateCheck}
+            />
+            <span>{t("settings_updateCheck")}</span>
+          </label>
+          <p className="settings__hint">{t("settings_updateCheckHint")}</p>
+        </>
+      ) : null}
       <p className="settings__hint">{t("settings_aboutWhatsNew")}</p>
       <ul className="settings__notes">
         {notes.map((n) => (
@@ -913,7 +946,13 @@ export function SettingsPanel(props: SettingsPanelProps): JSX.Element {
               {props.showTitlebarSettings ? <TitlebarSettings /> : null}
             </>
           ) : null}
-          {tab === "about" ? <AboutSettings /> : null}
+          {tab === "about" ? (
+            <AboutSettings
+              updateAvailable={props.updateAvailable ?? null}
+              updateCheck={props.updateCheck ?? true}
+              {...(props.onToggleUpdateCheck ? { onToggleUpdateCheck: props.onToggleUpdateCheck } : {})}
+            />
+          ) : null}
           {tab === "relay" ? (
           <section className="settings__sec">
             <h4>{t("settings_relayUrl")}</h4>

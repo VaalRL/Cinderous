@@ -87,6 +87,24 @@ describe("SettingsPanel 分頁（ADR-0142）", () => {
     expect(out).toContain("本版更新內容"); // zh-Hant（provider 固定語系）
   });
 
+  it("關於分頁：可更新徽章＋前往下載（ADR-0228 P3）；無新版不顯示", () => {
+    const out = render({ initialTab: "about", updateAvailable: "9.9.9" });
+    expect(out).toContain('data-testid="update-badge"');
+    expect(out).toContain("9.9.9");
+    expect(out).toContain("github.com/VaalRL/Cinderous/releases");
+    expect(render({ initialTab: "about" })).not.toContain('data-testid="update-badge"');
+    expect(render({ initialTab: "about", updateAvailable: null })).not.toContain('data-testid="update-badge"');
+  });
+
+  it("關於分頁：自動檢查更新開關（ADR-0228 P3）——提供 onToggleUpdateCheck 才顯示、反映開關狀態", () => {
+    expect(render({ initialTab: "about" })).not.toContain('data-testid="update-check-toggle"');
+    const on = render({ initialTab: "about", updateCheck: true, onToggleUpdateCheck: () => {} });
+    expect(on).toContain('data-testid="update-check-toggle"');
+    expect(on).toMatch(/data-testid="update-check-toggle"[^>]*checked/);
+    const off = render({ initialTab: "about", updateCheck: false, onToggleUpdateCheck: () => {} });
+    expect(off).not.toMatch(/data-testid="update-check-toggle"[^>]*checked/);
+  });
+
   it("身分分頁只在有內容時出現（selfNsec/security/配對）；進階同理（retention/export/ollama）", () => {
     expect(render()).not.toContain('data-testid="settings-tab-identity"');
     expect(render({ selfNsec: "nsec1x" })).toContain('data-testid="settings-tab-identity"');

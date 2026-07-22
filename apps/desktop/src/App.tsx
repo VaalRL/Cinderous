@@ -94,6 +94,14 @@ import { HistoryWindow } from "./ui/HistoryWindow.js";
 import { TauriStorage } from "./native/tauri-storage.js";
 import type { AppStorage } from "@cinderous/engine";
 import { cleanOnPasteEnabled, setCleanOnPasteEnabled } from "./ui/url-hygiene.js";
+import {
+  fetchLatest,
+  loadUpdateState,
+  saveUpdateState,
+  setUpdateCheckEnabled,
+  shouldCheck,
+  updateCheckEnabled,
+} from "./update-check.js";
 import { autoAcquireEnabled, setAutoAcquireEnabled } from "./ui/sticker-library.js";
 import {
   allLabels,
@@ -464,6 +472,11 @@ export function App(): JSX.Element {
   const [relays, setRelays] = useState<{ url: string; state: ConnectionState; home: boolean; stale: boolean }[]>([]);
   const [cleanPaste, setCleanPaste] = useState<boolean>(() => cleanOnPasteEnabled());
   const [autoAcquire, setAutoAcquire] = useState<boolean>(() => autoAcquireEnabled());
+  /** 更新偵測（ADR-0228 P3）：opt-in 開關＋上次查到的可更新版本（開機先顯示、查完更新）。 */
+  const [updateCheckOn, setUpdateCheckOn] = useState<boolean>(() => updateCheckEnabled());
+  const [updateAvailable, setUpdateAvailable] = useState<string | null>(
+    () => (updateCheckEnabled() ? (loadUpdateState()?.available ?? null) : null),
+  );
   const [blobsNonce, setBlobsNonce] = useState(0); // ADR-0223：backfill 到貨時 bump → 對話窗重讀 blob 快取
   const [groups, setGroups] = useState<Group[]>([]);
   const [groupPrefs, setGroupPrefs] = useState<GroupPrefsMap>(() => loadGroupPrefs());
@@ -492,6 +505,16 @@ export function App(): JSX.Element {
     registerSettingsOpener(() => setSettingsOpen(true));
     return () => registerSettingsOpener(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- 註冊器來自 context、掛載一次即可
+  }, []);
+  // 更新偵測（ADR-0228 P3）：開機查一次官網 releases.json——opt-in＋每日節流＋失敗靜默。
+  useEffect(() => {
+    if (!updateCheckEnabled()) return;
+    const now = Date.now();
+    if (!shouldCheck(loadUpdateState()?.lastCheck, now)) return;
+    void fetchLatest().then((v) => {
+      saveUpdateState({ lastCheck: now, available: v });
+      setUpdateAvailable(v);
+    });
   }, []);
   // ADR-0206：三欄＋Tauri 把身分元件（切換/＋/🔒/🗂）上移標題列的註冊器（實際 bundle 於下方 effect 提供）。
   const registerIdentityControls = useRegisterIdentityControls();
@@ -2504,6 +2527,25 @@ export function App(): JSX.Element {
           onToggleAutoAcquire={() => {
             setAutoAcquireEnabled(!autoAcquire);
             setAutoAcquire(!autoAcquire);
+          }}
+          updateAvailable={updateAvailable}
+          updateCheck={updateCheckOn}
+          onToggleUpdateCheck={() => {
+            const next = !updateCheckOn;
+            setUpdateCheckEnabled(next);
+            setUpdateCheckOn(next);
+            if (!next) {
+              // 關閉＝不再查也不再顯示；清掉暫存的可更新版本。
+              setUpdateAvailable(null);
+              saveUpdateState({ lastCheck: 0, available: null });
+            } else {
+              // 重新開啟＝立即查一次（使用者明確要查，不受每日節流限制）。
+              const now = Date.now();
+              void fetchLatest().then((v) => {
+                saveUpdateState({ lastCheck: now, available: v });
+                setUpdateAvailable(v);
+              });
+            }
           }}
           notifications={notify}
           onToggleNotifications={toggleNotifications}
