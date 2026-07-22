@@ -725,6 +725,29 @@ describe("RelayChatBackend（真實後端 + 持久化）", () => {
     b.stop();
   });
 
+  it("無痕收回（ADR-0234）：traceless 兩端整行移除（purged）、不落佔位（deleted）", () => {
+    const net = createInMemoryRelayNetwork();
+    const storeA = new MemoryStorage();
+    const storeB = new MemoryStorage();
+    const a = new RelayChatBackend(storeA, (h) => net.connect("a", h), "Alice");
+    const b = new RelayChatBackend(storeB, (h) => net.connect("b", h), "Bob");
+    const bIncoming: ChatMessage[] = [];
+    const bUnsent: [string, boolean | undefined][] = [];
+    a.start(noop);
+    b.start({ ...noop, onMessage: (_pk, m) => bIncoming.push(m), onUnsend: (mid, tr) => bUnsent.push([mid, tr]) });
+    a.addContact(b.selfNpub);
+    a.sendMessage(b.self.pubkey, "誤傳");
+    const mid = bIncoming[0]!.id;
+
+    a.unsendMessage(b.self.pubkey, mid, true);
+    expect(bUnsent).toContainEqual([mid, true]);
+    expect(storeB.loadPurged()).toContain(mid);
+    expect(storeB.loadDeleted()).not.toContain(mid);
+    expect(storeA.loadPurged()).toContain(mid); // 送端本機同樣無痕
+    a.stop();
+    b.stop();
+  });
+
   it("收回擁有者驗證（ADR-0233）：對端偽造收回你的訊息 → 拒收、不標記", () => {
     const net = createInMemoryRelayNetwork();
     const storeA = new MemoryStorage();

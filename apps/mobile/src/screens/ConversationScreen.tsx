@@ -318,8 +318,8 @@ export function ConversationScreen({
   unsent?: Set<string>;
   /** 對某訊息送出 emoji 回應；未提供則不顯示回應入口（如示範模式）。 */
   onReact?: (messageId: string, emoji: string) => void;
-  /** 收回自己送出的訊息；未提供則不顯示收回入口。 */
-  onUnsend?: (messageId: string) => void;
+  /** 收回自己送出的訊息；未提供則不顯示收回入口。`traceless`＝無痕收回（ADR-0234）。 */
+  onUnsend?: (messageId: string, traceless?: boolean) => void;
   /** 離開群組（ADR-0114）；未提供則不顯示。 */
   onLeaveGroup?: () => void;
   /**
@@ -369,6 +369,9 @@ export function ConversationScreen({
   const t = (k: MessageKey, params?: Record<string, string | number>): string => translate(locale, k, params);
   /** 長按選中的訊息（顯示回應/收回列）。手機沒有 hover，長按是等價的入口。 */
   const [picked, setPicked] = useState<string | null>(null);
+  /** 收回二次確認（ADR-0234）：目標訊息 id＋「無痕收回」勾選（每次開啟重置）。 */
+  const [unsendAsk, setUnsendAsk] = useState<string | null>(null);
+  const [unsendTraceless, setUnsendTraceless] = useState(false);
   // 本地暱稱（ADR-0148）：有暱稱時點標頭在暱稱↔廣播名切換；✎ 展開輸入列設定/清除。
   const hasAlias = !!alias?.trim();
   const [showBroadcast, setShowBroadcast] = useState(false);
@@ -966,13 +969,47 @@ export function ConversationScreen({
                     accessibilityRole="button"
                     testID={`unsend-${m.id}`}
                     onPress={() => {
-                      onUnsend(m.id);
+                      // 二次確認（ADR-0234）：改開確認列（含「無痕收回」選項），不直接收回。
+                      setUnsendTraceless(false);
+                      setUnsendAsk(m.id);
                       setPicked(null);
                     }}
                   >
                     <Text style={styles.actText}>{t("msg_unsend")}</Text>
                   </Pressable>
                 ) : null}
+              </View>
+            ) : null}
+            {/* 收回確認列（ADR-0234）：確認／取消＋「無痕收回」勾選（勾＝整行消失不留佔位）。 */}
+            {unsendAsk === m.id ? (
+              <View style={styles.actions} testID={`unsend-confirm-${m.id}`}>
+                <Pressable
+                  style={styles.actBtn}
+                  accessibilityRole="button"
+                  testID={`unsend-traceless-${m.id}`}
+                  onPress={() => setUnsendTraceless((v) => !v)}
+                >
+                  <Text style={styles.actText}>{`${unsendTraceless ? "☑" : "☐"} ${t("unsend_traceless")}`}</Text>
+                </Pressable>
+                <Pressable
+                  style={styles.actBtn}
+                  accessibilityRole="button"
+                  testID={`unsend-go-${m.id}`}
+                  onPress={() => {
+                    onUnsend?.(m.id, unsendTraceless || undefined);
+                    setUnsendAsk(null);
+                  }}
+                >
+                  <Text style={styles.actText}>{t("msg_unsend")}</Text>
+                </Pressable>
+                <Pressable
+                  style={styles.actBtn}
+                  accessibilityRole="button"
+                  testID={`unsend-cancel-${m.id}`}
+                  onPress={() => setUnsendAsk(null)}
+                >
+                  <Text style={styles.actText}>{t("ai_cancel")}</Text>
+                </Pressable>
               </View>
             ) : null}
             {/* 送出狀態（ADR-0095）：與桌面同一套——沙漏／閉眼／半開眼／張開眼（主色）／紅色重試。

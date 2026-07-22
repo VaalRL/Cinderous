@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { KIND } from "./constants.js";
-import { deletionTarget, wrapDeletion } from "./deletion.js";
+import { deletionTarget, deletionTraceless, wrapDeletion } from "./deletion.js";
 import { generateSecretKey, getPublicKey } from "./keys.js";
 import { openWrap } from "./nip59.js";
 
@@ -33,5 +33,13 @@ describe("收回訊息（NIP-09，Gift Wrap 包封）", () => {
     expect(sender).toBe(alicePk);
     expect(rumor.kind).toBe(KIND.DELETE);
     expect(deletionTarget(rumor)).toBe("msg-1"); // 指向同一則 → 那台也會 markDeleted
+  });
+
+  it("無痕收回（ADR-0234）：traceless 帶 purge tag；預設不帶", () => {
+    const plain = openWrap(wrapDeletion(aliceSk, bobPk, "t1").events[0]!, bobSk).rumor;
+    expect(deletionTraceless(plain)).toBe(false);
+    const purge = openWrap(wrapDeletion(aliceSk, bobPk, "t1", { traceless: true }).events[0]!, bobSk).rumor;
+    expect(deletionTraceless(purge)).toBe(true);
+    expect(deletionTarget(purge)).toBe("t1"); // 目標不受旗標影響
   });
 });

@@ -18,11 +18,17 @@ export function wrapDeletion(
   /** 收件人；群組傳成員清單（扇出），1:1 傳單一 pubkey。 */
   recipients: PubkeyHex | PubkeyHex[],
   targetEventId: string,
-  opts: { now?: number } = {},
+  opts: { now?: number; traceless?: boolean } = {},
 ): WrappedMessage {
   const nowSec = opts.now ?? Math.floor(Date.now() / 1000);
   return wrapForBoth(
-    { kind: KIND.DELETE, created_at: nowSec, tags: [["e", targetEventId]], content: "" },
+    {
+      kind: KIND.DELETE,
+      created_at: nowSec,
+      // 無痕收回（ADR-0234）：`purge` tag＝收件端整行移除、不留「訊息已收回」佔位。
+      tags: [["e", targetEventId], ...(opts.traceless ? [["purge"]] : [])],
+      content: "",
+    },
     senderSk,
     recipients,
     nowSec + DEFAULT_TTL_SECONDS,
@@ -32,4 +38,9 @@ export function wrapDeletion(
 /** 從刪除 rumor 取出其指向的目標訊息 id（`e` tag）。 */
 export function deletionTarget(rumor: Rumor): string | undefined {
   return rumor.tags.find((t) => t[0] === "e")?.[1];
+}
+
+/** 無痕收回旗標（ADR-0234）：收件端整行移除、不留佔位；舊客戶端不認得則退回佔位（無害降級）。 */
+export function deletionTraceless(rumor: Rumor): boolean {
+  return rumor.tags.some((t) => t[0] === "purge");
 }

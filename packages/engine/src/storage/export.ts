@@ -119,6 +119,9 @@ export async function exportRecords(
   const nameOf = new Map<string, string>();
   for (const c of storage.loadContacts()) nameOf.set(c.pubkey, c.name);
   const deleted = new Set(storage.loadDeleted());
+  // 無痕收回（ADR-0234）：匯出也不留痕——整行剔除（一般收回仍以「（已收回）」佔位）。
+  const purged = new Set(storage.loadPurged());
+  for (const c of convos) c.messages = c.messages.filter((m) => !purged.has(m.id));
   const reactions = new Map<string, string[]>();
   for (const r of storage.loadReactions()) {
     const list = reactions.get(r.messageId) ?? [];

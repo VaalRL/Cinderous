@@ -40,6 +40,8 @@ export class MemoryStorage implements AppStorage {
   private readonly convos = new Map<string, Convo>();
   private reactions: StoredReaction[] = [];
   private readonly deleted = new Set<string>();
+  /** 無痕收回（ADR-0234）：UI 整行移除、不留佔位。 */
+  private readonly purged = new Set<string>();
   private blocked: StoredContact[] = [];
   /** 訊息請求（ADR-0121）：陌生人傳來的訊息，等使用者裁示。 */
   private requests: StoredContact[] = [];
@@ -208,7 +210,10 @@ export class MemoryStorage implements AppStorage {
   private pruneOrphans(messageIds: Set<string>): void {
     if (messageIds.size === 0) return;
     this.reactions = this.reactions.filter((r) => !messageIds.has(r.messageId));
-    for (const id of messageIds) this.deleted.delete(id);
+    for (const id of messageIds) {
+      this.deleted.delete(id);
+      this.purged.delete(id);
+    }
   }
   remapContact(from: string, to: string): void {
     if (from === to) return;
@@ -362,6 +367,12 @@ export class MemoryStorage implements AppStorage {
     }
     return undefined;
   }
+  markPurged(messageId: string): void {
+    this.purged.add(messageId);
+  }
+  loadPurged(): string[] {
+    return [...this.purged];
+  }
   loadGroups(): StoredGroup[] {
     return this.groups.map((g) => ({ ...g, members: [...g.members] }));
   }
@@ -419,6 +430,7 @@ export class MemoryStorage implements AppStorage {
       messages,
       reactions: [...this.reactions],
       deleted: [...this.deleted],
+      purged: [...this.purged], // ADR-0234
       groups: this.groups.map((g) => ({ ...g, members: [...g.members] })),
       bootstrapList: this.bootstrapList,
       customAssets: [...this.customAssets], // ADR-0220
@@ -448,6 +460,8 @@ export class MemoryStorage implements AppStorage {
     this.reactions = [...s.reactions];
     this.deleted.clear();
     for (const id of s.deleted) this.deleted.add(id);
+    this.purged.clear();
+    for (const id of s.purged ?? []) this.purged.add(id); // 舊快照無此欄位（ADR-0234）
     this.groups = s.groups.map((g) => ({ ...g, members: [...g.members] }));
     this.bootstrapList = s.bootstrapList;
     this.customAssets = [...(s.customAssets ?? [])]; // 舊快照無此欄位（ADR-0220）

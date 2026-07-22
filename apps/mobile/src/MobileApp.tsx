@@ -184,6 +184,8 @@ export function MobileApp({
   const [reactions, setReactions] = useState<Record<string, string[]>>({});
   /** 已收回的訊息（NIP-09）。收回是**隱私**功能——不同步的話，在桌面收回的訊息會留在手機上。 */
   const [unsent, setUnsent] = useState<Set<string>>(new Set());
+  /** 無痕收回（ADR-0234）：整行移除、不留佔位（unsent 是佔位「（已收回）」）。 */
+  const [purged, setPurged] = useState<Set<string>>(new Set());
   /** 封鎖名單：被封鎖者的訊息不再收，且移出聯絡人。 */
   const [blocked, setBlocked] = useState<BlockedContact[]>([]);
   /** 訊息請求（ADR-0121）：陌生人傳來訊息但尚未接受。**不是聯絡人**。 */
@@ -505,8 +507,8 @@ export function MobileApp({
           if (cur.includes(emoji)) return prev;
           return { ...prev, [messageId]: [...cur, emoji] };
         }),
-      onUnsend: (messageId) =>
-        setUnsent((prev) => {
+      onUnsend: (messageId, traceless) =>
+        (traceless ? setPurged : setUnsent)((prev) => {
           if (prev.has(messageId)) return prev;
           const next = new Set(prev);
           next.add(messageId);
@@ -771,9 +773,9 @@ export function MobileApp({
   const react = (messageId: string, emoji: string): void => {
     if (activeId) backendRef.current?.sendReaction?.(activeId, messageId, emoji);
   };
-  /** 收回自己送出的訊息（NIP-09）。 */
-  const unsend = (messageId: string): void => {
-    if (activeId) backendRef.current?.unsendMessage?.(activeId, messageId);
+  /** 收回自己送出的訊息（NIP-09）；`traceless`＝無痕收回（ADR-0234）。 */
+  const unsend = (messageId: string, traceless?: boolean): void => {
+    if (activeId) backendRef.current?.unsendMessage?.(activeId, messageId, traceless);
   };
   /** 封鎖／解除封鎖。封鎖會一併移出聯絡人並清掉該對話（含封存，ADR-0111）。 */
   const block = (pubkey: string): void => {
@@ -1273,7 +1275,8 @@ export function MobileApp({
           // 時強制重掛，重置 ttl/draft/replyTarget/面板——避免燒毀效期殘留到別的對話。
           key={activeId}
           name={group ? group.name : contact ? contactLabel(contact) : activeId}
-          messages={convos[activeId] ?? []}
+          // 無痕收回（ADR-0234）：進畫面前整行剔除（相簿/串/回覆數一致看不到）。
+          messages={(convos[activeId] ?? []).filter((m) => !purged.has(m.id))}
           onSend={send}
           onBack={back}
           reactions={reactions}

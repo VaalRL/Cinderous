@@ -255,6 +255,8 @@ export interface ConversationProps {
   reactions?: Record<string, string[]>;
   /** 已收回（NIP-09）的訊息 id 集合。 */
   unsent?: Set<string>;
+  /** 無痕收回（ADR-0234）：這些訊息整行移除、不留佔位（unsent 才是佔位）。 */
+  purged?: Set<string>;
   /** 已到期（限時訊息）的訊息 id 集合。 */
   expired?: Set<string>;
   onSend: (text: string, ttlSeconds?: number, mentions?: string[], replyTo?: string, alsoMain?: boolean) => void;
@@ -268,8 +270,8 @@ export interface ConversationProps {
   onNudge: () => void;
   /** 對某訊息送出 emoji 回應（未提供則不顯示回應功能）。 */
   onReact?: (messageId: string, emoji: string) => void;
-  /** 收回自己送出的某訊息（未提供則不顯示收回功能）。 */
-  onUnsend?: (messageId: string) => void;
+  /** 收回自己送出的某訊息（未提供則不顯示收回功能）；`traceless`＝無痕收回（ADR-0234）。 */
+  onUnsend?: (messageId: string, traceless?: boolean) => void;
   /** 檢視此對話時呼叫（供送出已讀回條；ADR-0058）。開窗與新訊息到達時觸發。 */
   onMarkRead?: () => void;
   /** 以 P2P 傳送檔案（未提供則不顯示檔案功能）。 */
@@ -429,7 +431,12 @@ function renderRichText(
 export function ConversationWindow(props: ConversationProps): JSX.Element {
   const { t } = useI18n();
   const { confirm, alert, prompt } = useDialog(); // 統一自訂對話框（ADR-0139）
-  const { self, contact, messages } = props;
+  const { self, contact } = props;
+  // 無痕收回（ADR-0234）：整行剔除——主列表、串面板、相簿、回覆數全部一致看不到。
+  const messages = useMemo(
+    () => (props.purged && props.purged.size > 0 ? props.messages.filter((m) => !props.purged!.has(m.id)) : props.messages),
+    [props.messages, props.purged],
+  );
   // 送出端威脅警示（ADR-0231 P3）：命中已知惡意連結→警示（可關）；嚴格模式→阻止送出。
   const threat = useThreat();
   const threatSendAllowed = async (body: string): Promise<boolean> => {
@@ -576,6 +583,15 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
   const [threadText, setThreadText] = useState("");
   /** 串回覆「同時傳到主對話」勾選（ADR-0232，仿 Slack）；每次送出後重置。 */
   const [threadAlsoMain, setThreadAlsoMain] = useState(false);
+  /** 收回確認彈窗（ADR-0234）：目標訊息 id；含「無痕收回」勾選（每次開窗重置）。 */
+  const [unsendAsk, setUnsendAsk] = useState<string | null>(null);
+  const [unsendTraceless, setUnsendTraceless] = useState(false);
+  const askUnsend = props.onUnsend
+    ? (id: string) => {
+        setUnsendTraceless(false);
+        setUnsendAsk(id);
+      }
+    : undefined;
   /** 長訊息詳情面板：開啟中的訊息 id（null＝未開）。與對話串面板互斥（共用右側槽位）。 */
   const [detailMsgId, setDetailMsgId] = useState<string | null>(null);
   /** 開右側面板：兩者互斥（Slack 風，右側一次只一個）。 */
@@ -1387,7 +1403,7 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
               unsent={props.unsent?.has(m.id) ?? false}
               expired={props.expired?.has(m.id) ?? false}
               onReact={props.onReact}
-              onUnsend={props.onUnsend}
+              onUnsend={askUnsend}
               onView={setLightbox}
               ownedIds={ownedIds} getBlob={getBlob}
               onOwnSticker={acquireSticker}
@@ -2025,6 +2041,49 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
       </div>
       )}
 
+      {/* 收回確認彈窗（ADR-0234）：確認＋「無痕收回」勾選（勾＝整行消失不留佔位）。 */}
+      {unsendAsk !== null ? (
+        <div className="modal" role="dialog" aria-modal="true" aria-label={t("unsend_confirmTitle")} onClick={() => setUnsendAsk(null)}>
+          <div className="modal__box win" onClick={(e) => e.stopPropagation()}>
+            <div className="win__title">
+              <span>{t("unsend_confirmTitle")}</span>
+              <span className="spacer" />
+              <span className="win__btn" role="button" aria-label={t("convo_close")} onClick={() => setUnsendAsk(null)}>
+                ×
+              </span>
+            </div>
+            <div className="unsendask" data-testid="unsend-confirm">
+              <p>{t("unsend_confirmBody")}</p>
+              <label className="unsendask__opt">
+                <input
+                  type="checkbox"
+                  data-testid="unsend-traceless"
+                  checked={unsendTraceless}
+                  onChange={(e) => setUnsendTraceless(e.target.checked)}
+                />
+                <span>{t("unsend_traceless")}</span>
+              </label>
+              <p className="unsendask__hint">{t("unsend_tracelessHint")}</p>
+              <div className="unsendask__row">
+                <button
+                  type="button"
+                  data-testid="unsend-confirm-go"
+                  onClick={() => {
+                    props.onUnsend?.(unsendAsk, unsendTraceless || undefined);
+                    setUnsendAsk(null);
+                  }}
+                >
+                  {t("convo_unsend")}
+                </button>
+                <button type="button" onClick={() => setUnsendAsk(null)}>
+                  {t("ai_cancel")}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {showAlbum && (
         <div className="modal" role="dialog" aria-modal="true" aria-label={t("album_open")} onClick={() => setShowAlbum(false)}>
           <div className="modal__box win album" onClick={(e) => e.stopPropagation()}>
@@ -2199,7 +2258,7 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
                 unsent={props.unsent?.has(m.id) ?? false}
                 expired={props.expired?.has(m.id) ?? false}
                 onReact={props.onReact}
-                onUnsend={props.onUnsend}
+                onUnsend={askUnsend}
                 onView={setLightbox}
                 ownedIds={ownedIds} getBlob={getBlob}
                 onOwnSticker={acquireSticker}
@@ -2298,7 +2357,7 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
               unsent={props.unsent?.has(detailMsg.id) ?? false}
               expired={props.expired?.has(detailMsg.id) ?? false}
               onReact={props.onReact}
-              onUnsend={props.onUnsend}
+              onUnsend={askUnsend}
               onView={setLightbox}
               ownedIds={ownedIds} getBlob={getBlob}
               onOwnSticker={acquireSticker}

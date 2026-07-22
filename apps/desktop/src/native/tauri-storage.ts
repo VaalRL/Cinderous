@@ -408,6 +408,13 @@ export class TauriStorage implements AppStorage {
   findMessage(messageId: string): StoredMessage | undefined {
     return this.mem.findMessage(messageId);
   }
+  markPurged(messageId: string): void {
+    this.mem.markPurged(messageId);
+    this.persist(META);
+  }
+  loadPurged(): string[] {
+    return this.mem.loadPurged();
+  }
   loadReadAt(): Record<string, number> {
     return this.mem.loadReadAt();
   }

@@ -156,6 +156,7 @@ export class LocalStorage implements AppStorage {
       messages,
       reactions: read<StoredReaction[]>(this.k("reactions"), [], this.dek),
       deleted: read<string[]>(this.k("deleted"), [], this.dek),
+      purged: read<string[]>(this.k("purged"), [], this.dek), // ADR-0234
       groups,
       bootstrapList: read<StoredBootstrapList | null>(this.k("bootstrapList"), null, this.dek),
       customAssets: read<CustomAsset[]>(this.k("customAssets"), [], this.dek), // ADR-0220
@@ -179,6 +180,7 @@ export class LocalStorage implements AppStorage {
   private writeOrphanSweep(): void {
     write(this.k("reactions"), this.mem.loadReactions(), this.dek);
     write(this.k("deleted"), this.mem.loadDeleted(), this.dek);
+    write(this.k("purged"), this.mem.loadPurged(), this.dek); // ADR-0234
   }
 
   loadIdentity(): StoredIdentity | null {
@@ -359,6 +361,13 @@ export class LocalStorage implements AppStorage {
   }
   findMessage(messageId: string): StoredMessage | undefined {
     return this.mem.findMessage(messageId);
+  }
+  markPurged(messageId: string): void {
+    this.mem.markPurged(messageId);
+    write(this.k("purged"), this.mem.loadPurged(), this.dek);
+  }
+  loadPurged(): string[] {
+    return this.mem.loadPurged();
   }
   loadDeleted(): string[] {
     return this.mem.loadDeleted();

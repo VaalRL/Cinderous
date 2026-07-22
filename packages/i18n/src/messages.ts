@@ -614,6 +614,11 @@ export interface Messages {
   thread_alsoMainBadge: string;
   convo_copy: string;
   convo_copied: string;
+  /** 收回確認彈窗與無痕收回（ADR-0234）。 */
+  unsend_confirmTitle: string;
+  unsend_confirmBody: string;
+  unsend_traceless: string;
+  unsend_tracelessHint: string;
   thread_replies: string;
   /** 行動端內嵌回覆（ADR-0136）。 */
   reply_label: string;
@@ -1292,6 +1297,10 @@ const zhHant: Messages = {
   thread_alsoMainBadge: "同時顯示於主對話的討論串回覆（點擊開啟討論串）",
   convo_copy: "複製文字",
   convo_copied: "已複製",
+  unsend_confirmTitle: "收回訊息",
+  unsend_confirmBody: "確定要收回這則訊息嗎？雙方都將看不到內容。",
+  unsend_traceless: "無痕收回（不留下「訊息已收回」痕跡）",
+  unsend_tracelessHint: "勾選後訊息將直接消失；未勾選則保留「訊息已收回」佔位。舊版客戶端仍可能顯示佔位。",
   thread_replies: "{count} 則回覆",
   reply_label: "回覆",
   reply_cancel: "取消回覆",
@@ -1964,6 +1973,10 @@ const en: Messages = {
   thread_alsoMainBadge: "Thread reply also shown in the main conversation (click to open thread)",
   convo_copy: "Copy text",
   convo_copied: "Copied",
+  unsend_confirmTitle: "Unsend message",
+  unsend_confirmBody: "Unsend this message? Neither side will see its content.",
+  unsend_traceless: "Traceless unsend (leave no “message unsent” placeholder)",
+  unsend_tracelessHint: "When checked the message disappears entirely; otherwise a placeholder remains. Older clients may still show a placeholder.",
   thread_replies: "{count} replies",
   reply_label: "Reply",
   reply_cancel: "Cancel reply",

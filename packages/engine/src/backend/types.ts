@@ -177,7 +177,8 @@ export interface ChatBackendEvents {
   /** 某訊息收到 emoji 回應（`mine` 表示是否為自己送出）。 */
   onReaction?(messageId: string, emoji: string, mine: boolean): void;
   /** 某訊息被收回（NIP-09），應顯示為「已收回」。 */
-  onUnsend?(messageId: string): void;
+  /** 訊息被收回；`traceless`＝無痕收回（ADR-0234）：UI 整行移除、不留「已收回」佔位。 */
+  onUnsend?(messageId: string, traceless?: boolean): void;
   /** 自己送出的某訊息送達/已讀狀態更新（ADR-0058；含 `failed`，ADR-0095）。 */
   onMessageStatus?(contact: PubkeyHex, messageId: string, status: MessageStatus): void;
   /**
@@ -308,7 +309,8 @@ export interface ChatBackend {
   /** 對某訊息送出 emoji 回應（NIP-25）。 */
   sendReaction?(to: PubkeyHex, messageId: string, emoji: string): void;
   /** 收回（刪除）自己送出的某訊息（NIP-09）。 */
-  unsendMessage?(to: PubkeyHex, messageId: string): void;
+  /** 收回自己送出的訊息（NIP-09）；`traceless`＝無痕收回（ADR-0234，不留佔位）。 */
+  unsendMessage?(to: PubkeyHex, messageId: string, traceless?: boolean): void;
   /**
    * 使用者**看到**了這個對話：推進本機已讀水位（ADR-0108）**並**送出已讀回條
    * （僅在回條開啟時；ADR-0058 Tier 3）。

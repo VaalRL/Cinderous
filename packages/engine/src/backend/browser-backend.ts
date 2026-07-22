@@ -318,9 +318,9 @@ export class BrowserChatBackend implements ChatBackend {
     this.handlers?.onReaction?.(messageId, emoji, true);
   }
 
-  unsendMessage(_to: PubkeyHex, messageId: string): void {
-    // 示範模式：本機回顯收回
-    this.handlers?.onUnsend?.(messageId);
+  unsendMessage(_to: PubkeyHex, messageId: string, traceless?: boolean): void {
+    // 示範模式：本機回顯收回（無痕旗標照傳，ADR-0234）
+    this.handlers?.onUnsend?.(messageId, traceless);
   }
 
   removeContact(pubkey: PubkeyHex): void {

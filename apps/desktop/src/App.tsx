@@ -476,6 +476,8 @@ export function App(): JSX.Element {
   const [nudge, setNudge] = useState<Record<string, number>>({});
   const [reactions, setReactions] = useState<Record<string, string[]>>({});
   const [unsent, setUnsent] = useState<Set<string>>(new Set());
+  /** 無痕收回（ADR-0234）：整行移除、不留佔位（unsent 是佔位「訊息已收回」）。 */
+  const [purged, setPurged] = useState<Set<string>>(new Set());
   const [expired, setExpired] = useState<Set<string>>(new Set());
   const [blocked, setBlocked] = useState<BlockedContact[]>([]);
   /** 訊息請求（ADR-0121）：陌生人傳來訊息但尚未接受。**不是聯絡人**。 */
@@ -1057,8 +1059,8 @@ export function App(): JSX.Element {
           if (cur.includes(emoji)) return prev;
           return { ...prev, [messageId]: [...cur, emoji] };
         }),
-      onUnsend: (messageId) =>
-        setUnsent((prev) => {
+      onUnsend: (messageId, traceless) =>
+        (traceless ? setPurged : setUnsent)((prev) => {
           if (prev.has(messageId)) return prev;
           const next = new Set(prev);
           next.add(messageId);
@@ -2785,7 +2787,7 @@ export function App(): JSX.Element {
           ? { onReact: (messageId: string, emoji: string) => activeBackend.sendReaction!(pk, messageId, emoji) }
           : {};
         const unsendProps = activeBackend.unsendMessage
-          ? { onUnsend: (messageId: string) => activeBackend.unsendMessage!(pk, messageId) }
+          ? { onUnsend: (messageId: string, traceless?: boolean) => activeBackend.unsendMessage!(pk, messageId, traceless) }
           : {};
         // 企業政策（ADR-0048）：停用檔案/通話時不傳對應 handler → UI 隱藏。
         const fileProps =
@@ -2836,6 +2838,7 @@ export function App(): JSX.Element {
             messages={convos[pk] ?? []}
             reactions={reactions}
             unsent={unsent}
+            purged={purged}
             expired={expired}
             typing={(typingAt[pk] ?? 0) > Date.now() - TYPING_VISIBLE_MS}
             nudgeSignal={nudge[pk] ?? 0}

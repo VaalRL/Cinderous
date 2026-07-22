@@ -9,6 +9,7 @@ import {
   createTyping,
   decodePresence,
   deletionTarget,
+  deletionTraceless,
   type Filter,
   groupTarget,
   groupReceiptMode,
@@ -475,7 +476,7 @@ export class RelayChatBackend implements ChatBackend {
    */
   private readonly pendingReceipts = new Map<string, { from: PubkeyHex; type: ReceiptType; groupId?: string }[]>();
   /** 收回等待區（ADR-0233）：目標尚未抵達的收回（回放順序亂），訊息落地時驗證後補套用。 */
-  private readonly pendingDeletes = new Map<string, PubkeyHex[]>();
+  private readonly pendingDeletes = new Map<string, { from: PubkeyHex; traceless?: boolean }[]>();
   /** 早到群訊緩存（ADR-0131）：指向本地還不存在的群組的訊息，待加入後重放（有界）。 */
   private readonly pendingGroupMsgs = new Map<string, { sender: PubkeyHex; rumor: Rumor }[]>();
   /** 已送出的最新「已讀」水位訊息 id（避免重複送已讀回條）。
@@ -695,9 +696,12 @@ export class RelayChatBackend implements ChatBackend {
       this.seenMsg.add(r.id);
       handlers.onReaction?.(r.messageId, r.emoji, r.mine);
     }
-    // 回放已收回的訊息
+    // 回放已收回的訊息（一般＝佔位；無痕＝整行移除，ADR-0234）
     for (const id of this.storage.loadDeleted()) {
       handlers.onUnsend?.(id);
+    }
+    for (const id of this.storage.loadPurged()) {
+      handlers.onUnsend?.(id, true);
     }
     // 回放群組與其歷史訊息（同樣批次交付）
     this.emitGroups();
@@ -1323,7 +1327,8 @@ export class RelayChatBackend implements ChatBackend {
     if (rumor.kind === KIND.DELETE) {
       const target = deletionTarget(rumor);
       if (!target) return;
-      this.applyDeletion(target, sender); // 擁有者驗證（ADR-0233）：只有原寄件人能收回
+      // 擁有者驗證（ADR-0233）：只有原寄件人能收回；無痕旗標（ADR-0234）一併傳遞。
+      this.applyDeletion(target, sender, deletionTraceless(rumor));
       return;
     }
 
@@ -1470,11 +1475,11 @@ export class RelayChatBackend implements ChatBackend {
    * 群訊看 `sender`；1:1 進訊＝對話對象（`contact`）。
    * 目標尚未抵達（中繼回放順序亂）→ 暫存於等待區，訊息落地時驗證後補套用（比照 pendingReceipts）。
    */
-  private applyDeletion(target: string, from: PubkeyHex): void {
+  private applyDeletion(target: string, from: PubkeyHex, traceless?: boolean): void {
     const m = this.storage.findMessage(target);
     if (!m) {
       const queue = this.pendingDeletes.get(target) ?? [];
-      if (!queue.includes(from)) queue.push(from);
+      if (!queue.some((q) => q.from === from)) queue.push({ from, ...(traceless ? { traceless: true } : {}) });
       this.pendingDeletes.set(target, queue);
       while (this.pendingDeletes.size > 1024) {
         const oldest = this.pendingDeletes.keys().next().value;
@@ -1485,8 +1490,9 @@ export class RelayChatBackend implements ChatBackend {
     }
     const author = m.outgoing ? this.self.pubkey : (m.sender ?? m.contact);
     if (author !== from) return; // 非原寄件人 → 拒收，不標記
-    this.storage.markDeleted(target);
-    this.handlers?.onUnsend?.(target);
+    if (traceless) this.storage.markPurged(target); // 無痕（ADR-0234）：整行移除不留佔位
+    else this.storage.markDeleted(target);
+    this.handlers?.onUnsend?.(target, traceless);
   }
 
   /** 訊息落地後補套用等待中的收回（驗證同 {@link applyDeletion}）。 */
@@ -1494,7 +1500,7 @@ export class RelayChatBackend implements ChatBackend {
     const queue = this.pendingDeletes.get(messageId);
     if (!queue) return;
     this.pendingDeletes.delete(messageId);
-    for (const from of queue) this.applyDeletion(messageId, from);
+    for (const q of queue) this.applyDeletion(messageId, q.from, q.traceless);
   }
 
   /**
@@ -2487,21 +2493,25 @@ export class RelayChatBackend implements ChatBackend {
     this.readReceipts = enabled;
   }
 
-  unsendMessage(to: PubkeyHex, messageId: string): void {
+  unsendMessage(to: PubkeyHex, messageId: string, traceless?: boolean): void {
+    const mark = (): void => {
+      // 無痕（ADR-0234）＝整行移除不留佔位；一般＝佔位「訊息已收回」。
+      if (traceless) this.storage.markPurged(messageId);
+      else this.storage.markDeleted(messageId);
+      this.handlers?.onUnsend?.(messageId, traceless);
+    };
     const recipients = this.recipientsOf(to);
     if (!recipients) {
       // 空群仍要在本機收回（否則使用者按了收回卻什麼都沒發生）。
-      this.storage.markDeleted(messageId);
-      this.handlers?.onUnsend?.(messageId);
+      mark();
       return;
     }
-    const wrapped = wrapDeletion(this.sk, recipients, messageId);
+    const wrapped = wrapDeletion(this.sk, recipients, messageId, traceless ? { traceless } : {});
     // 自封副本是**必要**的（ADR-0107）：否則在手機收回的訊息，仍留在自己的電腦上。
     for (const evt of wrapped.events) this.publishReliable(evt);
     this.publishReliable(wrapped.selfCopy);
     this.seenMsg.add(wrapped.id);
-    this.storage.markDeleted(messageId);
-    this.handlers?.onUnsend?.(messageId);
+    mark();
   }
 
   sendFile(to: PubkeyHex, file: OutgoingFile, opts: { thumb?: string; savedPath?: string } = {}): string {

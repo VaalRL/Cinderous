@@ -288,6 +288,10 @@ export interface AppStorage {
   loadDeleted(): string[];
   /** 以訊息 id 跨對話尋找已存訊息（收回擁有者驗證用，ADR-0233；線性掃描——收回事件罕見）。 */
   findMessage(messageId: string): StoredMessage | undefined;
+  /** 標記某訊息為無痕收回（ADR-0234）：UI 整行移除、不留佔位。 */
+  markPurged(messageId: string): void;
+  /** 無痕收回的訊息 id 集合。 */
+  loadPurged(): string[];
   /** 群組清單（M9）。 */
   loadGroups(): StoredGroup[];
   /** 新增或更新群組（以 id 為鍵）。 */
@@ -336,6 +340,8 @@ export interface StorageSnapshot {
   messages: Record<string, StoredMessage[]>;
   reactions: StoredReaction[];
   deleted: string[];
+  /** 無痕收回（ADR-0234）；舊快照沒有這個欄位 → 匯入時容忍 `undefined`（退回 `[]`）。 */
+  purged?: string[];
   groups: StoredGroup[];
   bootstrapList: StoredBootstrapList | null;
   /** 自訂資產庫（ADR-0220）；舊快照沒有這個欄位 → 匯入時容忍 `undefined`（退回 `[]`）。 */

@@ -81,6 +81,34 @@ describe("ConversationWindow 訊息列視窗化（P0-3）", () => {
     expect(html).toContain("data-clickthread");
   });
 
+  it("無痕收回（ADR-0234）：purged 訊息整行剔除（無佔位）；unsent 才是佔位", () => {
+    const msgs: ChatMessage[] = [
+      { id: "keep", outgoing: false, text: "還在的訊息", at: 1 },
+      { id: "gone", outgoing: true, text: "無痕消失的訊息", at: 2 },
+    ];
+    const html = renderToStaticMarkup(
+      <I18nProvider locale="en">
+        <ThemeProvider>
+          <ConversationWindow
+            self={self}
+            contact={contact}
+            messages={msgs}
+            purged={new Set(["gone"])}
+            typing={false}
+            nudgeSignal={0}
+            onSend={() => {}}
+            onTyping={() => {}}
+            onNudge={() => {}}
+            onClose={() => {}}
+          />
+        </ThemeProvider>
+      </I18nProvider>,
+    );
+    expect(html).toContain("還在的訊息");
+    expect(html).not.toContain("無痕消失的訊息");
+    expect(html).not.toContain("unsent"); // 不落佔位 class
+  });
+
   it("群組視窗提供成員清單時顯示 👥 成員管理入口（M9）", () => {
     const html = renderToStaticMarkup(
       <I18nProvider>
