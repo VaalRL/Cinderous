@@ -6,14 +6,16 @@ import { defineConfig, type Plugin } from "vite";
 // 版號注入（ADR-0227 P2）：自 root package.json（SSOT）讀取為 build-time 常數 __APP_VERSION__。
 const version = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")).version as string;
 
-// 發佈 release notes（ADR-0228 P2）：build 時把 docs/releases.json 複製進 dist 根，
-// 讓官網 …/Cinderous/releases.json 可被各 app 查詢（更新偵測來源）。
+// 發佈靜態資料檔：docs/releases.json（ADR-0228 P2，更新偵測來源）與
+// docs/threat-intel.json（ADR-0231 P2，威脅情報 snapshot）複製進 dist 根，供各 app 查詢。
 function copyReleases(): Plugin {
   return {
     name: "copy-releases-json",
     apply: "build",
     closeBundle() {
-      copyFileSync(new URL("../../docs/releases.json", import.meta.url), new URL("./dist/releases.json", import.meta.url));
+      for (const f of ["releases.json", "threat-intel.json"]) {
+        copyFileSync(new URL(`../../docs/${f}`, import.meta.url), new URL(`./dist/${f}`, import.meta.url));
+      }
     },
   };
 }

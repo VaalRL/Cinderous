@@ -1,0 +1,43 @@
+name: 威脅情報 snapshot 更新（ADR-0231 P2）
+
+# 每日重建 docs/threat-intel.json（URLhaus CC0＋StevenBlack MIT，抽 registrable domain）。
+# 有變更才提交；提交會觸發 pages.yml 重新部署官網（paths 含 docs/threat-intel.json）。
+# 純 node 內建（fetch/fs），不需 pnpm install。
+on:
+  schedule:
+    - cron: "20 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: threat-intel
+  cancel-in-progress: true
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: 抓取來源並重建 snapshot
+        run: node scripts/threat-snapshot.mjs
+
+      - name: 驗證格式
+        run: node scripts/threat-snapshot.mjs --check
+
+      - name: 提交 snapshot 變更（若有）
+        run: |
+          if [ -n "$(git status --porcelain docs/threat-intel.json)" ]; then
+            git config user.name "threat-intel-bot"
+            git config user.email "bot@users.noreply.github.com"
+            git add docs/threat-intel.json
+            git commit -m "chore(threat-intel): 自動更新威脅情報 snapshot（ADR-0231 P2）"
+            git push
+          else
+            echo "snapshot 無變化，略過提交。"
+          fi

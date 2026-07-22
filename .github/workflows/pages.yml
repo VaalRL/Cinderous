@@ -15,6 +15,8 @@ on:
       - "packages/i18n/**"
       - "packages/theme/**"
       - "packages/core/**"
+      # 威脅情報 snapshot（ADR-0231 P2）：排程更新後需重新部署官網以供 app 拉取。
+      - "docs/threat-intel.json"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
 

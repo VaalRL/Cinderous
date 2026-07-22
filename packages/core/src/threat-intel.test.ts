@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { matchThreat, urlHost, type ThreatDb } from "./threat-intel.js";
+import { matchThreat, parseThreatSnapshot, urlHost, type ThreatDb } from "./threat-intel.js";
 
 const db: ThreatDb = {
   sources: [
@@ -43,5 +43,36 @@ describe("matchThreat（ADR-0231）", () => {
       ]),
     };
     expect(matchThreat(db2, "x.com").map((s) => s.id)).toEqual(["a", "b"]);
+  });
+});
+
+describe("parseThreatSnapshot（ADR-0231 P2）", () => {
+  it("合法 snapshot → ThreatDb（網域小寫、去 www.；url 可選）", () => {
+    const db2 = parseThreatSnapshot({
+      updated: "2026-07-22",
+      sources: [
+        { id: "urlhaus", name: "URLhaus", url: "https://urlhaus.abuse.ch" },
+        { id: "sb", name: "StevenBlack" },
+      ],
+      domains: { urlhaus: ["WWW.Evil.com", "bad.example"], sb: [] },
+    });
+    expect(db2).not.toBeNull();
+    expect(db2!.sources.map((s) => s.id)).toEqual(["urlhaus", "sb"]);
+    expect(db2!.sources[0]!.url).toBe("https://urlhaus.abuse.ch");
+    expect(db2!.domains.get("urlhaus")!.has("evil.com")).toBe(true);
+    expect(matchThreat(db2!, "a.bad.example").map((s) => s.id)).toEqual(["urlhaus"]);
+  });
+  it("壞形狀／空來源 → null；壞條目被略過", () => {
+    expect(parseThreatSnapshot(null)).toBeNull();
+    expect(parseThreatSnapshot("x")).toBeNull();
+    expect(parseThreatSnapshot({ sources: "no", domains: {} })).toBeNull();
+    expect(parseThreatSnapshot({ sources: [], domains: {} })).toBeNull();
+    expect(parseThreatSnapshot({ sources: [{ id: "", name: "x" }], domains: {} })).toBeNull();
+    const db2 = parseThreatSnapshot({
+      sources: [{ id: "ok", name: "OK" }, { id: 5, name: "bad" }, null],
+      domains: { ok: ["good.com", 42, ""] },
+    });
+    expect(db2!.sources.map((s) => s.id)).toEqual(["ok"]);
+    expect([...db2!.domains.get("ok")!]).toEqual(["good.com"]);
   });
 });
