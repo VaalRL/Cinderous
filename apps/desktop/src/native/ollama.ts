@@ -180,12 +180,18 @@ export function ollamaModels(cfg: OllamaConfig, io: OllamaIo = defaultOllamaIo()
   return io.models(cfg);
 }
 
-/** 存線上 provider 的 API key 到 OS 金鑰庫（不落 JS/localStorage；ADR-0062）。僅 Tauri。 */
-export async function setApiKey(provider: AiProvider, key: string): Promise<void> {
-  if (isTauri()) await invoke("ai_set_key", { provider, key });
+/**
+ * 存線上 provider 的 API key 到 OS 金鑰庫（不落 JS/localStorage；ADR-0062）。僅 Tauri。
+ *
+ * ADR-0235 H3：key **綁定該端點的主機**。舊版存成 `ai:<provider>`，於是任何呼叫
+ * `ai_generate("openai", <任意網址>, …)` 的人都能把使用者的 API key 當 Bearer token 送出去
+ * ——前端的 `ensureAllowed` 擋不住 XSS。現在換了端點就查不到 key，金鑰不會被讀出金鑰庫。
+ */
+export async function setApiKey(provider: AiProvider, endpoint: string, key: string): Promise<void> {
+  if (isTauri()) await invoke("ai_set_key", { provider, endpoint, key });
 }
 
-/** 該 provider 是否已設 API key（金鑰庫）。 */
-export function hasApiKey(provider: AiProvider): Promise<boolean> {
-  return isTauri() ? invoke<boolean>("ai_has_key", { provider }) : Promise.resolve(false);
+/** 該 provider 在**該端點**是否已設 API key（金鑰庫）。 */
+export function hasApiKey(provider: AiProvider, endpoint: string): Promise<boolean> {
+  return isTauri() ? invoke<boolean>("ai_has_key", { provider, endpoint }) : Promise.resolve(false);
 }

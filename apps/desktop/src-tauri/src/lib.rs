@@ -20,3 +20,6 @@ pub mod keyvault;
 pub mod passlock;
 // 部位檔的檔案安全原語（ADR-0119）：**無 feature 閘門**——只用 std，且是資料安全的關鍵。
 pub mod partfile;
+// AI provider API key 的端點綁定（ADR-0235 H3）：同上，**無 feature 閘門**——防止
+// 「換個 endpoint 就把 API key 送出去」是安全關鍵，必須進 `cargo test` 的預設編譯範圍。
+pub mod aikey;

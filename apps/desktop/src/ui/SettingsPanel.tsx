@@ -1475,16 +1475,21 @@ function OllamaSettings({
   };
   useEffect(() => {
     if (value.enabled) void loadModels();
-    if (provider === "openai") void hasApiKey("openai").then(setKeySet);
+    // ADR-0235 H3：key 綁端點主機 → 「是否已設」必須連端點一起問（換端點＝需重設）。
+    if (provider === "openai") void hasApiKey("openai", value.endpoint).then(setKeySet);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [value.enabled, value.endpoint, provider]);
 
-  // 切換 provider 帶入預設端點/模型；線上服務預設關「僅本機」（否則會被硬守則擋）。
-  const switchProvider = (p: AiProvider): void =>
-    onChange({ ...value, provider: p, ...PROVIDER_DEFAULTS[p], localOnly: p === "ollama" });
+  // 切換 provider 帶入預設端點/模型。
+  //
+  // ADR-0235 H4：**不再自動關掉「僅本機」**。舊版切到線上 provider 時會順手把
+  // `localOnly` 設成 false——那等於系統替使用者解除了「明文不離開裝置」這條隱私鐵則
+  // （ARCHITECTURE §1），而使用者從未明示同意。現在切過去仍是鎖住的狀態，畫面會顯示
+  // 「僅本機模式擋住了非本機端點」，使用者得自己把開關扳掉才會有文字送出去。
+  const switchProvider = (p: AiProvider): void => onChange({ ...value, provider: p, ...PROVIDER_DEFAULTS[p] });
   const saveKey = async (): Promise<void> => {
     if (!apiKey.trim()) return;
-    await setApiKey(provider, apiKey.trim());
+    await setApiKey(provider, value.endpoint, apiKey.trim());
     setApiKeyInput("");
     setKeySet(true);
   };

