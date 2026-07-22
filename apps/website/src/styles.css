@@ -102,6 +102,18 @@ h1, h2, h3 { text-wrap: balance; }
 .btn:hover { border-color: color-mix(in srgb, var(--accent) 50%, var(--border)); }
 .btn--primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); box-shadow: 0 6px 20px var(--glow); }
 
+/* ── hero icon 按鈕列（ADR-0229）── */
+.cta--icons { gap: 14px; }
+.iconbtn { position: relative; display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; min-width: 56px; min-height: 56px; padding: 8px; border-radius: 14px; border: 1px solid var(--border); background: var(--panel); color: var(--ink); cursor: pointer; font-family: inherit; }
+.iconbtn:hover, .iconbtn:focus-visible { border-color: color-mix(in srgb, var(--accent) 50%, var(--border)); }
+.iconbtn--primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); box-shadow: 0 6px 20px var(--glow); }
+.iconbtn--disabled { filter: grayscale(1); opacity: 0.55; cursor: not-allowed; }
+/* 桌面：icon-only，標籤藏起（手機媒體查詢再顯示）。 */
+.iconbtn__label { display: none; font-size: 12.5px; font-weight: 700; }
+/* 自訂 CSS tooltip：hover／鍵盤聚焦顯示；不擋滑鼠。 */
+.iconbtn__tip { position: absolute; bottom: calc(100% + 8px); left: 50%; transform: translateX(-50%); padding: 5px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel); color: var(--ink); font-size: 12.5px; font-weight: 600; white-space: nowrap; opacity: 0; pointer-events: none; transition: opacity 0.15s; z-index: 5; box-shadow: 0 4px 14px var(--glow); }
+.iconbtn:hover .iconbtn__tip, .iconbtn:focus-visible .iconbtn__tip { opacity: 1; }
+
 /* ── Sections ── */
 .sec { padding: 60px 0; border-top: 1px solid var(--border); }
 .sec--plain { border-top: none; }
@@ -153,6 +165,10 @@ th { color: var(--muted); font-weight: 600; background: var(--surface); }
   .hero__sub { font-size: 17px; }
   .nav__inner { flex-wrap: wrap; }
   .sec h2 { font-size: 25px; }
+  /* 手機（ADR-0229）：觸控無 hover → icon＋可見標籤並列、tooltip 停用；觸控目標 ≥44px。 */
+  .iconbtn { flex-direction: row; min-height: 44px; min-width: 0; padding: 10px 14px; }
+  .iconbtn__label { display: inline; }
+  .iconbtn__tip { display: none; }
 }
 @media (max-width: 440px) {
   .grid--4 { grid-template-columns: 1fr; }

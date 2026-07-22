@@ -26,7 +26,14 @@ export interface Copy {
   hero_eyebrow: string;
   hero_title: string;
   hero_subtitle: string;
-  hero_download: string;
+  /** hero icon 按鈕列（ADR-0229）：可見標籤（手機）＋tooltip／aria-label 文案。 */
+  hero_ic_windows: string;
+  hero_ic_mac: string;
+  hero_ic_mobile: string;
+  hero_ic_web: string;
+  hero_ic_github: string;
+  hero_tip_windows: string;
+  hero_soon: string;
   hero_webapp: string;
   hero_tech: string;
   hero_github: string;
@@ -145,7 +152,13 @@ const zhHant: Copy = {
   hero_title: "Cinderous",
   hero_subtitle:
     "通訊本該屬於說話的人，而不是中間的平台。Cinderous 讓你在沒有伺服器帳號、沒有守門人的前提下，安全地和你邀來的人說話——像夜裡森林深處的一簇營火，只有圍坐的人聽得見。",
-  hero_download: "下載桌面版",
+  hero_ic_windows: "Windows",
+  hero_ic_mac: "macOS",
+  hero_ic_mobile: "行動版",
+  hero_ic_web: "網頁版",
+  hero_ic_github: "GitHub",
+  hero_tip_windows: "下載 Windows 版",
+  hero_soon: "即將推出",
   hero_webapp: "在瀏覽器開啟",
   hero_tech: "看技術原理",
   hero_github: "在 GitHub 檢視原始碼",
@@ -282,7 +295,13 @@ const en: Copy = {
   hero_title: "Cinderous",
   hero_subtitle:
     "Conversations should belong to the people having them — not to the platform in the middle. Cinderous lets you talk safely with the people you invite, with no server account and no gatekeeper — like a campfire deep in a night forest, heard only by those sitting around it.",
-  hero_download: "Download desktop",
+  hero_ic_windows: "Windows",
+  hero_ic_mac: "macOS",
+  hero_ic_mobile: "Mobile",
+  hero_ic_web: "Web app",
+  hero_ic_github: "GitHub",
+  hero_tip_windows: "Download for Windows",
+  hero_soon: "Coming soon",
   hero_webapp: "Open in browser",
   hero_tech: "How it works",
   hero_github: "View source on GitHub",
