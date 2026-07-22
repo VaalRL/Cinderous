@@ -2,6 +2,17 @@ name: Relay 健康檢查（ADR-0039）
 
 # 每小時探測引導 relay 清單、剔除逾時節點、產生簽章清單事件。
 # 信任根＝維護者金鑰（MAINTAINER_NSEC secret）；本 workflow 僅為發佈通道。
+#
+# ⚠️ 這是本 repo 風險最高的 workflow（ADR-0235 C5）。`MAINTAINER_NSEC` 是**客戶端釘死的
+# 簽章清單信任根**——它一旦外流，攻擊者就能簽發假的 relay 清單，把全體使用者的中繼池
+# 導向自己的節點。已套用的緩解：
+#   1. 所有 action 釘 commit SHA（可變 tag ＝上游被盜即為我們的 RCE）
+#   2. `--ignore-scripts`（相依的 install 腳本不執行）
+#   3. secret 只注入**簽章那一步**的 env，其餘步驟拿不到
+#   4. 明確的最小 `permissions`
+#
+# 殘餘風險：`bootstrap:run` 仍在 runner 上執行整棵相依樹的程式碼。要徹底移除這個風險，
+# 唯一的辦法是**離線簽章**（維護者本機簽好、只把結果推上來）——見 ADR-0235「後續行動」。
 on:
   schedule:
     - cron: "0 * * * *"
@@ -19,15 +30,15 @@ jobs:
   health:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       # 版本由 package.json 的 `packageManager` 決定；再指定 version 會觸發
       # 「Multiple versions of pnpm specified」而讓排程在 setup 就失敗（見 ci.yml 同一修正）。
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: pnpm
-      - run: pnpm install --frozen-lockfile
+      - run: pnpm install --frozen-lockfile --ignore-scripts
 
       - name: 探測 + 更新清單 + 簽章
         env:

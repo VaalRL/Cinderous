@@ -5,34 +5,76 @@ on:
     branches: [main]
   pull_request:
 
+# 最小權限（ADR-0235 M2）：CI 只需要讀出原始碼。未宣告時會沿用 repo 的預設 token 權限
+# ——那可能是讀寫，等於每個 job（含第三方 action）都握著能推 main 的 token。
+permissions:
+  contents: read
+
 jobs:
   typescript:
     name: TypeScript（typecheck + test + build）
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      # Action 一律釘 commit SHA（ADR-0235 C5）：`@v4` 是**可變** tag，上游帳號被盜或 tag
+      # 被移動，就等於在我們的 runner 上執行任意程式碼。註解保留人類看得懂的版本。
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       # 版本由 package.json 的 `packageManager`（pnpm@10.x）決定；這裡再指定 version 會觸發
       # 「Multiple versions of pnpm specified」而讓整條 CI 卡在 setup（測試根本沒跑到）。
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
           cache: pnpm
-      - run: pnpm install --frozen-lockfile
+      # `--ignore-scripts`（ADR-0235 C5）：不執行任何相依的 install 生命週期腳本。
+      # pnpm 10 預設已封鎖（無 `onlyBuiltDependencies`），這行是把它變成**明示的契約**
+      # ——日後有人為了某個套件加上允許清單時，會先看到這裡。
+      - run: pnpm install --frozen-lockfile --ignore-scripts
       - run: pnpm version:check # ADR-0227：全平台版號須與 SSOT（root package.json）一致，漂移即 fail
       - run: pnpm -r typecheck
       - run: pnpm -r test
       - run: pnpm --filter @cinderous/desktop build
 
-  rust:
-    name: Rust（cargo test — 出貨密碼學）
+  audit:
+    name: 相依弱點掃描（ADR-0235 M2）
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      # default feature 現為 `passlock`（含 encstore），故這行測的是**真正會出貨**的
-      # 加密儲存與本地密碼/救援（ADR-0105）。在此之前 default 是空的，`cargo test`
-      # 只跑到 ipc/session/reconnect 那些從未出貨的死碼——13 個真測試一次都沒跑過。
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      # 硬閘：**會出貨給使用者**的相依必須零已知弱點。這是一個 E2E 加密通訊軟體，
+      # 產品相依樹裡的洞不該等到有人回報才知道。
+      - name: 出貨相依（硬閘）
+        run: pnpm audit --prod --audit-level low
+      # 開發工具鏈（vite dev server／vitest UI／esbuild）不隨產品出貨，其弱點多半要求
+      # 「跑著 dev server 且被惡意網站造訪」。仍然要**看得見**——但不讓它變成一盞永遠亮著、
+      # 大家學會忽略的紅燈。目前已知：vite 5→6、vitest 2→3 的升級債（見 ADR-0235 後續行動）。
+      - name: 開發工具鏈（僅報告）
+        continue-on-error: true
+        run: pnpm audit --audit-level high
+      - name: cargo audit（Rust 出貨密碼學相依）
+        run: |
+          cargo install cargo-audit --locked
+          cargo audit
+        working-directory: apps/desktop/src-tauri
+
+  rust:
+    name: Rust（cargo test + clippy — 出貨密碼學）
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          components: clippy
+      # default feature 現為 `passlock`（含 encstore、partfile、aikey），故這行測的是**真正會出貨**的
+      # 加密儲存、本地密碼/救援、檔案安全原語與 AI 金鑰端點綁定（ADR-0105/0119/0235）。
+      # 在此之前 default 是空的，`cargo test` 只跑到 ipc/session/reconnect 那些從未出貨的死碼
+      # ——13 個真測試一次都沒跑過。
       # `keyring` 不入 default：其測試會存取真實 OS 金鑰庫，CI 容器裡不可用。
       - run: cargo test
+        working-directory: apps/desktop/src-tauri
+      - run: cargo clippy --all-targets -- -D warnings
         working-directory: apps/desktop/src-tauri
