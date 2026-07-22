@@ -51,6 +51,7 @@ import {
   verifyRelayList,
   PRESENCE_SIGNAL_KIND,
   SDP_SIGNAL_KIND,
+  alsoMain,
   threadRoot,
   unwrapMessage,
   selfCopyTarget,
@@ -1412,6 +1413,7 @@ export class RelayChatBackend implements ChatBackend {
     const extra = {
       ...(expiresAt !== undefined ? { expiresAt } : {}),
       ...(replyTo !== undefined ? { replyTo } : {}),
+      ...(alsoMain(rumor) ? { alsoMain: true } : {}), // 同傳主對話旗標（ADR-0232）
     };
     // 自封副本＝我在另一台裝置發的訊息 → outgoing，狀態 `sent`（它確實已進中繼）。
     // 之後對方的回條本來就定址給我 → **我的每一台裝置都收得到** → 狀態自動收斂為送達/已讀。
@@ -1538,6 +1540,7 @@ export class RelayChatBackend implements ChatBackend {
       ...(expiresAt !== undefined ? { expiresAt } : {}),
       ...(mine ? { mentionsMe: true } : {}),
       ...(replyTo !== undefined ? { replyTo } : {}),
+      ...(alsoMain(rumor) ? { alsoMain: true } : {}), // 同傳主對話旗標（ADR-0232）
     };
     // 群訊識別用**內層 rumor.id**（跨成員一致、openWrap 已驗雜湊）；外層 wrap id 每人不同，
     // 拿來當 id 會讓回條/引用對不回發訊者（ADR-0095 修正；`eventId` 僅用於 wrap 去重）。
@@ -2041,7 +2044,7 @@ export class RelayChatBackend implements ChatBackend {
     this.broadcastProfile();
   }
 
-  sendMessage(to: PubkeyHex, text: string, ttlSeconds?: number, mentions?: PubkeyHex[], replyTo?: string): void {
+  sendMessage(to: PubkeyHex, text: string, ttlSeconds?: number, mentions?: PubkeyHex[], replyTo?: string, alsoMain?: boolean): void {
     // 你主動回覆一個請求＝你接受了他（ADR-0121）。不接受就送訊息會很怪：對方在你的清單裡
     // 永遠是「請求」，你卻在跟他聊天。**主動聯絡的人就是聯絡人。**
     if (this.requests.some((r) => r.pubkey === to)) this.acceptRequest(to);
@@ -2058,11 +2061,13 @@ export class RelayChatBackend implements ChatBackend {
       ...(this.homeUrl ? { relayHint: this.homeUrl } : {}),
       ...(mentions && mentions.length > 0 ? { mentions } : {}),
       ...(replyTo ? { replyTo } : {}),
+      ...(replyTo && alsoMain ? { alsoMain: true } : {}),
     });
     const id = wrapped.id; // 內層 rumor id（ADR-0107）：對方與自己的其他裝置都指涉同一則
     const extra = {
       ...(disappearAt !== undefined ? { expiresAt: disappearAt * 1000 } : {}),
       ...(replyTo ? { replyTo } : {}),
+      ...(replyTo && alsoMain ? { alsoMain: true } : {}),
     };
     const message = { id, contact: to, outgoing: true, text, at: now * 1000, status: "sending" as const, ...extra };
     this.seenMsg.add(id); // 自封副本回流到本機時據此丟棄（ADR-0107）
@@ -2951,7 +2956,7 @@ export class RelayChatBackend implements ChatBackend {
     this.emitGroups();
   }
 
-  sendGroupMessage(groupId: string, text: string, mentions?: PubkeyHex[], replyTo?: string): void {
+  sendGroupMessage(groupId: string, text: string, mentions?: PubkeyHex[], replyTo?: string, alsoMain?: boolean): void {
     const group = this.groups.find((g) => g.id === groupId);
     if (!group) return;
     if (!canPostToGroup(group, this.self.pubkey)) return; // 公告群僅管理者可發（ADR-0049）
@@ -2965,10 +2970,15 @@ export class RelayChatBackend implements ChatBackend {
       ...(this.homeUrl ? { relayHint: this.homeUrl } : {}),
       ...(validMentions.length > 0 ? { mentions: validMentions } : {}),
       ...(replyTo ? { replyTo } : {}),
+      ...(replyTo && alsoMain ? { alsoMain: true } : {}),
     });
     this.seenMsg.add(wrapped.id);
     const id = wrapped.id;
-    const extra = { sender: this.self.pubkey, ...(replyTo ? { replyTo } : {}) };
+    const extra = {
+      sender: this.self.pubkey,
+      ...(replyTo ? { replyTo } : {}),
+      ...(replyTo && alsoMain ? { alsoMain: true } : {}),
+    };
     const status = "sending" as const;
     const message = { id, contact: groupId, outgoing: true, text, at: now * 1000, status, ...extra };
     this.storage.appendMessage(message);

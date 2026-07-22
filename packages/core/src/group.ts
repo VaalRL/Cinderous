@@ -13,7 +13,7 @@ import { getPublicKey, type PubkeyHex, type SecretKey } from "./keys.js";
 import { mentionTags } from "./mention.js";
 import type { Rumor, RumorInput } from "./nip59.js";
 import { sealAndWrap } from "./nip59.js";
-import { replyTag } from "./thread.js";
+import { alsoMainTag, replyTag } from "./thread.js";
 
 const DAY_SECONDS = 86_400;
 const DEFAULT_TTL_SECONDS = 7 * DAY_SECONDS;
@@ -159,7 +159,7 @@ export function wrapGroupMessage(
   senderSk: SecretKey,
   senderPk: PubkeyHex,
   group: Group,
-  opts: { now?: number; relayHint?: string; mentions?: PubkeyHex[]; replyTo?: string; expiration?: number } = {},
+  opts: { now?: number; relayHint?: string; mentions?: PubkeyHex[]; replyTo?: string; alsoMain?: boolean; expiration?: number } = {},
 ): WrappedMessage {
   const nowSec = opts.now ?? Math.floor(Date.now() / 1000);
   const input: RumorInput = {
@@ -170,6 +170,7 @@ export function wrapGroupMessage(
       ...(opts.relayHint ? [["relay", opts.relayHint]] : []),
       ...(opts.mentions && opts.mentions.length > 0 ? mentionTags(opts.mentions) : []),
       ...(opts.replyTo ? [replyTag(opts.replyTo)] : []),
+      ...(opts.replyTo && opts.alsoMain ? [alsoMainTag()] : []),
     ],
     content: text,
   };

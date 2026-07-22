@@ -609,6 +609,11 @@ export interface Messages {
   thread_empty: string;
   thread_reply: string;
   thread_open: string;
+  /** 串回覆同傳主對話與一鍵複製（ADR-0232）。 */
+  thread_alsoMain: string;
+  thread_alsoMainBadge: string;
+  convo_copy: string;
+  convo_copied: string;
   thread_replies: string;
   /** 行動端內嵌回覆（ADR-0136）。 */
   reply_label: string;
@@ -1283,6 +1288,10 @@ const zhHant: Messages = {
   thread_empty: "尚無回覆，開始討論吧",
   thread_reply: "回覆討論串…",
   thread_open: "在討論串回覆",
+  thread_alsoMain: "同時傳到主對話",
+  thread_alsoMainBadge: "同時顯示於主對話的討論串回覆（點擊開啟討論串）",
+  convo_copy: "複製文字",
+  convo_copied: "已複製",
   thread_replies: "{count} 則回覆",
   reply_label: "回覆",
   reply_cancel: "取消回覆",
@@ -1951,6 +1960,10 @@ const en: Messages = {
   thread_empty: "No replies yet — start the discussion",
   thread_reply: "Reply in thread…",
   thread_open: "Reply in thread",
+  thread_alsoMain: "Also send to the main conversation",
+  thread_alsoMainBadge: "Thread reply also shown in the main conversation (click to open thread)",
+  convo_copy: "Copy text",
+  convo_copied: "Copied",
   thread_replies: "{count} replies",
   reply_label: "Reply",
   reply_cancel: "Cancel reply",

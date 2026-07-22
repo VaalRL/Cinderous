@@ -12,7 +12,7 @@ import { Fragment, type MouseEvent as ReactMouseEvent, useEffect, useMemo, useRe
 import { useI18n } from "../i18n.js";
 import type { FloatingWindow } from "./useFloatingWindow.js";
 import type { CallMedia, MentionCandidate } from "@cinderous/core";
-import { getKv, mainMessages, replyCounts, threadMessages } from "@cinderous/engine";
+import { getKv, mainMessages, replyCounts, rootIdOf, threadMessages } from "@cinderous/engine";
 import type { MessageKey } from "@cinderous/i18n";
 import type { ChatMessage, Contact, MessageStatus, Self } from "@cinderous/engine";
 import { contactLabel } from "@cinderous/engine";
@@ -257,7 +257,7 @@ export interface ConversationProps {
   unsent?: Set<string>;
   /** 已到期（限時訊息）的訊息 id 集合。 */
   expired?: Set<string>;
-  onSend: (text: string, ttlSeconds?: number, mentions?: string[], replyTo?: string) => void;
+  onSend: (text: string, ttlSeconds?: number, mentions?: string[], replyTo?: string, alsoMain?: boolean) => void;
   onTyping: () => void;
   /** 本機 AI 改寫（ADR-0060）：提供才顯示 ✨ 改寫入口；回傳改寫後文字。 */
   onRewrite?: (text: string, instruction: string) => Promise<string>;
@@ -574,6 +574,8 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
   /** 對話串面板（ADR-0051）：開啟中的串根訊息 id（null＝未開）。 */
   const [threadRoot, setThreadRoot] = useState<string | null>(null);
   const [threadText, setThreadText] = useState("");
+  /** 串回覆「同時傳到主對話」勾選（ADR-0232，仿 Slack）；每次送出後重置。 */
+  const [threadAlsoMain, setThreadAlsoMain] = useState(false);
   /** 長訊息詳情面板：開啟中的訊息 id（null＝未開）。與對話串面板互斥（共用右側槽位）。 */
   const [detailMsgId, setDetailMsgId] = useState<string | null>(null);
   /** 開右側面板：兩者互斥（Slack 風，右側一次只一個）。 */
@@ -584,6 +586,7 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
   const openDetail = (id: string): void => {
     setThreadRoot(null);
     setThreadText("");
+    setThreadAlsoMain(false);
     setDetailMsgId(id);
   };
   const detailMsg = detailMsgId !== null ? messages.find((m) => m.id === detailMsgId) : undefined;
@@ -1149,8 +1152,9 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
     void threatSendAllowed(body).then((ok) => {
       if (!ok) return;
       const mentions = props.mentionCandidates ? parseMentions(body, props.mentionCandidates) : [];
-      props.onSend(content, undefined, mentions.length > 0 ? mentions : undefined, threadRoot);
+      props.onSend(content, undefined, mentions.length > 0 ? mentions : undefined, threadRoot, threadAlsoMain || undefined);
       setThreadText("");
+      setThreadAlsoMain(false);
     });
   };
   // 串內 @提及自動完成（ADR-0050/0051）。
@@ -1388,7 +1392,7 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
               ownedIds={ownedIds} getBlob={getBlob}
               onOwnSticker={acquireSticker}
               replyCount={counts.get(m.id) ?? 0}
-              onOpenThread={props.readOnly ? undefined : () => openThread(m.id)}
+              onOpenThread={props.readOnly ? undefined : () => openThread(rootIdOf(m))}
               onExpand={() => openDetail(m.id)}
               groupRead={groupReadOf(m)}
               onDeposit={props.onDepositFile}
@@ -2178,6 +2182,7 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
             onClick={() => {
               setThreadRoot(null);
               setThreadText("");
+              setThreadAlsoMain(false);
             }}
           >
             ×
@@ -2258,6 +2263,16 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
           />
           <button className="composer__send" onClick={sendThread}>{t("convo_send")}</button>
         </div>
+        {/* 仿 Slack「也傳到頻道」（ADR-0232）：勾選＝這則回覆同時顯示在主對話（雙方皆然）。 */}
+        <label className="thread-alsomain">
+          <input
+            type="checkbox"
+            data-testid="thread-also-main"
+            checked={threadAlsoMain}
+            onChange={(e) => setThreadAlsoMain(e.target.checked)}
+          />
+          <span>{t("thread_alsoMain")}</span>
+        </label>
       </div>
     ) : null}
     {detailMsg ? (
@@ -2343,12 +2358,33 @@ function MessageLine({
 }): JSX.Element {
   const { t } = useI18n();
   const [picking, setPicking] = useState(false);
+  const [copied, setCopied] = useState(false);
   const react = (emoji: string) => {
     onReact?.(message.id, emoji);
     setPicking(false);
   };
   // 行內自訂 emoji（ADR-0220）：先拆出可見文字與資產清單；貼圖判定與文字渲染皆用可見文字。
   const { text: bodyText, manifest } = splitAssetManifest(message.text);
+  // 一鍵複製訊息文字（ADR-0232）：複製「可見文字」（不含行內資產 manifest）。
+  const copyText = () => {
+    void navigator.clipboard?.writeText(bodyText).then(
+      () => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1500);
+      },
+      () => {
+        /* 剪貼簿不可用時忽略 */
+      },
+    );
+  };
+  // 點擊訊息文字快速開串（ADR-0232）：連結/按鈕自身行為優先、反白選取不觸發。
+  const textClick = onOpenThread
+    ? (e: ReactMouseEvent<HTMLElement>) => {
+        if ((e.target as HTMLElement).closest("a, button")) return;
+        if (window.getSelection()?.toString()) return;
+        onOpenThread();
+      }
+    : undefined;
   const ref = parseSticker(bodyText);
   const sticker = ref ? stickerSvg(ref.pack, ref.id) : undefined;
   // 自製貼圖（v2）：內容隨訊息；渲染前必過驗證（ADR-0032）。
@@ -2408,6 +2444,21 @@ function MessageLine({
       {message.expiresAt !== undefined ? (
         <span className="timer-badge" title={t("convo_timerTitle")}>⏱</span>
       ) : null}
+      {message.alsoMain ? (
+        // 串回覆同傳主對話（ADR-0232）：標示這則同時存在於串與主對話。
+        <span className="alsomain-badge" data-testid="alsomain-badge" title={t("thread_alsoMainBadge")}>🧵</span>
+      ) : null}
+      {sticker === undefined && custom === null ? (
+        <button
+          className="copy__btn"
+          data-testid="copy-msg"
+          title={copied ? t("convo_copied") : t("convo_copy")}
+          aria-label={copied ? t("convo_copied") : t("convo_copy")}
+          onClick={copyText}
+        >
+          {copied ? "✓" : "📋"}
+        </button>
+      ) : null}
       {onReact ? (
         <span className="react">
           <button className="react__btn" title={t("convo_react")} onClick={() => setPicking((v) => !v)}>＋</button>
@@ -2460,7 +2511,7 @@ function MessageLine({
       ) : custom !== null ? (
         <span className="text expired__text">{t("sticker_invalid")}</span>
       ) : !expanded && bodyText.length > MESSAGE_TRUNCATE_CHARS ? (
-        <span className="text">
+        <span className="text" {...(textClick ? { onClick: textClick, "data-clickthread": "true" } : {})}>
           {renderRichText(bodyText.slice(0, MESSAGE_TRUNCATE_CHARS), manifest, getBlob ?? (() => undefined))}
           <span className="text__ellip">… </span>
           {onExpand ? (
@@ -2470,7 +2521,9 @@ function MessageLine({
           ) : null}
         </span>
       ) : (
-        <span className="text">{renderRichText(bodyText, manifest, getBlob ?? (() => undefined))}</span>
+        <span className="text" {...(textClick ? { onClick: textClick, "data-clickthread": "true" } : {})}>
+          {renderRichText(bodyText, manifest, getBlob ?? (() => undefined))}
+        </span>
       )}
       {reactions.length > 0 ? (
         <span className="reactions">

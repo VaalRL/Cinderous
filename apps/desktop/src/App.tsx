@@ -2748,7 +2748,9 @@ export function App(): JSX.Element {
               {...(activeBackend.removeGroupMember
                 ? { onRemoveMember: (m: string) => activeBackend.removeGroupMember!(pk, m) }
                 : {})}
-              onSend={(text, _ttl, mentions, replyTo) => activeBackend.sendGroupMessage?.(pk, text, mentions, replyTo)}
+              onSend={(text, _ttl, mentions, replyTo, alsoMain) =>
+                activeBackend.sendGroupMessage?.(pk, text, mentions, replyTo, alsoMain)
+              }
               onTyping={() => {}}
               onNudge={() => {}}
               {...(group.announce && group.admin !== self.pubkey ? { readOnly: true } : {})}
@@ -2850,8 +2852,8 @@ export function App(): JSX.Element {
             {...callProps}
             {...stickerProps}
             mentionCandidates={[{ pubkey: contact.pubkey, name: contact.name }]}
-            onSend={(text, ttlSeconds, mentions, replyTo) =>
-              activeBackend.sendMessage(pk, text, ttlSeconds, mentions, replyTo)
+            onSend={(text, ttlSeconds, mentions, replyTo, alsoMain) =>
+              activeBackend.sendMessage(pk, text, ttlSeconds, mentions, replyTo, alsoMain)
             }
             onTyping={() => {
               const now = Date.now();

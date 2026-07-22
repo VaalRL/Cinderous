@@ -147,6 +147,8 @@ export interface ChatMessage {
   mentionsMe?: boolean;
   /** 對話串回覆（ADR-0051）：此訊息所屬串的根訊息 id；無則為主頻道訊息。 */
   replyTo?: string;
+  /** 串回覆同時顯示於主對話（ADR-0232，仿 Slack「也傳到頻道」）；僅回覆有意義。 */
+  alsoMain?: boolean;
   /** 檔案附件（有值時此訊息為檔案而非文字）。 */
   file?: ChatFile;
   /** 送達/已讀狀態（自己送出的訊息才有意義；ADR-0058/0095）。 */
@@ -297,9 +299,10 @@ export interface ChatBackend {
   selfTitle?(): string | undefined;
   /**
    * 送出訊息；`ttlSeconds` 設定時為限時訊息（閱後即焚，NIP-40 短期過期）；
-   * `mentions` 為 @提及公鑰（ADR-0050）；`replyTo` 為對話串根訊息 id（ADR-0051）。
+   * `mentions` 為 @提及公鑰（ADR-0050）；`replyTo` 為對話串根訊息 id（ADR-0051）；
+   * `alsoMain` 為串回覆同時顯示於主對話（ADR-0232，與 replyTo 併用才有意義）。
    */
-  sendMessage(to: PubkeyHex, text: string, ttlSeconds?: number, mentions?: PubkeyHex[], replyTo?: string): void;
+  sendMessage(to: PubkeyHex, text: string, ttlSeconds?: number, mentions?: PubkeyHex[], replyTo?: string, alsoMain?: boolean): void;
   sendTyping(to: PubkeyHex): void;
   sendNudge(to: PubkeyHex): void;
   /** 對某訊息送出 emoji 回應（NIP-25）。 */
@@ -348,8 +351,8 @@ export interface ChatBackend {
   connectPeer?(to: PubkeyHex): void;
   /** 建立群組（M9）：`memberPubkeys` 為其他成員的公鑰（既有聯絡人）。 */
   createGroup?(name: string, memberPubkeys: PubkeyHex[]): void;
-  /** 對群組送出訊息（扇出給所有成員）；`mentions` 為 @提及公鑰（ADR-0050）；`replyTo` 為對話串根 id（ADR-0051）。 */
-  sendGroupMessage?(groupId: string, text: string, mentions?: PubkeyHex[], replyTo?: string): void;
+  /** 對群組送出訊息（扇出給所有成員）；`mentions` 為 @提及公鑰（ADR-0050）；`replyTo` 為對話串根 id（ADR-0051）；`alsoMain` 同 sendMessage（ADR-0232）。 */
+  sendGroupMessage?(groupId: string, text: string, mentions?: PubkeyHex[], replyTo?: string, alsoMain?: boolean): void;
   /** 離開群組。 */
   leaveGroup?(groupId: string): void;
   /** 管理者新增群組成員（M9 成員管理）。 */

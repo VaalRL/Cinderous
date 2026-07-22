@@ -6,9 +6,9 @@ import type { ChatMessage } from "./types.js";
 /** 訊息所屬串的根 id：回覆取 replyTo，否則自身即為根。 */
 export const rootIdOf = (m: ChatMessage): string => m.replyTo ?? m.id;
 
-/** 主頻道訊息（排除串回覆，回覆只在面板顯示）。 */
+/** 主頻道訊息：排除串回覆（回覆只在面板顯示），但帶 `alsoMain` 旗標的回覆同時顯示（ADR-0232）。 */
 export function mainMessages(messages: ChatMessage[]): ChatMessage[] {
-  return messages.filter((m) => m.replyTo === undefined);
+  return messages.filter((m) => m.replyTo === undefined || m.alsoMain === true);
 }
 
 /** 各根訊息 id → 回覆數。 */

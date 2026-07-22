@@ -64,6 +64,23 @@ describe("ConversationWindow 訊息列視窗化（P0-3）", () => {
     expect(html).toContain("2 replies");
   });
 
+  it("alsoMain 回覆同時顯示於主頻道＋徽章（ADR-0232）；一般回覆照舊隱藏", () => {
+    const html = render([
+      { id: "root", outgoing: false, text: "主頻道根訊息", at: 1 },
+      { id: "r1", outgoing: false, text: "串內回覆一", at: 2, replyTo: "root" },
+      { id: "r2", outgoing: true, text: "同傳主對話的回覆", at: 3, replyTo: "root", alsoMain: true },
+    ]);
+    expect(html).toContain("同傳主對話的回覆");
+    expect(html).toContain('data-testid="alsomain-badge"');
+    expect(html).not.toContain("串內回覆一");
+  });
+
+  it("訊息一鍵複製鈕（ADR-0232）：文字訊息顯示、可點文字開串標記存在", () => {
+    const html = render([{ id: "m1", outgoing: false, text: "hello", at: 1 }]);
+    expect(html).toContain('data-testid="copy-msg"');
+    expect(html).toContain("data-clickthread");
+  });
+
   it("群組視窗提供成員清單時顯示 👥 成員管理入口（M9）", () => {
     const html = renderToStaticMarkup(
       <I18nProvider>

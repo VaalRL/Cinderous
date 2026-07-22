@@ -1002,6 +1002,18 @@ button:disabled { opacity: .5; cursor: default; filter: none; }
 .unsend__btn { margin-left: 4px; border: 1px solid var(--border); background: var(--field); color: var(--muted); border-radius: 10px; height: 16px; line-height: 12px; font-size: 10px; cursor: pointer; padding: 0 5px; opacity: 0; }
 .line:hover .unsend__btn { opacity: 1; }
 .unsend__btn:hover { color: var(--accent); }
+
+/* 一鍵複製訊息文字（ADR-0232）：hover 才浮現，樣式比照收回鈕。 */
+.copy__btn { margin-left: 4px; border: 1px solid var(--border); background: var(--field); color: var(--muted); border-radius: 10px; height: 16px; line-height: 12px; font-size: 10px; cursor: pointer; padding: 0 5px; opacity: 0; }
+.line:hover .copy__btn { opacity: 1; }
+.copy__btn:hover { color: var(--accent); }
+/* 串回覆同傳主對話徽章（ADR-0232）。 */
+.alsomain-badge { font-size: 10px; opacity: 0.7; }
+/* 點擊文字快速開串（ADR-0232）：hover 給極輕提示，不搶走文字選取。 */
+.text[data-clickthread] { cursor: pointer; }
+.text[data-clickthread]:hover { background: color-mix(in srgb, var(--accent) 7%, transparent); border-radius: 4px; }
+/* 串 composer「同時傳到主對話」勾選列。 */
+.thread-alsomain { display: flex; align-items: center; gap: 6px; padding: 4px 10px 8px; font-size: 12px; color: var(--muted); cursor: pointer; }
 .line.unsent .text { color: var(--muted); font-style: italic; }
 .line.expired .text { color: var(--muted); font-style: italic; }
 .timer-badge { margin-left: 4px; font-size: 10px; opacity: .7; }

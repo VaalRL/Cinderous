@@ -28,6 +28,13 @@ describe("thread-util（ADR-0051）", () => {
     expect(mainMessages(msgs).map((m) => m.id)).toEqual(["r1", "r2"]);
   });
 
+  it("mainMessages 保留 alsoMain 回覆（ADR-0232，仿 Slack「也傳到頻道」）", () => {
+    const withAlso: ChatMessage[] = [...msgs, { ...msg("d", 6, "r1"), alsoMain: true }];
+    expect(mainMessages(withAlso).map((m) => m.id)).toEqual(["r1", "r2", "d"]);
+    // 串面板照舊包含它（它仍是 r1 的回覆）
+    expect(threadMessages(withAlso, "r1").map((m) => m.id)).toEqual(["r1", "a", "b", "d"]);
+  });
+
   it("replyCounts 統計各根回覆數", () => {
     const c = replyCounts(msgs);
     expect(c.get("r1")).toBe(2);
