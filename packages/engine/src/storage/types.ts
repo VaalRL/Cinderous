@@ -286,6 +286,8 @@ export interface AppStorage {
   markDeleted(messageId: string): void;
   /** 已收回的訊息 id 集合。 */
   loadDeleted(): string[];
+  /** 以訊息 id 跨對話尋找已存訊息（收回擁有者驗證用，ADR-0233；線性掃描——收回事件罕見）。 */
+  findMessage(messageId: string): StoredMessage | undefined;
   /** 群組清單（M9）。 */
   loadGroups(): StoredGroup[];
   /** 新增或更新群組（以 id 為鍵）。 */

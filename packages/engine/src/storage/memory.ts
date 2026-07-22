@@ -355,6 +355,13 @@ export class MemoryStorage implements AppStorage {
   loadDeleted(): string[] {
     return [...this.deleted];
   }
+  findMessage(messageId: string): StoredMessage | undefined {
+    for (const c of this.convos.values()) {
+      const hit = c.byId.get(messageId);
+      if (hit) return hit;
+    }
+    return undefined;
+  }
   loadGroups(): StoredGroup[] {
     return this.groups.map((g) => ({ ...g, members: [...g.members] }));
   }

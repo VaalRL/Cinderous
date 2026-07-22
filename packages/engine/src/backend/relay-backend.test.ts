@@ -725,6 +725,60 @@ describe("RelayChatBackend（真實後端 + 持久化）", () => {
     b.stop();
   });
 
+  it("收回擁有者驗證（ADR-0233）：對端偽造收回你的訊息 → 拒收、不標記", () => {
+    const net = createInMemoryRelayNetwork();
+    const storeA = new MemoryStorage();
+    const a = new RelayChatBackend(storeA, (h) => net.connect("a", h), "Alice");
+    const b = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("b", h), "Bob");
+    const aUnsent: string[] = [];
+    const bIncoming: ChatMessage[] = [];
+    a.start({ ...noop, onUnsend: (id) => aUnsent.push(id) });
+    b.start({ ...noop, onMessage: (_pk, m) => bIncoming.push(m) });
+    a.addContact(b.selfNpub);
+    a.sendMessage(b.self.pubkey, "我的訊息");
+    const mid = bIncoming[0]!.id;
+
+    // Bob（收件人、非作者）對 Alice 的訊息發 kind 5 → Alice 端作者比對不符，必須拒收。
+    b.unsendMessage(a.self.pubkey, mid);
+    expect(aUnsent).toEqual([]);
+    expect(storeA.loadDeleted()).not.toContain(mid);
+    a.stop();
+    b.stop();
+  });
+
+  it("收回擁有者驗證（ADR-0233，群組）：非作者成員收回他人訊息 → 其他成員拒收；作者本人 → 生效", () => {
+    const net = createInMemoryRelayNetwork();
+    const sa = new MemoryStorage();
+    const sb = new MemoryStorage();
+    const a = new RelayChatBackend(sa, (h) => net.connect("a", h), "Alice");
+    const b = new RelayChatBackend(sb, (h) => net.connect("b", h), "Bob");
+    const c = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("c", h), "Carol");
+    const aUnsent: string[] = [];
+    a.start({ ...noop, onUnsend: (id) => aUnsent.push(id) });
+    b.start(noop);
+    c.start(noop);
+    a.addContact(b.selfNpub);
+    a.addContact(c.selfNpub);
+    a.createGroup("專案群", [b.self.pubkey, c.self.pubkey]);
+    const gid = sa.loadGroups()[0]!.id;
+    b.sendGroupMessage(gid, "Bob 的訊息");
+    const mid = sa.loadMessages(gid)[0]!.id;
+
+    // Carol（非作者）對 Bob 的群訊發收回 → Alice 與 Bob 皆拒收（作者是 Bob 不是 Carol）。
+    c.unsendMessage(gid, mid);
+    expect(aUnsent).toEqual([]);
+    expect(sa.loadDeleted()).not.toContain(mid);
+    expect(sb.loadDeleted()).not.toContain(mid);
+
+    // Bob（作者）收回自己的群訊 → 其他成員生效。
+    b.unsendMessage(gid, mid);
+    expect(aUnsent).toEqual([mid]);
+    expect(sa.loadDeleted()).toContain(mid);
+    a.stop();
+    b.stop();
+    c.stop();
+  });
+
   it("限時訊息：帶 ttl 送出，兩端訊息帶 expiresAt 且持久化", () => {
     const net = createInMemoryRelayNetwork();
     const storeA = new MemoryStorage();

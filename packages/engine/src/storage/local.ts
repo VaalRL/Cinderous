@@ -357,6 +357,9 @@ export class LocalStorage implements AppStorage {
     this.mem.markDeleted(messageId);
     write(this.k("deleted"), this.mem.loadDeleted(), this.dek);
   }
+  findMessage(messageId: string): StoredMessage | undefined {
+    return this.mem.findMessage(messageId);
+  }
   loadDeleted(): string[] {
     return this.mem.loadDeleted();
   }

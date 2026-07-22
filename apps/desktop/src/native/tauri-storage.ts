@@ -405,6 +405,9 @@ export class TauriStorage implements AppStorage {
     this.mem.markDeleted(messageId);
     this.persist(META);
   }
+  findMessage(messageId: string): StoredMessage | undefined {
+    return this.mem.findMessage(messageId);
+  }
   loadReadAt(): Record<string, number> {
     return this.mem.loadReadAt();
   }

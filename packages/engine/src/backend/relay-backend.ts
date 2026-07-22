@@ -474,6 +474,8 @@ export class RelayChatBackend implements ChatBackend {
    * 抵達時原樣重放。群組回條逐成員，故存整筆回條而非單一狀態。
    */
   private readonly pendingReceipts = new Map<string, { from: PubkeyHex; type: ReceiptType; groupId?: string }[]>();
+  /** 收回等待區（ADR-0233）：目標尚未抵達的收回（回放順序亂），訊息落地時驗證後補套用。 */
+  private readonly pendingDeletes = new Map<string, PubkeyHex[]>();
   /** 早到群訊緩存（ADR-0131）：指向本地還不存在的群組的訊息，待加入後重放（有界）。 */
   private readonly pendingGroupMsgs = new Map<string, { sender: PubkeyHex; rumor: Rumor }[]>();
   /** 已送出的最新「已讀」水位訊息 id（避免重複送已讀回條）。
@@ -1321,8 +1323,7 @@ export class RelayChatBackend implements ChatBackend {
     if (rumor.kind === KIND.DELETE) {
       const target = deletionTarget(rumor);
       if (!target) return;
-      this.storage.markDeleted(target);
-      this.handlers?.onUnsend?.(target);
+      this.applyDeletion(target, sender); // 擁有者驗證（ADR-0233）：只有原寄件人能收回
       return;
     }
 
@@ -1401,6 +1402,7 @@ export class RelayChatBackend implements ChatBackend {
           ...(selfCopy ? { status: "sent" as const } : {}),
         });
         if (selfCopy) this.applyPendingReceipts(rumor.id);
+        this.applyPendingDeletes(rumor.id); // 收回早於檔案訊息抵達（ADR-0233）
         if (!selfCopy) this.bumpUnread(convo, msgTime(rumor)); // O(1)（ADR-0110）
       }
       if (!selfCopy) this.publishReliable(wrapReceipt("delivered", this.sk, sender, rumor.id));
@@ -1437,6 +1439,7 @@ export class RelayChatBackend implements ChatBackend {
       ...(status ? { status } : {}),
       ...extra,
     });
+    this.applyPendingDeletes(rumor.id); // 收回早於訊息抵達（ADR-0233）：落地後驗證補套用
     if (!selfCopy) this.bumpUnread(convo, message.at); // 未讀 +1（O(1)，ADR-0110）
     if (selfCopy) {
       this.applyPendingReceipts(rumor.id); // 回條若比自封副本先到，在此補套用（ADR-0107）
@@ -1458,6 +1461,40 @@ export class RelayChatBackend implements ChatBackend {
       if (oldest === undefined) break;
       this.pendingReceipts.delete(oldest);
     }
+  }
+
+  /**
+   * 套用收回（NIP-09，ADR-0233）：**只接受原寄件人收回自己的訊息**。
+   * 未驗證前任何人可指向任意 id——1:1 對端能讓你自己的訊息「被收回」、群組任何成員能刪
+   * 任何人的訊息（UI 只擋按鈕，協定層曾無檢查）。作者判定：自己送的（outgoing）＝自己；
+   * 群訊看 `sender`；1:1 進訊＝對話對象（`contact`）。
+   * 目標尚未抵達（中繼回放順序亂）→ 暫存於等待區，訊息落地時驗證後補套用（比照 pendingReceipts）。
+   */
+  private applyDeletion(target: string, from: PubkeyHex): void {
+    const m = this.storage.findMessage(target);
+    if (!m) {
+      const queue = this.pendingDeletes.get(target) ?? [];
+      if (!queue.includes(from)) queue.push(from);
+      this.pendingDeletes.set(target, queue);
+      while (this.pendingDeletes.size > 1024) {
+        const oldest = this.pendingDeletes.keys().next().value;
+        if (oldest === undefined) break;
+        this.pendingDeletes.delete(oldest);
+      }
+      return;
+    }
+    const author = m.outgoing ? this.self.pubkey : (m.sender ?? m.contact);
+    if (author !== from) return; // 非原寄件人 → 拒收，不標記
+    this.storage.markDeleted(target);
+    this.handlers?.onUnsend?.(target);
+  }
+
+  /** 訊息落地後補套用等待中的收回（驗證同 {@link applyDeletion}）。 */
+  private applyPendingDeletes(messageId: string): void {
+    const queue = this.pendingDeletes.get(messageId);
+    if (!queue) return;
+    this.pendingDeletes.delete(messageId);
+    for (const from of queue) this.applyDeletion(messageId, from);
   }
 
   /**
@@ -1560,6 +1597,7 @@ export class RelayChatBackend implements ChatBackend {
     if (!selfCopy) this.trackExpectedRefs(rumor.content); // ADR-0223 P2b：接受寄件者推播的 blob。
     this.storage.appendMessage({ ...body, contact: groupId });
     this.handlers?.onMessage(groupId, body);
+    this.applyPendingDeletes(id); // 收回早於群訊抵達（ADR-0233）：落地後驗證補套用
     if (!selfCopy) this.bumpUnread(groupId, body.at); // 未讀 +1（O(1)，ADR-0110）
     if (selfCopy) {
       this.applyPendingReceipts(id); // 其他成員的回條可能比自封副本先到
