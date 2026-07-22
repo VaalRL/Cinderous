@@ -111,8 +111,6 @@ registerExtension({ id: "my.renderer", name: "自訂訊染" /* …你的能力 *
 6. **Fix First**：優先修正/延伸既有設計，不要建立 `v2`／`new_*`／`*_enhanced` 平行路徑。
 7. 改動模組邊界、Nostr 事件契約或 WebRTC 流程，**同步更新** `ARCHITECTURE.md`。
 
-工程細則另見 [`AGENTS.md`](../AGENTS.md) 與 [`CLAUDE.md`](../CLAUDE.md)。
-
 ---
 
 ## 授權（重要）

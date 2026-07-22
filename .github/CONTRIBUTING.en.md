@@ -111,8 +111,6 @@ This project has a strong **decision-record culture**; please read before you ac
 6. **Fix First**: prefer fixing/extending existing designs; do not create `v2`/`new_*`/`*_enhanced` parallel paths.
 7. If you change module boundaries, the Nostr event contract, or the WebRTC flow, **update `ARCHITECTURE.md` in sync**.
 
-For engineering details, also see [`AGENTS.md`](../AGENTS.md) and [`CLAUDE.md`](../CLAUDE.md).
-
 ---
 
 ## License (important)

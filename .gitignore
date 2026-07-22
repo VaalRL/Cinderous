@@ -73,3 +73,11 @@ secrets/
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# === AI 助理指示檔（僅本地使用，不進公開 repo）===
+CLAUDE.md
+AGENTS.md
+gemini.md
+claude/
+.claude/
+docs/PENDING-ADR-WORK.md
