@@ -1,5 +1,8 @@
 // 網址衛生（ADR-0038）：追蹤參數清除 + 本地啟發式高風險評估。
 // 全部純函式、零網路；規則採「精確名單＋站點範圍」壓低誤清風險。
+// ADR-0231：assessUrl 可注入威脅情報 matcher（純函式回呼）——命中即 danger＋來源出處。
+
+import type { ThreatSource } from "@cinderous/core";
 
 /** 全域追蹤參數：前綴比對。 */
 const TRACK_PREFIXES = ["utm_"];
@@ -171,11 +174,14 @@ export type UrlRiskReason =
   | "odd-port"
   | "http"
   | "shortener"
+  | "known-malicious"
   | "unparsable";
 
 export interface UrlRisk {
   level: "ok" | "caution" | "danger";
   reasons: UrlRiskReason[];
+  /** 命中的威脅情報來源（ADR-0231）；僅 `known-malicious` 時存在，供遮罩顯示出處。 */
+  sources?: ThreatSource[];
 }
 
 const DANGER: ReadonlySet<UrlRiskReason> = new Set(["text-mismatch", "userinfo", "punycode", "ip-host", "known-malicious"]);
@@ -216,11 +222,15 @@ function hostnameInText(text: string): string | undefined {
 
 const IPV4_RE = /^\d{1,3}(\.\d{1,3}){3}$/;
 
+/** 威脅情報 matcher（ADR-0231）：以主機名查命中的來源；未命中回 []。純函式、零網路。 */
+export type ThreatMatcher = (host: string) => ThreatSource[];
+
 /**
  * 本地啟發式風險評估（ADR-0038）。`linkText` 為 Markdown 連結的顯示文字，
- * 用於偵測「文字偽裝成另一個網址」。
+ * 用於偵測「文字偽裝成另一個網址」。`matchThreat`（ADR-0231）為可選威脅情報
+ * matcher——命中即 `known-malicious`（danger）並附來源出處；未提供＝不比對（向後相容）。
  */
-export function assessUrl(href: string, linkText?: string): UrlRisk {
+export function assessUrl(href: string, linkText?: string, matchThreat?: ThreatMatcher): UrlRisk {
   const reasons: UrlRiskReason[] = [];
   let url: URL;
   try {
@@ -242,8 +252,17 @@ export function assessUrl(href: string, linkText?: string): UrlRisk {
     if (textHost && !sameSite(textHost, host)) reasons.push("text-mismatch");
   }
 
+  let sources: ThreatSource[] | undefined;
+  if (matchThreat) {
+    const hit = matchThreat(stripWww(host));
+    if (hit.length > 0) {
+      reasons.push("known-malicious");
+      sources = hit;
+    }
+  }
+
   const level = reasons.some((r) => DANGER.has(r)) ? "danger" : reasons.length > 0 ? "caution" : "ok";
-  return { level, reasons };
+  return sources ? { level, reasons, sources } : { level, reasons };
 }
 
 // ── 設定開關（ADR-0038 後續）──

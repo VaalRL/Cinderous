@@ -31,6 +31,7 @@ function RiskyLink({ href, risk, children }: { href: string; risk: UrlRisk; chil
       "odd-port": t("urlrisk_oddPort"),
       http: t("urlrisk_http"),
       shortener: t("urlrisk_shortener"),
+      "known-malicious": t("urlrisk_knownMalicious"),
       unparsable: t("urlrisk_unparsable"),
     })[r];
   return (

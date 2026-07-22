@@ -508,6 +508,10 @@ export interface Messages {
   settingsTab_about: string;
   settings_aboutVersion: string;
   settings_aboutWhatsNew: string;
+  settings_updateAvailable: string;
+  settings_updateDownload: string;
+  settings_updateCheck: string;
+  settings_updateCheckHint: string;
   /** 統一自訂對話框（ADR-0139）。 */
   dialog_titleConfirm: string;
   dialog_titleAlert: string;
@@ -627,6 +631,7 @@ export interface Messages {
   urlrisk_oddPort: string;
   urlrisk_http: string;
   urlrisk_shortener: string;
+  urlrisk_knownMalicious: string;
   urlrisk_unparsable: string;
   settings_privacy: string;
   settings_cleanOnPaste: string;
@@ -1285,6 +1290,7 @@ const zhHant: Messages = {
   urlrisk_oddPort: "非常規連接埠",
   urlrisk_http: "未加密（http）",
   urlrisk_shortener: "短網址，無法預覽真正目的地",
+  urlrisk_knownMalicious: "已知惡意網站（威脅情報命中）",
   urlrisk_unparsable: "網址格式異常",
   settings_privacy: "隱私",
   settings_cleanOnPaste: "貼上時自動清除網址追蹤參數（含 redirect 拆殼）",
@@ -1939,6 +1945,7 @@ const en: Messages = {
   urlrisk_oddPort: "Unusual port",
   urlrisk_http: "Unencrypted (http)",
   urlrisk_shortener: "URL shortener — destination hidden",
+  urlrisk_knownMalicious: "Known malicious site (threat-intel match)",
   urlrisk_unparsable: "Malformed URL",
   settings_privacy: "Privacy",
   settings_cleanOnPaste: "Strip tracking parameters from pasted links (incl. redirect unwrapping)",
