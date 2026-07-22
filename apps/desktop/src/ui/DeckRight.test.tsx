@@ -34,6 +34,26 @@ describe("DeckRight 右側輔助區（ADR-0079 Q4）", () => {
   });
 });
 
+describe("右欄不洩漏已收回內容（審查修正，ADR-0234 後補）", () => {
+  it("unsent／purged 訊息自衍生資料剔除：串回覆數歸零、分頁計數不含它們", () => {
+    const convos = {
+      p1: [
+        { id: "root", outgoing: false, text: "根訊息", at: 1 },
+        { id: "r1", outgoing: false, text: "串回覆", at: 2, replyTo: "root" },
+      ],
+    };
+    const threadCount1 = '對話串<span class="daux__count">1</span>';
+    // 未過濾：threads 分頁計數 1
+    expect(render({ convos })).toContain(threadCount1);
+    // 串回覆被無痕收回 → 回覆數歸零
+    const purgedHtml = render({ convos, purged: new Set(["r1"]) });
+    expect(purgedHtml).not.toContain(threadCount1);
+    // 一般收回（佔位）同樣不列入右欄衍生資料
+    const unsentHtml = render({ convos, unsent: new Set(["r1"]) });
+    expect(unsentHtml).not.toContain(threadCount1);
+  });
+});
+
 describe("右欄便條分頁（ADR-0182，計算為其功能之一）", () => {
   it("提供便條分頁入口；便條是獨立輸入框，不接管主對話框草稿", () => {
     const html = render();

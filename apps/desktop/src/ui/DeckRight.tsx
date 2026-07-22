@@ -79,6 +79,9 @@ export interface DeckRightProps {
   contacts: Contact[];
   groups: Group[];
   convos: Record<string, ChatMessage[]>;
+  /** 已收回（佔位）與無痕收回的訊息 id（審查修正）：相簿/串列表不得洩漏其內容。 */
+  unsent?: Set<string>;
+  purged?: Set<string>;
   /** 把右欄計算機的結果插入主對話框草稿（ADR-0097）；未提供則不顯示插入鈕。 */
   onInsert?: (text: string) => void;
 }
@@ -93,7 +96,10 @@ export function DeckRight(props: DeckRightProps): JSX.Element {
 
   const group = props.groups.find((g) => g.id === activeId);
   const contact = props.contacts.find((c) => c.pubkey === activeId);
-  const msgs = props.convos[activeId] ?? [];
+  // 審查修正：已收回（含無痕）的訊息剔除——否則相簿仍顯示被收回的圖片、串列表洩漏原文。
+  const msgs = (props.convos[activeId] ?? []).filter(
+    (m) => !(props.unsent?.has(m.id) || props.purged?.has(m.id)),
+  );
   const nameFor = (pk: string): string =>
     pk === props.self.pubkey ? props.self.name : props.contacts.find((c) => c.pubkey === pk)?.name ?? `${pk.slice(0, 8)}…`;
 

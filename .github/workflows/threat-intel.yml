@@ -10,6 +10,8 @@ on:
 
 permissions:
   contents: write
+  # 觸發 pages.yml 重佈用（GITHUB_TOKEN 推送不會觸發其他 workflow 的 push 事件——GitHub 防遞迴限制）。
+  actions: write
 
 concurrency:
   group: threat-intel
@@ -30,7 +32,9 @@ jobs:
       - name: 驗證格式
         run: node scripts/threat-snapshot.mjs --check
 
-      - name: 提交 snapshot 變更（若有）
+      - name: 提交 snapshot 變更（若有）＋觸發官網重佈
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           if [ -n "$(git status --porcelain docs/threat-intel.json)" ]; then
             git config user.name "threat-intel-bot"
@@ -38,6 +42,9 @@ jobs:
             git add docs/threat-intel.json
             git commit -m "chore(threat-intel): 自動更新威脅情報 snapshot（ADR-0231 P2）"
             git push
+            # GITHUB_TOKEN 的 push 不會觸發 pages.yml 的 push 事件（GitHub 防遞迴限制）
+            # → 明確 dispatch 重新部署官網，否則 app 永遠拉不到新 snapshot。
+            gh workflow run pages.yml --ref main
           else
-            echo "snapshot 無變化，略過提交。"
+            echo "snapshot 無變化，略過提交與重佈。"
           fi

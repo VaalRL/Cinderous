@@ -1571,6 +1571,7 @@ export class RelayChatBackend implements ChatBackend {
         sender,
         ...(selfCopyFile ? { status: "sent" as const } : {}),
       });
+      this.applyPendingDeletes(rumor.id); // 收回早於群組檔案訊息抵達（ADR-0233，審查修正）
       return;
     }
 

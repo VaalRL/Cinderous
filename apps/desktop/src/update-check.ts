@@ -25,22 +25,31 @@ export function shouldCheck(lastCheck: number | null | undefined, now: number): 
   return now - lastCheck >= CHECK_INTERVAL_MS;
 }
 
+/** 查詢結果三態（審查修正）：`ok:false`＝查詢失敗——呼叫端不得覆寫既有狀態、不得記節流時間。 */
+export interface UpdateCheckResult {
+  ok: boolean;
+  /** 可更新版本；null＝已是最新（僅 ok:true 時有意義）。 */
+  version: string | null;
+}
+
 /**
- * 查官網最新版：回「可更新版本字串」或 null（已是最新／任何失敗皆靜默 null，不打擾）。
+ * 查官網最新版。「查詢失敗」（離線／被擋／格式壞）與「沒有新版」是不同結果——
+ * 失敗回 `ok:false`，呼叫端保留既有徽章並於下次開機重試（不燒 24h 節流窗）。
  * `fetchFn` 注入以便測試（desktop/mobile 共用 core 比對邏輯，不綁 Tauri）。
  */
 export async function fetchLatest(
   fetchFn: typeof fetch = fetch,
   endpoint: string = UPDATE_ENDPOINT,
   current: string = APP_VERSION,
-): Promise<string | null> {
+): Promise<UpdateCheckResult> {
   try {
     const res = await fetchFn(endpoint, { cache: "no-store" });
-    if (!res.ok) return null;
+    if (!res.ok) return { ok: false, version: null };
     const data: unknown = await res.json();
-    return Array.isArray(data) ? newerRelease(data as RemoteRelease[], current) : null;
+    if (!Array.isArray(data)) return { ok: false, version: null };
+    return { ok: true, version: newerRelease(data as RemoteRelease[], current) };
   } catch {
-    return null;
+    return { ok: false, version: null };
   }
 }
 

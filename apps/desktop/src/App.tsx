@@ -535,9 +535,10 @@ export function App(): JSX.Element {
     if (!updateCheckEnabled()) return;
     const now = Date.now();
     if (!shouldCheck(loadUpdateState()?.lastCheck, now)) return;
-    void fetchLatest().then((v) => {
-      saveUpdateState({ lastCheck: now, available: v });
-      setUpdateAvailable(v);
+    void fetchLatest().then((r) => {
+      if (!r.ok) return; // 查詢失敗：保留既有徽章、不記節流時間（下次開機重試）
+      saveUpdateState({ lastCheck: now, available: r.version });
+      setUpdateAvailable(r.version);
     });
   }, []);
   // 威脅情報（ADR-0231 P2/P3）：開機先回快取；啟用中且滿一日→背景拉新 snapshot。
@@ -2359,6 +2360,8 @@ export function App(): JSX.Element {
             contacts={contacts}
             groups={groups}
             convos={convos}
+            unsent={unsent}
+            purged={purged}
             {...(activeConvo
               ? {
                   onInsert: (text: string) =>
@@ -2602,9 +2605,10 @@ export function App(): JSX.Element {
             } else {
               // 重新開啟＝立即查一次（使用者明確要查，不受每日節流限制）。
               const now = Date.now();
-              void fetchLatest().then((v) => {
-                saveUpdateState({ lastCheck: now, available: v });
-                setUpdateAvailable(v);
+              void fetchLatest().then((r) => {
+                if (!r.ok) return; // 失敗：保留現狀，下次開機再試
+                saveUpdateState({ lastCheck: now, available: r.version });
+                setUpdateAvailable(r.version);
               });
             }
           }}
@@ -2725,6 +2729,18 @@ export function App(): JSX.Element {
               blobsNonce={blobsNonce}
               contact={groupContact}
               messages={convos[pk] ?? []}
+              // 審查修正（ADR-0233/0234 後補）：群組視窗過去完全沒接回應/收回——
+              // 群裡不能收回、看不到「已收回」佔位、無痕收回不生效、回應不顯示（引擎早已支援）。
+              reactions={reactions}
+              unsent={unsent}
+              purged={purged}
+              expired={expired}
+              {...(activeBackend.sendReaction
+                ? { onReact: (messageId: string, emoji: string) => activeBackend.sendReaction!(pk, messageId, emoji) }
+                : {})}
+              {...(activeBackend.unsendMessage
+                ? { onUnsend: (messageId: string, traceless?: boolean) => activeBackend.unsendMessage!(pk, messageId, traceless) }
+                : {})}
               typing={false}
               nudgeSignal={0}
               {...(rewriteFn ? { onRewrite: rewriteFn } : {})}

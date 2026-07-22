@@ -31,30 +31,36 @@ describe("shouldCheck（每日節流）", () => {
 const okFetch = (body: unknown): typeof fetch =>
   (() => Promise.resolve({ ok: true, json: () => Promise.resolve(body) })) as unknown as typeof fetch;
 
-describe("fetchLatest（fetch 注入、失敗靜默）", () => {
-  it("遠端有較新已發布版本 → 回版本字串", async () => {
+describe("fetchLatest（fetch 注入、三態：新版／已最新／查詢失敗）", () => {
+  it("遠端有較新已發布版本 → ok＋版本字串", async () => {
     const remote = [
       { version: "0.0.14", released: true },
       { version: "0.0.12" },
     ];
-    await expect(fetchLatest(okFetch(remote), "https://x/releases.json", "0.0.12")).resolves.toBe("0.0.14");
+    await expect(fetchLatest(okFetch(remote), "https://x/releases.json", "0.0.12")).resolves.toEqual({
+      ok: true,
+      version: "0.0.14",
+    });
   });
-  it("hold 草稿（released:false）不列入", async () => {
+  it("hold 草稿（released:false）不列入；已是最新 → ok＋null", async () => {
     const remote = [{ version: "0.0.14", released: false }, { version: "0.0.12" }];
-    await expect(fetchLatest(okFetch(remote), "https://x/releases.json", "0.0.12")).resolves.toBeNull();
+    await expect(fetchLatest(okFetch(remote), "https://x/releases.json", "0.0.12")).resolves.toEqual({
+      ok: true,
+      version: null,
+    });
+    await expect(fetchLatest(okFetch([{ version: "0.0.12" }]), "https://x", "0.0.12")).resolves.toEqual({
+      ok: true,
+      version: null,
+    });
   });
-  it("已是最新 → null", async () => {
-    await expect(fetchLatest(okFetch([{ version: "0.0.12" }]), "https://x", "0.0.12")).resolves.toBeNull();
-  });
-  it("HTTP 非 ok／JSON 非陣列／fetch 拋錯 → 一律靜默 null", async () => {
+  it("HTTP 非 ok／JSON 非陣列／fetch 拋錯 → ok:false（呼叫端不覆寫既有徽章、不燒節流窗）", async () => {
     const notOk = (() => Promise.resolve({ ok: false, json: () => Promise.resolve([]) })) as unknown as typeof fetch;
     const throws = (() => Promise.reject(new Error("offline"))) as unknown as typeof fetch;
     const badJson = (() =>
       Promise.resolve({ ok: true, json: () => Promise.reject(new Error("bad")) })) as unknown as typeof fetch;
-    await expect(fetchLatest(notOk, "https://x", "0.0.12")).resolves.toBeNull();
-    await expect(fetchLatest(okFetch({ nope: 1 }), "https://x", "0.0.12")).resolves.toBeNull();
-    await expect(fetchLatest(throws, "https://x", "0.0.12")).resolves.toBeNull();
-    await expect(fetchLatest(badJson, "https://x", "0.0.12")).resolves.toBeNull();
+    for (const f of [notOk, okFetch({ nope: 1 }), throws, badJson]) {
+      await expect(fetchLatest(f, "https://x", "0.0.12")).resolves.toEqual({ ok: false, version: null });
+    }
   });
 });
 
