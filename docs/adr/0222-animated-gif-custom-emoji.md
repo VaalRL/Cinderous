@@ -1,6 +1,6 @@
 # 0222. 自訂 emoji 動畫 GIF 支援：raster 渲染路徑＋內容定址傳遞（Model B）
 
-- 狀態：提議中（Phase 1 raster 地基已實作；Phase 2 Model B 待）
+- 狀態：已接受（Phase 1 raster 地基＋Phase 2 Model B 內容定址傳遞皆已實作，見 ADR-0223；跨裝置由 ADR-0224 補齊）
 - 日期：2026-07-21
 - 相關文件：ADR-0220（統一自訂資產）、0221（審查修正）、0093（檔案 P2P 傳遞與持久化）、0102（圖片縮圖）、0032（自製貼圖 SVG）、0043（動態貼圖 reduced-motion）、0042（自製貼圖容量限制）
 

@@ -23,7 +23,7 @@
 | --- | --- | --- |
 | Identity/signatures | secp256k1 + BIP-340 Schnorr (`@noble/curves`) | NIP-01; ADR-0004 |
 | Content encryption | NIP-44 v2 (versioned AEAD, via `nostr-tools`) | Replaces the insecure NIP-04; ADR-0007 |
-| Metadata hiding | NIP-17 + NIP-59 Gift Wrap (kind 14→13→1059) | Hides the **sender** (one-time key); recipient pubkey is plaintext for routing. Message-layer social graph is hidden, but presence subscriptions still leak your contact set (see residual below); ADR-0002 |
+| Metadata hiding | NIP-17 + NIP-59 Gift Wrap (kind 14→13→1059) | Against a relay that only inspects events: hides the **sender** (one-time key); recipient pubkey is plaintext for routing. ⚠️ Against a relay that correlates "connection identity ↔ traffic," both the sender (publish connection = real npub) and the contact set (presence subscription) are attributable (ADR-0237); ADR-0002 |
 | Real-time channel | WebRTC DTLS (P2P, with forward secrecy) | File/voice/call media does not pass through the relay |
 | At-rest storage | SQLCipher (`sqlcipher` feature) | Native desktop DB encryption; ADR-0020 |
 | Randomness | `@noble/hashes` `randomBytes` / WebCrypto | groupId, one-time keys, nonce |
@@ -32,7 +32,8 @@
 
 ### Relay operators / subpoena-able hosting providers
 - **Content**: always NIP-44 ciphertext; the relay only sees ciphertext. ✅
-- **Social graph (message layer)**: direct messages, reactions, retractions, ephemeral messages, and **groups** all go through NIP-59 Gift Wrap (the outer author is a one-time key), so the relay cannot reconstruct "who **messages** whom." ✅ (Groups are also pairwise fan-out; see ADR-0027)
+- **Social graph (message layer)**: direct messages, reactions, retractions, ephemeral messages, and **groups** all go through NIP-59 Gift Wrap (the outer author is a one-time key), so **a relay that only inspects events** cannot reconstruct "who **messages** whom." ✅ (Groups are also pairwise fan-out; see ADR-0027)
+- **🔴 Residual — connection attribution defeats event-layer sender hiding (ADR-0237)**: NIP-42 AUTH (anti-scraping) binds every connection to your real npub, and publishing rides the same authed connection — a relay that correlates "authed identity ↔ published events" (zero cost; it already holds `authState`) sees "real-A's connection published a Gift Wrap addressed to #p" = the **send edge**, even though the outer author is a one-time key. So event-layer sender hiding holds only against a relay that does not correlate connections. Mitigation: self-hosting (the adversary is yourself); a full fix needs transport anonymity — see ADR-0237.
 - **🔴 Residual — presence subscriptions leak your contact set**: to receive contacts' online status, the client AUTHs under its real identity and subscribes to `{kinds:[20000], authors:[contact list]}` — this REQ **hands your contact set straight to your home relay**. The message-layer graph is hidden by Gift Wrap; the presence layer is not. Mitigations: P2P presence offload (ADR-0088e) and self-hosting (the leak is to your own node); a full fix requires wrapping presence too (publishes × contacts, hitting free-tier capacity) and is deferred — see PRD §6 and `docs/relay-metadata-observability.md` M7.
 - **Residual — timing/size**: online **timing** (heartbeats) and event **size/time** are observable. Mitigations: heartbeats are only broadcast to mutually consented contacts, with added **jitter** (ADR-0006 F5), and music is folded into the heartbeat to reduce events; traffic padding is not implemented.
 
