@@ -199,4 +199,11 @@
      2 moderate），**全部在開發工具鏈**（vite dev server 路徑穿越／`server.fs.deny` 繞過、
      vitest UI 任意檔案讀取執行、esbuild dev server），不隨產品出貨；`pnpm audit --prod`
      為零。故 CI 把「出貨相依」設為硬閘（`--prod --audit-level low`），開發工具鏈只報告
-     不擋——一盞永遠亮著的紅燈等於沒有燈。升級是跨主版本，另案處理。
+     不擋——一盞永遠亮著的紅燈等於沒有燈。
+     - **2026-07-23 嘗試升級（vite@6.4.3／vitest@3.2.7，清掉全部 5 弱點）：website build 綠、
+       全庫 1683 測試僅 `packages/engine` 的 ADR-0127「訊息請求防洪」2 測試在 vitest 3 下**間歇
+       逾時**（非確定性——flood 130 給 30s 過、flood 105 給 30s 卻掛、flood 30 給 5s 也掛）。
+       這些測試各建 100+ 個做 NIP-44＋Schnorr 的後端，疑似 vitest 3 對 outbox `setInterval` 泵
+       計時器的清理/排程改變導致偶發 hang，非產品 bug。單純加逾時無法穩定——需專門調查
+       timer 互動（`stop()` 是否清 pump、in-memory net 是否用真計時器）。**已還原升級**：不為
+       開發工具鏈弱點而引入 flaky 測試。留待專門一次 PR 處理（先解 timer 清理，再升級）。
