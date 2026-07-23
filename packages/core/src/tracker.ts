@@ -24,4 +24,9 @@ export class LatestPerKey<V = undefined> {
   value(key: PubkeyHex): V | undefined {
     return this.entries.get(key)?.value;
   }
+
+  /** 清空所有記錄。 */
+  clear(): void {
+    this.entries.clear();
+  }
 }

@@ -40,6 +40,11 @@ export class PresenceTracker {
     this.seen.observe(pubkey, createdAtSec * 1000, cadenceMs);
   }
 
+  /** 清空所有觀察記錄（ADR-0240 真隱身）：之後 `statusOf` 一律回 `offline`，直到重新收到心跳。 */
+  clear(): void {
+    this.seen.clear();
+  }
+
   lastSeenAt(pubkey: PubkeyHex): number | undefined {
     return this.seen.at(pubkey);
   }

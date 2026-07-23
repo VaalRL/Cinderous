@@ -2995,3 +2995,67 @@ describe("早到的群訊：緩存＋加入後重放（ADR-0131）", () => {
     b.stop();
   });
 });
+
+describe("真隱身：隱身時也停止訂閱聯絡人心跳（ADR-0240）", () => {
+  const hasHb = (filters: unknown[]) =>
+    filters.some((f) => (f as { kinds?: number[] }).kinds?.includes(KIND.HEARTBEAT));
+  const hasInbox = (filters: unknown[]) =>
+    filters.some((f) => (f as { kinds?: number[] }).kinds?.includes(KIND.OFFLINE_DM_GIFT_WRAP));
+
+  it("🔴 隱身 → 不送 `authors:[聯絡人]` 心跳訂閱（聯絡人集合不外流）；收件箱與復出不受影響", () => {
+    const reqs: unknown[][] = [];
+    const net = createInMemoryRelayNetwork();
+    const a = new RelayChatBackend(
+      new MemoryStorage(),
+      (h) => {
+        const c = net.connect("a", h);
+        const orig = c.subscribe.bind(c);
+        c.subscribe = (subId: string, filters: unknown[]) => {
+          reqs.push(filters);
+          orig(subId, filters as never);
+        };
+        return c;
+      },
+      "Alice",
+    );
+    a.start(noop);
+    a.addContact(npubEncode(getPublicKey(generateSecretKey()))); // 有聯絡人 → 心跳訂閱帶 authors
+
+    // 可見：最後一次 REQ 含心跳 filter，且 authors 帶著聯絡人（＝把聯絡人集合交給中繼）。
+    expect(hasHb(reqs.at(-1)!)).toBe(true);
+    const hb = reqs.at(-1)!.find((f) => (f as { kinds?: number[] }).kinds?.includes(KIND.HEARTBEAT)) as { authors: string[] };
+    expect(hb.authors.length).toBe(1);
+
+    // 隱身：重新訂閱，但**不含**心跳 filter（聯絡人不再上中繼）；收件箱仍在（訊息不受影響）。
+    reqs.length = 0;
+    a.setInvisible(true);
+    expect(reqs.length).toBeGreaterThan(0);
+    expect(hasHb(reqs.at(-1)!)).toBe(false);
+    expect(hasInbox(reqs.at(-1)!)).toBe(true);
+
+    // 復出：心跳 filter 回來。
+    reqs.length = 0;
+    a.setInvisible(false);
+    expect(hasHb(reqs.at(-1)!)).toBe(true);
+    a.stop();
+  });
+
+  it("隱身立即讓聯絡人在我眼中變離線（清 presence，不等逾時）", () => {
+    const net = createInMemoryRelayNetwork();
+    const a = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("a", h), "Alice");
+    const b = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("b", h), "Bob");
+    const aSees: { pubkey: string; status: string }[][] = [];
+    a.start({ ...noop, onContacts: (cs) => aSees.push(cs.map((c) => ({ pubkey: c.pubkey, status: c.status }))) });
+    b.start(noop);
+    a.addContact(b.selfNpub);
+    b.acceptRequest(a.self.pubkey);
+    b.setStatus("online", "在忙"); // b 對在線聯絡人 a 封裝廣播狀態 → a 同步 emitContacts → 看到 b 在線
+    const statusOf = (pk: string) => aSees[aSees.length - 1]?.find((c) => c.pubkey === pk)?.status;
+    expect(statusOf(b.self.pubkey)).toBe("online");
+
+    a.setInvisible(true); // 清 presence ＋ emitContacts → b 立即變離線
+    expect(statusOf(b.self.pubkey)).toBe("offline");
+    a.stop();
+    b.stop();
+  });
+});

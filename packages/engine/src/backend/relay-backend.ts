@@ -827,7 +827,11 @@ export class RelayChatBackend implements ChatBackend {
     const me = [this.self.pubkey];
     const filters: Filter[] = [
       // F5：presence 心跳已彙整音樂狀態（np），不再單獨訂閱 MUSIC。
-      { kinds: [KIND.HEARTBEAT], authors },
+      // 真隱身（ADR-0240）：隱身時**不訂閱**聯絡人心跳——這條 `authors:[聯絡人]` 正是把
+      // 你的**聯絡人集合**以真名交給中繼的洩漏（ADR-0237）。既有隱身只停「發布」（beat 早退），
+      // 你卻還在訂閱別人 → 中繼照樣知道你有哪些聯絡人。補上這一側，隱身才名副其實：
+      // 既不報自己、也不看別人 → 對中繼真正消失。訊息收發（收件匣 `#p:自己`）不受影響。
+      ...(this.invisible ? [] : [{ kinds: [KIND.HEARTBEAT], authors }]),
       // ADR-0120：typing/nudge 已 NIP-59 封裝 → 外層作者是**一次性臨時金鑰**，`authors: all`
       // 永遠不會命中。改為只靠 `#p`（與 Gift Wrap 收件箱同形）。
       //
@@ -2059,10 +2063,20 @@ export class RelayChatBackend implements ChatBackend {
     }
   }
 
-  /** 隱身開關（ADR-0088 (d)）：開＝停止一切在線廣播（relay＋P2P），仍正常收發；關＝立即復出廣播。 */
+  /**
+   * 隱身開關。開＝**真隱身**（ADR-0088 (d) ＋ ADR-0240）：既不廣播自己（`beat()` 早退），
+   * 也**不訂閱聯絡人心跳**（不把聯絡人集合交給中繼，ADR-0237）——對中繼真正消失。仍正常收發訊息。
+   * 關＝立即復出（重掛心跳訂閱＋重新廣播）。
+   */
   setInvisible(invisible: boolean): void {
     this.invisible = invisible;
-    if (!invisible) {
+    // 重建訂閱（ADR-0240）：隱身時移除心跳 filter（聯絡人不上中繼）、復出時加回。
+    this.resubscribe();
+    if (invisible) {
+      // 不再收心跳 → 立即讓所有聯絡人在我眼中變離線（不等 60s 逾時），清乾淨再重繪。
+      this.presence.clear();
+      this.emitContacts();
+    } else {
       this.beat();
       this.broadcastPresenceState(); // 復出：重新封裝送出當下狀態（ADR-0129）
     }
