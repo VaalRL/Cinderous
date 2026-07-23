@@ -1,10 +1,11 @@
-import type { AssetBlob, AssetTombstone, CustomAsset } from "@cinderous/core";
+import type { AssetBlob, AssetTombstone, CustomAsset, OrSetTombstone } from "@cinderous/core";
 import {
   advanceReceipt,
   type AppStorage,
   THUMB_MAX_BYTES,
   MESSAGE_STATUS_RANK,
   type MessageStatus,
+  type OrSetName,
   type StorageSnapshot,
   type StoredBootstrapList,
   type StoredContact,
@@ -415,6 +416,14 @@ export class MemoryStorage implements AppStorage {
   saveAssetTombstones(list: AssetTombstone[]): void {
     this.assetTombstones = list;
   }
+  // 多設備 OR-Set 墓碑（ADR-0242）：以 set 名為桶（contacts/groups/blocked）。
+  private crdtTombstones: Record<string, OrSetTombstone[]> = {};
+  loadCrdtTombstones(set: OrSetName): OrSetTombstone[] {
+    return this.crdtTombstones[set] ?? [];
+  }
+  saveCrdtTombstones(set: OrSetName, list: OrSetTombstone[]): void {
+    this.crdtTombstones[set] = list;
+  }
 
   /** 匯出整包狀態快照（B2 加密儲存，ADR-0054）；深拷貝以免外部改動內部。 */
   exportSnapshot(): StorageSnapshot {
@@ -436,6 +445,7 @@ export class MemoryStorage implements AppStorage {
       customAssets: [...this.customAssets], // ADR-0220
       assetBlobs: [...this.assetBlobs], // ADR-0223
       assetTombstones: [...this.assetTombstones], // ADR-0224
+      crdtTombstones: { ...this.crdtTombstones }, // ADR-0242
       readAt: Object.fromEntries(this.readAt), // ADR-0108
     };
   }
@@ -467,6 +477,7 @@ export class MemoryStorage implements AppStorage {
     this.customAssets = [...(s.customAssets ?? [])]; // 舊快照無此欄位（ADR-0220）
     this.assetBlobs = [...(s.assetBlobs ?? [])]; // 舊快照無此欄位（ADR-0223）
     this.assetTombstones = [...(s.assetTombstones ?? [])]; // 舊快照無此欄位（ADR-0224）
+    this.crdtTombstones = { ...(s.crdtTombstones ?? {}) }; // 舊快照無此欄位（ADR-0242）
     this.readAt.clear();
     for (const [k, v] of Object.entries(s.readAt ?? {})) this.readAt.set(k, v); // 舊快照無此欄位
   }

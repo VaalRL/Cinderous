@@ -5,6 +5,7 @@ import {
   type AssetBlob,
   type AssetTombstone,
   type CustomAsset,
+  type OrSetTombstone,
 } from "@cinderous/core";
 
 import { ArchiveWriter, type MessageArchive } from "./archive.js";
@@ -12,6 +13,7 @@ import { MemoryStorage } from "./memory.js";
 import type {
   AppStorage,
   MessageStatus,
+  OrSetName,
   StorageSnapshot,
   StoredBootstrapList,
   StoredContact,
@@ -162,6 +164,12 @@ export class LocalStorage implements AppStorage {
       customAssets: read<CustomAsset[]>(this.k("customAssets"), [], this.dek), // ADR-0220
       assetBlobs: read<AssetBlob[]>(this.k("assetBlobs"), [], this.dek), // ADR-0223
       assetTombstones: read<AssetTombstone[]>(this.k("assetTombstones"), [], this.dek), // ADR-0224
+      crdtTombstones: {
+        // ADR-0242：每 set 一鍵載回，組成 Record 供 importSnapshot。
+        contacts: read<OrSetTombstone[]>(this.k("crdtTomb.contacts"), [], this.dek),
+        groups: read<OrSetTombstone[]>(this.k("crdtTomb.groups"), [], this.dek),
+        blocked: read<OrSetTombstone[]>(this.k("crdtTomb.blocked"), [], this.dek),
+      },
       readAt: read<Record<string, number>>(this.k("readAt"), {}, this.dek),
     };
   }
@@ -413,6 +421,13 @@ export class LocalStorage implements AppStorage {
   saveAssetTombstones(list: AssetTombstone[]): void {
     this.mem.saveAssetTombstones(list);
     write(this.k("assetTombstones"), list, this.dek); // ADR-0224：以 dek 加密落地
+  }
+  loadCrdtTombstones(set: OrSetName): OrSetTombstone[] {
+    return this.mem.loadCrdtTombstones(set);
+  }
+  saveCrdtTombstones(set: OrSetName, list: OrSetTombstone[]): void {
+    this.mem.saveCrdtTombstones(set, list);
+    write(this.k(`crdtTomb.${set}`), list, this.dek); // ADR-0242：以 dek 加密落地、每 set 一鍵
   }
   exportSnapshot(): StorageSnapshot {
     return this.mem.exportSnapshot();

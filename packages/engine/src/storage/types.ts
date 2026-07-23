@@ -1,6 +1,6 @@
 /** 本機持久化的資料型別（身分、聯絡人、訊息）。 */
 
-import type { AssetBlob, AssetTombstone, CustomAsset } from "@cinderous/core";
+import type { AssetBlob, AssetTombstone, CustomAsset, OrSetTombstone } from "@cinderous/core";
 import type { MessageArchive } from "./archive.js";
 
 /**
@@ -19,6 +19,11 @@ export interface StoredIdentity {
 export interface StoredContact {
   pubkey: string;
   name: string;
+  /**
+   * 加入/更新時間（毫秒；ADR-0242 多設備 OR-Set）：跨裝置合併的 LWW 基準，與聯絡人墓碑比大小
+   * （聯絡人較新＝復活、墓碑較新＝刪除）。舊資料可能缺 → 合併時視為 `0`（最舊）。
+   */
+  at?: number;
   /** 對方的 relay hint（ADR-0034 多中繼路由）；無 hint 時走自己的 home relay。 */
   relayUrl?: string;
   /**
@@ -157,6 +162,8 @@ export interface StoredGroup {
   announce?: boolean;
   /** 組織名冊分發的群（ADR-0049）：由名冊對帳權威管理，區隔本機自建群以免誤刪。 */
   org?: boolean;
+  /** 加入/更新時間（毫秒；ADR-0242 多設備 OR-Set）：與群組墓碑比大小（離群復活修正）。缺＝0。 */
+  at?: number;
 }
 
 export interface StoredReaction {
@@ -310,7 +317,16 @@ export interface AppStorage {
   /** 資產刪除墓碑（跨裝置刪除傳播，ADR-0224）：加密落地、每身分獨立；未設過回傳 []。 */
   loadAssetTombstones(): AssetTombstone[];
   saveAssetTombstones(list: AssetTombstone[]): void;
+  /**
+   * 多設備 OR-Set 墓碑（ADR-0242）：聯絡人／群組／封鎖清單的刪除傳播。泛用一組方法涵蓋三集合，
+   * 以 `set` 區隔；加密落地、每身分獨立；未設過回傳 []。
+   */
+  loadCrdtTombstones(set: OrSetName): OrSetTombstone[];
+  saveCrdtTombstones(set: OrSetName, list: OrSetTombstone[]): void;
 }
+
+/** OR-Set 集合名（ADR-0242）：多設備可變集合的三個墓碑桶。 */
+export type OrSetName = "contacts" | "groups" | "blocked";
 
 /** 已採用的引導 relay 清單（ADR-0039）。 */
 export interface StoredBootstrapList {
@@ -350,6 +366,8 @@ export interface StorageSnapshot {
   assetBlobs?: AssetBlob[];
   /** 資產刪除墓碑（ADR-0224）；舊快照沒有 → 匯入時退回 `[]`。 */
   assetTombstones?: AssetTombstone[];
+  /** 多設備 OR-Set 墓碑（ADR-0242）：set 名 → 墓碑清單；舊快照沒有 → 匯入時退回 `{}`。 */
+  crdtTombstones?: Record<string, OrSetTombstone[]>;
   /**
    * 已讀水位（ADR-0108）：對話 → 已讀到的最新訊息時間（毫秒）。
    *

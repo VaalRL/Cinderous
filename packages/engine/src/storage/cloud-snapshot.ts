@@ -7,12 +7,15 @@
 
 import {
   isWellFormedAsset,
+  isWellFormedOrSetTombstone,
   isWellFormedTombstone,
   mergeAssetLibrary,
+  mergeOrSet,
   type AssetTombstone,
   type CustomAsset,
+  type OrSetTombstone,
 } from "@cinderous/core";
-import type { AppStorage, StoredContact, StoredGroup, StoredMessage } from "./types.js";
+import type { AppStorage, OrSetName, StoredContact, StoredGroup, StoredMessage } from "./types.js";
 
 /** 雲端同步模式（ADR-0071 三檔）。 */
 export type CloudSyncMode = "off" | "basic" | "full";
@@ -48,6 +51,12 @@ export interface CloudSnapshotContent {
   customAssets?: CustomAsset[];
   /** 資產刪除墓碑（ADR-0224）：LWW 交換律合併，跨自機傳播刪除。 */
   assetTombstones?: AssetTombstone[];
+  /** 聯絡人刪除墓碑（ADR-0242 OR-Set）：跨裝置傳播「移除聯絡人」，修刪除復活。 */
+  contactTombstones?: OrSetTombstone[];
+  /** 群組離群墓碑（ADR-0242 OR-Set）：跨裝置傳播「離開/移除群組」，修離群復活。 */
+  groupTombstones?: OrSetTombstone[];
+  /** 封鎖解封墓碑（ADR-0242 OR-Set）：跨裝置傳播「解封」，修解封不傳播（G-Set→OR-Set）。 */
+  blockTombstones?: OrSetTombstone[];
 }
 
 /** 組裝快照內容：基本＝聯絡人/群組/封鎖；完整＝＋近期訊息。 */
@@ -80,6 +89,9 @@ export function buildSnapshotContent(
     assetBytes += len;
   }
   const assetTombstones = storage.loadAssetTombstones();
+  const contactTombstones = storage.loadCrdtTombstones("contacts");
+  const groupTombstones = storage.loadCrdtTombstones("groups");
+  const blockTombstones = storage.loadCrdtTombstones("blocked");
   const base: CloudSnapshotContent = {
     v: 1,
     at: opts.now ?? Date.now(),
@@ -89,6 +101,9 @@ export function buildSnapshotContent(
     blocked,
     ...(customAssets.length ? { customAssets } : {}),
     ...(assetTombstones.length ? { assetTombstones } : {}),
+    ...(contactTombstones.length ? { contactTombstones } : {}),
+    ...(groupTombstones.length ? { groupTombstones } : {}),
+    ...(blockTombstones.length ? { blockTombstones } : {}),
   };
   if (mode !== "full") return base;
   const all: StoredMessage[] = [];
@@ -119,10 +134,24 @@ export function parseSnapshotContent(json: string): CloudSnapshotContent | null 
     if (s.messages !== undefined && !Array.isArray(s.messages)) return null;
     if (s.customAssets !== undefined && !Array.isArray(s.customAssets)) return null; // ADR-0224
     if (s.assetTombstones !== undefined && !Array.isArray(s.assetTombstones)) return null; // ADR-0224
+    // ADR-0242：OR-Set 墓碑（逐筆過濾留到 merge，此處只驗頂層為陣列）。
+    if (s.contactTombstones !== undefined && !Array.isArray(s.contactTombstones)) return null;
+    if (s.groupTombstones !== undefined && !Array.isArray(s.groupTombstones)) return null;
+    if (s.blockTombstones !== undefined && !Array.isArray(s.blockTombstones)) return null;
     return s as CloudSnapshotContent;
   } catch {
     return null;
   }
+}
+
+/** OR-Set 墓碑集合有變才寫回並回報（避免順序/無變更誤報 changed）。 */
+function saveTombstonesIfChanged(storage: AppStorage, set: OrSetName, merged: OrSetTombstone[]): boolean {
+  const key = (t: OrSetTombstone): string => `${t.key}:${t.at}`;
+  const before = new Set(storage.loadCrdtTombstones(set).map(key));
+  const after = new Set(merged.map(key));
+  if (before.size === after.size && [...after].every((k) => before.has(k))) return false;
+  storage.saveCrdtTombstones(set, merged);
+  return true;
 }
 
 /**
@@ -134,28 +163,83 @@ export function mergeSnapshotContent(
   content: CloudSnapshotContent,
 ): { changed: boolean; convos: string[] } {
   let changed = false;
-  // 封鎖先行（安全優先）：聯集，且封鎖者不得經快照重新入列聯絡人。
-  const blockedSet = new Set(storage.loadBlocked().map((b) => b.pubkey));
-  for (const b of content.blocked) {
-    if (blockedSet.has(b.pubkey)) continue;
-    storage.blockContact(b);
-    blockedSet.add(b.pubkey);
-    changed = true;
+
+  // ── 封鎖清單（OR-Set＋墓碑，ADR-0242）：解封現在能傳播（舊為聯集、只增不減＝解封失效）。 ──
+  const localBlocked = storage.loadBlocked();
+  const mb = mergeOrSet(
+    localBlocked,
+    content.blocked,
+    storage.loadCrdtTombstones("blocked"),
+    (content.blockTombstones ?? []).filter(isWellFormedOrSetTombstone),
+    { keyOf: (b) => b.pubkey, atOf: (b) => b.at ?? 0 },
+  );
+  const blockedNow = new Set(mb.items.map((b) => b.pubkey));
+  const blockedBefore = new Set(localBlocked.map((b) => b.pubkey));
+  for (const b of mb.items) {
+    if (!blockedBefore.has(b.pubkey)) {
+      storage.blockContact(b); // 新封鎖：亦清出聯絡人（安全不變式）
+      changed = true;
+    }
   }
-  const have = new Set(storage.loadContacts().map((c) => c.pubkey));
-  for (const c of content.contacts) {
-    if (have.has(c.pubkey) || blockedSet.has(c.pubkey)) continue;
-    storage.addContact(c);
-    have.add(c.pubkey);
-    changed = true;
+  for (const b of localBlocked) {
+    if (!blockedNow.has(b.pubkey)) {
+      storage.unblockContact(b.pubkey); // 解封傳播（墓碑較新蓋過封鎖）
+      changed = true;
+    }
   }
-  const gids = new Set(storage.loadGroups().map((g) => g.id));
-  for (const g of content.groups) {
-    if (gids.has(g.id)) continue; // 既有群組不覆蓋（admin 快照/名冊才是對帳權威）
-    storage.saveGroup(g);
-    gids.add(g.id);
-    changed = true;
+  if (saveTombstonesIfChanged(storage, "blocked", mb.tombstones)) changed = true;
+
+  // ── 聯絡人（OR-Set＋墓碑）：移除傳得出去（舊為補缺、刪除會復活）。封鎖者永不入列。 ──
+  const localContacts = storage.loadContacts();
+  const mc = mergeOrSet(
+    localContacts,
+    content.contacts.filter((c) => !blockedNow.has(c.pubkey)),
+    storage.loadCrdtTombstones("contacts"),
+    (content.contactTombstones ?? []).filter(isWellFormedOrSetTombstone),
+    { keyOf: (c) => c.pubkey, atOf: (c) => c.at ?? 0 },
+  );
+  const contactSurvivors = mc.items.filter((c) => !blockedNow.has(c.pubkey));
+  const contactNow = new Set(contactSurvivors.map((c) => c.pubkey));
+  const contactBefore = new Set(localContacts.map((c) => c.pubkey));
+  for (const c of contactSurvivors) {
+    if (!contactBefore.has(c.pubkey)) {
+      storage.addContact(c); // 補新聯絡人（既有內容不覆蓋——欄位同步＝階段②）
+      changed = true;
+    }
   }
+  for (const c of localContacts) {
+    if (!contactNow.has(c.pubkey)) {
+      storage.removeContact(c.pubkey); // 刪除傳播（遠端墓碑較新）
+      changed = true;
+    }
+  }
+  if (saveTombstonesIfChanged(storage, "contacts", mc.tombstones)) changed = true;
+
+  // ── 群組（OR-Set＋墓碑）：離群/移除傳得出去（舊為補缺、離群會復活）。 ──
+  const localGroups = storage.loadGroups();
+  const mg = mergeOrSet(
+    localGroups,
+    content.groups,
+    storage.loadCrdtTombstones("groups"),
+    (content.groupTombstones ?? []).filter(isWellFormedOrSetTombstone),
+    { keyOf: (g) => g.id, atOf: (g) => g.at ?? 0 },
+  );
+  const groupNow = new Set(mg.items.map((g) => g.id));
+  const groupBefore = new Set(localGroups.map((g) => g.id));
+  for (const g of mg.items) {
+    if (!groupBefore.has(g.id)) {
+      storage.saveGroup(g); // 補新群組（既有不覆蓋——admin 快照/名冊才是對帳權威）
+      changed = true;
+    }
+  }
+  for (const g of localGroups) {
+    if (!groupNow.has(g.id)) {
+      storage.removeGroup(g.id); // 離群傳播
+      changed = true;
+    }
+  }
+  if (saveTombstonesIfChanged(storage, "groups", mg.tombstones)) changed = true;
+
   const convos: string[] = [];
   if (content.messages) {
     const idsByConvo = new Map<string, Set<string>>();

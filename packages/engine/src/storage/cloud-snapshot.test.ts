@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildSnapshotContent,
+  type CloudSnapshotContent,
   mergeSnapshotContent,
   parseSnapshotContent,
   SNAPSHOT_MESSAGE_CAP,
@@ -123,6 +124,76 @@ describe("快照合併（交換律、補缺不覆蓋）", () => {
     expect(parseSnapshotContent("not json")).toBeNull();
     expect(parseSnapshotContent(JSON.stringify({ v: 2 }))).toBeNull();
     expect(parseSnapshotContent(JSON.stringify({ v: 1, mode: "basic" }))).toBeNull();
+  });
+});
+
+describe("多設備 OR-Set 合併（ADR-0242 階段①：聯絡人/群組/封鎖刪除傳播）", () => {
+  const basic = (over: Partial<CloudSnapshotContent>): CloudSnapshotContent => ({
+    v: 1,
+    at: 1,
+    mode: "basic",
+    contacts: [],
+    groups: [],
+    blocked: [],
+    ...over,
+  });
+
+  it("聯絡人刪除傳播：另一台刪了（墓碑較新）→ 本機也移除，並保留墓碑續傳", () => {
+    const dst = new MemoryStorage();
+    dst.addContact({ pubkey: "bob", name: "Bob", at: 100 });
+    const { changed } = mergeSnapshotContent(dst, basic({ contactTombstones: [{ key: "bob", at: 200 }] }));
+    expect(changed).toBe(true);
+    expect(dst.loadContacts().some((c) => c.pubkey === "bob")).toBe(false);
+    expect(dst.loadCrdtTombstones("contacts").map((t) => t.key)).toContain("bob");
+    // 冪等：同快照再合併無變更
+    expect(mergeSnapshotContent(dst, basic({ contactTombstones: [{ key: "bob", at: 200 }] })).changed).toBe(false);
+  });
+
+  it("刪除復活：本機重加（at 較新）蓋過舊墓碑 → 保留、丟棄過時墓碑", () => {
+    const dst = new MemoryStorage();
+    dst.addContact({ pubkey: "bob", name: "Bob", at: 300 }); // 重加，比墓碑 200 新
+    const { changed } = mergeSnapshotContent(dst, basic({ contactTombstones: [{ key: "bob", at: 200 }] }));
+    expect(changed).toBe(false); // bob 存活、本無此墓碑
+    expect(dst.loadContacts().some((c) => c.pubkey === "bob")).toBe(true);
+    expect(dst.loadCrdtTombstones("contacts")).toEqual([]); // 復活 → 墓碑清掉
+  });
+
+  it("群組離群傳播：另一台離群（墓碑較新）→ 本機也移除", () => {
+    const dst = new MemoryStorage();
+    dst.saveGroup({ id: "g1", name: "群", admin: "me", members: ["me"], at: 100 });
+    const { changed } = mergeSnapshotContent(dst, basic({ groupTombstones: [{ key: "g1", at: 200 }] }));
+    expect(changed).toBe(true);
+    expect(dst.loadGroups().some((g) => g.id === "g1")).toBe(false);
+  });
+
+  it("解封傳播（G-Set→OR-Set）：另一台解封（墓碑較新）→ 本機也解封", () => {
+    const dst = new MemoryStorage();
+    dst.blockContact({ pubkey: "eve", name: "Eve", at: 100 });
+    expect(dst.loadBlocked().some((b) => b.pubkey === "eve")).toBe(true);
+    const { changed } = mergeSnapshotContent(dst, basic({ blockTombstones: [{ key: "eve", at: 200 }] }));
+    expect(changed).toBe(true);
+    expect(dst.loadBlocked().some((b) => b.pubkey === "eve")).toBe(false);
+  });
+
+  it("封鎖傳播：對端封鎖（blocked 元素＋聯絡人墓碑）→ 本機加入封鎖、且該人不留在聯絡人", () => {
+    const dst = new MemoryStorage();
+    dst.addContact({ pubkey: "mallory", name: "M", at: 100 });
+    const { changed } = mergeSnapshotContent(
+      dst,
+      basic({ blocked: [{ pubkey: "mallory", name: "M", at: 200 }], contactTombstones: [{ key: "mallory", at: 200 }] }),
+    );
+    expect(changed).toBe(true);
+    expect(dst.loadBlocked().some((b) => b.pubkey === "mallory")).toBe(true);
+    expect(dst.loadContacts().some((c) => c.pubkey === "mallory")).toBe(false);
+  });
+
+  it("舊快照（無墓碑欄位）→ 純補缺、絕不刪除本機資料（向後相容）", () => {
+    const dst = new MemoryStorage();
+    dst.addContact({ pubkey: "bob", name: "Bob", at: 100 });
+    // 舊格式：只有 contacts/groups/blocked，沒有任何 tombstone 欄位
+    const { changed } = mergeSnapshotContent(dst, basic({ contacts: [{ pubkey: "carol", name: "Carol" }] }));
+    expect(changed).toBe(true);
+    expect(dst.loadContacts().map((c) => c.pubkey).sort()).toEqual(["bob", "carol"]); // bob 不被刪
   });
 });
 

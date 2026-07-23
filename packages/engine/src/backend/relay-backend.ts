@@ -120,7 +120,7 @@ import { WebRtcCall } from "./webrtc-call.js";
 import { WebRtcTransfer } from "./webrtc.js";
 import { buildSnapshotContent, mergeSnapshotContent, parseSnapshotContent } from "../storage/cloud-snapshot.js";
 import { getDeviceId } from "../storage/device-id.js";
-import type { AppStorage, MessageStatus, StoredMessage } from "../storage/types.js";
+import type { AppStorage, MessageStatus, OrSetName, StoredMessage } from "../storage/types.js";
 import type {
   ChatBackend,
   ChatBackendEvents,
@@ -953,6 +953,16 @@ export class RelayChatBackend implements ChatBackend {
     return buildRtcConfig(this.forceTurn, staticTurn ?? this.publicTurnServers);
   }
 
+  /** 蓋加入/更新時間（ADR-0242 OR-Set）：使用者新增聯絡人/群組時打時間戳，供跨裝置合併 LWW。 */
+  private stampAt<T extends object>(item: T): T & { at: number } {
+    return { ...item, at: Date.now() };
+  }
+
+  /** 寫一筆 OR-Set 墓碑（ADR-0242）：**使用者移除操作**才呼叫——跨裝置傳播刪除/離群/解封。 */
+  private tombstone(set: OrSetName, key: string): void {
+    this.storage.saveCrdtTombstones(set, [...this.storage.loadCrdtTombstones(set), { key, at: Date.now() }]);
+  }
+
   /** 抓公共 TURN 短期憑證（ADR-0243）。抓到才覆蓋，抓不到保留舊值/純 STUN——保底不拖垮通話。 */
   private async refreshPublicTurn(): Promise<void> {
     if (!this.turnEndpoint) return;
@@ -1667,7 +1677,8 @@ export class RelayChatBackend implements ChatBackend {
       if (!control.members.includes(this.self.pubkey)) return;
       // 管理者強制為驗證後的寄件人（不信任 payload 的 admin 欄位）；
       // 不自動把其他成員塞進個人聯絡人（避免被強行灌入聯絡人清單）。
-      this.storage.saveGroup({ id: control.id, name: control.name, admin: from, members: control.members });
+      // ADR-0242：實例化群組打時間戳——重新被邀入時 at 較新 → 蓋過舊的離群墓碑（復活）。
+      this.storage.saveGroup(this.stampAt({ id: control.id, name: control.name, admin: from, members: control.members }));
       this.groups = this.storage.loadGroups();
       this.emitGroups();
       this.drainPendingGroup(control.id); // ADR-0131：重放在 group-create 之前先到的群訊
@@ -1744,7 +1755,7 @@ export class RelayChatBackend implements ChatBackend {
     if (!req || this.isBlocked(pubkey)) return;
     this.storage.removeRequest(pubkey);
     // 把請求期間學到的 relay hint（ADR-0035）一起帶過來——否則回信只會走 home relay。
-    this.storage.addContact({ pubkey, name: req.name, ...(req.relayUrl ? { relayUrl: req.relayUrl } : {}) });
+    this.storage.addContact(this.stampAt({ pubkey, name: req.name, ...(req.relayUrl ? { relayUrl: req.relayUrl } : {}) }));
     this.requests = this.storage.loadRequests();
     this.contacts = this.storage.loadContacts();
     this.resubscribe(); // 現在才訂閱他的上線心跳
@@ -1779,7 +1790,7 @@ export class RelayChatBackend implements ChatBackend {
   private ensureContact(pubkey: PubkeyHex): void {
     if (this.isBlocked(pubkey)) return;
     if (this.contacts.some((c) => c.pubkey === pubkey)) return;
-    const contact = { pubkey, name: shortNpub(npubEncode(pubkey)) };
+    const contact = this.stampAt({ pubkey, name: shortNpub(npubEncode(pubkey)) });
     this.storage.addContact(contact);
     this.contacts = this.storage.loadContacts();
     this.resubscribe();
@@ -1793,11 +1804,13 @@ export class RelayChatBackend implements ChatBackend {
     // 自我防呆（ADR-0055）：不得加自己作用中身分（跨身分連結風險；App 層另擋其他自身身分）。
     if (pubkey === this.self.pubkey || this.isBlocked(pubkey) || this.contacts.some((c) => c.pubkey === pubkey)) return;
     const hint = normalizeRelayUrl(relayUrl ?? inlineHint);
-    this.storage.addContact({
-      pubkey,
-      name: shortNpub((rawNpub ?? "").trim()),
-      ...(hint && hint !== this.homeUrl ? { relayUrl: hint } : {}),
-    });
+    this.storage.addContact(
+      this.stampAt({
+        pubkey,
+        name: shortNpub((rawNpub ?? "").trim()),
+        ...(hint && hint !== this.homeUrl ? { relayUrl: hint } : {}),
+      }),
+    );
     this.contacts = this.storage.loadContacts();
     this.resubscribe();
     this.emitContacts();
@@ -1805,6 +1818,7 @@ export class RelayChatBackend implements ChatBackend {
   }
 
   removeContact(pubkey: PubkeyHex): void {
+    this.tombstone("contacts", pubkey); // ADR-0242：使用者刪除 → 跨裝置傳播（修刪除復活）
     this.storage.removeContact(pubkey);
     this.statuses.delete(pubkey); // 釋放狀態快取，避免殘留
     this.contacts = this.storage.loadContacts();
@@ -1875,7 +1889,9 @@ export class RelayChatBackend implements ChatBackend {
     const existing =
       this.contacts.find((c) => c.pubkey === pubkey) ?? this.requests.find((r) => r.pubkey === pubkey);
     const name = existing?.name ?? shortNpub(npubEncode(pubkey));
-    this.storage.blockContact({ pubkey, name }); // 也會清掉請求（ADR-0121）
+    // ADR-0242：封鎖＝兩個 OR-Set 操作——封鎖元素帶時間、並對聯絡人寫墓碑（他離開聯絡人集合）。
+    this.tombstone("contacts", pubkey);
+    this.storage.blockContact(this.stampAt({ pubkey, name })); // 也會清掉請求（ADR-0121）
     this.statuses.delete(pubkey);
     this.blocked = this.storage.loadBlocked();
     this.contacts = this.storage.loadContacts();
@@ -1887,6 +1903,7 @@ export class RelayChatBackend implements ChatBackend {
   }
 
   unblockContact(pubkey: PubkeyHex): void {
+    this.tombstone("blocked", pubkey); // ADR-0242：解封 → 跨裝置傳播（修解封不傳播；G-Set→OR-Set）
     this.storage.unblockContact(pubkey);
     this.blocked = this.storage.loadBlocked();
     this.emitBlocked();
@@ -3042,7 +3059,7 @@ export class RelayChatBackend implements ChatBackend {
 
   createGroup(name: string, memberPubkeys: PubkeyHex[]): void {
     const members = [this.self.pubkey, ...memberPubkeys.filter((p) => p !== this.self.pubkey)];
-    const group: Group = { id: newGroupId(), name: name.trim() || "群組", admin: this.self.pubkey, members };
+    const group: Group = this.stampAt({ id: newGroupId(), name: name.trim() || "群組", admin: this.self.pubkey, members });
     this.storage.saveGroup(group);
     this.groups = this.storage.loadGroups();
     for (const m of members) if (m !== this.self.pubkey) this.ensureContact(m);
@@ -3139,6 +3156,7 @@ export class RelayChatBackend implements ChatBackend {
     if (!group) return;
     // 含自己（ADR-0107）：在一台裝置離群 → 自己的其他裝置也離群。
     this.publishControl({ type: "group-leave", id: groupId }, group.members.filter((m) => m !== this.self.pubkey));
+    this.tombstone("groups", groupId); // ADR-0242：離群 → 跨裝置傳播（修離群復活）
     this.storage.removeGroup(groupId);
     this.groups = this.storage.loadGroups();
     this.emitGroups();
