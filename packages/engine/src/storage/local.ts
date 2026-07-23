@@ -215,12 +215,12 @@ export class LocalStorage implements AppStorage {
     this.writeContacts();
     this.writeRequests(); // 請求區的顯示名也會被更新（ADR-0121）
   }
-  setContactAlias(pubkey: string, alias: string | undefined): void {
-    this.mem.setContactAlias(pubkey, alias); // ADR-0148：本地暱稱，僅寫聯絡人區
+  setContactAlias(pubkey: string, alias: string | undefined, at?: number): void {
+    this.mem.setContactAlias(pubkey, alias, at); // ADR-0148/0242：本地暱稱＋per-field LWW 時間戳
     this.writeContacts();
   }
-  setContactNotifySound(pubkey: string, soundId: string | undefined): void {
-    this.mem.setContactNotifySound(pubkey, soundId); // ADR-0149：依聯絡人通知音效
+  setContactNotifySound(pubkey: string, soundId: string | undefined, at?: number): void {
+    this.mem.setContactNotifySound(pubkey, soundId, at); // ADR-0149/0242
     this.writeContacts();
   }
   updateContactAvatar(pubkey: string, avatar: string | undefined): void {

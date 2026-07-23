@@ -297,12 +297,12 @@ export class TauriStorage implements AppStorage {
     this.mem.updateContactName(pubkey, name);
     this.persist(META);
   }
-  setContactAlias(pubkey: string, alias: string | undefined): void {
-    this.mem.setContactAlias(pubkey, alias); // ADR-0148：本地暱稱，隨加密 blob 落地
+  setContactAlias(pubkey: string, alias: string | undefined, at?: number): void {
+    this.mem.setContactAlias(pubkey, alias, at); // ADR-0148/0242：本地暱稱＋per-field LWW 時間戳
     this.persist(META);
   }
-  setContactNotifySound(pubkey: string, soundId: string | undefined): void {
-    this.mem.setContactNotifySound(pubkey, soundId); // ADR-0149：依聯絡人通知音效
+  setContactNotifySound(pubkey: string, soundId: string | undefined, at?: number): void {
+    this.mem.setContactNotifySound(pubkey, soundId, at); // ADR-0149/0242
     this.persist(META);
   }
   updateContactAvatar(pubkey: string, avatar: string | undefined): void {

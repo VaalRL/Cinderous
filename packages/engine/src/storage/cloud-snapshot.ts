@@ -144,6 +144,26 @@ export function parseSnapshotContent(json: string): CloudSnapshotContent | null 
   }
 }
 
+/**
+ * 兩端皆有的聯絡人做 per-field LWW（ADR-0242 階段②）：同步 `alias`／`notifySound` 兩個本地私有偏好，
+ * 逐欄位取「fieldsAt 較新」的一方（含「清除」——清除也帶時間戳）。遠端較新才寫回並推進本地 fieldsAt；
+ * 回報是否有**使用者可見**變更（值不同才算，純推進時間戳不算）。並發改不同欄位互不覆蓋。
+ */
+function mergeContactFieldsInto(storage: AppStorage, local: StoredContact, remote: StoredContact): boolean {
+  const lf = local.fieldsAt ?? {};
+  const rf = remote.fieldsAt ?? {};
+  let changed = false;
+  if ((rf.alias ?? 0) > (lf.alias ?? 0)) {
+    if (remote.alias !== local.alias) changed = true;
+    storage.setContactAlias(local.pubkey, remote.alias, rf.alias); // 遠端較新 → 採用（含清除），推進 fieldsAt
+  }
+  if ((rf.notifySound ?? 0) > (lf.notifySound ?? 0)) {
+    if (remote.notifySound !== local.notifySound) changed = true;
+    storage.setContactNotifySound(local.pubkey, remote.notifySound, rf.notifySound);
+  }
+  return changed;
+}
+
 /** OR-Set 墓碑集合有變才寫回並回報（避免順序/無變更誤報 changed）。 */
 function saveTombstonesIfChanged(storage: AppStorage, set: OrSetName, merged: OrSetTombstone[]): boolean {
   const key = (t: OrSetTombstone): string => `${t.key}:${t.at}`;
@@ -200,12 +220,18 @@ export function mergeSnapshotContent(
   );
   const contactSurvivors = mc.items.filter((c) => !blockedNow.has(c.pubkey));
   const contactNow = new Set(contactSurvivors.map((c) => c.pubkey));
-  const contactBefore = new Set(localContacts.map((c) => c.pubkey));
+  const localContactByKey = new Map(localContacts.map((c) => [c.pubkey, c]));
+  const remoteContactByKey = new Map(content.contacts.map((c) => [c.pubkey, c]));
   for (const c of contactSurvivors) {
-    if (!contactBefore.has(c.pubkey)) {
-      storage.addContact(c); // 補新聯絡人（既有內容不覆蓋——欄位同步＝階段②）
+    const local = localContactByKey.get(c.pubkey);
+    if (!local) {
+      storage.addContact(c); // 補新聯絡人（含遠端欄位）
       changed = true;
+      continue;
     }
+    // 階段②：兩端皆有 → 逐欄位 LWW（暱稱/音效）；成員身分不變、只同步欄位。
+    const remote = remoteContactByKey.get(c.pubkey);
+    if (remote && mergeContactFieldsInto(storage, local, remote)) changed = true;
   }
   for (const c of localContacts) {
     if (!contactNow.has(c.pubkey)) {

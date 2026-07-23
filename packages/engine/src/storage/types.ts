@@ -24,6 +24,11 @@ export interface StoredContact {
    * （聯絡人較新＝復活、墓碑較新＝刪除）。舊資料可能缺 → 合併時視為 `0`（最舊）。
    */
   at?: number;
+  /**
+   * 逐欄位最後編輯時間（毫秒；ADR-0242 階段② per-field LWW）：目前同步 `alias`／`notifySound`
+   * 兩個**本地私有偏好**。並發編輯不同欄位不互相覆蓋；缺＝視為 `0`（最舊）。
+   */
+  fieldsAt?: Record<string, number>;
   /** 對方的 relay hint（ADR-0034 多中繼路由）；無 hint 時走自己的 home relay。 */
   relayUrl?: string;
   /**
@@ -187,10 +192,14 @@ export interface AppStorage {
   updateContactRelay(pubkey: string, relayUrl: string | undefined): void;
   /** 更新聯絡人顯示名稱（收到對方加密個人檔時；ADR-0061）。 */
   updateContactName(pubkey: string, name: string): void;
-  /** 設定/清除聯絡人本地暱稱（ADR-0148）；空字串或 undefined＝清除，退回廣播名。 */
-  setContactAlias(pubkey: string, alias: string | undefined): void;
-  /** 設定/清除依聯絡人通知音效（ADR-0149）；空字串或 undefined＝清除，退回全域預設。 */
-  setContactNotifySound(pubkey: string, soundId: string | undefined): void;
+  /**
+   * 設定/清除聯絡人本地暱稱（ADR-0148）；空字串或 undefined＝清除，退回廣播名。
+   * `at`（ADR-0242 階段②）＝本次編輯時間（毫秒），寫入 `fieldsAt.alias` 供跨裝置 per-field LWW；
+   * 省略則不動時間戳（純本地舊行為）。
+   */
+  setContactAlias(pubkey: string, alias: string | undefined, at?: number): void;
+  /** 設定/清除依聯絡人通知音效（ADR-0149）；空＝清除退回全域預設。`at`＝編輯時間供 per-field LWW（ADR-0242）。 */
+  setContactNotifySound(pubkey: string, soundId: string | undefined, at?: number): void;
   /** 更新聯絡人廣播頭像（收到對方加密個人檔時；ADR-0154）；undefined＝清除（對方已移除）。 */
   updateContactAvatar(pubkey: string, avatar: string | undefined): void;
   /** 更新聯絡人廣播頭銜（收到對方加密個人檔時；ADR-0158）；undefined＝清除。 */

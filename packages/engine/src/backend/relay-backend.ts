@@ -1831,7 +1831,7 @@ export class RelayChatBackend implements ChatBackend {
    * 空字串或 undefined＝清除，退回廣播名。
    */
   setContactAlias(pubkey: PubkeyHex, alias: string | undefined): void {
-    this.storage.setContactAlias(pubkey, alias);
+    this.storage.setContactAlias(pubkey, alias, Date.now()); // ADR-0242 階段②：帶編輯時間供跨裝置 LWW
     this.contacts = this.storage.loadContacts();
     this.emitContacts();
   }
@@ -1841,7 +1841,7 @@ export class RelayChatBackend implements ChatBackend {
    * 空/undefined＝清除，播放退回全域預設。
    */
   setContactNotifySound(pubkey: PubkeyHex, soundId: string | undefined): void {
-    this.storage.setContactNotifySound(pubkey, soundId);
+    this.storage.setContactNotifySound(pubkey, soundId, Date.now()); // ADR-0242 階段②
     this.contacts = this.storage.loadContacts();
     this.emitContacts();
   }

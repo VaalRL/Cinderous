@@ -197,6 +197,58 @@ describe("多設備 OR-Set 合併（ADR-0242 階段①：聯絡人/群組/封鎖
   });
 });
 
+describe("多設備欄位 per-field LWW（ADR-0242 階段②：暱稱/音效）", () => {
+  const basic = (contacts: CloudSnapshotContent["contacts"]): CloudSnapshotContent => ({
+    v: 1,
+    at: 1,
+    mode: "basic",
+    contacts,
+    groups: [],
+    blocked: [],
+  });
+  const bob = (dst: MemoryStorage) => dst.loadContacts().find((c) => c.pubkey === "bob");
+
+  it("遠端較新的暱稱 → 傳到本機既有聯絡人（修欄位編輯不傳播）", () => {
+    const dst = new MemoryStorage();
+    dst.addContact({ pubkey: "bob", name: "Bob", alias: "本機暱稱", fieldsAt: { alias: 100 }, at: 1 });
+    const { changed } = mergeSnapshotContent(
+      dst,
+      basic([{ pubkey: "bob", name: "Bob", alias: "改過的暱稱", fieldsAt: { alias: 200 }, at: 1 }]),
+    );
+    expect(changed).toBe(true);
+    expect(bob(dst)?.alias).toBe("改過的暱稱");
+  });
+
+  it("遠端較新的『清除』→ 本機暱稱也清掉（清除也是一次編輯）", () => {
+    const dst = new MemoryStorage();
+    dst.addContact({ pubkey: "bob", name: "Bob", alias: "待清除", fieldsAt: { alias: 100 }, at: 1 });
+    mergeSnapshotContent(dst, basic([{ pubkey: "bob", name: "Bob", fieldsAt: { alias: 200 }, at: 1 }]));
+    expect(bob(dst)?.alias).toBeUndefined();
+  });
+
+  it("本機較新 → 不被較舊的遠端覆蓋", () => {
+    const dst = new MemoryStorage();
+    dst.addContact({ pubkey: "bob", name: "Bob", alias: "本機新", fieldsAt: { alias: 200 }, at: 1 });
+    const { changed } = mergeSnapshotContent(
+      dst,
+      basic([{ pubkey: "bob", name: "Bob", alias: "遠端舊", fieldsAt: { alias: 100 }, at: 1 }]),
+    );
+    expect(changed).toBe(false);
+    expect(bob(dst)?.alias).toBe("本機新");
+  });
+
+  it("並發改不同欄位（一台改暱稱、另一台改音效）→ 兩者皆保留", () => {
+    const dst = new MemoryStorage();
+    dst.addContact({ pubkey: "bob", name: "Bob", alias: "A暱稱", fieldsAt: { alias: 200 }, at: 1 });
+    mergeSnapshotContent(
+      dst,
+      basic([{ pubkey: "bob", name: "Bob", notifySound: "chime2", fieldsAt: { notifySound: 200 }, at: 1 }]),
+    );
+    expect(bob(dst)?.alias).toBe("A暱稱"); // 本機暱稱未被覆蓋
+    expect(bob(dst)?.notifySound).toBe("chime2"); // 遠端音效被套用
+  });
+});
+
 describe("跨裝置資產同步（ADR-0224）", () => {
   const asset = (id: string, extra: Partial<CustomAsset> = {}): CustomAsset => ({
     id,

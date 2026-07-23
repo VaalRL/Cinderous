@@ -163,22 +163,27 @@ export class MemoryStorage implements AppStorage {
     // 使用者無從判斷要不要接受。
     this.requests = this.requests.map((r) => (r.pubkey === pubkey ? { ...r, name } : r));
   }
-  setContactAlias(pubkey: string, alias: string | undefined): void {
+  setContactAlias(pubkey: string, alias: string | undefined, at?: number): void {
     // ADR-0148：只動聯絡人的 alias，不碰 name（廣播名獨立保存）。空＝清除，退回廣播名。
     const trimmed = alias?.trim();
     this.contacts = this.contacts.map((c) => {
       if (c.pubkey !== pubkey) return c;
       const { alias: _drop, ...rest } = c;
-      return trimmed ? { ...rest, alias: trimmed } : rest;
+      const next: StoredContact = trimmed ? { ...rest, alias: trimmed } : rest;
+      // ADR-0242 階段②：帶編輯時間戳供 per-field LWW（清除也是一次編輯，須記時間才傳得出去）。
+      if (at !== undefined) next.fieldsAt = { ...(c.fieldsAt ?? {}), alias: at };
+      return next;
     });
   }
-  setContactNotifySound(pubkey: string, soundId: string | undefined): void {
+  setContactNotifySound(pubkey: string, soundId: string | undefined, at?: number): void {
     // ADR-0149：依聯絡人通知音效（預設集 id）。空＝清除，播放退回全域預設。
     const trimmed = soundId?.trim();
     this.contacts = this.contacts.map((c) => {
       if (c.pubkey !== pubkey) return c;
       const { notifySound: _drop, ...rest } = c;
-      return trimmed ? { ...rest, notifySound: trimmed } : rest;
+      const next: StoredContact = trimmed ? { ...rest, notifySound: trimmed } : rest;
+      if (at !== undefined) next.fieldsAt = { ...(c.fieldsAt ?? {}), notifySound: at }; // ADR-0242 階段②
+      return next;
     });
   }
   updateContactAvatar(pubkey: string, avatar: string | undefined): void {
