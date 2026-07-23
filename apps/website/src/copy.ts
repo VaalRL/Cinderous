@@ -8,8 +8,14 @@ export interface Copy {
   nav_tech: string;
   nav_node: string;
   nav_roadmap: string;
+  nav_faq: string;
   nav_download: string;
   nav_transparency: string;
+  /** FAQ 頁（ADR-0235 SEO-4）：標題、引言，與問答清單（同時餵頁面與 FAQPage JSON-LD）。 */
+  faq_title: string;
+  faq_intro: string;
+  /** 問答對——GEO 關鍵：答案引擎最常擷取的正是這種「一問一答」結構。 */
+  faqItems: { q: string; a: string }[];
   roadmap_title: string;
   roadmap_intro: string;
   roadmap_shipped_t: string;
@@ -142,8 +148,45 @@ const zhHant: Copy = {
   nav_tech: "技術原理",
   nav_node: "建立節點",
   nav_roadmap: "藍圖",
+  nav_faq: "常見問題",
   nav_download: "下載",
   nav_transparency: "透明度",
+  faq_title: "常見問題",
+  faq_intro: "關於 Cinderous 是什麼、如何保護你的隱私，以及與其他通訊軟體有何不同——最常被問到的問題。",
+  faqItems: [
+    {
+      q: "Cinderous 是什麼？",
+      a: "Cinderous 是一款開源、永久免費、隱私優先的去中心化即時通訊軟體。訊息以端到端加密（Nostr NIP-44／Gift Wrap），採本地優先儲存，中繼站不保存任何線上狀態——明文與私鑰永遠不離開你的裝置。桌面版（Windows）與網頁版皆可使用。",
+    },
+    {
+      q: "Cinderous 安全嗎？我的訊息會被誰看到？",
+      a: "只有對話中的人看得到內容。訊息以 NIP-44 端到端加密，並用 NIP-17／59 Gift Wrap 把收發雙方一起封裝起來，因此中繼站連「誰在跟誰講話」都無法重建。明文只存在你自己的裝置上，且經作業系統金鑰庫或本地密碼加密落地。",
+    },
+    {
+      q: "使用 Cinderous 需要手機號碼或電子郵件嗎？",
+      a: "不需要。首次啟動會在本機產生一組密碼學金鑰對，你的公鑰（npub）就是全網唯一的身分。沒有電話、沒有電子郵件、沒有實名——不會有一個中央資料庫握著你的通訊錄。",
+    },
+    {
+      q: "Cinderous 和 Signal、Session、SimpleX 有什麼不同？",
+      a: "Cinderous 建立在開放的 Nostr 協定上，任何人都能自架相容的中繼站、彼此互通——沒有單一公司控制的伺服器。它同時走 WebRTC P2P 直連（通話、檔案、在線狀態繞過中繼），並主打還原經典即時通訊的體驗（浮動對話窗、聯絡人分組、狀態文字）。與 Signal 不同，它不需要手機號碼，也不依賴單一營運方。",
+    },
+    {
+      q: "真的完全免費嗎？背後靠什麼營運？",
+      a: "是，永久免費、無廣告、無內購、不販售資料。程式碼以 AGPL-3.0 開源。官方中繼站的營運成本由自願捐款支持，並以簽章式的資金透明度公開。你也可以完全自架，不依賴任何官方基礎設施。",
+    },
+    {
+      q: "伺服器是誰在運作？我的資料存在哪裡？",
+      a: "你的資料（訊息、聯絡人、設定）以加密形式存在你自己的裝置上——那是唯一的真相來源。中繼站只轉發密文與暫存有到期時間的離線留言（預設 7 天），不持久化任何線上狀態。中繼可跑在 Cloudflare Workers、Docker 或樹莓派上，任何人都能自架。",
+    },
+    {
+      q: "我的公司可以用 Cinderous 嗎？",
+      a: "可以。企業模式支援自架封閉節點（以 allowlist 只放行組織成員）、組織名冊與邀請碼入職、離職接管，以及保留天數等公司設定。資料完全留在公司自己的基礎設施上，中繼全程只看得到密文與成員公鑰。",
+    },
+    {
+      q: "如果我換手機或弄丟裝置，訊息會不見嗎？",
+      a: "Cinderous 提供三條換機路徑：加密備份碼（自持）、opt-in 的加密雲端快照（中繼只見密文），以及桌面配對克隆（一次性 P2P 全量搬家、以 SAS 短碼互相確認，內容不經中繼）。由於沒有金鑰託管，建議重要身分登記在兩台裝置作為冗餘。",
+    },
+  ],
   roadmap_title: "產品藍圖",
   roadmap_intro: "Cinderous 已上線桌面版與網頁版。以下是已完成的能力，以及正在規劃的未來待辦。",
   roadmap_shipped_t: "✅ 已上線",
@@ -288,8 +331,45 @@ const en: Copy = {
   nav_tech: "How it works",
   nav_node: "Run a node",
   nav_roadmap: "Roadmap",
+  nav_faq: "FAQ",
   nav_download: "Download",
   nav_transparency: "Transparency",
+  faq_title: "Frequently asked questions",
+  faq_intro: "The questions people ask most — what Cinderous is, how it protects your privacy, and how it differs from other messengers.",
+  faqItems: [
+    {
+      q: "What is Cinderous?",
+      a: "Cinderous is open-source, forever-free, privacy-first decentralized messaging. Messages are end-to-end encrypted (Nostr NIP-44 / Gift Wrap), storage is local-first, and relays keep no online state — plaintext and private keys never leave your device. It runs on desktop (Windows) and in the browser.",
+    },
+    {
+      q: "Is Cinderous secure? Who can read my messages?",
+      a: "Only the people in the conversation. Messages are end-to-end encrypted with NIP-44 and wrapped with NIP-17/59 Gift Wrap, which hides both sender and recipient — so relays cannot even reconstruct who is talking to whom. Plaintext exists only on your own device, encrypted at rest via the OS keychain or a local password.",
+    },
+    {
+      q: "Do I need a phone number or email to use Cinderous?",
+      a: "No. On first launch your device generates a cryptographic keypair; your public key (npub) is your unique identity across the whole network. No phone, no email, no real name — there is no central database holding your contacts.",
+    },
+    {
+      q: "How is Cinderous different from Signal, Session, or SimpleX?",
+      a: "Cinderous is built on the open Nostr protocol, so anyone can self-host a compatible relay and interoperate — there is no single company-controlled server. It also uses WebRTC P2P for calls, files and presence (bypassing relays), and deliberately restores the classic instant-messenger experience (floating chat windows, contact groups, status text). Unlike Signal it needs no phone number and depends on no single operator.",
+    },
+    {
+      q: "Is it really free? How is it funded?",
+      a: "Yes — forever free, no ads, no in-app purchases, no data sales. The code is AGPL-3.0 open source. Official relay costs are covered by voluntary donations, published with signed funding transparency. You can also self-host entirely, depending on no official infrastructure.",
+    },
+    {
+      q: "Who runs the servers? Where is my data stored?",
+      a: "Your data (messages, contacts, settings) lives encrypted on your own device — that is the single source of truth. Relays only forward ciphertext and briefly hold offline messages with an expiry (7 days by default); they persist no online state. A relay can run on Cloudflare Workers, Docker, or a Raspberry Pi, and anyone can self-host one.",
+    },
+    {
+      q: "Can my company use Cinderous?",
+      a: "Yes. Enterprise mode supports a self-hosted closed node (an allowlist admitting only organization members), org rosters with invite-code onboarding, offboarding takeover, and company settings such as retention days. Data stays entirely on the company's own infrastructure, and the relay only ever sees ciphertext and member public keys.",
+    },
+    {
+      q: "If I switch phones or lose my device, do I lose my messages?",
+      a: "Cinderous offers three device-migration paths: an encrypted backup code you hold yourself, an opt-in encrypted cloud snapshot (relays see only ciphertext), and desktop pairing clone (a one-time P2P full transfer confirmed via a short SAS code, with content never touching a relay). Since there is no key escrow, registering an important identity on two devices is recommended for redundancy.",
+    },
+  ],
   roadmap_title: "Roadmap",
   roadmap_intro: "Cinderous already ships desktop and web. Here's what's done, and what's planned next.",
   roadmap_shipped_t: "✅ Shipped",

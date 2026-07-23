@@ -15,9 +15,9 @@
 import type { Locale } from "@cinderous/i18n";
 
 /** 官網的頁面。 */
-export type View = "home" | "tech" | "node" | "roadmap";
+export type View = "home" | "tech" | "node" | "roadmap" | "faq";
 
-export const VIEWS: readonly View[] = ["home", "tech", "node", "roadmap"] as const;
+export const VIEWS: readonly View[] = ["home", "tech", "node", "roadmap", "faq"] as const;
 
 /** 官網支援的語言；`zh-Hant` 為預設（根路徑），其餘走 `/<locale>/` 前綴。 */
 export const LOCALES: readonly Locale[] = ["zh-Hant", "en"] as const;

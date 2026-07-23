@@ -71,6 +71,26 @@ describe("head 標籤產出", () => {
     expect(JSON.parse(tech)).toBeTruthy();
   });
 
+  it("FAQ 頁輸出 FAQPage，問答對與可見文案同源（ADR-0235 SEO-4）", () => {
+    const route = { view: "faq", locale: "zh-Hant" } as const;
+    const c = useCopy("zh-Hant");
+    const ld = JSON.parse(jsonLd(route, pageMeta(route, c), REPO, c)) as {
+      "@graph": { "@type": string; mainEntity?: { name: string; acceptedAnswer: { text: string } }[] }[];
+    };
+    const faq = ld["@graph"].find((n) => n["@type"] === "FAQPage");
+    expect(faq).toBeTruthy();
+    expect(faq?.mainEntity).toHaveLength(c.faqItems.length);
+    // 結構化資料的問答必須與頁面可見內容一字不差（Google 政策）。
+    expect(faq?.mainEntity?.[0]?.name).toBe(c.faqItems[0]!.q);
+    expect(faq?.mainEntity?.[0]?.acceptedAnswer.text).toBe(c.faqItems[0]!.a);
+  });
+
+  it("非 FAQ 頁不含 FAQPage", () => {
+    const route = { view: "home", locale: "zh-Hant" } as const;
+    const c = useCopy("zh-Hant");
+    expect(jsonLd(route, pageMeta(route, c), REPO, c)).not.toContain("FAQPage");
+  });
+
   it("JSON-LD 內的 < 一律跳脫——否則內容裡的 </script> 會提早關閉標籤", () => {
     const html = tags({ view: "home", locale: "zh-Hant" });
     const script = /<script type="application\/ld\+json">([\s\S]*?)<\/script>/.exec(html)?.[1] ?? "";

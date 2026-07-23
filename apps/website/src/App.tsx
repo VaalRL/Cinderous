@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { Theme } from "@cinderous/theme";
 import { CinderMark } from "./Brand.js";
 import { useCopy } from "./copy.js";
+import { Faq } from "./pages/Faq.js";
 import { Home } from "./pages/Home.js";
 import { Node } from "./pages/Node.js";
 import { Roadmap } from "./pages/Roadmap.js";
@@ -108,6 +109,7 @@ export function App({ route: initialRoute }: { route: Route }): JSX.Element {
           <NavLink route={{ view: "tech", locale }} current={view} label={c.nav_tech} onNavigate={navigate} />
           <NavLink route={{ view: "node", locale }} current={view} label={c.nav_node} onNavigate={navigate} />
           <NavLink route={{ view: "roadmap", locale }} current={view} label={c.nav_roadmap} onNavigate={navigate} />
+          <NavLink route={{ view: "faq", locale }} current={view} label={c.nav_faq} onNavigate={navigate} />
           <a className="nav__toggle" href={localeHref} hrefLang={otherLocale} rel="alternate">
             {locale === "zh-Hant" ? "EN" : "繁中"}
           </a>
@@ -131,6 +133,8 @@ export function App({ route: initialRoute }: { route: Route }): JSX.Element {
         <Tech c={c} />
       ) : view === "roadmap" ? (
         <Roadmap c={c} />
+      ) : view === "faq" ? (
+        <Faq c={c} />
       ) : (
         <Node c={c} />
       )}

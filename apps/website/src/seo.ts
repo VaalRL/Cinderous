@@ -83,6 +83,12 @@ export function pageMeta(route: Route, c: Copy): PageMeta {
         ? "Cinderous 的開發路線圖：已完成的端對端加密訊息、群組、語音視訊通話、檔案傳輸與企業模式，以及規劃中的行動端與桌面強化。"
         : "The Cinderous roadmap: shipped end-to-end encrypted messaging, groups, voice/video calls, file transfer and enterprise mode — plus what is planned next.",
     },
+    faq: {
+      title: zh ? `常見問題：Cinderous 是什麼、安全嗎、免費嗎？｜${BRAND}` : `FAQ: what is Cinderous, is it secure, is it free?｜${BRAND}`,
+      description: zh
+        ? "關於 Cinderous 的常見問題：它是什麼、訊息會被誰看到、需不需要手機號碼、與 Signal 有何不同、真的免費嗎、伺服器是誰在運作、換手機會不會丟訊息。"
+        : "Common questions about Cinderous: what it is, who can read your messages, whether it needs a phone number, how it differs from Signal, whether it is really free, who runs the servers, and device migration.",
+    },
   };
   const { title, description } = byView[route.view];
   // 文案缺漏時退回目錄值，確保永遠有非空的 description（空 description 比沒有更糟）。
@@ -90,7 +96,7 @@ export function pageMeta(route: Route, c: Copy): PageMeta {
 }
 
 /** 結構化資料（JSON-LD）：答案引擎最容易正確擷取的格式。 */
-export function jsonLd(route: Route, meta: PageMeta, repoUrl: string): string {
+export function jsonLd(route: Route, meta: PageMeta, repoUrl: string, c?: Copy): string {
   const org = {
     "@type": "Organization",
     name: BRAND,
@@ -116,6 +122,20 @@ export function jsonLd(route: Route, meta: PageMeta, repoUrl: string): string {
       isPartOf: { "@id": `${SITE_ORIGIN}/Cinderous/#website` },
     },
   ];
+  // FAQ 頁宣告 FAQPage——問答對直接對應答案引擎的擷取格式。用**與可見內容相同**的 faqItems
+  // （Google 政策：結構化資料須與頁面內容相符）。
+  if (route.view === "faq" && c) {
+    graph.push({
+      "@type": "FAQPage",
+      "@id": `${meta.canonical}#faq`,
+      inLanguage: route.locale,
+      mainEntity: c.faqItems.map((item) => ({
+        "@type": "Question",
+        name: item.q,
+        acceptedAnswer: { "@type": "Answer", text: item.a },
+      })),
+    });
+  }
   // 首頁額外宣告這是一個軟體——這是「Cinderous 是什麼」這類提問的直接答案來源。
   if (route.view === "home") {
     graph.push({
@@ -169,7 +189,7 @@ export function headTags(route: Route, c: Copy, repoUrl: string): string {
     `<meta name="theme-color" content="#0f1f3a" />`,
     // JSON-LD 內容是我們自己產的 JSON；`</script>` 序列在 JSON 字串中會被跳脫成 `<\/script>`
     // 以免提早關閉標籤。
-    `<script type="application/ld+json">${jsonLd(route, meta, repoUrl).replace(/</g, "\\u003c")}</script>`,
+    `<script type="application/ld+json">${jsonLd(route, meta, repoUrl, c).replace(/</g, "\\u003c")}</script>`,
   );
   return lines.join("\n    ");
 }
