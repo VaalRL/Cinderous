@@ -162,7 +162,7 @@
 - ~~monorepo 工具與行動端共用程度？~~（已定案：**pnpm workspace**；行動端共用 core/engine/i18n/theme，ADR-0086。）
 - ~~各平台版號分歧、runtime 無版號、無 release note？~~（已定案 ADR-0227：**版號 SSOT＝root `package.json`**，`pnpm run version:sync` 同步四端 app＋desktop 三處，CI `version:check` 防漂移；runtime 經 vite `define __APP_VERSION__`；release note 單一雙語來源 `docs/releases.json`——app 依 locale 顯示、`release-notes.mjs` 生成 GitHub release 雙語 body。）
 - ~~Ephemeral 心跳的容量估算與批次/合併？~~（已由 ADR-0109 定案並實作：**自適應心跳 60/300s ＋ 合併 REQ ＋ 增量收件箱**，取代 ADR-0006 的 30s。）
-- **（仍開放）** 是否導入棘輪（Double Ratchet）以取得前向保密／後妥協安全，或維持 Nostr 靜態金鑰模型？
+- **（方向已定，實作待排）** 前向保密：現行靜態金鑰模型無 FS/PCS（NIP-44 對話金鑰恆為同一把，Gift Wrap 臨時金鑰只藏寄件人元資料、不給內容 FS）。**ADR-0236** 定案分階段路徑——Stage 1 為 1:1 對稱 KDF 棘輪（給 FS、不給 PCS），Stage 2 X3DH prekey，Stage 3 評估 Double Ratchet（1:1 PCS）與 MLS（群組）。FS 上線前文案不得宣稱前向保密。
 - 多設備同步的衝突解法：訊息以 rumor.id 去重、已讀水位 LWW（ADR-0108）已定；其餘可變狀態的 CRDT 化仍可評估。
 - ~~群組加密方案？~~（已定案 ADR-0027：Gift-Wrap 成對扇出；MLS 延後。顯示名稱走加密個人檔 kind 已實作，ADR-0061。）
 - **（仍開放）** 語音訊息（M7）離線傳遞受中繼大小限制時的退回策略；**心跳真名廣播＋訂閱洩漏聯絡人**的結構性隱私修法（ADR-0120／0123 已記為已知限制，待專門 ADR 權衡成本）。
