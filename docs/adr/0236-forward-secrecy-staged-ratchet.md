@@ -173,9 +173,9 @@ ADR-0235 FAQ 已守此線。）
   - MLS 路線若啟動仍需自建有序 epoch delivery（Nostr 天生無序）。
 - 後續行動 / 待辦：
   1. **撤回**初版的 `packages/core/src/ratchet.ts`（純對稱棘輪）Stage 1 工作項。
-  2. **立「輪替加密子鑰（粗粒度 FS）」設計 ADR＋原型**：子鑰生成/簽章/發佈（可取代事件）、grace 窗
-     與快照老化的刪除紀律、多設備 epoch 同步、retarget gift wrap、向後相容退回靜態金鑰、遷移。
-     驗證後再定是否上線。
+  2. **設計 ADR 已立＝ADR-0238**（輪替加密子鑰的完整規格：每週 UTC epoch、grace 固定 7 天獨立於
+     企業 TTL、EK 隨機每身分一把、生成走 LWW＋全私鑰同步、混合發佈 kind 10040＋rumor 內嵌、
+     retarget gift wrap、降級保護＝簽章旗標＋TOFU 釘選）。待 prototype 與外部審計後再定是否上線。
   3. 近期止血：評估「限時訊息預設化」與 at-rest 加固清單；文案守則維持「不得宣稱 FS」。
   4. 完整 PCS/群組若要做：立「MLS over Nostr」ADR（含有序 epoch delivery），排外部審計。
   5. 更新 §9 與 ADR 索引，反映修訂後的方向。
