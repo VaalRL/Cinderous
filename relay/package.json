@@ -20,6 +20,7 @@
     "node-relay": "pnpm build:node-relay && node dist/node-relay.js",
     "bootstrap:build": "esbuild bootstrap/health-check.ts --bundle --platform=node --format=esm --outfile=dist/health-check.js",
     "bootstrap:run": "pnpm bootstrap:build && node dist/health-check.js",
+    "bootstrap:sign": "pnpm bootstrap:build && node dist/health-check.js --sign-only",
     "genkey:maintainer": "esbuild bootstrap/genkey.ts --bundle --platform=node --format=esm --outfile=dist/genkey.js && node dist/genkey.js"
   },
   "dependencies": {

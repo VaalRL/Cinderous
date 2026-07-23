@@ -69,6 +69,16 @@ function publishEvent(url: string, event: unknown): Promise<boolean> {
 
 async function main(): Promise<void> {
   const current = JSON.parse(readFileSync(LIST_PATH, "utf8")) as RelayListDoc;
+
+  // 離線簽發（ADR-0239）：維護者本機以 `--sign-only` 對**已提交的明文清單**簽章＋帶內發佈，
+  // 不探測、不改 health-history。信任根金鑰因此不需進 CI——CI 只探測＋更新明文清單。
+  if (process.argv.includes("--sign-only")) {
+    const nsec = process.env.MAINTAINER_NSEC?.trim();
+    if (!nsec) throw new Error("--sign-only 需要 MAINTAINER_NSEC（維護者本機離線簽發）");
+    await signAndPublish(current, nsec);
+    return;
+  }
+
   // ADR-0069/0092：一致性探測（含 liveness）自動維護 accepting/weight；retired 免探測原樣保留。
   const entries = listEntries(current);
   const active = entries.filter((e) => e.status !== "retired");
@@ -135,20 +145,27 @@ async function main(): Promise<void> {
     console.log("清單無變化。");
   }
 
-  // 簽章發佈（可選）：有維護者金鑰才簽。
+  // 簽章發佈：本機提供 MAINTAINER_NSEC 才簽。**CI 常態不提供**——信任根金鑰不進 CI，
+  // 改由維護者本機離線簽發（ADR-0239）。維護者若在本機跑完整探測，這條會順手簽＋發佈。
   const nsec = process.env.MAINTAINER_NSEC?.trim();
   if (nsec) {
-    const event = signRelayList(next, nsecDecode(nsec));
-    writeFileSync(EVENT_PATH, `${JSON.stringify(event, null, 2)}\n`);
-    console.log(`已簽章 relay 清單事件（kind ${event.kind}）→ ${EVENT_PATH}`);
-    // 帶內發佈（ADR-0039）：把簽章清單推到每座健康 relay，客戶端連上即學到。
-    const pubResults = await Promise.all(
-      decided.map(async (e) => [e.url, await publishEvent(e.url, event)] as const),
-    );
-    for (const [u, ok] of pubResults) console.log(`  ${ok ? "📡" : "⚠"} 發佈至 ${u}`);
+    await signAndPublish(next, nsec);
   } else {
-    console.log("未提供 MAINTAINER_NSEC：略過簽章與發佈（僅更新明文清單）。");
+    console.log("未提供 MAINTAINER_NSEC：僅更新明文清單（CI 常態；簽章由維護者離線執行，ADR-0239）。");
   }
+}
+
+/**
+ * 以維護者金鑰簽章 relay 清單並帶內發佈到清單內每座 relay（ADR-0039）。
+ * 供正常探測後的順手簽發，以及 `--sign-only`（對已提交清單離線補簽）共用。
+ */
+async function signAndPublish(doc: RelayListDoc, nsec: string): Promise<void> {
+  const event = signRelayList(doc, nsecDecode(nsec));
+  writeFileSync(EVENT_PATH, `${JSON.stringify(event, null, 2)}\n`);
+  console.log(`已簽章 relay 清單事件（kind ${event.kind}）→ ${EVENT_PATH}`);
+  // 帶內發佈：把簽章清單推到每座 relay，客戶端連上即學到（以 npub…@relay hint 驗釘死維護者公鑰）。
+  const pubResults = await Promise.all(doc.relays.map(async (u) => [u, await publishEvent(u, event)] as const));
+  for (const [u, ok] of pubResults) console.log(`  ${ok ? "📡" : "⚠"} 發佈至 ${u}`);
 }
 
 main().catch((err) => {

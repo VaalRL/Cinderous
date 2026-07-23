@@ -1,18 +1,15 @@
 name: Relay 健康檢查（ADR-0039）
 
-# 每小時探測引導 relay 清單、剔除逾時節點、產生簽章清單事件。
-# 信任根＝維護者金鑰（MAINTAINER_NSEC secret）；本 workflow 僅為發佈通道。
+# 每小時探測引導 relay 清單、剔除逾時節點、更新**明文**清單。
 #
-# ⚠️ 這是本 repo 風險最高的 workflow（ADR-0235 C5）。`MAINTAINER_NSEC` 是**客戶端釘死的
-# 簽章清單信任根**——它一旦外流，攻擊者就能簽發假的 relay 清單，把全體使用者的中繼池
-# 導向自己的節點。已套用的緩解：
-#   1. 所有 action 釘 commit SHA（可變 tag ＝上游被盜即為我們的 RCE）
-#   2. `--ignore-scripts`（相依的 install 腳本不執行）
-#   3. secret 只注入**簽章那一步**的 env，其餘步驟拿不到
-#   4. 明確的最小 `permissions`
+# ✅ 信任根金鑰已移出 CI（ADR-0239）。本 workflow **不再持有 `MAINTAINER_NSEC`**、
+# 不再簽章、不再帶內發佈——只探測與更新明文 `relays.json`／`health-history.json`。
+# 簽章清單事件（kind 10037，客戶端釘死維護者公鑰驗證）由**維護者本機離線簽發**：
+#   pnpm --filter @cinderous/relay bootstrap:sign   （需 MAINTAINER_NSEC 在本機環境）
+# 於 relay 集合實際變動時執行即可（錨點稀少、變動罕見）。
 #
-# 殘餘風險：`bootstrap:run` 仍在 runner 上執行整棵相依樹的程式碼。要徹底移除這個風險，
-# 唯一的辦法是**離線簽章**（維護者本機簽好、只把結果推上來）——見 ADR-0235「後續行動」。
+# 這消除了 ADR-0235 C5 的殘餘：信任根不再暴露於「在 runner 上執行整棵相依樹」的環境。
+# 明文清單即使被竄改也無法冒充簽章事件（客戶端只採信釘死公鑰簽章的 10037）。
 on:
   schedule:
     - cron: "0 * * * *"
@@ -40,10 +37,8 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile --ignore-scripts
 
-      - name: 探測 + 更新清單 + 簽章
-        env:
-          # 維護者私鑰（nsec）；未設定時僅更新明文清單、不產生簽章事件。
-          MAINTAINER_NSEC: ${{ secrets.MAINTAINER_NSEC }}
+      - name: 探測 + 更新明文清單（不簽章——信任根金鑰不進 CI，ADR-0239）
+        # 不注入 MAINTAINER_NSEC：health-check 未見金鑰時只更新明文清單、略過簽章與發佈。
         run: pnpm --filter @cinderous/relay bootstrap:run
 
       - name: 提交清單與一致性/uptime 記錄變更（若有）
