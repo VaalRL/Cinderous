@@ -553,6 +553,8 @@ export interface Messages {
   pair_importBusy: string;
   pair_importSasHint: string;
   file_attach: string;
+  /** 檔案暫時送不出去（無 P2P 直連、站方也無 relay 檔案後備）；ADR-0244。 */
+  file_unavailableHint: string;
   file_download: string;
   file_sending: string;
   /** 收檔另存後顯示的前綴（ADR-0093），後接儲存路徑。 */
@@ -1244,6 +1246,7 @@ const zhHant: Messages = {
   pair_importBusy: "連線中…",
   pair_importSasHint: "請確認舊裝置上顯示的數字與下方相同，並在舊裝置按「相符」。",
   file_attach: "傳送檔案（P2P）",
+  file_unavailableHint: "暫時無法傳檔——尚未與對方建立直連，此中繼也未提供檔案暫存。對方上線並建立直連後即可傳送（文字訊息不受影響）。",
   file_download: "下載",
   file_sending: "傳送中…",
   file_saved: "已儲存於",
@@ -1922,6 +1925,8 @@ const en: Messages = {
   pair_importBusy: "Connecting…",
   pair_importSasHint: "Check that the digits shown on the old device match the ones below, then press “Match” there.",
   file_attach: "Send a file (P2P)",
+  file_unavailableHint:
+    "Can't send a file right now — no direct link to this contact yet, and this relay offers no file store. Once they're online and a direct link is established you can send (text messages are unaffected).",
   file_download: "Download",
   file_sending: "Sending…",
   file_saved: "Saved to",

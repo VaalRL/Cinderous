@@ -288,6 +288,12 @@ export interface ConversationProps {
    * 僅 1:1 提供（群組為多對端、無單一直連概念）；`undefined`＝不顯示晶片。
    */
   p2pConnected?: boolean;
+  /**
+   * 檔案**現在**能否送達（ADR-0244 過渡：至少讓 UI 反映現實）：`false` 時停用 📎/🎤 並改提示，
+   * 避免公共站無 P2P、又無 relay 檔案後備時「按了卻靜默送不出」。判定＝有 P2P 直連 ∨ 站方提供
+   * relay 檔案後備。`undefined`＝不判定（沿用啟用；群組/示範不 gate）。
+   */
+  canSendFile?: boolean;
   /** 浮動視窗（ADR-0216）：經典佈局右側自由拖曳/縮放/置頂；提供時套用絕對定位與拖放把手。 */
   floating?: FloatingWindow;
   /** 此對話是否已靜音（ADR-0217）；提供 onToggleMute 才顯示 🔕 入口。 */
@@ -1042,8 +1048,10 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
     void alert(t("emoji_packImported", { added: String(added), skipped: String(skipped) }));
   };
 
+  // ADR-0244 過渡：檔案現在送不出去時（無 P2P 又無 relay 後備），拖放/貼上也一併擋下，不靜默失敗。
+  const fileUnavailable = props.canSendFile === false;
   const dropFiles = (files: FileList | null) => {
-    if (!files || !props.onSendFile) return;
+    if (!files || !props.onSendFile || fileUnavailable) return;
     for (const f of Array.from(files)) props.onSendFile(f);
   };
 
@@ -1507,7 +1515,9 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
           <>
             <button
               className="tool"
-              title={t("file_attach")}
+              title={fileUnavailable ? t("file_unavailableHint") : t("file_attach")}
+              data-testid="file-attach"
+              disabled={fileUnavailable}
               onClick={() => (props.onAttach ? props.onAttach() : fileRef.current?.click())}
             >
               📎
@@ -1524,8 +1534,10 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
             />
             <button
               className={`tool ${recording ? "tool--recording" : ""}`}
-              title={recording ? t("voice_stop") : t("voice_record")}
+              title={fileUnavailable ? t("file_unavailableHint") : recording ? t("voice_stop") : t("voice_record")}
+              data-testid="voice-record"
               aria-pressed={recording}
+              disabled={fileUnavailable && !recording}
               onClick={toggleRecording}
             >
               {recording ? "⏹" : "🎤"}

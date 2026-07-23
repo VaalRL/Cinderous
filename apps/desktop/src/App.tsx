@@ -2840,6 +2840,9 @@ export function App(): JSX.Element {
               blobsNonce={blobsNonce}
             contact={contact}
             p2pConnected={p2pConnected.has(pk)}
+            // ADR-0244 過渡：檔案現在能否送達＝有 P2P 直連 ∨ 站方有 relay 檔案後備（企業政策 relayFilesMaxMb）。
+            // 皆無時停用 📎/🎤，避免公共站無直連又無後備時靜默送不出。
+            canSendFile={p2pConnected.has(pk) || !!policy.relayFilesMaxMb}
             muted={isMuted(groupPrefs, pk)}
             onToggleMute={() => updatePrefs(withMuted(groupPrefs, pk, !isMuted(groupPrefs, pk)))}
             {...(activeBackend.setContactAlias
