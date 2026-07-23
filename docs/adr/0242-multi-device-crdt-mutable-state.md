@@ -91,4 +91,6 @@
      不在 `StoredContact`（屬 desktop `groupPrefs`）→ 併入階段③「設定/偏好同步」；relay hint 為自動學習
      欄位、暫沿用既有路徑（未納入本階段的使用者編輯 LWW）。
   3. 階段 3：設定/偏好逐項納入 LWW 同步（先每對話靜音、狀態文字；排除「該裝置本地」項）。
-  4. 墓碑 GC：帶時間、保留窗 ≥ 合理最長離線期，超窗回收。
+  4. ✅ **墓碑 GC 完成**：時間 GC（`OR_SET_TOMBSTONE_RETENTION_MS`＝90 天，須 ≥ 裝置合理最長離線期）
+     ＋純函式 `pruneTombstonesByTime`。build 不把超窗墓碑放進快照、merge 回寫前 prune 三集合；既有
+     數量上限（256 顆）保留。正式環境墓碑帶真實 ms、新建即在窗內照常傳播，只有超窗才回收。TDD +5。
