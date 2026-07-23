@@ -9,7 +9,7 @@ import {
 } from "./cloud-snapshot.js";
 import { MemoryStorage } from "./memory.js";
 import type { StoredMessage } from "./types.js";
-import type { AssetTombstone, CustomAsset } from "@cinderous/core";
+import { type AssetTombstone, type CustomAsset, OR_SET_TOMBSTONE_RETENTION_MS } from "@cinderous/core";
 
 const msg = (id: string, contact: string, at: number, text = id): StoredMessage => ({
   id,
@@ -141,12 +141,15 @@ describe("多設備 OR-Set 合併（ADR-0242 階段①：聯絡人/群組/封鎖
   it("聯絡人刪除傳播：另一台刪了（墓碑較新）→ 本機也移除，並保留墓碑續傳", () => {
     const dst = new MemoryStorage();
     dst.addContact({ pubkey: "bob", name: "Bob", at: 100 });
-    const { changed } = mergeSnapshotContent(dst, basic({ contactTombstones: [{ key: "bob", at: 200 }] }));
+    // now 設小值 → 墓碑在保留窗內（合成時間戳；正式環境用真實 ms）。
+    const { changed } = mergeSnapshotContent(dst, basic({ contactTombstones: [{ key: "bob", at: 200 }] }), { now: 300 });
     expect(changed).toBe(true);
     expect(dst.loadContacts().some((c) => c.pubkey === "bob")).toBe(false);
     expect(dst.loadCrdtTombstones("contacts").map((t) => t.key)).toContain("bob");
     // 冪等：同快照再合併無變更
-    expect(mergeSnapshotContent(dst, basic({ contactTombstones: [{ key: "bob", at: 200 }] })).changed).toBe(false);
+    expect(
+      mergeSnapshotContent(dst, basic({ contactTombstones: [{ key: "bob", at: 200 }] }), { now: 300 }).changed,
+    ).toBe(false);
   });
 
   it("刪除復活：本機重加（at 較新）蓋過舊墓碑 → 保留、丟棄過時墓碑", () => {
@@ -194,6 +197,46 @@ describe("多設備 OR-Set 合併（ADR-0242 階段①：聯絡人/群組/封鎖
     const { changed } = mergeSnapshotContent(dst, basic({ contacts: [{ pubkey: "carol", name: "Carol" }] }));
     expect(changed).toBe(true);
     expect(dst.loadContacts().map((c) => c.pubkey).sort()).toEqual(["bob", "carol"]); // bob 不被刪
+  });
+});
+
+describe("墓碑時間 GC（ADR-0242 後續④）", () => {
+  const base = (over: Partial<CloudSnapshotContent>): CloudSnapshotContent => ({
+    v: 1,
+    at: 1,
+    mode: "basic",
+    contacts: [],
+    groups: [],
+    blocked: [],
+    ...over,
+  });
+
+  it("窗內：刪除套用且墓碑保留（未 GC，續傳給尚未同步的裝置）", () => {
+    const dst = new MemoryStorage();
+    dst.addContact({ pubkey: "bob", name: "Bob", at: 100 });
+    mergeSnapshotContent(dst, base({ contactTombstones: [{ key: "bob", at: 200 }] }), { now: 500 });
+    expect(dst.loadContacts().some((c) => c.pubkey === "bob")).toBe(false);
+    expect(dst.loadCrdtTombstones("contacts").map((t) => t.key)).toContain("bob"); // 窗內保留
+  });
+
+  it("超窗：早於保留窗的墓碑被回收（收斂快照大小）", () => {
+    const dst = new MemoryStorage();
+    dst.saveCrdtTombstones("contacts", [{ key: "ancient", at: 1000 }]);
+    const now = 1000 + OR_SET_TOMBSTONE_RETENTION_MS + 1; // 超過保留窗
+    const { changed } = mergeSnapshotContent(dst, base({}), { now });
+    expect(changed).toBe(true);
+    expect(dst.loadCrdtTombstones("contacts")).toEqual([]); // 古老墓碑 GC 掉
+  });
+
+  it("build：超窗墓碑不放進快照", () => {
+    const s = new MemoryStorage();
+    s.saveCrdtTombstones("blocked", [
+      { key: "fresh", at: 10_000 },
+      { key: "ancient", at: 1000 },
+    ]);
+    const now = 1000 + OR_SET_TOMBSTONE_RETENTION_MS + 1; // 門檻＝1001：ancient(1000) 超窗、fresh(10000) 窗內
+    const snap = buildSnapshotContent(s, "basic", { now });
+    expect(snap.blockTombstones?.map((t) => t.key)).toEqual(["fresh"]); // ancient 超窗被剔除
   });
 });
 

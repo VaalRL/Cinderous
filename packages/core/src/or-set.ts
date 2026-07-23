@@ -16,6 +16,18 @@ export interface OrSetTombstone {
 /** 墓碑保留上限（顆）；超過取新到舊前 N。裝置最長離線期內不得回收，否則久離線裝置漏掉刪除。 */
 export const OR_SET_TOMBSTONE_MAX = 256;
 
+/**
+ * 墓碑時間保留窗（毫秒）：預設 90 天。超過此窗的墓碑可回收（時間 GC）。
+ * **必須 ≥ 裝置合理最長離線期**——否則一台久未上線的裝置回來時，刪除的墓碑已被 GC，
+ * 它帶著舊的（未刪）版本合併就會讓刪掉的東西**復活**。90 天涵蓋絕大多數「抽屜裡的第二台」情境。
+ */
+export const OR_SET_TOMBSTONE_RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
+
+/** 丟棄早於 `olderThan`（毫秒）的墓碑（時間 GC）；`olderThan` 通常＝`now - 保留窗`。純函式。 */
+export function pruneTombstonesByTime(tombstones: OrSetTombstone[], olderThan: number): OrSetTombstone[] {
+  return tombstones.filter((t) => t.at >= olderThan);
+}
+
 /** 取多組墓碑中每個 key 的最新（最大 `at`）。 */
 function latestByKey(lists: OrSetTombstone[][]): Map<string, number> {
   const m = new Map<string, number>();

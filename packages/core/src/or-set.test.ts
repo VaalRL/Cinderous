@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mergeOrSet, type OrSetTombstone } from "./or-set.js";
+import { mergeOrSet, type OrSetTombstone, pruneTombstonesByTime } from "./or-set.js";
 
 // OR-Set＋墓碑（ADR-0242 階段①）：泛用「可增可刪集合」的交換律合併，複用 ADR-0224 資產墓碑機制。
 // 用一個最小元素型別（key＋at＋payload）驗證核心語意。
@@ -93,5 +93,20 @@ describe("mergeOrSet（OR-Set＋墓碑，ADR-0242）", () => {
       { key: "t2", at: 3 },
       { key: "t3", at: 2 },
     ]);
+  });
+});
+
+describe("pruneTombstonesByTime（時間 GC，ADR-0242）", () => {
+  it("丟棄早於門檻的墓碑、保留門檻（含）之後的", () => {
+    const tombs: OrSetTombstone[] = [
+      { key: "old", at: 100 },
+      { key: "edge", at: 200 },
+      { key: "fresh", at: 300 },
+    ];
+    expect(pruneTombstonesByTime(tombs, 200).map((t) => t.key)).toEqual(["edge", "fresh"]);
+  });
+  it("門檻極早 → 全保留（保留窗夠長時不誤刪，久離線裝置的刪除不丟）", () => {
+    const tombs: OrSetTombstone[] = [{ key: "a", at: 100 }];
+    expect(pruneTombstonesByTime(tombs, 0)).toEqual(tombs);
   });
 });

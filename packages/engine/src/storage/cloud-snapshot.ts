@@ -11,6 +11,8 @@ import {
   isWellFormedTombstone,
   mergeAssetLibrary,
   mergeOrSet,
+  OR_SET_TOMBSTONE_RETENTION_MS,
+  pruneTombstonesByTime,
   type AssetTombstone,
   type CustomAsset,
   type OrSetTombstone,
@@ -89,9 +91,11 @@ export function buildSnapshotContent(
     assetBytes += len;
   }
   const assetTombstones = storage.loadAssetTombstones();
-  const contactTombstones = storage.loadCrdtTombstones("contacts");
-  const groupTombstones = storage.loadCrdtTombstones("groups");
-  const blockTombstones = storage.loadCrdtTombstones("blocked");
+  // 時間 GC（ADR-0242）：不把早於保留窗的墓碑放進快照——超窗即回收，收斂快照大小。
+  const tombFloor = (opts.now ?? Date.now()) - OR_SET_TOMBSTONE_RETENTION_MS;
+  const contactTombstones = pruneTombstonesByTime(storage.loadCrdtTombstones("contacts"), tombFloor);
+  const groupTombstones = pruneTombstonesByTime(storage.loadCrdtTombstones("groups"), tombFloor);
+  const blockTombstones = pruneTombstonesByTime(storage.loadCrdtTombstones("blocked"), tombFloor);
   const base: CloudSnapshotContent = {
     v: 1,
     at: opts.now ?? Date.now(),
@@ -181,8 +185,11 @@ function saveTombstonesIfChanged(storage: AppStorage, set: OrSetName, merged: Or
 export function mergeSnapshotContent(
   storage: AppStorage,
   content: CloudSnapshotContent,
+  opts: { now?: number } = {},
 ): { changed: boolean; convos: string[] } {
   let changed = false;
+  // 時間 GC（ADR-0242）：合併後回寫墓碑前，丟棄早於保留窗者——超窗回收、收斂大小。
+  const tombFloor = (opts.now ?? Date.now()) - OR_SET_TOMBSTONE_RETENTION_MS;
 
   // ── 封鎖清單（OR-Set＋墓碑，ADR-0242）：解封現在能傳播（舊為聯集、只增不減＝解封失效）。 ──
   const localBlocked = storage.loadBlocked();
@@ -207,7 +214,7 @@ export function mergeSnapshotContent(
       changed = true;
     }
   }
-  if (saveTombstonesIfChanged(storage, "blocked", mb.tombstones)) changed = true;
+  if (saveTombstonesIfChanged(storage, "blocked", pruneTombstonesByTime(mb.tombstones, tombFloor))) changed = true;
 
   // ── 聯絡人（OR-Set＋墓碑）：移除傳得出去（舊為補缺、刪除會復活）。封鎖者永不入列。 ──
   const localContacts = storage.loadContacts();
@@ -239,7 +246,7 @@ export function mergeSnapshotContent(
       changed = true;
     }
   }
-  if (saveTombstonesIfChanged(storage, "contacts", mc.tombstones)) changed = true;
+  if (saveTombstonesIfChanged(storage, "contacts", pruneTombstonesByTime(mc.tombstones, tombFloor))) changed = true;
 
   // ── 群組（OR-Set＋墓碑）：離群/移除傳得出去（舊為補缺、離群會復活）。 ──
   const localGroups = storage.loadGroups();
@@ -264,7 +271,7 @@ export function mergeSnapshotContent(
       changed = true;
     }
   }
-  if (saveTombstonesIfChanged(storage, "groups", mg.tombstones)) changed = true;
+  if (saveTombstonesIfChanged(storage, "groups", pruneTombstonesByTime(mg.tombstones, tombFloor))) changed = true;
 
   const convos: string[] = [];
   if (content.messages) {
