@@ -57,9 +57,12 @@
 - **截圖/轉貼**：明確不在保護範圍（收回/限時為軟性、非強制）。
 
 ### 設備竊取者
-- 私鑰與 DB 應加密落地：DB→SQLCipher（ADR-0020）、私鑰→OS 金鑰庫（B5，**待實作**）。
-- **殘餘（現況）**：桌面 GUI 打包（Tauri B 階段）與 OS 金鑰庫尚未完成；瀏覽器示範/開發
-  模式下身分存 localStorage（**非落地加密**）——**正式桌面版才具備 at-rest 保護**。
+- 私鑰與 DB 加密落地：DB→SQLCipher（ADR-0020）、私鑰→**OS 金鑰庫（B5，已實作，ADR-0053）**——
+  桌面版經 `keyring`（Windows Credential Manager／macOS Keychain／Linux Secret Service）託管 nsec；
+  舊版殘留 localStorage 的明文 nsec 於開機**遷入金鑰庫並抹除**（`key_set`／`key_get`／`key_delete`）。
+- **殘餘（現況）**：正式桌面版 at-rest ＝私鑰（OS 金鑰庫）＋DB（SQLCipher）。瀏覽器示範/開發模式：
+  應用資料以 nsec 導出 DEK 靜態加密（ADR-0112）；nsec 本身以**使用者密碼包裹**後落盤（passlock）
+  或**不持久化**（未設密碼時）。**桌面版尚未程式碼簽章**（SmartScreen 警告）為發佈面殘餘、非 at-rest 缺口。
 
 ### 前向保密 / 後妥協安全（跨對手）
 - **靜態 ECDH，無 FS/PCS**：單次私鑰外洩可解**全部歷史與未來**離線訊息。決策見
@@ -70,7 +73,7 @@
 
 1. **離線訊息無前向保密**（ADR-0028）——最高優先。
 2. **無金鑰輪替/撤銷**：私鑰即身分，外洩＝永久可冒名（PRD §4）。
-3. **at-rest 加密僅正式桌面版**：Web/開發模式 localStorage 未加密；OS 金鑰庫（B5）未落地。
+3. **at-rest 加密（已具備）**：正式桌面版＝私鑰經 OS 金鑰庫（B5，ADR-0053，已實作）＋DB 經 SQLCipher；Web/開發模式＝應用資料以 nsec 導出 DEK 加密（ADR-0112）、nsec 以密碼包裹（passlock）或不持久化。殘餘＝桌面版尚未程式碼簽章（發佈面，非 at-rest）。
 4. **顯示名稱不驗證/不傳遞**：以 npub 為唯一真實識別；名稱純本機、可重複（Zooko 取捨）。
 5. **無公共 TURN（ADR-0243）**：一般使用者僅 STUN。兩個後果——(a) P2P 直連向聯絡人揭露 IP；
    (b) **對稱 NAT／嚴格防火牆下通話接不通**（即時影音只能 P2P/TURN、無文字中繼退路；**檔案有 relay
