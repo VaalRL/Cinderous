@@ -85,6 +85,10 @@
      （removeContact/unblock/block→聯絡人墓碑、leaveGroup），**內部清理不寫**（免把清理誤傳為刪除）。
      **舊快照無墓碑欄位＝純補缺、絕不刪本機資料（向後相容）。** TDD：or-set 10 測＋cloud-snapshot +6 測
      （刪除傳播/復活/離群/解封/封鎖/舊快照相容）；交換律由 or-set 核心測涵蓋。
-  2. 階段 2：聯絡人欄位 per-field LWW（暱稱/標籤/hint 帶時間戳）。
+  2. ✅ **階段 2 完成**：聯絡人欄位 per-field LWW。`StoredContact.fieldsAt`（逐欄位編輯時間）＋
+     `setContactAlias/setContactNotifySound` 帶 `at` 戳；merge 對兩端皆有的聯絡人逐欄取較新（**暱稱／
+     通知音效**，含「清除」；並發改不同欄位互不覆蓋）。TDD +4。**標籤/hint 註記**：標籤與每對話靜音
+     不在 `StoredContact`（屬 desktop `groupPrefs`）→ 併入階段③「設定/偏好同步」；relay hint 為自動學習
+     欄位、暫沿用既有路徑（未納入本階段的使用者編輯 LWW）。
   3. 階段 3：設定/偏好逐項納入 LWW 同步（先每對話靜音、狀態文字；排除「該裝置本地」項）。
   4. 墓碑 GC：帶時間、保留窗 ≥ 合理最長離線期，超窗回收。
