@@ -115,6 +115,7 @@ import {
   type SecretKey,
 } from "@cinderous/core";
 import { buildRtcConfig } from "./rtc-config.js";
+import { fetchTurnServers, turnEndpointFromRelay } from "./turn-fetch.js";
 import { WebRtcCall } from "./webrtc-call.js";
 import { WebRtcTransfer } from "./webrtc.js";
 import { buildSnapshotContent, mergeSnapshotContent, parseSnapshotContent } from "../storage/cloud-snapshot.js";
@@ -343,6 +344,14 @@ export interface RelayPoolOptions {
   /** 企業 TURN 伺服器（ADR-0048）：供強制 TURN 政策使用；relay-only 時的 ICE 中繼。 */
   turnServers?: RTCIceServer[];
   /**
+   * 公共 TURN 保底端點（ADR-0243）：一般使用者的 WebRTC TURN 換發端點（`https://relay/turn`）。
+   * 未設＝由 home relay URL 自動推導（`turnEndpointFromRelay`）；抓不到/未配 secret 時 no-op、
+   * 退回純 STUN。**企業 `turnServers` 存在時優先且不抓公共 TURN**（避免第三方元資料）。
+   */
+  turnEndpoint?: string;
+  /** 停用公共 TURN 抓取（ADR-0243）：完全不打 `/turn`（例如純內網部署、隱私極致者）。 */
+  disablePublicTurn?: boolean;
+  /**
    * 私鑰由外部（OS 金鑰庫）提供而非 localStorage（B5，ADR-0053）。設定後以此為身分
    * 私鑰、**不寫入** identity blob；未設則沿用既有行為（從 storage 讀/自動產生）。
    */
@@ -448,6 +457,10 @@ export class RelayChatBackend implements ChatBackend {
   /** 企業 TURN 伺服器與強制 TURN 政策狀態（ADR-0048）：供 WebRTC ICE 設定。 */
   private readonly turnServers: RTCIceServer[] | undefined;
   private forceTurn = false;
+  /** 公共 TURN 保底（ADR-0243）：由 `/turn` 抓來的短期 TURN 憑證，開機取得、到期前刷新。 */
+  private publicTurnServers: RTCIceServer[] | undefined;
+  private readonly turnEndpoint: string | undefined;
+  private turnTimer: ReturnType<typeof setInterval> | undefined;
   private readonly onHomeSwitched: ((url: string) => void) | undefined;
   private lastList: RelayListDoc | null;
   /** 外部 relay 連線（正規化 URL → client），惰性建立（ADR-0034）。 */
@@ -555,6 +568,13 @@ export class RelayChatBackend implements ChatBackend {
     this.orgOwnerFlag = pool?.orgOwner === true;
     this.orgInviteToken = pool?.orgInviteToken;
     this.turnServers = pool?.turnServers;
+    // 公共 TURN 保底（ADR-0243）：企業已配**非空**靜態 turnServers 時**不抓**（避免多一個第三方
+    // 元資料方）；否則由 home relay 推導 `/turn` 端點（或呼叫端明指）。停用旗標＝完全不打。
+    const hasStaticTurn = (pool?.turnServers?.length ?? 0) > 0;
+    this.turnEndpoint =
+      pool?.disablePublicTurn || hasStaticTurn
+        ? undefined
+        : (pool?.turnEndpoint ?? turnEndpointFromRelay(this.homeUrl));
     this.onHomeSwitched = pool?.onHomeSwitched;
     for (const a of pool?.anchors ?? []) {
       const norm = normalizeRelay(a);
@@ -683,6 +703,12 @@ export class RelayChatBackend implements ChatBackend {
     }, 1000);
     // 外送匣節流泵（ADR-0041）：以固定間隔在併發上限內送出、退避重試、丟棄逾時在途。
     this.pumpTimer = setInterval(() => this.outbox.pump(), 200);
+    // 公共 TURN 保底（ADR-0243）：開機抓一次短期憑證，並於 6h 前刷新（Cloudflare 預設 TTL 1 天）。
+    // 抓不到/未配 secret 皆 no-op（退回純 STUN），不阻塞其餘啟動流程。
+    if (this.turnEndpoint) {
+      void this.refreshPublicTurn();
+      this.turnTimer = setInterval(() => void this.refreshPublicTurn(), 6 * 3600_000);
+    }
     this.emitContacts();
     // 回放本機持久化的歷史訊息：每對話一次批次交付（避免逐則 O(n²) 狀態更新與全開視窗）。
     for (const c of this.contacts) {
@@ -917,9 +943,20 @@ export class RelayChatBackend implements ChatBackend {
     this.scheduleRetirementIfNeeded(); // 清單標我的 home 為 draining/retired → T3 撤離（ADR-0069）
   }
 
-  /** 當前 WebRTC ICE 設定（ADR-0048）：強制 TURN 政策生效時只走 relay 候選。 */
+  /**
+   * 當前 WebRTC ICE 設定（ADR-0048/0243）：強制 TURN 政策生效時只走 relay 候選。
+   * TURN 來源優先序：企業靜態 `turnServers`（若有，獨佔——不混公共，避第三方）＞公共 TURN 保底。
+   */
   private rtcConfig(): RTCConfiguration | undefined {
-    return buildRtcConfig(this.forceTurn, this.turnServers);
+    const staticTurn = this.turnServers && this.turnServers.length > 0 ? this.turnServers : undefined;
+    return buildRtcConfig(this.forceTurn, staticTurn ?? this.publicTurnServers);
+  }
+
+  /** 抓公共 TURN 短期憑證（ADR-0243）。抓到才覆蓋，抓不到保留舊值/純 STUN——保底不拖垮通話。 */
+  private async refreshPublicTurn(): Promise<void> {
+    if (!this.turnEndpoint) return;
+    const servers = await fetchTurnServers(this.turnEndpoint);
+    if (servers.length > 0) this.publicTurnServers = servers;
   }
 
   /**
@@ -3180,6 +3217,7 @@ export class RelayChatBackend implements ChatBackend {
     if (this.renderTimer) clearInterval(this.renderTimer);
     if (this.pumpTimer) clearInterval(this.pumpTimer);
     if (this.snapTimer) clearInterval(this.snapTimer);
+    if (this.turnTimer) clearInterval(this.turnTimer);
     if (this.retireTimer !== undefined) clearTimeout(this.retireTimer);
     this.outbox.clear();
     this.transfer.close();

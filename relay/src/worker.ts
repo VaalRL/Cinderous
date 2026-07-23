@@ -14,6 +14,54 @@ export interface Env {
    * 值目前僅作開關（實際上限由名冊政策 relayFilesMaxMb ≤16 控制）。
    */
   MAX_FILE_MB?: string;
+  /**
+   * 公共 TURN 保底（ADR-0243）：Cloudflare TURN 的 Key ID。與 `TURN_API_TOKEN` 一起設定後，
+   * `GET /turn` 會向 Cloudflare 換發**短期**憑證回給客戶端（餵進 `buildRtcConfig` 的 turnServers）。
+   * **未設＝端點回 204，客戶端退回純 STUN**（no-op，不影響既有部署）。
+   */
+  TURN_KEY_ID?: string;
+  /** 公共 TURN 保底（ADR-0243）：Cloudflare TURN 的 API Token（secret，以 `wrangler secret put` 放）。 */
+  TURN_API_TOKEN?: string;
+  /** 短期 TURN 憑證有效秒數（ADR-0243）；未設/壞值＝預設 86400（1 天）。客戶端於半 TTL 前刷新。 */
+  TURN_TTL_SECONDS?: string;
+}
+
+/** Cloudflare TURN 憑證換發 API（POST，Bearer token）。 */
+const CF_TURN_API = "https://rtc.live.cloudflare.com/v1/turn/keys";
+
+/** 短期憑證秒數：正整數才採用，否則預設 1 天。 */
+function turnTtlSeconds(raw?: string): number {
+  const n = raw ? Number(raw) : NaN;
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 86400;
+}
+
+/**
+ * `GET /turn`（ADR-0243）：以站方 secret 向 Cloudflare 換發**短期** TURN 憑證回給客戶端。
+ * 未配 `TURN_KEY_ID`/`TURN_API_TOKEN` → **204**（客戶端 no-op、退回純 STUN）；Cloudflare 故障
+ * 亦回 204（保底抓不到不該讓客戶端報錯）。憑證短期＋Cloudflare 端用量上限＝ADR-0243 的「有上限」。
+ */
+export async function mintTurnResponse(env: Env, fetchFn: typeof fetch = fetch): Promise<Response> {
+  const keyId = env.TURN_KEY_ID;
+  const token = env.TURN_API_TOKEN;
+  if (!keyId || !token) return new Response(null, { status: 204 }); // 未配置＝no-op
+  try {
+    const res = await fetchFn(`${CF_TURN_API}/${encodeURIComponent(keyId)}/credentials/generate`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ ttl: turnTtlSeconds(env.TURN_TTL_SECONDS) }),
+    });
+    if (!res.ok) return new Response(null, { status: 204 });
+    return new Response(await res.text(), {
+      status: 200,
+      headers: {
+        "Content-Type": "application/json",
+        "Cache-Control": "no-store", // 短期憑證，勿快取
+        "Access-Control-Allow-Origin": "*", // 客戶端（Tauri/瀏覽器）跨源抓取
+      },
+    });
+  } catch {
+    return new Response(null, { status: 204 });
+  }
 }
 
 /** NIP-40 過期留言的清理間隔（C2）：DO alarm 每小時 prune 一次。 */
@@ -23,6 +71,8 @@ const PRUNE_INTERVAL_MS = 60 * 60 * 1000;
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     if (request.headers.get("Upgrade") !== "websocket") {
+      // 公共 TURN 保底端點（ADR-0243）：換發短期憑證；未配 secret 則 204、客戶端退回純 STUN。
+      if (new URL(request.url).pathname === "/turn") return mintTurnResponse(env);
       return new Response("Cinderous relay", { status: 200 });
     }
     const stub = env.RELAY_ROOM.get(env.RELAY_ROOM.idFromName("global"));

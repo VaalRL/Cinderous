@@ -13,7 +13,7 @@ import { createRequire } from "node:module";
 import type { DatabaseSync as DatabaseSyncType } from "node:sqlite";
 import { buildAuthEvent, finalizeEvent, generateSecretKey, getPublicKey, type NostrEvent, type SecretKey } from "@cinderous/core";
 import { beforeAll, describe, expect, it } from "vitest";
-import { RelayRoom, type Env } from "./worker.js";
+import { mintTurnResponse, RelayRoom, type Env } from "./worker.js";
 
 const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as {
   DatabaseSync: typeof DatabaseSyncType;
@@ -341,5 +341,62 @@ describe("RelayRoom — 崩潰韌性（ADR-0235 C1 宿主層）", () => {
     const ws = open(room, state);
     expect(() => room.webSocketClose(ws as unknown as WebSocket)).not.toThrow();
     expect(ws.closed).toBe(true);
+  });
+});
+
+describe("公共 TURN 端點（/turn，ADR-0243）", () => {
+  const cfBody = JSON.stringify({
+    iceServers: { urls: ["turn:turn.cloudflare.com:3478"], username: "u", credential: "p" },
+  });
+  const okFetch = (async () =>
+    ({ ok: true, status: 201, text: async () => cfBody }) as unknown as Response) as typeof fetch;
+  // 本檔的 beforeAll 把全域 Response 換成只存 {body, init} 的替身（見上）；照其形狀斷言。
+  const stub = (r: Response) => r as unknown as { body: unknown; init: { status?: number; headers?: Record<string, string> } };
+
+  it("未配 secret → 204（客戶端退回純 STUN，no-op）", async () => {
+    const r = stub(await mintTurnResponse({} as Env, okFetch));
+    expect(r.init.status).toBe(204);
+    expect(r.body).toBeNull();
+  });
+
+  it("配好 secret → 200＋Cloudflare 憑證 body＋CORS", async () => {
+    let seen: { url: string; init: RequestInit | undefined } | undefined;
+    const spy = (async (url: string, init?: RequestInit) => {
+      seen = { url, init };
+      return { ok: true, status: 201, text: async () => cfBody } as unknown as Response;
+    }) as typeof fetch;
+    const env = { TURN_KEY_ID: "key123", TURN_API_TOKEN: "tok", TURN_TTL_SECONDS: "3600" } as Env;
+    const r = stub(await mintTurnResponse(env, spy));
+    expect(r.init.status).toBe(200);
+    expect(r.init.headers?.["Access-Control-Allow-Origin"]).toBe("*");
+    expect(JSON.parse(r.body as string)).toEqual(JSON.parse(cfBody));
+    // 打對 Cloudflare API、帶 Bearer token 與 ttl。
+    expect(seen?.url).toBe("https://rtc.live.cloudflare.com/v1/turn/keys/key123/credentials/generate");
+    expect((seen?.init?.headers as Record<string, string>).Authorization).toBe("Bearer tok");
+    expect(JSON.parse(seen?.init?.body as string)).toEqual({ ttl: 3600 });
+  });
+
+  it("Cloudflare 回非 2xx → 204（保底抓不到不讓客戶端報錯）", async () => {
+    const bad = (async () => ({ ok: false, status: 500, text: async () => "" }) as unknown as Response) as typeof fetch;
+    const env = { TURN_KEY_ID: "k", TURN_API_TOKEN: "t" } as Env;
+    expect(stub(await mintTurnResponse(env, bad)).init.status).toBe(204);
+  });
+
+  it("fetch 拋 → 204", async () => {
+    const boom = (async () => {
+      throw new Error("network");
+    }) as typeof fetch;
+    const env = { TURN_KEY_ID: "k", TURN_API_TOKEN: "t" } as Env;
+    expect(stub(await mintTurnResponse(env, boom)).init.status).toBe(204);
+  });
+
+  it("TTL 未設 → 預設 86400", async () => {
+    let body: string | undefined;
+    const spy = (async (_url: string, init?: RequestInit) => {
+      body = init?.body as string;
+      return { ok: true, status: 201, text: async () => cfBody } as unknown as Response;
+    }) as typeof fetch;
+    await mintTurnResponse({ TURN_KEY_ID: "k", TURN_API_TOKEN: "t" } as Env, spy);
+    expect(JSON.parse(body as string)).toEqual({ ttl: 86400 });
   });
 });
