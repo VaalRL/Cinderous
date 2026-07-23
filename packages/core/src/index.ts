@@ -21,6 +21,7 @@ export * from "./mention-suggest.js";
 export * from "./sticker-svg.js";
 export * from "./stickers.js";
 export * from "./custom-assets.js";
+export * from "./or-set.js";
 export * from "./version-check.js";
 export * from "./threat-intel.js";
 export * from "./asset-relay.js";
