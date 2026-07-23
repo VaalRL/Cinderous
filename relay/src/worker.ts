@@ -1,4 +1,4 @@
-import { TIMESTAMP_JITTER_SECONDS } from "@cinderous/core";
+import { ABUSE_GUARD, acceptFileEvents, firstHost, storeOptions } from "./host-config.js";
 import { RelayCore, type ConnSnapshot, type Outbound } from "./relay-core.js";
 import { SqlMessageStore } from "./sql-message-store.js";
 
@@ -16,37 +16,8 @@ export interface Env {
   MAX_FILE_MB?: string;
 }
 
-/** 每收件人離線留言上限（防單一收件人塞爆免費額度；PRD §8）。 */
-const MAX_PER_RECIPIENT = 500;
-/** 每連線訂閱數上限（ADR-0119）：客戶端合併後只用 1 個 REQ，16 已極寬鬆。 */
-const MAX_SUBSCRIPTIONS = 16;
-
 /** NIP-40 過期留言的清理間隔（C2）：DO alarm 每小時 prune 一次。 */
 const PRUNE_INTERVAL_MS = 60 * 60 * 1000;
-
-/**
- * 每 pubkey 每分鐘事件上限（ADR-0235 H1）。
- *
- * 真實用量遠低於此：自適應心跳 60s／300s 一次（ADR-0109）、typing 有節流、
- * 訊息由人手動送。120 給檔案分塊與群組扇出留了充分餘裕，同時把「單一金鑰灌爆
- * 單一全域房間 DO」壓成不可能。
- */
-const MAX_EVENTS_PER_MINUTE = 120;
-
-/** 未來方向時鐘容忍（秒）：沒有合法事件是未來的，只留客戶端時鐘誤差。 */
-const MAX_FUTURE_SKEW_SEC = 15 * 60;
-
-/**
- * 過去方向時鐘容忍（秒）：**必須大於 NIP-59 的 2 天抖動窗**——外層 `created_at` 被刻意
- * 往前推是隱私設計（`TIMESTAMP_JITTER_SECONDS`），設小了會擋掉幾乎每一則 Gift Wrap。
- */
-const MAX_PAST_SKEW_SEC = TIMESTAMP_JITTER_SECONDS + 60 * 60;
-
-/**
- * 重放去重窗（秒）：只快取近期事件的 id。封裝事件不需要（收件端以 rumor.id 去重），
- * 真正要擋的是裸心跳（kind 20000）被重放來偽造「某人在線」。
- */
-const REPLAY_WINDOW_SEC = 60 * 60;
 
 /** Worker 進入點：WebSocket 升級後交給單一 Durable Object 房間以共享連線狀態。 */
 export default {
@@ -77,32 +48,14 @@ export class RelayRoom {
     const sql = ctx.storage.sql;
     const exec = (query: string, ...bindings: (string | number | null)[]): Record<string, unknown>[] =>
       sql.exec(query, ...bindings).toArray() as Record<string, unknown>[];
-    // TTL 上限（ADR-0160）：企業站可放寬；未設/壞值＝預設 7 天。上界 clamp 3650 天（審查修正：
-    // 防 `MAX_TTL_DAYS=99999` 這類手誤產生實質無界保留）。
-    const ttlDays = Math.min(Number(env.MAX_TTL_DAYS ?? 0), 3650);
-    this.store = new SqlMessageStore(exec, {
-      maxPerRecipient: MAX_PER_RECIPIENT,
-      ...(Number.isFinite(ttlDays) && ttlDays >= 1 ? { maxTtlSeconds: Math.floor(ttlDays) * 86_400 } : {}),
-    });
-    const fileMb = Number(env.MAX_FILE_MB ?? 0); // ADR-0162：檔案塊開關
-    // NIP-42 AUTH（ADR-0057）：開放中繼要求認證——只有本人能拉自己的加密收件匣。
-    // 每連線訂閱數上限（ADR-0119）：`relay-core` 一直有這道防禦（含正確的 `CLOSED rate-limited`
-    // 回應），但**從來沒被啟用**——而這是**單一全域房間 DO**（所有人共用），任何人自產一把金鑰
-    // 通過 AUTH 後即可開無限訂閱把 DO 記憶體撐爆 → **全站掛掉**。
-    // 客戶端合併後只需 1 個 REQ（ADR-0109），16 已是非常寬鬆的上限。
-    // ADR-0235 H1：這些防護 `relay-core` 大多早就實作好了，但**產線一直沒有啟用**
-    // ——`maxClockSkewSec` 沒設，於是 `seenIds` 永遠是空的、零重放防護；速率限制則是
-    // 從頭到尾不存在。實作了卻沒接上，和沒實作的效果完全一樣。
+    this.store = new SqlMessageStore(exec, storeOptions(env.MAX_TTL_DAYS));
+    // 濫用防護（ADR-0235 H1）由 `host-config` 統一供應——與 `node-relay.ts` 用同一組常數，
+    // 兩座宿主不可能各走各的。NIP-42 AUTH（ADR-0057）＋單一全域房間 DO 的背景見該檔註解。
     this.core = new RelayCore({
       store: this.store,
       requireAuth: true,
-      maxSubscriptions: MAX_SUBSCRIPTIONS,
-      authMaxAgeSec: 600, // NIP-42 建議：限制側錄簽名的可用時間（ADR-0235 H2）
-      maxEventsPerMinute: MAX_EVENTS_PER_MINUTE,
-      maxFutureSkewSec: MAX_FUTURE_SKEW_SEC,
-      maxPastSkewSec: MAX_PAST_SKEW_SEC,
-      replayWindowSec: REPLAY_WINDOW_SEC,
-      ...(Number.isFinite(fileMb) && fileMb >= 1 ? { acceptFileEvents: true } : {}),
+      ...ABUSE_GUARD,
+      ...(acceptFileEvents(env.MAX_FILE_MB) ? { acceptFileEvents: true } : {}),
     });
     // C2：排程 NIP-40 過期清理（DO 休眠仍會被 alarm 喚醒執行）。
     ctx.blockConcurrencyWhile(async () => {
@@ -191,8 +144,8 @@ function connIdOf(ws: WebSocket): string | undefined {
 
 /** 本次請求的主機（含 port）；優先取 `Host` 標頭，退回 URL。解析失敗回 undefined＝不強制。 */
 function hostOf(request: Request): string | undefined {
-  const header = request.headers.get("Host");
-  if (header) return header.toLowerCase();
+  const header = firstHost(request.headers.get("Host") ?? undefined);
+  if (header) return header;
   try {
     return new URL(request.url).host.toLowerCase() || undefined;
   } catch {
