@@ -166,7 +166,7 @@
 - 多設備同步的衝突解法：訊息以 rumor.id 去重、已讀水位 LWW（ADR-0108）已定；其餘可變狀態的 CRDT 化仍可評估。
 - ~~群組加密方案？~~（已定案 ADR-0027：Gift-Wrap 成對扇出；MLS 延後。顯示名稱走加密個人檔 kind 已實作，ADR-0061。）
 - **（方向已定，實作待排）** 中繼層元資料可連結性：連線都綁真名 → 中繼可歸屬 presence 訂閱（聯絡人集合）與 Gift Wrap 發布（送出邊）。**ADR-0237** 定案分層——Tier 0 強化 P2P 卸載、Tier 1 opt-in 嚴格 presence 模式、**自架為官方解答**；輪替金鑰 presence 因 IP 關聯與 N× 容量而否決，臨時身分連線與傳輸匿名（Tor）延後、與 DO 分片一起評估。
-- **（方向已定，實作待排）** **單一全域 Durable Object 分片**：全網流量路由到單一 DO（`idFromName("global")`）＝單點故障（一崩全崩，ADR-0235 C1）＋擴充天花板。**ADR-0241** 定案按收件人 pubkey 前綴分片（重用 outbox、免 hint、客戶端 URL 選片解 AUTH 早於選 DO）；血條收益無條件、擴充收益取決於降低 relay presence 依賴（P2P／真隱身 ADR-0240）；與 ADR-0237 Tier 2 多連線綁定。開放：shard 數、遷移、presence 跨分片策略。
+- **（方向已定，實作待排）** **單一全域 Durable Object 分片**：全網流量路由到單一 DO（`idFromName("global")`）＝單點故障（一崩全崩，ADR-0235 C1）＋擴充天花板。**ADR-0241** 定案按收件人 pubkey 前綴分片（重用 outbox、免 hint、客戶端 URL 選片解 AUTH 早於選 DO）；血條收益無條件；**presence 拆成獨立層**（不進訊息分片→訊息片擴充收益無條件、presence 失效只影響綠點不影響訊息）；與 ADR-0237 Tier 2 多連線綁定。開放：shard 數、遷移。
 - **（仍開放）** 語音訊息（M7）離線傳遞受中繼大小限制時的退回策略。
 
 > 已定案決策見 `docs/adr/`（例如 `0002` 隱私元資料與協定基線、`0010` LINE 借鏡功能路線圖）。
