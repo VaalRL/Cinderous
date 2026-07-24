@@ -113,6 +113,7 @@ import {
   type RelayListDoc,
   type Rumor,
   type SecretKey,
+  PRESENCE_PATH,
   shardPath,
 } from "@cinderous/core";
 import { buildRtcConfig } from "./rtc-config.js";
@@ -776,6 +777,11 @@ export class RelayChatBackend implements ChatBackend {
     return `${this.shardingBase}${shardPath(pubkey)}`;
   }
 
+  /** presence 獨立層 URL（ADR-0241）：`<base>/presence`。非分片模式回 undefined。 */
+  private presenceUrl(): string | undefined {
+    return this.shardingBase ? `${this.shardingBase}${PRESENCE_PATH}` : undefined;
+  }
+
   /**
    * 路由到聯絡人的目標 relay（非 home 時回 URL、home 時回 undefined）。
    * - 分片模式（ADR-0241）：由 **pubkey 直接算** `shard(對方)`，免 hint（收件匣天然同片）。
@@ -888,6 +894,13 @@ export class RelayChatBackend implements ChatBackend {
    * 故合併是純客戶端改動，語意完全不變。
    */
   private subscribeOn(client: RelayClient, url: string | undefined): void {
+    // ADR-0241：presence 獨立層——一條連線一次訂閱**全部**聯絡人心跳（`authors:[聯絡人]`），
+    // 不必連每個聯絡人的訊息片。真隱身（ADR-0240）照樣不訂（不把聯絡人集合交出去）。訊息片則不再訂心跳。
+    if (this.shardingBase && url !== undefined && url === this.presenceUrl()) {
+      const all = this.contacts.map((c) => c.pubkey);
+      client.subscribe("all", this.invisible || all.length === 0 ? [] : [{ kinds: [KIND.HEARTBEAT], authors: all }]);
+      return;
+    }
     const authors = this.contacts
       .filter((c) => (this.foreignUrlOf(c) ?? this.homeUrl) === url)
       .map((c) => c.pubkey);
@@ -899,7 +912,8 @@ export class RelayChatBackend implements ChatBackend {
       // 你的**聯絡人集合**以真名交給中繼的洩漏（ADR-0237）。既有隱身只停「發布」（beat 早退），
       // 你卻還在訂閱別人 → 中繼照樣知道你有哪些聯絡人。補上這一側，隱身才名副其實：
       // 既不報自己、也不看別人 → 對中繼真正消失。訊息收發（收件匣 `#p:自己`）不受影響。
-      ...(this.invisible ? [] : [{ kinds: [KIND.HEARTBEAT], authors }]),
+      // 分片模式：心跳改走 presence 獨立層（見上），訊息片不再訂心跳。真隱身時本就不訂。
+      ...(this.shardingBase || this.invisible ? [] : [{ kinds: [KIND.HEARTBEAT], authors }]),
       // ADR-0120：typing/nudge 已 NIP-59 封裝 → 外層作者是**一次性臨時金鑰**，`authors: all`
       // 永遠不會命中。改為只靠 `#p`（與 Gift Wrap 收件箱同形）。
       //
@@ -954,6 +968,9 @@ export class RelayChatBackend implements ChatBackend {
   private resubscribe(): void {
     this.subscribeOn(this.client, this.originalHomeUrl);
     if (!this.connectorFor) return;
+    // ADR-0241：分片模式下另連 presence 獨立層（一條連線訂全部聯絡人心跳）。
+    const pu = this.presenceUrl();
+    if (pu) this.poolClient(pu);
     // 引導座（錨點/清單，ADR-0039）與聯絡人 hint 的外部 relay 都連線並掛訂閱。
     for (const url of this.bootstrapSeats) if (url !== this.homeUrl) this.poolClient(url);
     // 搬家排水（ADR-0066 H3）：舊 home 也連線——subscribeOn 會掛自家收件匣，收訊走既有去重。
@@ -1140,7 +1157,13 @@ export class RelayChatBackend implements ChatBackend {
     // **不再帶 s/m/np**。狀態內容改走封裝（見 broadcastPresenceState），relay 再也讀不到你的
     // 自訂狀態文字與正在聽的音樂。節奏本來就能從時戳觀察，明寫不構成新的元資料洩漏。
     const beacon = createHeartbeat(this.sk, { cadenceMs });
-    // 信標發到 pool 中所有 relay：對方未記錄我的 relay 也看得到我在線（ADR-0034）。
+    // ADR-0241 分片模式：心跳只發到 presence 獨立層（聯絡人在該層一次訂全部）；不再灑各訊息片。
+    const pu = this.presenceUrl();
+    if (pu) {
+      (this.poolClient(pu) ?? this.client).publish(beacon);
+      return;
+    }
+    // 單一 relay（ADR-0034）：信標發到 pool 中所有 relay，對方未記錄我的 relay 也看得到我在線。
     this.client.publish(beacon);
     for (const client of this.relayPool.values()) client.publish(beacon);
   }

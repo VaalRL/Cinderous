@@ -3113,6 +3113,31 @@ describe("中繼分片客戶端（ADR-0241）", () => {
     b.stop();
   });
 
+  it("presence 走獨立層：不同分片的 Alice/Bob 仍互看在線（一條 presence 連線、非連對方訊息片）", () => {
+    const net = createShardedRelayNetwork();
+    const { skA, skB } = crossShardKeys();
+    const storeA = new MemoryStorage();
+    const storeB = new MemoryStorage();
+    storeA.saveIdentity({ nsec: nsecEncode(skA), name: "Alice" });
+    storeB.saveIdentity({ nsec: nsecEncode(skB), name: "Bob" });
+    const a = new RelayChatBackend(storeA, noConnector, "Alice", { shardingBase: base, connectorFor: connFor("a", net) });
+    const b = new RelayChatBackend(storeB, noConnector, "Bob", { shardingBase: base, connectorFor: connFor("b", net) });
+    expect(shardPrefix(a.self.pubkey)).not.toBe(shardPrefix(b.self.pubkey)); // 不同片
+
+    const aSees: { pubkey: string; status: string }[][] = [];
+    a.start({ ...noop, onContacts: (cs) => aSees.push(cs.map((c) => ({ pubkey: c.pubkey, status: c.status }))) });
+    b.start(noop);
+    a.addContact(b.selfNpub);
+    b.acceptRequest(a.self.pubkey); // 互為聯絡人 → 心跳互訂（於 presence 層）
+    b.setStatus("online"); // beat → 經 presence 獨立層；A 在該層訂到 B 心跳 → 看到 B 在線
+
+    const statusOf = (pk: string) => aSees.at(-1)?.find((c) => c.pubkey === pk)?.status;
+    // A、B 在不同訊息片，A 不訂對方訊息片的心跳（已移到 presence 層）——仍看得到 B 在線＝presence 層生效。
+    expect(statusOf(b.self.pubkey)).toBe("online");
+    a.stop();
+    b.stop();
+  });
+
   it("分片模式仍向後相容：未設 shardingBase → 走單一 relay（現況不變）", () => {
     const net = createInMemoryRelayNetwork();
     const a = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("a", h), "Alice");
