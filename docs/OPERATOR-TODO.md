@@ -72,6 +72,7 @@ export const MAINTAINER_PUBKEY = "你的維護者公鑰 hex（64 字元）";
 | **企業強制 TURN 真機驗證** | 部署 TURN 伺服器、把 `turnServers` 填入 `RelayPoolOptions` | G2（ADR-0048） | `forceTurn`→`iceTransportPolicy:"relay"` 程式已接（`buildRtcConfig`），缺 TURN 才能實測；同時作為通話 NAT 保底 |
 | **公共 TURN 保底上線** | Cloudflare 開 TURN app → `TURN_KEY_ID`（var）＋`wrangler secret put TURN_API_TOKEN`＋Cloudflare 端設用量上限 | ADR-0243 | **客戶端＋Worker `/turn` 接線已落地、TDD 綠、未配 secret 即 no-op（純 STUN）**；設好 secret 即全體一般使用者自動享保底，修對稱 NAT／嚴格防火牆下 ~10–20% 通話接不通。設定範例見 `relay/wrangler.toml` 註解 |
 | 第三方安全稽核 | 外部稽核員 | F4（`docs/SECURITY.md` 已備前置） | 前置威脅模型/加密盤點已備 |
+| **前向保密（FS）外部審計＋上線** | 外部密碼學審計員 | ADR-0245（Phase 3） | **引擎＋UI 已實作（Phase 0–2、全測綠、opt-in 預設關）**。輪替加密子鑰、retarget Gift Wrap、10040 PKI、多裝置 EK 同步、grace 刪除、降級偵測皆完成。**上線前硬閘：外部密碼學審計通過後才可預設啟用、文案才可宣稱 FS**（現行文案不得提 FS） |
 | 企業 SSO / 元資料稽核 | 外部 IdP（AD/LDAP/OIDC）、自架 relay 記錄連線元資料 | G5 | 需先立 ADR 與環境；未動工 |
 
 ### §B-Tauri：程式碼簽章與自動更新（Phase B ③）
