@@ -112,6 +112,12 @@
        `shardNameForPath`）＋`worker.ts` 依 URL 選 DO（`/s/<prefix>`→訊息片、`/presence`→presence 層、
        其他含 `/`→舊全域回退）。**backward-compatible**：客戶端連 `/s/` 前，`/` 仍走 global＝零行為變化。
        血條測試綠（一片收畸形訊息不影響他片的離線留言查詢）。
-     - ⏳ **客戶端側待做**：連自己訊息片（`wss://relay/s/<自己前綴>`）＋presence 層；outbox 算 `shard(B)`
-       路由發布；遷移期雙讀（自己片＋全域）＋最低版本閘。
+     - ✅ **客戶端訊息路由已落地**：`RelayPoolOptions.shardingBase` 開分片模式——home（收件匣）連自己的
+       訊息片（`<base>/s/<自己前綴>`，pubkey 到建構才知 → 該處才定 homeUrl，解「AUTH 早於選 DO」）；
+       `foreignUrlOf` 改由 pubkey **直接算** `shard(對方)`（免 hint），`publishAddressed` 修正**非聯絡人**
+       （陌生人/群成員）也路由到 `shard(對方)`。**重用既有 outbox/pool**（分片＝把「路由到 home relay」變
+       「路由到 home shard」）。分片計算 SSOT 於 core（client/server 共用）。TDD：跨分片雙向投遞（`createShardedRelayNetwork`
+       每 host＝獨立 DO）＋向後相容（未設 shardingBase 走單一 relay）；123 既有後端測不變。
+     - ⏳ **剩**：presence 獨立層優化（目前沿用「每分片訂閱該片聯絡人心跳」——正確但連線較多）；App 建構點
+       接線（傳 `shardingBase`＋`connectorFor`）；遷移期雙讀（自己片＋全域）＋最低版本閘。
   5. **（未來、非現在）** 一人一片（選項 1b）prototype＋量測 AUTH churn／冷 DO 喚醒/計費；數字好再評估切過去。
