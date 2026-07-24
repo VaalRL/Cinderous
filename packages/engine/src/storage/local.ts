@@ -15,6 +15,7 @@ import type {
   AppStorage,
   MessageStatus,
   OrSetName,
+  StoredFsState,
   StorageSnapshot,
   StoredBootstrapList,
   StoredContact,
@@ -172,6 +173,7 @@ export class LocalStorage implements AppStorage {
         blocked: read<OrSetTombstone[]>(this.k("crdtTomb.blocked"), [], this.dek),
       },
       syncedPrefs: read<SyncedPrefs>(this.k("syncedPrefs"), {}, this.dek), // ADR-0242 階段③
+      fsState: read<StoredFsState>(this.k("fsState"), { enabled: false, keys: [], contactEks: {} }, this.dek), // ADR-0245
       readAt: read<Record<string, number>>(this.k("readAt"), {}, this.dek),
     };
   }
@@ -437,6 +439,13 @@ export class LocalStorage implements AppStorage {
   saveSyncedPrefs(prefs: SyncedPrefs): void {
     this.mem.saveSyncedPrefs(prefs);
     write(this.k("syncedPrefs"), prefs, this.dek); // ADR-0242 階段③：以 dek 加密落地
+  }
+  loadFsState(): StoredFsState {
+    return this.mem.loadFsState();
+  }
+  saveFsState(state: StoredFsState): void {
+    this.mem.saveFsState(state);
+    write(this.k("fsState"), state, this.dek); // ADR-0245：EK 私鑰以 dek 加密落地
   }
   exportSnapshot(): StorageSnapshot {
     return this.mem.exportSnapshot();

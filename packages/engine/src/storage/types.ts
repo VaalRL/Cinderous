@@ -338,6 +338,29 @@ export interface AppStorage {
    */
   loadSyncedPrefs(): SyncedPrefs;
   saveSyncedPrefs(prefs: SyncedPrefs): void;
+  /**
+   * 前向保密狀態（ADR-0245）：opt-in 開關、我的 EK 金鑰（current＋grace 內舊把）、每聯絡人學到的 EK。
+   * EK 私鑰加密落地（同 at-rest 保護）；grace 後由引擎刪除（刪除紀律）。未設過回傳預設空狀態。
+   */
+  loadFsState(): StoredFsState;
+  saveFsState(state: StoredFsState): void;
+}
+
+/** 前向保密的一把加密子鑰（ADR-0245）：`nsec`＝EK 私鑰、`pk`＝公鑰、`at`＝生成時間（毫秒；current＝最大）。 */
+export interface StoredFsKey {
+  nsec: string;
+  pk: string;
+  at: number;
+}
+
+/** 前向保密本機狀態（ADR-0245）。 */
+export interface StoredFsState {
+  /** opt-in：啟用才生成 EK、retarget、發 10040、宣告 capability。預設 false。 */
+  enabled: boolean;
+  /** 我的 EK 金鑰：current（最大 at）＋grace 內舊把（供解在途/自我副本）。 */
+  keys: StoredFsKey[];
+  /** 每聯絡人學到的當前 EK 公鑰（聯絡人 pubkey → ek pubkey）。 */
+  contactEks: Record<string, string>;
 }
 
 /** OR-Set 集合名（ADR-0242）：多設備可變集合的三個墓碑桶。 */
@@ -385,6 +408,8 @@ export interface StorageSnapshot {
   crdtTombstones?: Record<string, OrSetTombstone[]>;
   /** 跨裝置同步設定（ADR-0242 階段③）：逐鍵 LWW；舊快照沒有 → 匯入時退回 `{}`。 */
   syncedPrefs?: SyncedPrefs;
+  /** 前向保密狀態（ADR-0245）：opt-in＋EK 金鑰＋每聯絡人 EK；舊快照沒有 → 匯入時退回預設空。 */
+  fsState?: StoredFsState;
   /**
    * 已讀水位（ADR-0108）：對話 → 已讀到的最新訊息時間（毫秒）。
    *

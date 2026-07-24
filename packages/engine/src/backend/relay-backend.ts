@@ -54,7 +54,6 @@ import {
   SDP_SIGNAL_KIND,
   alsoMain,
   threadRoot,
-  unwrapMessage,
   selfCopyTarget,
   type WrappedMessage,
   wrapDeletion,
@@ -115,6 +114,13 @@ import {
   type SecretKey,
   PRESENCE_PATH,
   shardPath,
+  buildEkAnnounce,
+  EK_ANNOUNCE_KIND,
+  ekHintOf,
+  generateEncryptionKey,
+  openWrapWithEks,
+  readEkAnnounce,
+  type UnwrappedMessage,
 } from "@cinderous/core";
 import { buildRtcConfig } from "./rtc-config.js";
 import { fetchTurnServers, turnEndpointFromRelay } from "./turn-fetch.js";
@@ -122,7 +128,7 @@ import { WebRtcCall } from "./webrtc-call.js";
 import { WebRtcTransfer } from "./webrtc.js";
 import { buildSnapshotContent, mergeSnapshotContent, parseSnapshotContent } from "../storage/cloud-snapshot.js";
 import { getDeviceId } from "../storage/device-id.js";
-import type { AppStorage, MessageStatus, OrSetName, StoredMessage } from "../storage/types.js";
+import type { AppStorage, MessageStatus, OrSetName, StoredFsState, StoredMessage } from "../storage/types.js";
 import type {
   ChatBackend,
   ChatBackendEvents,
@@ -421,6 +427,8 @@ export class RelayChatBackend implements ChatBackend {
   private readonly connectorFor: ((url: string) => RelayConnector) | undefined;
   /** 分片基底 host（ADR-0241）；設定＝分片模式，路由 URL 由 pubkey 直接算（免 hint）。 */
   private readonly shardingBase: string | undefined;
+  /** 前向保密狀態（ADR-0245）：opt-in＋我的 EK 金鑰＋每聯絡人學到的 EK。 */
+  private fsState: StoredFsState;
   /** 搬家排水的舊 home（ADR-0066 H3）：只多訂閱其收件匣，不參與發送路由。 */
   private readonly drainUrl: string | undefined;
   /** 加密雲端快照設定（ADR-0071）；undefined＝不發佈（接收合併恆開）。 */
@@ -632,6 +640,7 @@ export class RelayChatBackend implements ChatBackend {
     this.selfNpub = npubEncode(pubkey);
     this.selfNsec = identity.nsec;
     this.contacts = storage.loadContacts();
+    this.fsState = storage.loadFsState(); // ADR-0245：前向保密狀態
     this.myAvatar = storage.loadSelfAvatar(); // ADR-0154：開機廣播帶上頭像（或移除記號）
     this.myTitle = storage.loadSelfTitle(); // ADR-0158：企業頭銜同理
     this.blocked = storage.loadBlocked();
@@ -914,6 +923,9 @@ export class RelayChatBackend implements ChatBackend {
       // 既不報自己、也不看別人 → 對中繼真正消失。訊息收發（收件匣 `#p:自己`）不受影響。
       // 分片模式：心跳改走 presence 獨立層（見上），訊息片不再訂心跳。真隱身時本就不訂。
       ...(this.shardingBase || this.invisible ? [] : [{ kinds: [KIND.HEARTBEAT], authors }]),
+      // ADR-0245：FS 啟用時訂閱聯絡人的 EK 公告（kind 10040），學到他們當前 EK 好加密給他們。
+      // 搭 presence 便車（同 authors:[聯絡人]、零新增隱私面）、隨真隱身同進退（隱身不訂）。
+      ...(this.fsEnabled() && !this.invisible && authors.length > 0 ? [{ kinds: [EK_ANNOUNCE_KIND], authors }] : []),
       // ADR-0120：typing/nudge 已 NIP-59 封裝 → 外層作者是**一次性臨時金鑰**，`authors: all`
       // 永遠不會命中。改為只靠 `#p`（與 Gift Wrap 收件箱同形）。
       //
@@ -1000,6 +1012,81 @@ export class RelayChatBackend implements ChatBackend {
       this.emitRelayPool();
     }
     this.scheduleRetirementIfNeeded(); // 清單標我的 home 為 draining/retired → T3 撤離（ADR-0069）
+  }
+
+  // ── 前向保密（ADR-0245，手動/opt-in）──────────────────────────────────────
+
+  private persistFs(): void {
+    this.storage.saveFsState(this.fsState);
+  }
+  private fsEnabled(): boolean {
+    return this.fsState.enabled;
+  }
+  /** 我當前的 EK（最新一把）；未啟用/無金鑰回 undefined。 */
+  private myCurrentEk(): { sk: SecretKey; pk: string } | undefined {
+    const latest = [...this.fsState.keys].sort((a, b) => a.at - b.at).at(-1);
+    return latest ? { sk: nsecDecode(latest.nsec), pk: latest.pk } : undefined;
+  }
+  /** 解封候選私鑰：我的所有 EK（current＋grace 內舊把）＋身分金鑰（向後相容/退回）。 */
+  private fsDecryptCandidates(): SecretKey[] {
+    return [...this.fsState.keys.map((k) => nsecDecode(k.nsec)), this.sk];
+  }
+  /** 送訊息的 FS 選項：啟用且有 EK 才回。encryptToFor＝收件人 learned EK（不知則退回身分＝該則無 FS），自我副本用自己 EK。 */
+  private fsSendOpt(): { encryptToFor: (pk: PubkeyHex) => PubkeyHex; myEk: string } | undefined {
+    const my = this.myCurrentEk();
+    if (!this.fsEnabled() || !my) return undefined;
+    const selfPk = this.self.pubkey;
+    return {
+      myEk: my.pk,
+      encryptToFor: (pk) => (pk === selfPk ? my.pk : this.fsState.contactEks[pk] ?? pk),
+    };
+  }
+  /** 學到某聯絡人當前 EK（收 10040 或訊息內嵌 hint）。 */
+  private learnContactEk(pubkey: PubkeyHex, ek: string): void {
+    if (this.fsState.contactEks[pubkey] === ek) return;
+    this.fsState = { ...this.fsState, contactEks: { ...this.fsState.contactEks, [pubkey]: ek } };
+    this.persistFs();
+  }
+  /** 多鑰解封並順帶學對方 EK（rumor 內嵌 hint）。取代裸 unwrapMessage——FS 未啟用時候選只有 IK＝行為不變。 */
+  private openFs(event: NostrEvent): UnwrappedMessage {
+    const opened = openWrapWithEks(event, this.fsDecryptCandidates());
+    const ek = ekHintOf(opened.rumor.tags);
+    if (ek) this.learnContactEk(opened.sender, ek);
+    return opened;
+  }
+  /** 發佈 kind 10040 EK 公告（IK 簽章、可取代）到 home＋pool——聯絡人訂 `authors:[我]` 學到我的當前 EK。 */
+  private publishEkAnnounce(): void {
+    const my = this.myCurrentEk();
+    if (!my) return;
+    const announce = buildEkAnnounce(this.sk, my.pk);
+    this.client.publish(announce);
+    for (const c of this.relayPool.values()) c.publish(announce);
+  }
+
+  /** 啟用前向保密（ADR-0245，opt-in）：生成第一把 EK、掛 10040 訂閱、發 10040。冪等。 */
+  enableFs(): void {
+    if (this.fsState.enabled && this.myCurrentEk()) return;
+    const ek = generateEncryptionKey();
+    this.fsState = {
+      ...this.fsState,
+      enabled: true,
+      keys: [...this.fsState.keys, { nsec: nsecEncode(ek.sk), pk: ek.pk, at: Date.now() }],
+    };
+    this.persistFs();
+    this.resubscribe(); // 掛上 `{kinds:[10040], authors:[聯絡人]}` 訂閱（搭 presence）
+    this.publishEkAnnounce();
+  }
+
+  /** 手動更換加密金鑰（ADR-0245）：生成新 EK（保留舊把至 grace，供解在途）、發新 10040。需先啟用。 */
+  rotateEncryptionKey(): void {
+    if (!this.fsState.enabled) return;
+    const ek = generateEncryptionKey();
+    this.fsState = {
+      ...this.fsState,
+      keys: [...this.fsState.keys, { nsec: nsecEncode(ek.sk), pk: ek.pk, at: Date.now() }],
+    };
+    this.persistFs();
+    this.publishEkAnnounce();
   }
 
   /**
@@ -1267,6 +1354,12 @@ export class RelayChatBackend implements ChatBackend {
       if (event.created_at > prev) this.inboxWatermark.set(url, event.created_at);
     }
     if (this.seenBefore(event.id)) return;
+    if (event.kind === EK_ANNOUNCE_KIND) {
+      // ADR-0245：聯絡人的 EK 公告（kind 10040，IK 簽章）→ 學到其當前 EK（供加密給他們）。
+      const read = readEkAnnounce(event);
+      if (read && this.contacts.some((c) => c.pubkey === read.ik)) this.learnContactEk(read.ik, read.ek);
+      return;
+    }
     if (event.kind === SNAPSHOT_KIND) {
       this.receiveSnapshot(event); // 加密雲端快照（ADR-0071 J3）
       return;
@@ -1380,7 +1473,7 @@ export class RelayChatBackend implements ChatBackend {
   private receiveDm(event: NostrEvent): void {
     let opened;
     try {
-      opened = unwrapMessage(event, this.sk);
+      opened = this.openFs(event); // ADR-0245：多鑰解封（我的 EK→IK）＋順帶學對方 EK；FS 未啟用時＝裸解
     } catch {
       return;
     }
@@ -2270,6 +2363,7 @@ export class RelayChatBackend implements ChatBackend {
     // 同一則訊息會差最多 999ms → 已讀水位比較就不精確了。
     const now = nowSec();
     const disappearAt = ttlSeconds ? now + ttlSeconds : undefined;
+    const fs = this.fsSendOpt(); // ADR-0245：啟用 FS 時加密到收件人 EK＋內嵌我的 EK（不知對方 EK 則退回身分）
     const wrapped = wrapMessage(text, this.sk, to, {
       now,
       ...(disappearAt !== undefined ? { disappearAt } : {}),
@@ -2279,6 +2373,7 @@ export class RelayChatBackend implements ChatBackend {
       ...(mentions && mentions.length > 0 ? { mentions } : {}),
       ...(replyTo ? { replyTo } : {}),
       ...(replyTo && alsoMain ? { alsoMain: true } : {}),
+      ...(fs ? { fs } : {}),
     });
     const id = wrapped.id; // 內層 rumor id（ADR-0107）：對方與自己的其他裝置都指涉同一則
     const extra = {
@@ -2838,7 +2933,7 @@ export class RelayChatBackend implements ChatBackend {
   private receiveFileChunk(event: NostrEvent): void {
     let opened;
     try {
-      opened = unwrapMessage(event, this.sk);
+      opened = this.openFs(event); // ADR-0245：多鑰解封（我的 EK→IK）＋順帶學對方 EK；FS 未啟用時＝裸解
     } catch {
       return;
     }

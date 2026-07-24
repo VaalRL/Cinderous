@@ -305,6 +305,13 @@ export interface ChatBackend {
   /** 一次性遷移（ADR-0242 階段③）：把本機舊有靜音種進同步設定，僅在鍵不存在時（不蓋遠端解除靜音）。 */
   seedMutesIfAbsent?(convoIds: string[]): void;
   /**
+   * 啟用前向保密（ADR-0245，opt-in、預設關）：生成加密子鑰 EK、發佈 kind 10040 公告、訂閱聯絡人 EK。
+   * 之後送訊息加密到收件人當前 EK（不知則退回身分）；收訊多鑰解封並學對方 EK。冪等。
+   */
+  enableFs?(): void;
+  /** 手動更換加密金鑰（ADR-0245）：生成新 EK、發新 10040；保留舊 EK 至 grace 供解在途。需先 enableFs。 */
+  rotateEncryptionKey?(): void;
+  /**
    * 設定/移除自己的**廣播頭像**（ADR-0154）：`avatar` 為 data URI 縮圖（來源端 128px），
    * 空字串或 undefined＝移除（廣播移除記號，聯絡人端清掉舊圖）。設定即比照改名
    * （ADR-0144）全量重播個人檔。格式不合（非白名單 data URI 或超過上限）回 false 不套用。

@@ -10,6 +10,7 @@ import type {
   MessageStatus,
   OrSetName,
   StorageSnapshot,
+  StoredFsState,
   StoredBootstrapList,
   StoredContact,
   StoredGroup,
@@ -468,6 +469,13 @@ export class TauriStorage implements AppStorage {
   saveCrdtTombstones(set: OrSetName, list: OrSetTombstone[]): void {
     // ADR-0242：OR-Set 墓碑同屬快照非 messages → 隨 META 部位加密落地。
     this.mem.saveCrdtTombstones(set, list);
+    this.persist(META);
+  }
+  loadFsState(): StoredFsState {
+    return this.mem.loadFsState();
+  }
+  saveFsState(state: StoredFsState): void {
+    this.mem.saveFsState(state); // ADR-0245：隨 META 加密落地
     this.persist(META);
   }
   loadSyncedPrefs(): SyncedPrefs {

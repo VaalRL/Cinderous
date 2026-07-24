@@ -3152,3 +3152,57 @@ describe("中繼分片客戶端（ADR-0241）", () => {
     b.stop();
   });
 });
+
+describe("前向保密（ADR-0245 Phase 1b：opt-in 手動輪替）", () => {
+  it("啟用 FS：互學 EK → Alice FS-送 → Bob 解得開；**同身分但無 EK 者解不開側錄密文（FS）**", () => {
+    const net = createInMemoryRelayNetwork();
+    const bobSk = generateSecretKey();
+    const bobNsec = nsecEncode(bobSk);
+    const storeA = new MemoryStorage();
+    const storeB = new MemoryStorage();
+    storeB.saveIdentity({ nsec: bobNsec, name: "Bob" }); // 固定 Bob 身分，稍後用同 nsec、無 EK 者驗 FS
+    const a = new RelayChatBackend(storeA, (h) => net.connect("a", h), "Alice");
+    const b = new RelayChatBackend(storeB, (h) => net.connect("b", h), "Bob");
+    const bIncoming: ChatMessage[] = [];
+    a.start(noop);
+    b.start({ ...noop, onMessage: (_pk, m) => bIncoming.push(m) });
+
+    a.addContact(b.selfNpub);
+    b.acceptRequest(a.self.pubkey); // 互為聯絡人 → 互訂 10040
+    a.enableFs(); // 生成 EK_A、發 10040_A、訂 {10040, authors:[Bob]}
+    b.enableFs(); // 生成 EK_B、發 10040_B → A 學到 EK_B；A 的 10040_A 已在 → B 學到 EK_A
+    a.sendMessage(b.self.pubkey, "FS 訊息"); // A 知道 B 的 EK → 加密到 EK_B
+
+    // Bob（有 EK_B）解得開。
+    expect(bIncoming.map((m) => m.text)).toContain("FS 訊息");
+
+    // 🔴 FS：用**同一個 Bob 身分、但沒有 EK**（模擬 grace 後刪 EK）去收同一則側錄密文 → 解不開。
+    // 若 A 當時退回「加密到身分」（沒學到 EK），這個無-EK 的 Bob 就會解得開 → 本斷言會失敗，
+    // 故此同時證明「A 確實用了 EK 加密」＋「刪 EK 後同身分也解不開＝前向保密」。
+    const storeB2 = new MemoryStorage();
+    storeB2.saveIdentity({ nsec: bobNsec, name: "Bob" }); // 同身分、fsState 為預設空（無 EK）
+    const b2 = new RelayChatBackend(storeB2, (h) => net.connect("b2", h), "Bob");
+    const b2Incoming: ChatMessage[] = [];
+    b2.start({ ...noop, onMessage: (_pk, m) => b2Incoming.push(m) }); // 訂閱收件匣 → relay 重放那則 wrap
+    expect(b2Incoming.map((m) => m.text)).not.toContain("FS 訊息"); // 無 EK、只有 IK → 解不開
+
+    a.stop();
+    b.stop();
+    b2.stop();
+  });
+
+  it("向後相容：一方未啟用 FS → 退回靜態、照常收發", () => {
+    const net = createInMemoryRelayNetwork();
+    const a = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("a", h), "Alice");
+    const b = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("b", h), "Bob");
+    const bIncoming: ChatMessage[] = [];
+    a.start(noop);
+    b.start({ ...noop, onMessage: (_pk, m) => bIncoming.push(m) });
+    a.addContact(b.selfNpub);
+    a.enableFs(); // 只有 A 啟用；A 不知道 B 的 EK（B 沒發 10040）→ 退回加密到 B 的身分
+    a.sendMessage(b.self.pubkey, "退回靜態");
+    expect(bIncoming.map((m) => m.text)).toContain("退回靜態"); // B（未啟用、用 IK）照樣解得開
+    a.stop();
+    b.stop();
+  });
+});

@@ -9,6 +9,7 @@ import {
   type StorageSnapshot,
   type StoredBootstrapList,
   type StoredContact,
+  type StoredFsState,
   type StoredGroup,
   type StoredIdentity,
   type StoredMessage,
@@ -436,6 +437,13 @@ export class MemoryStorage implements AppStorage {
   saveSyncedPrefs(prefs: SyncedPrefs): void {
     this.syncedPrefs = prefs;
   }
+  private fsState: StoredFsState = { enabled: false, keys: [], contactEks: {} }; // ADR-0245
+  loadFsState(): StoredFsState {
+    return this.fsState;
+  }
+  saveFsState(state: StoredFsState): void {
+    this.fsState = state;
+  }
 
   /** 匯出整包狀態快照（B2 加密儲存，ADR-0054）；深拷貝以免外部改動內部。 */
   exportSnapshot(): StorageSnapshot {
@@ -459,6 +467,7 @@ export class MemoryStorage implements AppStorage {
       assetTombstones: [...this.assetTombstones], // ADR-0224
       crdtTombstones: { ...this.crdtTombstones }, // ADR-0242
       syncedPrefs: { ...this.syncedPrefs }, // ADR-0242 階段③
+      fsState: { ...this.fsState, keys: [...this.fsState.keys], contactEks: { ...this.fsState.contactEks } }, // ADR-0245
       readAt: Object.fromEntries(this.readAt), // ADR-0108
     };
   }
@@ -492,6 +501,7 @@ export class MemoryStorage implements AppStorage {
     this.assetTombstones = [...(s.assetTombstones ?? [])]; // 舊快照無此欄位（ADR-0224）
     this.crdtTombstones = { ...(s.crdtTombstones ?? {}) }; // 舊快照無此欄位（ADR-0242）
     this.syncedPrefs = { ...(s.syncedPrefs ?? {}) }; // 舊快照無此欄位（ADR-0242 階段③）
+    this.fsState = s.fsState ?? { enabled: false, keys: [], contactEks: {} }; // 舊快照無此欄位（ADR-0245）
     this.readAt.clear();
     for (const [k, v] of Object.entries(s.readAt ?? {})) this.readAt.set(k, v); // 舊快照無此欄位
   }
