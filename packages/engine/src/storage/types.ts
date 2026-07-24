@@ -361,6 +361,11 @@ export interface StoredFsState {
   keys: StoredFsKey[];
   /** 每聯絡人學到的當前 EK 公鑰（聯絡人 pubkey → ek pubkey）。 */
   contactEks: Record<string, string>;
+  /**
+   * TOFU 釘選「此聯絡人期望 FS」（ADR-0245，pubkey → true）：見其簽章個人檔 `fs` 宣告或學到其 EK 即釘。
+   * 釘選後若送訊時無其 EK → 不得靜默退回靜態，發降級警告。可選（舊資料缺＝視為空）。
+   */
+  pinned?: Record<string, boolean>;
 }
 
 /** OR-Set 集合名（ADR-0242）：多設備可變集合的三個墓碑桶。 */

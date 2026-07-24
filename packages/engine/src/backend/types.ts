@@ -267,6 +267,11 @@ export interface ChatBackendEvents {
    * `lost`＝已連上後斷線，可再撥。與 `onCallState('ended')` 一起發生（視窗關閉＋留下提示）。
    */
   onCallFailed?(peer: PubkeyHex, reason: CallFailureReason): void;
+  /**
+   * 前向保密降級警告（ADR-0245）：對**已釘選 FS**（見過其簽章能力宣告）的聯絡人送訊，卻**找不到其 EK**
+   * → 該則會退回靜態（無 FS）。UI 應提示使用者（非靜默）——可能是對方 EK 尚未同步（稍後重試），或疑似降級。
+   */
+  onFsDowngrade?(peer: PubkeyHex): void;
 }
 
 /**

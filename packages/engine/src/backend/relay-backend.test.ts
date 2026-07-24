@@ -3191,6 +3191,20 @@ describe("前向保密（ADR-0245 Phase 1b：opt-in 手動輪替）", () => {
     b2.stop();
   });
 
+  it("降級偵測：已釘選 FS 的聯絡人卻無其 EK → onFsDowngrade（非靜默退回靜態）", () => {
+    const net = createInMemoryRelayNetwork();
+    const bobPk = getPublicKey(generateSecretKey());
+    const storeA = new MemoryStorage();
+    // Alice 啟用 FS、已釘選「Bob 期望 FS」（見過其簽章能力宣告），但沒有 Bob 的 EK（EK 未到/被剝除）。
+    storeA.saveFsState({ enabled: true, keys: [], contactEks: {}, pinned: { [bobPk]: true } });
+    const a = new RelayChatBackend(storeA, (h) => net.connect("a", h), "Alice");
+    const downgrades: string[] = [];
+    a.start({ ...noop, onFsDowngrade: (pk) => downgrades.push(pk) });
+    a.sendMessage(bobPk, "沒有你的 EK"); // 會退回靜態 → 但發降級警告（非靜默）
+    expect(downgrades).toContain(bobPk);
+    a.stop();
+  });
+
   it("向後相容：一方未啟用 FS → 退回靜態、照常收發", () => {
     const net = createInMemoryRelayNetwork();
     const a = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("a", h), "Alice");

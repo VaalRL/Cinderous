@@ -117,6 +117,7 @@ import {
   buildEkAnnounce,
   EK_ANNOUNCE_KIND,
   ekHintOf,
+  FS_CAPABILITY,
   generateEncryptionKey,
   openWrapWithEks,
   pruneFsKeys,
@@ -1050,11 +1051,26 @@ export class RelayChatBackend implements ChatBackend {
       encryptToFor: (pk) => (pk === selfPk ? my.pk : this.fsState.contactEks[pk] ?? pk),
     };
   }
-  /** 學到某聯絡人當前 EK（收 10040 或訊息內嵌 hint）。 */
+  /** 學到某聯絡人當前 EK（收 10040 或訊息內嵌 hint）；順帶 TOFU 釘選「此人用 FS」。 */
   private learnContactEk(pubkey: PubkeyHex, ek: string): void {
-    if (this.fsState.contactEks[pubkey] === ek) return;
-    this.fsState = { ...this.fsState, contactEks: { ...this.fsState.contactEks, [pubkey]: ek } };
+    const known = this.fsState.contactEks[pubkey] === ek && (this.fsState.pinned?.[pubkey] ?? false);
+    if (known) return;
+    this.fsState = {
+      ...this.fsState,
+      contactEks: { ...this.fsState.contactEks, [pubkey]: ek },
+      pinned: { ...(this.fsState.pinned ?? {}), [pubkey]: true }, // 學到 EK＝證據他用 FS → 釘選
+    };
     this.persistFs();
+  }
+  /** TOFU 釘選「此聯絡人期望 FS」（見其簽章個人檔 `fs` 宣告）。 */
+  private pinFs(pubkey: PubkeyHex): void {
+    if (this.fsState.pinned?.[pubkey]) return;
+    this.fsState = { ...this.fsState, pinned: { ...(this.fsState.pinned ?? {}), [pubkey]: true } };
+    this.persistFs();
+  }
+  /** 降級偵測（ADR-0245）：已釘選 FS 的聯絡人卻無其 EK → 送訊會退回靜態＝疑似降級，回 true 供警告。 */
+  private fsWouldDowngrade(to: PubkeyHex): boolean {
+    return (this.fsState.pinned?.[to] ?? false) && !this.fsState.contactEks[to];
   }
   /** 多鑰解封並順帶學對方 EK（rumor 內嵌 hint）。取代裸 unwrapMessage——FS 未啟用時候選只有 IK＝行為不變。 */
   private openFs(event: NostrEvent): UnwrappedMessage {
@@ -1084,6 +1100,8 @@ export class RelayChatBackend implements ChatBackend {
     this.persistFs();
     this.resubscribe(); // 掛上 `{kinds:[10040], authors:[聯絡人]}` 訂閱（搭 presence）
     this.publishEkAnnounce();
+    this.profileSentTo.clear(); // 重新廣播個人檔 → 聯絡人學到我的 FS capability（TOFU 釘選）
+    this.broadcastProfile();
   }
 
   /** 手動更換加密金鑰（ADR-0245）：生成新 EK（保留舊把至 grace，供解在途）、發新 10040。需先啟用。 */
@@ -1560,6 +1578,8 @@ export class RelayChatBackend implements ChatBackend {
 
     const profile = parseProfile(rumor);
     if (profile) {
+      // ADR-0245：對方簽章個人檔宣告 FS capability → TOFU 釘選（不可偽造；日後無其 EK 不得靜默退回靜態）。
+      if (profile.fs === FS_CAPABILITY) this.pinFs(sender);
       // ADR-0061：以對方自選暱稱更新顯示名稱（僅在變動時）。
       // **請求區的人也算**（ADR-0121）：否則請求清單只看得到 `npub1abc…`，使用者無從判斷；
       // 而且 `acceptRequest()` 會把那個陳舊的縮寫帶進聯絡人。
@@ -2373,6 +2393,8 @@ export class RelayChatBackend implements ChatBackend {
     // 同一則訊息會差最多 999ms → 已讀水位比較就不精確了。
     const now = nowSec();
     const disappearAt = ttlSeconds ? now + ttlSeconds : undefined;
+    // ADR-0245 降級偵測：已釘選 FS 的聯絡人卻無其 EK → 不靜默退回靜態，發警告（訊息仍送出，非靜默）。
+    if (this.fsWouldDowngrade(to)) this.handlers?.onFsDowngrade?.(to);
     const fs = this.fsSendOpt(); // ADR-0245：啟用 FS 時加密到收件人 EK＋內嵌我的 EK（不知對方 EK 則退回身分）
     const wrapped = wrapMessage(text, this.sk, to, {
       now,
@@ -2437,6 +2459,8 @@ export class RelayChatBackend implements ChatBackend {
       name: this.self.name,
       ...(this.myAvatar !== null ? { avatar: this.myAvatar } : {}),
       ...(this.myTitle !== null ? { title: this.myTitle } : {}),
+      // ADR-0245：FS 啟用時宣告 capability（IK 簽章、不可偽造）→ 對方 TOFU 釘選、降級偵測。
+      ...(this.fsEnabled() ? { fs: FS_CAPABILITY } : {}),
     };
     // hint 讓「每次開機廣播」同時成為全聯絡人的路由刷新——搬家後自動改道、陳舊自癒。
     this.publishReliable(wrapProfile(profile, this.sk, pubkey, this.homeUrl ? { relayHint: this.homeUrl } : {}));

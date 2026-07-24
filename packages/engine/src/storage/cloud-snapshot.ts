@@ -318,6 +318,7 @@ export function mergeSnapshotContent(
       enabled: local.enabled || content.fs.enabled === true,
       keys: pruneFsKeys([...byPk.values()], opts.now ?? Date.now()), // union 後修剪逾 grace
       contactEks: { ...(content.fs.contactEks ?? {}), ...local.contactEks }, // union，本地衝突優先
+      pinned: { ...(content.fs.pinned ?? {}), ...(local.pinned ?? {}) }, // union 釘選（ADR-0245：一台釘＝全釘）
     };
     if (JSON.stringify(merged) !== JSON.stringify(local)) {
       storage.saveFsState(merged);

@@ -45,6 +45,11 @@ export interface ProfileData {
    * `""`＝已移除；缺席＝無變更。工作身分的聯絡人＝全組織同事 → 全員可見。
    */
   title?: string;
+  /**
+   * 前向保密能力宣告（ADR-0245，如 `"ek-v1"`）：因個人檔由 IK **簽章**，MITM 無法偽造「不支援 FS」。
+   * 收端 TOFU 釘選「此聯絡人期望 FS」→ 日後若無其 EK 不得靜默退回靜態（降級偵測）。缺席＝未宣告。
+   */
+  fs?: string;
 }
 
 /**
@@ -54,7 +59,7 @@ export interface ProfileData {
  * 網址只當輸入方式，絕不把 URL 發給對方讓對方裝置去抓，見 ADR-0154）。
  */
 export function wrapProfile(
-  profile: { name: string; avatar?: string; title?: string },
+  profile: { name: string; avatar?: string; title?: string; fs?: string },
   senderSk: SecretKey,
   recipientPk: PubkeyHex,
   opts: { now?: number; relayHint?: string } = {},
@@ -65,6 +70,7 @@ export function wrapProfile(
   const content: ProfileData = { name: profile.name };
   if (profile.avatar !== undefined) content.avatar = profile.avatar;
   if (profile.title !== undefined) content.title = profile.title === "" ? "" : sanitizeTitle(profile.title);
+  if (profile.fs !== undefined) content.fs = profile.fs; // ADR-0245：FS capability 宣告（IK 簽章）
   return sealAndWrap(
     { kind: KIND.PROFILE, created_at: nowSec, tags, content: JSON.stringify(content) },
     senderSk,
@@ -87,7 +93,7 @@ export function wrapProfile(
 export function parseProfile(rumor: Rumor): ProfileData | undefined {
   if (rumor.kind !== KIND.PROFILE) return undefined;
   try {
-    const raw = JSON.parse(rumor.content) as { name?: unknown; avatar?: unknown; title?: unknown };
+    const raw = JSON.parse(rumor.content) as { name?: unknown; avatar?: unknown; title?: unknown; fs?: unknown };
     const out: ProfileData = {};
     if (typeof raw.name === "string" && raw.name.trim()) out.name = raw.name.trim();
     if (typeof raw.avatar === "string" && (raw.avatar === "" || validAvatarDataUri(raw.avatar))) out.avatar = raw.avatar;
@@ -96,7 +102,11 @@ export function parseProfile(rumor: Rumor): ProfileData | undefined {
       const t = raw.title === "" ? "" : sanitizeTitle(raw.title);
       if (t !== "" || raw.title === "") out.title = t;
     }
-    return out.name !== undefined || out.avatar !== undefined || out.title !== undefined ? out : undefined;
+    // FS capability（ADR-0245）：短字串（≤16）才收，防畸形。
+    if (typeof raw.fs === "string" && raw.fs.length > 0 && raw.fs.length <= 16) out.fs = raw.fs;
+    return out.name !== undefined || out.avatar !== undefined || out.title !== undefined || out.fs !== undefined
+      ? out
+      : undefined;
   } catch {
     return undefined;
   }

@@ -21,6 +21,9 @@ const PK_RE = /^[0-9a-f]{64}$/;
 /** EK 公告事件 kind（ADR-0245；接續 10037/10038/10039 的可取代事件範圍）。 */
 export const EK_ANNOUNCE_KIND = 10040;
 
+/** FS 能力宣告版本字串（ADR-0245）：寫進簽章個人檔的 `fs` 欄位供 TOFU 釘選/降級偵測。 */
+export const FS_CAPABILITY = "ek-v1";
+
 /** rumor 內嵌 EK hint 的 tag 名（比照 ADR-0035 relay hint；夾在**加密內層** rumor、中繼看不到）。 */
 export const EK_HINT_TAG = "ek";
 
