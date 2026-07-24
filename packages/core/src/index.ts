@@ -23,6 +23,7 @@ export * from "./stickers.js";
 export * from "./custom-assets.js";
 export * from "./or-set.js";
 export * from "./shard.js";
+export * from "./subkey.js";
 export * from "./synced-prefs.js";
 export * from "./version-check.js";
 export * from "./threat-intel.js";
