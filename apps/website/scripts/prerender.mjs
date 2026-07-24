@@ -27,7 +27,7 @@ for (const marker of ["<!--app-head-->", "<!--app-html-->"]) {
   }
 }
 
-const { renderAll, extraFiles, applyTemplate } = await import(pathToFileURL(ssrEntry).href);
+const { renderAll, renderNotFound, extraFiles, applyTemplate } = await import(pathToFileURL(ssrEntry).href);
 
 const write = (relPath, content) => {
   const out = join(distDir, relPath);
@@ -42,6 +42,13 @@ for (const page of pages) {
   console.log(`  ✓ ${page.file}`);
 }
 
+// 404（ADR-0247）：剝掉 vite 注入的 app JS module script → 純靜態頁，不 hydrate
+// （否則 SPA 對未知路徑會 render 首頁、把 404 內容覆蓋掉）。CSS 連結保留。
+const notFound = renderNotFound();
+const notFoundHtml = applyTemplate(template, notFound).replace(/\s*<script type="module"[^>]*><\/script>/g, "");
+write(notFound.file, notFoundHtml);
+console.log(`  ✓ ${notFound.file}（靜態、無 JS）`);
+
 for (const { file, content } of extraFiles()) {
   write(file, content);
   console.log(`  ✓ ${file}`);
@@ -50,4 +57,4 @@ for (const { file, content } of extraFiles()) {
 // SSR 中繼產物不該進部署成品。
 rmSync(join(here, "..", "dist-ssr"), { recursive: true, force: true });
 
-console.log(`預渲染完成：${pages.length} 頁 + robots.txt + sitemap.xml`);
+console.log(`預渲染完成：${pages.length} 頁 + 404 + robots.txt + sitemap.xml`);

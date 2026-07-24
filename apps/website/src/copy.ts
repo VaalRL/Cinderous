@@ -172,6 +172,10 @@ export interface Copy {
   tr_col_other: string;
   tr_col_note: string;
   footer_privacy: string;
+  /** 404 頁（ADR-0247）：熄滅的營火意象＋回首頁。 */
+  nf_title: string;
+  nf_lead: string;
+  nf_home: string;
 }
 
 const zhHant: Copy = {
@@ -398,6 +402,9 @@ const zhHant: Copy = {
   tr_col_other: "其他",
   tr_col_note: "備註",
   footer_privacy: "本站零追蹤、無 cookie、無第三方分析；與 Cinderous 通訊平面完全隔離，永不接觸使用者資料或金鑰。",
+  nf_title: "這簇營火熄了",
+  nf_lead: "你要找的頁面不在這裡——也許被移動、改名，或從來不存在。回到營火旁吧。",
+  nf_home: "回首頁",
 };
 
 const en: Copy = {
@@ -629,6 +636,9 @@ const en: Copy = {
   tr_col_note: "Note",
   footer_privacy:
     "This site has zero tracking, no cookies, and no third-party analytics; it is fully isolated from Cinderous's messaging plane and never touches user data or keys.",
+  nf_title: "This campfire has gone out",
+  nf_lead: "The page you're looking for isn't here — maybe it moved, was renamed, or never existed. Head back to the fire.",
+  nf_home: "Back to home",
 };
 
 const CATALOG: Record<Locale, Copy> = { "zh-Hant": zhHant, en };

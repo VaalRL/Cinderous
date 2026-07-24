@@ -32,6 +32,9 @@ importers:
 
   apps/desktop:
     dependencies:
+      '@cinderous/brand':
+        specifier: workspace:*
+        version: link:../../packages/brand
       '@cinderous/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -136,6 +139,9 @@ importers:
 
   apps/website:
     dependencies:
+      '@cinderous/brand':
+        specifier: workspace:*
+        version: link:../../packages/brand
       '@cinderous/core':
         specifier: workspace:*
         version: link:../../packages/core
@@ -161,6 +167,33 @@ importers:
       '@vitejs/plugin-react':
         specifier: ^4.3.4
         version: 4.7.0(vite@5.4.21(@types/node@22.20.0)(terser@5.49.0))
+      typescript:
+        specifier: ^5.6.3
+        version: 5.9.3
+      vite:
+        specifier: ^5.4.11
+        version: 5.4.21(@types/node@22.20.0)(terser@5.49.0)
+      vitest:
+        specifier: ^2.1.8
+        version: 2.1.9(@types/node@22.20.0)(jsdom@29.1.1(@noble/hashes@2.0.1))(terser@5.49.0)
+
+  packages/brand:
+    devDependencies:
+      '@types/react':
+        specifier: ^18.3.12
+        version: 18.3.31
+      '@types/react-dom':
+        specifier: ^18.3.1
+        version: 18.3.7(@types/react@18.3.31)
+      '@vitejs/plugin-react':
+        specifier: ^4.3.4
+        version: 4.7.0(vite@5.4.21(@types/node@22.20.0)(terser@5.49.0))
+      react:
+        specifier: ^18.3.1
+        version: 18.3.1
+      react-dom:
+        specifier: ^18.3.1
+        version: 18.3.1(react@18.3.1)
       typescript:
         specifier: ^5.6.3
         version: 5.9.3

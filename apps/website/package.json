@@ -15,6 +15,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@cinderous/brand": "workspace:*",
     "@cinderous/core": "workspace:*",
     "@cinderous/i18n": "workspace:*",
     "@cinderous/theme": "workspace:*",

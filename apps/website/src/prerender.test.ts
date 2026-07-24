@@ -6,8 +6,8 @@
 // 直接對「渲染後的 HTML 字串」下斷言，退化就會在 CI 被擋下。
 
 import { describe, expect, it } from "vitest";
-import { applyTemplate, renderAll, renderRoute } from "./entry-server.js";
-import { allRoutes, routeHref, VIEWS } from "./routes.js";
+import { applyTemplate, renderAll, renderNotFound, renderRoute } from "./entry-server.js";
+import { allRoutes, BASE_PATH, routeHref, VIEWS } from "./routes.js";
 
 const pages = renderAll();
 
@@ -88,5 +88,23 @@ describe("預渲染輸出", () => {
     const headTitles = html.slice(0, html.indexOf('<div id="root"')).match(/<title>[^<]*<\/title>/g) ?? [];
     expect(headTitles).toHaveLength(1);
     expect(headTitles[0]).toContain("Open-source");
+  });
+
+  // ADR-0247：頁尾吉祥物——每頁 footer 都帶 CinderMascot（aria-label Cinderous）。
+  it("每頁頁尾都有吉祥物", () => {
+    for (const page of pages) {
+      expect(page.body).toContain("footer__inner");
+      expect(page.body).toContain('aria-label="Cinderous"');
+    }
+  });
+
+  // ADR-0247：404 頁——輸出 404.html、noindex、含吉祥物與回首頁連結。
+  it("renderNotFound 產出 noindex 的 404.html，含吉祥物與回首頁", () => {
+    const nf = renderNotFound();
+    expect(nf.file).toBe("404.html");
+    expect(nf.head).toContain('name="robots" content="noindex');
+    expect(nf.body).toContain('data-testid="notfound"');
+    expect(nf.body).toContain('aria-label="Cinderous"');
+    expect(nf.body).toContain(`href="${BASE_PATH}"`);
   });
 });

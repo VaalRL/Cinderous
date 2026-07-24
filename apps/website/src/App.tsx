@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { CinderMascot } from "@cinderous/brand";
 import type { Theme } from "@cinderous/theme";
 import { CinderMark } from "./Brand.js";
 import { useCopy } from "./copy.js";
@@ -144,7 +145,11 @@ export function App({ route: initialRoute }: { route: Route }): JSX.Element {
       )}
 
       <footer className="footer">
-        <div className="wrap">{c.footer_privacy}</div>
+        <div className="wrap footer__inner">
+          {/* ADR-0247：頁尾吉祥物——身體吃站台 --accent（橘紅火焰調），與品牌一致。 */}
+          <CinderMascot size={34} />
+          <span>{c.footer_privacy}</span>
+        </div>
       </footer>
     </>
   );

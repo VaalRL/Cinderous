@@ -162,6 +162,16 @@ th { color: var(--muted); font-weight: 600; background: var(--surface); }
 
 /* ── Footer ── */
 .footer { border-top: 1px solid var(--border); padding: 34px 0; color: var(--muted); font-size: 13.5px; text-align: center; background: var(--bg2); }
+/* 頁尾吉祥物（ADR-0247）：與隱私宣稱並排、置中。 */
+.footer__inner { display: flex; align-items: center; justify-content: center; gap: 14px; flex-wrap: wrap; }
+.footer__inner svg { flex: none; }
+
+/* 404 頁（ADR-0247）：熄滅營火意象＋大隻吉祥物，置中。 */
+.nf__inner { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 10px; }
+.nf__code { margin: 6px 0 0; font-size: 54px; font-weight: 800; line-height: 1; color: var(--accent); letter-spacing: 2px; }
+.nf__title { margin: 0; }
+.nf__lead { max-width: 520px; }
+.nf__inner .btn { margin-top: 10px; }
 
 @media (max-width: 860px) {
   .grid--4 { grid-template-columns: repeat(2, 1fr); }

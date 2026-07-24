@@ -150,6 +150,7 @@ import { pickSlotFolder, setSlotDir, slotDir, storeSlotDeposit } from "./native/
 import { type EscrowEntry, loadEscrow, offboardedEntries, removeEscrow, saveEscrow, upsertEscrow } from "./ui/org-escrow.js";
 import { loadPresence, savePresence } from "./ui/presence-store.js";
 import { createRinger, createRingback, DEFAULT_CHIME_ID, playChime } from "./ui/ringtone.js";
+import { CinderMascot } from "@cinderous/brand";
 import { CallWindow } from "./ui/CallWindow.js";
 import { ContactListWindow } from "./ui/ContactListWindow.js";
 import { DeckSidebar } from "./ui/DeckSidebar.js";
@@ -2791,7 +2792,13 @@ export function App(): JSX.Element {
           onClose={closeConvo}
         />
       ) : null}
-      {layout === "modern" && open.length === 0 ? <div className="deckcenter__empty">{t("deck_pickChat")}</div> : null}
+      {layout === "modern" && open.length === 0 ? (
+        <div className="deckcenter__empty" data-testid="deck-empty">
+          {/* ADR-0247：三欄中欄空狀態放一隻待機吉祥物，把空畫面變成有溫度的品牌時刻。 */}
+          <CinderMascot size={104} />
+          <p className="deckcenter__emptytxt">{t("deck_pickChat")}</p>
+        </div>
+      ) : null}
       {open.map((pk, i) => {
         // ADR-0216：經典寬螢幕才浮動；三欄（embedded）與窄螢幕（單欄切換）不套用。
         const floating = layout !== "modern" && !isNarrow ? floatWins.get(pk, i) : undefined;

@@ -6,8 +6,9 @@
 import { renderToString } from "react-dom/server";
 import { App, GITHUB_URL } from "./App.js";
 import { useCopy } from "./copy.js";
-import { allRoutes, routeSlug, type Route } from "./routes.js";
-import { headTags, robotsTxt, sitemapXml } from "./seo.js";
+import { NotFound } from "./pages/NotFound.js";
+import { allRoutes, DEFAULT_LOCALE, routeSlug, type Route } from "./routes.js";
+import { BRAND, escapeAttr, headTags, robotsTxt, sitemapXml } from "./seo.js";
 
 export interface RenderedPage {
   /** 相對於 dist 根的輸出路徑，如 `index.html`、`tech/index.html`、`en/tech/index.html`。 */
@@ -35,6 +36,22 @@ export function renderRoute(route: Route): RenderedPage {
 /** 渲染全部路由（語言 × 頁面）。 */
 export function renderAll(): RenderedPage[] {
   return allRoutes().map(renderRoute);
+}
+
+/**
+ * 404 頁（ADR-0247）：GitHub Pages 對 `/Cinderous/` 下未匹配路徑服務 `dist/404.html`。
+ * 不列入 `allRoutes`／sitemap；`robots: noindex`。預設語言（en）單頁，預渲染時由 prerender 剝掉 app JS
+ * → 純靜態、不 hydrate（否則 SPA 的 unknown→home 會把 404 內容覆蓋掉）。
+ */
+export function renderNotFound(): RenderedPage {
+  const c = useCopy(DEFAULT_LOCALE);
+  const head = [
+    `<title>${escapeAttr(c.nf_title)}｜${BRAND}</title>`,
+    `<meta name="description" content="${escapeAttr(c.nf_lead)}" />`,
+    `<meta name="robots" content="noindex, follow" />`,
+    `<meta name="theme-color" content="#f7f2ea" />`,
+  ].join("\n    ");
+  return { file: "404.html", lang: DEFAULT_LOCALE, head, body: renderToString(<NotFound c={c} />) };
 }
 
 /**

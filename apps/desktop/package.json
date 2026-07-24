@@ -16,6 +16,7 @@
     "tauri:build": "tauri build -f tauri-app"
   },
   "dependencies": {
+    "@cinderous/brand": "workspace:*",
     "@cinderous/core": "workspace:*",
     "@cinderous/engine": "workspace:*",
     "@cinderous/i18n": "workspace:*",
