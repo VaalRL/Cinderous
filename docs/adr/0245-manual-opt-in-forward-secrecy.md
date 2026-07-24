@@ -121,10 +121,15 @@ Gift Wrap（wrap＋seal）到收件人當前 EK；EK 是**傳輸金鑰**、與 a
        ＋學對方 rumor 內嵌 EK）；10040 發到 home＋pool、`subscribeOn` 加 `{kinds:[10040], authors:[聯絡人]}`
        （搭 presence、隨隱身、FS 啟用才訂）、onEvent 驗簽後學。TDD：互學 EK→FS-送→解得開；**同身分無 EK
        者解不開側錄密文（FS）**；向後相容退回靜態。engine 336 綠、126 既有訊息測不變。
-     - ⏳ **Phase 1c/1d 剩**：capability 旗標 `fs:ek-v1`＋TOFU 釘選＋降級偵測（已釘選找不到 EK 不得靜默退回）；
-       多裝置 EK **雲端**同步（目前 fsState 只隨本機 StorageSnapshot/配對、未進 CloudSnapshotContent）；grace
-       刪除紀律（超窗刪舊 EK＋快照/配對老化剔除）；備份碼身分-only（確認不含 EK）。其他事件型別（typing/
-       nudge/receipts/檔案/通話/群）暫維持靜態、未 retarget。
+     - ✅ **Phase 1d 完成（grace 刪除＋多裝置同步）**：core `pruneFsKeys`＋`FS_GRACE_MS`（7 天）；backend
+       `pruneFs`（開機＋換鑰執行刪除紀律）；EK 隨 CloudSnapshotContent.fs 多裝置同步（build 只帶 current＋grace、
+       merge＝union EK/已學 EK/釘選＋grace 修剪＝快照老化剔除）；merge 後 reload fsState＋重發 10040。
+     - ✅ **Phase 1c 完成（capability＋TOFU＋降級偵測）**：`ProfileData.fs`（IK 簽章不可偽造）＋`FS_CAPABILITY`；
+       enableFs 重廣播個人檔宣告；收宣告/學 EK → TOFU 釘選；`fsWouldDowngrade`（已釘選卻無 EK）→ `onFsDowngrade`
+       警告（非靜默、訊息仍退回靜態送出）。TDD 全綠（core 456/engine 340/desktop 524）。
+     - **備份碼身分-only（ADR-0245 §2）**：確認——備份碼編碼 nsec（身分）、不含 EK/fsState；EK 只在**加密快照/
+       配對**同步且**老化**（會過期），寫下來的永久備份不含 EK → 備份外洩不破 FS。
+     - ⏳ **未 retarget**：其他事件型別（typing/nudge/receipts/檔案/通話/群）暫維持靜態（非長期敏感或另議）。
   3. **Phase 2 — UI（desktop）**：設定頁「啟用前向保密／立即更換金鑰」；換鑰**警告彈窗**（列已確認/尚未確認
      聯絡人、備份影響、其他裝置同步）；每聯絡人 FS 狀態（已確認新鑰/尚未確認）；誠實文案（不宣稱 FS）。
   4. **Phase 3 — 審計後上線**：外部密碼學審計；通過後才在產線啟用、文案才可提 FS。
