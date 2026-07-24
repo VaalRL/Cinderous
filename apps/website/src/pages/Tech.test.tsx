@@ -36,3 +36,17 @@ describe("Tech 底層機制（進階，ADR-0246）", () => {
     expect(en.toLowerCase()).not.toContain("forward secrecy");
   });
 });
+
+describe("Tech 原理圖傳訊角色＝吉祥物（ADR-0247 延伸）", () => {
+  it("兩張圖的角色都是 CinderMascot，且保留角色標題", () => {
+    const zh = renderToStaticMarkup(<Tech c={useCopy("zh-Hant")} />);
+    expect(zh).toContain('aria-label="Cinderous"'); // 待機吉祥物
+    expect(zh).toContain('aria-label="Cinderous（有新訊息）"'); // FlowDiagram 收件者 alert
+    expect(zh).toContain("<title>你</title>"); // 角色標題（無障礙）仍在
+    expect(zh).toContain("<title>好友</title>");
+    // 不應再是原本的通用人物頭像（circle 頭 + 肩弧），改吉祥物後不再用 var(--muted) 填頭
+    const en = renderToStaticMarkup(<Tech c={useCopy("en")} />);
+    expect(en).toContain("<title>You</title>");
+    expect(en).toContain("<title>Friend</title>");
+  });
+});

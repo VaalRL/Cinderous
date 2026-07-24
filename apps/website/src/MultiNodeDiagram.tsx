@@ -1,13 +1,16 @@
 // 多節點協作圖（原創 SVG，隨主題色）：你/好友各連任一可用中繼，密文可經任一節點轉發；
 // 一座離線→自動改走其他座；可用節點由簽章清單決定；即時互動走 WebRTC P2P 直連。
+import { CinderMascot } from "@cinderous/brand";
 import type { Copy } from "./copy.js";
 
-function Person({ cx, cy }: { cx: number; cy: number }): JSX.Element {
+// 傳訊角色改用吉祥物（ADR-0247 延伸）：巢狀 <svg> 內嵌 CinderMascot、置中於原本人物位置，隨圖縮放。
+function Person({ cx, cy, glyph }: { cx: number; cy: number; glyph: string }): JSX.Element {
+  const w = 62;
+  const h = Math.round((w * 150) / 120);
   return (
-    <g>
-      <circle cx={cx} cy={cy} r={30} fill="var(--surface)" stroke="var(--border)" strokeWidth={2} />
-      <circle cx={cx} cy={cy - 7} r={9} fill="var(--muted)" />
-      <path d={`M ${cx - 13} ${cy + 15} a 13 12 0 0 1 26 0 Z`} fill="var(--muted)" />
+    <g transform={`translate(${cx - w / 2}, ${cy - h / 2})`}>
+      <title>{glyph}</title>
+      <CinderMascot size={w} />
     </g>
   );
 }
@@ -108,9 +111,9 @@ export function MultiNodeDiagram({ c }: { c: Copy }): JSX.Element {
           {c.md_offline}
         </text>
 
-        {/* 人物 */}
-        <Person cx={YOU.cx} cy={YOU.cy} />
-        <Person cx={FRIEND.cx} cy={FRIEND.cy} />
+        {/* 傳訊角色（吉祥物） */}
+        <Person cx={YOU.cx} cy={YOU.cy} glyph={c.fd_alice} />
+        <Person cx={FRIEND.cx} cy={FRIEND.cy} glyph={c.fd_bob} />
         <text x={YOU.cx} y={YOU.cy + 44} textAnchor="middle" fontSize="14" fontWeight="600" fill="var(--ink)">
           {c.fd_alice}
         </text>
