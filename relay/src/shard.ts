@@ -1,14 +1,13 @@
 // 中繼分片路由（ADR-0241）：從單一全域 Durable Object 到「按收件人 pubkey 前綴分片＋presence 獨立層」。
 //
-// 分片鍵＝收件人 pubkey 高 nibble（16 片）。收件匣天然同片（你的訊息 `#p:你` 與你訂閱 `#p:你` 都在
-// `shard(你)`），跨分片路由由 pubkey **直接算**（免 ADR-0035 hint）。presence 是多對多廣播、資料形狀
-// 不同 → **不進訊息分片，拆成獨立層**（單一/少數 DO，客戶端一次 `authors:[聯絡人]` 問完）。
-//
-// 本模組只做**純路由計算**（DO 名選擇），供 worker 的 `fetch` 依 URL 選 DO。每個分片與 presence 層
-// 都是同一個 `RelayRoom` 類的獨立實例——分片＝路由，DO 邏輯不變。血條：一片崩只影響其 1/16 使用者。
+// 分片鍵計算是 SSOT——`shardPrefix`／`shardPath` 由 core 提供、client 與 server 共用（見 core/shard.ts），
+// 避免兩端算出不同分片而訊息路由到錯的 DO。本模組只加 **server 端路由**（URL 路徑 → DO 名選擇），
+// 供 worker 的 `fetch` 依 URL 選 DO。每個分片與 presence 層都是同一個 `RelayRoom` 類的獨立實例——
+// 分片＝路由、DO 邏輯不變。血條：一片崩只影響其 1/16 使用者。
 
-/** 訊息分片數（ADR-0241）：按收件人 pubkey 高 nibble 取 16 片。血條 1/16。 */
-export const SHARD_COUNT = 16;
+import { shardPrefix } from "@cinderous/core";
+
+export { SHARD_COUNT, shardPath, shardPrefix } from "@cinderous/core"; // SSOT re-export
 
 /** presence 獨立層的 DO 名（ADR-0241）：廣播型、單一/少數 DO。 */
 export const PRESENCE_LAYER_NAME = "presence";
@@ -16,20 +15,9 @@ export const PRESENCE_LAYER_NAME = "presence";
 /** 遷移期的舊全域 DO 名（切換＋舊留言 7 天自然過期；最低版本閘前的舊客戶端仍走這裡）。 */
 export const LEGACY_GLOBAL_NAME = "global";
 
-/** 收件人 pubkey → 分片前綴（單一 hex nibble `0`–`f`）。非法/空 → `"0"`（安全預設，不丟事件）。 */
-export function shardPrefix(pubkey: string | undefined): string {
-  const c = pubkey?.[0]?.toLowerCase();
-  return c !== undefined && /^[0-9a-f]$/.test(c) ? c : "0";
-}
-
-/** 訊息分片的 DO 名（ADR-0241）：`shard-<prefix>`。 */
+/** 訊息分片的 DO 名（ADR-0241）：`shard-<prefix>`（前綴＝core `shardPrefix`）。 */
 export function messageShardName(pubkey: string | undefined): string {
   return `shard-${shardPrefix(pubkey)}`;
-}
-
-/** 客戶端連自己訊息片的 URL 路徑（ADR-0241）：`wss://relay/s/<自己pubkey前綴>`。 */
-export function shardPath(pubkey: string | undefined): string {
-  return `/s/${shardPrefix(pubkey)}`;
 }
 
 /**
