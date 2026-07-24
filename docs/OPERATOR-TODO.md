@@ -65,6 +65,7 @@ export const MAINTAINER_PUBKEY = "你的維護者公鑰 hex（64 字元）";
 | 項目 | 需要 | 對應 | 現況 |
 | --- | --- | --- | --- |
 | 中繼站生產部署 | Cloudflare 帳號、`wrangler deploy`、D1 綁定、NIP-42 AUTH | Phase C（C1–C4） | 程式/測試已備，離線留言待接 D1 |
+| **中繼分片上線** | `wrangler deploy` 最新 worker（分片路由：`/s/<prefix>`＋`/presence`） | ADR-0241 | 客戶端**預設開分片**（`shardingEnabled` 預設 true）。worker 路由 **backward-compatible**——舊 worker 對 `/s/` 仍回退 global、不壞（只是不真的分片）；deploy 最新版後 `/s/`／`/presence` 才真正路由到分片/presence DO。pre-release 幾乎無使用者 → 直接切換、不需雙讀遷移。kill-switch＝`localStorage nb.sharding=0` |
 | **雲端快照上線** | ~~`wrangler deploy`~~ ✅ **已部署（2026-07-10）** | Phase J（ADR-0071） | 生產已上線並實測：取代語意（同 `d` 只留最新）、purge 零殘留、**隱私閘門**（他人已認證仍讀不到你的快照）皆通過。**企業自架 relay 注意**：若有設 `allowedKinds`（G2 政策），需把快照 kind **30078** 加入名單，否則政策允許備份時 relay 仍會默默拒收 |
 | Tauri 桌面**簽章/自動更新** | Windows 程式碼簽章憑證（Authenticode）；（更新用）updater 金鑰＋更新託管端點 | Phase B ③ | B1 殼/B5 金鑰庫/B6 安裝檔/系統匣背景皆已 **Windows 實機完成**；僅剩**未簽章**（SmartScreen 警告）＋無自動更新，步驟見下方 §B-Tauri |
 | 行動端 + QR 相機掃描 | React Native 工具鏈、APNs/FCM 憑證、相機權限 | Phase D、M9 | 大量重用 core/i18n；QR 產生已完成、掃描待 RN |

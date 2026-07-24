@@ -328,16 +328,16 @@ function normalizeAdminPubkey(input: string): string | undefined {
  * 資料以 profile.namespace 隔離。
  */
 /**
- * 中繼分片開關（ADR-0241）：**預設關**。遷移的「雙讀（自己片＋全域）＋最低版本閘」尚未上線前不可預設開——
- * 否則切換前存在全域 DO 的離線留言在新客戶端讀不到。開發/測試可設 `localStorage nb.sharding=1` 啟用
- * （新裝置/空機下可用；有既有資料者待遷移落地）。啟用後 home 收件匣連自己的訊息片、發布路由到 `shard(對方)`、
+ * 中繼分片開關（ADR-0241）：**預設開**。pre-release 幾乎無使用者 → 直接切換（不需雙讀/最低版本閘遷移；
+ * 全域 DO 上頂多幾則離線留言，可捨棄）。啟用後 home 收件匣連自己的訊息片、發布路由到 `shard(對方)`、
  * presence 走獨立層——全由引擎依 `shardingBase` 處理（見 relay-backend）。
+ * kill-switch：若產線有狀況，設 `localStorage nb.sharding=0` 即停用、退回單一全域 DO（不需改版）。
  */
 function shardingEnabled(): boolean {
   try {
-    return localStorage.getItem("nb.sharding") === "1";
+    return localStorage.getItem("nb.sharding") !== "0";
   } catch {
-    return false;
+    return true;
   }
 }
 
@@ -371,8 +371,9 @@ function buildBackend(p: Profile, nsecOverride?: string, storage?: AppStorage): 
         ...(p.orgOwner ? { orgOwner: true, ...(p.orgInviteToken ? { orgInviteToken: p.orgInviteToken } : {}) } : {}),
         ...(drain ? { drainUrl: drain.url } : {}),
         connectorFor: webSocketConnector,
-        // ADR-0241：分片模式（預設關，見 shardingEnabled）——base host＝home relay，引擎據此把收件匣連自己的
-        // 訊息片、發布路由到 shard(對方)、presence 走獨立層。需 connectorFor（上面已提供）建各片/presence 連線。
+        // ADR-0241：分片模式（**預設開**，見 shardingEnabled；kill-switch＝localStorage nb.sharding=0）——
+        // base host＝home relay，引擎據此把收件匣連自己的訊息片、發布路由到 shard(對方)、presence 走獨立層。
+        // 需 connectorFor（上面已提供）建各片/presence 連線。
         ...(shardingEnabled() ? { shardingBase: p.relayUrl } : {}),
         anchors: ANCHOR_RELAYS,
         ...(MAINTAINER_PUBKEY ? { maintainerPubkey: MAINTAINER_PUBKEY } : {}),

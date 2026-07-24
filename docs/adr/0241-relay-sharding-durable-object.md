@@ -1,6 +1,9 @@
 # 0241. 中繼分片：從單一全域 Durable Object 到按收件人 pubkey 分片
 
-- 狀態：已接受（方向、presence 獨立層、shard 數＝16、遷移策略皆定；剩實作 prototype。一人一片 1b 為未來待實測替代）
+- 狀態：已接受（**已實作＋預設開**）：server 路由（worker 依 URL 選 DO＋血條隔離）、分片計算 SSOT（core，
+  client/server 共用）、客戶端訊息路由（收件匣自己片＋發布 shard(B)＋跨分片雙向投遞）、presence 獨立層、
+  App 接線皆已落地並端到端測；遷移＝直接切換（pre-release 幾乎無使用者，不做雙讀/版本閘）、`shardingEnabled()`
+  預設開＋kill-switch。shard 數＝16；一人一片（選項 1b）為未來待實測替代。**運維：relay 需 deploy 最新 worker。**
 - 日期：2026-07-23
 - 相關文件：ADR-0056（DO 內建 SQLite）、ADR-0059（休眠式 WebSocket）、ADR-0034（多中繼路由／outbox）、
   ADR-0035（加密 rumor 學 relay hint）、ADR-0235（C1：畸形事件曾可打掛全域 DO）、
@@ -123,9 +126,11 @@
        另連該層。TDD：不同分片的 Alice/Bob 仍互看在線（只靠 presence 層）。隱私不變（ADR-0237：`authors:[聯絡人]`
        送 presence 層＝與送單一 DO 同級；真隱身照樣不問）。
      - ✅ **App 建構點接線**：`buildBackend` 非企業路徑於 `shardingEnabled()` 時傳 `shardingBase=p.relayUrl`
-       （`connectorFor` 已提供）。**預設關**——遷移雙讀/最低版本閘未上前開了會讀不到切換前的全域 DO 離線留言；
-       開發/測試用 `localStorage nb.sharding=1` 啟用（空機可用）。
-     - ⏳ **剩（上線流程）**：遷移期雙讀（新客戶端同時讀「自己片＋全域 DO」收切換前離線留言）＋最低版本閘
-       （舊客戶端仍走全域）＋過渡期滿全域 DO 退役。**server 路由、分片計算 SSOT、客戶端訊息路由、跨分片
-       投遞、presence 獨立層、App 接線皆已實作＋端到端測**；只差這個「平滑切換」上線步驟即可預設開。
+       （`connectorFor` 已提供）。
+     - ✅ **遷移＝直接切換（預設開）**：pre-release 幾乎無使用者 → **不做雙讀/最低版本閘**（全域 DO 上頂多
+       幾則離線留言、可捨棄，與〈決策〉「小用戶量下近乎零成本」一致）。`shardingEnabled()` **預設開**、
+       kill-switch＝`localStorage nb.sharding=0`。**運維前提**：relay 需 `wrangler deploy` 最新 worker（分片路由；
+       backward-compatible——舊 worker 對 `/s/` 仍回退 global，不壞、只是不分片）。
+     - **未來若使用者量已成長才要 re-shard（16→更細／→一人一片）**：屆時才需本 ADR 記的「切換＋7 天過期＋
+       過渡雙讀」；現在直接切是低後悔決定（切片數/遷移皆可日後低成本再做）。
   5. **（未來、非現在）** 一人一片（選項 1b）prototype＋量測 AUTH churn／冷 DO 喚醒/計費；數字好再評估切過去。
