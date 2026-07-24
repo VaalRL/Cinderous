@@ -107,6 +107,11 @@
   2. presence 獨立層設計：先單一/少數 DO（廣播型、輕）；`authors:[聯絡人]` 一條連線；與 ADR-0240 真隱身
      ／P2P 卸載協同降負載。
   3. 與 ADR-0237 Tier 2（臨時身分連線）綁定，算連線總帳後再定是否一起做。
-  4. prototype：`worker.ts` 依 URL 路徑選訊息片（16）＋presence 層；客戶端 `shard(pubkey)` 與 outbox 路由；
-     血條測試（一片崩不影響他片、presence 崩不影響訊息）。
+  4. prototype（分兩部分）：
+     - ✅ **server 端已落地**：`relay/shard.ts`（純路由：`shardPrefix`／`messageShardName`／`shardPath`／
+       `shardNameForPath`）＋`worker.ts` 依 URL 選 DO（`/s/<prefix>`→訊息片、`/presence`→presence 層、
+       其他含 `/`→舊全域回退）。**backward-compatible**：客戶端連 `/s/` 前，`/` 仍走 global＝零行為變化。
+       血條測試綠（一片收畸形訊息不影響他片的離線留言查詢）。
+     - ⏳ **客戶端側待做**：連自己訊息片（`wss://relay/s/<自己前綴>`）＋presence 層；outbox 算 `shard(B)`
+       路由發布；遷移期雙讀（自己片＋全域）＋最低版本閘。
   5. **（未來、非現在）** 一人一片（選項 1b）prototype＋量測 AUTH churn／冷 DO 喚醒/計費；數字好再評估切過去。
