@@ -113,11 +113,18 @@ Gift Wrap（wrap＋seal）到收件人當前 EK；EK 是**傳輸金鑰**、與 a
      參數化在 recipientPk/Sk、nip44 對話金鑰對稱 → retarget 到 EK 不需改 nip59**，呼叫端改傳 EK 金鑰即可，
      `#p` 仍身分供路由。TDD 11 測含 **FS 核心**（刪 EK 後即使 IK 也解不開被側錄密文）、向後相容退回 IK、
      多 EK 解封、全錯拋、10040 驗簽、hint 往返。core 451 綠。
-  2. **Phase 1 — 引擎（opt-in、手動）**：storage 存 EK（當前＋grace 內舊把）／每聯絡人 learned-EK／FS 釘選；
-     backend `rotateEncryptionKey()`（手動：生成→發 10040→之後訊息內嵌→保留舊 EK 至 grace→排刪）；發布路徑
-     依收件人當前 EK＋FS 狀態決定 retarget 或退回；subscribeOn 加 `{kinds:[10040], authors:[聯絡人]}`（搭 presence、
-     隨隱身同進退）；學習（收 10040/rumor→存對方 EK；收訊記「用我哪把 EK」）；capability 宣告＋TOFU；降級偵測；
-     多裝置 EK 同步（0107/0071/0072）；快照/配對老化剔除；備份碼保持身分-only。
+  2. **Phase 1 — 引擎（opt-in、手動）**：
+     - ✅ **Phase 1b 完成（端到端 FS DM）**：`StoredFsState`（enabled＋EK 金鑰 current+grace＋每聯絡人
+       learned EK；storage 4 impl、隨 StorageSnapshot 匯出）；backend `enableFs`/`rotateEncryptionKey`／
+       `myCurrentEk`／`fsDecryptCandidates`／`fsSendOpt`／`learnContactEk`／`openFs`／`publishEkAnnounce`；
+       send 用 `wrapMessage.fs`（加密到收件人 learned EK、不知則退回身分）；receive 改 `openFs`（多鑰解封
+       ＋學對方 rumor 內嵌 EK）；10040 發到 home＋pool、`subscribeOn` 加 `{kinds:[10040], authors:[聯絡人]}`
+       （搭 presence、隨隱身、FS 啟用才訂）、onEvent 驗簽後學。TDD：互學 EK→FS-送→解得開；**同身分無 EK
+       者解不開側錄密文（FS）**；向後相容退回靜態。engine 336 綠、126 既有訊息測不變。
+     - ⏳ **Phase 1c/1d 剩**：capability 旗標 `fs:ek-v1`＋TOFU 釘選＋降級偵測（已釘選找不到 EK 不得靜默退回）；
+       多裝置 EK **雲端**同步（目前 fsState 只隨本機 StorageSnapshot/配對、未進 CloudSnapshotContent）；grace
+       刪除紀律（超窗刪舊 EK＋快照/配對老化剔除）；備份碼身分-only（確認不含 EK）。其他事件型別（typing/
+       nudge/receipts/檔案/通話/群）暫維持靜態、未 retarget。
   3. **Phase 2 — UI（desktop）**：設定頁「啟用前向保密／立即更換金鑰」；換鑰**警告彈窗**（列已確認/尚未確認
      聯絡人、備份影響、其他裝置同步）；每聯絡人 FS 狀態（已確認新鑰/尚未確認）；誠實文案（不宣稱 FS）。
   4. **Phase 3 — 審計後上線**：外部密碼學審計；通過後才在產線啟用、文案才可提 FS。
