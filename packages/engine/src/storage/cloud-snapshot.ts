@@ -14,13 +14,22 @@ import {
   mergeOrSet,
   mergeSyncedPrefs,
   OR_SET_TOMBSTONE_RETENTION_MS,
+  pruneFsKeys,
   pruneTombstonesByTime,
   type AssetTombstone,
   type CustomAsset,
   type OrSetTombstone,
   type SyncedPrefs,
 } from "@cinderous/core";
-import type { AppStorage, OrSetName, StoredContact, StoredGroup, StoredMessage } from "./types.js";
+import type {
+  AppStorage,
+  OrSetName,
+  StoredContact,
+  StoredFsKey,
+  StoredFsState,
+  StoredGroup,
+  StoredMessage,
+} from "./types.js";
 
 /** 雲端同步模式（ADR-0071 三檔）。 */
 export type CloudSyncMode = "off" | "basic" | "full";
@@ -64,6 +73,12 @@ export interface CloudSnapshotContent {
   blockTombstones?: OrSetTombstone[];
   /** 跨裝置同步設定（ADR-0242 階段③）：逐鍵 LWW（如每對話靜音）。只含該跨裝置的項。 */
   syncedPrefs?: SyncedPrefs;
+  /**
+   * 前向保密狀態（ADR-0245）：多裝置共享 EK（否則各裝置各生各的 EK、FS 壞）。只帶 **current＋grace 內**
+   * 的 EK（老化剔除＝刪除紀律）；EK 私鑰在此加密快照內（與訊息同級保護，FS 界限＝grace 不因此惡化）。
+   * 註：**寫下來的備份碼**另走身分-only（ADR-0245 §2），不含 EK；此為多裝置同步用的加密快照，會老化。
+   */
+  fs?: StoredFsState;
 }
 
 /** 組裝快照內容：基本＝聯絡人/群組/封鎖；完整＝＋近期訊息。 */
@@ -102,6 +117,12 @@ export function buildSnapshotContent(
   const groupTombstones = pruneTombstonesByTime(storage.loadCrdtTombstones("groups"), tombFloor);
   const blockTombstones = pruneTombstonesByTime(storage.loadCrdtTombstones("blocked"), tombFloor);
   const syncedPrefs = storage.loadSyncedPrefs(); // ADR-0242 階段③
+  // ADR-0245：多裝置共享 EK；只帶 current＋grace 內（老化剔除＝刪除紀律，舊 EK 不進快照）。
+  const localFs = storage.loadFsState();
+  const fs: StoredFsState | undefined =
+    localFs.enabled || localFs.keys.length > 0
+      ? { ...localFs, keys: pruneFsKeys(localFs.keys, opts.now ?? Date.now()) }
+      : undefined;
   const base: CloudSnapshotContent = {
     v: 1,
     at: opts.now ?? Date.now(),
@@ -115,6 +136,7 @@ export function buildSnapshotContent(
     ...(groupTombstones.length ? { groupTombstones } : {}),
     ...(blockTombstones.length ? { blockTombstones } : {}),
     ...(Object.keys(syncedPrefs).length ? { syncedPrefs } : {}),
+    ...(fs ? { fs } : {}),
   };
   if (mode !== "full") return base;
   const all: StoredMessage[] = [];
@@ -151,6 +173,9 @@ export function parseSnapshotContent(json: string): CloudSnapshotContent | null 
     if (s.blockTombstones !== undefined && !Array.isArray(s.blockTombstones)) return null;
     // ADR-0242 階段③：同步設定為物件（逐筆過濾留到 merge）。
     if (s.syncedPrefs !== undefined && (typeof s.syncedPrefs !== "object" || Array.isArray(s.syncedPrefs))) return null;
+    // ADR-0245：FS 狀態為物件且 keys 為陣列（逐筆過濾留到 merge）。
+    if (s.fs !== undefined && (typeof s.fs !== "object" || s.fs === null || !Array.isArray((s.fs as StoredFsState).keys)))
+      return null;
     return s as CloudSnapshotContent;
   } catch {
     return null;
@@ -281,6 +306,24 @@ export function mergeSnapshotContent(
     }
   }
   if (saveTombstonesIfChanged(storage, "groups", pruneTombstonesByTime(mg.tombstones, tombFloor))) changed = true;
+
+  // ── 前向保密（ADR-0245）：多裝置共享 EK——union EK 金鑰（by pk）＋grace 修剪、union 已學 EK、OR enabled。 ──
+  if (content.fs !== undefined) {
+    const local = storage.loadFsState();
+    const byPk = new Map<string, StoredFsKey>();
+    for (const k of [...local.keys, ...content.fs.keys]) {
+      if (k && typeof k.nsec === "string" && typeof k.pk === "string" && typeof k.at === "number") byPk.set(k.pk, k);
+    }
+    const merged: StoredFsState = {
+      enabled: local.enabled || content.fs.enabled === true,
+      keys: pruneFsKeys([...byPk.values()], opts.now ?? Date.now()), // union 後修剪逾 grace
+      contactEks: { ...(content.fs.contactEks ?? {}), ...local.contactEks }, // union，本地衝突優先
+    };
+    if (JSON.stringify(merged) !== JSON.stringify(local)) {
+      storage.saveFsState(merged);
+      changed = true;
+    }
+  }
 
   // ── 同步設定（ADR-0242 階段③）：逐鍵 LWW（每對話靜音等）。畸形項先過濾再合併。 ──
   if (content.syncedPrefs !== undefined) {

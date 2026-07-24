@@ -9,7 +9,7 @@ import {
 } from "./cloud-snapshot.js";
 import { MemoryStorage } from "./memory.js";
 import type { StoredMessage } from "./types.js";
-import { type AssetTombstone, type CustomAsset, OR_SET_TOMBSTONE_RETENTION_MS } from "@cinderous/core";
+import { type AssetTombstone, type CustomAsset, FS_GRACE_MS, OR_SET_TOMBSTONE_RETENTION_MS } from "@cinderous/core";
 
 const msg = (id: string, contact: string, at: number, text = id): StoredMessage => ({
   id,
@@ -239,6 +239,61 @@ describe("跨裝置同步設定（ADR-0242 階段③：每對話靜音等）", (
       withPrefs({ good: { v: "1", at: 5 }, bad: { v: 123, at: "x" } as unknown as { v: string; at: number } }),
     );
     expect(dst.loadSyncedPrefs()).toEqual({ good: { v: "1", at: 5 } });
+  });
+});
+
+describe("多裝置 EK 同步（ADR-0245）", () => {
+  const base = (fs: CloudSnapshotContent["fs"]): CloudSnapshotContent => ({
+    v: 1,
+    at: 1,
+    mode: "basic",
+    contacts: [],
+    groups: [],
+    blocked: [],
+    ...(fs ? { fs } : {}),
+  });
+
+  it("union EK 金鑰（by pk）＋union 已學 EK＋OR enabled——兩裝置共享 EK", () => {
+    const dst = new MemoryStorage();
+    dst.saveFsState({ enabled: true, keys: [{ nsec: "n1", pk: "pk1", at: 1000 }], contactEks: { bob: "ekB" } });
+    const { changed } = mergeSnapshotContent(
+      dst,
+      base({ enabled: true, keys: [{ nsec: "n2", pk: "pk2", at: 2000 }], contactEks: { carol: "ekC" } }),
+      { now: 2000 },
+    );
+    expect(changed).toBe(true);
+    const fs = dst.loadFsState();
+    expect(fs.keys.map((k) => k.pk).sort()).toEqual(["pk1", "pk2"]); // 兩裝置的 EK 都在 → 皆可解
+    expect(fs.contactEks).toEqual({ bob: "ekB", carol: "ekC" }); // 已學 EK union
+    expect(fs.enabled).toBe(true);
+  });
+
+  it("另一裝置啟用了 FS（本機未啟）→ 同步後本機也 enabled、拿到其 EK", () => {
+    const dst = new MemoryStorage(); // 預設未啟用
+    mergeSnapshotContent(dst, base({ enabled: true, keys: [{ nsec: "n", pk: "pk", at: 5 }], contactEks: {} }), { now: 5 });
+    const fs = dst.loadFsState();
+    expect(fs.enabled).toBe(true);
+    expect(fs.keys.map((k) => k.pk)).toEqual(["pk"]);
+  });
+
+  it("grace 修剪：union 後逾 grace 的舊 EK 不留（快照老化剔除＝刪除紀律）", () => {
+    const g = FS_GRACE_MS;
+    const now = 10 * g;
+    const dst = new MemoryStorage();
+    dst.saveFsState({ enabled: true, keys: [{ nsec: "old", pk: "pkOld", at: 0 }], contactEks: {} }); // 最舊
+    mergeSnapshotContent(
+      dst,
+      base({
+        enabled: true,
+        keys: [
+          { nsec: "mid", pk: "pkMid", at: g + 10 }, // 取代 pkOld（於 g+10）→ now-(g+10) 遠 >grace → pkOld 刪
+          { nsec: "cur", pk: "pkCur", at: now }, // current，取代 pkMid（於 now）→ pkMid 未逾 grace → 留
+        ],
+        contactEks: {},
+      }),
+      { now },
+    );
+    expect(dst.loadFsState().keys.map((k) => k.pk).sort()).toEqual(["pkCur", "pkMid"]); // pkOld 逾 grace 被剔除
   });
 });
 

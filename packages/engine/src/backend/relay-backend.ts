@@ -2492,11 +2492,13 @@ export class RelayChatBackend implements ChatBackend {
     this.contacts = this.storage.loadContacts();
     this.blocked = this.storage.loadBlocked();
     this.groups = this.storage.loadGroups();
-    this.resubscribe(); // 新聯絡人的 hint／新群組成員的 presence 分組
+    this.fsState = this.storage.loadFsState(); // ADR-0245：快照可能帶來其他裝置共享的 EK（多裝置 FS）
+    this.resubscribe(); // 新聯絡人的 hint／新群組成員的 presence 分組（含 FS 啟用後的 10040 訂閱）
     this.emitContacts();
     this.emitGroups();
     this.emitBlocked();
     this.emitMutes(); // ADR-0242 階段③：快照可能帶來其他裝置的靜音變更
+    if (this.fsEnabled() && this.myCurrentEk()) this.publishEkAnnounce(); // 同步來的 current EK → 發 10040 讓聯絡人學到
     for (const convo of convos) {
       const msgs = this.storage.loadMessages(convo);
       for (const m of msgs) this.seenMsg.add(m.id);
