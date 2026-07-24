@@ -8,14 +8,17 @@
 import {
   isWellFormedAsset,
   isWellFormedOrSetTombstone,
+  isWellFormedSyncedPref,
   isWellFormedTombstone,
   mergeAssetLibrary,
   mergeOrSet,
+  mergeSyncedPrefs,
   OR_SET_TOMBSTONE_RETENTION_MS,
   pruneTombstonesByTime,
   type AssetTombstone,
   type CustomAsset,
   type OrSetTombstone,
+  type SyncedPrefs,
 } from "@cinderous/core";
 import type { AppStorage, OrSetName, StoredContact, StoredGroup, StoredMessage } from "./types.js";
 
@@ -59,6 +62,8 @@ export interface CloudSnapshotContent {
   groupTombstones?: OrSetTombstone[];
   /** 封鎖解封墓碑（ADR-0242 OR-Set）：跨裝置傳播「解封」，修解封不傳播（G-Set→OR-Set）。 */
   blockTombstones?: OrSetTombstone[];
+  /** 跨裝置同步設定（ADR-0242 階段③）：逐鍵 LWW（如每對話靜音）。只含該跨裝置的項。 */
+  syncedPrefs?: SyncedPrefs;
 }
 
 /** 組裝快照內容：基本＝聯絡人/群組/封鎖；完整＝＋近期訊息。 */
@@ -96,6 +101,7 @@ export function buildSnapshotContent(
   const contactTombstones = pruneTombstonesByTime(storage.loadCrdtTombstones("contacts"), tombFloor);
   const groupTombstones = pruneTombstonesByTime(storage.loadCrdtTombstones("groups"), tombFloor);
   const blockTombstones = pruneTombstonesByTime(storage.loadCrdtTombstones("blocked"), tombFloor);
+  const syncedPrefs = storage.loadSyncedPrefs(); // ADR-0242 階段③
   const base: CloudSnapshotContent = {
     v: 1,
     at: opts.now ?? Date.now(),
@@ -108,6 +114,7 @@ export function buildSnapshotContent(
     ...(contactTombstones.length ? { contactTombstones } : {}),
     ...(groupTombstones.length ? { groupTombstones } : {}),
     ...(blockTombstones.length ? { blockTombstones } : {}),
+    ...(Object.keys(syncedPrefs).length ? { syncedPrefs } : {}),
   };
   if (mode !== "full") return base;
   const all: StoredMessage[] = [];
@@ -142,6 +149,8 @@ export function parseSnapshotContent(json: string): CloudSnapshotContent | null 
     if (s.contactTombstones !== undefined && !Array.isArray(s.contactTombstones)) return null;
     if (s.groupTombstones !== undefined && !Array.isArray(s.groupTombstones)) return null;
     if (s.blockTombstones !== undefined && !Array.isArray(s.blockTombstones)) return null;
+    // ADR-0242 階段③：同步設定為物件（逐筆過濾留到 merge）。
+    if (s.syncedPrefs !== undefined && (typeof s.syncedPrefs !== "object" || Array.isArray(s.syncedPrefs))) return null;
     return s as CloudSnapshotContent;
   } catch {
     return null;
@@ -272,6 +281,18 @@ export function mergeSnapshotContent(
     }
   }
   if (saveTombstonesIfChanged(storage, "groups", pruneTombstonesByTime(mg.tombstones, tombFloor))) changed = true;
+
+  // ── 同步設定（ADR-0242 階段③）：逐鍵 LWW（每對話靜音等）。畸形項先過濾再合併。 ──
+  if (content.syncedPrefs !== undefined) {
+    const localPrefs = storage.loadSyncedPrefs();
+    const remotePrefs: SyncedPrefs = {};
+    for (const [k, v] of Object.entries(content.syncedPrefs)) if (isWellFormedSyncedPref(v)) remotePrefs[k] = v;
+    const mergedPrefs = mergeSyncedPrefs(localPrefs, remotePrefs);
+    if (JSON.stringify(mergedPrefs) !== JSON.stringify(localPrefs)) {
+      storage.saveSyncedPrefs(mergedPrefs);
+      changed = true;
+    }
+  }
 
   const convos: string[] = [];
   if (content.messages) {

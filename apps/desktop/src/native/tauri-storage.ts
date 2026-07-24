@@ -3,7 +3,7 @@
 // 記憶體 + **防抖**持久化（store_save）。同步介面不變＝後端零改（解 async/sync 摩擦）。
 
 import { invoke } from "@tauri-apps/api/core";
-import type { AssetBlob, AssetTombstone, CustomAsset, OrSetTombstone } from "@cinderous/core";
+import type { AssetBlob, AssetTombstone, CustomAsset, OrSetTombstone, SyncedPrefs } from "@cinderous/core";
 import { ArchiveWriter, MemoryStorage, type MessageArchive } from "@cinderous/engine";
 import type {
   AppStorage,
@@ -468,6 +468,13 @@ export class TauriStorage implements AppStorage {
   saveCrdtTombstones(set: OrSetName, list: OrSetTombstone[]): void {
     // ADR-0242：OR-Set 墓碑同屬快照非 messages → 隨 META 部位加密落地。
     this.mem.saveCrdtTombstones(set, list);
+    this.persist(META);
+  }
+  loadSyncedPrefs(): SyncedPrefs {
+    return this.mem.loadSyncedPrefs();
+  }
+  saveSyncedPrefs(prefs: SyncedPrefs): void {
+    this.mem.saveSyncedPrefs(prefs); // ADR-0242 階段③：隨 META 加密落地
     this.persist(META);
   }
 }

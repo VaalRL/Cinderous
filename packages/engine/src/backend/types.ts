@@ -198,6 +198,11 @@ export interface ChatBackendEvents {
   onBlocked?(blocked: BlockedContact[]): void;
   /** 訊息請求清單變動（ADR-0121）。UI 以此決定「不通知、不放進主對話清單」。 */
   onRequests?(requests: ContactRequest[]): void;
+  /**
+   * 跨裝置同步的「每對話靜音」集合變動（ADR-0242 階段③）：靜音狀態現由引擎同步（隨加密快照 LWW），
+   * UI 以此更新顯示與 `shouldNotify`。開機與快照合併後皆會發。
+   */
+  onMutes?(convoIds: string[]): void;
   /** 與中繼站的連線狀態改變。 */
   onConnection?(state: ConnectionState): void;
   /**
@@ -290,6 +295,15 @@ export interface ChatBackend {
    * 退回全域預設。純本地偏好——**不廣播、不送對方/中繼站**。
    */
   setContactNotifySound?(pubkey: PubkeyHex, soundId: string | undefined): void;
+  /**
+   * 設定某對話（聯絡人或群組）的**每對話靜音**（ADR-0217/0242 階段③）：現由引擎跨裝置同步
+   * （隨加密快照逐鍵 LWW）。設定後發 `onMutes`；隨快照傳到其他裝置。純本地偏好、不送對方/中繼站內容。
+   */
+  setConvoMuted?(convoId: string, muted: boolean): void;
+  /** 目前靜音的對話集合（ADR-0242 階段③）：供 UI 初始化。 */
+  mutedConvos?(): string[];
+  /** 一次性遷移（ADR-0242 階段③）：把本機舊有靜音種進同步設定，僅在鍵不存在時（不蓋遠端解除靜音）。 */
+  seedMutesIfAbsent?(convoIds: string[]): void;
   /**
    * 設定/移除自己的**廣播頭像**（ADR-0154）：`avatar` 為 data URI 縮圖（來源端 128px），
    * 空字串或 undefined＝移除（廣播移除記號，聯絡人端清掉舊圖）。設定即比照改名

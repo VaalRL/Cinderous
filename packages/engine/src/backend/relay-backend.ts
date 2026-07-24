@@ -390,6 +390,9 @@ export interface RelayPoolOptions {
   retireDelayMs?: () => number;
 }
 
+/** 每對話靜音在同步設定表中的鍵前綴（ADR-0242 階段③）：`mute:<convoId>` → v "1"＝靜音。 */
+const MUTE_PREFIX = "mute:";
+
 export class RelayChatBackend implements ChatBackend {
   readonly self: Self;
   readonly selfNpub: string;
@@ -711,6 +714,7 @@ export class RelayChatBackend implements ChatBackend {
       this.turnTimer = setInterval(() => void this.refreshPublicTurn(), 6 * 3600_000);
     }
     this.emitContacts();
+    this.emitMutes(); // ADR-0242 階段③：把同步來的每對話靜音交給 UI 初始化
     // 回放本機持久化的歷史訊息：每對話一次批次交付（避免逐則 O(n²) 狀態更新與全開視窗）。
     for (const c of this.contacts) {
       const msgs = this.storage.loadMessages(c.pubkey);
@@ -1846,6 +1850,45 @@ export class RelayChatBackend implements ChatBackend {
     this.emitContacts();
   }
 
+  /** 每對話靜音（ADR-0217/0242 階段③）：寫進跨裝置同步設定（逐鍵 LWW），隨快照傳到其他裝置。 */
+  setConvoMuted(convoId: string, muted: boolean): void {
+    const prefs = this.storage.loadSyncedPrefs();
+    this.storage.saveSyncedPrefs({ ...prefs, [MUTE_PREFIX + convoId]: { v: muted ? "1" : "", at: Date.now() } });
+    this.emitMutes();
+  }
+
+  /** 目前靜音的對話集合（ADR-0242 階段③）。 */
+  mutedConvos(): string[] {
+    return Object.entries(this.storage.loadSyncedPrefs())
+      .filter(([k, p]) => k.startsWith(MUTE_PREFIX) && p.v === "1")
+      .map(([k]) => k.slice(MUTE_PREFIX.length));
+  }
+
+  /**
+   * 一次性遷移（ADR-0242 階段③）：把本機既有的每對話靜音（舊版存 desktop groupPrefs）種進同步設定，
+   * **僅在該鍵尚不存在時**——避免蓋掉其他裝置已同步的「解除靜音」（v 空的鍵仍算存在、不再種）。
+   */
+  seedMutesIfAbsent(convoIds: string[]): void {
+    const prefs = this.storage.loadSyncedPrefs();
+    const next = { ...prefs };
+    let changed = false;
+    for (const id of convoIds) {
+      const key = MUTE_PREFIX + id;
+      if (!(key in prefs)) {
+        next[key] = { v: "1", at: Date.now() };
+        changed = true;
+      }
+    }
+    if (changed) {
+      this.storage.saveSyncedPrefs(next);
+      this.emitMutes();
+    }
+  }
+
+  private emitMutes(): void {
+    this.handlers?.onMutes?.(this.mutedConvos());
+  }
+
   /**
    * 設定/移除自己的廣播頭像（ADR-0154）：落地本機 → 比照改名（ADR-0144）清掉「已送過」
    * 記號全量重播。移除持久化為 `""`（繼續廣播移除記號，晚上線的聯絡人也會清掉舊圖）。
@@ -2288,6 +2331,7 @@ export class RelayChatBackend implements ChatBackend {
     this.emitContacts();
     this.emitGroups();
     this.emitBlocked();
+    this.emitMutes(); // ADR-0242 階段③：快照可能帶來其他裝置的靜音變更
     for (const convo of convos) {
       const msgs = this.storage.loadMessages(convo);
       for (const m of msgs) this.seenMsg.add(m.id);

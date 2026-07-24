@@ -1,6 +1,6 @@
 /** 本機持久化的資料型別（身分、聯絡人、訊息）。 */
 
-import type { AssetBlob, AssetTombstone, CustomAsset, OrSetTombstone } from "@cinderous/core";
+import type { AssetBlob, AssetTombstone, CustomAsset, OrSetTombstone, SyncedPrefs } from "@cinderous/core";
 import type { MessageArchive } from "./archive.js";
 
 /**
@@ -332,6 +332,12 @@ export interface AppStorage {
    */
   loadCrdtTombstones(set: OrSetName): OrSetTombstone[];
   saveCrdtTombstones(set: OrSetName, list: OrSetTombstone[]): void;
+  /**
+   * 跨裝置同步的設定/偏好（ADR-0242 階段③）：逐鍵 LWW（如每對話靜音）。加密落地、每身分獨立；
+   * 未設過回傳 `{}`。**只放該跨裝置的項**——該裝置本地項（通知音量/佈局）不進此、留 localStorage。
+   */
+  loadSyncedPrefs(): SyncedPrefs;
+  saveSyncedPrefs(prefs: SyncedPrefs): void;
 }
 
 /** OR-Set 集合名（ADR-0242）：多設備可變集合的三個墓碑桶。 */
@@ -377,6 +383,8 @@ export interface StorageSnapshot {
   assetTombstones?: AssetTombstone[];
   /** 多設備 OR-Set 墓碑（ADR-0242）：set 名 → 墓碑清單；舊快照沒有 → 匯入時退回 `{}`。 */
   crdtTombstones?: Record<string, OrSetTombstone[]>;
+  /** 跨裝置同步設定（ADR-0242 階段③）：逐鍵 LWW；舊快照沒有 → 匯入時退回 `{}`。 */
+  syncedPrefs?: SyncedPrefs;
   /**
    * 已讀水位（ADR-0108）：對話 → 已讀到的最新訊息時間（毫秒）。
    *

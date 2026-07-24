@@ -958,6 +958,13 @@ export function App(): JSX.Element {
     if (!backend) return;
     setOrgInfo(null); // ADR-0157：換身分/後端時重置，避免沿用上一個身分的組織資訊
     setP2pConnected(new Set()); // ADR-0213：換身分/後端時清空 P2P 直連狀態，避免沿用上一個身分
+    // ADR-0242 階段③：把本機既有的每對話靜音種進引擎同步設定（僅在該鍵不存在時，不蓋遠端解除靜音），
+    // 於 start() 之前——讓 start 的首發 onMutes 直接帶正確集合，避免「先清空再種回」的閃動。
+    backend.seedMutesIfAbsent?.(
+      Object.entries(groupPrefsRef.current)
+        .filter(([, p]) => p.muted)
+        .map(([id]) => id),
+    );
     backend.start({
       onContacts: setContacts,
       onMessage: (pk, msg) => {
@@ -1251,6 +1258,29 @@ export function App(): JSX.Element {
         const key = reason === "unreachable" ? "call_failed_unreachable" : "call_failed_lost";
         const msg: ChatMessage = { id: uid("cf"), outgoing: false, text: `⚠️ ${tRef.current(key)}`, at: Date.now() };
         setConvos((prev) => ({ ...prev, [peer]: [...(prev[peer] ?? []), msg] }));
+      },
+      // ADR-0242 階段③：引擎同步來的每對話靜音 → 對帳本機 groupPrefs.muted（遠端 LWW 為權威）。
+      onMutes: (ids) => {
+        const muted = new Set(ids);
+        setGroupPrefs((prev) => {
+          let dirty = false;
+          const next: GroupPrefsMap = { ...prev };
+          for (const id of ids) {
+            const cur = next[id] ?? { labels: [], pinned: false };
+            if (!cur.muted) {
+              next[id] = { ...cur, muted: true };
+              dirty = true;
+            }
+          }
+          for (const [id, p] of Object.entries(prev)) {
+            if (p.muted && !muted.has(id)) {
+              next[id] = { ...p, muted: false };
+              dirty = true;
+            }
+          }
+          if (dirty) saveGroupPrefs(next);
+          return dirty ? next : prev;
+        });
       },
       onGroups: setGroups,
     });
@@ -2724,7 +2754,11 @@ export function App(): JSX.Element {
               embedded={layout === "modern"}
               {...(floating ? { floating } : {})}
               muted={isMuted(groupPrefs, pk)}
-              onToggleMute={() => updatePrefs(withMuted(groupPrefs, pk, !isMuted(groupPrefs, pk)))}
+              onToggleMute={() => {
+                const nextMuted = !isMuted(groupPrefs, pk);
+                updatePrefs(withMuted(groupPrefs, pk, nextMuted)); // 即時本機
+                activeBackend.setConvoMuted?.(pk, nextMuted); // ADR-0242 階段③：跨裝置同步（回聲 onMutes 對帳）
+              }}
               self={self}
               {...(assetStore ? { assetStore } : {})}
               {...(blobStore ? { blobStore } : {})}

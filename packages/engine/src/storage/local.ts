@@ -6,6 +6,7 @@ import {
   type AssetTombstone,
   type CustomAsset,
   type OrSetTombstone,
+  type SyncedPrefs,
 } from "@cinderous/core";
 
 import { ArchiveWriter, type MessageArchive } from "./archive.js";
@@ -170,6 +171,7 @@ export class LocalStorage implements AppStorage {
         groups: read<OrSetTombstone[]>(this.k("crdtTomb.groups"), [], this.dek),
         blocked: read<OrSetTombstone[]>(this.k("crdtTomb.blocked"), [], this.dek),
       },
+      syncedPrefs: read<SyncedPrefs>(this.k("syncedPrefs"), {}, this.dek), // ADR-0242 階段③
       readAt: read<Record<string, number>>(this.k("readAt"), {}, this.dek),
     };
   }
@@ -428,6 +430,13 @@ export class LocalStorage implements AppStorage {
   saveCrdtTombstones(set: OrSetName, list: OrSetTombstone[]): void {
     this.mem.saveCrdtTombstones(set, list);
     write(this.k(`crdtTomb.${set}`), list, this.dek); // ADR-0242：以 dek 加密落地、每 set 一鍵
+  }
+  loadSyncedPrefs(): SyncedPrefs {
+    return this.mem.loadSyncedPrefs();
+  }
+  saveSyncedPrefs(prefs: SyncedPrefs): void {
+    this.mem.saveSyncedPrefs(prefs);
+    write(this.k("syncedPrefs"), prefs, this.dek); // ADR-0242 階段③：以 dek 加密落地
   }
   exportSnapshot(): StorageSnapshot {
     return this.mem.exportSnapshot();

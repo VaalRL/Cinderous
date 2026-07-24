@@ -200,6 +200,48 @@ describe("多設備 OR-Set 合併（ADR-0242 階段①：聯絡人/群組/封鎖
   });
 });
 
+describe("跨裝置同步設定（ADR-0242 階段③：每對話靜音等）", () => {
+  const withPrefs = (syncedPrefs: CloudSnapshotContent["syncedPrefs"]): CloudSnapshotContent => ({
+    v: 1,
+    at: 1,
+    mode: "basic",
+    contacts: [],
+    groups: [],
+    blocked: [],
+    ...(syncedPrefs ? { syncedPrefs } : {}),
+  });
+
+  it("build 帶入同步設定；merge 逐鍵 LWW（遠端較新的靜音套用）", () => {
+    const src = new MemoryStorage();
+    src.saveSyncedPrefs({ "mute:g1": { v: "1", at: 200 } });
+    const snap = buildSnapshotContent(src, "basic");
+    expect(snap.syncedPrefs).toEqual({ "mute:g1": { v: "1", at: 200 } });
+
+    const dst = new MemoryStorage();
+    dst.saveSyncedPrefs({ "mute:g1": { v: "", at: 100 } }); // 本機較舊（未靜音）
+    const { changed } = mergeSnapshotContent(dst, snap);
+    expect(changed).toBe(true);
+    expect(dst.loadSyncedPrefs()["mute:g1"]).toEqual({ v: "1", at: 200 }); // 採用遠端較新（靜音）
+  });
+
+  it("本機較新 → 不被較舊的遠端覆蓋（冪等/收斂）", () => {
+    const dst = new MemoryStorage();
+    dst.saveSyncedPrefs({ "mute:g1": { v: "1", at: 300 } });
+    const { changed } = mergeSnapshotContent(dst, withPrefs({ "mute:g1": { v: "", at: 100 } }));
+    expect(changed).toBe(false);
+    expect(dst.loadSyncedPrefs()["mute:g1"]?.v).toBe("1");
+  });
+
+  it("畸形同步設定項被過濾，不污染本機", () => {
+    const dst = new MemoryStorage();
+    mergeSnapshotContent(
+      dst,
+      withPrefs({ good: { v: "1", at: 5 }, bad: { v: 123, at: "x" } as unknown as { v: string; at: number } }),
+    );
+    expect(dst.loadSyncedPrefs()).toEqual({ good: { v: "1", at: 5 } });
+  });
+});
+
 describe("墓碑時間 GC（ADR-0242 後續④）", () => {
   const base = (over: Partial<CloudSnapshotContent>): CloudSnapshotContent => ({
     v: 1,
