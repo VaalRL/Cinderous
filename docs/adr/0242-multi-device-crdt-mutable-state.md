@@ -1,6 +1,7 @@
 # 0242. 多設備可變狀態的 CRDT 化：把臨時合併規則系統化
 
-- 狀態：已接受（方向與分階段計畫；實作待排、逐階段觸發）
+- 狀態：已接受（**三階段＋墓碑 GC 皆已實作**：①聯絡人/群組/封鎖 OR-Set＋墓碑 ②聯絡人欄位 per-field
+  LWW ③同步設定/每對話靜音 ④墓碑時間 GC。狀態文字等其餘設定用同一機制漸進）
 - 日期：2026-07-23
 - 相關文件：ADR-0009／0107（多設備自封同步）、ADR-0071（加密雲端快照）、ADR-0108（已讀水位 LWW）、
   ADR-0224（資產庫 LWW＋墓碑）、ADR-0217（每對話靜音）、`packages/engine/src/storage/cloud-snapshot.ts`、
@@ -90,7 +91,12 @@
      通知音效**，含「清除」；並發改不同欄位互不覆蓋）。TDD +4。**標籤/hint 註記**：標籤與每對話靜音
      不在 `StoredContact`（屬 desktop `groupPrefs`）→ 併入階段③「設定/偏好同步」；relay hint 為自動學習
      欄位、暫沿用既有路徑（未納入本階段的使用者編輯 LWW）。
-  3. 階段 3：設定/偏好逐項納入 LWW 同步（先每對話靜音、狀態文字；排除「該裝置本地」項）。
+  3. ✅ **階段 3 完成**：通用「同步設定」機制——core `synced-prefs.ts`（逐鍵 LWW `mergeSyncedPrefs`）
+     ＋engine storage `load/saveSyncedPrefs`＋接進快照 merge。**每對話靜音**端到端：backend
+     `setConvoMuted`/`mutedConvos`/`onMutes`＋`seedMutesIfAbsent`（一次性遷移、僅鍵不存在時，不蓋遠端
+     解除靜音）；desktop `onToggleMute` 即時本機＋引擎同步、`onMutes` 對帳（遠端 LWW 權威）。TDD +8。
+     **逐項判定**：靜音＝跨裝置（已做）；**標籤/置頂維持裝置本地**（ADR-0040「只存本機」的檢視偏好，
+     不同步）；狀態文字、其餘設定用同一機制漸進（`key→{v,at}` 可直接擴充）。
   4. ✅ **墓碑 GC 完成**：時間 GC（`OR_SET_TOMBSTONE_RETENTION_MS`＝90 天，須 ≥ 裝置合理最長離線期）
      ＋純函式 `pruneTombstonesByTime`。build 不把超窗墓碑放進快照、merge 回寫前 prune 三集合；既有
      數量上限（256 顆）保留。正式環境墓碑帶真實 ms、新建即在窗內照常傳播，只有超窗才回收。TDD +5。
