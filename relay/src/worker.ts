@@ -1,5 +1,6 @@
 import { ABUSE_GUARD, acceptFileEvents, firstHost, storeOptions } from "./host-config.js";
 import { RelayCore, type ConnSnapshot, type Outbound } from "./relay-core.js";
+import { shardNameForPath } from "./shard.js";
 import { SqlMessageStore } from "./sql-message-store.js";
 
 export interface Env {
@@ -70,12 +71,16 @@ const PRUNE_INTERVAL_MS = 60 * 60 * 1000;
 /** Worker 進入點：WebSocket 升級後交給單一 Durable Object 房間以共享連線狀態。 */
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
+    const url = new URL(request.url);
     if (request.headers.get("Upgrade") !== "websocket") {
       // 公共 TURN 保底端點（ADR-0243）：換發短期憑證；未配 secret 則 204、客戶端退回純 STUN。
-      if (new URL(request.url).pathname === "/turn") return mintTurnResponse(env);
+      if (url.pathname === "/turn") return mintTurnResponse(env);
       return new Response("Cinderous relay", { status: 200 });
     }
-    const stub = env.RELAY_ROOM.get(env.RELAY_ROOM.idFromName("global"));
+    // 分片路由（ADR-0241）：依 URL 路徑選 DO——`/s/<prefix>` 訊息片、`/presence` 獨立層、
+    // 其他（含 `/`）回退舊全域 DO（遷移期＋最低版本閘前的舊客戶端）。每個實例都是獨立 RelayRoom，
+    // 血條＝一片崩只影響其 1/16 使用者。
+    const stub = env.RELAY_ROOM.get(env.RELAY_ROOM.idFromName(shardNameForPath(url.pathname)));
     return stub.fetch(request);
   },
 };

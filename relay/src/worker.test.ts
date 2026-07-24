@@ -13,7 +13,7 @@ import { createRequire } from "node:module";
 import type { DatabaseSync as DatabaseSyncType } from "node:sqlite";
 import { buildAuthEvent, finalizeEvent, generateSecretKey, getPublicKey, type NostrEvent, type SecretKey } from "@cinderous/core";
 import { beforeAll, describe, expect, it } from "vitest";
-import { mintTurnResponse, RelayRoom, type Env } from "./worker.js";
+import worker, { mintTurnResponse, RelayRoom, type Env } from "./worker.js";
 
 const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as {
   DatabaseSync: typeof DatabaseSyncType;
@@ -316,6 +316,68 @@ describe("RelayRoom — 休眠→喚醒還原（ADR-0059 + ADR-0235 H2）", () =
     const out = send(room2, reader, ["REQ", "inbox", { kinds: [1059], "#p": [recipientPk] }]) as [string, string, NostrEvent][];
     const evented = out.find((m) => m[0] === "EVENT");
     expect(evented?.[2]?.id).toBe(dm.id);
+  });
+});
+
+describe("分片路由（ADR-0241 worker fetch）", () => {
+  const routeOf = async (path: string): Promise<string> => {
+    let routed = "";
+    const env = {
+      RELAY_ROOM: {
+        idFromName: (n: string) => {
+          routed = n;
+          return {} as never;
+        },
+        get: () => ({ fetch: () => new Response(null, { status: 101 }) }),
+      },
+    } as unknown as Env;
+    await worker.fetch(new Request(`https://${HOST}${path}`, { headers: { Upgrade: "websocket" } }), env);
+    return routed;
+  };
+
+  it("/s/<prefix> → 訊息片", async () => {
+    expect(await routeOf("/s/a")).toBe("shard-a");
+  });
+  it("/presence → presence 獨立層", async () => {
+    expect(await routeOf("/presence")).toBe("presence");
+  });
+  it("/（舊客戶端）→ 舊全域 DO（遷移回退）", async () => {
+    expect(await routeOf("/")).toBe("global");
+  });
+});
+
+describe("分片血條隔離（ADR-0241）", () => {
+  it("一片收畸形訊息（不拋）不影響另一片：他片的離線留言照樣查得到", () => {
+    // shard-A：塞畸形訊息（模擬攻擊/崩潰路徑，C1 已保證不拋）——完全獨立的 state/DO。
+    const stateA = new FakeState();
+    const roomA = newRoom(stateA);
+    const wsA = open(roomA, stateA);
+    wsA.drain();
+    expect(() => roomA.webSocketMessage(wsA as unknown as WebSocket, "not json{{{")).not.toThrow();
+
+    // shard-B：另一個獨立 DO——存一則離線留言。
+    const stateB = new FakeState();
+    const roomB = newRoom(stateB);
+    const recipientSk = generateSecretKey();
+    const recipientPk = getPublicKey(recipientSk);
+    const senderSk = generateSecretKey();
+    const sender = open(roomB, stateB);
+    authenticate(roomB, sender, senderSk);
+    const dm = finalizeEvent(
+      { kind: 1059, created_at: Math.floor(Date.now() / 1000), tags: [["p", recipientPk]], content: "x" },
+      senderSk,
+    );
+    send(roomB, sender, ["EVENT", dm]);
+
+    // shard-A 的故障不影響 shard-B：B 的收件人照常拉到留言（血條＝一崩 1/N）。
+    const reader = open(roomB, stateB);
+    authenticate(roomB, reader, recipientSk);
+    const out = send(roomB, reader, ["REQ", "inbox", { kinds: [1059], "#p": [recipientPk] }]) as [
+      string,
+      string,
+      NostrEvent,
+    ][];
+    expect(out.find((m) => m[0] === "EVENT")?.[2]?.id).toBe(dm.id);
   });
 });
 
