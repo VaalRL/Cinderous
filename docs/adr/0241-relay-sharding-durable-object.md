@@ -118,6 +118,10 @@
        （陌生人/群成員）也路由到 `shard(對方)`。**重用既有 outbox/pool**（分片＝把「路由到 home relay」變
        「路由到 home shard」）。分片計算 SSOT 於 core（client/server 共用）。TDD：跨分片雙向投遞（`createShardedRelayNetwork`
        每 host＝獨立 DO）＋向後相容（未設 shardingBase 走單一 relay）；123 既有後端測不變。
-     - ⏳ **剩**：presence 獨立層優化（目前沿用「每分片訂閱該片聯絡人心跳」——正確但連線較多）；App 建構點
-       接線（傳 `shardingBase`＋`connectorFor`）；遷移期雙讀（自己片＋全域）＋最低版本閘。
+     - ✅ **presence 獨立層已落地**：心跳移出訊息片、集中到 `<base>/presence`——`subscribeOn` 新增 presence
+       層分支（一條連線訂 `authors:[全部聯絡人]`）、訊息片不再訂心跳；`beat` 只發到 presence 層；`resubscribe`
+       另連該層。TDD：不同分片的 Alice/Bob 仍互看在線（只靠 presence 層）。隱私不變（ADR-0237：`authors:[聯絡人]`
+       送 presence 層＝與送單一 DO 同級；真隱身照樣不問）。
+     - ⏳ **剩（上線流程，低風險）**：App 建構點接線（傳 `shardingBase`＋`connectorFor`）；遷移期雙讀（自己片
+       ＋全域）＋最低版本閘。訊息路由、跨分片投遞、presence 層核心皆已實作＋端到端測。
   5. **（未來、非現在）** 一人一片（選項 1b）prototype＋量測 AUTH churn／冷 DO 喚醒/計費；數字好再評估切過去。
