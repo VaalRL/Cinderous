@@ -107,10 +107,12 @@ Gift Wrap（wrap＋seal）到收件人當前 EK；EK 是**傳輸金鑰**、與 a
     安全刪除 best-effort；**本機明文封存仍是最大長期暴露面**（FS 管不到）；kind 10040 洩漏「此 npub 用 FS 輪替」極小元資料。
   - 全裝置同時遺失＋只有身分-only 備份→少數未落地在途訊息救不回。
 - 後續行動 / 待辦（分階段實作計劃）：
-  1. **Phase 0 — core 純函式（可獨立 TDD、不碰網路）**：`packages/core/src/subkey.ts`——EK 生成、kind 10040
-     建構/驗簽、rumor 內嵌 put/read、retarget `nip59.sealAndWrap`/`giftwrap` 到收件人 EK、解封依序試
-     「當前→grace 內舊 EK→rumor 內嵌」。測向量：刪 EK 後網路密文不可解但本機封存可讀、向後相容退回靜態、
-     多 EK 解封、10040 驗簽。
+  1. ✅ **Phase 0 完成 — core 純函式**：`packages/core/src/subkey.ts`——`generateEncryptionKey`、
+     `buildEkAnnounce`/`readEkAnnounce`（kind 10040 IK 簽章、驗 kind/簽章/pk）、`withEkHint`/`ekHintOf`
+     （rumor 內嵌）、`openWrapWithEks`（多鑰依序解封）。**關鍵發現：nip59.sealAndWrap/openWrap 已完全
+     參數化在 recipientPk/Sk、nip44 對話金鑰對稱 → retarget 到 EK 不需改 nip59**，呼叫端改傳 EK 金鑰即可，
+     `#p` 仍身分供路由。TDD 11 測含 **FS 核心**（刪 EK 後即使 IK 也解不開被側錄密文）、向後相容退回 IK、
+     多 EK 解封、全錯拋、10040 驗簽、hint 往返。core 451 綠。
   2. **Phase 1 — 引擎（opt-in、手動）**：storage 存 EK（當前＋grace 內舊把）／每聯絡人 learned-EK／FS 釘選；
      backend `rotateEncryptionKey()`（手動：生成→發 10040→之後訊息內嵌→保留舊 EK 至 grace→排刪）；發布路徑
      依收件人當前 EK＋FS 狀態決定 retarget 或退回；subscribeOn 加 `{kinds:[10040], authors:[聯絡人]}`（搭 presence、
