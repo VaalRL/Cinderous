@@ -15,15 +15,18 @@
 import type { Locale } from "@cinderous/i18n";
 
 /** 官網的頁面。 */
-export type View = "home" | "tech" | "node" | "roadmap" | "faq";
+export type View = "home" | "tech" | "node" | "enterprise" | "roadmap" | "faq";
 
-export const VIEWS: readonly View[] = ["home", "tech", "node", "roadmap", "faq"] as const;
+export const VIEWS: readonly View[] = ["home", "tech", "node", "enterprise", "roadmap", "faq"] as const;
 
-/** 官網支援的語言；`zh-Hant` 為預設（根路徑），其餘走 `/<locale>/` 前綴。 */
+/** 官網支援的語言；`en` 為預設（根路徑），其餘走 `/<locale>/` 前綴。 */
 export const LOCALES: readonly Locale[] = ["zh-Hant", "en"] as const;
 
-/** 預設語言＝根路徑，不加前綴（避免 `/zh-Hant/` 與 `/` 重複內容）。 */
-export const DEFAULT_LOCALE: Locale = "zh-Hant";
+/**
+ * 預設語言＝根路徑，不加前綴（避免預設語言版與 `/` 重複內容）。
+ * ADR-0246：預設語言由 `zh-Hant` 改為 `en`——官網主打國際受眾，英文走根路徑；繁中改走 `/zh-Hant/`。
+ */
+export const DEFAULT_LOCALE: Locale = "en";
 
 export interface Route {
   view: View;

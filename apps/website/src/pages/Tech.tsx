@@ -10,6 +10,12 @@ export function Tech({ c }: { c: Copy }): JSX.Element {
     { t: c.feat_local_t, b: c.feat_local_b },
     { t: c.feat_free_t, b: c.feat_free_b },
   ];
+  const advanced = [
+    { t: c.tech_scale_t, b: c.tech_scale_b },
+    { t: c.tech_sync_t, b: c.tech_sync_b },
+    { t: c.tech_calls_t, b: c.tech_calls_b },
+    { t: c.tech_migrate_t, b: c.tech_migrate_b },
+  ];
   return (
     <section className="sec sec--plain" style={{ paddingTop: 56 }}>
       <div className="wrap">
@@ -31,6 +37,21 @@ export function Tech({ c }: { c: Copy }): JSX.Element {
               <div className="card__ember" />
               <h3>{p.t}</h3>
               <p>{p.b}</p>
+            </div>
+          ))}
+        </div>
+
+        {/* 底層機制（進階，ADR-0246）：近期落地的分片／多裝置同步／通話 NAT 穿透／換機備援。 */}
+        <h2 style={{ fontSize: 22, marginTop: 40 }} data-testid="tech-advanced">
+          {c.tech_adv_title}
+        </h2>
+        <p className="sec__lead">{c.tech_adv_lead}</p>
+        <div className="grid">
+          {advanced.map((a) => (
+            <div className="card" key={a.t}>
+              <div className="card__ember" />
+              <h3>{a.t}</h3>
+              <p>{a.b}</p>
             </div>
           ))}
         </div>

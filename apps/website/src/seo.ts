@@ -77,6 +77,12 @@ export function pageMeta(route: Route, c: Copy): PageMeta {
         ? "自架 Cinderous 中繼站：Cloudflare Workers、Docker 或樹莓派皆可執行同一套 RelayCore。企業可用 allowlist 建立封閉節點，資料完全留在自己的基礎設施。"
         : "Self-host a Cinderous relay: the same RelayCore runs on Cloudflare Workers, Docker, or a Raspberry Pi. Enterprises can run a closed node via allowlist and keep data on their own infrastructure.",
     },
+    enterprise: {
+      title: zh ? `企業版：自架封閉節點與組織名冊｜${BRAND}` : `Enterprise: self-hosted closed relay & org roster｜${BRAND}`,
+      description: zh
+        ? "Cinderous 企業版：以 allowlist 自架封閉中繼、組織名冊與邀請碼入職、離職接管（無金鑰託管）、保留天數與強制 TURN 等公司政策，資料完全留在自己的基礎設施，中繼只見密文。"
+        : "Cinderous Enterprise: a self-hosted closed relay via allowlist, org roster with invite-code onboarding, offboarding takeover (no key escrow), and company policy like retention and forced TURN — data stays on your own infrastructure and relays see only ciphertext.",
+    },
     roadmap: {
       title: zh ? `產品路線圖：已完成與規劃中的功能｜${BRAND}` : `Roadmap: shipped and planned｜${BRAND}`,
       description: zh
@@ -186,7 +192,7 @@ export function headTags(route: Route, c: Copy, repoUrl: string): string {
     `<meta name="twitter:description" content="${escapeAttr(meta.description)}" />`,
     `<meta name="twitter:image" content="${escapeAttr(ogImage)}" />`,
     `<meta name="robots" content="index, follow, max-image-preview:large" />`,
-    `<meta name="theme-color" content="#0f1f3a" />`,
+    `<meta name="theme-color" content="#f7f2ea" />`,
     // JSON-LD 內容是我們自己產的 JSON；`</script>` 序列在 JSON 字串中會被跳脫成 `<\/script>`
     // 以免提早關閉標籤。
     `<script type="application/ld+json">${jsonLd(route, meta, repoUrl, c).replace(/</g, "\\u003c")}</script>`,

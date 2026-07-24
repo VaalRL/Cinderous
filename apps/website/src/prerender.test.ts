@@ -6,7 +6,7 @@
 // 直接對「渲染後的 HTML 字串」下斷言，退化就會在 CI 被擋下。
 
 import { describe, expect, it } from "vitest";
-import { renderAll, renderRoute } from "./entry-server.js";
+import { applyTemplate, renderAll, renderRoute } from "./entry-server.js";
 import { allRoutes, routeHref, VIEWS } from "./routes.js";
 
 const pages = renderAll();
@@ -15,10 +15,12 @@ describe("預渲染輸出", () => {
   it("每一條路由都產出一份 HTML，路徑為目錄式 index.html", () => {
     expect(pages).toHaveLength(allRoutes().length);
     const files = pages.map((p) => p.file);
-    expect(files).toContain("index.html");
-    expect(files).toContain("tech/index.html");
-    expect(files).toContain("en/index.html");
-    expect(files).toContain("en/roadmap/index.html");
+    // ADR-0246：預設語言 en 走根路徑；繁中改走 /zh-Hant/ 前綴。
+    expect(files).toContain("index.html"); // en 首頁
+    expect(files).toContain("tech/index.html"); // en 技術頁
+    expect(files).toContain("enterprise/index.html"); // en 企業版頁（新頁）
+    expect(files).toContain("zh-Hant/index.html"); // 繁中首頁
+    expect(files).toContain("zh-Hant/roadmap/index.html"); // 繁中藍圖
     // GitHub Pages 直接服務目錄下的 index.html——爬蟲拿到 200 而非 404 轉址。
     for (const f of files) expect(f.endsWith("index.html")).toBe(true);
   });
@@ -64,5 +66,27 @@ describe("預渲染輸出", () => {
     const titles = pages.map((p) => /<title>([^<]*)<\/title>/.exec(p.head)?.[1] ?? "");
     expect(new Set(titles).size).toBe(pages.length);
     for (const page of pages) expect(page.head).toContain('<link rel="canonical"');
+  });
+
+  // ADR-0246 迴歸：修正前模板套用會誤刪注入的正確 title、留下模板預設值，導致每頁 <title> 全毀。
+  it("applyTemplate 留下每頁正確 title、丟掉模板預設，且換對 lang", () => {
+    const template = [
+      "<!doctype html>",
+      '<html lang="zh-Hant">',
+      "  <head>",
+      '    <meta charset="utf-8" />',
+      "    <!--app-head-->",
+      "    <title>Cinderous — 開源・永久免費・隱私優先</title>",
+      "  </head>",
+      '  <body><div id="root"><!--app-html--></div></body>',
+      "</html>",
+    ].join("\n");
+    const html = applyTemplate(template, renderRoute({ view: "home", locale: "en" }));
+    expect(html).not.toContain("開源・永久免費・隱私優先"); // 模板預設值必須被丟棄
+    expect(html).toContain('<html lang="en">');
+    // head 區（body 前）只剩一個 title，且是英文首頁的 SEO title
+    const headTitles = html.slice(0, html.indexOf('<div id="root"')).match(/<title>[^<]*<\/title>/g) ?? [];
+    expect(headTitles).toHaveLength(1);
+    expect(headTitles[0]).toContain("Open-source");
   });
 });

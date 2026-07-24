@@ -37,6 +37,22 @@ export function renderAll(): RenderedPage[] {
   return allRoutes().map(renderRoute);
 }
 
+/**
+ * 把單一預渲染頁套進 HTML 模板：換 `<html lang>`、移除模板自帶的預設 `<title>`、注入 head 與 body。
+ *
+ * ⚠️ 順序關鍵（ADR-0246 修正）：**先移除模板的預設 title、再注入 head**。
+ * 模板在注入前只有一個 `<title>`（那個要丟掉的預設值）；若先注入 head，注入內容的
+ * 「每頁正確 title」會排在模板 title **之前**，非全域 `replace` 只會刪到第一個——結果誤刪正確 title、
+ * 留下模板預設值（先前所有預渲染頁的 `<title>` 都變成同一個模板預設，SEO 最重要的標籤全毀而測試沒攔到）。
+ */
+export function applyTemplate(template: string, page: RenderedPage): string {
+  return template
+    .replace('<html lang="zh-Hant">', `<html lang="${page.lang}">`)
+    .replace(/\n\s*<title>[^<]*<\/title>/, "")
+    .replace("<!--app-head-->", page.head)
+    .replace("<!--app-html-->", page.body);
+}
+
 /** 附帶產出的靜態檔（robots／sitemap）。 */
 export function extraFiles(): { file: string; content: string }[] {
   return [

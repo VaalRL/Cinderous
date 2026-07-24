@@ -7,6 +7,7 @@ export interface Copy {
   nav_home: string;
   nav_tech: string;
   nav_node: string;
+  nav_enterprise: string;
   nav_roadmap: string;
   nav_faq: string;
   nav_download: string;
@@ -78,6 +79,17 @@ export interface Copy {
   md_anchorB: string;
   md_community: string;
   md_offline: string;
+  /** 底層機制（進階）——近期落地的擴充：分片、多裝置同步、通話 NAT 穿透、換機備援。 */
+  tech_adv_title: string;
+  tech_adv_lead: string;
+  tech_scale_t: string;
+  tech_scale_b: string;
+  tech_sync_t: string;
+  tech_sync_b: string;
+  tech_calls_t: string;
+  tech_calls_b: string;
+  tech_migrate_t: string;
+  tech_migrate_b: string;
   features_title: string;
   feat_e2e_t: string;
   feat_e2e_b: string;
@@ -123,6 +135,25 @@ export interface Copy {
   node_donate_t: string;
   node_donate_b: string;
   node_docs: string;
+  /** 企業版頁（ADR-0246）：自架封閉節點、組織名冊、離職接管、政策與資料主權。 */
+  ent_title: string;
+  ent_intro: string;
+  ent_closed_t: string;
+  ent_closed_b: string;
+  ent_roster_t: string;
+  ent_roster_b: string;
+  ent_offboard_t: string;
+  ent_offboard_b: string;
+  ent_policy_t: string;
+  ent_policy_b: string;
+  ent_sovereign_t: string;
+  ent_sovereign_b: string;
+  ent_open_t: string;
+  ent_open_b: string;
+  ent_deploy_t: string;
+  ent_deploy_b: string;
+  ent_note: string;
+  ent_cta: string;
   tr_title: string;
   tr_intro: string;
   tr_loading: string;
@@ -147,6 +178,7 @@ const zhHant: Copy = {
   nav_home: "首頁",
   nav_tech: "技術原理",
   nav_node: "建立節點",
+  nav_enterprise: "企業版",
   nav_roadmap: "藍圖",
   nav_faq: "常見問題",
   nav_download: "下載",
@@ -251,6 +283,21 @@ const zhHant: Copy = {
   md_anchorB: "錨點 B",
   md_community: "社群節點",
   md_offline: "離線 → 改走其他節點",
+  tech_adv_title: "底層機制（進階）",
+  tech_adv_lead:
+    "為了在「零伺服器狀態」前提下仍能規模化、跨裝置、且通話穩定，Cinderous 近期落地了幾項機制——全部維持中繼只見密文的原則。",
+  tech_scale_t: "中繼分片與 presence 分層",
+  tech_scale_b:
+    "單一中繼可依公鑰把收件匣切成多個分片（Durable Object），負載自動分散、規模化不需要中央狀態；在線狀態走獨立的 presence 層，與訊息片分離。分片與否只改路由，中繼看到的仍然只有密文與公鑰，沒有可翻閱的對話（ADR-0241）。",
+  tech_sync_t: "多裝置無衝突同步",
+  tech_sync_b:
+    "同一身分可在多台裝置登入。聯絡人、群組、設定等可變狀態以 CRDT（OR-Set／LWW／墓碑）合併——兩台裝置同時改動也能無衝突收斂，刪除以墓碑表示、逾期自動回收。跨裝置只透過一份加密狀態快照交換，中繼全程只見密文（ADR-0242／0071）。",
+  tech_calls_t: "通話與 NAT 穿透",
+  tech_calls_b:
+    "語音／視訊與檔案優先走 WebRTC P2P 直連、完全不經中繼。連線協商用 STUN 探測公網位址；遇到對稱 NAT／嚴格防火牆無法直連時，改用短效憑證的 TURN 中繼保底（憑證由 Worker 現發、有到期），把接不通率壓到最低。企業可強制只走 TURN（relay-only）以符合網路政策（ADR-0243／G2）。",
+  tech_migrate_t: "換機與備援",
+  tech_migrate_b:
+    "沒有金鑰託管＝沒有後門，因此換機提供三條自持路徑：加密備份碼、opt-in 的加密雲端快照（中繼只見密文），以及桌面配對克隆（一次性 P2P 全量搬家、以 SAS 短碼互相確認、內容不經中繼）。建議重要身分登記於兩台裝置作為冗餘。",
   features_title: "四大技術支柱",
   feat_e2e_t: "端到端加密",
   feat_e2e_b: "以 Nostr NIP-17/44/59（Gift Wrap）加密——中繼站看不到內容，也看不到寄件者。",
@@ -306,6 +353,33 @@ const zhHant: Copy = {
   node_donate_b:
     "你可在節點的 NIP-11 資訊自報贊助連結（GitHub Sponsors／Buy Me a Coffee／Liberapay／Lightning）；桌面版會低調顯示「贊助此節點」、純導流，App 不碰金流（ADR-0089）。",
   node_docs: "看自架文件",
+  ent_title: "企業版",
+  ent_intro:
+    "同一套開源核心，換一種部署姿態：企業自架一座封閉中繼，只放行組織成員，資料完全留在公司自己的基礎設施。中繼全程只看得到密文與成員公鑰——沒有明文、沒有可被傳喚的中央對話庫，也沒有第三方 SaaS 供應商站在你和員工中間。",
+  ent_closed_t: "封閉自架節點",
+  ent_closed_b:
+    "以 allowlist 建立只放行組織成員的封閉中繼；非名冊成員連不進來。可跑在 Cloudflare Workers、Docker 或自有機房，資料與元資料都留在公司邊界內。",
+  ent_roster_t: "組織名冊與邀請碼入職",
+  ent_roster_b:
+    "管理者維護一份簽章的成員名冊；新人以一次性邀請碼加入，自動取得工作身分與預設聯絡人／群組。無需手機號碼或電子郵件即可完成入職。",
+  ent_offboard_t: "離職接管（無金鑰託管）",
+  ent_offboard_b:
+    "採「工作身分輪替」而非金鑰託管——公司不持有解密後門。成員離職或換機時，管理者以名冊撤舊、發新，成員端自動接續；想保留歷史者建議雙設備登記（ADR-0052）。",
+  ent_policy_t: "公司政策設定",
+  ent_policy_b:
+    "可設定離線留言保留天數、允許的事件類型（kind allowlist），以及強制通話只走 TURN（relay-only）以符合網路／稽核政策。政策由自架中繼執行，不外流給任何第三方。",
+  ent_sovereign_t: "資料主權",
+  ent_sovereign_b:
+    "明文與私鑰只存在成員裝置；中繼只轉發密文。整條通訊平面跑在你自己的基礎設施上，不依賴任何官方或第三方服務——關掉外網也能內部互通。",
+  ent_open_t: "開源、可稽核、不鎖定",
+  ent_open_b:
+    "AGPL-3.0 授權，伺服器與客戶端程式碼皆可稽核；建構於開放的 Nostr 協定，任何相容中繼都能互通。沒有專有格式、沒有供應商鎖定——要遷出隨時可以。",
+  ent_deploy_t: "如何部署",
+  ent_deploy_b:
+    "把 relay/ 的 Worker 部署到 Cloudflare（wrangler deploy），或以容器自架 node-relay 於 VPS／機房；設定 allowlist 與政策後，成員以邀請碼加入即可。詳見自架文件。",
+  ent_note:
+    "企業模式重用與一般版完全相同的加密核心——差別只在「誰來營運中繼、放行誰」。沒有另一套閉源企業版，也沒有為了功能而弱化的加密。",
+  ent_cta: "看自架與企業部署文件",
   tr_title: "資金透明度",
   tr_intro: "官方財務以維護者簽章的資料檔公開；前端驗簽通過才顯示數字，任何主機被入侵也無法竄改。",
   tr_loading: "載入並驗簽中…",
@@ -330,6 +404,7 @@ const en: Copy = {
   nav_home: "Home",
   nav_tech: "How it works",
   nav_node: "Run a node",
+  nav_enterprise: "Enterprise",
   nav_roadmap: "Roadmap",
   nav_faq: "FAQ",
   nav_download: "Download",
@@ -434,6 +509,21 @@ const en: Copy = {
   md_anchorB: "Anchor B",
   md_community: "Community node",
   md_offline: "offline → route via others",
+  tech_adv_title: "Under the hood (advanced)",
+  tech_adv_lead:
+    "To stay scalable, multi-device, and reliable on calls — all while keeping zero server state — Cinderous recently landed a few mechanisms, every one of them keeping relays to ciphertext only.",
+  tech_scale_t: "Relay sharding & presence layer",
+  tech_scale_b:
+    "A single relay can split its inbox into shards by public key (Durable Objects), spreading load and scaling without any central state; online presence runs on a separate layer, decoupled from message shards. Sharding only changes routing — the relay still sees only ciphertext and public keys, with no conversations to browse (ADR-0241).",
+  tech_sync_t: "Conflict-free multi-device sync",
+  tech_sync_b:
+    "One identity can sign in on several devices. Mutable state — contacts, groups, settings — merges via CRDTs (OR-Set / LWW / tombstones), so simultaneous edits on two devices converge without conflict; deletions are tombstoned and garbage-collected on expiry. Devices exchange only an encrypted state snapshot, and relays see ciphertext throughout (ADR-0242 / 0071).",
+  tech_calls_t: "Calls & NAT traversal",
+  tech_calls_b:
+    "Voice/video and files prefer a direct WebRTC P2P link, bypassing relays entirely. Connection setup uses STUN to discover public addresses; when symmetric NAT or a strict firewall blocks a direct path, it falls back to a TURN relay with short-lived credentials (minted on demand by the Worker, with expiry) to minimize failed calls. Enterprises can force relay-only (TURN) to satisfy network policy (ADR-0243 / G2).",
+  tech_migrate_t: "Device migration & redundancy",
+  tech_migrate_b:
+    "No key escrow means no backdoor, so device migration offers three self-held paths: an encrypted backup code, an opt-in encrypted cloud snapshot (relays see only ciphertext), and desktop pairing clone (a one-time P2P full transfer confirmed via a short SAS code, content never touching a relay). Registering an important identity on two devices is recommended for redundancy.",
   features_title: "Four technical pillars",
   feat_e2e_t: "End-to-end encrypted",
   feat_e2e_b: "Encrypted with Nostr NIP-17/44/59 (Gift Wrap) — relays see neither the content nor the sender.",
@@ -492,6 +582,33 @@ const en: Copy = {
   node_donate_b:
     "You can self-report donation links in your node's NIP-11 info (GitHub Sponsors / Buy Me a Coffee / Liberapay / Lightning); the desktop app shows a low-key “Support this node” card — pure external links, the app never touches money (ADR-0089).",
   node_docs: "Read the self-hosting docs",
+  ent_title: "Enterprise",
+  ent_intro:
+    "The same open-source core, deployed differently: your organization self-hosts a closed relay that admits only its members, keeping data entirely on your own infrastructure. The relay only ever sees ciphertext and member public keys — no plaintext, no central conversation store to subpoena, and no third-party SaaS vendor sitting between you and your employees.",
+  ent_closed_t: "Closed self-hosted node",
+  ent_closed_b:
+    "Stand up a closed relay whose allowlist admits only organization members; non-roster keys can't connect. Run it on Cloudflare Workers, Docker, or your own hardware — data and metadata stay inside your boundary.",
+  ent_roster_t: "Org roster & invite-code onboarding",
+  ent_roster_b:
+    "Admins maintain a signed member roster; new hires join with a one-time invite code and automatically receive a work identity plus default contacts/groups. Onboarding needs no phone number or email.",
+  ent_offboard_t: "Offboarding takeover (no key escrow)",
+  ent_offboard_b:
+    "Uses work-identity rotation rather than key escrow — the company holds no decryption backdoor. When a member leaves or switches devices, an admin revokes the old and issues a new identity via the roster, and the member's client picks up seamlessly; register two devices to retain history (ADR-0052).",
+  ent_policy_t: "Company policy controls",
+  ent_policy_b:
+    "Set offline-message retention days, an allowed event-kind list, and force calls to relay-only (TURN) to meet network or audit policy. Policies are enforced by your self-hosted relay and never leave it.",
+  ent_sovereign_t: "Data sovereignty",
+  ent_sovereign_b:
+    "Plaintext and private keys live only on member devices; the relay forwards ciphertext only. The entire messaging plane runs on your own infrastructure, depending on no official or third-party service — cut off the internet and internal messaging still works.",
+  ent_open_t: "Open, auditable, no lock-in",
+  ent_open_b:
+    "AGPL-3.0 licensed — both server and client code are auditable; built on the open Nostr protocol, so any compatible relay interoperates. No proprietary formats, no vendor lock-in — you can migrate out anytime.",
+  ent_deploy_t: "How to deploy",
+  ent_deploy_b:
+    "Deploy the relay/ Worker to Cloudflare (wrangler deploy), or self-host node-relay as a container on a VPS / in your data center; configure the allowlist and policies, then members join with an invite code. See the self-hosting docs.",
+  ent_note:
+    "Enterprise mode reuses the exact same encryption core as the regular app — the only difference is who operates the relay and who it admits. There is no separate closed-source enterprise build, and no crypto weakened for features.",
+  ent_cta: "Read the self-hosting & enterprise docs",
   tr_title: "Fund transparency",
   tr_intro:
     "Official finances are published as a maintainer-signed data file; numbers render only after the signature verifies, so a compromised host cannot tamper with them.",

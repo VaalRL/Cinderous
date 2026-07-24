@@ -14,3 +14,25 @@ describe("Tech 威脅防護介紹（ADR-0231 P4）", () => {
     expect(en).toContain("never sent to any server");
   });
 });
+
+describe("Tech 底層機制（進階，ADR-0246）", () => {
+  it("zh/en 都有進階區並涵蓋分片、多裝置同步、通話 NAT 穿透", () => {
+    const zh = renderToStaticMarkup(<Tech c={useCopy("zh-Hant")} />);
+    expect(zh).toContain('data-testid="tech-advanced"');
+    expect(zh).toContain("分片"); // 中繼分片
+    expect(zh).toContain("多裝置");
+    expect(zh).toContain("TURN"); // 通話 NAT 穿透保底
+    const en = renderToStaticMarkup(<Tech c={useCopy("en")} />);
+    expect(en).toContain("sharding");
+    expect(en).toContain("multi-device");
+    expect(en).toContain("TURN");
+  });
+
+  // FS（前向保密）尚未通過外部審計——依上線硬閘，官網文案不得宣稱 FS（ADR-0245）。
+  it("進階區不得宣稱前向保密（審計前硬閘）", () => {
+    const zh = renderToStaticMarkup(<Tech c={useCopy("zh-Hant")} />);
+    expect(zh).not.toContain("前向保密");
+    const en = renderToStaticMarkup(<Tech c={useCopy("en")} />);
+    expect(en.toLowerCase()).not.toContain("forward secrecy");
+  });
+});

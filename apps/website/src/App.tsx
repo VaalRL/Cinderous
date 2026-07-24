@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { Theme } from "@cinderous/theme";
 import { CinderMark } from "./Brand.js";
 import { useCopy } from "./copy.js";
+import { Enterprise } from "./pages/Enterprise.js";
 import { Faq } from "./pages/Faq.js";
 import { Home } from "./pages/Home.js";
 import { Node } from "./pages/Node.js";
@@ -17,7 +18,9 @@ export const GITHUB_URL = "https://github.com/VaalRL/Cinderous";
 export const WEBAPP_URL = "https://cinderous.cinderous1.workers.dev";
 
 function initialTheme(): Theme {
-  return "dark"; // 夜森林為預設身分；使用者仍可切白日
+  // ADR-0246：預設改為白日（淺色）。CSS 的 `:root` 底色本就是淺色，故首屏與 hydration 一致、無閃爍；
+  // 夜森林仍可由右上角 ☾ 切換。（原先預設 dark 會在掛載後才套 data-theme，造成淺→深閃一下。）
+  return "light";
 }
 
 /**
@@ -61,10 +64,8 @@ export function App({ route: initialRoute }: { route: Route }): JSX.Element {
   const c = useCopy(route.locale);
   const { view, locale } = route;
 
-  // 開機時才讀系統偏好：SSR 期間沒有 window，讀了會在預渲染階段炸掉。
-  useEffect(() => {
-    if (window.matchMedia?.("(prefers-color-scheme: light)").matches) setTheme("light");
-  }, []);
+  // ADR-0246：預設淺色為明確產品決策，不再依系統偏好自動切深色（避免使用者明明要淺色卻因 OS 深色而看到深色）。
+  // 深色仍可由右上角 ☾ 手動切換。
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -108,6 +109,7 @@ export function App({ route: initialRoute }: { route: Route }): JSX.Element {
           <NavLink route={{ view: "home", locale }} current={view} label={c.nav_home} onNavigate={navigate} />
           <NavLink route={{ view: "tech", locale }} current={view} label={c.nav_tech} onNavigate={navigate} />
           <NavLink route={{ view: "node", locale }} current={view} label={c.nav_node} onNavigate={navigate} />
+          <NavLink route={{ view: "enterprise", locale }} current={view} label={c.nav_enterprise} onNavigate={navigate} />
           <NavLink route={{ view: "roadmap", locale }} current={view} label={c.nav_roadmap} onNavigate={navigate} />
           <NavLink route={{ view: "faq", locale }} current={view} label={c.nav_faq} onNavigate={navigate} />
           <a className="nav__toggle" href={localeHref} hrefLang={otherLocale} rel="alternate">
@@ -131,6 +133,8 @@ export function App({ route: initialRoute }: { route: Route }): JSX.Element {
         />
       ) : view === "tech" ? (
         <Tech c={c} />
+      ) : view === "enterprise" ? (
+        <Enterprise c={c} />
       ) : view === "roadmap" ? (
         <Roadmap c={c} />
       ) : view === "faq" ? (

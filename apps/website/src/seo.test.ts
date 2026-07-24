@@ -45,10 +45,10 @@ describe("head 標籤產出", () => {
 
   it("含 canonical、雙語 hreflang 與 x-default", () => {
     const html = tags({ view: "tech", locale: "en" });
-    expect(html).toContain('<link rel="canonical" href="https://vaalrl.github.io/Cinderous/en/tech/" />');
-    expect(html).toContain('hreflang="zh-Hant" href="https://vaalrl.github.io/Cinderous/tech/"');
-    expect(html).toContain('hreflang="en" href="https://vaalrl.github.io/Cinderous/en/tech/"');
-    // x-default 指向預設語言版本
+    expect(html).toContain('<link rel="canonical" href="https://vaalrl.github.io/Cinderous/tech/" />');
+    expect(html).toContain('hreflang="zh-Hant" href="https://vaalrl.github.io/Cinderous/zh-Hant/tech/"');
+    expect(html).toContain('hreflang="en" href="https://vaalrl.github.io/Cinderous/tech/"');
+    // x-default 指向預設語言版本（ADR-0246：改為 en）
     expect(html).toContain('hreflang="x-default" href="https://vaalrl.github.io/Cinderous/tech/"');
   });
 

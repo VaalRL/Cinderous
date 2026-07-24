@@ -27,7 +27,7 @@ for (const marker of ["<!--app-head-->", "<!--app-html-->"]) {
   }
 }
 
-const { renderAll, extraFiles } = await import(pathToFileURL(ssrEntry).href);
+const { renderAll, extraFiles, applyTemplate } = await import(pathToFileURL(ssrEntry).href);
 
 const write = (relPath, content) => {
   const out = join(distDir, relPath);
@@ -37,13 +37,8 @@ const write = (relPath, content) => {
 
 const pages = renderAll();
 for (const page of pages) {
-  const html = template
-    .replace('<html lang="zh-Hant">', `<html lang="${page.lang}">`)
-    .replace("<!--app-head-->", page.head)
-    // 模板自帶的預設 <title> 會與注入的 <title> 重複——移除它，只留每頁專屬的那一個。
-    .replace(/\n\s*<title>[^<]*<\/title>/, "")
-    .replace("<!--app-html-->", page.body);
-  write(page.file, html);
+  // 模板套用（含「先移除預設 title、再注入 head」的正確順序）集中在 entry-server.applyTemplate，可單元測試。
+  write(page.file, applyTemplate(template, page));
   console.log(`  ✓ ${page.file}`);
 }
 
