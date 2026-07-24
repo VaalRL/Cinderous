@@ -119,6 +119,7 @@ import {
   ekHintOf,
   generateEncryptionKey,
   openWrapWithEks,
+  pruneFsKeys,
   readEkAnnounce,
   type UnwrappedMessage,
 } from "@cinderous/core";
@@ -641,6 +642,7 @@ export class RelayChatBackend implements ChatBackend {
     this.selfNsec = identity.nsec;
     this.contacts = storage.loadContacts();
     this.fsState = storage.loadFsState(); // ADR-0245：前向保密狀態
+    this.pruneFs(); // 開機即執行刪除紀律：修剪逾 grace 的舊 EK
     this.myAvatar = storage.loadSelfAvatar(); // ADR-0154：開機廣播帶上頭像（或移除記號）
     this.myTitle = storage.loadSelfTitle(); // ADR-0158：企業頭銜同理
     this.blocked = storage.loadBlocked();
@@ -1019,6 +1021,13 @@ export class RelayChatBackend implements ChatBackend {
   private persistFs(): void {
     this.storage.saveFsState(this.fsState);
   }
+  /** grace 刪除紀律（ADR-0245）：修剪逾 grace 的舊 EK（回收＝FS 真正生效）；有變才寫回。開機/輪替時呼叫。 */
+  private pruneFs(): void {
+    const kept = pruneFsKeys(this.fsState.keys, Date.now());
+    if (kept.length === this.fsState.keys.length) return;
+    this.fsState = { ...this.fsState, keys: kept };
+    this.persistFs();
+  }
   private fsEnabled(): boolean {
     return this.fsState.enabled;
   }
@@ -1086,6 +1095,7 @@ export class RelayChatBackend implements ChatBackend {
       keys: [...this.fsState.keys, { nsec: nsecEncode(ek.sk), pk: ek.pk, at: Date.now() }],
     };
     this.persistFs();
+    this.pruneFs(); // 換鑰時順帶修剪（前一輪逾 grace 的更舊 EK）
     this.publishEkAnnounce();
   }
 

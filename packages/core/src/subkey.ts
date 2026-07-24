@@ -24,6 +24,22 @@ export const EK_ANNOUNCE_KIND = 10040;
 /** rumor 內嵌 EK hint 的 tag 名（比照 ADR-0035 relay hint；夾在**加密內層** rumor、中繼看不到）。 */
 export const EK_HINT_TAG = "ek";
 
+/**
+ * EK grace 窗（毫秒）：預設 7 天。一把 EK 被更新的一把**取代**後，仍保留 grace 供解在途訊息；
+ * 超窗即刪（刪除紀律＝FS 真正生效的下半場）。current（最新）永不刪。
+ */
+export const FS_GRACE_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * 依 grace 修剪 EK 金鑰（ADR-0245 刪除紀律）：保留 current（最大 `at`）＋「被取代未逾 grace」者；
+ * 逾 grace 的舊 EK 回收（＝真正刪除，之後被側錄的密文再也解不開）。純函式；`now` 由呼叫端傳入。
+ */
+export function pruneFsKeys<T extends { at: number }>(keys: T[], now: number, graceMs: number = FS_GRACE_MS): T[] {
+  const sorted = [...keys].sort((a, b) => a.at - b.at);
+  // 索引 i 的金鑰於 sorted[i+1] 生成時被取代；current（最後一個）永遠保留。
+  return sorted.filter((k, i) => i === sorted.length - 1 || now - (sorted[i + 1] as { at: number }).at <= graceMs);
+}
+
 /** 加密子鑰對（傳輸金鑰，非身分）。 */
 export interface EncryptionKey {
   sk: SecretKey;

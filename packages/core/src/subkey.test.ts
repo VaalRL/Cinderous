@@ -6,8 +6,10 @@ import {
   buildEkAnnounce,
   EK_ANNOUNCE_KIND,
   ekHintOf,
+  FS_GRACE_MS,
   generateEncryptionKey,
   openWrapWithEks,
+  pruneFsKeys,
   readEkAnnounce,
   withEkHint,
 } from "./subkey.js";
@@ -132,6 +134,26 @@ describe("retarget Gift Wrap 到 EK＋多鑰解封（FS 核心，ADR-0245）", (
       tags: [],
     });
     expect(() => openWrapWithEks(wrap, [generateSecretKey(), generateSecretKey()])).toThrow();
+  });
+});
+
+describe("pruneFsKeys（grace 刪除紀律，ADR-0245）", () => {
+  it("保留 current＋grace 內被取代者；逾 grace 的舊 EK 回收", () => {
+    const g = FS_GRACE_MS;
+    const now = 100 * g;
+    const keys = [
+      { at: now - 3 * g, id: "oldest" }, // 被 mid 取代（於 now-2g）→ 逾 grace → 刪
+      { at: now - 2 * g, id: "mid" }, // 被 cur 取代（於 now-0.5g）→ 未逾 grace → 留
+      { at: now - 0.5 * g, id: "cur" }, // current → 留
+    ];
+    expect(pruneFsKeys(keys, now).map((k) => k.id).sort()).toEqual(["cur", "mid"]);
+  });
+  it("只有一把（current）→ 永不刪", () => {
+    expect(pruneFsKeys([{ at: 1 }], 1e15)).toEqual([{ at: 1 }]);
+  });
+  it("剛換（都在 grace 內）→ 全留", () => {
+    const now = 1000;
+    expect(pruneFsKeys([{ at: now - 10 }, { at: now }], now)).toHaveLength(2);
   });
 });
 
