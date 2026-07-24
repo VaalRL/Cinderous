@@ -134,6 +134,8 @@ Gift Wrap（wrap＋seal）到收件人當前 EK；EK 是**傳輸金鑰**、與 a
      - ⏳ **未 retarget**：其他事件型別（typing/nudge/receipts/檔案/通話/群）暫維持靜態（非長期敏感或另議）。
   3. ✅ **Phase 2 完成 — UI（desktop）**：設定隱私分頁 FS 區（未啟用→「啟用」鈕；已啟用→狀態＋「立即更換
      金鑰」鈕）；換鑰 `dialog.confirm` **警告彈窗**（在途訊息/其他裝置同步/備份影響）；`onFsDowngrade`→該對話
-     留下降級提示（非靜默）；**誠實文案**（`fs_hint` 講明「取決於你多常更換」、不宣稱 always-on FS）。TDD +3。
+     留下降級提示（非靜默）；**誠實文案**（`fs_hint` 講明「取決於你多常更換」）。TDD +3。
+     - 🔒 **UI 預設對使用者隱藏（`fsUiEnabled`，App.tsx）**：符合上線硬閘「審計通過前不對使用者露出 FS」。
+       設 `localStorage nb.fs=1` 才顯示（供開發/審計驗證手動啟用＋更換金鑰）；審計通過後改預設開。
      **未做（後續）**：每聯絡人 FS 狀態徽章（需後端另曝 per-contact pinned/EK 狀態）。
   4. **Phase 3 — 審計後上線**：外部密碼學審計；通過後才在產線啟用、文案才可提 FS。

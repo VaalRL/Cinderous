@@ -341,6 +341,19 @@ function shardingEnabled(): boolean {
   }
 }
 
+/**
+ * 前向保密 UI 開關（ADR-0245）：**預設關（對使用者隱藏）**。上線硬閘＝「外部密碼學審計通過前，不對使用者
+ * 露出 FS、文案不宣稱 FS」。引擎已實作、可用旗標開發/驗證：設 `localStorage nb.fs=1` 才顯示設定頁的 FS 區塊
+ * （手動啟用＋立即更換金鑰）。審計通過後再改預設開（或移除此閘）。
+ */
+function fsUiEnabled(): boolean {
+  try {
+    return localStorage.getItem("nb.fs") === "1";
+  } catch {
+    return false;
+  }
+}
+
 function buildBackend(p: Profile, nsecOverride?: string, storage?: AppStorage): ChatBackend {
   if (!p.relayUrl) return new BrowserChatBackend(p.name);
   // ADR-0164：本機記住的手動狀態——**建構時就 seed**，讓 start() 首拍 beat() 尊重離線（不事後補正）。
@@ -2689,7 +2702,7 @@ export function App(): JSX.Element {
           onToggleReadReceipts={toggleReadReceipts}
           invisible={invisible}
           onToggleInvisible={toggleInvisible}
-          {...(activeBackend.enableFs
+          {...(activeBackend.enableFs && fsUiEnabled()
             ? {
                 fs: {
                   enabled: fsEnabled,
