@@ -17,9 +17,12 @@ const SOURCES = [
     id: "urlhaus",
     name: "URLhaus",
     url: "https://urlhaus.abuse.ch",
+    // 鏡像優先（ADR-0231/0235 H5）：GitHub raw 穩定、跨環境一致；abuse.ch 直連改為後備——它偶有
+    // 網路不可達，且其 hostfile 是「即時活躍威脅」數量波動大，當主來源會讓不同環境（本機/CI）抓到
+    // 差很多的數字（曾見 368 vs 592），反覆觸發變動量護欄。以穩定鏡像為主可讓護欄比對有意義。
     feeds: [
-      "https://urlhaus.abuse.ch/downloads/hostfile/",
       "https://raw.githubusercontent.com/StevenBlack/hosts/master/data/URLHaus/hosts",
+      "https://urlhaus.abuse.ch/downloads/hostfile/",
     ],
   },
   {
