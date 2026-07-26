@@ -1,10 +1,10 @@
 {
   "wss://cinder-relay.jt0856.workers.dev": {
-    "probes": 124,
-    "live": 124
+    "probes": 125,
+    "live": 125
   },
   "wss://cinder-relay.cinderous1.workers.dev": {
-    "probes": 124,
-    "live": 124
+    "probes": 125,
+    "live": 125
   }
 }
