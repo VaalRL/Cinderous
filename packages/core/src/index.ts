@@ -53,3 +53,4 @@ export * from "./bootstrap.js";
 export * from "./org-roster.js";
 export * from "./node-attestation.js";
 export * from "./nip42.js";
+export * from "./vanish.js";

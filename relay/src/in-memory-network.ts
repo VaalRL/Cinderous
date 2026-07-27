@@ -8,11 +8,19 @@ export interface InMemoryRelayNetwork {
   connect(connId: string, handlers?: RelayClientHandlers): RelayClient;
 }
 
+export interface InMemoryNetworkOptions extends RelayCoreOptions {
+  /**
+   * 本站主機（ADR-0256）。NIP-62 的清除請求要驗 `relay` tag 指向本站，而那是 fail-closed 的
+   * ——**沒有主機資訊就只認 `ALL_RELAYS`**。要在記憶體網路上端到端測具名的清除請求就得給它。
+   */
+  host?: string;
+}
+
 /**
  * 在記憶體中以真實 RelayCore 串接多個 RelayClient（無真實網路），
  * 供整合測試與瀏覽器 demo 共用，避免各處重造 route/clients 接線。
  */
-export function createInMemoryRelayNetwork(opts?: RelayCoreOptions): InMemoryRelayNetwork {
+export function createInMemoryRelayNetwork(opts?: InMemoryNetworkOptions): InMemoryRelayNetwork {
   const core = new RelayCore(opts);
   const clients = new Map<string, RelayClient>();
   const route = (outbound: ReturnType<RelayCore["handle"]>): void => {
@@ -23,7 +31,7 @@ export function createInMemoryRelayNetwork(opts?: RelayCoreOptions): InMemoryRel
     connect(connId: string, handlers: RelayClientHandlers = {}): RelayClient {
       const client = new RelayClient({ send: (data) => route(core.handle(connId, data)) }, handlers);
       clients.set(connId, client);
-      route(core.connect(connId)); // 送出 NIP-42 AUTH 挑戰（requireAuth 時；否則空）
+      route(core.connect(connId, opts?.host)); // 送出 NIP-42 AUTH 挑戰（requireAuth 時；否則空）
       return client;
     },
   };

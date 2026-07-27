@@ -631,6 +631,9 @@ describe("RelayCore — 例外圍籬（ADR-0235 C1）", () => {
       throw new TypeError("boom");
     },
     prune: () => {},
+    vanish: () => {
+      throw new TypeError("boom");
+    },
   };
 
   it("持久層拋例外時回 NOTICE，不向宿主逸出", () => {

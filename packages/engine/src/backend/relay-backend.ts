@@ -2,6 +2,7 @@ import {
   applyGroupControl,
   BoundedSet,
   buildAuthEvent,
+  buildVanishRequest,
   canPostToGroup,
   CALL_SIGNAL_KIND,
   createHeartbeat,
@@ -2604,6 +2605,40 @@ export class RelayChatBackend implements ChatBackend {
     const hash = JSON.stringify({ ...content, at: 0 }); // 比對不含產生時間
     if (!this.snapshotDue(hash)) return;
     this.publishReliable(buildSnapshotEvent(JSON.stringify(content), this.sk, this.cloudSync.deviceId));
+  }
+
+  /**
+   * NIP-62 清除請求（ADR-0256）：對**每一座已知的中繼**送出「刪掉我的一切」。
+   *
+   * ## 為什麼要逐座、且每座簽一顆
+   *
+   * relay 端會驗 `relay` tag 是否指向自己（不可逆的動作採 fail-closed，見 core `vanish.ts`）
+   * ——所以不能簽一顆到處發，得針對每座簽一顆帶該座 URL 的。這也讓「我只想清掉某一座」
+   * 天然可行（未來若要做，選 URL 即可）。
+   *
+   * ## 誠實邊界
+   *
+   * 回傳的是**請求已送出**的 URL，不是「已刪除」——刪除發生在別人的機器上，客戶端無從證實。
+   * 離線的座會走既有重連佇列（`publish` 的行為），但若使用者此後不再連該座，那份請求就不會
+   * 到達；UI 措辭不得暗示保證。
+   */
+  requestVanish(): string[] {
+    const urls = new Set<string>();
+    if (this.homeUrl) urls.add(this.homeUrl);
+    if (this.originalHomeUrl) urls.add(this.originalHomeUrl);
+    for (const url of this.relayPool.keys()) urls.add(url);
+    for (const url of this.bootstrapSeats) urls.add(url);
+
+    const sent: string[] = [];
+    for (const url of urls) {
+      // 單 relay 模式（無 `connectorFor`）下 `poolClient` 回 undefined → 退回基礎連線；
+      // 那條連線連的就是 home，故只有 home URL 該走它。
+      const client = url === this.homeUrl || url === this.originalHomeUrl ? this.homeClient() : this.poolClient(url);
+      if (!client) continue;
+      client.publish(buildVanishRequest(url, this.sk));
+      sent.push(url);
+    }
+    return sent;
   }
 
   /** 立即備份（設定面板「立即備份」；跳過節流）。 */

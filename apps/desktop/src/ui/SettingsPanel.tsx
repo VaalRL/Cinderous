@@ -148,6 +148,12 @@ export interface SettingsPanelProps {
   onRemoveIdentity?: () => void;
   /** 清空裝置（ADR-0202，破壞性）：刪所有身分＋所有本機資料；未提供則不顯示。 */
   onWipeDevice?: () => void;
+  /**
+   * NIP-62 清除請求（ADR-0256，破壞性）：要求已連上的每座中繼刪除本人資料。
+   * 回傳實際送出請求的 relay URL——**不是**「已刪除」（刪除發生在對方機器上）。
+   * 未提供則不顯示（示範後端）。
+   */
+  onVanish?: () => string[];
   /** 加密雲端快照（ADR-0071）：三檔模式；未提供則不顯示（示範模式/政策禁用）。 */
   cloud?: {
     mode: CloudSyncMode;
@@ -692,6 +698,45 @@ function CloudSyncSettings({ value }: { value: NonNullable<SettingsPanelProps["c
         <button type="button" data-testid="cloud-backup-now" onClick={() => value.onBackupNow?.()}>
           {t("settings_cloudBackupNow")}
         </button>
+      ) : null}
+    </section>
+  );
+}
+
+/**
+ * NIP-62 清除請求（ADR-0256）：要求中繼站立即刪除本人的資料，不必等 7 天 TTL。
+ *
+ * ## 措辭為什麼這樣寫
+ *
+ * 刪除發生在**別人的機器**上，客戶端能誠實聲稱的只有「請求已送出」。所以結果顯示的是
+ * 送達的座數，而非「已刪除」——一個做不到的保證比沒有保證更糟。確認框也明講兩件事：
+ * 不可逆、且只影響中繼站（本機對話不受影響，那本來就只在你的裝置上）。
+ */
+function VanishSettings({ onVanish }: { onVanish: () => string[] }): JSX.Element {
+  const { t } = useI18n();
+  const { confirm } = useDialog();
+  const [sentTo, setSentTo] = useState<number | null>(null);
+
+  return (
+    <section className="settings__sec" data-testid="vanish-section">
+      <h4 className="settings__warn">{t("vanish_title")}</h4>
+      <p className="hint">{t("vanish_hint")}</p>
+      <button
+        type="button"
+        className="settings__danger"
+        data-testid="vanish-btn"
+        onClick={() => {
+          void confirm(t("vanish_confirm")).then((ok) => {
+            if (ok) setSentTo(onVanish().length);
+          });
+        }}
+      >
+        {t("vanish_action")}
+      </button>
+      {sentTo !== null ? (
+        <p className="hint" data-testid="vanish-result">
+          {t("vanish_sent").replace("{n}", String(sentTo))}
+        </p>
       ) : null}
     </section>
   );
@@ -1279,6 +1324,8 @@ export function SettingsPanel(props: SettingsPanelProps): JSX.Element {
           ) : null}
 
           {tab === "privacy" && props.threat ? <ThreatSettings value={props.threat} /> : null}
+
+          {tab === "privacy" && props.onVanish ? <VanishSettings onVanish={props.onVanish} /> : null}
 
           {tab === "privacy" ? (
           <section className="settings__sec">

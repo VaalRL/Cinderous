@@ -123,6 +123,16 @@ export interface OfflineStore {
   query(filter: RelayFilter, nowSec: number): NostrEvent[];
   /** 清除所有已過期留言。 */
   prune(nowSec: number): void;
+  /**
+   * NIP-62 清除請求（ADR-0256）：刪掉某 pubkey 在本站的一切——
+   *
+   * 1. **他發的**事件（`pubkey` 相符）；
+   * 2. **寄給他的**事件（`p` 標籤相符）——Gift Wrap 外層是一次性金鑰，這是唯一能定位收件匣的鍵；
+   * 3. 他的可尋址事件（雲端快照等）。
+   *
+   * 回傳刪除的事件數（去重後），供宿主記錄；呼叫端不得依它做流程判斷。
+   */
+  vanish(pubkey: string, nowSec: number): number;
 }
 
 /** 取事件的收件人（`p` 標籤值）清單；供記憶體與 SQL 版共用。 */
@@ -247,6 +257,48 @@ export class MessageStore implements OfflineStore {
     for (const id of this.effExp.keys()) {
       if (!survivors.has(id)) this.effExp.delete(id);
     }
+  }
+
+  /** NIP-62 清除（ADR-0256）：刪掉此人發的、寄給他的、以及他的可尋址事件。 */
+  vanish(pubkey: string, _nowSec: number): number {
+    const removed = new Set<string>();
+
+    // 1. 寄給他的：整個收件人桶（Gift Wrap 外層是一次性金鑰，`p` 是唯一的鍵）。
+    for (const e of this.byRecipient.get(pubkey) ?? []) removed.add(e.id);
+    this.byRecipient.delete(pubkey);
+
+    // 2. 他發的：掃其餘桶（他可能是別人收件匣裡的作者——裸事件如心跳並不封裝）。
+    for (const [recipient, bucket] of this.byRecipient) {
+      const kept = bucket.filter((e) => {
+        if (e.pubkey !== pubkey) return true;
+        removed.add(e.id);
+        return false;
+      });
+      if (kept.length > 0) this.byRecipient.set(recipient, kept);
+      else this.byRecipient.delete(recipient);
+    }
+    this.noRecipient = this.noRecipient.filter((e) => {
+      if (e.pubkey !== pubkey) return true;
+      removed.add(e.id);
+      return false;
+    });
+
+    // 3. 他的可尋址事件（ADR-0071 雲端快照）。
+    for (const [key, e] of this.addressable) {
+      if (e.pubkey !== pubkey) continue;
+      removed.add(e.id);
+      this.addressable.delete(key);
+    }
+
+    // 同一顆事件可能同時存在於多個收件人桶——只有**確定沒有任何一份倖存**時才收 effExp，
+    // 否則會讓其他收件人手上那份失去到期時間（`isExpired` 退回 tag，永存縫隙就回來了）。
+    const survivors = new Set<string>();
+    for (const bucket of this.byRecipient.values()) for (const e of bucket) survivors.add(e.id);
+    for (const e of this.noRecipient) survivors.add(e.id);
+    for (const e of this.addressable.values()) survivors.add(e.id);
+    for (const id of removed) if (!survivors.has(id)) this.effExp.delete(id);
+
+    return removed.size;
   }
 
   /** 依 filter 縮小候選集合：帶 `#p` 時僅取相關收件人桶，否則全掃。 */

@@ -242,6 +242,27 @@ export class SqlMessageStore implements OfflineStore {
     this.sql(`DELETE FROM addressable WHERE expiration <= ?`, nowSec);
   }
 
+  /**
+   * NIP-62 清除（ADR-0256）：`pubkey = ?`（他發的）**或** `recipient = ?`（寄給他的
+   * ——Gift Wrap 外層是一次性金鑰，`p` 是唯一能定位收件匣的鍵），外加他的可尋址事件。
+   *
+   * 兩欄都有索引（`idx_offline_pubkey`／`idx_offline_recipient`），故不是全表掃描。
+   */
+  vanish(pubkey: string, _nowSec: number): number {
+    const rows = this.sql(
+      `SELECT COUNT(DISTINCT id) AS n FROM offline_msgs WHERE pubkey = ? OR recipient = ?`,
+      pubkey,
+      pubkey,
+    );
+    const msgs = Number(rows[0]?.n ?? 0);
+    const addr = Number(
+      this.sql(`SELECT COUNT(*) AS n FROM addressable WHERE pubkey = ?`, pubkey)[0]?.n ?? 0,
+    );
+    this.sql(`DELETE FROM offline_msgs WHERE pubkey = ? OR recipient = ?`, pubkey, pubkey);
+    this.sql(`DELETE FROM addressable WHERE pubkey = ?`, pubkey);
+    return msgs + addr;
+  }
+
   private enforceCap(recipients: string[]): void {
     const cap = this.opts.maxPerRecipient;
     const fileCap = this.opts.filePerRecipient ?? DEFAULT_FILE_PER_RECIPIENT;

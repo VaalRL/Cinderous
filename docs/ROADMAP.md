@@ -116,8 +116,8 @@
 
 | # | 任務 | 說明 |
 | --- | --- | --- |
-| F1 | 群組加密 ADR | ✅ **已定案（ADR-0027）**：v1 Gift-Wrap 成對扇出 + 帶內群組狀態；MLS（NIP-EE/OpenMLS）延後為未來升級（觸發：需 PCS/更大群/稽核後），與 F2 棘輪一併評估。 |
-| F2 | 前向保密決策 | ✅ **已定案（ADR-0028）**：維持靜態 ECDH；即時走 WebRTC/DTLS（已具 PFS）；不另立 Double Ratchet，未來若需 FS/PCS 統一採 MLS（與 ADR-0027 同一次工程）。 |
+| F1 | 群組加密 ADR | ✅ **已定案（ADR-0027）**：v1 Gift-Wrap 成對扇出 + 帶內群組狀態；MLS 延後為未來升級（觸發：需 PCS/更大群/稽核後），與 F2 棘輪一併評估。**⚠ 指標更新（ADR-0256/0255）：原文寫的 NIP-EE 已被生態標為 `unrecommended`，由 [Marmot Protocol](https://github.com/marmot-protocol/marmot)（狀態 adopted）取代——日後真要做 MLS 時應照 Marmot，不是 NIP-EE。行程不變（ADR-0091 的暫緩理由仍成立）。** |
+| F2 | 前向保密決策 | ✅ **已定案（ADR-0028）**：維持靜態 ECDH；即時走 WebRTC/DTLS（已具 PFS）；不另立 Double Ratchet，未來若需 FS/PCS 統一採 MLS（與 ADR-0027 同一次工程；**規格指標同 F1：改為 Marmot**）。近期 FS 路徑見 ADR-0245（手動 opt-in，待外部審計）。 |
 | F3 | 剩餘 review 技術債 | ✅ **完成**：C4 二進位框架（去 base64 ~33%，ADR-0029）＋ A6 ICE candidate 批次（合併單一 `candidates` 信令，減少中繼發佈）＋ A5 多設備 sync 上限（`DeviceSyncState` 訊息/狀態鍵數上限逐出，防撐爆記憶體）。皆單元測試，WebRTC 項經真實 E2E。 |
 | F4 | 第三方安全稽核 | 🔧 **前置已備**：`docs/SECURITY.md`（漏洞回報政策 + 加密盤點 + 威脅模型逐項盤點 + 已知限制 + 建議稽核範圍）。獨立稽核本身需外部稽核員（此環境無法執行）。 |
 | F5 | 容量/成本 | ✅ **大致完成**：心跳合併（音樂併入心跳、移除 kind 20002）+ jitter + **WebRTC 狀態卸載**（開對話主動建 P2P、輸入中優先走 Data Channel、退回中繼；真實 WebRTC E2E 驗證）；容量模型回填 `docs/adr/0006`。付費層評估為部署階段（C4）。 |

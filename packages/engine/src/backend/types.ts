@@ -286,6 +286,15 @@ export interface ChatBackend {
   setInvisible?(invisible: boolean): void;
   setNowPlaying(text: string): void;
   /**
+   * NIP-62 清除請求（ADR-0256）：要求**已連上的每一座**中繼站立即刪除本人的資料
+   * （他發的、寄給他的 Gift Wrap、他的雲端快照），不必等 7 天 TTL。
+   *
+   * 回傳實際送出請求的 relay URL 清單，供 UI 據實回報（**不是**「保證已刪」——
+   * 刪除發生在對方機器上，客戶端能誠實聲稱的只有「請求已送出」）。
+   * 僅真實 relay 後端支援。
+   */
+  requestVanish?(): string[];
+  /**
    * 更改顯示名稱（ADR-0144）：更新記憶體、落地本機（nsec 不明文，只更名）、把新名廣播給所有
    * 聯絡人（ADR-0061 profile）。未實作的後端（如部分示範）由呼叫端以本機狀態更新即可。
    */

@@ -2502,6 +2502,10 @@ export function App(): JSX.Element {
           onLogout={() => void logout()}
           {...(profilesState.active ? { onRemoveIdentity: () => void removeIdentity(profilesState.active!) } : {})}
           onWipeDevice={() => void wipeDevice()}
+          {...(activeBackend.requestVanish
+            ? // NIP-62（ADR-0256）：只有真實 relay 後端有這個能力；示範後端不顯示此區塊。
+              { onVanish: () => activeBackend.requestVanish!() }
+            : {})}
           {...(orgInfo ? { orgInfo } : {})}
           {...(() => {
             // 企業頭銜（ADR-0158）：企業成員與企業主身分才顯示編輯欄。
