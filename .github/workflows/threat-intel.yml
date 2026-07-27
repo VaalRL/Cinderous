@@ -7,6 +7,11 @@ on:
   schedule:
     - cron: "20 3 * * *"
   workflow_dispatch:
+    inputs:
+      reseed:
+        description: "重設變動量護欄基準（來源組成刻意變動時用，例如首次建聯集或加減 feed；ADR-0248）"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -27,7 +32,8 @@ jobs:
           node-version: 22
 
       - name: 抓取來源並重建 snapshot
-        run: node scripts/threat-snapshot.mjs
+        # 手動 dispatch 勾 reseed＝跳過變動量護欄重設基準（ADR-0248）；排程一律不帶（inputs 為空即 falsy）。
+        run: node scripts/threat-snapshot.mjs ${{ inputs.reseed && '--reseed' || '' }}
 
       - name: 驗證格式
         run: node scripts/threat-snapshot.mjs --check
@@ -36,10 +42,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if [ -n "$(git status --porcelain docs/threat-intel.json)" ]; then
+          if [ -n "$(git status --porcelain docs/threat-intel.json docs/threat-intel.feeds.json)" ]; then
             git config user.name "threat-intel-bot"
             git config user.email "bot@users.noreply.github.com"
-            git add docs/threat-intel.json
+            # 逐-feed 記憶檔一起提交（ADR-0248）：CI 每次都是全新環境，沒有 committed 記憶就救不回暫時掛掉的 feed。
+            git add docs/threat-intel.json docs/threat-intel.feeds.json
             git commit -m "chore(threat-intel): 自動更新威脅情報 snapshot（ADR-0231 P2）"
             git push
             # GITHUB_TOKEN 的 push 不會觸發 pages.yml 的 push 事件（GitHub 防遞迴限制）

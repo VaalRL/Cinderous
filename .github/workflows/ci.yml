@@ -32,6 +32,9 @@ jobs:
       - run: pnpm version:check # ADR-0227：全平台版號須與 SSOT（root package.json）一致，漂移即 fail
       - run: pnpm -r typecheck
       - run: pnpm -r test
+      # root scripts/ 不在 pnpm workspace（`pnpm -r test` 掃不到）→ 用 Node 內建 runner 跑其純邏輯測試（ADR-0248）。
+      # 傳明確 glob（bash 展開）而非目錄：`node --test <dir>` 的目錄探索語意跨 Node 版本不一致。
+      - run: node --test scripts/*.test.mjs
       - run: pnpm --filter @cinderous/desktop build
 
   audit:
