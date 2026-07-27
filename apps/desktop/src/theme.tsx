@@ -11,9 +11,8 @@ function initialTheme(): Theme {
   } catch {
     /* localStorage 不可用時忽略 */
   }
-  if (typeof window !== "undefined" && window.matchMedia?.("(prefers-color-scheme: dark)").matches) {
-    return "dark";
-  }
+  // 首次啟動一律預設淺色（ADR-0250，收斂官網 ADR-0246 立場）：不再跟隨系統深色，
+  // 讓「初次登入」在所有版本一致是淺色；深色改由使用者手動切換（本機記憶）。
   return "light";
 }
 

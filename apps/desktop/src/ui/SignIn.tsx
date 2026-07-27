@@ -2,6 +2,7 @@ import { listEntries, type OrgInvite, parseOrgInvite, weightedOrder } from "@cin
 import { useEffect, useRef, useState } from "react";
 import { ANCHOR_RELAYS } from "@cinderous/engine";
 import { useI18n } from "../i18n.js";
+import { BrandWordmark } from "./BrandWordmark.js";
 import { CinderMark } from "./Brand.js";
 import { TitleControls } from "./TitleControls.js";
 
@@ -236,7 +237,7 @@ export function SignIn({
     <div className="desktop desktop--center">
       <div className="win signin">
         <div className="win__title">
-          <span>{t("appName")}</span>
+          <BrandWordmark />
           <span className="spacer" />
           <TitleControls />
         </div>

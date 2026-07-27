@@ -8,6 +8,7 @@ import { CinderMascot } from "./Brand.js";
 import { type ContactSection, groupContacts, type SortMode } from "./contact-grouping.js";
 import { ContactRow } from "./ContactRow.js";
 import { messagePreview } from "./deck-sidebar.js";
+import { BrandWordmark } from "./BrandWordmark.js";
 import { hasRichStatus, renderStatus } from "./status-text.js";
 import { TitleControls } from "./TitleControls.js";
 import { avatarColor, initial } from "./util.js";
@@ -293,7 +294,7 @@ export function ContactListWindow(props: ContactListProps): JSX.Element {
   return (
     <div className="win contacts">
       <div className="win__title">
-        <span>{t("appName")}</span>
+        <BrandWordmark />
         <span className="spacer" />
         {/* 設定 ⚙ 已收斂到 idbar（ADR-0216）；此處不再放。 */}
         <TitleControls />

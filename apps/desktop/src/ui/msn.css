@@ -208,6 +208,9 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
   text-shadow: 0 1px 1px rgba(0, 0, 0, 0.25);
 }
 .win__title .spacer { flex: 1; }
+/* 品牌字樣連結（ADR-0250）：外連官網，但在標題列裡維持標題文字外觀（不藍字/不底線），hover 才提示可點。 */
+.win__brand { color: inherit; text-decoration: none; cursor: pointer; }
+.win__brand:hover { text-decoration: underline; }
 /* 本地暱稱（ADR-0148）：有暱稱時標頭名字可點切換廣播名，給點擊提示。 */
 .convo__name--toggle { cursor: pointer; }
 .convo__name--toggle:hover { text-decoration: underline dotted; text-underline-offset: 2px; }

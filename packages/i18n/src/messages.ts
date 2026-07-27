@@ -14,6 +14,8 @@ export const LOCALE_LABELS: Record<Locale, string> = {
 /** UI 訊息鍵；`{name}` / `{count}` 等為插值參數。 */
 export interface Messages {
   appName: string;
+  /** 品牌字樣的 tooltip（ADR-0250）：點擊外連官網。 */
+  brand_visitSite: string;
   signIn_title: string;
   signIn_hint: string;
   /** 瀏覽器本地密碼（ADR-0122）：必填——沒有它，重新整理一次身分就沒了。 */
@@ -746,6 +748,7 @@ export interface Messages {
 
 const zhHant: Messages = {
   appName: "Cinderous",
+  brand_visitSite: "前往官網",
   signIn_title: "登入 Cinderous",
   signIn_hint: "去中心化、端到端加密的即時通。輸入顯示名稱即可開始（你的身分是本機生成的 secp256k1 金鑰）。",
   signIn_password: "本機密碼",
@@ -1432,6 +1435,7 @@ const zhHant: Messages = {
 
 const en: Messages = {
   appName: "Cinderous",
+  brand_visitSite: "Visit website",
   signIn_title: "Sign in to Cinderous",
   signIn_hint: "A decentralized, end-to-end encrypted messenger. Just enter a display name to start (your identity is a secp256k1 key generated on this device).",
   signIn_password: "Local password",

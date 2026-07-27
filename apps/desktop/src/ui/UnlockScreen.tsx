@@ -1,6 +1,7 @@
 import { isBackupCode, parseBackupCode } from "@cinderous/core";
 import { useState } from "react";
 import { useI18n } from "../i18n.js";
+import { BrandWordmark } from "./BrandWordmark.js";
 import { CinderMark } from "./Brand.js";
 import { TitleControls } from "./TitleControls.js";
 
@@ -51,7 +52,7 @@ export function UnlockScreen({
     <div className="desktop desktop--center">
       <div className="win signin">
         <div className="win__title">
-          <span>{t("appName")}</span>
+          <BrandWordmark />
           <span className="spacer" />
           <TitleControls />
         </div>
@@ -126,7 +127,7 @@ function RescuePanel({ name, onRescue, onBack }: { name: string; onRescue: Rescu
     <div className="desktop desktop--center">
       <div className="win signin">
         <div className="win__title">
-          <span>{t("appName")}</span>
+          <BrandWordmark />
           <span className="spacer" />
           <TitleControls />
         </div>
