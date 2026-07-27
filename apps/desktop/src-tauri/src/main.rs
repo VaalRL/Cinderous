@@ -1035,6 +1035,42 @@ fn hide_to_tray(app: tauri::AppHandle) {
     }
 }
 
+/// 目前系統正在播放的媒體（ADR-0252）：Windows GSMTC 讀「播放中」工作階段的曲目。
+/// 純本機查詢、零網路；非 Windows／無播放／暫停中一律回 None（前端顯示偵測中）。
+#[tauri::command]
+fn now_playing_detect() -> Option<String> {
+    #[cfg(windows)]
+    {
+        gsmtc_now_playing()
+    }
+    #[cfg(not(windows))]
+    {
+        None
+    }
+}
+
+/// GSMTC 查詢本體：目前媒體工作階段（Spotify/瀏覽器/播放器都會註冊）→ 僅「播放中」
+/// 才回報，格式「演出者 — 曲名」（無演出者則只有曲名）。任何失敗都靜默回 None。
+#[cfg(windows)]
+fn gsmtc_now_playing() -> Option<String> {
+    use windows::Media::Control::{
+        GlobalSystemMediaTransportControlsSessionManager as Manager,
+        GlobalSystemMediaTransportControlsSessionPlaybackStatus as Playback,
+    };
+    let mgr = Manager::RequestAsync().ok()?.get().ok()?;
+    let session = mgr.GetCurrentSession().ok()?;
+    if session.GetPlaybackInfo().ok()?.PlaybackStatus().ok()? != Playback::Playing {
+        return None;
+    }
+    let props = session.TryGetMediaPropertiesAsync().ok()?.get().ok()?;
+    let title = props.Title().ok()?.to_string();
+    let artist = props.Artist().ok().map(|s| s.to_string()).unwrap_or_default();
+    if title.trim().is_empty() {
+        return None;
+    }
+    Some(if artist.trim().is_empty() { title } else { format!("{artist} — {title}") })
+}
+
 fn main() {
     // 反安裝「一併清空」（ADR-0203）：以 `--wipe-local` 啟動＝headless 清資料後結束，不開視窗。
     #[cfg(feature = "keyring")]
@@ -1133,7 +1169,8 @@ fn main() {
             write_slot_file,
             append_slot_index,
             quit_app,
-            hide_to_tray
+            hide_to_tray,
+            now_playing_detect
         ])
         .run(tauri::generate_context!())
         .expect("執行 Tauri 應用程式時發生錯誤");

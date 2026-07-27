@@ -502,6 +502,10 @@ export class RelayChatBackend implements ChatBackend {
   private readonly presence = new PresenceTracker();
   private readonly statuses = new Map<PubkeyHex, PresencePayload>();
   private nowPlaying = "";
+  /** np 封裝廣播節流（ADR-0252）：對「在線✕無 P2P」聯絡人的音樂更新最多每窗一次。 */
+  private static readonly NP_SEALED_GAP_MS = 5 * 60_000;
+  private npSealedAt = 0;
+  private npSealedTimer: ReturnType<typeof setTimeout> | undefined;
   /** 隱身（ADR-0088 (d)）：完全不廣播心跳（對 relay 與聯絡人皆顯示離線），但仍正常收發。 */
   private invisible = false;
   // 送達/已讀回條（ADR-0058）。
@@ -2365,10 +2369,25 @@ export class RelayChatBackend implements ChatBackend {
   }
 
   setNowPlaying(text: string): void {
+    // 無變化不重播（ADR-0252）：自動偵測輪詢與手動重複失焦的天然去重。
+    if (text === this.nowPlaying) return;
     // F5：音樂彙整進在線狀態；ADR-0129：改變時封裝送出（relay 不再明文看到你在聽什麼）。
     this.nowPlaying = text;
-    this.beat();
-    this.broadcastPresenceState();
+    this.beat(); // P2P 聯絡人即時直送（零 relay 成本）＋存活信標
+    // 封裝節流（ADR-0252）：自動偵測會讓「改變稀疏」的前提失效（每 3-4 分鐘換歌）。
+    // 「在線✕無 P2P」集合的封裝發佈壓在每 5 分鐘最多一次；窗內變更掛尾端補發最新值——
+    // 聽歌時段的額度增量上限 ≈ 12×K/小時（K＝該集合大小），對 P2P 聯絡人仍即時。
+    const since = Date.now() - this.npSealedAt;
+    if (since >= RelayChatBackend.NP_SEALED_GAP_MS) {
+      this.npSealedAt = Date.now();
+      this.broadcastPresenceState();
+    } else if (this.npSealedTimer === undefined) {
+      this.npSealedTimer = setTimeout(() => {
+        this.npSealedTimer = undefined;
+        this.npSealedAt = Date.now();
+        this.broadcastPresenceState();
+      }, RelayChatBackend.NP_SEALED_GAP_MS - since);
+    }
   }
 
   /**
@@ -3469,6 +3488,7 @@ export class RelayChatBackend implements ChatBackend {
 
   stop(): void {
     if (this.heartbeatTimer) clearTimeout(this.heartbeatTimer);
+    if (this.npSealedTimer !== undefined) clearTimeout(this.npSealedTimer);
     if (this.renderTimer) clearInterval(this.renderTimer);
     if (this.pumpTimer) clearInterval(this.pumpTimer);
     if (this.snapTimer) clearInterval(this.snapTimer);

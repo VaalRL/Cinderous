@@ -379,6 +379,9 @@ export interface Messages {
   lang_label: string;
   theme_toggle: string;
   nowPlaying_placeholder: string;
+  /** ♪ 自動偵測切換（ADR-0252，僅桌面 Tauri）。 */
+  npAuto_toggle: string;
+  npAuto_detecting: string;
   settings_open: string;
   settings_title: string;
   settings_relayUrl: string;
@@ -1088,6 +1091,8 @@ const zhHant: Messages = {
   lang_label: "語言",
   theme_toggle: "深色 / 淺色模式",
   nowPlaying_placeholder: "正在聽…（分享音樂狀態）",
+  npAuto_toggle: "點擊切換：自動偵測正在播放的音樂",
+  npAuto_detecting: "偵測中…（沒在播放音樂）",
   settings_open: "設定",
   settings_title: "設定",
   settings_relayUrl: "中繼站",
@@ -1775,6 +1780,8 @@ const en: Messages = {
   lang_label: "Language",
   theme_toggle: "Toggle dark mode",
   nowPlaying_placeholder: "Now playing… (share your music)",
+  npAuto_toggle: "Click to toggle: auto-detect playing music",
+  npAuto_detecting: "Detecting… (nothing playing)",
   settings_open: "Settings",
   settings_title: "Settings",
   settings_relayUrl: "Relay",

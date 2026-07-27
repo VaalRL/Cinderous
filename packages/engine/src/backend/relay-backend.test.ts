@@ -2934,6 +2934,64 @@ describe("在線狀態內容改走封裝（ADR-0129）", () => {
     me.stop();
     stranger.stop();
   });
+
+  describe("np 封裝廣播節流（ADR-0252）", () => {
+    afterEach(() => vi.useRealTimers());
+
+    /** pairOnline＋wiretap：記錄 a 對 relay 發布的所有事件（含封裝 21004）。 */
+    const tapPair = () => {
+      const seen: NostrEvent[] = [];
+      const net = createInMemoryRelayNetwork();
+      const wiretap = (h: RelayClientHandlers): CloseableRelayClient => {
+        const c = net.connect("a", h) as CloseableRelayClient;
+        const publish = c.publish.bind(c);
+        c.publish = (e: NostrEvent) => {
+          seen.push(e);
+          publish(e);
+        };
+        return c;
+      };
+      const a = new RelayChatBackend(new MemoryStorage(), wiretap, "Alice");
+      const b = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("b", h), "Bob");
+      const bSees: { pubkey: string; status: string; statusMessage: string; nowPlaying: string }[][] = [];
+      a.start(noop);
+      b.start({ ...noop, onContacts: onContacts(bSees) });
+      a.addContact(b.selfNpub);
+      b.acceptRequest(a.self.pubkey);
+      a.setStatus("online");
+      b.setStatus("online");
+      return { a, b, seen, bSees };
+    };
+    /** 封裝在線狀態（kind 21004，見 core presence-signal）的發布數。 */
+    const sealedCount = (seen: NostrEvent[]) => seen.filter((e) => e.kind === 21004).length;
+
+    it("相同文字重複 set＝no-op：不發任何新事件（自動偵測輪詢的天然去重）", () => {
+      const { a, b, seen } = tapPair();
+      a.setNowPlaying("同一首歌");
+      const after = seen.length;
+      a.setNowPlaying("同一首歌");
+      expect(seen.length).toBe(after);
+      a.stop();
+      b.stop();
+    });
+
+    it("🔴 換歌節流：窗內變更不立即封裝、窗到尾端補發**最新值**；P2P 之外每窗最多一則", () => {
+      vi.useFakeTimers();
+      const { a, b, seen, bSees } = tapPair();
+      const base = sealedCount(seen);
+      a.setNowPlaying("第一首");
+      expect(sealedCount(seen)).toBe(base + 1); // 窗外第一次：立即封裝
+      expect(latest(bSees, a.self.pubkey)?.nowPlaying).toBe("第一首");
+      a.setNowPlaying("第二首");
+      a.setNowPlaying("第三首");
+      expect(sealedCount(seen)).toBe(base + 1); // 窗內：封裝不再增加（P2P/信標不受影響）
+      vi.advanceTimersByTime(5 * 60_000);
+      expect(sealedCount(seen)).toBe(base + 2); // 尾端補發一次
+      expect(latest(bSees, a.self.pubkey)?.nowPlaying).toBe("第三首"); // 補的是最新值
+      a.stop();
+      b.stop();
+    });
+  });
 });
 
 describe("早到的群訊：緩存＋加入後重放（ADR-0131）", () => {

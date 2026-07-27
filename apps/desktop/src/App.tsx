@@ -168,6 +168,7 @@ import {
 import { createPairingOffer, runPairSource, runPairTarget, webRtcPairTransport } from "@cinderous/engine";
 import { applyPairBundle } from "@cinderous/engine";
 import { PairDeviceModal, type PairPhase } from "./ui/PairDeviceModal.js";
+import { detectNowPlaying, npAutoEnabled, setNpAutoEnabled } from "./native/now-playing.js";
 import { SettingsPanel } from "./ui/SettingsPanel.js";
 import { ThemeToggleButton } from "./ui/ThemeToggleButton.js";
 import { useRegisterIdentityControls, useRegisterSettingsOpener } from "./titlebar.js";
@@ -599,6 +600,38 @@ export function App(): JSX.Element {
   const setExportOpen = (open: boolean) => setExportPreselect(open ? [] : null);
   const [addIdOpen, setAddIdOpen] = useState(false);
   const [rosterOpen, setRosterOpen] = useState(false);
+  // 正在聽自動偵測（ADR-0252）：♪ 切換、opt-in 預設關（裝置偏好）；Tauri 限定（瀏覽器讀不到系統媒體）。
+  const [npAuto, setNpAuto] = useState(npAutoEnabled);
+  const [npAutoText, setNpAutoText] = useState("");
+  // 輪詢（ADR-0252）：開啟且已登入時每 15 秒查一次本機媒體（零網路）；變更才進後端
+  // ——引擎端另有同文去重＋封裝節流（P2P 即時、非 P2P 每 5 分鐘一次）。
+  useEffect(() => {
+    if (!npAuto || !isTauri() || !backend) return;
+    let last: string | null = null;
+    let live = true;
+    const poll = async () => {
+      const np = await detectNowPlaying();
+      if (!live || np === last) return;
+      last = np;
+      setNpAutoText(np ?? "");
+      backend.setNowPlaying(np ?? "");
+    };
+    void poll();
+    const timer = setInterval(() => void poll(), 15_000);
+    return () => {
+      live = false;
+      clearInterval(timer);
+    };
+  }, [npAuto, backend]);
+  const toggleNpAuto = (): void => {
+    const next = !npAuto;
+    setNpAutoEnabled(next);
+    setNpAuto(next);
+    if (!next) {
+      setNpAutoText("");
+      backend?.setNowPlaying(""); // 關閉＝清掉正在聽，不殘留最後偵測到的曲目
+    }
+  };
   const [policy, setPolicy] = useState<OrgPolicy>({});
   /** 組織資訊（ADR-0157）：採用名冊時由引擎發出；null＝非工作身分或尚未採用。 */
   const [orgInfo, setOrgInfo] = useState<OrgInfo | null>(null);
@@ -2399,6 +2432,7 @@ export function App(): JSX.Element {
             onStatus={setStatus}
             onStatusMessage={setStatusMessage}
             onNowPlaying={(text) => activeBackend.setNowPlaying(text)}
+            {...(isTauri() ? { npAuto, npAutoText, onToggleNpAuto: toggleNpAuto } : {})}
             onAddLabel={(id, label) => updatePrefs(withLabel(groupPrefs, id, label))}
             onRemoveLabel={(id, label) => updatePrefs(withoutLabel(groupPrefs, id, label))}
             labelOptions={allLabels(groupPrefs)}
@@ -2420,6 +2454,7 @@ export function App(): JSX.Element {
             onSelfAvatar={broadcastSelfAvatar}
             onOpenSettings={() => setSettingsOpen(true)}
             onNowPlaying={(text) => activeBackend.setNowPlaying(text)}
+            {...(isTauri() ? { npAuto, npAutoText, onToggleNpAuto: toggleNpAuto } : {})}
             unread={unread}
             {...(ollama.enabled ? { onSummarize: summarizeUnread } : {})}
             connection={conn}

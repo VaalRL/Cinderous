@@ -801,6 +801,10 @@ button:disabled { opacity: .5; cursor: default; filter: none; }
 .me__np { display: flex; align-items: center; gap: 4px; margin-top: 3px; }
 .me__np-ic { color: #9a6cd4; font-size: 12px; }
 .me__np input { flex: 1; min-width: 0; }
+/* ♪ 自動偵測切換（ADR-0252）：按鈕化的 ♪；開啟時主色高亮＋偵測文字取代輸入框。 */
+.me__np-auto { background: none; border: none; padding: 0 2px; cursor: pointer; font: inherit; font-size: 12px; }
+.me__np-auto--on { color: var(--accent); font-weight: 700; }
+.me__np-live { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; color: var(--muted); font-style: italic; }
 
 /* 設定面板 */
 .modal { position: fixed; inset: 0; background: rgba(0,0,0,.35); display: flex; align-items: center; justify-content: center; z-index: 50; }

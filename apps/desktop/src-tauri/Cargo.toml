@@ -28,7 +28,7 @@ required-features = ["tauri-app"]
 default = ["passlock"] # passlock 已含 encstore
 
 # 完整 Tauri 桌面二進位（需 Tauri 工具鏈與 webkit2gtk 等系統庫）。
-tauri-app = ["dep:tauri", "dep:tauri-plugin-notification", "dep:tauri-plugin-single-instance", "dep:tauri-build", "dep:reqwest", "dep:rfd", "keyring", "encstore", "passlock"]
+tauri-app = ["dep:tauri", "dep:tauri-plugin-notification", "dep:tauri-plugin-single-instance", "dep:tauri-build", "dep:reqwest", "dep:rfd", "dep:windows", "keyring", "encstore", "passlock"]
 # OS 金鑰庫（B5，ADR-0053）：私鑰託管於作業系統安全儲存。
 # **不放進 default**：其測試會存取真實 OS 金鑰庫，在 CI 容器裡不可用。
 keyring = ["dep:keyring"]
@@ -57,6 +57,11 @@ sha2 = { version = "0.10", optional = true, default-features = false }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"], optional = true }
 # 收檔另存的原生「另存新檔」對話框（ADR-0093）；自帶原生對話框、不需 Tauri ACL。
 rfd = { version = "0.15", optional = true }
+
+# 正在聽自動偵測（ADR-0252）：Windows GSMTC 讀系統媒體工作階段（純本機查詢、零網路）。
+# 與 tauri 依賴樹共版（0.61）避免重複編譯；僅 Windows 目標生效，其他平台此依賴不存在。
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", optional = true, features = ["Media_Control", "Foundation"] }
 
 [build-dependencies]
 tauri-build = { version = "2", optional = true , features = [] }

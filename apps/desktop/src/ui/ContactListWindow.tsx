@@ -149,6 +149,12 @@ export interface ContactListProps {
   onOpenSettings?: () => void;
   /** 設定自己的音樂狀態（分享正在聽的音樂）。 */
   onNowPlaying?: (text: string) => void;
+  /** 自動偵測正在聽（ADR-0252）：切換開關；僅 Tauri 提供（瀏覽器讀不到系統媒體）。 */
+  onToggleNpAuto?: () => void;
+  /** 自動偵測目前是否開啟。 */
+  npAuto?: boolean;
+  /** 自動偵測到的曲目（顯示用；空＝偵測中/無播放）。 */
+  npAutoText?: string;
   /** 每位聯絡人的未讀訊息數。 */
   unread?: Record<string, number>;
   /** 點開對話前以本機 AI 摘要未讀（ADR-0060）；提供且有未讀時顯示 🧠。 */
@@ -331,15 +337,37 @@ export function ContactListWindow(props: ContactListProps): JSX.Element {
           ) : null}
           {props.onNowPlaying ? (
             <div className="me__np">
-              <span className="me__np-ic">♪</span>
-              <input
-                aria-label={t("nowPlaying_placeholder")}
-                placeholder={t("nowPlaying_placeholder")}
-                onBlur={(e) => props.onNowPlaying?.(e.target.value.trim())}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-                }}
-              />
+              {/* ♪ 點擊切換自動偵測（ADR-0252）：僅 Tauri 提供 onToggleNpAuto；開啟時主色高亮、
+                  輸入框換成偵測顯示（唯讀）。瀏覽器維持純手動（無切換鈕）。 */}
+              {props.onToggleNpAuto ? (
+                <button
+                  type="button"
+                  className={`me__np-ic me__np-auto${props.npAuto ? " me__np-auto--on" : ""}`}
+                  title={t("npAuto_toggle")}
+                  aria-label={t("npAuto_toggle")}
+                  aria-pressed={!!props.npAuto}
+                  data-testid="np-auto-toggle"
+                  onClick={props.onToggleNpAuto}
+                >
+                  ♪
+                </button>
+              ) : (
+                <span className="me__np-ic">♪</span>
+              )}
+              {props.npAuto ? (
+                <span className="me__np-live" data-testid="np-auto-live">
+                  {props.npAutoText || t("npAuto_detecting")}
+                </span>
+              ) : (
+                <input
+                  aria-label={t("nowPlaying_placeholder")}
+                  placeholder={t("nowPlaying_placeholder")}
+                  onBlur={(e) => props.onNowPlaying?.(e.target.value.trim())}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") (e.target as HTMLInputElement).blur();
+                  }}
+                />
+              )}
             </div>
           ) : null}
         </div>
