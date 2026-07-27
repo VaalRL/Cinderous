@@ -392,9 +392,11 @@ export function SignIn({
             <button onClick={submit}>{entering ? t("signIn_enterExisting") : t("signIn_createButton")}</button>
           )}
 
-          {/* 用既有 nsec 登入（ADR-0122）：忘記密碼、或在舊版被換掉身分的人的出路。 */}
+          {/* 用既有 nsec 登入（ADR-0122）：忘記密碼、或在舊版被換掉身分的人的出路。
+              次要動作用幽靈鈕（ADR-0251）：settings__reveal 是幽靈 class（無 CSS 規則），
+              先前 fallback 成主色實心與「登入」搶視覺——改與兄弟「從其他裝置登入」同語言。 */}
           {!invite && onEnterNsec && !nsecOpen ? (
-            <button className="settings__reveal" data-testid="nsec-open" onClick={() => setNsecOpen(true)}>
+            <button className="signin__secondary" data-testid="nsec-open" onClick={() => setNsecOpen(true)}>
               {t("signIn_useNsec")}
             </button>
           ) : null}

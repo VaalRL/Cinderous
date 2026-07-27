@@ -43,4 +43,13 @@ describe("UnlockScreen（ADR-0067 本地密碼解鎖）", () => {
     expect(out).toContain("用其他身分登入");
     expect(render()).not.toContain('data-testid="unlock-switch"');
   });
+
+  it("逃生口降級為細字連結（ADR-0251）：解鎖獨佔主色、文案縮短", () => {
+    const out = render({ onRescue: async () => true, onSwitch: () => {} });
+    // 兩顆逃生口掛底線連結語言（signin__relaytoggle），不再 fallback 到 .signin button 主色實心
+    expect(out.match(/signin__relaytoggle signin__escape/g)?.length).toBe(2);
+    expect(out).not.toContain("settings__reveal"); // 幽靈 class（無 CSS 規則）退場
+    expect(out).toContain("忘記密碼？"); // 細節說明留在救援面板 rescue_hint，按鈕不再 16 字
+    expect(out).not.toContain("救援登入碼登入回來");
+  });
 });

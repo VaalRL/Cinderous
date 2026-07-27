@@ -405,6 +405,8 @@ button:disabled { opacity: .5; cursor: default; filter: none; }
 /* 登入頁主要動作按鈕改直向堆疊＋間隔（登入／用 nsec 登入／從舊裝置登入不再並排黏一起）。 */
 .signin button { display: block; width: fit-content; margin: 12px auto 0; }
 .signin .signin__relaytoggle { display: inline; }
+/* 解鎖畫面逃生口（ADR-0251）：同底線細字連結語言，但各自成行置中、與主鈕留距。 */
+.signin .signin__escape { display: block; margin: 10px auto 0; }
 
 /* ── 聯絡人清單 ── */
 .contacts { width: 300px; display: flex; flex-direction: column; max-height: 80vh; }

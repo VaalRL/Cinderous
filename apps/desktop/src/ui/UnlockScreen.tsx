@@ -76,13 +76,14 @@ export function UnlockScreen({
           <button onClick={() => void submit()} disabled={!password || busy}>
             {t("unlock_button")}
           </button>
+          {/* 逃生口降級為細字連結（ADR-0251）：主色實心只留「解鎖」，重用登入頁的次要動作語言。 */}
           {onRescue ? (
-            <button className="settings__reveal" data-testid="unlock-forgot" onClick={() => setRescue(true)}>
+            <button className="signin__relaytoggle signin__escape" data-testid="unlock-forgot" onClick={() => setRescue(true)}>
               {t("unlock_forgot")}
             </button>
           ) : null}
           {onSwitch ? (
-            <button className="settings__reveal" data-testid="unlock-switch" onClick={onSwitch} disabled={busy}>
+            <button className="signin__relaytoggle signin__escape" data-testid="unlock-switch" onClick={onSwitch} disabled={busy}>
               {t("unlock_switch")}
             </button>
           ) : null}
@@ -170,7 +171,7 @@ function RescuePanel({ name, onRescue, onBack }: { name: string; onRescue: Rescu
           <button data-testid="rescue-submit" onClick={submit} disabled={!ready || busy}>
             {busy ? t("rescue_busy") : t("rescue_submit")}
           </button>
-          <button className="settings__reveal" onClick={onBack} disabled={busy}>
+          <button className="signin__relaytoggle signin__escape" onClick={onBack} disabled={busy}>
             {t("rescue_back")}
           </button>
         </div>
