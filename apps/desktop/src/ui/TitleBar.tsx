@@ -6,6 +6,7 @@
 
 import { useEffect, useState } from "react";
 import { useI18n } from "../i18n.js";
+import { ThemeToggleButton } from "./ThemeToggleButton.js";
 import {
   DEFAULT_TITLEBAR_CONTROLS,
   type ControlId,
@@ -123,6 +124,13 @@ export function TitleBar(props: {
         Cinderous
       </span>
       <span className="titlebar__spacer" data-tauri-drag-region />
+      {/* 明暗切換（ADR-0249）：三欄＋Tauri 時 idbar 不畫（身分已上移標題列），這裡補上明暗鈕
+          ——否則 Tauri 三欄同樣沒有快速切換。gate on identityControls＝僅三欄＋Tauri，不在經典重複。 */}
+      {identityControls ? (
+        <div className="titlebar__controls">
+          <ThemeToggleButton className="titlebar__btn titlebar__btn--theme" testId="titlebar-theme" tabIndex={-1} />
+        </div>
+      ) : null}
       {strip(controls.right)}
     </div>
   );

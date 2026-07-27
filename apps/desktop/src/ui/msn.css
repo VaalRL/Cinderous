@@ -259,7 +259,7 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
   border: 1px solid var(--border); border-radius: 6px;
   background: var(--field); color: var(--ink); font-size: 12px; padding: 0 6px; cursor: pointer;
 }
-.titlebar__btn--addid, .titlebar__btn--unlockhidden, .titlebar__btn--roster { width: 30px; font-size: 13px; color: var(--ink); }
+.titlebar__btn--addid, .titlebar__btn--unlockhidden, .titlebar__btn--roster, .titlebar__btn--theme { width: 30px; font-size: 13px; color: var(--ink); }
 
 /* 標題列按鈕風格（ADR-0167）：flat＝上方預設，以下三種可於設定切換。 */
 /* rounded：圓角膠囊懸停底、按鈕間留白。 */

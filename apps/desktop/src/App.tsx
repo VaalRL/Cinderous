@@ -169,6 +169,7 @@ import { createPairingOffer, runPairSource, runPairTarget, webRtcPairTransport }
 import { applyPairBundle } from "@cinderous/engine";
 import { PairDeviceModal, type PairPhase } from "./ui/PairDeviceModal.js";
 import { SettingsPanel } from "./ui/SettingsPanel.js";
+import { ThemeToggleButton } from "./ui/ThemeToggleButton.js";
 import { useRegisterIdentityControls, useRegisterSettingsOpener } from "./titlebar.js";
 import { dialog, useDialog } from "./ui/Dialog.js";
 import { ExportModal, type ExportConvoItem } from "./ui/ExportModal.js";
@@ -2344,6 +2345,10 @@ export function App(): JSX.Element {
               ⚙️
             </button>
           ) : null}
+          {/* 明暗切換（ADR-0249）：三欄 idbar 是瀏覽器版三欄唯一的頂部 chrome——經典佈局的明暗鈕
+              在聯絡人視窗標題列、三欄沒有。補在此讓瀏覽器三欄也能快速切換；gate on modern 以免
+              經典 idbar 與聯絡人視窗重複（Tauri 三欄無 idbar，改由原生標題列提供）。 */}
+          {layout === "modern" ? <ThemeToggleButton className="idbar__add idbar__theme" testId="idbar-theme" /> : null}
         </div>
       ) : null}
       {addIdOpen ? (
