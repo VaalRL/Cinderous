@@ -635,12 +635,17 @@ export function App(): JSX.Element {
   const [policy, setPolicy] = useState<OrgPolicy>({});
   /** 組織資訊（ADR-0157）：採用名冊時由引擎發出；null＝非工作身分或尚未採用。 */
   const [orgInfo, setOrgInfo] = useState<OrgInfo | null>(null);
-  /** 入職金鑰託管（ADR-0163，企業主端）：依作用中身分載入。 */
+  /**
+   * 入職金鑰託管（ADR-0163，企業主端）：依作用中身分載入。
+   *
+   * ADR-0254 起清單以企業主 sk 導出的金鑰加密落盤，故**改依 backend 載入**（而非只看
+   * `profilesState.active`）——沒有 nsec 就沒有解密金鑰，此時保持空清單。
+   */
   const [escrow, setEscrow] = useState<EscrowEntry[]>([]);
   useEffect(() => {
-    const pk = profilesState.active;
-    setEscrow(pk ? loadEscrow(pk) : []);
-  }, [profilesState.active]);
+    const nsec = backend?.selfNsec;
+    setEscrow(backend && nsec ? loadEscrow(backend.self.pubkey, nsecDecode(nsec)) : []);
+  }, [backend]);
   /** 公司儲存槽（ADR-0161）：員工端待存放佇列＋企業主端槽目錄（依身分載入）。 */
   const [slotQueue, setSlotQueue] = useState<SlotItem[]>([]);
   const [slotDirVal, setSlotDirVal] = useState("");
@@ -1184,12 +1189,15 @@ export function App(): JSX.Element {
       onPolicy: setPolicy,
       onOrgEscrow: (e) => {
         // ADR-0163：公司帳號成員入職託管的私鑰 → 持久化（依管理者身分），供日後離職接管。
+        // ADR-0254：加密落盤，故需企業主 sk；且**以磁碟為準做讀-改-寫**——託管在清單載入前
+        // 就到達時（backend 剛起、escrow 尚為空），拿 React state 當基底會把既有條目蓋掉。
         const adminPk = backend.self.pubkey;
-        setEscrow((prev) => {
-          const next = upsertEscrow(prev, { ...e, at: Date.now() });
-          saveEscrow(adminPk, next);
-          return next;
-        });
+        const nsec = backend.selfNsec;
+        if (!nsec) return; // 無身分私鑰＝無法加密落盤；寧可不存也不明文落地
+        const sk = nsecDecode(nsec);
+        const next = upsertEscrow(loadEscrow(adminPk, sk), { ...e, at: Date.now() });
+        saveEscrow(adminPk, sk, next);
+        setEscrow(next);
       },
       onSlotDeposit: (sender, dep) => {
         // 公司儲存槽（ADR-0161，企業主端）：靜默落盤（無通知）；槽目錄未設＝appData 預設槽。
@@ -2528,11 +2536,12 @@ export function App(): JSX.Element {
                 void addIdentity(`離職·${e.name}`, e.relayUrl, false, { nsec: e.nsec, orgOffboarded: true });
               },
               onDeleteEscrow: (pubkey: string) => {
-                setEscrow((prev) => {
-                  const next = removeEscrow(prev, pubkey);
-                  saveEscrow(backend.self.pubkey, next);
-                  return next;
-                });
+                const nsec = backend.selfNsec;
+                if (!nsec) return;
+                const sk = nsecDecode(nsec);
+                const next = removeEscrow(loadEscrow(backend.self.pubkey, sk), pubkey); // 以磁碟為準（ADR-0254）
+                saveEscrow(backend.self.pubkey, sk, next);
+                setEscrow(next);
               },
             };
           })()}
