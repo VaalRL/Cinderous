@@ -124,7 +124,8 @@ export function parseHosts(text) {
  * **純函式**：把一個來源的各 feed 結果合併成聯集，並算出要寫回的逐-feed 記憶。
  *
  * @param feeds     來源宣告的 feed 網址順序
- * @param freshByFeed  本次抓取結果 `{ feedUrl: string[] | null }`（null＝抓失敗）
+ * @param freshByFeed  本次抓取結果 `{ feedUrl: string[] | null }`（null＝抓失敗；**空陣列視同失敗**——
+ *                     合法 hosts feed 不可能是 0 筆，200-but-empty＝格式改版或錯誤頁，不得覆寫記憶）
  * @param cache     上次的逐-feed 記憶 `{ feedUrl: string[] }`
  * @returns `{ domains, feedMemory }`：
  *          - `domains`：去重排序後的聯集；**全 feed 皆失敗且完全無記憶時為 null**（呼叫端保留上一版）。
@@ -136,8 +137,11 @@ export function unionWithMemory(feeds, freshByFeed, cache = {}) {
   let anyFresh = false;
   for (const feed of feeds) {
     const fresh = freshByFeed[feed];
-    const feedDomains = fresh ?? cache[feed] ?? [];
-    if (fresh) anyFresh = true;
+    // 空陣列視同失敗（審查修正）：否則 200-but-empty 會把 last-known-good 覆寫成空、
+    // 聯集靜默縮水（縮幅小於護欄門檻時完全無警訊）——正是逐-feed 記憶要防的事。
+    const usable = fresh && fresh.length > 0 ? fresh : null;
+    const feedDomains = usable ?? cache[feed] ?? [];
+    if (usable) anyFresh = true;
     feedMemory[feed] = feedDomains;
     for (const d of feedDomains) union.add(d);
   }
@@ -159,7 +163,14 @@ async function fetchFeed(feed) {
       console.warn(`  ⚠ ${feed} → HTTP ${res.status}`);
       return null;
     }
-    return [...parseHosts(await res.text())];
+    const parsed = [...parseHosts(await res.text())];
+    // 200 但解析 0 筆＝格式改版或錯誤頁（合法 hosts feed 不會是 0 筆）——視為失敗，
+    // 讓逐-feed 記憶接手；unionWithMemory 亦有同語意防線（雙層，審查修正）。
+    if (parsed.length === 0) {
+      console.warn(`  ⚠ ${feed} → HTTP 200 但解析 0 筆（格式改版/錯誤頁？）——視為失敗`);
+      return null;
+    }
+    return parsed;
   } catch (err) {
     console.warn(`  ⚠ ${feed} → ${err?.message ?? err}`);
     return null;

@@ -62,6 +62,17 @@ describe("unionWithMemory（多-feed 聯集＋逐-feed 記憶）", () => {
     assert.deepEqual(feedMemory.A, ["fresh.tld"]);
     assert.deepEqual(feedMemory.B, ["remembered.tld"]);
   });
+
+  it("fresh=[]（200 但解析 0 筆）視同失敗：不覆寫記憶、聯集不縮水（審查修正）", () => {
+    const { domains, feedMemory } = unionWithMemory(feeds, { A: [], B: ["c.tld"] }, { A: ["a.tld", "b.tld"] });
+    assert.deepEqual(domains, ["a.tld", "b.tld", "c.tld"]); // A 的記憶仍在聯集
+    assert.deepEqual(feedMemory.A, ["a.tld", "b.tld"]); // 記憶未被空陣列清空
+  });
+
+  it("全 feed 皆空陣列且無記憶：回 null（不把來源寫成空）", () => {
+    const { domains } = unionWithMemory(feeds, { A: [], B: [] }, {});
+    assert.equal(domains, null);
+  });
 });
 
 describe("guardTripped（變動量護欄）", () => {
