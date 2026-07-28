@@ -56,8 +56,31 @@ Termux relay 與客戶端是獨立程序；同機連 `ws://127.0.0.1:8787`（瀏
 
 ### 3.3 電腦客戶端連家庭 relay
 - **同一網路**：桌面版填 `ws://<手機IP>:8787` 即通（Tauri 不受 mixed-content 限制）。手機開熱點時 IP 固定 `192.168.x.1`。
-- **跨網路**：家用寬頻可設路由器 port-forward（＋DDNS）；或兩端裝 Tailscale/WireGuard 填隧道 IP（進階）。行動網路下的手機＝CGNAT，無法入站——這正是「插電在家」勝過「帶著走」的原因。
-- **瀏覽器版電腦端連不上**：https 頁面連非 localhost 的 `ws://` 被 mixed content 擋（wss 需憑證，家庭場景不划算）→ 電腦端用桌面版。
+- **瀏覽器版電腦端連不上裸 ws**：https 頁面連非 localhost 的 `ws://` 被 mixed content 擋 → 電腦端用桌面版，或走 §3.5 的 Cloudflare Tunnel 取得 wss。
+- **跨網路（外網連入）**：見 §3.5 專節。
+
+### 3.5 外網連入：三條路
+
+| 方案 | 難度 | 傳輸加密 | 穿 CGNAT | 適合 |
+| --- | --- | --- | --- | --- |
+| **① Tailscale（推薦）** | 🟢 最低 | ✅ WireGuard | ✅ | 自己＋家人的裝置 |
+| **② Cloudflare Tunnel** | 🟡 中 | ✅ wss（至 CF 邊緣） | ✅ | 開放給朋友、或瀏覽器版客戶端 |
+| **③ Port-forward＋DDNS** | 🟡 中 | ❌ 裸 ws | ❌ 需家用寬頻有公網 IP | 技術控 |
+
+- **① Tailscale**：手機（Android app）＋各客戶端裝置登同一 tailnet → 任何地方填
+  `ws://<tailscale IP>:8787`（MagicDNS 可給穩定名稱）。零路由器設定、穿 CGNAT、隧道本身
+  即 WireGuard 加密（順帶解掉裸 ws 疑慮）；relay 綁所有介面故 Termux 端零改動。
+  限制：每台要連的裝置都須在 tailnet 內——「自己＋家人」剛好，陌生人不行。
+- **② Cloudflare Tunnel**：Termux `pkg install cloudflared` → tunnel 指 `localhost:8787` →
+  綁 CF 網域得 `wss://relay.<網域>`。不開入站 port、穿 CGNAT、**真 wss**（瀏覽器版客戶端
+  也能連）。誠實取捨：TLS 於 CF 邊緣終止——訊息內容仍為 E2E 密文，但連線層元資料
+  （誰何時連）CF 可見，與純自架的資料主權敘事有所折衷。
+- **③ Port-forward＋DDNS**：路由器轉發 TCP 8787 → 手機固定區網 IP＋DDNS。前提是家用寬頻
+  有公網 IPv4（部分 ISP／4G 家用寬頻為 CGNAT 即不通）。裸 `ws://` 走公網：內容有 E2E
+  保護（relay 本就只見密文），但傳輸層無加密——要 wss 得再架反代＋憑證，家庭場景不划算，
+  有此需求直接用 ①②。
+- **安全底線（已內建，維持預設即可）**：`REQUIRE_AUTH` 預設開（NIP-42 擋匿名讀取）＋
+  速率限制等濫用防護（ADR-0235 H1，與雲端版同一組常數）。
 
 ### 3.4 iOS 🔴
 無 Termux 等價物；背景常駐伺服器被系統掛起策略與 App Store 政策雙重封死。不做。
