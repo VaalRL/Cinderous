@@ -71,6 +71,8 @@ export interface Messages {
   // ── 行動端 app 殼：聊天清單＋對話（ADR-0085）──
   mobileChats_title: string;
   mobileChats_empty: string;
+  /** 聊天清單搜尋（ADR-0256 階段 4）。 */
+  mobileChats_search: string;
   mobileChats_you: string;
   mobileConvo_input: string;
   mobileConvo_send: string;
@@ -822,6 +824,7 @@ const zhHant: Messages = {
   mobilePair_toNsec: "改用私鑰登入",
   mobileChats_title: "聊天",
   mobileChats_empty: "還沒有對話。加個好友或建立群組就會出現在這裡。",
+  mobileChats_search: "搜尋（名稱或訊息）",
   mobileChats_you: "你：",
   mobileConvo_input: "輸入訊息…",
   mobileConvo_send: "送出",
@@ -1528,6 +1531,7 @@ const en: Messages = {
   mobilePair_toNsec: "Use secret key sign-in",
   mobileChats_title: "Chats",
   mobileChats_empty: "No conversations yet. Add a friend or create a group and it'll show up here.",
+  mobileChats_search: "Search (name or messages)",
   mobileChats_you: "You: ",
   mobileConvo_input: "Message…",
   mobileConvo_send: "Send",

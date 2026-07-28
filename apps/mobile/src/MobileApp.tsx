@@ -1339,6 +1339,7 @@ export function MobileApp({
       {tab === "chats" ? (
         <ChatsListScreen
           entries={entries}
+          convos={convos}
           onOpen={openConvo}
           {...(relayUrl
             ? {

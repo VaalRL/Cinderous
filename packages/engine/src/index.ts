@@ -5,6 +5,7 @@
 // ── 前端↔通訊契約與 DTO ──
 export * from "./backend/types.js";
 export * from "./backend/thread-util.js";
+export * from "./backend/search-util.js";
 // ── 通訊後端實作 ──
 export * from "./backend/relay-backend.js";
 export * from "./backend/browser-backend.js";
