@@ -135,10 +135,13 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
 .desktop .convotab { display: contents; }
 .deck .convotab { display: none; }
 .deck .convotab.on { display: flex; flex: 1; min-height: 0; }
-.convo-dock--embed { flex: 1; min-height: 0; width: 100%; height: 100%; align-items: stretch; }
+/* 選擇器刻意疊 class 提高 specificity（審查修正）：這兩條覆寫寫在檔案前段，而 .convo/.convo-dock
+   的基礎規則（height: 460px／align-items: flex-start）在後段——同分時後者贏，內嵌對話會被
+   釘在 460px 高、下方露出中欄背景（撐滿中欄的設計意圖被反殺）。 */
+.convo-dock.convo-dock--embed { flex: 1; min-height: 0; width: 100%; height: 100%; align-items: stretch; }
 /* 內嵌對話（三欄中欄，ADR-0079/0143）：整塊填滿中欄，**不再是浮動視窗**——
    去掉外框/圓角/陰影/視窗底色，標題列改為扁平的對話標頭（非彩色視窗標題列）。 */
-.convo--embed {
+.convo.convo--embed {
   flex: 1; min-height: 0; width: auto; height: auto;
   border: none; border-radius: 0; box-shadow: none; background: var(--panel);
 }
