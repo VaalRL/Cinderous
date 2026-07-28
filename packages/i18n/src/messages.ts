@@ -524,6 +524,16 @@ export interface Messages {
   cal_none: string;
   cal_by: string;
   cal_byYou: string;
+  /**
+   * 行動端專用（ADR-0261）：手機沒有 `datetime-local`，改用相對調整鈕，故多這幾個字串。
+   * `cal_durNone` ＝不設結束時間（單點行程）。
+   */
+  cal_durLabel: string;
+  cal_durNone: string;
+  cal_dur1h: string;
+  cal_dur2h: string;
+  cal_durAllDay: string;
+  cal_adjHint: string;
   /** NIP-62 清除請求（ADR-0256）。 */
   /** 贊助此節點角落卡（ADR-0089／0258）。 */
   sponsor_title: string;
@@ -1041,7 +1051,7 @@ const zhHant: Messages = {
   aux_tabMedia: "媒體",
   aux_tabThreads: "對話串",
   aux_tabNote: "便條",
-  aux_title: "對話輔助（媒體／對話串／便條）",
+  aux_title: "對話輔助（媒體／對話串／便條／行程）",
   note_placeholder: "便條…（記筆記；最後一行輸入算式如 12*8 會自動算出）",
   note_hint: "私人便條，每個對話一張，只存在這台裝置（不廣播、不上雲）。輸入算式會自動辨識，可插入對話。",
   note_placeholderM: "便條…（記筆記，只存這台裝置）",
@@ -1264,6 +1274,12 @@ const zhHant: Messages = {
   cal_none: "這個對話還沒有行程。",
   cal_by: "由 {name} 發起",
   cal_byYou: "由你發起",
+  cal_durLabel: "長度",
+  cal_durNone: "不設",
+  cal_dur1h: "1 小時",
+  cal_dur2h: "2 小時",
+  cal_durAllDay: "整天",
+  cal_adjHint: "點上下調整時間",
   sponsor_title: "贊助此節點",
   sponsor_who: "{relay} 由其營運者自費提供。以下連結由該節點自報，非官方背書。",
   sponsor_note: "完全自願。點擊只會用瀏覽器或錢包開啟外部連結——本 App 不經手金流，也永不自動付款。",
@@ -1761,7 +1777,7 @@ const en: Messages = {
   aux_tabMedia: "Media",
   aux_tabThreads: "Threads",
   aux_tabNote: "Notes",
-  aux_title: "Conversation panels (media / threads / notes)",
+  aux_title: "Conversation panels (media / threads / notes / plans)",
   note_placeholder: "Notes… (jot anything; type a calc like 12*8 on the last line to evaluate)",
   note_hint: "Private notes, one per conversation, stored only on this device (never broadcast or synced). Calculations are auto-detected and can be inserted.",
   note_placeholderM: "Notes… (jot anything; stored only on this device)",
@@ -1984,6 +2000,12 @@ const en: Messages = {
   cal_none: "No plans in this conversation yet.",
   cal_by: "Organized by {name}",
   cal_byYou: "Organized by you",
+  cal_durLabel: "Length",
+  cal_durNone: "None",
+  cal_dur1h: "1 hour",
+  cal_dur2h: "2 hours",
+  cal_durAllDay: "All day",
+  cal_adjHint: "Tap ↑↓ to adjust",
   sponsor_title: "Support this node",
   sponsor_who: "{relay} is run at its operator\u2019s own expense. The links below are self-reported by that node, not an official endorsement.",
   sponsor_note: "Entirely optional. Clicking only opens an external link in your browser or wallet \u2014 this app never handles money and never pays automatically.",

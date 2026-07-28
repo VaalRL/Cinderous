@@ -26,7 +26,7 @@ import {
   webSocketConnector,
 } from "@cinderous/engine";
 import { notifier, onNotifyClick } from "./native/notify.js";
-import type { BlockedContact, ContactRequest } from "@cinderous/engine";
+import type { BlockedContact, CalendarEventInput, ContactRequest, RsvpStatus, StoredCalendarEvent } from "@cinderous/engine";
 import type { CallMedia, CallState } from "@cinderous/core";
 import { makeThumbnail, pickFile, saveFile } from "./native/files.js";
 import { hasCallSupport } from "./native/call-media.js";
@@ -190,6 +190,13 @@ export function MobileApp({
   const [blocked, setBlocked] = useState<BlockedContact[]>([]);
   /** 訊息請求（ADR-0121）：陌生人傳來訊息但尚未接受。**不是聯絡人**。 */
   const [requests, setRequests] = useState<ContactRequest[]>([]);
+  /** 共享行程（ADR-0259／0261）：全部對話的行程，交給對話畫面時才依 activeId 篩。 */
+  const [calendar, setCalendar] = useState<StoredCalendarEvent[]>([]);
+  /**
+   * 點對話中的日期標記後的預填（ADR-0260 階段四）。**帶 `convo`**：對話畫面以 `key={activeId}`
+   * 重掛、但本層 state 不會——不記住是哪個對話的話，換對話回來會冒出上一個對話的預填表單。
+   */
+  const [calDraft, setCalDraft] = useState<{ convo: string; at: number; nonce: number } | null>(null);
   /** 通知（ADR-0116）：預設關（需使用者明確授權）。 */
   const [notify, setNotifyState] = useState(() => {
     try {
@@ -455,9 +462,11 @@ export function MobileApp({
     setBlocked([]);
     setRequests([]);
     setUnread({});
+    setCalendar([]);
     backend.start({
       onContacts: setContacts,
       onGroups: setGroups,
+      onCalendar: setCalendar,
       onHistory: (pk, msgs) => setConvos((c) => ({ ...c, [pk]: msgs })),
       onMessage: (pk, m) => {
         setConvos((c) => {
@@ -1267,6 +1276,31 @@ export function MobileApp({
       selfEnterprise && selfAdmin && backendRef.current?.depositFile ? { onDepositSlot: () => depositToSlot(convoName) } : {};
     // 通話：需真實後端＋平台具備 WebRTC（ADR-0101）。
     const callProps = backendRef.current?.startCall && hasCallSupport() ? { onStartCall: startCall } : {};
+    // 共享行程（ADR-0259／0261）：示範後端沒有 calendarPublish → 整個分頁不出現、日期也不偵測。
+    // 群組 vs 1:1 由當前對話 id 是否為群組決定（與訊息路由同一判準）。
+    const calProps = ((): Record<string, unknown> => {
+      const publish = backendRef.current?.calendarPublish;
+      if (!publish) return {};
+      const target = group ? { groupId: activeId } : { contact: activeId };
+      const mine = calendar.filter((e) => e.groupId === activeId || e.contact === activeId);
+      const rsvp = backendRef.current?.calendarRsvp;
+      return {
+        calendar: mine,
+        calendarNameFor: nameFor,
+        onPickDate: (at: number) => setCalDraft({ convo: activeId, at, nonce: Date.now() }),
+        ...(calDraft?.convo === activeId ? { calendarDraft: { at: calDraft.at, nonce: calDraft.nonce } } : {}),
+        onCalendarPublish: (input: CalendarEventInput, opts?: { eventId?: string }) => {
+          publish(target, input, opts?.eventId ? { action: "update", eventId: opts.eventId } : {});
+        },
+        onCalendarCancel: (eventId: string) => {
+          // 取消只需指名目標；欄位帶原值以滿足型別（收端只看 action 與 e tag）。
+          const e = mine.find((x) => x.id === eventId);
+          if (!e) return;
+          publish(target, { title: e.title, start: e.start }, { action: "cancel", eventId });
+        },
+        ...(rsvp ? { onCalendarRsvp: (id: string, status: RsvpStatus) => rsvp(id, status) } : {}),
+      };
+    })();
     return (
       <View style={shell.root}>
         {connBanner}
@@ -1283,6 +1317,9 @@ export function MobileApp({
           unsent={unsent}
           onReact={react}
           onUnsend={unsend}
+          // 行程的主揪權威要在 1:1 也判得出來（groupProps 只在群組帶 selfPubkey）——
+          // 少了它，自己開的 1:1 行程會顯示成別人的，變成「改不動自己的行程」。
+          selfPubkey={selfPubkey}
           {...aliasProps}
           {...(!group && contact?.title ? { title: contact.title } : {})}
           {...(subtitle ? { subtitle } : {})}
@@ -1295,6 +1332,7 @@ export function MobileApp({
           {...dmMentionProps}
           {...fileProps}
           {...noteProps}
+          {...calProps}
           {...slotProps}
           {...callProps}
           {...themeProps}
