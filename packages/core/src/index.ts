@@ -38,6 +38,7 @@ export * from "./deletion.js";
 export * from "./signaling.js";
 export * from "./call.js";
 export * from "./group.js";
+export * from "./calendar.js";
 export * from "./datachannel.js";
 export * from "./connection.js";
 export * from "./pairing.js";
