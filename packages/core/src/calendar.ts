@@ -165,14 +165,31 @@ export function wrapCalendarEvent(
   input: CalendarEventInput,
   senderSk: SecretKey,
   recipientPk: PubkeyHex,
-  opts: { now?: number; action?: CalendarAction; eventId?: string; expiration?: number } = {},
+  opts: {
+    now?: number;
+    action?: CalendarAction;
+    eventId?: string;
+    expiration?: number;
+    /**
+     * **補送群組行程給單一成員時必填**（ADR-0260 §9）。
+     *
+     * 行程 id ＝ rumor 的雜湊，而 rumor 的 tags 含 `g`（群組）或 `to`（1:1）——**形狀不同就是
+     * 不同的雜湊**。補送時若用 1:1 的形狀重包一份群組行程，收件人會得到一個**新 id 的重複行程**，
+     * 而且原本的 RSVP 全對不回去。給了 `groupId` 就照群組形狀重建，id 與原件一致。
+     */
+    groupId?: string;
+  } = {},
 ): WrappedMessage {
   const senderPk = getPublicKey(senderSk);
   const action = opts.action ?? "create";
   const rumor: RumorInput = {
     kind: KIND.CALENDAR_EVENT,
     created_at: opts.now ?? Math.floor(Date.now() / 1000),
-    tags: eventTags(input, action, { to: recipientPk, ...(opts.eventId ? { eventId: opts.eventId } : {}) }),
+    tags: eventTags(input, action, {
+      // 群組形狀不帶 `to`；1:1 才帶（與 `wrapGroupCalendarEvent` 產出的 rumor 逐位元組相同）。
+      ...(opts.groupId ? { groupId: opts.groupId } : { to: recipientPk }),
+      ...(opts.eventId ? { eventId: opts.eventId } : {}),
+    }),
     content: input.description ?? "",
   };
   return fanOut(rumor, senderSk, senderPk, [recipientPk], opts.expiration);

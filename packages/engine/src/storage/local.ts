@@ -313,6 +313,10 @@ export class LocalStorage implements AppStorage {
     this.mem.setCalendarRsvp(eventId, pubkey, status, at);
     this.writeCalendar();
   }
+  setCalendarDelivered(eventId: string, pubkey: string, at: number): void {
+    this.mem.setCalendarDelivered(eventId, pubkey, at);
+    this.writeCalendar();
+  }
   unblockContact(pubkey: string): void {
     this.mem.unblockContact(pubkey);
     write(this.k("blocked"), this.mem.loadBlocked(), this.dek);

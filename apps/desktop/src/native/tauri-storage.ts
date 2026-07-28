@@ -372,6 +372,10 @@ export class TauriStorage implements AppStorage {
     this.mem.setCalendarRsvp(eventId, pubkey, status, at);
     this.persist(META);
   }
+  setCalendarDelivered(eventId: string, pubkey: string, at: number): void {
+    this.mem.setCalendarDelivered(eventId, pubkey, at);
+    this.persist(META);
+  }
   appendMessage(message: StoredMessage): void {
     this.mem.appendMessage(message);
     this.persist(MSGS + message.contact);

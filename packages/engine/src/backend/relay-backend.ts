@@ -248,6 +248,14 @@ export type CloseableRelayClient = RelayClient & { close?: () => void };
 const RECONNECT_MAX_MS = 15_000;
 
 /** 正規化 relay URL（trim、去尾斜線）；非 ws(s) 或空值回傳 undefined。 */
+/**
+ * 行程補送的節流窗（ADR-0260 §9）：同一個 (行程, 對象) 在此窗內只補一次。
+ *
+ * 對方若正常回送達回條，第一次補送後就不會再補（`delivered` 有他了）；這條窗擋的是
+ * **對方不回回條**（舊版客戶端）的情況——沒有它，每次他上線都會重送一次。
+ */
+const CALENDAR_RESEND_THROTTLE_MS = 6 * 60 * 60 * 1000;
+
 export function normalizeRelayUrl(url: string | undefined): string | undefined {
   const u = url?.trim().replace(/\/+$/, "");
   if (!u || !/^wss?:\/\//i.test(u)) return undefined;
@@ -502,6 +510,11 @@ export class RelayChatBackend implements ChatBackend {
   private readonly onHomeSwitched: ((url: string) => void) | undefined;
   private lastList: RelayListDoc | null;
   /** 外部 relay 連線（正規化 URL → client），惰性建立（ADR-0034）。 */
+  /**
+   * 行程補送節流（ADR-0260 §9）：`行程id|對象` → 上次補送時間（毫秒）。**純記憶體**
+   * ——重啟後至多多補一次，可接受；持久化它反而會讓「換裝置就永遠不補」。
+   */
+  private readonly calResent = new Map<string, number>();
   private readonly relayPool = new Map<string, CloseableRelayClient>();
   /** 跨 relay 事件去重（同一事件可能經多個 relay 抵達）。 */
   private readonly seenEvt = new BoundedSet<string>(4096, 2048);
@@ -1344,7 +1357,11 @@ export class RelayChatBackend implements ChatBackend {
     // 對方剛上線（離線→上線）→ 把我當下的狀態封裝補送給他（否則他只看得到我在線、卻沒有我的
     // 狀態文字/音樂——那些只在改變時發、他錯過了）。只補給聯絡人。一輪即止（第二次 observe 後
     // wasOnline 為真，不再回補）。
-    if (!wasOnline && this.isContact(pubkey)) this.sendPresenceState(pubkey);
+    if (!wasOnline && this.isContact(pubkey)) {
+      this.sendPresenceState(pubkey);
+      // 補送未送達的行程邀請（ADR-0260 §9）：他離線期間過期的邀請在這裡補回來。
+      this.resendCalendarTo(pubkey);
+    }
     // 喚醒握手（ADR-0109）：有人上線 → 立刻補發信標並切回 ACTIVE，讓對方一個 RTT 內看到我。
     // **只在 IDLE→ACTIVE 轉換時**——否則兩端互相觸發成風暴。
     if (wasIdle && this.anyContactOnline()) {
@@ -1592,6 +1609,15 @@ export class RelayChatBackend implements ChatBackend {
       // 自封副本＝我在另一台裝置建的 → 對話對象是 rumor 的 `to`；否則就是寄件人。
       const to = rumor.tags.find((t) => t[0] === "to")?.[1];
       this.applyCalendar(calEvent, calEvent.groupId ? undefined : (selfCopy ? to : sender));
+      // 送達回條（ADR-0260 §9 補送）：**沿用既有的 RECEIPT kind**，零新協定面。主揪據此
+      // 知道誰已經拿到，才有辦法只補送給沒拿到的人（否則每次上線都得盲送給全體）。
+      if (!selfCopy) {
+        this.publishReliable(
+          wrapReceipt("delivered", this.sk, calEvent.organizer, calEvent.id, {
+            ...(calEvent.groupId ? { groupId: calEvent.groupId } : {}),
+          }),
+        );
+      }
       return;
     }
     const rsvp = calendarRsvpOf(rumor);
@@ -1603,6 +1629,14 @@ export class RelayChatBackend implements ChatBackend {
 
     const receipt = receiptOf(rumor);
     if (receipt) {
+      // 行程的送達回條（ADR-0260 §9）：目標 id 命中我主揪的行程 → 記下這個人已拿到。
+      // 放在訊息回條之前判斷——訊息與行程的 id 空間都是 rumor.id，命中行程就不是訊息。
+      const mine = this.storage.loadCalendar().find((e) => e.id === receipt.messageId);
+      if (mine && mine.organizer === this.self.pubkey) {
+        this.storage.setCalendarDelivered(receipt.messageId, sender, rumor.created_at);
+        this.handlers?.onCalendar?.(this.storage.loadCalendar());
+        return;
+      }
       // ADR-0058：標記自己訊息的送達/已讀；帶 groupId 者為群組回條（ADR-0095）。
       this.applyReceipt(sender, receipt.messageId, receipt.type, receipt.groupId);
       return;
@@ -3528,6 +3562,57 @@ export class RelayChatBackend implements ChatBackend {
     this.publishReliable(wrapped.selfCopy);
   }
 
+  /**
+   * 補送未送達的行程邀請（ADR-0259 §1.5／ADR-0260 §9）。
+   *
+   * ## 為什麼需要這個
+   *
+   * 中繼只保存 7 天（ADR-0065）。「約三個月後的事、對方離線 8 天」＝ gift wrap 過期 →
+   * **對方永遠收不到這個邀請**，而群組以為事情講定了、沒有任何訊號顯示他少了東西。
+   * 這是行事曆與聊天訊息的真正差異：**資料的有效期比傳輸的 TTL 長**。
+   * Outbox（ADR-0041）不覆蓋這個——它保證的是「中繼收下了」，不是「對方拿到了」。
+   *
+   * ## 判斷「還沒拿到」
+   *
+   * `delivered` 沒有他，且他也沒 RSVP（有回覆＝顯然拿到了，那是更強的證據）。
+   * 只補**未來**的行程——過去的補了也沒意義。
+   */
+  private resendCalendarTo(pubkey: PubkeyHex): void {
+    const now = nowSec();
+    for (const e of this.storage.loadCalendar()) {
+      if (e.organizer !== this.self.pubkey) continue; // 只有主揪補送自己的
+      if ((e.end ?? e.start) < now) continue; // 過去的不補
+      if (e.delivered?.[pubkey] !== undefined || e.rsvps?.[pubkey] !== undefined) continue; // 已拿到
+      // 群組行程只補給仍在群內的人；1:1 只補給那位對象。
+      if (e.groupId) {
+        if (!this.groups.find((g) => g.id === e.groupId)?.members.includes(pubkey)) continue;
+      } else if (e.contact !== pubkey) continue;
+      // 節流：同一個 (行程, 對象) 在窗內只補一次。對方是舊版客戶端／不回回條時，
+      // 這條是唯一擋住「每次上線都重送」的東西。記憶體即可——重啟後至多多補一次。
+      const key = `${e.id}|${pubkey}`;
+      const last = this.calResent.get(key) ?? 0;
+      if (Date.now() - last < CALENDAR_RESEND_THROTTLE_MS) continue;
+      this.calResent.set(key, Date.now());
+      const wrapped = wrapCalendarEvent(
+        {
+          title: e.title,
+          start: e.start,
+          ...(e.end !== undefined ? { end: e.end } : {}),
+          ...(e.location ? { location: e.location } : {}),
+          ...(e.description ? { description: e.description } : {}),
+        },
+        this.sk,
+        pubkey,
+        // `now` 與 `groupId` 都必須還原成原件的值——rumor 的雜湊就是行程 id，
+        // 差一個 tag 或差一秒，補送出去的就是「另一個行程」而不是同一個。
+        { now: e.updatedAt, ...(e.groupId ? { groupId: e.groupId } : {}), ...this.orgExpiration(now) },
+      );
+      // ⚠ 只送給他那一份，**不送自封副本**——自封副本會在自己的其他裝置上被當成新建，
+      // 而 `updatedAt` 沿用原值故不會覆蓋內容，但白白多一顆事件。
+      for (const evt of wrapped.events) this.publishReliable(evt);
+    }
+  }
+
   /** 目前所有行程（依 start 升冪）。 */
   calendarList(): StoredCalendarEvent[] {
     return this.storage.loadCalendar();
@@ -3601,6 +3686,9 @@ export class RelayChatBackend implements ChatBackend {
     this.storage.saveGroup({ ...group, members });
     this.groups = this.storage.loadGroups();
     this.ensureContact(pubkey);
+    // 新成員補送既有行程（ADR-0260 §9）：無伺服器端房間＝沒有歷史重播（ADR-0027），
+    // 不補的話新成員的行事曆就是空的，而群組以為他知道。
+    this.resendCalendarTo(pubkey);
     const hint = this.homeUrl ? { relayHint: this.homeUrl } : {};
     // 既有成員 ＋ 自己的其他裝置（ADR-0107）收 group-add。
     this.publishControl(

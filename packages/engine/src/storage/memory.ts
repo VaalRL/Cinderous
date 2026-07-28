@@ -264,9 +264,20 @@ export class MemoryStorage implements AppStorage {
     return [...this.calendar.values()].sort((a, b) => a.start - b.start);
   }
   upsertCalendarEvent(event: StoredCalendarEvent): void {
-    // 保留既有 rsvps：主揪改時間的那則 rumor 不帶回覆，直接覆寫會把大家的回覆清掉。
+    // 保留既有 rsvps 與 delivered：主揪改時間的那則 rumor 不帶這兩者，直接覆寫會把大家的
+    // 回覆與送達紀錄一起清掉（清掉 delivered 的後果是「改一次時間就全體重新補送」）。
     const prev = this.calendar.get(event.id);
-    this.calendar.set(event.id, { ...event, ...(prev?.rsvps ? { rsvps: { ...prev.rsvps, ...event.rsvps } } : {}) });
+    this.calendar.set(event.id, {
+      ...event,
+      ...(prev?.rsvps ? { rsvps: { ...prev.rsvps, ...event.rsvps } } : {}),
+      ...(prev?.delivered ? { delivered: { ...prev.delivered, ...event.delivered } } : {}),
+    });
+  }
+  setCalendarDelivered(eventId: string, pubkey: string, at: number): void {
+    const event = this.calendar.get(eventId);
+    if (!event) return;
+    if ((event.delivered?.[pubkey] ?? 0) >= at) return; // 只往前推進
+    this.calendar.set(eventId, { ...event, delivered: { ...event.delivered, [pubkey]: at } });
   }
   removeCalendarEvent(id: string): void {
     this.calendar.delete(id);

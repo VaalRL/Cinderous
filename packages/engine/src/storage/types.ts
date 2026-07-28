@@ -205,6 +205,12 @@ export interface StoredCalendarEvent {
    * 故存在事件內即可，不需要另一個集合，也不會有多人衝突。
    */
   rsvps?: Record<string, { status: "accepted" | "declined" | "tentative"; at: number }>;
+  /**
+   * 送達確認（ADR-0260 §9 補送）：**只有主揪端有意義**——收件人 pubkey → 收到的時間（unix 秒）。
+   *
+   * 用來回答「誰還沒拿到這個邀請」。沒有這個欄位就無從判斷該補送給誰，只能每次上線都盲送。
+   */
+  delivered?: Record<string, number>;
 }
 
 /**
@@ -279,6 +285,8 @@ export interface AppStorage {
    * （多裝置／重送），晚到的舊回覆不該把新的蓋掉。行程不存在時忽略（尚未收到邀請）。
    */
   setCalendarRsvp(eventId: string, pubkey: string, status: "accepted" | "declined" | "tentative", at: number): void;
+  /** 記下某人已收到某行程（ADR-0260 §9）；只往前推進，行程不存在時忽略。 */
+  setCalendarDelivered(eventId: string, pubkey: string, at: number): void;
   loadMessages(contactPubkey: string): StoredMessage[];
   appendMessage(message: StoredMessage): void;
   /** 只往前推進某訊息的送達/已讀狀態（ADR-0058）；訊息不存在或狀態不前進則忽略。 */
