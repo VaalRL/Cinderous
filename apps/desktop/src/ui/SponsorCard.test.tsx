@@ -18,7 +18,7 @@ function render(props: Partial<Parameters<typeof SponsorCard>[0]> = {}): string 
   );
 }
 
-describe("贊助此節點角落卡（ADR-0089／0258）", () => {
+describe("贊助此節點角落卡（ADR-0089／0262）", () => {
   it("列出每個管道，連結為外部開啟且不洩漏 referrer", () => {
     const html = render();
     expect(html).toContain('data-testid="sponsor-card"');
@@ -50,7 +50,7 @@ describe("贊助此節點角落卡（ADR-0089／0258）", () => {
   });
 });
 
-describe("贊助卡的「不再顯示」記憶（ADR-0258）", () => {
+describe("贊助卡的「不再顯示」記憶（ADR-0262）", () => {
   beforeEach(() => {
     const store = new Map<string, string>();
     (globalThis as { localStorage?: unknown }).localStorage = {

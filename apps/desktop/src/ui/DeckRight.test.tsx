@@ -64,7 +64,7 @@ describe("右欄便條分頁（ADR-0182，計算為其功能之一）", () => {
   });
 });
 
-describe("行程分頁的顯示條件與對話歸屬（ADR-0259 階段三）", () => {
+describe("行程分頁的顯示條件與對話歸屬（ADR-0263 階段三）", () => {
   const ev = (over: Record<string, unknown> = {}) => ({
     id: "e1",
     title: "週六爬山",
@@ -97,8 +97,8 @@ describe("行程分頁的顯示條件與對話歸屬（ADR-0259 階段三）", (
   });
 });
 
-describe("日期標記點擊後切到行程分頁（ADR-0260 階段四）", () => {
-  it("有 calendarDraft → 直接停在行程分頁（**使用者點擊觸發**，非 ADR-0259 §1.6 否決的自動切換）", () => {
+describe("日期標記點擊後切到行程分頁（ADR-0264 階段四）", () => {
+  it("有 calendarDraft → 直接停在行程分頁（**使用者點擊觸發**，非 ADR-0263 §1.6 否決的自動切換）", () => {
     const html = render({
       calendar: [] as never,
       onCalendarPublish: () => {},

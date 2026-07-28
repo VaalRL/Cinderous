@@ -95,18 +95,18 @@ export interface DeckRightProps {
   /** 把右欄計算機的結果插入主對話框草稿（ADR-0097）；未提供則不顯示插入鈕。 */
   onInsert?: (text: string) => void;
   /**
-   * 共享行程（ADR-0259）：**全部**行程，本元件依當前對話篩選。
+   * 共享行程（ADR-0263）：**全部**行程，本元件依當前對話篩選。
    * 未提供 `onCalendarPublish` ＝不顯示行程分頁（示範後端無此能力）。
    */
   calendar?: StoredCalendarEvent[];
   onCalendarPublish?: (input: CalendarEventInput, opts?: { eventId?: string }) => void;
   onCalendarCancel?: (eventId: string) => void;
   onCalendarRsvp?: (eventId: string, status: RsvpStatus) => void;
-  /** 設定本機提醒（ADR-0262）；未提供＝不顯示提醒選單。 */
+  /** 設定本機提醒（ADR-0266）；未提供＝不顯示提醒選單。 */
   onCalendarRemind?: (eventId: string, lead: number | undefined) => void;
   /**
-   * 使用者在對話中點了日期標記（ADR-0260 階段四）：切到行程分頁並預填。
-   * **這是使用者觸發的導覽，不是 ADR-0259 §1.6 否決的自動切換**——沒有點就不會動。
+   * 使用者在對話中點了日期標記（ADR-0264 階段四）：切到行程分頁並預填。
+   * **這是使用者觸發的導覽，不是 ADR-0263 §1.6 否決的自動切換**——沒有點就不會動。
    */
   calendarDraft?: { at: number; nonce: number } | undefined;
 }

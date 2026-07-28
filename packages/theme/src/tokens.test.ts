@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   accentForTheme,
+  contrastRatio,
   lightenHex,
   mixSrgb,
   resolveTheme,
@@ -96,5 +97,40 @@ describe("resolveTheme 與桌面 msn.css 對齊（改一邊沒改另一邊＝紅
     expect(t.accent2).toBe("#2f6cd6");
     expect(t.bgA).toBe("#acc4ef"); // 由預設推導、非 "bogus"
     expect(t.titlebarBottom).toBe("#2f6cd6");
+  });
+});
+
+describe("高對比與 WCAG（ADR-0253）", () => {
+  it("contrastRatio：WCAG 2.x 定義（黑白 21、同色 1、對稱）", () => {
+    expect(contrastRatio("#000000", "#ffffff")).toBeCloseTo(21, 5);
+    expect(contrastRatio("#2f6cd6", "#2f6cd6")).toBeCloseTo(1, 5);
+    expect(contrastRatio("#445269", "#ffffff")).toBeCloseTo(contrastRatio("#ffffff", "#445269"), 10);
+  });
+
+  it("🔴 高對比 token 全數過 WCAG AA：文字 ≥4.5、邊框 ≥3（亮/暗兩組）", () => {
+    for (const theme of ["light", "dark"] as const) {
+      const t = resolveTheme({ theme, contrast: true });
+      for (const surface of [t.panel, t.field]) {
+        expect(contrastRatio(t.ink, surface)).toBeGreaterThanOrEqual(4.5);
+        expect(contrastRatio(t.muted, surface)).toBeGreaterThanOrEqual(4.5);
+        expect(contrastRatio(t.inName, surface)).toBeGreaterThanOrEqual(4.5);
+        expect(contrastRatio(t.border, surface)).toBeGreaterThanOrEqual(3); // 非文字元件門檻
+      }
+    }
+  });
+
+  it("高對比修掉現況缺口：非高對比的亮色 muted 不足 AA（4.18），高對比後達標", () => {
+    const normal = resolveTheme({ theme: "light" });
+    expect(contrastRatio(normal.muted, normal.panel)).toBeLessThan(4.5); // 佐證缺口存在（修它的理由）
+    const hc = resolveTheme({ theme: "light", contrast: true });
+    expect(contrastRatio(hc.muted, hc.panel)).toBeGreaterThanOrEqual(7); // AAA 級
+  });
+
+  it("contrast 不影響 accent/bg 推導公式（只動基底鍵）", () => {
+    const a = resolveTheme({ theme: "light", accent: "#2f6cd6" });
+    const b = resolveTheme({ theme: "light", accent: "#2f6cd6", contrast: true });
+    expect(b.accent).toBe(a.accent);
+    expect(b.bgA).toBe(a.bgA);
+    expect(b.ink).toBe("#000000"); // 覆寫生效
   });
 });

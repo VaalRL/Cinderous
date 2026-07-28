@@ -71,6 +71,8 @@ export interface Messages {
   // ── 行動端 app 殼：聊天清單＋對話（ADR-0085）──
   mobileChats_title: string;
   mobileChats_empty: string;
+  /** 聊天清單搜尋（ADR-0256 階段 4）。 */
+  mobileChats_search: string;
   mobileChats_you: string;
   mobileConvo_input: string;
   mobileConvo_send: string;
@@ -237,6 +239,10 @@ export interface Messages {
   export_this: string;
   /** 歷史紀錄（ADR-0111）：讀封存的舊訊息。 */
   history_title: string;
+  /** 封存搜尋（ADR-0256 階段 3）。 */
+  history_search: string;
+  history_scanning: string;
+  history_searchClear: string;
   history_open: string;
   history_older: string;
   history_loading: string;
@@ -316,6 +322,15 @@ export interface Messages {
   settings_accent2Follow: string;
   settings_accentCustom: string;
   settings_accentReset: string;
+  /** 無障礙設定（ADR-0253）：高對比＋UI 尺寸＋色覺友善色票。 */
+  settings_accentCb: string;
+  settings_a11y: string;
+  a11y_contrast: string;
+  a11y_contrastHint: string;
+  a11y_stateOn: string;
+  a11y_stateOff: string;
+  a11y_uiScale: string;
+  a11y_uiScaleHint: string;
   settings_accentHint: string;
   settings_aiProvider: string;
   settings_aiProviderOllama: string;
@@ -370,6 +385,13 @@ export interface Messages {
   convo_msgDetail: string;
   convo_unsent: string;
   convo_loadEarlier: string;
+  /** 對話內搜尋與經典佈局搜尋（ADR-0256）。 */
+  convo_search: string;
+  convo_searchHint: string;
+  convo_searchNone: string;
+  convo_searchPrev: string;
+  convo_searchNext: string;
+  roster_search: string;
   convo_timerTitle: string;
   convo_timerOff: string;
   convo_timer1m: string;
@@ -502,9 +524,9 @@ export interface Messages {
   settings_removeIdentityConfirm: string;
   settings_wipeDeviceHint: string;
   wipe_device: string;
-  /** 共享行程（ADR-0259）。 */
+  /** 共享行程（ADR-0263）。 */
   aux_tabCalendar: string;
-  /** 日期偵測提示（ADR-0260 階段四）。 */
+  /** 日期偵測提示（ADR-0264 階段四）。 */
   date_chipHint: string;
   date_barHint: string;
   cal_new: string;
@@ -525,7 +547,7 @@ export interface Messages {
   cal_by: string;
   cal_byYou: string;
   /**
-   * 行動端專用（ADR-0261）：手機沒有 `datetime-local`，改用相對調整鈕，故多這幾個字串。
+   * 行動端專用（ADR-0265）：手機沒有 `datetime-local`，改用相對調整鈕，故多這幾個字串。
    * `cal_durNone` ＝不設結束時間（單點行程）。
    */
   cal_durLabel: string;
@@ -534,7 +556,7 @@ export interface Messages {
   cal_dur2h: string;
   cal_durAllDay: string;
   cal_adjHint: string;
-  /** 行程提醒（ADR-0262）：本機計時器、零中繼成本。 */
+  /** 行程提醒（ADR-0266）：本機計時器、零中繼成本。 */
   cal_remindLabel: string;
   cal_remindOff: string;
   cal_remindNow: string;
@@ -544,8 +566,8 @@ export interface Messages {
   cal_remind1d: string;
   cal_remindHint: string;
   cal_reminderBody: string;
-  /** NIP-62 清除請求（ADR-0256）。 */
-  /** 贊助此節點角落卡（ADR-0089／0258）。 */
+  /** NIP-62 清除請求（ADR-0260）。 */
+  /** 贊助此節點角落卡（ADR-0089／0262）。 */
   sponsor_title: string;
   sponsor_who: string;
   sponsor_note: string;
@@ -855,6 +877,7 @@ const zhHant: Messages = {
   mobilePair_toNsec: "改用私鑰登入",
   mobileChats_title: "聊天",
   mobileChats_empty: "還沒有對話。加個好友或建立群組就會出現在這裡。",
+  mobileChats_search: "搜尋（名稱或訊息）",
   mobileChats_you: "你：",
   mobileConvo_input: "輸入訊息…",
   mobileConvo_send: "送出",
@@ -1007,6 +1030,9 @@ const zhHant: Messages = {
   export_run: "導出",
   export_this: "導出此對話",
   history_title: "歷史紀錄",
+  history_search: "搜尋封存的舊訊息…",
+  history_scanning: "掃描 {done}/{total} 塊（逐塊解密、不留索引）",
+  history_searchClear: "清除",
   history_open: "歷史紀錄（封存的舊訊息）",
   history_older: "載入更早",
   history_loading: "載入中…",
@@ -1082,6 +1108,14 @@ const zhHant: Messages = {
   settings_accent2Follow: "跟隨主色",
   settings_accentCustom: "自訂色",
   settings_accentReset: "預設",
+  settings_accentCb: "色覺友善（色盲可辨）",
+  settings_a11y: "無障礙",
+  a11y_contrast: "高對比模式",
+  a11y_contrastHint: "拉高文字與邊框對比（WCAG AA），與深淺主題可並用；未設定時跟隨系統的高對比偏好。",
+  a11y_stateOn: "開",
+  a11y_stateOff: "關",
+  a11y_uiScale: "介面尺寸",
+  a11y_uiScaleHint: "整體縮放文字與介面（立即生效、只存這台裝置）。",
   settings_accentHint: "即時套用、只存在本機；深色主題會自動提亮以維持對比。主色連吉祥物身體，副色驅動標題列與頂部漸層（留空＝跟隨主色）。",
   settings_aiProvider: "AI 服務",
   settings_aiProviderOllama: "本機 Ollama",
@@ -1135,6 +1169,12 @@ const zhHant: Messages = {
   convo_msgDetail: "訊息詳情",
   convo_unsent: "訊息已收回",
   convo_loadEarlier: "載入較早的 {count} 則訊息",
+  convo_search: "搜尋訊息",
+  convo_searchHint: "搜尋此對話…",
+  convo_searchNone: "無符合",
+  convo_searchPrev: "上一個（較舊）",
+  convo_searchNext: "下一個（較新）",
+  roster_search: "搜尋（名稱或訊息）",
   convo_timerTitle: "限時訊息（閱後即焚）",
   convo_timerOff: "限時：關",
   convo_timer1m: "限時：1 分鐘",
@@ -1590,6 +1630,7 @@ const en: Messages = {
   mobilePair_toNsec: "Use secret key sign-in",
   mobileChats_title: "Chats",
   mobileChats_empty: "No conversations yet. Add a friend or create a group and it'll show up here.",
+  mobileChats_search: "Search (name or messages)",
   mobileChats_you: "You: ",
   mobileConvo_input: "Message…",
   mobileConvo_send: "Send",
@@ -1742,6 +1783,9 @@ const en: Messages = {
   export_run: "Export",
   export_this: "Export this conversation",
   history_title: "History",
+  history_search: "Search archived messages…",
+  history_scanning: "Scanning chunk {done}/{total} (decrypt-and-discard, no index kept)",
+  history_searchClear: "Clear",
   history_open: "History (archived messages)",
   history_older: "Load older",
   history_loading: "Loading…",
@@ -1817,6 +1861,14 @@ const en: Messages = {
   settings_accent2Follow: "Follow primary",
   settings_accentCustom: "Custom color",
   settings_accentReset: "Default",
+  settings_accentCb: "Color-vision friendly (colorblind-safe)",
+  settings_a11y: "Accessibility",
+  a11y_contrast: "High contrast",
+  a11y_contrastHint: "Boost text and border contrast (WCAG AA); combines with light/dark theme. Follows your system's contrast preference until set.",
+  a11y_stateOn: "On",
+  a11y_stateOff: "Off",
+  a11y_uiScale: "UI size",
+  a11y_uiScaleHint: "Scale the whole interface (applies instantly; stored on this device only).",
   settings_accentHint: "Applies instantly, stored locally; auto-brightened in dark theme. Primary recolors the mascot too; secondary drives the title bar and background gradient (blank = follow primary).",
   settings_aiProvider: "AI provider",
   settings_aiProviderOllama: "Local Ollama",
@@ -1870,6 +1922,12 @@ const en: Messages = {
   convo_msgDetail: "Message",
   convo_unsent: "Message unsent",
   convo_loadEarlier: "Load {count} earlier messages",
+  convo_search: "Search messages",
+  convo_searchHint: "Search this conversation…",
+  convo_searchNone: "No matches",
+  convo_searchPrev: "Previous (older)",
+  convo_searchNext: "Next (newer)",
+  roster_search: "Search (name or messages)",
   convo_timerTitle: "Disappearing message",
   convo_timerOff: "Timer: off",
   convo_timer1m: "Timer: 1 min",

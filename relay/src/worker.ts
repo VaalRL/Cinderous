@@ -26,7 +26,7 @@ export interface Env {
   TURN_API_TOKEN?: string;
   /** 短期 TURN 憑證有效秒數（ADR-0243）；未設/壞值＝預設 86400（1 天）。客戶端於半 TTL 前刷新。 */
   TURN_TTL_SECONDS?: string;
-  // ── NIP-11 Relay Information Document（ADR-0256／0089／0092）─────────────────
+  // ── NIP-11 Relay Information Document（ADR-0260／0089／0092）─────────────────
   /** 站名／描述／營運者公鑰（hex）／聯絡方式；未設＝該欄不出現在文件裡。 */
   RELAY_NAME?: string;
   RELAY_DESCRIPTION?: string;
@@ -80,7 +80,7 @@ export async function mintTurnResponse(env: Env, fetchFn: typeof fetch = fetch):
 }
 
 /**
- * 由 Worker 環境變數組出 NIP-11 文件（ADR-0256）。
+ * 由 Worker 環境變數組出 NIP-11 文件（ADR-0260）。
  *
  * `authRequired: true` 是**寫死**的——worker 的 `RelayCore` 就是 `requireAuth: true`
  * （見 `RelayRoom` 建構子），拿一個獨立的旗標去描述它遲早會說謊。
@@ -114,7 +114,7 @@ export default {
     if (request.headers.get("Upgrade") !== "websocket") {
       // 公共 TURN 保底端點（ADR-0243）：換發短期憑證；未配 secret 則 204、客戶端退回純 STUN。
       if (url.pathname === "/turn") return mintTurnResponse(env);
-      // NIP-11（ADR-0256）：只有明確要 `application/nostr+json` 的請求拿到 JSON；
+      // NIP-11（ADR-0260）：只有明確要 `application/nostr+json` 的請求拿到 JSON；
       // 其餘維持純文字 200（PaaS／容器健康檢查靠它，ADR-0089 定下的契約）。
       if (wantsRelayInfo(request.headers.get("Accept"))) {
         return new Response(JSON.stringify(relayInfoFrom(env)), { status: 200, headers: NIP11_HEADERS });

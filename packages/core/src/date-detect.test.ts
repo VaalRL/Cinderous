@@ -12,7 +12,7 @@ const ymd = (d: Date | undefined): string | undefined =>
 const hm = (d: Date | undefined): string | undefined =>
   d && `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 
-describe("對話日期偵測（ADR-0260 階段四）", () => {
+describe("對話日期偵測（ADR-0264 階段四）", () => {
   describe("相對日", () => {
     it("今天／明天／後天／大後天", () => {
       expect(ymd(at("明天要交"))).toBe("2026-07-28");

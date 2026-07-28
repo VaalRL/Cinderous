@@ -319,7 +319,7 @@ describe("RelayRoom — 休眠→喚醒還原（ADR-0059 + ADR-0235 H2）", () =
   });
 });
 
-describe("NIP-11 端點（ADR-0256 worker fetch）", () => {
+describe("NIP-11 端點（ADR-0260 worker fetch）", () => {
   // 本檔的全域 `Response` 是假的（見 beforeAll）——只記 body 與 init，故這樣拆。
   const get = async (
     headers: Record<string, string> = {},

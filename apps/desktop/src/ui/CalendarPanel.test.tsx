@@ -36,7 +36,7 @@ function render(over: Partial<CalendarPanelProps> = {}): string {
   );
 }
 
-describe("右欄行程分頁（ADR-0259 階段三）", () => {
+describe("右欄行程分頁（ADR-0263 階段三）", () => {
   it("列出行程的名稱、地點與備註", () => {
     const html = render({ events: [evt({ location: "象山", description: "帶水" })] });
     expect(html).toContain("週六爬山");
@@ -129,7 +129,7 @@ describe("右欄行程分頁（ADR-0259 階段三）", () => {
   });
 });
 
-describe("由對話日期預填（ADR-0260 階段四）", () => {
+describe("由對話日期預填（ADR-0264 階段四）", () => {
   it("有 draft → 直接開啟新建表單（使用者點了才會有 draft）", () => {
     const html = render({ events: [], draft: { at: NOW + 7200, nonce: 1 } });
     expect(html).toContain('data-testid="cal-form"');
@@ -142,7 +142,7 @@ describe("由對話日期預填（ADR-0260 階段四）", () => {
   });
 });
 
-describe("行程提醒（ADR-0262）：本機設定，其他人不會知道", () => {
+describe("行程提醒（ADR-0266）：本機設定，其他人不會知道", () => {
   it("未提供 onRemind（後端無此能力）→ 完全不顯示提醒選單", () => {
     expect(render()).not.toContain('data-testid="cal-remind"');
   });

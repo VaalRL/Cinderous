@@ -44,6 +44,28 @@
   --code-bg: #2a3344;
 }
 
+/* ── 高對比（ADR-0253，視障友善）：獨立軸、與亮/暗正交（可組合出亮+高對比、暗+高對比）。
+   值與 @cinderous/theme 的 HIGH_CONTRAST 對齊（SSOT；桌面測試讀本檔比對）。
+   驗收＝WCAG AA：文字 ≥4.5、邊框等非文字 ≥3（現行亮色 --muted 對白底僅 4.18，不足 AA）。 */
+:root[data-contrast="high"] {
+  --ink: #000000;
+  --muted: #445269;   /* vs #ffffff 7.90 */
+  --border: #56688a;  /* vs #ffffff 5.61 */
+  --in-name: #8f2468; /* vs #ffffff 8.01 */
+}
+:root[data-theme="dark"][data-contrast="high"] {
+  --ink: #ffffff;
+  --muted: #b9c5da;   /* vs panel 10.52 */
+  --border: #8195b8;  /* vs panel 6.04 */
+  --in-name: #ff9ed0; /* vs panel 9.64 */
+  --panel: #10151d;   /* 底色壓深爭取對比頭寸 */
+  --field: #0b0f15;   /* ink vs field 19.21 */
+}
+/* 高對比下：焦點環加粗（原全域 2px）、內文連結一律底線（不只靠顏色辨識）。 */
+:root[data-contrast="high"] button:focus-visible,
+:root[data-contrast="high"] [role="button"]:focus-visible { outline-width: 3px; }
+:root[data-contrast="high"] a { text-decoration: underline; }
+
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg-b); color: var(--ink); }
 
@@ -806,6 +828,43 @@ button:disabled { opacity: .5; cursor: default; filter: none; }
 .me__np-auto--on { color: var(--accent); font-weight: 700; }
 .me__np-live { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; color: var(--muted); font-style: italic; }
 
+/* 對話內搜尋（ADR-0256）：標頭 🔍＋搜尋列＋命中高亮；經典佈局 roster 搜尋框同記於此。 */
+.convo__head { position: relative; }
+.convo__searchbtn {
+  position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+  background: none; border: none; cursor: pointer; font-size: 13px; opacity: .7; padding: 2px 4px;
+}
+.convo__searchbtn:hover, .convo__searchbtn[aria-pressed="true"] { opacity: 1; }
+.convo__search {
+  display: flex; align-items: center; gap: 6px; padding: 6px 10px;
+  background: var(--surface2); border-bottom: 1px solid var(--border);
+}
+.convo__search input { flex: 1; min-width: 0; }
+.convo__search .cnt { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.convo__search button { border: 1px solid var(--border); background: var(--field); color: var(--ink); border-radius: 6px; cursor: pointer; padding: 2px 8px; font-size: 12px; }
+.line--hit { animation: hitflash 1.6s ease; border-radius: 6px; }
+@keyframes hitflash {
+  0% { background: color-mix(in srgb, var(--accent) 28%, transparent); }
+  100% { background: transparent; }
+}
+.roster__search { padding: 6px 8px 0; }
+.roster__search input { width: 100%; box-sizing: border-box; }
+/* 封存搜尋（ADR-0256 階段 3）：歷史視窗頂端搜尋列＋掃描進度。 */
+.hist__search { display: flex; gap: 6px; padding: 6px 10px; border-bottom: 1px solid var(--border); background: var(--surface2); }
+.hist__search input { flex: 1; min-width: 0; }
+.hist__search button { border: 1px solid var(--border); background: var(--field); color: var(--ink); border-radius: 6px; cursor: pointer; padding: 2px 8px; font-size: 12px; }
+.hist__search button:disabled { opacity: .5; cursor: default; }
+.hist__scan { color: var(--muted); font-size: 12px; margin: 6px 0; }
+
+/* 無障礙設定（ADR-0253）：UI 尺寸檔位橫排；開啟/選中以主色描邊＋粗體標示（aria-pressed 同步，不只靠顏色）。 */
+.a11y__scale { display: flex; gap: 6px; flex-wrap: wrap; }
+.a11y__scale button[aria-pressed="true"],
+.a11y__toggle[aria-pressed="true"] {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 40%, transparent);
+  font-weight: 700;
+}
+
 /* 設定面板 */
 .modal { position: fixed; inset: 0; background: rgba(0,0,0,.35); display: flex; align-items: center; justify-content: center; z-index: 50; }
 /* 彈窗一律不超過視窗：封頂高度、直向排列、標題列固定、內文區可捲（否則長設定頁會頂出畫面外）。 */
@@ -1189,7 +1248,7 @@ button:disabled { opacity: .5; cursor: default; filter: none; }
 .requests__clear { font-size: 10px; border: 1px solid #e5484d; background: var(--field); color: #e5484d; border-radius: 5px; cursor: pointer; padding: 1px 6px; }
 .requests__clear:hover { background: #e5484d; color: #fff; }
 
-/* 「贊助此節點」角落卡（ADR-0089／0258）：低調、可關閉、絕不擋操作。
+/* 「贊助此節點」角落卡（ADR-0089／0262）：低調、可關閉、絕不擋操作。
    z-index 刻意低於對話框/通話/貼圖編輯器（55–70）——它是最不重要的東西，不該蓋住任何互動。 */
 .sponsor {
   position: fixed; right: 12px; bottom: 12px; z-index: 40; width: 232px;
@@ -1210,7 +1269,7 @@ button:disabled { opacity: .5; cursor: default; filter: none; }
 /* 「不自動付款」的提醒刻意比連結更小、更淡——它是免責，不是行動呼籲。 */
 .sponsor__note { margin: 6px 0 0; font-size: 10px; line-height: 1.4; opacity: .8; }
 
-/* 右欄「行程」分頁（ADR-0259）。沿用 daux 的密度與色票，不另立一套視覺語言。 */
+/* 右欄「行程」分頁（ADR-0263）。沿用 daux 的密度與色票，不另立一套視覺語言。 */
 .cal { display: flex; flex-direction: column; gap: 8px; padding: 8px; }
 .cal__new {
   border: 1px dashed var(--border); background: var(--field); color: var(--ink);
@@ -1247,7 +1306,7 @@ button:disabled { opacity: .5; cursor: default; filter: none; }
 .cal__descout { font-size: 11px; color: var(--ink); margin-top: 3px; white-space: pre-wrap; word-break: break-word; }
 .cal__going { font-size: 11px; color: var(--ink); margin-top: 4px; }
 .cal__acts { display: flex; gap: 4px; margin-top: 6px; flex-wrap: wrap; }
-/* 提醒選單（ADR-0262）：本機設定，刻意做得比 RSVP 低調——它不是給別人看的。 */
+/* 提醒選單（ADR-0266）：本機設定，刻意做得比 RSVP 低調——它不是給別人看的。 */
 .cal__remind { display: flex; align-items: center; gap: 5px; margin-top: 5px; }
 .cal__remindlbl { font-size: 10px; color: var(--muted); }
 .cal__remindsel {
@@ -1256,7 +1315,7 @@ button:disabled { opacity: .5; cursor: default; filter: none; }
 }
 .cal__remindsel:focus { outline: none; border-color: var(--accent); }
 
-/* 對話中的日期提示（ADR-0260 階段四）：偵測→提示，低調、可點、不搶版面。 */
+/* 對話中的日期提示（ADR-0264 階段四）：偵測→提示，低調、可點、不搶版面。 */
 .datechips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
 .datechip {
   border: 1px solid var(--border); background: var(--field); color: var(--muted);

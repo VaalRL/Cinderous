@@ -1,12 +1,12 @@
-// 右欄「行程」分頁（ADR-0259 實作階段三）：每個對話的共享行程。
+// 右欄「行程」分頁（ADR-0263 實作階段三）：每個對話的共享行程。
 //
 // ## 這個面板只做兩件事
 //
-// 1. **主揪**（建立者）看得到「編輯／取消」——ADR-0259 §1.7 的權威模型在 UI 的體現。
+// 1. **主揪**（建立者）看得到「編輯／取消」——ADR-0263 §1.7 的權威模型在 UI 的體現。
 //    非主揪連按鈕都不出現，不是按了才被拒（引擎與 core 仍各有一道，這裡是可用性不是安全性）。
 // 2. **其他人**看得到「參加／也許／不參加」。RSVP 是每人對自己狀態的宣告，誰都能改自己的。
 //
-// 時間全部是本機時區的顯示與輸入；行程本身存 unix 秒。**提醒是本機的事**（ADR-0259 §1.4
+// 時間全部是本機時區的顯示與輸入；行程本身存 unix 秒。**提醒是本機的事**（ADR-0263 §1.4
 // 紅線：零中繼成本），本面板不排任何遠端觸發。
 
 import type { CalendarEventInput, RsvpStatus, StoredCalendarEvent } from "@cinderous/engine";
@@ -25,15 +25,15 @@ export interface CalendarPanelProps {
   onCancel: (eventId: string) => void;
   onRsvp: (eventId: string, status: RsvpStatus) => void;
   /**
-   * 設定本機提醒（ADR-0262）；`undefined`＝不提醒。**未提供＝不顯示提醒選單**
+   * 設定本機提醒（ADR-0266）；`undefined`＝不提醒。**未提供＝不顯示提醒選單**
    * （後端無此能力）。純本機、零中繼流量，其他參與者不會知道。
    */
   onRemind?: (eventId: string, lead: number | undefined) => void;
   /** pubkey → 顯示名（列出誰要來）。 */
   nameFor: (pubkey: string) => string;
   /**
-   * 由對話中的日期標記帶進來的預填（ADR-0260 階段四）：`nonce` 變動即開啟新建表單並帶入時間。
-   * **一律由使用者點擊觸發**——本元件不會自己冒出表單（ADR-0259 §1.6 否決自動導覽）。
+   * 由對話中的日期標記帶進來的預填（ADR-0264 階段四）：`nonce` 變動即開啟新建表單並帶入時間。
+   * **一律由使用者點擊觸發**——本元件不會自己冒出表單（ADR-0263 §1.6 否決自動導覽）。
    */
   draft?: { at: number; nonce: number } | undefined;
 }
@@ -66,7 +66,7 @@ function formatRange(start: number, end: number | undefined, locale: string): st
 }
 
 /**
- * 提醒選項（ADR-0262）。`undefined`＝不提醒。順序即選單順序，預設值在 `CALENDAR_REMINDER_LEADS`
+ * 提醒選項（ADR-0266）。`undefined`＝不提醒。順序即選單順序，預設值在 `CALENDAR_REMINDER_LEADS`
  * 之外另有 `CALENDAR_REMINDER_DEFAULT_LEAD`——但**沒選過就是不提醒**：預設值只在使用者
  * 主動打開提醒時當起始選擇，不會替他決定要被吵。
  */
@@ -257,7 +257,7 @@ export function CalendarPanel(props: CalendarPanelProps): JSX.Element {
                   </div>
                 ) : null}
 
-                {/* 提醒（ADR-0262）：**本機的**，其他參與者不會知道，也不產生任何中繼流量。
+                {/* 提醒（ADR-0266）：**本機的**，其他參與者不會知道，也不產生任何中繼流量。
                     已過去的行程不顯示——提醒一個過去的時間沒有意義。 */}
                 {props.onRemind && !past ? (
                   <label className="cal__remind" data-testid="cal-remind">

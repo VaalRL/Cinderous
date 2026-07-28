@@ -1,4 +1,4 @@
-// 行動端「行程」分頁（ADR-0261）：桌面 `apps/desktop/src/ui/CalendarPanel.tsx` 的行動端版。
+// 行動端「行程」分頁（ADR-0265）：桌面 `apps/desktop/src/ui/CalendarPanel.tsx` 的行動端版。
 //
 // ## 與桌面同的部分（**刻意逐條對齊**）
 //
@@ -32,15 +32,15 @@ export interface CalendarPanelProps {
   onCancel: (eventId: string) => void;
   onRsvp: (eventId: string, status: RsvpStatus) => void;
   /**
-   * 設定本機提醒（ADR-0262）；`undefined`＝不提醒。**未提供＝不顯示提醒列**（後端無此能力）。
+   * 設定本機提醒（ADR-0266）；`undefined`＝不提醒。**未提供＝不顯示提醒列**（後端無此能力）。
    * 純本機、零中繼流量，其他參與者不會知道。
    */
   onRemind?: (eventId: string, lead: number | undefined) => void;
   /** pubkey → 顯示名（列出誰要來）。 */
   nameFor: (pubkey: string) => string;
   /**
-   * 由對話中的日期標記帶進來的預填（ADR-0260 階段四）：`nonce` 變動即開啟新建表單並帶入時間。
-   * **一律由使用者點擊觸發**——本元件不會自己冒出表單（ADR-0259 §1.6 否決自動導覽）。
+   * 由對話中的日期標記帶進來的預填（ADR-0264 階段四）：`nonce` 變動即開啟新建表單並帶入時間。
+   * **一律由使用者點擊觸發**——本元件不會自己冒出表單（ADR-0263 §1.6 否決自動導覽）。
    */
   draft?: { at: number; nonce: number } | undefined;
   tk: ThemeTokens;
@@ -66,7 +66,7 @@ const DURATIONS: { key: MessageKey; secs: number | undefined }[] = [
 ];
 
 /**
- * 提醒選項（ADR-0262）。`undefined`＝不提醒。**沒選過就是不提醒**——不替使用者決定要被吵。
+ * 提醒選項（ADR-0266）。`undefined`＝不提醒。**沒選過就是不提醒**——不替使用者決定要被吵。
  * 行動端用 chip 列而非下拉：拇指點得到，且看一眼就知道目前選的是哪個。
  */
 const REMIND_CHOICES: { lead: number | undefined; key: MessageKey }[] = [
@@ -412,7 +412,7 @@ export function CalendarPanel(props: CalendarPanelProps): JSX.Element {
                   </Text>
                 ) : null}
 
-                {/* 提醒（ADR-0262）：**本機的**，其他參與者不會知道，也不產生任何中繼流量。
+                {/* 提醒（ADR-0266）：**本機的**，其他參與者不會知道，也不產生任何中繼流量。
                     已過去的行程不顯示——提醒一個過去的時間沒有意義。 */}
                 {props.onRemind && !past ? (
                   <View style={styles.remind} testID="cal-remind">
@@ -437,7 +437,7 @@ export function CalendarPanel(props: CalendarPanelProps): JSX.Element {
                   </View>
                 ) : null}
 
-                {/* 主揪權威（ADR-0259 §1.7）：非主揪連按鈕都不出現，不是按了才被拒。 */}
+                {/* 主揪權威（ADR-0263 §1.7）：非主揪連按鈕都不出現，不是按了才被拒。 */}
                 {mine ? (
                   <View style={styles.acts}>
                     <Pressable

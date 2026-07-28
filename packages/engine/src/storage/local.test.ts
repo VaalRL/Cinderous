@@ -79,7 +79,7 @@ describe("LocalStorage（ADR-0110：狀態常駐記憶體 + 逐鍵寫回）", ()
     expect(new LocalStorage("carol").loadMessages("bob")).toEqual([]);
   });
 
-  it("行程保留上限（ADR-0260 §10）：清掉的過去行程也要從磁碟消失，不是只在記憶體裡不見", () => {
+  it("行程保留上限（ADR-0264 §10）：清掉的過去行程也要從磁碟消失，不是只在記憶體裡不見", () => {
     const now = 1_800_000_000;
     const ev = (id: string, start: number) => ({ id, title: id, start, organizer: "bob", updatedAt: start });
     const s = new LocalStorage("ns");

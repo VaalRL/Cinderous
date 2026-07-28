@@ -56,7 +56,7 @@ read ordinary environment variables.
 ### Node identity and the sponsorship entry (NIP-11)
 
 Your relay answers an HTTP GET carrying `Accept: application/nostr+json` with a
-**NIP-11 Relay Information Document** (ADR-0256). **Without that header it still returns the plain
+**NIP-11 Relay Information Document** (ADR-0260). **Without that header it still returns the plain
 text `Cinderous relay`**, so health checks are unaffected.
 
 All of the following are optional, and **fields you leave unset simply do not appear** in the document:
@@ -108,7 +108,7 @@ DONATE_LIGHTNING="op@example.com" pnpm --filter @cinderous/relay node-relay
 
 ### Users can ask you to erase their data (NIP-62)
 
-The relay supports **NIP-62 Request to Vanish** (ADR-0256): when a user publishes a kind 62 event
+The relay supports **NIP-62 Request to Vanish** (ADR-0260): when a user publishes a kind 62 event
 signed with their own key, your node **immediately** deletes the events they authored, the offline
 messages addressed to them, and their encrypted cloud snapshot — without waiting for the TTL.
 

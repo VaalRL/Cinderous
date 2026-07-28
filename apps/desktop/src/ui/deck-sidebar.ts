@@ -1,7 +1,7 @@
 // 三欄左側欄邏輯（ADR-0079 Q2）：聯絡人＋群組混合、依最近互動排序、
 // 搜尋（名稱＋訊息內容）、自訂標籤篩選。純函式、可測。
 import type { ChatMessage, Contact, Group, Status } from "@cinderous/engine";
-import { contactLabel } from "@cinderous/engine";
+import { contactLabel, nameOrMessagesMatch } from "@cinderous/engine";
 import { labelsOf, type GroupPrefsMap } from "./group-labels.js";
 
 export interface SidebarEntry {
@@ -67,13 +67,12 @@ export function buildEntries(
   return [...c, ...g];
 }
 
-/** 名稱或任一則訊息內容命中查詢（空查詢＝全中；大小寫不敏感）。 */
+// 名稱＋訊息內容比對已上移共用引擎（ADR-0256 階段 4，與行動端共用）；此處轉引保持既有 import 路徑。
+export { nameOrMessagesMatch };
+
+/** 名稱或任一則訊息內容命中查詢（SidebarEntry 便利包裝；空查詢＝全中、大小寫不敏感）。 */
 export function matchesQuery(entry: SidebarEntry, query: string, convos: Record<string, ChatMessage[]>): boolean {
-  const q = query.trim().toLowerCase();
-  if (!q) return true;
-  if (entry.name.toLowerCase().includes(q)) return true;
-  const msgs = convos[entry.id];
-  return !!msgs && msgs.some((m) => m.text?.toLowerCase().includes(q));
+  return nameOrMessagesMatch(entry.name, entry.id, query, convos);
 }
 
 /** 依最近互動排序（新→舊）；無互動者殿後、同分依名稱。不改動輸入。 */

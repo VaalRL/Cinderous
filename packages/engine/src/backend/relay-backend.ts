@@ -250,7 +250,7 @@ const RECONNECT_MAX_MS = 15_000;
 
 /** 正規化 relay URL（trim、去尾斜線）；非 ws(s) 或空值回傳 undefined。 */
 /**
- * 行程補送的節流窗（ADR-0260 §9）：同一個 (行程, 對象) 在此窗內只補一次。
+ * 行程補送的節流窗（ADR-0264 §9）：同一個 (行程, 對象) 在此窗內只補一次。
  *
  * 對方若正常回送達回條，第一次補送後就不會再補（`delivered` 有他了）；這條窗擋的是
  * **對方不回回條**（舊版客戶端）的情況——沒有它，每次他上線都會重送一次。
@@ -457,7 +457,7 @@ export class RelayChatBackend implements ChatBackend {
   /** 加密雲端快照設定（ADR-0071）；undefined＝不發佈（接收合併恆開）。 */
   private readonly cloudSync: { mode: "basic" | "full"; deviceId: string } | undefined;
   private snapTimer: ReturnType<typeof setInterval> | undefined;
-  /** 行程提醒 tick（ADR-0262）：純本機，不碰網路。 */
+  /** 行程提醒 tick（ADR-0266）：純本機，不碰網路。 */
   private remindTimer: ReturnType<typeof setInterval> | undefined;
   /** 企業政策禁止快照上雲（ADR-0071）：名冊採用時設定，即刻停止發佈。 */
   private cloudBackupBlocked = false;
@@ -514,7 +514,7 @@ export class RelayChatBackend implements ChatBackend {
   private lastList: RelayListDoc | null;
   /** 外部 relay 連線（正規化 URL → client），惰性建立（ADR-0034）。 */
   /**
-   * 行程補送節流（ADR-0260 §9）：`行程id|對象` → 上次補送時間（毫秒）。**純記憶體**
+   * 行程補送節流（ADR-0264 §9）：`行程id|對象` → 上次補送時間（毫秒）。**純記憶體**
    * ——重啟後至多多補一次，可接受；持久化它反而會讓「換裝置就永遠不補」。
    */
   private readonly calResent = new Map<string, number>();
@@ -764,9 +764,9 @@ export class RelayChatBackend implements ChatBackend {
     this.broadcastGroups(); // ADR-0068：管理員把自建群組快照廣播給成員（換機自癒）
     this.maybePublishSnapshot(); // ADR-0071：雲端快照（開機檢查；內容有變＋每日至多一次）
     this.reconcileCloudOff(); // 審查修正 #6：關閉狀態的雲端殘留對帳
-    this.pruneCalendarOnStart(); // ADR-0260 §10：清掉過久的過去行程
-    this.sweepReminders(); // ADR-0262：App 關著時錯過的提醒，開起來還在寬限窗內就補說一聲
-    // 提醒 tick（ADR-0262）：純本機、零中繼流量。30 秒一次——提醒的粒度是分鐘，
+    this.pruneCalendarOnStart(); // ADR-0264 §10：清掉過久的過去行程
+    this.sweepReminders(); // ADR-0266：App 關著時錯過的提醒，開起來還在寬限窗內就補說一聲
+    // 提醒 tick（ADR-0266）：純本機、零中繼流量。30 秒一次——提醒的粒度是分鐘，
     // 每秒掃只是白費電；30 秒最壞遲到半分鐘，感受不到。
     this.remindTimer = setInterval(() => this.sweepReminders(), 30_000);
     this.snapTimer = setInterval(() => this.maybePublishSnapshot(), 30 * 60_000);
@@ -1367,7 +1367,7 @@ export class RelayChatBackend implements ChatBackend {
     // wasOnline 為真，不再回補）。
     if (!wasOnline && this.isContact(pubkey)) {
       this.sendPresenceState(pubkey);
-      // 補送未送達的行程邀請（ADR-0260 §9）：他離線期間過期的邀請在這裡補回來。
+      // 補送未送達的行程邀請（ADR-0264 §9）：他離線期間過期的邀請在這裡補回來。
       this.resendCalendarTo(pubkey);
     }
     // 喚醒握手（ADR-0109）：有人上線 → 立刻補發信標並切回 ACTIVE，讓對方一個 RTT 內看到我。
@@ -1611,13 +1611,13 @@ export class RelayChatBackend implements ChatBackend {
       return;
     }
 
-    // 共享行程（ADR-0259）：權威與新舊判定在 core，這裡只負責歸屬（1:1 的對話對象）。
+    // 共享行程（ADR-0263）：權威與新舊判定在 core，這裡只負責歸屬（1:1 的對話對象）。
     const calEvent = calendarEventOf(rumor);
     if (calEvent) {
       // 自封副本＝我在另一台裝置建的 → 對話對象是 rumor 的 `to`；否則就是寄件人。
       const to = rumor.tags.find((t) => t[0] === "to")?.[1];
       this.applyCalendar(calEvent, calEvent.groupId ? undefined : (selfCopy ? to : sender));
-      // 送達回條（ADR-0260 §9 補送）：**沿用既有的 RECEIPT kind**，零新協定面。主揪據此
+      // 送達回條（ADR-0264 §9 補送）：**沿用既有的 RECEIPT kind**，零新協定面。主揪據此
       // 知道誰已經拿到，才有辦法只補送給沒拿到的人（否則每次上線都得盲送給全體）。
       if (!selfCopy) {
         this.publishReliable(
@@ -1637,7 +1637,7 @@ export class RelayChatBackend implements ChatBackend {
 
     const receipt = receiptOf(rumor);
     if (receipt) {
-      // 行程的送達回條（ADR-0260 §9）：目標 id 命中我主揪的行程 → 記下這個人已拿到。
+      // 行程的送達回條（ADR-0264 §9）：目標 id 命中我主揪的行程 → 記下這個人已拿到。
       // 放在訊息回條之前判斷——訊息與行程的 id 空間都是 rumor.id，命中行程就不是訊息。
       const mine = this.storage.loadCalendar().find((e) => e.id === receipt.messageId);
       if (mine && mine.organizer === this.self.pubkey) {
@@ -2676,7 +2676,7 @@ export class RelayChatBackend implements ChatBackend {
   }
 
   /**
-   * NIP-62 清除請求（ADR-0256）：對**每一座已知的中繼**送出「刪掉我的一切」。
+   * NIP-62 清除請求（ADR-0260）：對**每一座已知的中繼**送出「刪掉我的一切」。
    *
    * ## 為什麼要逐座、且每座簽一顆
    *
@@ -3490,7 +3490,7 @@ export class RelayChatBackend implements ChatBackend {
    * 自然不影響狀態。
    */
   /**
-   * 建立/修改/取消共享行程（ADR-0259）。`groupId` 給群組行程，`contact` 給 1:1。
+   * 建立/修改/取消共享行程（ADR-0263）。`groupId` 給群組行程，`contact` 給 1:1。
    *
    * **主揪權威**：`action` 為 `update`／`cancel` 時，只有原主揪送出的才會被收端採納
    * （`applyCalendarChange` 是執行點）；這裡也先擋一次，避免送出注定被忽略的事件。
@@ -3528,7 +3528,7 @@ export class RelayChatBackend implements ChatBackend {
     if (!wrapped) return undefined;
 
     const id = action === "create" ? wrapped.id : opts.eventId!;
-    // 先落本機（本機是真實來源，ADR-0259 §1.2）——送出成功與否不影響自己看得到。
+    // 先落本機（本機是真實來源，ADR-0263 §1.2）——送出成功與否不影響自己看得到。
     this.applyCalendar({
       id,
       action,
@@ -3548,7 +3548,7 @@ export class RelayChatBackend implements ChatBackend {
   }
 
   /**
-   * 回覆某行程（ADR-0259）。送給誰由 {@link rsvpAudience} 決定——大群只送主揪，
+   * 回覆某行程（ADR-0263）。送給誰由 {@link rsvpAudience} 決定——大群只送主揪，
    * 把每輪從 O(N²) 降回 O(N)（見 core `calendar.ts` 的說明）。
    */
   calendarRsvp(eventId: string, status: RsvpStatus): void {
@@ -3571,7 +3571,7 @@ export class RelayChatBackend implements ChatBackend {
   }
 
   /**
-   * 補送未送達的行程邀請（ADR-0259 §1.5／ADR-0260 §9）。
+   * 補送未送達的行程邀請（ADR-0263 §1.5／ADR-0264 §9）。
    *
    * ## 為什麼需要這個
    *
@@ -3586,11 +3586,11 @@ export class RelayChatBackend implements ChatBackend {
    * 只補**未來**的行程——過去的補了也沒意義。
    */
   /**
-   * 開機清理過期行程（ADR-0260 §10）。**光靠寫入路徑不夠**——一筆過去行程會隨時間變舊，
+   * 開機清理過期行程（ADR-0264 §10）。**光靠寫入路徑不夠**——一筆過去行程會隨時間變舊，
    * 但沒有任何寫入會碰到它；不在開機掃一次，過去的行程就只增不減。
    */
   /**
-   * 開機清一次過久的過去行程（ADR-0260 §10）。
+   * 開機清一次過久的過去行程（ADR-0264 §10）。
    * 只在真的清到東西時才回推 UI——沒清到就沒有狀態變化，不必多一次 render。
    */
   private pruneCalendarOnStart(): void {
@@ -3639,7 +3639,7 @@ export class RelayChatBackend implements ChatBackend {
   }
 
   /**
-   * 設定提醒提前量（ADR-0262）。**這個方法刻意什麼網路動作都不做**——ADR-0259 §1.4 給
+   * 設定提醒提前量（ADR-0266）。**這個方法刻意什麼網路動作都不做**——ADR-0263 §1.4 給
    * 提醒畫的紅線就是零中繼成本，而提醒設定本來就只是自己的事（也不能進 rumor，否則會
    * 改變行程 id）。
    */
@@ -3649,7 +3649,7 @@ export class RelayChatBackend implements ChatBackend {
   }
 
   /**
-   * 掃一次到期的提醒（ADR-0262）。由**一個週期 tick** 驅動，而不是每筆行程一個
+   * 掃一次到期的提醒（ADR-0266）。由**一個週期 tick** 驅動，而不是每筆行程一個
    * `setTimeout`——後者對「三個月後」的行程是壞的：`setTimeout` 的延遲是 32 位元毫秒
    * （上限約 24.8 天），超過就溢位成**立刻觸發**，於是三個月後的會議在你設定的當下就叫你。
    *
@@ -3734,7 +3734,7 @@ export class RelayChatBackend implements ChatBackend {
     this.storage.saveGroup({ ...group, members });
     this.groups = this.storage.loadGroups();
     this.ensureContact(pubkey);
-    // 新成員補送既有行程（ADR-0260 §9）：無伺服器端房間＝沒有歷史重播（ADR-0027），
+    // 新成員補送既有行程（ADR-0264 §9）：無伺服器端房間＝沒有歷史重播（ADR-0027），
     // 不補的話新成員的行事曆就是空的，而群組以為他知道。
     this.resendCalendarTo(pubkey);
     const hint = this.homeUrl ? { relayHint: this.homeUrl } : {};

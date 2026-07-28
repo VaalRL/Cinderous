@@ -106,6 +106,8 @@ import { MsgStatusIcon } from "./MsgStatusIcon.js";
 import { readOriginal, relocateOriginal } from "../native/save-file.js";
 import { copyImageFromUrl, copyText } from "../native/clipboard.js";
 import { chatBgCss, getChatBg, getConvoSize, setConvoSize } from "./personalize.js";
+import { searchChannel, stepHit } from "./msg-search.js";
+import { cssZoomFactor } from "../ui-scale.js";
 
 /**
  * 燈箱項目（ADR-0102）：`preview` 是立刻能顯示的東西（本 session 的原圖 blob，或跨 session 存活的縮圖）；
@@ -247,7 +249,7 @@ const MSG_STATUS_KEY: Record<MessageStatus, MessageKey> = {
 
 export interface ConversationProps {
   /**
-   * 對話中偵測到日期時的可點提示（ADR-0259 §1.6／ADR-0260 階段四）：點了才開行程並預填。
+   * 對話中偵測到日期時的可點提示（ADR-0263 §1.6／ADR-0264 階段四）：點了才開行程並預填。
    * **偵測→提示，不自動導覽**；未提供＝完全不偵測、不顯示任何標記。
    */
   onPickDate?: (at: number, label: string) => void;
@@ -469,6 +471,14 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
     onMarkRead?.();
   }, [contact.pubkey, messages.length, onMarkRead]);
   const [visibleCount, setVisibleCount] = useState(MESSAGE_WINDOW);
+  // 對話內搜尋（ADR-0256）：🔍 開關＋關鍵字＋命中巡覽；searchAt 以超大值起始＝夾限後落在最新命中。
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchAt, setSearchAt] = useState(Number.MAX_SAFE_INTEGER);
+  useEffect(() => {
+    setSearchOpen(false);
+    setSearchQuery("");
+  }, [contact.pubkey]);
   // ADR-0148：本地暱稱。標頭預設顯示暱稱（若有），點名字暫態切換為對方廣播名；換對話即重置。
   const hasAlias = !!contact.alias?.trim();
   const [showBroadcast, setShowBroadcast] = useState(false);
@@ -672,9 +682,11 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
     const MIN_H = 320;
     const MAX_W = 900;
     const maxH = Math.round(window.innerHeight * 0.92);
+    // UI 尺寸（ADR-0253）：瀏覽器 CSS zoom 下位移除以縮放係數才 1:1 跟手（Tauri＝1）。
+    const zoom = cssZoomFactor();
     const onMove = (ev: MouseEvent): void => {
-      el.style.width = `${Math.max(MIN_W, Math.min(MAX_W, startW + ev.clientX - startX))}px`;
-      el.style.height = `${Math.max(MIN_H, Math.min(maxH, startH + ev.clientY - startY))}px`;
+      el.style.width = `${Math.max(MIN_W, Math.min(MAX_W, startW + (ev.clientX - startX) / zoom))}px`;
+      el.style.height = `${Math.max(MIN_H, Math.min(maxH, startH + (ev.clientY - startY) / zoom))}px`;
     };
     const onUp = (): void => {
       document.removeEventListener("mousemove", onMove);
@@ -691,6 +703,30 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
   // 訊息列視窗化：只渲染最近 visibleCount 則，避免長對話一次渲染上千 DOM 節點。
   const hiddenCount = Math.max(0, channel.length - visibleCount);
   const shown = hiddenCount > 0 ? channel.slice(hiddenCount) : channel;
+  // 對話內搜尋（ADR-0256）：命中限熱區（封存另行，ADR-0111 冷熱分離）；at＝夾限後的目前命中。
+  const hits = searchOpen ? searchChannel(channel, searchQuery, { ...(props.unsent ? { unsent: props.unsent } : {}), ...(props.expired ? { expired: props.expired } : {}) }) : [];
+  const hitAt = hits.length === 0 ? 0 : Math.min(searchAt, hits.length - 1);
+  // 跳轉：目標在視窗外→先擴 visibleCount（effect 重跑再捲）；到位→捲動＋短暫高亮。
+  // `.log` 子元素＝〔載入更早鈕?〕＋shown（索引對映；免動 MessageLine 的多分支根節點）。
+  useEffect(() => {
+    if (!searchOpen || !searchQuery.trim()) return;
+    const hit = hits[hitAt];
+    if (!hit) return;
+    const needed = channel.length - hit.index;
+    if (visibleCount < needed) {
+      setVisibleCount(Math.ceil(needed / MESSAGE_WINDOW) * MESSAGE_WINDOW);
+      return; // 擴窗後 effect 依 visibleCount 重跑再捲
+    }
+    const log = logRef.current;
+    if (!log) return;
+    const el = log.children[hit.index - hiddenCount + (hiddenCount > 0 ? 1 : 0)] as HTMLElement | undefined;
+    if (!el) return;
+    el.scrollIntoView?.({ block: "center" });
+    el.classList.add("line--hit");
+    const timer = setTimeout(() => el.classList.remove("line--hit"), 1600);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- hits/channel 由 searchQuery 與訊息派生
+  }, [searchOpen, searchQuery, searchAt, visibleCount, messages.length]);
   // 擁有中的自製貼圖 id 集合：整個訊息列共用一份（不再每則訊息各建一個 Set）。
   const ownedIds = new Set(library.map((s) => s.id));
 
@@ -891,7 +927,7 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
     ? []
     : matchTriggers(text, triggers, trigIndex).filter((m) => resolveAny(m.entry.ref) !== undefined);
   const trigActive = Math.min(trigSel, Math.max(trigMatches.length - 1, 0));
-  // 日期建議（ADR-0260 階段四）：草稿尾端剛打完日期才跳；沒有 onPickDate 就完全不算。
+  // 日期建議（ADR-0264 階段四）：草稿尾端剛打完日期才跳；沒有 onPickDate 就完全不算。
   const dateHit = props.onPickDate ? detectDateAtEnd(text) : undefined;
   const acceptTrigger = (m: TriggerMatch): void => {
     setText(text.slice(0, text.length - m.matchedLen));
@@ -1380,7 +1416,61 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
           {contact.status === "offline" ? t("convo_offlineNotice") : contact.statusMessage}
           {contact.nowPlaying ? `　♪ ${contact.nowPlaying}` : ""}
         </div>
+        {/* 對話內搜尋開關（ADR-0256）。 */}
+        <button
+          type="button"
+          className="convo__searchbtn"
+          data-testid="msg-search-toggle"
+          aria-label={t("convo_search")}
+          title={t("convo_search")}
+          aria-pressed={searchOpen}
+          onClick={() => {
+            setSearchOpen((o) => !o);
+            setSearchQuery("");
+          }}
+        >
+          🔍
+        </button>
       </div>
+      {searchOpen ? (
+        <div className="convo__search" data-testid="msg-search-bar">
+          <input
+            autoFocus
+            value={searchQuery}
+            aria-label={t("convo_search")}
+            placeholder={t("convo_searchHint")}
+            onChange={(e) => {
+              setSearchQuery(e.target.value);
+              setSearchAt(Number.MAX_SAFE_INTEGER); // 新查詢→跳到最新命中
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") setSearchOpen(false);
+              if (e.key === "Enter") setSearchAt(stepHit(hitAt, hits.length, e.shiftKey ? 1 : -1)); // Enter＝往較舊
+            }}
+          />
+          <span className="cnt" data-testid="msg-search-count">
+            {searchQuery.trim() ? (hits.length === 0 ? t("convo_searchNone") : `${hitAt + 1}/${hits.length}`) : ""}
+          </span>
+          <button
+            type="button"
+            aria-label={t("convo_searchPrev")}
+            title={t("convo_searchPrev")}
+            disabled={hits.length === 0}
+            onClick={() => setSearchAt(stepHit(hitAt, hits.length, -1))}
+          >
+            ↑
+          </button>
+          <button
+            type="button"
+            aria-label={t("convo_searchNext")}
+            title={t("convo_searchNext")}
+            disabled={hits.length === 0}
+            onClick={() => setSearchAt(stepHit(hitAt, hits.length, 1))}
+          >
+            ↓
+          </button>
+        </div>
+      ) : null}
 
       <div
         className={`convo__body ${dragging || props.dropActive ? "dropping" : ""}`}
@@ -1931,7 +2021,7 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
         </div>
       ) : null}
 
-      {/* 日期建議列（ADR-0260 階段四）：**只看游標前的尾端**剛打完的那個日期（同 ADR-0037 的
+      {/* 日期建議列（ADR-0264 階段四）：**只看游標前的尾端**剛打完的那個日期（同 ADR-0037 的
           尾端比對語意）。點擊＝開行程並預填；**不劫持 Enter**——Enter 照樣送出訊息。 */}
       {!props.readOnly && props.onPickDate && dateHit ? (
         <div className="trigbar" data-testid="date-bar">
@@ -2451,7 +2541,7 @@ function MessageLine({
   /** 於詳情面板中渲染時為 true：不截斷、顯示完整內文。 */
   expanded?: boolean;
   /**
-   * 訊息中偵測到日期時的可點提示（ADR-0259 §1.6／ADR-0260 階段四）。
+   * 訊息中偵測到日期時的可點提示（ADR-0263 §1.6／ADR-0264 階段四）。
    * **偵測→提示，不自動導覽**：點了才開行程分頁並預填；未提供＝不顯示標記。
    */
   onPickDate?: ((at: number, label: string) => void) | undefined;
@@ -2629,7 +2719,7 @@ function MessageLine({
           {renderRichText(bodyText, manifest, getBlob ?? (() => undefined))}
         </span>
       )}
-      {/* 日期提示（ADR-0260 階段四）：偵測→提示。已收回/過期的訊息不掃（內容不該再被解讀）。 */}
+      {/* 日期提示（ADR-0264 階段四）：偵測→提示。已收回/過期的訊息不掃（內容不該再被解讀）。 */}
       {onPickDate && !unsent && !expired && bodyText ? (
         (() => {
           const hits = detectDates(bodyText);

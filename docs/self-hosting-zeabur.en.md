@@ -60,7 +60,7 @@ Service → Variables, set only if needed:
 | `MAX_TTL_DAYS` | `7` | Retention cap for offline messages, in days (ADR-0160). |
 | `MAX_FILE_MB` | unset | Set to ≥1 to accept file chunks; unset means the whole class is rejected (ADR-0162/0244). |
 | `MAX_EVENTS_PER_MINUTE` | `120` | Per-pubkey events-per-minute cap; set `0` to disable (ADR-0235 H1). |
-| `RELAY_NAME` / `RELAY_CONTACT` / `RELAY_DESCRIPTION` / `RELAY_PUBKEY` | unset | NIP-11 relay information (ADR-0256). **Set `RELAY_CONTACT` if you want to be listed in the seat pool.** |
+| `RELAY_NAME` / `RELAY_CONTACT` / `RELAY_DESCRIPTION` / `RELAY_PUBKEY` | unset | NIP-11 relay information (ADR-0260). **Set `RELAY_CONTACT` if you want to be listed in the seat pool.** |
 | `NODE_ATTESTATION` | unset | Your signed node self-declaration event, as a JSON string (ADR-0092). |
 | `DONATE_GITHUB_SPONSORS` / `DONATE_BUY_ME_A_COFFEE` / `DONATE_LIBERAPAY` / `DONATE_LIGHTNING` | unset | Sponsorship links (ADR-0089): fill these and the desktop app shows a small, dismissible “Support this node” card. Leave all of them empty and no card appears. The three web platforms accept **`https://` only**. |
 

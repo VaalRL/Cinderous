@@ -3,6 +3,7 @@
 // floating-window.ts（已測），此處負責狀態、DOM 量測、事件與 localStorage 持久化。
 import { useRef, useState } from "react";
 import type { CSSProperties, MouseEvent as ReactMouseEvent } from "react";
+import { cssZoomFactor } from "../ui-scale.js";
 import { clampRect } from "./floating-window.js";
 
 const LS_PREFIX = "nb.win.";
@@ -104,10 +105,13 @@ export function useFloatingWindows(): FloatingApi {
       const base = stateOf(id, index, size);
       const startX = e.clientX;
       const startY = e.clientY;
+      // UI 尺寸（ADR-0253）：瀏覽器版 CSS zoom 下滑鼠座標是 viewport px、版面是縮放後 px，
+      // 位移需除以縮放係數才能 1:1 跟手（Tauri 原生縮放係數恆為 1）。
+      const zoom = cssZoomFactor();
       apply(id, { ...base, z: maxZ() + 1 }); // 拖曳即置頂
       const onMove = (ev: MouseEvent): void => {
-        const dx = ev.clientX - startX;
-        const dy = ev.clientY - startY;
+        const dx = (ev.clientX - startX) / zoom;
+        const dy = (ev.clientY - startY) / zoom;
         const raw =
           mode === "move"
             ? { x: base.x + dx, y: base.y + dy, w: base.w, h: base.h }

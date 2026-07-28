@@ -28,6 +28,14 @@ const render = (extra: Record<string, unknown>) =>
     </I18nProvider>,
   );
 
+describe("經典佈局搜尋（ADR-0256）", () => {
+  it("roster 頂端有搜尋框（名稱＋訊息內容，與三欄側欄同一套比對）", () => {
+    const html = render({});
+    expect(html).toContain('data-testid="roster-search"');
+    expect(html).toContain("搜尋（名稱或訊息）");
+  });
+});
+
 describe("ContactListWindow 群組標籤 UI（ADR-0040）", () => {
   it("渲染群組既有標籤為 chip、附加標籤鈕", () => {
     const html = render({

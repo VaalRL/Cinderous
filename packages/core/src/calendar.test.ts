@@ -41,7 +41,7 @@ const group = (members: string[]): Group => ({ id: "g1", name: "登山團", admi
 /** 以收件人私鑰拆開 wrap 取回 rumor。 */
 const open = (evt: Parameters<typeof openWrap>[0], sk: Uint8Array) => openWrap(evt, sk).rumor;
 
-describe("共享行程（ADR-0259）", () => {
+describe("共享行程（ADR-0263）", () => {
   describe("1:1 邀請", () => {
     it("外層與一般訊息無異：kind 1059＋單一 p tag，行程欄位全在密文內層", () => {
       const { events } = wrapCalendarEvent(input, aliceSk, bob, { now: NOW });
@@ -95,7 +95,7 @@ describe("共享行程（ADR-0259）", () => {
     });
   });
 
-  describe("RSVP 送給誰（ADR-0259 §1.4 的 O(N²) 閘）", () => {
+  describe("RSVP 送給誰（ADR-0263 §1.4 的 O(N²) 閘）", () => {
     it("小群：送給全體（不含自己）", () => {
       const members = [alice, bob, carol];
       expect(rsvpAudience(members, alice, bob).sort()).toEqual([alice, carol].sort());
@@ -219,7 +219,7 @@ describe("共享行程（ADR-0259）", () => {
   });
 });
 
-describe("行程保留上限（ADR-0260 §10）", () => {
+describe("行程保留上限（ADR-0264 §10）", () => {
   const ev = (startOffsetDays: number, endOffsetDays?: number) => ({
     start: NOW + startOffsetDays * 86_400,
     ...(endOffsetDays !== undefined ? { end: NOW + endOffsetDays * 86_400 } : {}),
@@ -270,7 +270,7 @@ describe("行程保留上限（ADR-0260 §10）", () => {
   });
 });
 
-describe("行程提醒到期判定（ADR-0262）：本機計時器、零中繼成本", () => {
+describe("行程提醒到期判定（ADR-0266）：本機計時器、零中繼成本", () => {
   const NOW = 1_800_000_000;
   const ME = "pk_me";
   /** 最小可判定形狀：`start` 相對現在的秒數 ＋ 提前量。 */

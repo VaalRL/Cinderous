@@ -10,7 +10,7 @@ export interface InMemoryRelayNetwork {
 
 export interface InMemoryNetworkOptions extends RelayCoreOptions {
   /**
-   * 本站主機（ADR-0256）。NIP-62 的清除請求要驗 `relay` tag 指向本站，而那是 fail-closed 的
+   * 本站主機（ADR-0260）。NIP-62 的清除請求要驗 `relay` tag 指向本站，而那是 fail-closed 的
    * ——**沒有主機資訊就只認 `ALL_RELAYS`**。要在記憶體網路上端到端測具名的清除請求就得給它。
    */
   host?: string;

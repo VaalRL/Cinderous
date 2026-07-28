@@ -31,6 +31,16 @@ const render = (messages: ChatMessage[]) =>
     </I18nProvider>,
   );
 
+describe("對話內搜尋（ADR-0256）", () => {
+  it("標頭有 🔍 開關；搜尋列預設收合（SSR 初始狀態）", () => {
+    const html = render(mkMessages(3));
+    const at = html.indexOf('data-testid="msg-search-toggle"');
+    expect(at).toBeGreaterThanOrEqual(0);
+    expect(html.slice(at, at + 120)).toContain('aria-pressed="false"'); // 預設關（範圍限定在開關本身）
+    expect(html).not.toContain('data-testid="msg-search-bar"');
+  });
+});
+
 describe("ConversationWindow 訊息列視窗化（P0-3）", () => {
   it("訊息數 ≤ 視窗時全部渲染、無『載入較早』", () => {
     const html = render(mkMessages(10));
@@ -548,7 +558,7 @@ describe("公司儲存槽存放鈕（ADR-0161）", () => {
   });
 });
 
-describe("訊息中的日期提示（ADR-0260 階段四）", () => {
+describe("訊息中的日期提示（ADR-0264 階段四）", () => {
   const withDate = (text: string, onPickDate?: (at: number, label: string) => void): string =>
     renderToStaticMarkup(
       <I18nProvider locale="zh-Hant">

@@ -190,10 +190,10 @@ export function MobileApp({
   const [blocked, setBlocked] = useState<BlockedContact[]>([]);
   /** 訊息請求（ADR-0121）：陌生人傳來訊息但尚未接受。**不是聯絡人**。 */
   const [requests, setRequests] = useState<ContactRequest[]>([]);
-  /** 共享行程（ADR-0259／0261）：全部對話的行程，交給對話畫面時才依 activeId 篩。 */
+  /** 共享行程（ADR-0263／0265）：全部對話的行程，交給對話畫面時才依 activeId 篩。 */
   const [calendar, setCalendar] = useState<StoredCalendarEvent[]>([]);
   /**
-   * 點對話中的日期標記後的預填（ADR-0260 階段四）。**帶 `convo`**：對話畫面以 `key={activeId}`
+   * 點對話中的日期標記後的預填（ADR-0264 階段四）。**帶 `convo`**：對話畫面以 `key={activeId}`
    * 重掛、但本層 state 不會——不記住是哪個對話的話，換對話回來會冒出上一個對話的預填表單。
    */
   const [calDraft, setCalDraft] = useState<{ convo: string; at: number; nonce: number } | null>(null);
@@ -467,7 +467,7 @@ export function MobileApp({
       onContacts: setContacts,
       onGroups: setGroups,
       onCalendar: setCalendar,
-      // 行程提醒（ADR-0262）：**刻意不看 `document.hidden`**——訊息通知的「正在看就別打擾」
+      // 行程提醒（ADR-0266）：**刻意不看 `document.hidden`**——訊息通知的「正在看就別打擾」
       // 在這裡是錯的：你正盯著這個 App，不代表你知道十分鐘後有會。只受總開關管。
       onCalendarReminder: (e) => {
         if (!notifyRef.current) return;
@@ -1293,7 +1293,7 @@ export function MobileApp({
       selfEnterprise && selfAdmin && backendRef.current?.depositFile ? { onDepositSlot: () => depositToSlot(convoName) } : {};
     // 通話：需真實後端＋平台具備 WebRTC（ADR-0101）。
     const callProps = backendRef.current?.startCall && hasCallSupport() ? { onStartCall: startCall } : {};
-    // 共享行程（ADR-0259／0261）：示範後端沒有 calendarPublish → 整個分頁不出現、日期也不偵測。
+    // 共享行程（ADR-0263／0265）：示範後端沒有 calendarPublish → 整個分頁不出現、日期也不偵測。
     // 群組 vs 1:1 由當前對話 id 是否為群組決定（與訊息路由同一判準）。
     const calProps = ((): Record<string, unknown> => {
       const publish = backendRef.current?.calendarPublish;
@@ -1400,6 +1400,7 @@ export function MobileApp({
       {tab === "chats" ? (
         <ChatsListScreen
           entries={entries}
+          convos={convos}
           onOpen={openConvo}
           {...(relayUrl
             ? {

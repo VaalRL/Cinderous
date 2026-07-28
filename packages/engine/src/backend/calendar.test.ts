@@ -1,4 +1,4 @@
-// 共享行程的端到端行為（ADR-0259 實作階段二）：經**真實 RelayCore** 的記憶體網路收發，
+// 共享行程的端到端行為（ADR-0263 實作階段二）：經**真實 RelayCore** 的記憶體網路收發，
 // 驗證「建立一次、扇出全體、id 跨成員一致、主揪權威、RSVP 只往前推進」。
 import { generateSecretKey, getPublicKey, npubEncode, nsecEncode } from "@cinderous/core";
 import { createInMemoryRelayNetwork } from "@cinderous/relay";
@@ -19,7 +19,7 @@ function peers(names: string[]): RelayChatBackend[] {
 
 const trip = { title: "週六爬山", start: soon(3), end: soon(3) + 7200, location: "象山", description: "帶水" };
 
-describe("共享行程端到端（ADR-0259）", () => {
+describe("共享行程端到端（ADR-0263）", () => {
   describe("1:1", () => {
     it("一個人建立 → 對方收到同一個行程（id 一致）", () => {
       const [a, b] = peers(["Alice", "Bob"]) as [RelayChatBackend, RelayChatBackend];
@@ -157,7 +157,7 @@ describe("共享行程端到端（ADR-0259）", () => {
   });
 });
 
-describe("未送達邀請的補送（ADR-0260 §9）", () => {
+describe("未送達邀請的補送（ADR-0264 §9）", () => {
   /** 讓 A 的 presence 觀察到 B 剛上線（離線→上線），觸發補送。 */
   const comeOnline = (a: RelayChatBackend, bPubkey: string): void => {
     (a as unknown as { observeContactPresence: (pk: string, sec: number, c?: number) => void })
@@ -285,7 +285,7 @@ describe("未送達邀請的補送（ADR-0260 §9）", () => {
   });
 });
 
-describe("行程保留上限（ADR-0260 §10）", () => {
+describe("行程保留上限（ADR-0264 §10）", () => {
   it("開機清掉過久的過去行程，未來的留著", () => {
     const store = new MemoryStorage();
     const old = { id: "old", title: "去年的事", start: NOW - 400 * 86_400, organizer: "x", updatedAt: 1 };
@@ -315,7 +315,7 @@ describe("行程保留上限（ADR-0260 §10）", () => {
   });
 });
 
-describe("行程提醒（ADR-0262）：本機計時器、零中繼成本", () => {
+describe("行程提醒（ADR-0266）：本機計時器、零中繼成本", () => {
   /** 起一個接在記憶體 relay 上的後端，並回傳它與可觀察的提醒清單。 */
   function loneBackend(store: MemoryStorage): { a: RelayChatBackend; fired: string[] } {
     const net = createInMemoryRelayNetwork();
@@ -367,7 +367,7 @@ describe("行程提醒（ADR-0262）：本機計時器、零中繼成本", () =>
     a.stop();
   });
 
-  it("⚠ `calendarRemind` 不產生任何中繼流量（ADR-0259 §1.4 的紅線）", () => {
+  it("⚠ `calendarRemind` 不產生任何中繼流量（ADR-0263 §1.4 的紅線）", () => {
     const store = new MemoryStorage();
     store.upsertCalendarEvent({ id: "e1", title: "會議", start: NOW + 7200, organizer: "x", updatedAt: 1 });
     const net = createInMemoryRelayNetwork();

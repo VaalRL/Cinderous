@@ -39,7 +39,7 @@ else coreOptions.maxEventsPerMinute = rate;
 if (acceptFileEvents(process.env.MAX_FILE_MB)) coreOptions.acceptFileEvents = true;
 const core = new RelayCore(coreOptions);
 
-// NIP-11 文件（ADR-0256）：自架者以環境變數填站名/聯絡/贊助管道；未設的欄位不會出現。
+// NIP-11 文件（ADR-0260）：自架者以環境變數填站名/聯絡/贊助管道；未設的欄位不會出現。
 // 只組一次——內容全部來自啟動時的環境，執行期不會變。
 const relayInfo = buildRelayInfo({
   name: process.env.RELAY_NAME,
@@ -67,7 +67,7 @@ const dispatch = (out: Outbound[]): void => {
 // 掛在 HTTP 伺服器上：一般請求回 200（讓 PaaS/容器健康檢查通過，比照 Cloudflare worker），
 // WebSocket 升級請求交給 ws。純 WS 伺服器對 GET / 不回應會被健康檢查誤判為離線。
 const httpServer = createServer((req, res) => {
-  // NIP-11（ADR-0256）：只有明確要 `application/nostr+json` 的請求拿到 JSON；其餘維持純文字 200
+  // NIP-11（ADR-0260）：只有明確要 `application/nostr+json` 的請求拿到 JSON；其餘維持純文字 200
   // ——健康檢查靠那個 200（ADR-0089 的契約），改掉會讓部署中的站看起來像掛了。
   if (wantsRelayInfo(req.headers.accept)) {
     res.writeHead(200, NIP11_HEADERS);

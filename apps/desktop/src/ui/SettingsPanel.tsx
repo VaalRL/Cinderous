@@ -1,8 +1,10 @@
 import { makeBackupCode } from "@cinderous/core";
 import { useEffect, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { ACCENT_PRESETS, useAccent } from "../accent.js";
+import { ACCENT_PRESETS, ACCENT_PRESETS_CB, useAccent } from "../accent.js";
+import { useContrast } from "../contrast.js";
 import { useLayout } from "../layout.js";
 import { useI18n } from "../i18n.js";
+import { getUiScale, setUiScale, UI_SCALE_STEPS } from "../ui-scale.js";
 import { APP_VERSION } from "../version.js";
 import { releaseFor } from "../releases.js";
 import { GITHUB_RELEASES } from "../update-check.js";
@@ -149,7 +151,7 @@ export interface SettingsPanelProps {
   /** 清空裝置（ADR-0202，破壞性）：刪所有身分＋所有本機資料；未提供則不顯示。 */
   onWipeDevice?: () => void;
   /**
-   * NIP-62 清除請求（ADR-0256，破壞性）：要求已連上的每座中繼刪除本人資料。
+   * NIP-62 清除請求（ADR-0260，破壞性）：要求已連上的每座中繼刪除本人資料。
    * 回傳實際送出請求的 relay URL——**不是**「已刪除」（刪除發生在對方機器上）。
    * 未提供則不顯示（示範後端）。
    */
@@ -279,6 +281,41 @@ function NameEditor({ name, onRename }: { name: string; onRename: (n: string) =>
   );
 }
 
+/** 無障礙（ADR-0253）：高對比開關（與亮/暗主題正交）＋UI 尺寸五檔（Tauri 原生縮放／瀏覽器 CSS zoom）。 */
+function AccessibilitySettings(): JSX.Element {
+  const { t } = useI18n();
+  const { contrast, toggle } = useContrast();
+  const [scale, setScale] = useState(() => getUiScale());
+  const pick = (v: number): void => {
+    setScale(v);
+    void setUiScale(v);
+  };
+  return (
+    <section className="settings__sec" data-testid="a11y-settings">
+      <h4>{t("settings_a11y")}</h4>
+      <p className="hint">{t("a11y_contrastHint")}</p>
+      <button type="button" className="a11y__toggle" data-testid="a11y-contrast-toggle" aria-pressed={contrast === "high"} onClick={toggle}>
+        {t("a11y_contrast")}：{contrast === "high" ? t("a11y_stateOn") : t("a11y_stateOff")}
+      </button>
+      <div className="accent__label">{t("a11y_uiScale")}</div>
+      <p className="hint">{t("a11y_uiScaleHint")}</p>
+      <div className="a11y__scale" data-testid="a11y-scale-row">
+        {UI_SCALE_STEPS.map((v) => (
+          <button
+            key={v}
+            type="button"
+            aria-pressed={scale === v}
+            data-testid={`a11y-scale-${Math.round(v * 100)}`}
+            onClick={() => pick(v)}
+          >
+            {Math.round(v * 100)}%
+          </button>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function AccentSettings(): JSX.Element {
   const { t } = useI18n();
   const { accent, setAccent, accent2, setAccent2 } = useAccent();
@@ -312,6 +349,21 @@ function AccentSettings(): JSX.Element {
         <button type="button" className="accent__reset" onClick={() => setAccent(null)} disabled={!accent}>
           {t("settings_accentReset")}
         </button>
+      </div>
+      {/* 色覺友善色票（ADR-0253）：常見色覺類型下彼此可辨、白字全過 AA。 */}
+      <div className="accent__label">{t("settings_accentCb")}</div>
+      <div className="accent__row" data-testid="accent-cb-row">
+        {ACCENT_PRESETS_CB.map((p) => (
+          <button
+            key={p.key}
+            type="button"
+            className={`accent__sw${cur === p.hex.toLowerCase() ? " on" : ""}`}
+            style={{ background: p.hex }}
+            aria-label={p.key}
+            title={p.key}
+            onClick={() => setAccent(p.hex)}
+          />
+        ))}
       </div>
       <div className="accent__label">{t("settings_accent2")}</div>
       <div className="accent__row">
@@ -704,7 +756,7 @@ function CloudSyncSettings({ value }: { value: NonNullable<SettingsPanelProps["c
 }
 
 /**
- * NIP-62 清除請求（ADR-0256）：要求中繼站立即刪除本人的資料，不必等 7 天 TTL。
+ * NIP-62 清除請求（ADR-0260）：要求中繼站立即刪除本人的資料，不必等 7 天 TTL。
  *
  * ## 措辭為什麼這樣寫
  *
@@ -1052,6 +1104,7 @@ export function SettingsPanel(props: SettingsPanelProps): JSX.Element {
             <>
               <LayoutSettings />
               <AccentSettings />
+              <AccessibilitySettings />
               {props.showTitlebarSettings ? <TitlebarSettings /> : null}
             </>
           ) : null}

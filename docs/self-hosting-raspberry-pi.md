@@ -60,7 +60,7 @@ wscat -c ws://localhost:8787
 | `MAX_TTL_DAYS` | `7` | 離線留言保留天數上限（ADR-0160）。 |
 | `MAX_FILE_MB` | 未設 | 設 ≥1 才收檔案塊；未設＝整類拒收（ADR-0162/0244）。 |
 | `MAX_EVENTS_PER_MINUTE` | `120` | 每 pubkey 每分鐘事件上限；設 `0` 關閉（ADR-0235 H1）。 |
-| `RELAY_NAME`／`RELAY_CONTACT`／`RELAY_DESCRIPTION`／`RELAY_PUBKEY` | 未設 | NIP-11 節點資訊（ADR-0256）。**想被選座池收錄就填 `RELAY_CONTACT`**。 |
+| `RELAY_NAME`／`RELAY_CONTACT`／`RELAY_DESCRIPTION`／`RELAY_PUBKEY` | 未設 | NIP-11 節點資訊（ADR-0260）。**想被選座池收錄就填 `RELAY_CONTACT`**。 |
 | `NODE_ATTESTATION` | 未設 | 已簽章的節點自報事件 JSON（ADR-0092）。 |
 | `DONATE_GITHUB_SPONSORS`／`DONATE_BUY_ME_A_COFFEE`／`DONATE_LIBERAPAY`／`DONATE_LIGHTNING` | 未設 | 贊助入口（ADR-0089）：填了桌面版會顯示低調可關閉的「贊助此節點」小卡；一個都不填＝不顯示。三個網頁平台**只收 `https://`**。 |
 

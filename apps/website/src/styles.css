@@ -159,6 +159,10 @@ table { width: 100%; border-collapse: collapse; font-size: 14px; }
 th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; }
 tr:last-child td { border-bottom: none; }
 th { color: var(--muted); font-weight: 600; background: var(--surface); }
+/* 比較頁（ADR-0254）：Cinderous 欄以主色淡染突顯；列標頭沿用表身樣式（tbody th＝比較項名稱）。 */
+.cmp__us { background: color-mix(in srgb, var(--accent) 9%, transparent); color: var(--ink); font-weight: 600; }
+tbody th[scope="row"] { background: transparent; border-bottom: 1px solid var(--border); }
+tbody tr:last-child th[scope="row"] { border-bottom: none; }
 
 /* ── Footer ── */
 .footer { border-top: 1px solid var(--border); padding: 34px 0; color: var(--muted); font-size: 13.5px; text-align: center; background: var(--bg2); }

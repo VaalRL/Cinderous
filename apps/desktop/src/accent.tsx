@@ -86,3 +86,15 @@ export const ACCENT_PRESETS: { key: string; hex: string }[] = [
   { key: "ember", hex: "#e2632b" },
   { key: "slate", hex: "#556884" },
 ];
+
+/**
+ * 色覺友善色票（ADR-0253）：Okabe-Ito 取向——常見色覺類型（紅綠/藍黃色盲）下彼此可辨，
+ * 且全數對白字 ≥4.5（WCAG AA，主色會當按鈕底色配白字；SettingsPanel 測試把關）。
+ */
+export const ACCENT_PRESETS_CB: { key: string; hex: string }[] = [
+  { key: "cbBlue", hex: "#0072b2" }, // 5.19
+  { key: "cbVermillion", hex: "#a83d00" }, // 6.30
+  { key: "cbTeal", hex: "#0f766e" }, // 5.47
+  { key: "cbViolet", hex: "#6d4fc4" }, // 5.89
+  { key: "cbMagenta", hex: "#a81d6e" }, // 6.85
+];

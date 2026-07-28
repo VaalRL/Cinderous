@@ -356,7 +356,7 @@ export class TauriStorage implements AppStorage {
   loadRequests(): StoredContact[] {
     return this.mem.loadRequests();
   }
-  // 共享行程（ADR-0259）：非訊息 → 落在 meta 部位（同訊息請求）。
+  // 共享行程（ADR-0263）：非訊息 → 落在 meta 部位（同訊息請求）。
   loadCalendar(): StoredCalendarEvent[] {
     return this.mem.loadCalendar();
   }

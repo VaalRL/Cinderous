@@ -1,11 +1,11 @@
-// NIP-11 Relay Information Document（ADR-0256，承接 ADR-0089／0092 的未竟待辦）。
+// NIP-11 Relay Information Document（ADR-0260，承接 ADR-0089／0092 的未竟待辦）。
 //
 // ## 為什麼這份檔案存在
 //
 // ADR-0089（營運者贊助入口）與 ADR-0092（節點自報 `cinder_node`）**都建立在「relay 能回一份
 // NIP-11 文件」之上**，但兩座宿主過去對 HTTP GET 一律只回純文字 `"Cinderous relay"`。於是：
 //
-// - 社群營運者**沒有任何收入面**（贊助連結無處可放，見 ADR-0253 §2）；
+// - 社群營運者**沒有任何收入面**（贊助連結無處可放，見 ADR-0257 §2）；
 // - 節點申請流程（ADR-0092）缺了它指定的載體；
 // - 客戶端要知道站方政策（TTL／檔案／速率）只能**送出去被拒才知道**。
 //
@@ -33,7 +33,7 @@ export const NIP11_MEDIA_TYPE = "application/nostr+json";
  * - 13：PoW（`minPowDifficulty`）
  * - 40：過期時戳（＋站方 TTL 上限，ADR-0065）
  * - 42：AUTH（預設開，ADR-0057）
- * - 62：Request to Vanish（ADR-0256）
+ * - 62：Request to Vanish（ADR-0260）
  */
 export const SUPPORTED_NIPS = [1, 11, 13, 40, 42, 62] as const;
 

@@ -5,7 +5,7 @@ import { ALL_RELAYS, buildVanishRequest, VANISH_KIND, vanishTargetsOf, vanishTar
 
 const sk = generateSecretKey();
 
-describe("NIP-62 清除請求（ADR-0256）", () => {
+describe("NIP-62 清除請求（ADR-0260）", () => {
   it("建構：kind 62、本人簽章、relay tag 帶目標", () => {
     const evt = buildVanishRequest("wss://relay.example", sk, { created_at: 1000 });
     expect(evt.kind).toBe(VANISH_KIND);

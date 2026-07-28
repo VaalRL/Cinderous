@@ -69,6 +69,28 @@ export function accentForTheme(hex: string, theme: Theme): string {
   return theme === "dark" ? lightenHex(hex, DARK_LIGHTEN) : hex;
 }
 
+/** WCAG 2.x 相對亮度（sRGB → 線性化加權）；非法輸入回 0。 */
+function relativeLuminance(hex: string): number {
+  const p = parseHex(hex);
+  if (!p) return 0;
+  const [r, g, b] = p.map((v) => {
+    const c = v / 255;
+    return c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+  }) as [number, number, number];
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+/**
+ * WCAG 2.x 對比值（1..21）。門檻：一般文字 AA ≥ 4.5、大字/UI 元件（非文字）≥ 3。
+ * 高對比 token（ADR-0253）與色覺友善色票以此為驗收標準（tokens.test.ts 把關）。
+ */
+export function contrastRatio(a: string, b: string): number {
+  const la = relativeLuminance(a);
+  const lb = relativeLuminance(b);
+  const [hi, lo] = la >= lb ? [la, lb] : [lb, la];
+  return (hi + 0.05) / (lo + 0.05);
+}
+
 /** 每主題的基底色票與 accent 推導設定（對照 msn.css）。 */
 interface ThemeBase {
   defaultAccent: string;
@@ -119,12 +141,27 @@ const DARK: ThemeBase = {
 
 const BASE: Record<Theme, ThemeBase> = { light: LIGHT, dark: DARK };
 
+/**
+ * 高對比 token 覆寫（ADR-0253，視障友善）：獨立軸、與亮/暗主題正交組合。
+ * 只覆寫需要拉高對比的鍵（文字/邊框/發話者名；暗色另壓深底色爭取頭寸），其餘沿用基底。
+ * 值以 WCAG AA 為驗收（一般文字 ≥4.5、邊框等非文字 ≥3，tokens.test.ts 把關）；
+ * 桌面 `msn.css` 的 `[data-contrast="high"]` 區塊與此對齊（桌面測試讀 CSS 比對）。
+ */
+export const HIGH_CONTRAST: Record<Theme, Partial<ThemeBase>> = {
+  // vs #ffffff：muted 7.90、border 5.61、inName 8.01（現行 muted #6b7d99 僅 4.18，不足 AA）
+  light: { ink: "#000000", muted: "#445269", border: "#56688a", inName: "#8f2468" },
+  // vs panel #10151d：muted 10.52、border 6.04、inName 9.64；ink vs field 19.21
+  dark: { ink: "#ffffff", muted: "#b9c5da", border: "#8195b8", inName: "#ff9ed0", panel: "#10151d", field: "#0b0f15" },
+};
+
 export interface ThemeInput {
   /** 主色 hex；null／未設＝用內建預設。 */
   accent?: string | null;
   /** 副色 hex；null／未設＝跟隨主色（同桌面 --accent2: var(--accent)）。 */
   accent2?: string | null;
   theme: Theme;
+  /** 高對比（ADR-0253）：true＝套 HIGH_CONTRAST 覆寫（與亮/暗正交）。 */
+  contrast?: boolean;
 }
 
 /** 解析後的具體色值（皆為 `#rrggbb`），供 RN StyleSheet 或注入 CSS 變數。 */
@@ -152,7 +189,8 @@ export interface ThemeTokens {
  * 未設主色＝內建預設（不再提亮）；設了自訂主色＝深色提亮；副色未設＝跟隨主色。
  */
 export function resolveTheme(input: ThemeInput): ThemeTokens {
-  const cfg = BASE[input.theme];
+  // 高對比（ADR-0253）：覆寫落在基底之上，accent/bg 推導公式不變。
+  const cfg = input.contrast ? { ...BASE[input.theme], ...HIGH_CONTRAST[input.theme] } : BASE[input.theme];
   // 非法 hex（非 #rrggbb）視同未設，落回內建預設——避免無效值無聲汙染整組 token（SSOT 自帶防呆）。
   const validAccent = input.accent && parseHex(input.accent) ? input.accent : null;
   const validAccent2 = input.accent2 && parseHex(input.accent2) ? input.accent2 : null;

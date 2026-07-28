@@ -526,14 +526,14 @@ export function App(): JSX.Element {
   const [historyOf, setHistoryOf] = useState<string | null>(null);
   const [conn, setConn] = useState<ConnectionState>("online");
   const [relays, setRelays] = useState<{ url: string; state: ConnectionState; home: boolean; stale: boolean }[]>([]);
-  /** 共享行程（ADR-0259）：全部行程；右欄依當前對話篩選。 */
+  /** 共享行程（ADR-0263）：全部行程；右欄依當前對話篩選。 */
   const [calendar, setCalendar] = useState<StoredCalendarEvent[]>([]);
   /**
-   * 對話中的日期被點擊（ADR-0260 階段四）：切到行程分頁並預填時間。
+   * 對話中的日期被點擊（ADR-0264 階段四）：切到行程分頁並預填時間。
    * nonce 讓「點同一個日期兩次」也能重新開啟表單（同 pendingInsert 的作法）。
    */
   const [calendarDraft, setCalendarDraft] = useState<{ at: number; nonce: number } | null>(null);
-  /** 贊助此節點角落卡（ADR-0089／0258）：抓到且未被關閉才有值。 */
+  /** 贊助此節點角落卡（ADR-0089／0262）：抓到且未被關閉才有值。 */
   const [sponsor, setSponsor] = useState<{ url: string; info: RelayInfo } | null>(null);
   const [cleanPaste, setCleanPaste] = useState<boolean>(() => cleanOnPasteEnabled());
   const [autoAcquire, setAutoAcquire] = useState<boolean>(() => autoAcquireEnabled());
@@ -651,7 +651,7 @@ export function App(): JSX.Element {
   /**
    * 入職金鑰託管（ADR-0163，企業主端）：依作用中身分載入。
    *
-   * ADR-0254 起清單以企業主 sk 導出的金鑰加密落盤，故**改依 backend 載入**（而非只看
+   * ADR-0258 起清單以企業主 sk 導出的金鑰加密落盤，故**改依 backend 載入**（而非只看
    * `profilesState.active`）——沒有 nsec 就沒有解密金鑰，此時保持空清單。
    */
   const [escrow, setEscrow] = useState<EscrowEntry[]>([]);
@@ -660,7 +660,7 @@ export function App(): JSX.Element {
     setEscrow(backend && nsec ? loadEscrow(backend.self.pubkey, nsecDecode(nsec)) : []);
   }, [backend]);
   /**
-   * 贊助此節點角落卡（ADR-0089 決策 2／ADR-0258）。
+   * 贊助此節點角落卡（ADR-0089 決策 2／ADR-0262）。
    *
    * **只對 home 座抓**。ADR-0089 決策 2 明訂不對「錨點／簽章清單自動塞入、使用者未選擇」的
    * relay 跳贊助卡（防蹭曝光／釣魚）——而 pool 裡的其他座正是這種：它們來自錨點常數
@@ -898,7 +898,7 @@ export function App(): JSX.Element {
   requestsRef.current = requests;
   const tRef = useRef(t);
   tRef.current = t;
-  const localeRef = useRef(locale); // ADR-0262：提醒通知的時間格式化（閉包 handler 內取用）
+  const localeRef = useRef(locale); // ADR-0266：提醒通知的時間格式化（閉包 handler 內取用）
   localeRef.current = locale;
   // 三欄可視性（ADR-0079）：讓 onMessage/visibilitychange 這類閉包 handler 讀到當前佈局與作用中分頁。
   const layoutRef = useRef(layout);
@@ -1229,7 +1229,7 @@ export function App(): JSX.Element {
         }
       },
       onCalendar: setCalendar,
-      // 行程提醒（ADR-0262）：**刻意不走 shouldNotify 的 `windowHidden` 閘**——
+      // 行程提醒（ADR-0266）：**刻意不走 shouldNotify 的 `windowHidden` 閘**——
       // 訊息通知的「看得到就別跳」在這裡是錯的：你正盯著這個 App，不代表你知道
       // 十分鐘後有會。提醒只受總開關管。
       onCalendarReminder: (e) => {
@@ -1252,7 +1252,7 @@ export function App(): JSX.Element {
       onPolicy: setPolicy,
       onOrgEscrow: (e) => {
         // ADR-0163：公司帳號成員入職託管的私鑰 → 持久化（依管理者身分），供日後離職接管。
-        // ADR-0254：加密落盤，故需企業主 sk；且**以磁碟為準做讀-改-寫**——託管在清單載入前
+        // ADR-0258：加密落盤，故需企業主 sk；且**以磁碟為準做讀-改-寫**——託管在清單載入前
         // 就到達時（backend 剛起、escrow 尚為空），拿 React state 當基底會把既有條目蓋掉。
         const adminPk = backend.self.pubkey;
         const nsec = backend.selfNsec;
@@ -2552,7 +2552,7 @@ export function App(): JSX.Element {
             calendar={calendar}
             {...(calendarDraft ? { calendarDraft } : {})}
             {...(() => {
-              // 共享行程（ADR-0259）：示範後端沒有這些方法 → 整個分頁不出現。
+              // 共享行程（ADR-0263）：示範後端沒有這些方法 → 整個分頁不出現。
               const publish = activeBackend.calendarPublish;
               if (!publish || !activeConvo) return {};
               // 群組 vs 1:1 由當前對話 id 是否為群組決定（與訊息路由同一判準）。
@@ -2608,7 +2608,7 @@ export function App(): JSX.Element {
           {...(profilesState.active ? { onRemoveIdentity: () => void removeIdentity(profilesState.active!) } : {})}
           onWipeDevice={() => void wipeDevice()}
           {...(activeBackend.requestVanish
-            ? // NIP-62（ADR-0256）：只有真實 relay 後端有這個能力；示範後端不顯示此區塊。
+            ? // NIP-62（ADR-0260）：只有真實 relay 後端有這個能力；示範後端不顯示此區塊。
               { onVanish: () => activeBackend.requestVanish!() }
             : {})}
           {...(orgInfo ? { orgInfo } : {})}
@@ -2648,7 +2648,7 @@ export function App(): JSX.Element {
                 const nsec = backend.selfNsec;
                 if (!nsec) return;
                 const sk = nsecDecode(nsec);
-                const next = removeEscrow(loadEscrow(backend.self.pubkey, sk), pubkey); // 以磁碟為準（ADR-0254）
+                const next = removeEscrow(loadEscrow(backend.self.pubkey, sk), pubkey); // 以磁碟為準（ADR-0258）
                 saveEscrow(backend.self.pubkey, sk, next);
                 setEscrow(next);
               },

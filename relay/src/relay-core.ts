@@ -208,7 +208,7 @@ export class RelayCore {
   /** connId → NIP-42 認證狀態（挑戰、已認證 pubkey、本站主機）；ADR-0057／0235 H2。 */
   private readonly authState = new Map<string, { challenge: string; pubkey?: string; relayHost?: string }>();
   /**
-   * connId → 本次連線打到的主機。**與 AUTH 狀態分離**（ADR-0256）：`authState` 只在
+   * connId → 本次連線打到的主機。**與 AUTH 狀態分離**（ADR-0260）：`authState` 只在
    * `requireAuth` 時才建立，但 NIP-62 的「這份清除請求是不是給本站的」在**沒有 AUTH 的
    * 自架站**同樣需要主機資訊——不分離的話，那些站會只認 `ALL_RELAYS`。
    */
@@ -243,7 +243,7 @@ export class RelayCore {
    */
   connect(connId: string, relayHost?: string): Outbound[] {
     if (!this.subs.has(connId)) this.subs.set(connId, new Map());
-    // 主機先記（ADR-0256）：無 AUTH 的站也要能判斷 NIP-62 的目標是不是自己。
+    // 主機先記（ADR-0260）：無 AUTH 的站也要能判斷 NIP-62 的目標是不是自己。
     if (relayHost) this.connHost.set(connId, relayHost);
     if (!this.requireAuth) return [];
     // 已有挑戰（含已認證）者只重發、不重置——避免重複呼叫把認證狀態洗掉。
@@ -275,7 +275,7 @@ export class RelayCore {
       ...(auth?.challenge !== undefined ? { challenge: auth.challenge } : {}),
       ...(auth?.pubkey !== undefined ? { pubkey: auth.pubkey } : {}),
       // 少了這一行，DO 休眠喚醒後 `relayHost` 就消失 → relay tag 檢查靜默失效（ADR-0235 H2）。
-      // 退回 `connHost`：無 AUTH 的站沒有 authState，但 NIP-62 仍需要主機（ADR-0256）。
+      // 退回 `connHost`：無 AUTH 的站沒有 authState，但 NIP-62 仍需要主機（ADR-0260）。
       ...(auth?.relayHost ?? this.connHost.get(connId) ? { relayHost: (auth?.relayHost ?? this.connHost.get(connId))! } : {}),
       subs,
     };
@@ -540,7 +540,7 @@ export class RelayCore {
       return [{ to: connId, message: ["OK", event.id, false, "rate-limited: 發送過於頻繁，請稍後再試"] }];
     }
 
-    // NIP-62 清除請求（ADR-0256）：這是**命令**不是留言——不寫庫、不扇出，執行完就回 OK。
+    // NIP-62 清除請求（ADR-0260）：這是**命令**不是留言——不寫庫、不扇出，執行完就回 OK。
     // 位置在速率限制**之後**（清除是昂貴操作，同樣要受速率桶約束）、寫庫之前（kind 62 落在
     // 一般持久化區間，不攔就會被當成留言存起來）。
     if (event.kind === VANISH_KIND) {
@@ -592,7 +592,7 @@ export class RelayCore {
   }
 
   /**
-   * NIP-62 Request to Vanish（ADR-0256）：清除此 pubkey 在本站的一切。
+   * NIP-62 Request to Vanish（ADR-0260）：清除此 pubkey 在本站的一切。
    *
    * 三道閘，順序即嚴格程度：
    *

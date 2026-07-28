@@ -3,6 +3,7 @@
 // 真實 relay 模式（ADR-0086）：標題列「＋」展開加好友面板（貼 npub），並顯示自己的 npub 供分享。
 // 色彩吃 @cinderous/theme。清單資料由呼叫端以 chat-list.ts 的 chatList() 排好傳入。
 import { useMemo, useState } from "react";
+import { type ChatMessage, nameOrMessagesMatch } from "@cinderous/engine";
 import { type Locale, type MessageKey, translate } from "@cinderous/i18n";
 import { resolveTheme, STATUS_COLORS, type Theme, type ThemeTokens } from "@cinderous/theme";
 import { Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native-web";
@@ -32,6 +33,7 @@ function makeStyles(tk: ThemeTokens) {
     myNpub: { fontSize: 11, color: tk.accent },
     addRow: { flexDirection: "row", gap: 8, alignItems: "center" },
     addInput: { flex: 1, borderWidth: 1, borderColor: tk.border, borderRadius: 8, backgroundColor: tk.field, color: tk.ink, paddingVertical: 6, paddingHorizontal: 10, fontSize: 13 },
+    searchInput: { marginTop: 8, flexGrow: 0 },
     addSubmit: { backgroundColor: tk.accent, borderRadius: 8, paddingVertical: 6, paddingHorizontal: 12 },
     addSubmitText: { color: "#ffffff", fontWeight: "700", fontSize: 13 },
     list: { flex: 1 },
@@ -66,6 +68,7 @@ export function ChatsListScreen({
   onCreateGroup,
   contacts,
   selfNpub,
+  convos,
   now = Date.now(),
   locale = "zh-Hant",
   theme = "light",
@@ -88,6 +91,8 @@ export function ChatsListScreen({
   contacts?: { pubkey: string; name: string }[];
   /** 自己的 npub（真實 relay 模式顯示於加好友面板供分享）。 */
   selfNpub?: string;
+  /** 各對話訊息（ADR-0256 階段 4）：供搜尋比對訊息內容；未提供＝只比名稱。 */
+  convos?: Record<string, ChatMessage[]>;
   now?: number;
   locale?: Locale;
   theme?: Theme;
@@ -99,6 +104,9 @@ export function ChatsListScreen({
   const t = (k: MessageKey): string => translate(locale, k);
   const [addOpen, setAddOpen] = useState(false);
   const [draft, setDraft] = useState("");
+  // 聊天清單搜尋（ADR-0256 階段 4）：名稱＋訊息內容，與桌面同一套比對（引擎共用）。
+  const [search, setSearch] = useState("");
+  const visible = search.trim() ? entries.filter((e) => nameOrMessagesMatch(e.name, e.id, search, convos ?? {})) : entries;
 
   const submitAdd = (): void => {
     const v = draft.trim();
@@ -160,6 +168,18 @@ export function ChatsListScreen({
             </Pressable>
           ) : null}
         </View>
+        {/* 搜尋（ADR-0256 階段 4）：名稱或訊息內容。 */}
+        <TextInput
+          style={[styles.addInput, styles.searchInput]}
+          value={search}
+          onChangeText={setSearch}
+          placeholder={t("mobileChats_search")}
+          placeholderTextColor={tk.muted}
+          autoCapitalize="none"
+          autoCorrect={false}
+          aria-label={t("mobileChats_search")}
+          testID="chats-search"
+        />
         {addOpen && onAddContact ? (
           <View style={styles.addPanel}>
             {selfNpub ? (
@@ -230,9 +250,11 @@ export function ChatsListScreen({
 
       {entries.length === 0 ? (
         <Text style={styles.empty}>{t("mobileChats_empty")}</Text>
+      ) : visible.length === 0 ? (
+        <Text style={styles.empty}>{t("convo_searchNone")}</Text>
       ) : (
         <ScrollView style={styles.list}>
-          {entries.map((e) => (
+          {visible.map((e) => (
             <Pressable key={e.id} style={styles.row} accessibilityRole="button" onPress={() => onOpen(e.id)}>
               <View style={[styles.avatar, { backgroundColor: avatarColor(e.id) }]}>
                 {e.avatar ? (

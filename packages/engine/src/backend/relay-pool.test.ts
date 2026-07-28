@@ -582,7 +582,7 @@ describe("跨中繼通訊：Relay Pool 與收件人路由（ADR-0034）", () => 
   });
 });
 
-describe("NIP-62 清除請求（ADR-0256）", () => {
+describe("NIP-62 清除請求（ADR-0260）", () => {
   it("端到端：送出後，中繼站上寄給我的離線留言真的消失", () => {
     // 具名目標要驗主機（fail-closed），故網路要知道自己是誰。
     const store = new MessageStore({ maxPerRecipient: 500 });

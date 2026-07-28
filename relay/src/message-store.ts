@@ -124,7 +124,7 @@ export interface OfflineStore {
   /** 清除所有已過期留言。 */
   prune(nowSec: number): void;
   /**
-   * NIP-62 清除請求（ADR-0256）：刪掉某 pubkey 在本站的一切——
+   * NIP-62 清除請求（ADR-0260）：刪掉某 pubkey 在本站的一切——
    *
    * 1. **他發的**事件（`pubkey` 相符）；
    * 2. **寄給他的**事件（`p` 標籤相符）——Gift Wrap 外層是一次性金鑰，這是唯一能定位收件匣的鍵；
@@ -259,7 +259,7 @@ export class MessageStore implements OfflineStore {
     }
   }
 
-  /** NIP-62 清除（ADR-0256）：刪掉此人發的、寄給他的、以及他的可尋址事件。 */
+  /** NIP-62 清除（ADR-0260）：刪掉此人發的、寄給他的、以及他的可尋址事件。 */
   vanish(pubkey: string, _nowSec: number): number {
     const removed = new Set<string>();
 

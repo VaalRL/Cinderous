@@ -1,4 +1,4 @@
-// NIP-62 Request to Vanish 的中繼端行為（ADR-0256）。
+// NIP-62 Request to Vanish 的中繼端行為（ADR-0260）。
 import {
   ALL_RELAYS,
   buildAuthEvent,
@@ -34,7 +34,7 @@ function authedCore(sk: Uint8Array, store: MessageStore): RelayCore {
   return core;
 }
 
-describe("NIP-62 中繼端清除（ADR-0256）", () => {
+describe("NIP-62 中繼端清除（ADR-0260）", () => {
   it("清掉寄給我的 Gift Wrap——即使外層作者是一次性金鑰", () => {
     const sk = generateSecretKey();
     const me = getPublicKey(sk);

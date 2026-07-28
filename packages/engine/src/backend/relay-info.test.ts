@@ -16,7 +16,7 @@ const doc = (donations: Record<string, unknown>, extra: Record<string, unknown> 
 const okFetch = (json: unknown): RelayInfoFetch => () =>
   Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(json) });
 
-describe("NIP-11 贊助資訊解析（ADR-0258）", () => {
+describe("NIP-11 贊助資訊解析（ADR-0262）", () => {
   describe("scheme 白名單——營運者自報的字串會變成可點連結", () => {
     it("三個平台只收 https", () => {
       expect(parseDonations(doc({ github_sponsors: "https://github.com/sponsors/op" }))).toEqual([

@@ -20,7 +20,7 @@ import { inWorkHours } from "@cinderous/core";
 
 export type { Group, OrgGroup, OrgMember, OrgPolicy, OrgRosterDoc, OrgWorkHours };
 export type { MessageStatus, StoredCalendarEvent };
-// 共享行程（ADR-0259）：UI 直接用 core 的型別，不另造一份平行定義。
+// 共享行程（ADR-0263）：UI 直接用 core 的型別，不另造一份平行定義。
 export type { CalendarAction, CalendarEventInput, RsvpStatus };
 
 /** 組織資訊（ADR-0157）：採用名冊時發給前端的公司設定摘要。 */
@@ -241,10 +241,10 @@ export interface ChatBackendEvents {
   onFileError?(contact: PubkeyHex, reason: string): void;
   /** 群組清單更新（M9）。 */
   onGroups?(groups: Group[]): void;
-  /** 共享行程有變動（ADR-0259）：建立/修改/取消/收到 RSVP 皆會發，帶完整清單（依 start 升冪）。 */
+  /** 共享行程有變動（ADR-0263）：建立/修改/取消/收到 RSVP 皆會發，帶完整清單（依 start 升冪）。 */
   onCalendar?(events: StoredCalendarEvent[]): void;
   /**
-   * 行程提醒到期（ADR-0262）：**本機計時器**判定，零中繼流量。同一個 `start` 只發一次。
+   * 行程提醒到期（ADR-0266）：**本機計時器**判定，零中繼流量。同一個 `start` 只發一次。
    * App 收到後決定怎麼提示（通知／音效／畫面），引擎不預設呈現方式。
    */
   onCalendarReminder?(event: StoredCalendarEvent): void;
@@ -298,7 +298,7 @@ export interface ChatBackend {
   setInvisible?(invisible: boolean): void;
   setNowPlaying(text: string): void;
   /**
-   * NIP-62 清除請求（ADR-0256）：要求**已連上的每一座**中繼站立即刪除本人的資料
+   * NIP-62 清除請求（ADR-0260）：要求**已連上的每一座**中繼站立即刪除本人的資料
    * （他發的、寄給他的 Gift Wrap、他的雲端快照），不必等 7 天 TTL。
    *
    * 回傳實際送出請求的 relay URL 清單，供 UI 據實回報（**不是**「保證已刪」——
@@ -306,19 +306,19 @@ export interface ChatBackend {
    * 僅真實 relay 後端支援。
    */
   requestVanish?(): string[];
-  /** 共享行程（ADR-0259）：建立/修改/取消；回傳行程 id。僅真實 relay 後端支援。 */
+  /** 共享行程（ADR-0263）：建立/修改/取消；回傳行程 id。僅真實 relay 後端支援。 */
   calendarPublish?(
     target: { groupId: string } | { contact: PubkeyHex },
     input: CalendarEventInput,
     opts?: { action?: CalendarAction; eventId?: string },
   ): string | undefined;
-  /** 回覆某行程（ADR-0259）。 */
+  /** 回覆某行程（ADR-0263）。 */
   calendarRsvp?(eventId: string, status: RsvpStatus): void;
   /** 目前所有行程（依 start 升冪）。 */
   calendarList?(): StoredCalendarEvent[];
   /**
-   * 設定某行程的提醒提前量（秒，ADR-0262）；`undefined`＝不提醒。
-   * **純本機**——不送任何事件、不碰網路（ADR-0259 §1.4 的紅線）。
+   * 設定某行程的提醒提前量（秒，ADR-0266）；`undefined`＝不提醒。
+   * **純本機**——不送任何事件、不碰網路（ADR-0263 §1.4 的紅線）。
    */
   calendarRemind?(eventId: string, lead: number | undefined): void;
   /**

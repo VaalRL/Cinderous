@@ -243,7 +243,7 @@ export class SqlMessageStore implements OfflineStore {
   }
 
   /**
-   * NIP-62 清除（ADR-0256）：`pubkey = ?`（他發的）**或** `recipient = ?`（寄給他的
+   * NIP-62 清除（ADR-0260）：`pubkey = ?`（他發的）**或** `recipient = ?`（寄給他的
    * ——Gift Wrap 外層是一次性金鑰，`p` 是唯一能定位收件匣的鍵），外加他的可尋址事件。
    *
    * 兩欄都有索引（`idx_offline_pubkey`／`idx_offline_recipient`），故不是全表掃描。

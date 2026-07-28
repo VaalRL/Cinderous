@@ -1,4 +1,4 @@
-// 行動端共享行程（ADR-0261）：協定與權威在 core／engine 已驗過（packages/core/src/calendar.test.ts、
+// 行動端共享行程（ADR-0265）：協定與權威在 core／engine 已驗過（packages/core/src/calendar.test.ts、
 // packages/engine/src/backend/calendar.test.ts）。這裡驗**行動端 UI 新加的可視行為**——
 // 尤其是「權威三層一致」的 UI 那一層在手機上也成立（桌面已有 22 個測試，手機不能是漏洞）。
 //
@@ -47,7 +47,7 @@ const ev = (over: Partial<StoredCalendarEvent> = {}): StoredCalendarEvent => ({
 const render = (props: Record<string, unknown>): string =>
   renderToStaticMarkup(<ConversationScreen {...base} {...props} />);
 
-describe("行動端行程分頁（ADR-0261）", () => {
+describe("行動端行程分頁（ADR-0265）", () => {
   it("後端無行事曆能力 → 分頁完全不出現（示範模式）", () => {
     const html = render({});
     expect(html).not.toContain('data-testid="aux-tab-calendar"');
@@ -66,13 +66,13 @@ describe("行動端行程分頁（ADR-0261）", () => {
     expect(html).toContain('data-testid="cal-form"'); // 直接開表單，不用再點一次「新增行程」
   });
 
-  it("沒有 draft → 面板預設不開（**不自動導覽**，ADR-0259 §1.6）", () => {
+  it("沒有 draft → 面板預設不開（**不自動導覽**，ADR-0263 §1.6）", () => {
     const html = render({ ...cal, calendar: [ev()] });
     expect(html).not.toContain('data-testid="aux-panel"');
   });
 });
 
-describe("行動端行程權威（ADR-0259 §1.7）：UI 那一層在手機上也要擋", () => {
+describe("行動端行程權威（ADR-0263 §1.7）：UI 那一層在手機上也要擋", () => {
   it("自己是主揪 → 有編輯與取消，沒有 RSVP 鈕（自己不必回覆自己）", () => {
     const html = render({ ...cal, calendar: [ev()], calendarDraft: { at: FUTURE, nonce: 1 } });
     expect(html).toContain('data-testid="cal-edit"');
@@ -136,7 +136,7 @@ describe("行動端行程列表呈現", () => {
   });
 });
 
-describe("行動端日期偵測（ADR-0260 階段四）：偵測→提示，不代替使用者行動", () => {
+describe("行動端日期偵測（ADR-0264 階段四）：偵測→提示，不代替使用者行動", () => {
   const msg = (text: string): unknown[] => [{ id: "m1", outgoing: false, sender: BOB, text, at: 1 }];
 
   it("訊息含未來日期 → 氣泡下方出現可點標記", () => {
@@ -160,7 +160,7 @@ describe("行動端日期偵測（ADR-0260 階段四）：偵測→提示，不�
   });
 });
 
-describe("行動端行程提醒（ADR-0262）：本機設定，其他人不會知道", () => {
+describe("行動端行程提醒（ADR-0266）：本機設定，其他人不會知道", () => {
   const open = { calendarDraft: { at: FUTURE, nonce: 1 } };
 
   it("未提供 onCalendarRemind（後端無此能力）→ 完全不顯示提醒列", () => {

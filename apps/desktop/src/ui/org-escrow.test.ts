@@ -31,7 +31,7 @@ describe("入職金鑰託管（ADR-0163）", () => {
     expect(offboardedEntries(list, new Set(["a", "b", "c"]))).toEqual([]); // 全在職
   });
 
-  describe("持久化（依管理者身分、加密落盤，ADR-0254）", () => {
+  describe("持久化（依管理者身分、加密落盤，ADR-0258）", () => {
     beforeEach(() => {
       const store = new Map<string, string>();
       (globalThis as { localStorage?: unknown }).localStorage = {
@@ -65,7 +65,7 @@ describe("入職金鑰託管（ADR-0163）", () => {
       expect(loadEscrow("admin1", otherSk)).toEqual([]); // 不得回傳、更不得拋出
     });
 
-    it("遷移：讀到 ADR-0254 之前的舊明文 → 內容照樣讀得到，且磁碟就地改寫為密文", () => {
+    it("遷移：讀到 ADR-0258 之前的舊明文 → 內容照樣讀得到，且磁碟就地改寫為密文", () => {
       // 舊版行為：直接把 JSON 明文寫進 localStorage。
       localStorage.setItem("nb.orgEscrow.admin1", JSON.stringify([entry("a"), entry("b")]));
       expect(loadEscrow("admin1", ownerSk).map((e) => e.pubkey)).toEqual(["a", "b"]); // 不因遷移而遺失

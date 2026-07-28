@@ -272,7 +272,7 @@ describe("SqlMessageStore — 查詢下推與筆數上限（ADR-0235 C2）", () 
     expect(s.query(f({ "#p": ["r"], limit: 999_999 }), 1000).length).toBeLessThanOrEqual(MAX_QUERY_ROWS);
   });
 
-  describe("NIP-62 vanish（ADR-0256）：行為須與記憶體版一致", () => {
+  describe("NIP-62 vanish（ADR-0260）：行為須與記憶體版一致", () => {
     it("刪掉他發的、寄給他的、以及他的可尋址事件", () => {
       const s = new SqlMessageStore(nodeSqlExec());
       s.put(ev("toMe", { p: ["alice"] }), 1000); // 寄給 alice（外層作者是別人＝一次性金鑰）

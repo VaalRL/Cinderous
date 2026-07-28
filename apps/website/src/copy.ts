@@ -6,6 +6,7 @@ import type { Locale } from "@cinderous/i18n";
 export interface Copy {
   nav_home: string;
   nav_tech: string;
+  nav_compare: string;
   nav_node: string;
   nav_enterprise: string;
   nav_roadmap: string;
@@ -154,6 +155,99 @@ export interface Copy {
   ent_deploy_b: string;
   ent_note: string;
   ent_cta: string;
+  /** 比較頁（ADR-0254）：與 Signal/LINE/WhatsApp 的誠實比較表。r{n}＝列標籤；a/b/c/d＝
+   * Cinderous/Signal/LINE/WhatsApp 各欄；含對我方不利的列（前向保密、成熟度）——誠實即賣點。 */
+  cp_title: string;
+  cp_lead: string;
+  cp_colDim: string;
+  cp_r1: string;
+  cp_r1a: string;
+  cp_r1b: string;
+  cp_r1c: string;
+  cp_r1d: string;
+  cp_r2: string;
+  cp_r2a: string;
+  cp_r2b: string;
+  cp_r2c: string;
+  cp_r2d: string;
+  cp_r3: string;
+  cp_r3a: string;
+  cp_r3b: string;
+  cp_r3c: string;
+  cp_r3d: string;
+  cp_r4: string;
+  cp_r4a: string;
+  cp_r4b: string;
+  cp_r4c: string;
+  cp_r4d: string;
+  cp_r5: string;
+  cp_r5a: string;
+  cp_r5b: string;
+  cp_r5c: string;
+  cp_r5d: string;
+  cp_r6: string;
+  cp_r6a: string;
+  cp_r6b: string;
+  cp_r6c: string;
+  cp_r6d: string;
+  cp_r7: string;
+  cp_r7a: string;
+  cp_r7b: string;
+  cp_r7c: string;
+  cp_r7d: string;
+  cp_r8: string;
+  cp_r8a: string;
+  cp_r8b: string;
+  cp_r8c: string;
+  cp_r8d: string;
+  cp_r9: string;
+  cp_r9a: string;
+  cp_r9b: string;
+  cp_r9c: string;
+  cp_r9d: string;
+  cp_r10: string;
+  cp_r10a: string;
+  cp_r10b: string;
+  cp_r10c: string;
+  cp_r10d: string;
+  cp_note1: string;
+  cp_note: string;
+  /** 比較頁 → 企業版互連（ADR-0255）。 */
+  cp_entLink: string;
+  /** 企業版「與常見選擇的差異」段（ADR-0255）：按類別比、只打隱私主權軸；含誠實限制段。
+   * ec_r{n}＝列標籤；a/b/c/d＝Cinderous 企業版／雲端協作套件／自架開源通訊／E2E 自架。 */
+  ent_cmp_title: string;
+  ent_cmp_lead: string;
+  ent_cmp_colCloud: string;
+  ent_cmp_colSelf: string;
+  ent_cmp_colE2e: string;
+  ec_r1: string;
+  ec_r1a: string;
+  ec_r1b: string;
+  ec_r1c: string;
+  ec_r1d: string;
+  ec_r2: string;
+  ec_r2a: string;
+  ec_r2b: string;
+  ec_r2c: string;
+  ec_r2d: string;
+  ec_r3: string;
+  ec_r3a: string;
+  ec_r3b: string;
+  ec_r3c: string;
+  ec_r3d: string;
+  ec_r4: string;
+  ec_r4a: string;
+  ec_r4b: string;
+  ec_r4c: string;
+  ec_r4d: string;
+  ec_r5: string;
+  ec_r5a: string;
+  ec_r5b: string;
+  ec_r5c: string;
+  ec_r5d: string;
+  ent_cmp_note: string;
+  ent_cmp_more: string;
   tr_title: string;
   tr_intro: string;
   tr_loading: string;
@@ -181,6 +275,7 @@ export interface Copy {
 const zhHant: Copy = {
   nav_home: "首頁",
   nav_tech: "技術原理",
+  nav_compare: "比較",
   nav_node: "建立節點",
   nav_enterprise: "企業版",
   nav_roadmap: "藍圖",
@@ -366,9 +461,9 @@ const zhHant: Copy = {
   ent_roster_t: "組織名冊與邀請碼入職",
   ent_roster_b:
     "管理者維護一份簽章的成員名冊；新人以一次性邀請碼加入，自動取得工作身分與預設聯絡人／群組。無需手機號碼或電子郵件即可完成入職。",
-  ent_offboard_t: "離職接管（無金鑰託管）",
+  ent_offboard_t: "離職接管（預設無金鑰託管）",
   ent_offboard_b:
-    "採「工作身分輪替」而非金鑰託管——公司不持有解密後門。成員離職或換機時，管理者以名冊撤舊、發新，成員端自動接續；想保留歷史者建議雙設備登記（ADR-0052）。",
+    "預設採「工作身分輪替」而非金鑰託管——公司不持有解密後門。成員離職或換機時，管理者以名冊撤舊、發新，成員端自動接續；想保留歷史者建議雙設備登記（ADR-0052）。如需離職後查看工作帳號歷史，可於入職時經成員明示同意，選擇性託管其工作身分金鑰。",
   ent_policy_t: "公司政策設定",
   ent_policy_b:
     "可設定離線留言保留天數、允許的事件類型（kind allowlist），以及強制通話只走 TURN（relay-only）以符合網路／稽核政策。政策由自架中繼執行，不外流給任何第三方。",
@@ -384,6 +479,98 @@ const zhHant: Copy = {
   ent_note:
     "企業模式重用與一般版完全相同的加密核心——差別只在「誰來營運中繼、放行誰」。沒有另一套閉源企業版，也沒有為了功能而弱化的加密。",
   ent_cta: "看自架與企業部署文件",
+  cp_title: "與主流通訊軟體的誠實比較",
+  cp_lead:
+    "沒有全勝表。這裡把 Cinderous 與 Signal、LINE、WhatsApp 依公開資訊並排——包括我們還沒做完的部分。你在意哪一項，就看那一列。",
+  cp_colDim: "比較項",
+  cp_r1: "註冊需要手機號碼",
+  cp_r1a: "不需要——金鑰即身分",
+  cp_r1b: "需要¹",
+  cp_r1c: "需要",
+  cp_r1d: "需要",
+  cp_r2: "預設端對端加密",
+  cp_r2a: "✓ 所有訊息",
+  cp_r2b: "✓",
+  cp_r2c: "△ 文字與位置（Letter Sealing），部分內容不含",
+  cp_r2d: "✓",
+  cp_r3: "誰看得到你跟誰聊天（元資料）",
+  cp_r3a: "大幅隱藏——Gift Wrap 密文＋一次性寄件者",
+  cp_r3b: "部分保護（sealed sender）",
+  cp_r3c: "平台可見",
+  cp_r3d: "平台可見，屬 Meta 生態",
+  cp_r4: "開放原始碼",
+  cp_r4a: "✓ AGPL，客戶端＋中繼站",
+  cp_r4b: "✓ 客戶端＋伺服器",
+  cp_r4c: "✗",
+  cp_r4d: "✗",
+  cp_r5: "伺服器架構",
+  cp_r5a: "去中心化多節點，任何人可自架",
+  cp_r5b: "中心化",
+  cp_r5c: "中心化",
+  cp_r5d: "中心化",
+  cp_r6: "你的訊息存放在哪",
+  cp_r6a: "只在你的裝置；離線暫存為密文並自動過期",
+  cp_r6b: "你的裝置",
+  cp_r6c: "伺服器／雲端備份",
+  cp_r6d: "裝置＋可選雲端備份",
+  cp_r7: "營利模式",
+  cp_r7a: "開源＋捐款——零廣告、資金公開透明",
+  cp_r7b: "非營利基金會捐款",
+  cp_r7c: "廣告與商務生態",
+  cp_r7d: "Meta 商業生態",
+  cp_r8: "帳號可被平台停權",
+  cp_r8a: "無單一平台能停權你",
+  cp_r8b: "可",
+  cp_r8c: "可",
+  cp_r8d: "可",
+  cp_r9: "前向保密",
+  cp_r9a: "開發中",
+  cp_r9b: "✓",
+  cp_r9c: "未公開細節",
+  cp_r9d: "✓",
+  cp_r10: "功能成熟度",
+  cp_r10a: "開發中",
+  cp_r10b: "成熟",
+  cp_r10c: "最豐富",
+  cp_r10d: "成熟",
+  cp_note1: "¹ Signal 可用使用者名稱隱藏號碼，但註冊仍需手機號。",
+  cp_note:
+    "各商標與產品名稱屬其所有者。比較基於公開資訊（截至 2026 年 7 月），如有出入以各產品官方說明為準。",
+  cp_entLink: "企業導入？看企業版與常見選擇的差異 →",
+  ent_cmp_title: "與常見選擇的差異",
+  ent_cmp_lead:
+    "企業通訊的選項分三類：雲端協作套件、自架開源通訊、E2E 自架。這裡只比隱私與資料主權——功能廣度（整合、搜尋、SSO）它們更成熟，那不是我們的主場，也不假裝是。",
+  ent_cmp_colCloud: "雲端協作套件（Slack／Teams／LINE WORKS）",
+  ent_cmp_colSelf: "自架開源通訊（Mattermost 等）",
+  ent_cmp_colE2e: "E2E 自架（Element／Matrix）",
+  ec_r1: "預設端對端加密",
+  ec_r1a: "✓ 所有訊息——中繼只見密文",
+  ec_r1b: "✗ 伺服器可讀內容",
+  ec_r1c: "預設無，部分可選配",
+  ec_r1d: "✓",
+  ec_r2: "管理者／營運方能否讀成員訊息",
+  ec_r2a: "不能——零知識，連企業主也只見密文",
+  ec_r2b: "能",
+  ec_r2c: "能（伺服器端明文）",
+  ec_r2d: "不能（房間內容加密）",
+  ec_r3: "組織內「誰跟誰聊」（元資料）",
+  ec_r3a: "大幅隱藏（Gift Wrap 一次性寄件者）",
+  ec_r3b: "平台完整可見",
+  ec_r3c: "自家伺服器完整可見",
+  ec_r3d: "homeserver 可見房間與成員",
+  ec_r4: "資料所在",
+  ec_r4a: "自家基礎設施（自架封閉節點）",
+  ec_r4b: "供應商雲端",
+  ec_r4c: "自家基礎設施",
+  ec_r4d: "自家基礎設施",
+  ec_r5: "離職交接需要金鑰託管嗎",
+  ec_r5a: "不需要——身分輪替接管；金鑰託管為可選（成員入職時明示同意）",
+  ec_r5b: "不適用（非 E2E）",
+  ec_r5c: "不適用（預設非 E2E）",
+  ec_r5d: "視部署（常見伺服器端金鑰備份）",
+  ent_cmp_note:
+    "誠實的限制：零知識設計下，任何人——包括企業主與我們——都無法匯出成員訊息明文；需要完整訊息稽核留存的受監管行業，Cinderous 可能不適合。SSO／SCIM 目前未提供。",
+  ent_cmp_more: "看個人通訊的完整比較 →",
   tr_title: "資金透明度",
   tr_intro: "官方財務以維護者簽章的資料檔公開；前端驗簽通過才顯示數字，任何主機被入侵也無法竄改。",
   tr_loading: "載入並驗簽中…",
@@ -410,6 +597,7 @@ const zhHant: Copy = {
 const en: Copy = {
   nav_home: "Home",
   nav_tech: "How it works",
+  nav_compare: "Compare",
   nav_node: "Run a node",
   nav_enterprise: "Enterprise",
   nav_roadmap: "Roadmap",
@@ -598,9 +786,9 @@ const en: Copy = {
   ent_roster_t: "Org roster & invite-code onboarding",
   ent_roster_b:
     "Admins maintain a signed member roster; new hires join with a one-time invite code and automatically receive a work identity plus default contacts/groups. Onboarding needs no phone number or email.",
-  ent_offboard_t: "Offboarding takeover (no key escrow)",
+  ent_offboard_t: "Offboarding takeover (no key escrow by default)",
   ent_offboard_b:
-    "Uses work-identity rotation rather than key escrow — the company holds no decryption backdoor. When a member leaves or switches devices, an admin revokes the old and issues a new identity via the roster, and the member's client picks up seamlessly; register two devices to retain history (ADR-0052).",
+    "Defaults to work-identity rotation rather than key escrow — the company holds no decryption backdoor. When a member leaves or switches devices, an admin revokes the old and issues a new identity via the roster, and the member's client picks up seamlessly; register two devices to retain history (ADR-0052). Optionally, with the member's explicit consent at onboarding, the work-identity key can be escrowed to allow reviewing that work account after offboarding.",
   ent_policy_t: "Company policy controls",
   ent_policy_b:
     "Set offline-message retention days, an allowed event-kind list, and force calls to relay-only (TURN) to meet network or audit policy. Policies are enforced by your self-hosted relay and never leave it.",
@@ -616,6 +804,98 @@ const en: Copy = {
   ent_note:
     "Enterprise mode reuses the exact same encryption core as the regular app — the only difference is who operates the relay and who it admits. There is no separate closed-source enterprise build, and no crypto weakened for features.",
   ent_cta: "Read the self-hosting & enterprise docs",
+  cp_title: "An honest comparison with mainstream messengers",
+  cp_lead:
+    "No clean-sweep table here. This puts Cinderous next to Signal, LINE and WhatsApp based on public information — including what we haven't finished yet. Find the row you care about.",
+  cp_colDim: "Dimension",
+  cp_r1: "Phone number required to sign up",
+  cp_r1a: "Not required — your key is your identity",
+  cp_r1b: "Required¹",
+  cp_r1c: "Required",
+  cp_r1d: "Required",
+  cp_r2: "End-to-end encryption by default",
+  cp_r2a: "✓ All messages",
+  cp_r2b: "✓",
+  cp_r2c: "△ Texts & locations (Letter Sealing); not all content",
+  cp_r2d: "✓",
+  cp_r3: "Who can see who you talk to (metadata)",
+  cp_r3a: "Largely hidden — Gift Wrap ciphertext + one-time senders",
+  cp_r3b: "Partially protected (sealed sender)",
+  cp_r3c: "Visible to the platform",
+  cp_r3d: "Visible to the platform, part of Meta",
+  cp_r4: "Open source",
+  cp_r4a: "✓ AGPL, clients + relay",
+  cp_r4b: "✓ Clients + server",
+  cp_r4c: "✗",
+  cp_r4d: "✗",
+  cp_r5: "Server architecture",
+  cp_r5a: "Decentralized multi-node; anyone can self-host",
+  cp_r5b: "Centralized",
+  cp_r5c: "Centralized",
+  cp_r5d: "Centralized",
+  cp_r6: "Where your messages live",
+  cp_r6a: "Only on your device; offline queue is ciphertext with auto-expiry",
+  cp_r6b: "Your device",
+  cp_r6c: "Servers / cloud backup",
+  cp_r6d: "Device + optional cloud backup",
+  cp_r7: "Business model",
+  cp_r7a: "Open source + donations — no ads, transparent funding",
+  cp_r7b: "Nonprofit donations",
+  cp_r7c: "Ads & commerce",
+  cp_r7d: "Meta's business ecosystem",
+  cp_r8: "Platform can suspend your account",
+  cp_r8a: "No single platform can",
+  cp_r8b: "Yes",
+  cp_r8c: "Yes",
+  cp_r8d: "Yes",
+  cp_r9: "Forward secrecy",
+  cp_r9a: "In development",
+  cp_r9b: "✓",
+  cp_r9c: "Undisclosed",
+  cp_r9d: "✓",
+  cp_r10: "Feature maturity",
+  cp_r10a: "In development",
+  cp_r10b: "Mature",
+  cp_r10c: "Richest",
+  cp_r10d: "Mature",
+  cp_note1: "¹ Signal usernames can hide your number, but registration still requires one.",
+  cp_note:
+    "All trademarks and product names belong to their respective owners. Comparison based on public information (as of July 2026); official product documentation prevails where they differ.",
+  cp_entLink: "Evaluating for a company? See how Enterprise differs from common options →",
+  ent_cmp_title: "How this differs from common options",
+  ent_cmp_lead:
+    "Enterprise messaging options fall into three groups: cloud suites, self-hosted open source, and E2E self-hosted. This table compares privacy and data sovereignty only — on feature breadth (integrations, search, SSO) they are more mature, that isn't our home turf and we won't pretend otherwise.",
+  ent_cmp_colCloud: "Cloud suites (Slack / Teams / LINE WORKS)",
+  ent_cmp_colSelf: "Self-hosted open source (Mattermost, etc.)",
+  ent_cmp_colE2e: "E2E self-hosted (Element / Matrix)",
+  ec_r1: "End-to-end encryption by default",
+  ec_r1a: "✓ All messages — relays see only ciphertext",
+  ec_r1b: "✗ Servers can read content",
+  ec_r1c: "Not by default; optional in some",
+  ec_r1d: "✓",
+  ec_r2: "Can admins / operators read members' messages",
+  ec_r2a: "No — zero-knowledge; even the org owner sees only ciphertext",
+  ec_r2b: "Yes",
+  ec_r2c: "Yes (server-side plaintext)",
+  ec_r2d: "No (room content encrypted)",
+  ec_r3: "Who-talks-to-whom inside the org (metadata)",
+  ec_r3a: "Largely hidden (Gift Wrap one-time senders)",
+  ec_r3b: "Fully visible to the vendor",
+  ec_r3c: "Fully visible on your server",
+  ec_r3d: "Homeserver sees rooms & membership",
+  ec_r4: "Where data lives",
+  ec_r4a: "Your infrastructure (self-hosted closed relay)",
+  ec_r4b: "Vendor cloud",
+  ec_r4c: "Your infrastructure",
+  ec_r4d: "Your infrastructure",
+  ec_r5: "Key escrow needed for offboarding",
+  ec_r5a: "No — takeover via identity rotation; key escrow is optional (member's explicit consent at onboarding)",
+  ec_r5b: "N/A (not E2E)",
+  ec_r5c: "N/A (not E2E by default)",
+  ec_r5d: "Deployment-dependent (server-side key backup is common)",
+  ent_cmp_note:
+    "An honest limitation: with zero-knowledge design, no one — including the org owner and us — can export members' messages in plaintext. Regulated industries that require full message archiving may find Cinderous unsuitable. SSO / SCIM are not yet available.",
+  ent_cmp_more: "See the full personal-messaging comparison →",
   tr_title: "Fund transparency",
   tr_intro:
     "Official finances are published as a maintainer-signed data file; numbers render only after the signature verifies, so a compromised host cannot tamper with them.",

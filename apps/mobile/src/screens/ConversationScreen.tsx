@@ -218,7 +218,7 @@ function makeStyles(tk: ThemeTokens) {
     thumb: { width: 180, height: 135, borderRadius: 8, marginBottom: 6, resizeMode: "cover" },
     calcchipEq: { fontSize: 12, color: tk.muted },
     calcchipVal: { fontSize: 13, fontWeight: "700", color: tk.accent },
-    // 日期提示（ADR-0260 階段四／0261）：氣泡下方的可點標記＋草稿尾端的建議列。
+    // 日期提示（ADR-0264 階段四／0265）：氣泡下方的可點標記＋草稿尾端的建議列。
     datechips: { flexDirection: "row", flexWrap: "wrap", gap: 4, marginTop: 4 },
     datechip: {
       paddingHorizontal: 8,
@@ -397,7 +397,7 @@ export function ConversationScreen({
   onNoteLoad?: () => string;
   onNoteSave?: (text: string) => void;
   /**
-   * 共享行程（ADR-0259／0260／0261）：本對話的行程（呼叫端已篩選）。
+   * 共享行程（ADR-0263／0264／0265）：本對話的行程（呼叫端已篩選）。
    * **未提供 `onCalendarPublish` ＝整個行程分頁不出現、日期也完全不偵測**——沒有能力就不要
    * 給提示（示範後端無此能力）。
    */
@@ -408,7 +408,7 @@ export function ConversationScreen({
    */
   calendarNameFor?: (pubkey: string) => string;
   /**
-   * 使用者點了對話中的日期標記（ADR-0260 階段四）。**狀態刻意由呼叫端持有**——見下方
+   * 使用者點了對話中的日期標記（ADR-0264 階段四）。**狀態刻意由呼叫端持有**——見下方
    * `calendarDraft` 的說明；未提供＝日期完全不偵測（不給做不到的事的提示）。
    */
   onPickDate?: (at: number) => void;
@@ -417,7 +417,7 @@ export function ConversationScreen({
   onCalendarPublish?: (input: CalendarEventInput, opts?: { eventId?: string }) => void;
   onCalendarCancel?: (eventId: string) => void;
   onCalendarRsvp?: (eventId: string, status: RsvpStatus) => void;
-  /** 設定本機提醒（ADR-0262）；未提供＝不顯示提醒列。 */
+  /** 設定本機提醒（ADR-0266）；未提供＝不顯示提醒列。 */
   onCalendarRemind?: (eventId: string, lead: number | undefined) => void;
   onBack: () => void;
   locale?: Locale;
@@ -457,7 +457,7 @@ export function ConversationScreen({
   );
   /**
    * 點了對話中的日期 → **開面板＋切到行程分頁＋預填**。這是**使用者觸發的導覽**，
-   * 不是 ADR-0259 §1.6 否決的自動切換——沒人點就什麼都不會動。
+   * 不是 ADR-0263 §1.6 否決的自動切換——沒人點就什麼都不會動。
    *
    * **在 render 期間調整 state**（React 官方的 derived-state-from-props 模式）而非 `useEffect`：
    * 少一次 paint，且這個測試環境是純 SSR（`renderToStaticMarkup`，vite config 的
@@ -546,7 +546,7 @@ export function ConversationScreen({
   };
   // 算式預覽（ADR-0097）：純函式判定草稿是否為算式；不是就回 null（不顯示）。
   const calc = calcPreview(draft);
-  // 日期建議（ADR-0260 階段四）：**只看游標前的尾端**剛打完的那個日期（同 ADR-0037 的尾端比對
+  // 日期建議（ADR-0264 階段四）：**只看游標前的尾端**剛打完的那個日期（同 ADR-0037 的尾端比對
   // 語意）。沒有行事曆能力（無 `onCalendarPublish`）就完全不算——不給做不到的事的提示。
   const dateHit = onPickDate ? detectDateAtEnd(draft) : undefined;
 
@@ -879,7 +879,7 @@ export function ConversationScreen({
             </View>
           ) : null}
 
-          {/* 共享行程（ADR-0261）：權威、RSVP、二次確認全在面板內，本處只負責篩選與注入。 */}
+          {/* 共享行程（ADR-0265）：權威、RSVP、二次確認全在面板內，本處只負責篩選與注入。 */}
           {auxTab === "calendar" && onCalendarPublish ? (
             <CalendarPanel
               events={calendar ?? []}
@@ -1024,7 +1024,7 @@ export function ConversationScreen({
                 <Text style={styles.reactionText}>{emojis.join(" ")}</Text>
               </View>
             ) : null}
-            {/* 日期提示（ADR-0260 階段四）：偵測→提示，點了才建立行程。
+            {/* 日期提示（ADR-0264 階段四）：偵測→提示，點了才建立行程。
                 **已收回的訊息不掃**——內容不該再被解讀。 */}
             {onPickDate && !gone && !sticker && !m.file && m.text
               ? (() => {
@@ -1181,7 +1181,7 @@ export function ConversationScreen({
         </ScrollView>
       ) : null}
 
-      {/* 日期建議列（ADR-0260 階段四）：點擊＝開行程並預填。**不劫持送出**——送出鍵照常送訊息。 */}
+      {/* 日期建議列（ADR-0264 階段四）：點擊＝開行程並預填。**不劫持送出**——送出鍵照常送訊息。 */}
       {dateHit ? (
         <Pressable
           style={styles.datebar}

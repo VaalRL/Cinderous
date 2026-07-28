@@ -1,7 +1,7 @@
-// NIP-11 Relay Information Document 的抓取與解析（ADR-0258，承接 ADR-0089 後續行動 2）。
+// NIP-11 Relay Information Document 的抓取與解析（ADR-0262，承接 ADR-0089 後續行動 2）。
 //
 // 用途：讀出營運者自報的贊助管道（`cinder_donations`），供桌面顯示「贊助此節點」角落卡。
-// 中繼端的文件產生見 `relay/src/nip11.ts`（ADR-0256）。
+// 中繼端的文件產生見 `relay/src/nip11.ts`（ADR-0260）。
 //
 // ## 這裡的每個值都是「不可信輸入」
 //

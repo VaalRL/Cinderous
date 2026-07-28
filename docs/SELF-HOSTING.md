@@ -55,7 +55,7 @@
 ### 節點識別與贊助入口（NIP-11）
 
 你的中繼會對帶 `Accept: application/nostr+json` 的 HTTP GET 回一份
-**NIP-11 Relay Information Document**（ADR-0256）；**不帶這個 header 時仍回純文字
+**NIP-11 Relay Information Document**（ADR-0260）；**不帶這個 header 時仍回純文字
 `Cinderous relay`**，健康檢查不受影響。
 
 下列變數**全部選填、未填的欄位不會出現在文件裡**：
@@ -104,7 +104,7 @@ DONATE_LIGHTNING="op@example.com" pnpm --filter @cinderous/relay node-relay
 
 ### 使用者可以要求你刪除他的資料（NIP-62）
 
-中繼支援 **NIP-62 Request to Vanish**（ADR-0256）：使用者送出以自己私鑰簽章的 kind 62，
+中繼支援 **NIP-62 Request to Vanish**（ADR-0260）：使用者送出以自己私鑰簽章的 kind 62，
 你的節點會**立刻**刪掉他發的事件、寄給他的離線留言、以及他的加密雲端快照——不必等 TTL 到期。
 
 - 這是**自動**的，你不需要做任何事，也**沒有**後台可以否決。

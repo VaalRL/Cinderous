@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { MAX_QUERY_ROWS } from "./message-store.js";
 import { buildRelayInfo, SUPPORTED_NIPS, wantsRelayInfo } from "./nip11.js";
 
-describe("NIP-11 Relay Information Document（ADR-0256）", () => {
+describe("NIP-11 Relay Information Document（ADR-0260）", () => {
   describe("內容協商", () => {
     it("只有帶 application/nostr+json 的 Accept 才要文件", () => {
       expect(wantsRelayInfo("application/nostr+json")).toBe(true);

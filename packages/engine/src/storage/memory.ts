@@ -50,7 +50,7 @@ export class MemoryStorage implements AppStorage {
   /** 訊息請求（ADR-0121）：陌生人傳來的訊息，等使用者裁示。 */
   private requests: StoredContact[] = [];
   private groups: StoredGroup[] = [];
-  /** 共享行程（ADR-0259）：id → 行程。本機是真實來源，中繼只是傳輸。 */
+  /** 共享行程（ADR-0263）：id → 行程。本機是真實來源，中繼只是傳輸。 */
   private readonly calendar = new Map<string, StoredCalendarEvent>();
   /** 已讀水位（ADR-0108）：對話 → 已讀到的最新訊息時間（毫秒）。 */
   private readonly readAt = new Map<string, number>();
@@ -273,11 +273,11 @@ export class MemoryStorage implements AppStorage {
       ...(prev?.rsvps ? { rsvps: { ...prev.rsvps, ...event.rsvps } } : {}),
       ...(prev?.delivered ? { delivered: { ...prev.delivered, ...event.delivered } } : {}),
       // 提醒設定是**本機的**，收到的 rumor 裡不會有——不保留就等於「主揪一改時間，
-      // 全體的提醒設定都被清掉」（ADR-0262）。
+      // 全體的提醒設定都被清掉」（ADR-0266）。
       ...(prev?.remindLead !== undefined ? { remindLead: prev.remindLead } : {}),
       ...(prev?.remindedFor !== undefined ? { remindedFor: prev.remindedFor } : {}),
     });
-    this.pruneCalendar(Math.floor(Date.now() / 1000)); // 上限（ADR-0260 §10）
+    this.pruneCalendar(Math.floor(Date.now() / 1000)); // 上限（ADR-0264 §10）
   }
   setCalendarDelivered(eventId: string, pubkey: string, at: number): void {
     const event = this.calendar.get(eventId);
@@ -302,7 +302,7 @@ export class MemoryStorage implements AppStorage {
     this.calendar.delete(id);
   }
   /**
-   * 套用保留政策（ADR-0260 §10）：清掉過久的過去行程，並在總數超上限時砍「最不可能馬上
+   * 套用保留政策（ADR-0264 §10）：清掉過久的過去行程，並在總數超上限時砍「最不可能馬上
    * 用到」的。回傳被清掉的數量。
    *
    * 由寫入路徑與開機各呼叫一次——**光靠寫入不夠**：一筆過去行程會隨時間變舊，但沒有任何
@@ -318,7 +318,7 @@ export class MemoryStorage implements AppStorage {
   }
   setCalendarRsvp(eventId: string, pubkey: string, status: "accepted" | "declined" | "tentative", at: number): void {
     const event = this.calendar.get(eventId);
-    if (!event) return; // 尚未收到邀請——回覆先丟掉，補送到時會重新帶出（ADR-0259 §1.5）
+    if (!event) return; // 尚未收到邀請——回覆先丟掉，補送到時會重新帶出（ADR-0263 §1.5）
     const prev = event.rsvps?.[pubkey];
     if (prev && prev.at >= at) return; // 只往前推進：亂序抵達的舊回覆不覆蓋新的
     this.calendar.set(eventId, { ...event, rsvps: { ...event.rsvps, [pubkey]: { status, at } } });
@@ -547,7 +547,7 @@ export class MemoryStorage implements AppStorage {
     this.contacts = [...s.contacts];
     this.blocked = [...s.blocked];
     this.requests = [...(s.requests ?? [])]; // 舊快照沒有 requests（ADR-0121）
-    this.calendar.clear(); // 共享行程（ADR-0259）；舊快照沒有 → 空
+    this.calendar.clear(); // 共享行程（ADR-0263）；舊快照沒有 → 空
     for (const e of s.calendar ?? []) this.calendar.set(e.id, e);
     this.convos.clear();
     for (const [k, v] of Object.entries(s.messages)) {
