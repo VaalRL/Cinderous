@@ -3,6 +3,7 @@ import { CinderMascot } from "@cinderous/brand";
 import type { Theme } from "@cinderous/theme";
 import { CinderMark } from "./Brand.js";
 import { useCopy } from "./copy.js";
+import { Compare } from "./pages/Compare.js";
 import { Enterprise } from "./pages/Enterprise.js";
 import { Faq } from "./pages/Faq.js";
 import { Home } from "./pages/Home.js";
@@ -109,6 +110,7 @@ export function App({ route: initialRoute }: { route: Route }): JSX.Element {
           <span className="nav__spacer" />
           <NavLink route={{ view: "home", locale }} current={view} label={c.nav_home} onNavigate={navigate} />
           <NavLink route={{ view: "tech", locale }} current={view} label={c.nav_tech} onNavigate={navigate} />
+          <NavLink route={{ view: "compare", locale }} current={view} label={c.nav_compare} onNavigate={navigate} />
           <NavLink route={{ view: "node", locale }} current={view} label={c.nav_node} onNavigate={navigate} />
           <NavLink route={{ view: "enterprise", locale }} current={view} label={c.nav_enterprise} onNavigate={navigate} />
           <NavLink route={{ view: "roadmap", locale }} current={view} label={c.nav_roadmap} onNavigate={navigate} />
@@ -134,6 +136,8 @@ export function App({ route: initialRoute }: { route: Route }): JSX.Element {
         />
       ) : view === "tech" ? (
         <Tech c={c} />
+      ) : view === "compare" ? (
+        <Compare c={c} />
       ) : view === "enterprise" ? (
         <Enterprise c={c} />
       ) : view === "roadmap" ? (

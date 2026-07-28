@@ -71,6 +71,12 @@ export function pageMeta(route: Route, c: Copy): PageMeta {
         ? "Cinderous 如何運作：Nostr 中繼負責離線留言與信令、WebRTC 走 P2P 直連，內容以 NIP-44 加密並用 NIP-17／59 Gift Wrap 隱藏寄件人，中繼站無法從訊息層重建「誰傳給誰」。"
         : "How Cinderous works: Nostr relays carry offline messages and signaling, WebRTC handles P2P; content is NIP-44 encrypted and wrapped with NIP-17/59 Gift Wrap that hides message senders, so relays cannot reconstruct who messages whom.",
     },
+    compare: {
+      title: zh ? `比較：Cinderous vs Signal／LINE／WhatsApp｜${BRAND}` : `Compare: Cinderous vs Signal / LINE / WhatsApp｜${BRAND}`,
+      description: zh
+        ? "Cinderous 與 Signal、LINE、WhatsApp 的誠實比較：是否需要手機號碼、預設端對端加密、元資料保護、開放原始碼、去中心化與自架、訊息存放位置與營利模式——含我們尚未完成的部分。"
+        : "An honest comparison of Cinderous vs Signal, LINE and WhatsApp: phone number requirements, default end-to-end encryption, metadata protection, open source, decentralization and self-hosting, where messages live, and business models — including what we haven't finished yet.",
+    },
     node: {
       title: zh ? `自架節點：企業與家用中繼站｜${BRAND}` : `Self-hosting: run your own relay｜${BRAND}`,
       description: zh

@@ -6,6 +6,7 @@ import type { Locale } from "@cinderous/i18n";
 export interface Copy {
   nav_home: string;
   nav_tech: string;
+  nav_compare: string;
   nav_node: string;
   nav_enterprise: string;
   nav_roadmap: string;
@@ -154,6 +155,63 @@ export interface Copy {
   ent_deploy_b: string;
   ent_note: string;
   ent_cta: string;
+  /** 比較頁（ADR-0254）：與 Signal/LINE/WhatsApp 的誠實比較表。r{n}＝列標籤；a/b/c/d＝
+   * Cinderous/Signal/LINE/WhatsApp 各欄；含對我方不利的列（前向保密、成熟度）——誠實即賣點。 */
+  cp_title: string;
+  cp_lead: string;
+  cp_colDim: string;
+  cp_r1: string;
+  cp_r1a: string;
+  cp_r1b: string;
+  cp_r1c: string;
+  cp_r1d: string;
+  cp_r2: string;
+  cp_r2a: string;
+  cp_r2b: string;
+  cp_r2c: string;
+  cp_r2d: string;
+  cp_r3: string;
+  cp_r3a: string;
+  cp_r3b: string;
+  cp_r3c: string;
+  cp_r3d: string;
+  cp_r4: string;
+  cp_r4a: string;
+  cp_r4b: string;
+  cp_r4c: string;
+  cp_r4d: string;
+  cp_r5: string;
+  cp_r5a: string;
+  cp_r5b: string;
+  cp_r5c: string;
+  cp_r5d: string;
+  cp_r6: string;
+  cp_r6a: string;
+  cp_r6b: string;
+  cp_r6c: string;
+  cp_r6d: string;
+  cp_r7: string;
+  cp_r7a: string;
+  cp_r7b: string;
+  cp_r7c: string;
+  cp_r7d: string;
+  cp_r8: string;
+  cp_r8a: string;
+  cp_r8b: string;
+  cp_r8c: string;
+  cp_r8d: string;
+  cp_r9: string;
+  cp_r9a: string;
+  cp_r9b: string;
+  cp_r9c: string;
+  cp_r9d: string;
+  cp_r10: string;
+  cp_r10a: string;
+  cp_r10b: string;
+  cp_r10c: string;
+  cp_r10d: string;
+  cp_note1: string;
+  cp_note: string;
   tr_title: string;
   tr_intro: string;
   tr_loading: string;
@@ -181,6 +239,7 @@ export interface Copy {
 const zhHant: Copy = {
   nav_home: "首頁",
   nav_tech: "技術原理",
+  nav_compare: "比較",
   nav_node: "建立節點",
   nav_enterprise: "企業版",
   nav_roadmap: "藍圖",
@@ -384,6 +443,63 @@ const zhHant: Copy = {
   ent_note:
     "企業模式重用與一般版完全相同的加密核心——差別只在「誰來營運中繼、放行誰」。沒有另一套閉源企業版，也沒有為了功能而弱化的加密。",
   ent_cta: "看自架與企業部署文件",
+  cp_title: "與主流通訊軟體的誠實比較",
+  cp_lead:
+    "沒有全勝表。這裡把 Cinderous 與 Signal、LINE、WhatsApp 依公開資訊並排——包括我們還沒做完的部分。你在意哪一項，就看那一列。",
+  cp_colDim: "比較項",
+  cp_r1: "註冊需要手機號碼",
+  cp_r1a: "不需要——金鑰即身分",
+  cp_r1b: "需要¹",
+  cp_r1c: "需要",
+  cp_r1d: "需要",
+  cp_r2: "預設端對端加密",
+  cp_r2a: "✓ 所有訊息",
+  cp_r2b: "✓",
+  cp_r2c: "△ 文字與位置（Letter Sealing），部分內容不含",
+  cp_r2d: "✓",
+  cp_r3: "誰看得到你跟誰聊天（元資料）",
+  cp_r3a: "大幅隱藏——Gift Wrap 密文＋一次性寄件者",
+  cp_r3b: "部分保護（sealed sender）",
+  cp_r3c: "平台可見",
+  cp_r3d: "平台可見，屬 Meta 生態",
+  cp_r4: "開放原始碼",
+  cp_r4a: "✓ AGPL，客戶端＋中繼站",
+  cp_r4b: "✓ 客戶端＋伺服器",
+  cp_r4c: "✗",
+  cp_r4d: "✗",
+  cp_r5: "伺服器架構",
+  cp_r5a: "去中心化多節點，任何人可自架",
+  cp_r5b: "中心化",
+  cp_r5c: "中心化",
+  cp_r5d: "中心化",
+  cp_r6: "你的訊息存放在哪",
+  cp_r6a: "只在你的裝置；離線暫存為密文並自動過期",
+  cp_r6b: "你的裝置",
+  cp_r6c: "伺服器／雲端備份",
+  cp_r6d: "裝置＋可選雲端備份",
+  cp_r7: "營利模式",
+  cp_r7a: "開源＋捐款——零廣告、資金公開透明",
+  cp_r7b: "非營利基金會捐款",
+  cp_r7c: "廣告與商務生態",
+  cp_r7d: "Meta 商業生態",
+  cp_r8: "帳號可被平台停權",
+  cp_r8a: "無單一平台能停權你",
+  cp_r8b: "可",
+  cp_r8c: "可",
+  cp_r8d: "可",
+  cp_r9: "前向保密",
+  cp_r9a: "開發中——外部審計完成前不對外宣稱",
+  cp_r9b: "✓",
+  cp_r9c: "未公開細節",
+  cp_r9d: "✓",
+  cp_r10: "功能成熟度",
+  cp_r10a: "開發中——訊息／通話／群組／檔案持續補齊",
+  cp_r10b: "成熟",
+  cp_r10c: "最豐富",
+  cp_r10d: "成熟",
+  cp_note1: "¹ Signal 可用使用者名稱隱藏號碼，但註冊仍需手機號。",
+  cp_note:
+    "各商標與產品名稱屬其所有者。比較基於公開資訊（截至 2026 年 7 月），如有出入以各產品官方說明為準。",
   tr_title: "資金透明度",
   tr_intro: "官方財務以維護者簽章的資料檔公開；前端驗簽通過才顯示數字，任何主機被入侵也無法竄改。",
   tr_loading: "載入並驗簽中…",
@@ -410,6 +526,7 @@ const zhHant: Copy = {
 const en: Copy = {
   nav_home: "Home",
   nav_tech: "How it works",
+  nav_compare: "Compare",
   nav_node: "Run a node",
   nav_enterprise: "Enterprise",
   nav_roadmap: "Roadmap",
@@ -616,6 +733,63 @@ const en: Copy = {
   ent_note:
     "Enterprise mode reuses the exact same encryption core as the regular app — the only difference is who operates the relay and who it admits. There is no separate closed-source enterprise build, and no crypto weakened for features.",
   ent_cta: "Read the self-hosting & enterprise docs",
+  cp_title: "An honest comparison with mainstream messengers",
+  cp_lead:
+    "No clean-sweep table here. This puts Cinderous next to Signal, LINE and WhatsApp based on public information — including what we haven't finished yet. Find the row you care about.",
+  cp_colDim: "Dimension",
+  cp_r1: "Phone number required to sign up",
+  cp_r1a: "Not required — your key is your identity",
+  cp_r1b: "Required¹",
+  cp_r1c: "Required",
+  cp_r1d: "Required",
+  cp_r2: "End-to-end encryption by default",
+  cp_r2a: "✓ All messages",
+  cp_r2b: "✓",
+  cp_r2c: "△ Texts & locations (Letter Sealing); not all content",
+  cp_r2d: "✓",
+  cp_r3: "Who can see who you talk to (metadata)",
+  cp_r3a: "Largely hidden — Gift Wrap ciphertext + one-time senders",
+  cp_r3b: "Partially protected (sealed sender)",
+  cp_r3c: "Visible to the platform",
+  cp_r3d: "Visible to the platform, part of Meta",
+  cp_r4: "Open source",
+  cp_r4a: "✓ AGPL, clients + relay",
+  cp_r4b: "✓ Clients + server",
+  cp_r4c: "✗",
+  cp_r4d: "✗",
+  cp_r5: "Server architecture",
+  cp_r5a: "Decentralized multi-node; anyone can self-host",
+  cp_r5b: "Centralized",
+  cp_r5c: "Centralized",
+  cp_r5d: "Centralized",
+  cp_r6: "Where your messages live",
+  cp_r6a: "Only on your device; offline queue is ciphertext with auto-expiry",
+  cp_r6b: "Your device",
+  cp_r6c: "Servers / cloud backup",
+  cp_r6d: "Device + optional cloud backup",
+  cp_r7: "Business model",
+  cp_r7a: "Open source + donations — no ads, transparent funding",
+  cp_r7b: "Nonprofit donations",
+  cp_r7c: "Ads & commerce",
+  cp_r7d: "Meta's business ecosystem",
+  cp_r8: "Platform can suspend your account",
+  cp_r8a: "No single platform can",
+  cp_r8b: "Yes",
+  cp_r8c: "Yes",
+  cp_r8d: "Yes",
+  cp_r9: "Forward secrecy",
+  cp_r9a: "In development — not claimed until an external audit completes",
+  cp_r9b: "✓",
+  cp_r9c: "Undisclosed",
+  cp_r9d: "✓",
+  cp_r10: "Feature maturity",
+  cp_r10a: "In development — messaging / calls / groups / files landing steadily",
+  cp_r10b: "Mature",
+  cp_r10c: "Richest",
+  cp_r10d: "Mature",
+  cp_note1: "¹ Signal usernames can hide your number, but registration still requires one.",
+  cp_note:
+    "All trademarks and product names belong to their respective owners. Comparison based on public information (as of July 2026); official product documentation prevails where they differ.",
   tr_title: "Fund transparency",
   tr_intro:
     "Official finances are published as a maintainer-signed data file; numbers render only after the signature verifies, so a compromised host cannot tamper with them.",
