@@ -504,6 +504,9 @@ export interface Messages {
   wipe_device: string;
   /** 共享行程（ADR-0259）。 */
   aux_tabCalendar: string;
+  /** 日期偵測提示（ADR-0260 階段四）。 */
+  date_chipHint: string;
+  date_barHint: string;
   cal_new: string;
   cal_title: string;
   cal_start: string;
@@ -1242,6 +1245,8 @@ const zhHant: Messages = {
   settings_wipeDeviceHint: "刪除這台裝置上「所有」身分的私鑰與全部本機資料，回到全新狀態。此動作無法復原——請先確認你已有救援登入碼。",
   wipe_device: "清空裝置",
   aux_tabCalendar: "行程",
+  date_chipHint: "建立行程（不會自動加入）",
+  date_barHint: "點擊建立行程；Enter 照常送出訊息",
   cal_new: "新增行程",
   cal_title: "行程名稱",
   cal_start: "開始",
@@ -1960,6 +1965,8 @@ const en: Messages = {
   settings_wipeDeviceHint: "Delete the private keys and all local data of EVERY identity on this device, returning it to a fresh state. This cannot be undone — make sure you have a rescue login code first.",
   wipe_device: "Wipe device",
   aux_tabCalendar: "Plans",
+  date_chipHint: "Create a plan (nothing is added automatically)",
+  date_barHint: "Click to create a plan \u2014 Enter still sends the message",
   cal_new: "New plan",
   cal_title: "What's the plan?",
   cal_start: "Starts",

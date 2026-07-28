@@ -1247,3 +1247,11 @@ button:disabled { opacity: .5; cursor: default; filter: none; }
 .cal__descout { font-size: 11px; color: var(--ink); margin-top: 3px; white-space: pre-wrap; word-break: break-word; }
 .cal__going { font-size: 11px; color: var(--ink); margin-top: 4px; }
 .cal__acts { display: flex; gap: 4px; margin-top: 6px; flex-wrap: wrap; }
+
+/* 對話中的日期提示（ADR-0260 階段四）：偵測→提示，低調、可點、不搶版面。 */
+.datechips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.datechip {
+  border: 1px solid var(--border); background: var(--field); color: var(--muted);
+  border-radius: 10px; padding: 1px 7px; font-size: 10px; cursor: pointer; line-height: 1.5;
+}
+.datechip:hover { border-color: var(--accent); color: var(--accent); background: var(--hover); }

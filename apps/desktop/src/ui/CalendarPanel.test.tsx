@@ -128,3 +128,16 @@ describe("右欄行程分頁（ADR-0259 階段三）", () => {
     expect(html.indexOf("明天")).toBeLessThan(html.indexOf("後天"));
   });
 });
+
+describe("由對話日期預填（ADR-0260 階段四）", () => {
+  it("有 draft → 直接開啟新建表單（使用者點了才會有 draft）", () => {
+    const html = render({ events: [], draft: { at: NOW + 7200, nonce: 1 } });
+    expect(html).toContain('data-testid="cal-form"');
+  });
+
+  it("沒有 draft → 只顯示「新增行程」按鈕，表單不自己冒出來", () => {
+    const html = render({ events: [] });
+    expect(html).not.toContain('data-testid="cal-form"');
+    expect(html).toContain('data-testid="cal-new"');
+  });
+});

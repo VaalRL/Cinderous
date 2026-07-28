@@ -102,12 +102,26 @@ export interface DeckRightProps {
   onCalendarPublish?: (input: CalendarEventInput, opts?: { eventId?: string }) => void;
   onCalendarCancel?: (eventId: string) => void;
   onCalendarRsvp?: (eventId: string, status: RsvpStatus) => void;
+  /**
+   * 使用者在對話中點了日期標記（ADR-0260 階段四）：切到行程分頁並預填。
+   * **這是使用者觸發的導覽，不是 ADR-0259 §1.6 否決的自動切換**——沒有點就不會動。
+   */
+  calendarDraft?: { at: number; nonce: number } | undefined;
 }
 
 /** 三欄右側欄：對話輔助區（ADR-0079 Q4）。四分頁從當前對話資料衍生；深度操作為後續擴充。 */
 export function DeckRight(props: DeckRightProps): JSX.Element {
   const { t } = useI18n();
-  const [tab, setTab] = useState<AuxTab>("info");
+  // 掛載時已有 draft（使用者點了日期才會有）＝直接停在行程分頁。
+  const [tab, setTab] = useState<AuxTab>(props.calendarDraft ? "calendar" : "info");
+  // 使用者在對話中點了日期 → 切到行程分頁。**在 render 期間調整 state**（同 CalendarPanel），
+  // 不用 useEffect：少一次 paint，且 SSR 也走得到。
+  const draftNonce = props.calendarDraft?.nonce;
+  const [seenDraft, setSeenDraft] = useState(draftNonce);
+  if (draftNonce !== seenDraft) {
+    setSeenDraft(draftNonce);
+    if (draftNonce !== undefined) setTab("calendar");
+  }
   const { activeId } = props;
 
   if (!activeId) return <div className="deck__ph">{t("aux_pickChat")}</div>;
@@ -214,6 +228,7 @@ export function DeckRight(props: DeckRightProps): JSX.Element {
             onPublish={props.onCalendarPublish}
             onCancel={props.onCalendarCancel ?? (() => {})}
             onRsvp={props.onCalendarRsvp ?? (() => {})}
+            {...(props.calendarDraft ? { draft: props.calendarDraft } : {})}
           />
         ) : null}
 

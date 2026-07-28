@@ -25,6 +25,11 @@ export interface CalendarPanelProps {
   onRsvp: (eventId: string, status: RsvpStatus) => void;
   /** pubkey → 顯示名（列出誰要來）。 */
   nameFor: (pubkey: string) => string;
+  /**
+   * 由對話中的日期標記帶進來的預填（ADR-0260 階段四）：`nonce` 變動即開啟新建表單並帶入時間。
+   * **一律由使用者點擊觸發**——本元件不會自己冒出表單（ADR-0259 §1.6 否決自動導覽）。
+   */
+  draft?: { at: number; nonce: number } | undefined;
 }
 
 /** unix 秒 → `datetime-local` 需要的本機時間字串（`YYYY-MM-DDTHH:mm`）。 */
@@ -63,10 +68,13 @@ const RSVP_CHOICES: { status: RsvpStatus; key: "cal_rsvpYes" | "cal_rsvpMaybe" |
 /** 建立/編輯表單。`initial` 有值＝編輯既有行程。 */
 function EventForm({
   initial,
+  startAt,
   onSubmit,
   onDismiss,
 }: {
   initial?: StoredCalendarEvent | undefined;
+  /** 新建時的預設開始時間（unix 秒）；來自對話中被點擊的日期。 */
+  startAt?: number | undefined;
   onSubmit: (input: CalendarEventInput) => void;
   onDismiss: () => void;
 }): JSX.Element {
@@ -74,7 +82,7 @@ function EventForm({
   const [title, setTitle] = useState(initial?.title ?? "");
   // 預設開始時間＝下一個整點，省去使用者每次都要挑（新建時才用）。
   const [start, setStart] = useState(
-    toLocalInput(initial?.start ?? Math.ceil(Date.now() / 1000 / 3600) * 3600),
+    toLocalInput(initial?.start ?? startAt ?? Math.ceil(Date.now() / 1000 / 3600) * 3600),
   );
   const [end, setEnd] = useState(initial?.end !== undefined ? toLocalInput(initial.end) : "");
   const [location, setLocation] = useState(initial?.location ?? "");
@@ -163,9 +171,25 @@ function EventForm({
 export function CalendarPanel(props: CalendarPanelProps): JSX.Element {
   const { t, locale } = useI18n();
   const { confirm } = useDialog();
-  /** `null`＝沒在編輯；`""`＝新建；其餘＝正在編輯該 id。 */
-  const [editing, setEditing] = useState<string | null>(null);
+  /**
+   * `null`＝沒在編輯；`""`＝新建；其餘＝正在編輯該 id。
+   *
+   * **掛載時就帶著 draft ＝直接開表單**：實際流程是「點對話裡的日期 → 右欄切到行程分頁 →
+   * 本元件才掛載」，所以第一次 render 就已經有 draft 了，不能當成「已看過」。
+   */
+  const [editing, setEditing] = useState<string | null>(props.draft ? "" : null);
   const nowSec = Math.floor(Date.now() / 1000);
+  // 對話中的日期被點擊 → 開新建表單並帶入時間。依 nonce 觸發（同 App 既有的 pendingInsert 模式），
+  // 這樣「點同一個日期兩次」也會重新開啟。
+  //
+  // **在 render 期間調整 state**（React 官方的 derived-state-from-props 模式），不是 useEffect：
+  // 少一次 paint，且伺服器端渲染（測試用 renderToStaticMarkup）也走得到——effect 在 SSR 不執行。
+  const draftNonce = props.draft?.nonce;
+  const [seenNonce, setSeenNonce] = useState(draftNonce);
+  if (draftNonce !== seenNonce) {
+    setSeenNonce(draftNonce);
+    if (draftNonce !== undefined) setEditing("");
+  }
 
   const sorted = [...props.events].sort((a, b) => a.start - b.start);
 
@@ -178,6 +202,7 @@ export function CalendarPanel(props: CalendarPanelProps): JSX.Element {
       ) : (
         <EventForm
           {...(editing ? { initial: sorted.find((e) => e.id === editing) } : {})}
+          {...(!editing && props.draft ? { startAt: props.draft.at } : {})}
           onDismiss={() => setEditing(null)}
           onSubmit={(input) => {
             props.onPublish(input, editing ? { eventId: editing } : undefined);

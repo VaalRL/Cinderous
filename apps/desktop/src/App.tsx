@@ -528,6 +528,11 @@ export function App(): JSX.Element {
   const [relays, setRelays] = useState<{ url: string; state: ConnectionState; home: boolean; stale: boolean }[]>([]);
   /** 共享行程（ADR-0259）：全部行程；右欄依當前對話篩選。 */
   const [calendar, setCalendar] = useState<StoredCalendarEvent[]>([]);
+  /**
+   * 對話中的日期被點擊（ADR-0260 階段四）：切到行程分頁並預填時間。
+   * nonce 讓「點同一個日期兩次」也能重新開啟表單（同 pendingInsert 的作法）。
+   */
+  const [calendarDraft, setCalendarDraft] = useState<{ at: number; nonce: number } | null>(null);
   /** 贊助此節點角落卡（ADR-0089／0258）：抓到且未被關閉才有值。 */
   const [sponsor, setSponsor] = useState<{ url: string; info: RelayInfo } | null>(null);
   const [cleanPaste, setCleanPaste] = useState<boolean>(() => cleanOnPasteEnabled());
@@ -2525,6 +2530,7 @@ export function App(): JSX.Element {
             unsent={unsent}
             purged={purged}
             calendar={calendar}
+            {...(calendarDraft ? { calendarDraft } : {})}
             {...(() => {
               // 共享行程（ADR-0259）：示範後端沒有這些方法 → 整個分頁不出現。
               const publish = activeBackend.calendarPublish;
@@ -2942,6 +2948,9 @@ export function App(): JSX.Element {
           return (
             <div key={pk} className={`convotab${pk === activeConvo ? " on" : ""}`}>
             <ConversationWindow
+              {...(activeBackend.calendarPublish
+                ? { onPickDate: (at: number) => setCalendarDraft({ at, nonce: Date.now() }) }
+                : {})}
               embedded={layout === "modern"}
               {...(floating ? { floating } : {})}
               muted={isMuted(groupPrefs, pk)}
@@ -3053,6 +3062,9 @@ export function App(): JSX.Element {
         return (
           <div key={pk} className={`convotab${pk === activeConvo ? " on" : ""}`}>
           <ConversationWindow
+            {...(activeBackend.calendarPublish
+              ? { onPickDate: (at: number) => setCalendarDraft({ at, nonce: Date.now() }) }
+              : {})}
             embedded={layout === "modern"}
             {...(floating ? { floating } : {})}
             self={self}

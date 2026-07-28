@@ -96,3 +96,19 @@ describe("行程分頁的顯示條件與對話歸屬（ADR-0259 階段三）", (
     expect(html).toContain('行程<span class="daux__count">1</span>');
   });
 });
+
+describe("日期標記點擊後切到行程分頁（ADR-0260 階段四）", () => {
+  it("有 calendarDraft → 直接停在行程分頁（**使用者點擊觸發**，非 ADR-0259 §1.6 否決的自動切換）", () => {
+    const html = render({
+      calendar: [] as never,
+      onCalendarPublish: () => {},
+      calendarDraft: { at: Math.floor(Date.now() / 1000) + 3600, nonce: 1 },
+    } as never);
+    expect(html).toContain('data-testid="aux-calendar"'); // 行程面板已渲染
+  });
+
+  it("沒有 calendarDraft → 停在預設的資訊分頁（不會自己跳走）", () => {
+    const html = render({ calendar: [] as never, onCalendarPublish: () => {} } as never);
+    expect(html).not.toContain('data-testid="aux-calendar"');
+  });
+});
