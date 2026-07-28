@@ -1274,6 +1274,34 @@ button:disabled { opacity: .5; cursor: default; filter: none; }
 
 /* 右欄「行程」分頁（ADR-0263）。沿用 daux 的密度與色票，不另立一套視覺語言。 */
 .cal { display: flex; flex-direction: column; gap: 8px; padding: 8px; }
+/* 行事曆視圖切換與月曆格陣（ADR-0269）。 */
+.cal__views { display: flex; gap: 2px; margin-bottom: 6px; }
+.cal__viewbtn { flex: 1; padding: 4px 0; font-size: 12px; border: 1px solid var(--border); background: var(--field); color: var(--muted); cursor: pointer; }
+.cal__viewbtn:first-child { border-radius: 6px 0 0 6px; }
+.cal__viewbtn:last-child { border-radius: 0 6px 6px 0; }
+.cal__viewbtn.on { background: var(--accent); color: #fff; border-color: var(--accent); font-weight: 600; }
+.cal__nav { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+.cal__navbtn { width: 24px; height: 24px; border: 1px solid var(--border); background: var(--field); color: var(--ink); border-radius: 6px; cursor: pointer; line-height: 1; }
+.cal__navbtn:hover { background: var(--hover); }
+.cal__today { padding: 2px 8px; font-size: 12px; border: 1px solid var(--border); background: var(--field); color: var(--ink); border-radius: 6px; cursor: pointer; }
+.cal__focuslbl { flex: 1; text-align: center; font-size: 12.5px; font-weight: 600; color: var(--ink); }
+.cal__grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+.cal__grid--week { grid-template-rows: auto 1fr; }
+.cal__dow { font-size: 10.5px; color: var(--muted); text-align: center; padding: 2px 0; }
+.cal__cell {
+  min-height: 46px; border: 1px solid var(--border); background: var(--panel); border-radius: 4px;
+  padding: 2px; display: flex; flex-direction: column; gap: 1px; align-items: stretch; cursor: pointer; overflow: hidden; text-align: left;
+}
+.cal__grid--week .cal__cell { min-height: 90px; }
+.cal__cell:hover { border-color: var(--accent); }
+.cal__cell--out { opacity: 0.4; }
+.cal__cell--today { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.cal__cellnum { font-size: 11px; color: var(--muted); align-self: flex-end; line-height: 1; }
+.cal__cell--today .cal__cellnum { color: var(--accent); font-weight: 700; }
+.cal__dot { font-size: 10px; background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--ink); border-radius: 3px; padding: 0 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cal__more { font-size: 10px; color: var(--muted); }
+.cal__day { margin-top: 2px; }
+
 .cal__new {
   border: 1px dashed var(--border); background: var(--field); color: var(--ink);
   border-radius: 6px; padding: 6px; font-size: 12px; cursor: pointer;

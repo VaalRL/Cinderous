@@ -13,6 +13,7 @@ import type { CalendarEventInput, RsvpStatus, StoredCalendarEvent } from "@cinde
 import type { MessageKey } from "@cinderous/i18n";
 import { useState, type JSX } from "react";
 import { useI18n } from "../i18n.js";
+import { addMonths, addDays, CAL_VIEWS, type CalView, type DayCell, dayCell, monthGrid, weekGrid } from "./calendar-view.js";
 import { useDialog } from "./Dialog.js";
 
 export interface CalendarPanelProps {
@@ -36,6 +37,8 @@ export interface CalendarPanelProps {
    * **一律由使用者點擊觸發**——本元件不會自己冒出表單（ADR-0263 §1.6 否決自動導覽）。
    */
   draft?: { at: number; nonce: number } | undefined;
+  /** 初始視圖（ADR-0269）：預設 `month`（本月月曆）。供深連結與測試指定清單/週/日。 */
+  initialView?: CalView;
 }
 
 /** unix 秒 → `datetime-local` 需要的本機時間字串（`YYYY-MM-DDTHH:mm`）。 */
@@ -213,8 +216,70 @@ export function CalendarPanel(props: CalendarPanelProps): JSX.Element {
 
   const sorted = [...props.events].sort((a, b) => a.start - b.start);
 
+  // 視圖與聚焦日（ADR-0269）：預設**本月月曆**；focus 為聚焦月/週/日的錨點（unix 秒，本機時區）。
+  const [view, setView] = useState<CalView>(props.initialView ?? "month");
+  const [focus, setFocus] = useState<number>(nowSec);
+  const VIEW_KEY: Record<CalView, MessageKey> = {
+    month: "cal_viewMonth",
+    week: "cal_viewWeek",
+    day: "cal_viewDay",
+    list: "cal_viewList",
+  };
+  // 導覽步進：月視圖跳月、週跳週、日跳日（清單無導覽）。
+  const stepFocus = (dir: -1 | 1): void => {
+    if (view === "month") setFocus((f) => addMonths(f, dir));
+    else if (view === "week") setFocus((f) => addDays(f, 7 * dir));
+    else if (view === "day") setFocus((f) => addDays(f, dir));
+  };
+  const focusLabel = ((): string => {
+    const d = new Date(focus * 1000);
+    if (view === "month") return d.toLocaleDateString(locale, { year: "numeric", month: "long" });
+    if (view === "day") return d.toLocaleDateString(locale, { year: "numeric", month: "long", day: "numeric", weekday: "short" });
+    if (view === "week") {
+      const wk = weekGrid(focus, [], nowSec);
+      const s = new Date(wk[0]!.startSec * 1000).toLocaleDateString(locale, { month: "short", day: "numeric" });
+      const e = new Date(wk[6]!.startSec * 1000).toLocaleDateString(locale, { month: "short", day: "numeric" });
+      return `${s} – ${e}`;
+    }
+    return "";
+  })();
+
   return (
     <div className="cal" data-testid="aux-calendar">
+      {/* 視圖切換（ADR-0269）：月／週／日／清單，預設月。 */}
+      <div className="cal__views" role="tablist" data-testid="cal-views">
+        {CAL_VIEWS.map((v) => (
+          <button
+            key={v}
+            type="button"
+            role="tab"
+            aria-selected={view === v}
+            className={`cal__viewbtn${view === v ? " on" : ""}`}
+            data-testid={`cal-view-${v}`}
+            onClick={() => setView(v)}
+          >
+            {t(VIEW_KEY[v])}
+          </button>
+        ))}
+      </div>
+      {/* 期間導覽（清單視圖無）：← 今天 → 。 */}
+      {view !== "list" ? (
+        <div className="cal__nav" data-testid="cal-nav">
+          <button type="button" className="cal__navbtn" data-testid="cal-prev" aria-label={t("cal_prev")} onClick={() => stepFocus(-1)}>
+            ‹
+          </button>
+          <button type="button" className="cal__today" data-testid="cal-today" onClick={() => setFocus(nowSec)}>
+            {t("cal_today")}
+          </button>
+          <span className="cal__focuslbl" data-testid="cal-focus-label">
+            {focusLabel}
+          </span>
+          <button type="button" className="cal__navbtn" data-testid="cal-next" aria-label={t("cal_next")} onClick={() => stepFocus(1)}>
+            ›
+          </button>
+        </div>
+      ) : null}
+
       {editing === null ? (
         <button type="button" className="cal__new" data-testid="cal-new" onClick={() => setEditing("")}>
           ＋ {t("cal_new")}
@@ -231,12 +296,33 @@ export function CalendarPanel(props: CalendarPanelProps): JSX.Element {
         />
       )}
 
-      {sorted.length === 0 ? (
+      {/* 內容區依視圖切換（ADR-0269）：月/週/日＝日格格陣（點行程展開細節）；清單＝原完整卡片。 */}
+      {view !== "list" ? (
+        <CalGrid
+          view={view}
+          cells={view === "month" ? monthGrid(focus, sorted, nowSec) : view === "week" ? weekGrid(focus, sorted, nowSec) : [dayCell(focus, sorted, nowSec)]}
+          locale={locale}
+          emptyLabel={t("cal_none")}
+          onOpenDay={(dayStart) => {
+            setFocus(dayStart);
+            setView("day");
+          }}
+          renderEvent={renderItem}
+          dayView={view === "day"}
+        />
+      ) : sorted.length === 0 ? (
         <div className="daux__empty">{t("cal_none")}</div>
       ) : (
         <ul className="cal__list">
-          {sorted.map((e) => {
-            const mine = e.organizer === props.selfPubkey;
+          {sorted.map((e) => renderItem(e))}
+        </ul>
+      )}
+    </div>
+  );
+
+  /** 單筆行程卡片（清單視圖用整份；日視圖也複用）。抽成函式供多視圖共用。 */
+  function renderItem(e: StoredCalendarEvent): JSX.Element {
+    const mine = e.organizer === props.selfPubkey;
             const past = (e.end ?? e.start) < nowSec;
             const myRsvp = e.rsvps?.[props.selfPubkey]?.status;
             // 只列「要來」與「也許」——不列缺席者（那是噪音，且對沒回覆的人不公平）。
@@ -317,9 +403,75 @@ export function CalendarPanel(props: CalendarPanelProps): JSX.Element {
                 )}
               </li>
             );
-          })}
-        </ul>
-      )}
+  }
+}
+
+/** 月/週/日視圖的日格格陣（ADR-0269）。月/週＝格子點行程展開、點日跳日視圖；日＝直接列出當天卡片。 */
+function CalGrid({
+  view,
+  cells,
+  locale,
+  emptyLabel,
+  onOpenDay,
+  renderEvent,
+  dayView,
+}: {
+  view: CalView;
+  cells: DayCell[];
+  locale: string;
+  emptyLabel: string;
+  onOpenDay: (dayStart: number) => void;
+  renderEvent: (e: StoredCalendarEvent) => JSX.Element;
+  dayView: boolean;
+}): JSX.Element {
+  // 日視圖：單格→直接列當天完整卡片（同清單樣式）。
+  if (dayView) {
+    const only = cells[0];
+    return (
+      <div className="cal__day" data-testid="cal-grid-day">
+        {!only || only.events.length === 0 ? (
+          <div className="daux__empty">{emptyLabel}</div>
+        ) : (
+          <ul className="cal__list">{only.events.map((e) => renderEvent(e))}</ul>
+        )}
+      </div>
+    );
+  }
+  const weekdays = weekdayLabels(locale, cells);
+  return (
+    <div className={`cal__grid cal__grid--${view}`} data-testid={`cal-grid-${view}`}>
+      {weekdays.map((w) => (
+        <div className="cal__dow" key={w}>
+          {w}
+        </div>
+      ))}
+      {cells.map((c) => (
+        <button
+          type="button"
+          key={c.startSec}
+          className={`cal__cell${c.inMonth ? "" : " cal__cell--out"}${c.isToday ? " cal__cell--today" : ""}`}
+          data-testid="cal-cell"
+          onClick={() => onOpenDay(c.startSec)}
+          title={new Date(c.startSec * 1000).toLocaleDateString(locale, { month: "long", day: "numeric" })}
+        >
+          <span className="cal__cellnum">{c.date}</span>
+          {c.events.slice(0, 3).map((e) => (
+            <span className="cal__dot" key={e.id} title={e.title}>
+              {e.title}
+            </span>
+          ))}
+          {c.events.length > 3 ? <span className="cal__more">＋{c.events.length - 3}</span> : null}
+        </button>
+      ))}
     </div>
+  );
+}
+
+/** 週幾表頭（依 grid 首格星期推出，跟隨 weekStartsOn；本機語系縮寫）。 */
+function weekdayLabels(locale: string, cells: DayCell[]): string[] {
+  const first = cells[0];
+  if (!first) return [];
+  return Array.from({ length: 7 }, (_, i) =>
+    new Date((first.startSec + i * 86400) * 1000).toLocaleDateString(locale, { weekday: "short" }),
   );
 }

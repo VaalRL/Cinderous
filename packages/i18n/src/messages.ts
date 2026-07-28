@@ -530,6 +530,14 @@ export interface Messages {
   date_chipHint: string;
   date_barHint: string;
   cal_new: string;
+  /** 行事曆視圖切換與導覽（ADR-0269）。 */
+  cal_viewMonth: string;
+  cal_viewWeek: string;
+  cal_viewDay: string;
+  cal_viewList: string;
+  cal_today: string;
+  cal_prev: string;
+  cal_next: string;
   cal_title: string;
   cal_start: string;
   cal_end: string;
@@ -1308,6 +1316,13 @@ const zhHant: Messages = {
   date_chipHint: "建立行程（不會自動加入）",
   date_barHint: "點擊建立行程；Enter 照常送出訊息",
   cal_new: "新增行程",
+  cal_viewMonth: "月",
+  cal_viewWeek: "週",
+  cal_viewDay: "日",
+  cal_viewList: "清單",
+  cal_today: "今天",
+  cal_prev: "上一個",
+  cal_next: "下一個",
   cal_title: "行程名稱",
   cal_start: "開始",
   cal_end: "結束（可選）",
@@ -2061,6 +2076,13 @@ const en: Messages = {
   date_chipHint: "Create a plan (nothing is added automatically)",
   date_barHint: "Click to create a plan \u2014 Enter still sends the message",
   cal_new: "New plan",
+  cal_viewMonth: "Month",
+  cal_viewWeek: "Week",
+  cal_viewDay: "Day",
+  cal_viewList: "List",
+  cal_today: "Today",
+  cal_prev: "Previous",
+  cal_next: "Next",
   cal_title: "What's the plan?",
   cal_start: "Starts",
   cal_end: "Ends (optional)",

@@ -68,11 +68,11 @@ export function DeckSidebar(props: DeckSidebarProps): JSX.Element {
   return (
     <div className="dsb">
       <div className="dsb__me">
+        {/* 尺寸與經典版 me 列對齊（44px 基礎款）——原本掛 sm（30px）偏小（使用者回報）。 */}
         <EditableAvatar
           id={props.self.pubkey}
           name={props.self.name}
           ring={`ring-${props.self.status}`}
-          className="sm"
           {...(props.onSelfAvatar ? { onBroadcast: props.onSelfAvatar } : {})}
         />
         <div className="dsb__meinfo">

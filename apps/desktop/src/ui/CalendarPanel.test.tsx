@@ -18,7 +18,29 @@ const evt = (over: Partial<StoredCalendarEvent> = {}): StoredCalendarEvent => ({
   ...over,
 });
 
+// 既有互動測試驗的是行程卡片邏輯（RSVP/編輯/提醒）→ 用清單視圖渲染卡片；
+// 「預設月曆」與視圖切換另有獨立 describe（ADR-0269）。
 function render(over: Partial<CalendarPanelProps> = {}): string {
+  return renderToStaticMarkup(
+    <I18nProvider locale="zh-Hant">
+      <DialogProvider>
+        <CalendarPanel
+          events={[evt()]}
+          selfPubkey={ME}
+          initialView="list"
+          onPublish={() => {}}
+          onCancel={() => {}}
+          onRsvp={() => {}}
+          nameFor={(pk) => (pk === ME ? "我" : pk === OTHER ? "小美" : pk.slice(0, 4))}
+          {...over}
+        />
+      </DialogProvider>
+    </I18nProvider>,
+  );
+}
+
+/** 不指定 initialView＝走預設（本月月曆），供視圖測試用。 */
+function renderDefault(over: Partial<CalendarPanelProps> = {}): string {
   return renderToStaticMarkup(
     <I18nProvider locale="zh-Hant">
       <DialogProvider>
@@ -35,6 +57,31 @@ function render(over: Partial<CalendarPanelProps> = {}): string {
     </I18nProvider>,
   );
 }
+
+describe("行事曆視圖（ADR-0269）", () => {
+  it("預設＝本月月曆：有四視圖切換列、月格陣、期間導覽；月視圖選中", () => {
+    const html = renderDefault();
+    expect(html).toContain('data-testid="cal-views"');
+    for (const v of ["month", "week", "day", "list"]) expect(html).toContain(`data-testid="cal-view-${v}"`);
+    expect(html).toContain('data-testid="cal-grid-month"');
+    expect(html).toContain('data-testid="cal-nav"'); // 期間導覽（‹ 今天 ›）
+    // 月鈕標 aria-selected=true（屬性在 data-testid 之前，取前一段窗口比對）。
+    const monthBtn = html.indexOf('data-testid="cal-view-month"');
+    expect(html.slice(monthBtn - 90, monthBtn)).toContain('aria-selected="true"');
+    expect(html).not.toContain('data-testid="cal-item"'); // 月視圖不是卡片列表
+  });
+
+  it("清單視圖：卡片列表、無期間導覽", () => {
+    const html = renderDefault({ initialView: "list" });
+    expect(html).toContain('data-testid="cal-item"');
+    expect(html).not.toContain('data-testid="cal-nav"'); // 清單無 ‹›
+  });
+
+  it("週視圖有 7 格表頭與格陣；日視圖列當天卡片容器", () => {
+    expect(renderDefault({ initialView: "week" })).toContain('data-testid="cal-grid-week"');
+    expect(renderDefault({ initialView: "day" })).toContain('data-testid="cal-grid-day"');
+  });
+});
 
 describe("右欄行程分頁（ADR-0263 階段三）", () => {
   it("列出行程的名稱、地點與備註", () => {
