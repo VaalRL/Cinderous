@@ -15,14 +15,14 @@ describe("比較頁（ADR-0254）", () => {
     }
   });
 
-  it("🔴 FS 硬閘（ADR-0245）：前向保密列的 Cinderous 格不得為 ✓，且明示審計前不宣稱", () => {
+  it("🔴 FS 硬閘（ADR-0245）：前向保密列的 Cinderous 格不得為 ✓，只標開發中", () => {
     for (const locale of ["zh-Hant", "en"] as const) {
       const c = useCopy(locale);
       expect(c.cp_r9a).not.toContain("✓");
       expect(c.cp_r9b).toContain("✓"); // Signal 誠實給 ✓（承認別人有≠宣稱自己有）
     }
-    expect(useCopy("zh-Hant").cp_r9a).toContain("審計");
-    expect(useCopy("en").cp_r9a.toLowerCase()).toContain("audit");
+    expect(useCopy("zh-Hant").cp_r9a).toBe("開發中"); // 精簡版：不帶審計說明（使用者指定）
+    expect(useCopy("en").cp_r9a).toBe("In development");
   });
 
   it("誠實列存在：功能成熟度自承開發中（誠實表比全勝表可信）", () => {
