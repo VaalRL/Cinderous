@@ -52,3 +52,11 @@ export function useTheme(): ThemeContextValue {
   if (!ctx) throw new Error("useTheme 必須在 ThemeProvider 內使用");
   return ctx;
 }
+
+/**
+ * 唯讀版：**不在 Provider 內時回 `"light"` 而非拋錯**（ADR-0271，同 `useContrastMode`）。
+ * 給「只是想知道目前主題以挑顏色」的消費端；切換主題的入口仍走 `useTheme`。
+ */
+export function useThemeMode(): Theme {
+  return useContext(ThemeContext)?.theme ?? "light";
+}

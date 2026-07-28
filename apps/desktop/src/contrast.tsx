@@ -59,3 +59,12 @@ export function useContrast(): ContrastContextValue {
   if (!ctx) throw new Error("useContrast 必須在 ContrastProvider 內使用");
   return ctx;
 }
+
+/**
+ * 唯讀版：**不在 Provider 內時回 `"normal"` 而非拋錯**（ADR-0271）。
+ * 給「只是想知道目前對比模式以挑顏色」的消費端——那類元件不該因為缺一個外觀 Provider
+ * 就整個炸掉（設定入口仍走 `useContrast`，缺 Provider 是真的寫錯）。
+ */
+export function useContrastMode(): Contrast {
+  return useContext(ContrastContext)?.contrast ?? "normal";
+}

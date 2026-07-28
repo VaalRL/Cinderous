@@ -10,6 +10,9 @@ import {
 } from "@cinderous/core";
 import { Fragment, type MouseEvent as ReactMouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "../i18n.js";
+import { nameColor } from "@cinderous/theme";
+import { useThemeMode } from "../theme.js";
+import { useContrastMode } from "../contrast.js";
 import type { FloatingWindow } from "./useFloatingWindow.js";
 import type { CallMedia, MentionCandidate } from "@cinderous/core";
 import { getKv, mainMessages, replyCounts, rootIdOf, threadMessages } from "@cinderous/engine";
@@ -444,6 +447,9 @@ function renderRichText(
 
 export function ConversationWindow(props: ConversationProps): JSX.Element {
   const { t } = useI18n();
+  // ADR-0271：名字色依主題/對比模式選安全亮度（唯讀取用，缺 Provider 時回預設不炸）。
+  const theme = useThemeMode();
+  const contrast = useContrastMode();
   const { confirm, alert, prompt } = useDialog(); // 統一自訂對話框（ADR-0139）
   const { self, contact } = props;
   // 無痕收回（ADR-0234）：整行剔除——主列表、串面板、相簿、回覆數全部一致看不到。
@@ -1214,6 +1220,13 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
   // 對話串（ADR-0051）：發送者顯示名稱、串內回覆送出。
   const whoOf = (m: ChatMessage): string =>
     m.outgoing ? self.name : m.sender && props.senderName ? props.senderName(m.sender) : contactLabel(contact);
+  /**
+   * 群組發言者的每人專屬名字色（ADR-0271）：由 pubkey 雜湊出**穩定**色（非每次隨機——
+   * 顏色要能認人），亮度依主題/高對比選安全值（全 hue 過 WCAG，見 @cinderous/theme）。
+   * 只在**群組**且**他人訊息**時給；1:1 與自己維持既有 CSS（--in-name／--accent）。
+   */
+  const whoColorOf = (m: ChatMessage): string | undefined =>
+    props.groupMembers && !m.outgoing && m.sender ? nameColor(m.sender, theme, contrast === "high") : undefined;
   const sendThread = () => {
     const body = threadText.trim();
     if (!body || threadRoot === null) return;
@@ -1524,6 +1537,7 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
               onExpand={() => openDetail(m.id)}
               groupRead={groupReadOf(m)}
               onDeposit={props.onDepositFile}
+              {...(whoColorOf(m) ? { whoColor: whoColorOf(m) } : {})}
             />
           ))}
         </div>
@@ -2524,6 +2538,7 @@ function MessageLine({
   groupRead,
   onDeposit,
   onPickDate,
+  whoColor,
 }: {
   message: ChatMessage;
   who: string;
@@ -2554,6 +2569,8 @@ function MessageLine({
   groupRead?: GroupRead | undefined;
   /** 存入公司儲存槽（ADR-0161）：企業成員限定；App 依 savedPath 排隊背景傳給企業主。 */
   onDeposit?: ((message: ChatMessage) => void) | undefined;
+  /** 發言者名字色（ADR-0271）：群組限定的每人專屬色；未提供＝沿用 CSS 的 `--in-name`。 */
+  whoColor?: string | undefined;
 }): JSX.Element {
   const { t } = useI18n();
   const [picking, setPicking] = useState(false);
@@ -2615,7 +2632,10 @@ function MessageLine({
 
   return (
     <div className={`line ${message.outgoing ? "out" : "in"}${message.mentionsMe ? " mention" : ""}`}>
-      <span className="who">{who}</span>
+      {/* 群組每人專屬名字色（ADR-0271）：whoColor 只在群組由呼叫端傳入；1:1 維持 --in-name。 */}
+      <span className="who" {...(whoColor ? { style: { color: whoColor } } : {})}>
+        {who}
+      </span>
       <span className="time">{new Date(message.at).toLocaleTimeString()}</span>
       {message.outgoing && message.status ? (
         <span

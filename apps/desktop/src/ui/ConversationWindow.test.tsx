@@ -146,6 +146,38 @@ describe("ConversationWindow 訊息列視窗化（P0-3）", () => {
     expect(html).toContain('data-testid="members-btn"');
   });
 
+  it("群組每人專屬名字色（ADR-0271）：他人名字帶穩定 inline 色、自己不帶；1:1 完全不帶", () => {
+    const msgs: ChatMessage[] = [
+      { id: "g1", outgoing: false, text: "嗨", at: 1, sender: "cc" },
+      { id: "g2", outgoing: false, text: "唷", at: 2, sender: "dd" },
+      { id: "g3", outgoing: true, text: "我說", at: 3 },
+    ];
+    const group = renderToStaticMarkup(
+      <I18nProvider>
+        <ThemeProvider>
+          <ConversationWindow
+            self={self}
+            contact={contact}
+            messages={msgs}
+            typing={false}
+            nudgeSignal={0}
+            senderName={(pk) => pk}
+            groupMembers={[{ pubkey: "cc", name: "Carol" }, { pubkey: "dd", name: "Dave" }]}
+            onSend={() => {}}
+            onTyping={() => {}}
+            onNudge={() => {}}
+            onClose={() => {}}
+          />
+        </ThemeProvider>
+      </I18nProvider>,
+    );
+    const colors = [...group.matchAll(/class="who" style="color:(#[0-9a-f]{6})"/g)].map((m) => m[1]);
+    expect(colors).toHaveLength(2); // 只有兩則他人訊息帶色（自己那則不帶）
+    expect(colors[0]).not.toBe(colors[1]); // 不同人不同色
+    // 1:1（無 groupMembers）：維持 CSS 的 --in-name，不帶 inline 色
+    expect(render(msgs)).not.toContain('class="who" style="color:');
+  });
+
   it("@提及我的訊息以 mention class + 徽章凸顯（ADR-0050）", () => {
     const html = render([
       { id: "m1", outgoing: false, text: "一般訊息", at: 1 },
