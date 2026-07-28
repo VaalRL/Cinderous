@@ -10,6 +10,7 @@
 // 紅線：零中繼成本），本面板不排任何遠端觸發。
 
 import type { CalendarEventInput, RsvpStatus, StoredCalendarEvent } from "@cinderous/engine";
+import type { MessageKey } from "@cinderous/i18n";
 import { useState, type JSX } from "react";
 import { useI18n } from "../i18n.js";
 import { useDialog } from "./Dialog.js";
@@ -23,6 +24,11 @@ export interface CalendarPanelProps {
   /** 取消行程（僅主揪；破壞性，呼叫端不必再確認——本元件已確認過）。 */
   onCancel: (eventId: string) => void;
   onRsvp: (eventId: string, status: RsvpStatus) => void;
+  /**
+   * 設定本機提醒（ADR-0262）；`undefined`＝不提醒。**未提供＝不顯示提醒選單**
+   * （後端無此能力）。純本機、零中繼流量，其他參與者不會知道。
+   */
+  onRemind?: (eventId: string, lead: number | undefined) => void;
   /** pubkey → 顯示名（列出誰要來）。 */
   nameFor: (pubkey: string) => string;
   /**
@@ -58,6 +64,20 @@ function formatRange(start: number, end: number | undefined, locale: string): st
   );
   return `${s} – ${e}`;
 }
+
+/**
+ * 提醒選項（ADR-0262）。`undefined`＝不提醒。順序即選單順序，預設值在 `CALENDAR_REMINDER_LEADS`
+ * 之外另有 `CALENDAR_REMINDER_DEFAULT_LEAD`——但**沒選過就是不提醒**：預設值只在使用者
+ * 主動打開提醒時當起始選擇，不會替他決定要被吵。
+ */
+const REMIND_CHOICES: { lead: number | undefined; key: MessageKey }[] = [
+  { lead: undefined, key: "cal_remindOff" },
+  { lead: 0, key: "cal_remindNow" },
+  { lead: 5 * 60, key: "cal_remind5m" },
+  { lead: 15 * 60, key: "cal_remind15m" },
+  { lead: 60 * 60, key: "cal_remind1h" },
+  { lead: 24 * 3600, key: "cal_remind1d" },
+];
 
 const RSVP_CHOICES: { status: RsvpStatus; key: "cal_rsvpYes" | "cal_rsvpMaybe" | "cal_rsvpNo" }[] = [
   { status: "accepted", key: "cal_rsvpYes" },
@@ -235,6 +255,29 @@ export function CalendarPanel(props: CalendarPanelProps): JSX.Element {
                       .map(([pk, r]) => `${props.nameFor(pk)}${r.status === "tentative" ? "?" : ""}`)
                       .join("、")}
                   </div>
+                ) : null}
+
+                {/* 提醒（ADR-0262）：**本機的**，其他參與者不會知道，也不產生任何中繼流量。
+                    已過去的行程不顯示——提醒一個過去的時間沒有意義。 */}
+                {props.onRemind && !past ? (
+                  <label className="cal__remind" data-testid="cal-remind">
+                    <span className="cal__remindlbl">🔔 {t("cal_remindLabel")}</span>
+                    <select
+                      className="cal__remindsel"
+                      data-testid={`cal-remind-${e.id}`}
+                      title={t("cal_remindHint")}
+                      value={e.remindLead === undefined ? "" : String(e.remindLead)}
+                      onChange={(ev) =>
+                        props.onRemind?.(e.id, ev.target.value === "" ? undefined : Number(ev.target.value))
+                      }
+                    >
+                      {REMIND_CHOICES.map((c) => (
+                        <option key={c.key} value={c.lead === undefined ? "" : String(c.lead)}>
+                          {t(c.key)}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                 ) : null}
 
                 {/* 主揪權威（§1.7）：非主揪連按鈕都不出現。 */}

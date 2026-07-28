@@ -243,6 +243,11 @@ export interface ChatBackendEvents {
   onGroups?(groups: Group[]): void;
   /** 共享行程有變動（ADR-0259）：建立/修改/取消/收到 RSVP 皆會發，帶完整清單（依 start 升冪）。 */
   onCalendar?(events: StoredCalendarEvent[]): void;
+  /**
+   * 行程提醒到期（ADR-0262）：**本機計時器**判定，零中繼流量。同一個 `start` 只發一次。
+   * App 收到後決定怎麼提示（通知／音效／畫面），引擎不預設呈現方式。
+   */
+  onCalendarReminder?(event: StoredCalendarEvent): void;
   /** 企業政策更新（ADR-0048，來自組織名冊）：前端據此隱藏對應功能。 */
   onPolicy?(policy: OrgPolicy): void;
   /**
@@ -311,6 +316,11 @@ export interface ChatBackend {
   calendarRsvp?(eventId: string, status: RsvpStatus): void;
   /** 目前所有行程（依 start 升冪）。 */
   calendarList?(): StoredCalendarEvent[];
+  /**
+   * 設定某行程的提醒提前量（秒，ADR-0262）；`undefined`＝不提醒。
+   * **純本機**——不送任何事件、不碰網路（ADR-0259 §1.4 的紅線）。
+   */
+  calendarRemind?(eventId: string, lead: number | undefined): void;
   /**
    * 更改顯示名稱（ADR-0144）：更新記憶體、落地本機（nsec 不明文，只更名）、把新名廣播給所有
    * 聯絡人（ADR-0061 profile）。未實作的後端（如部分示範）由呼叫端以本機狀態更新即可。

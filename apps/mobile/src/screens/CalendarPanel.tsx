@@ -31,6 +31,11 @@ export interface CalendarPanelProps {
   /** 取消行程（僅主揪）。**破壞性，本元件負責二次確認**——呼叫端不必再問一次。 */
   onCancel: (eventId: string) => void;
   onRsvp: (eventId: string, status: RsvpStatus) => void;
+  /**
+   * 設定本機提醒（ADR-0262）；`undefined`＝不提醒。**未提供＝不顯示提醒列**（後端無此能力）。
+   * 純本機、零中繼流量，其他參與者不會知道。
+   */
+  onRemind?: (eventId: string, lead: number | undefined) => void;
   /** pubkey → 顯示名（列出誰要來）。 */
   nameFor: (pubkey: string) => string;
   /**
@@ -58,6 +63,19 @@ const DURATIONS: { key: MessageKey; secs: number | undefined }[] = [
   { key: "cal_dur1h", secs: HOUR },
   { key: "cal_dur2h", secs: 2 * HOUR },
   { key: "cal_durAllDay", secs: 12 * HOUR },
+];
+
+/**
+ * 提醒選項（ADR-0262）。`undefined`＝不提醒。**沒選過就是不提醒**——不替使用者決定要被吵。
+ * 行動端用 chip 列而非下拉：拇指點得到，且看一眼就知道目前選的是哪個。
+ */
+const REMIND_CHOICES: { lead: number | undefined; key: MessageKey }[] = [
+  { lead: undefined, key: "cal_remindOff" },
+  { lead: 0, key: "cal_remindNow" },
+  { lead: 5 * 60, key: "cal_remind5m" },
+  { lead: 15 * 60, key: "cal_remind15m" },
+  { lead: 60 * 60, key: "cal_remind1h" },
+  { lead: 24 * 3600, key: "cal_remind1d" },
 ];
 
 const RSVP_CHOICES: { status: RsvpStatus; key: MessageKey }[] = [
@@ -160,6 +178,12 @@ function makeStyles(tk: ThemeTokens) {
     actText: { color: tk.muted, fontSize: 12 },
     danger: { borderColor: "#e5484d" },
     dangerText: { color: "#e5484d", fontSize: 12 },
+    remind: { flexDirection: "row", flexWrap: "wrap", gap: 4, alignItems: "center", marginTop: 4 },
+    remindLbl: { color: tk.muted, fontSize: 11 },
+    remindChip: { borderWidth: 1, borderColor: tk.border, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 2 },
+    remindChipOn: { borderColor: tk.accent, backgroundColor: tk.field },
+    remindText: { color: tk.muted, fontSize: 11 },
+    remindTextOn: { color: tk.accent, fontSize: 11, fontWeight: "700" },
     rsvpOn: { borderColor: tk.accent, backgroundColor: tk.field },
     rsvpOnText: { color: tk.accent, fontSize: 12, fontWeight: "700" },
   });
@@ -386,6 +410,31 @@ export function CalendarPanel(props: CalendarPanelProps): JSX.Element {
                   <Text style={styles.going} testID="cal-going">
                     {going.map(([pk, r]) => `${props.nameFor(pk)}${r.status === "tentative" ? "?" : ""}`).join("、")}
                   </Text>
+                ) : null}
+
+                {/* 提醒（ADR-0262）：**本機的**，其他參與者不會知道，也不產生任何中繼流量。
+                    已過去的行程不顯示——提醒一個過去的時間沒有意義。 */}
+                {props.onRemind && !past ? (
+                  <View style={styles.remind} testID="cal-remind">
+                    <Text style={styles.remindLbl}>🔔 {t("cal_remindLabel")}</Text>
+                    {REMIND_CHOICES.map((c) => {
+                      const on = e.remindLead === c.lead;
+                      return (
+                        <Pressable
+                          key={c.key}
+                          style={[styles.remindChip, on ? styles.remindChipOn : null]}
+                          accessibilityRole="button"
+                          aria-label={t(c.key)}
+                          // 選中的帶 `-on` 尾綴：RN-web 把樣式編成雜湊 class 名，
+                          // 不這樣做就斷言不到「目前選的是哪一個」（同 cal-item-past 的理由）。
+                          testID={`cal-remind-${c.key}${on ? "-on" : ""}`}
+                          onPress={() => props.onRemind?.(e.id, c.lead)}
+                        >
+                          <Text style={on ? styles.remindTextOn : styles.remindText}>{t(c.key)}</Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
                 ) : null}
 
                 {/* 主揪權威（ADR-0259 §1.7）：非主揪連按鈕都不出現，不是按了才被拒。 */}

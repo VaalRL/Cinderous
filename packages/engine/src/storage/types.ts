@@ -211,6 +211,18 @@ export interface StoredCalendarEvent {
    * 用來回答「誰還沒拿到這個邀請」。沒有這個欄位就無從判斷該補送給誰，只能每次上線都盲送。
    */
   delivered?: Record<string, number>;
+  /**
+   * 提醒提前量（秒，ADR-0262）；`undefined`＝不提醒。
+   *
+   * **純本機、不進 rumor**：塞進去會改變行程 id（＝rumor 雜湊，ADR-0260 §8 踩過的地雷），
+   * 而且「我要提前多久被叫」本來就是每個人自己的事，沒有理由讓群組其他人知道。
+   */
+  remindLead?: number;
+  /**
+   * 已提醒過的那個 `start`（unix 秒）。**記 `start` 而不是布林**：主揪改時間時提醒必須
+   * 重新武裝，以 `start` 為鍵就自動成立，不需要任何額外的清除邏輯。
+   */
+  remindedFor?: number;
 }
 
 /**
@@ -287,6 +299,13 @@ export interface AppStorage {
   setCalendarRsvp(eventId: string, pubkey: string, status: "accepted" | "declined" | "tentative", at: number): void;
   /** 記下某人已收到某行程（ADR-0260 §9）；只往前推進，行程不存在時忽略。 */
   setCalendarDelivered(eventId: string, pubkey: string, at: number): void;
+  /**
+   * 設定某行程的本機提醒提前量（秒，ADR-0262）；`undefined`＝不提醒。
+   * **不觸發任何網路動作**——提醒完全是本機的事。行程不存在時忽略。
+   */
+  setCalendarReminder(eventId: string, lead: number | undefined): void;
+  /** 記下「這個 `start` 已經提醒過了」（ADR-0262）；行程不存在時忽略。 */
+  markCalendarReminded(eventId: string, start: number): void;
   /**
    * 套用行程保留上限（ADR-0260 §10），回傳清掉的筆數。規則見 `core` 的 `pruneCalendar`。
    * 開機時呼叫一次即可——`upsertCalendarEvent` 本身也會順手清，兩者合起來讓行程不會無界成長。

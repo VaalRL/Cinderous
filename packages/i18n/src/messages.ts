@@ -534,6 +534,16 @@ export interface Messages {
   cal_dur2h: string;
   cal_durAllDay: string;
   cal_adjHint: string;
+  /** 行程提醒（ADR-0262）：本機計時器、零中繼成本。 */
+  cal_remindLabel: string;
+  cal_remindOff: string;
+  cal_remindNow: string;
+  cal_remind5m: string;
+  cal_remind15m: string;
+  cal_remind1h: string;
+  cal_remind1d: string;
+  cal_remindHint: string;
+  cal_reminderBody: string;
   /** NIP-62 清除請求（ADR-0256）。 */
   /** 贊助此節點角落卡（ADR-0089／0258）。 */
   sponsor_title: string;
@@ -1280,6 +1290,15 @@ const zhHant: Messages = {
   cal_dur2h: "2 小時",
   cal_durAllDay: "整天",
   cal_adjHint: "點上下調整時間",
+  cal_remindLabel: "提醒",
+  cal_remindOff: "關",
+  cal_remindNow: "準時",
+  cal_remind5m: "5 分前",
+  cal_remind15m: "15 分前",
+  cal_remind1h: "1 小時前",
+  cal_remind1d: "1 天前",
+  cal_remindHint: "提醒只在這台裝置上，不會通知其他參與者。",
+  cal_reminderBody: "{when} 開始",
   sponsor_title: "贊助此節點",
   sponsor_who: "{relay} 由其營運者自費提供。以下連結由該節點自報，非官方背書。",
   sponsor_note: "完全自願。點擊只會用瀏覽器或錢包開啟外部連結——本 App 不經手金流，也永不自動付款。",
@@ -2006,6 +2025,15 @@ const en: Messages = {
   cal_dur2h: "2 hours",
   cal_durAllDay: "All day",
   cal_adjHint: "Tap ↑↓ to adjust",
+  cal_remindLabel: "Remind",
+  cal_remindOff: "Off",
+  cal_remindNow: "On time",
+  cal_remind5m: "5 min before",
+  cal_remind15m: "15 min before",
+  cal_remind1h: "1 hour before",
+  cal_remind1d: "1 day before",
+  cal_remindHint: "Reminders live on this device only \u2014 no one else is notified.",
+  cal_reminderBody: "Starts {when}",
   sponsor_title: "Support this node",
   sponsor_who: "{relay} is run at its operator\u2019s own expense. The links below are self-reported by that node, not an official endorsement.",
   sponsor_note: "Entirely optional. Clicking only opens an external link in your browser or wallet \u2014 this app never handles money and never pays automatically.",

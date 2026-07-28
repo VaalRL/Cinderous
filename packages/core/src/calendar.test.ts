@@ -2,9 +2,11 @@ import { describe, expect, it } from "vitest";
 import {
   applyCalendarChange,
   CALENDAR_PAST_RETENTION_DAYS,
+  CALENDAR_REMINDER_GRACE_SECONDS,
   CALENDAR_RSVP_BROADCAST_MAX,
   calendarEventOf,
   calendarRsvpOf,
+  dueReminders,
   pruneCalendar,
   rsvpAudience,
   wrapCalendarEvent,
@@ -265,5 +267,66 @@ describe("行程保留上限（ADR-0260 §10）", () => {
   it("沒超過上限就原封不動（不重排、不丟）", () => {
     const events = [ev(5), ev(1)];
     expect(pruneCalendar(events, NOW)).toEqual(events);
+  });
+});
+
+describe("行程提醒到期判定（ADR-0262）：本機計時器、零中繼成本", () => {
+  const NOW = 1_800_000_000;
+  const ME = "pk_me";
+  /** 最小可判定形狀：`start` 相對現在的秒數 ＋ 提前量。 */
+  const ev = (offset: number, remindLead?: number, over: Record<string, unknown> = {}) => ({
+    id: `e${offset}`,
+    start: NOW + offset,
+    ...(remindLead !== undefined ? { remindLead } : {}),
+    ...over,
+  });
+
+  it("提前量到了就該提醒（10 分鐘前設定、現在剛好是 10 分鐘前）", () => {
+    expect(dueReminders([ev(600, 600)], NOW, ME).map((e) => e.id)).toEqual(["e600"]);
+  });
+
+  it("還沒到提前量 → 不提醒", () => {
+    expect(dueReminders([ev(3600, 600)], NOW, ME)).toEqual([]);
+  });
+
+  it("沒設 remindLead → 完全不提醒（沒表態＝不吵）", () => {
+    expect(dueReminders([ev(60)], NOW, ME)).toEqual([]);
+  });
+
+  it("⚠ lead=0（準時提醒）也要能觸發——寬限窗存在的第一個理由", () => {
+    // 提醒時刻恰等於 start，而 tick 是離散的、不可能剛好落在那一秒；
+    // 沒有寬限的話這個設定永遠不會響。
+    expect(dueReminders([ev(-1, 0)], NOW, ME).map((e) => e.id)).toEqual(["e-1"]);
+  });
+
+  it("App 關著錯過了、開起來時遲了幾分鐘 → 仍提醒（寬限窗內）", () => {
+    const late = CALENDAR_REMINDER_GRACE_SECONDS - 60;
+    expect(dueReminders([ev(-late, 600)], NOW, ME)).toHaveLength(1);
+  });
+
+  it("遲太久 → 不提醒：行程都開始很久了，說「即將開始」是錯的", () => {
+    const tooLate = CALENDAR_REMINDER_GRACE_SECONDS + 60;
+    expect(dueReminders([ev(-tooLate, 600)], NOW, ME)).toEqual([]);
+  });
+
+  it("已回覆「不參加」→ 不提醒（明說不去還叫你＝騷擾）", () => {
+    const e = ev(600, 600, { rsvps: { [ME]: { status: "declined", at: 1 } } });
+    expect(dueReminders([e], NOW, ME)).toEqual([]);
+  });
+
+  it("**別人**回覆不參加不影響自己的提醒", () => {
+    const e = ev(600, 600, { rsvps: { pk_bob: { status: "declined", at: 1 } } });
+    expect(dueReminders([e], NOW, ME)).toHaveLength(1);
+  });
+
+  it("已提醒過這個 start → 不重複提醒", () => {
+    const e = ev(600, 600, { remindedFor: NOW + 600 });
+    expect(dueReminders([e], NOW, ME)).toEqual([]);
+  });
+
+  it("⚠ 主揪改時間 → 提醒**自動重新武裝**（記的是 start 不是布林旗標）", () => {
+    // 昨天那場已經提醒過（remindedFor 指向舊 start）；改到現在的 10 分鐘後 → 該再響一次。
+    const e = ev(600, 600, { remindedFor: NOW - 86_400 });
+    expect(dueReminders([e], NOW, ME)).toHaveLength(1);
   });
 });

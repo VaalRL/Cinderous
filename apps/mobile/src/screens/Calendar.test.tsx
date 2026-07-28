@@ -159,3 +159,41 @@ describe("行動端日期偵測（ADR-0260 階段四）：偵測→提示，不�
     expect(html).not.toContain('data-testid="date-chip"');
   });
 });
+
+describe("行動端行程提醒（ADR-0262）：本機設定，其他人不會知道", () => {
+  const open = { calendarDraft: { at: FUTURE, nonce: 1 } };
+
+  it("未提供 onCalendarRemind（後端無此能力）→ 完全不顯示提醒列", () => {
+    const html = render({ ...cal, calendar: [ev()], ...open });
+    expect(html).not.toContain('data-testid="cal-remind"');
+  });
+
+  it("提供後 → 顯示提醒列，且**預設選中「關」**（不替使用者決定要被吵）", () => {
+    const html = render({ ...cal, calendar: [ev()], ...open, onCalendarRemind: () => {} });
+    expect(html).toContain('data-testid="cal-remind"');
+    expect(html).toContain('data-testid="cal-remind-cal_remindOff-on"');
+  });
+
+  it("已設提醒 → 選中的是對應的那個 chip", () => {
+    const html = render({
+      ...cal,
+      calendar: [ev({ remindLead: 15 * 60 })],
+      ...open,
+      onCalendarRemind: () => {},
+    });
+    expect(html).toContain('data-testid="cal-remind-cal_remind15m-on"');
+    expect(html).toContain('data-testid="cal-remind-cal_remindOff"'); // 「關」在，但沒被選中
+  });
+
+  it("**已過去的行程不顯示提醒列**——提醒一個過去的時間沒有意義", () => {
+    const html = render({ ...cal, calendar: [ev({ start: PAST })], ...open, onCalendarRemind: () => {} });
+    expect(html).toContain('data-testid="cal-item-past"'); // 行程本身留著
+    expect(html).not.toContain('data-testid="cal-remind"');
+  });
+
+  it("非主揪也能設自己的提醒（提醒與權威無關——那是你自己的鬧鐘）", () => {
+    const html = render({ ...cal, calendar: [ev({ organizer: BOB })], ...open, onCalendarRemind: () => {} });
+    expect(html).not.toContain('data-testid="cal-edit"'); // 仍然改不動別人的行程
+    expect(html).toContain('data-testid="cal-remind"');
+  });
+});

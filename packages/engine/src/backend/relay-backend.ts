@@ -2,6 +2,7 @@ import {
   applyGroupControl,
   BoundedSet,
   applyCalendarChange,
+  dueReminders,
   buildAuthEvent,
   buildVanishRequest,
   calendarEventOf,
@@ -456,6 +457,8 @@ export class RelayChatBackend implements ChatBackend {
   /** 加密雲端快照設定（ADR-0071）；undefined＝不發佈（接收合併恆開）。 */
   private readonly cloudSync: { mode: "basic" | "full"; deviceId: string } | undefined;
   private snapTimer: ReturnType<typeof setInterval> | undefined;
+  /** 行程提醒 tick（ADR-0262）：純本機，不碰網路。 */
+  private remindTimer: ReturnType<typeof setInterval> | undefined;
   /** 企業政策禁止快照上雲（ADR-0071）：名冊採用時設定，即刻停止發佈。 */
   private cloudBackupBlocked = false;
   /** durable 搬家（ADR-0069 T2/T3）：通知回呼、T2 門檻、T3 延遲、一次性 latch。 */
@@ -762,6 +765,10 @@ export class RelayChatBackend implements ChatBackend {
     this.maybePublishSnapshot(); // ADR-0071：雲端快照（開機檢查；內容有變＋每日至多一次）
     this.reconcileCloudOff(); // 審查修正 #6：關閉狀態的雲端殘留對帳
     this.pruneCalendarOnStart(); // ADR-0260 §10：清掉過久的過去行程
+    this.sweepReminders(); // ADR-0262：App 關著時錯過的提醒，開起來還在寬限窗內就補說一聲
+    // 提醒 tick（ADR-0262）：純本機、零中繼流量。30 秒一次——提醒的粒度是分鐘，
+    // 每秒掃只是白費電；30 秒最壞遲到半分鐘，感受不到。
+    this.remindTimer = setInterval(() => this.sweepReminders(), 30_000);
     this.snapTimer = setInterval(() => this.maybePublishSnapshot(), 30 * 60_000);
     this.scheduleBeat();
     this.renderTimer = setInterval(() => {
@@ -3632,6 +3639,34 @@ export class RelayChatBackend implements ChatBackend {
   }
 
   /**
+   * 設定提醒提前量（ADR-0262）。**這個方法刻意什麼網路動作都不做**——ADR-0259 §1.4 給
+   * 提醒畫的紅線就是零中繼成本，而提醒設定本來就只是自己的事（也不能進 rumor，否則會
+   * 改變行程 id）。
+   */
+  calendarRemind(eventId: string, lead: number | undefined): void {
+    this.storage.setCalendarReminder(eventId, lead);
+    this.handlers?.onCalendar?.(this.storage.loadCalendar());
+  }
+
+  /**
+   * 掃一次到期的提醒（ADR-0262）。由**一個週期 tick** 驅動，而不是每筆行程一個
+   * `setTimeout`——後者對「三個月後」的行程是壞的：`setTimeout` 的延遲是 32 位元毫秒
+   * （上限約 24.8 天），超過就溢位成**立刻觸發**，於是三個月後的會議在你設定的當下就叫你。
+   *
+   * 開機時也跑一次：App 關著錯過的提醒，開起來若還在寬限窗內仍該說一聲。
+   */
+  private sweepReminders(): void {
+    const due = dueReminders(this.storage.loadCalendar(), nowSec(), this.self.pubkey);
+    if (due.length === 0) return;
+    for (const e of due) {
+      // 先記再發：發送端若丟例外，也不該讓同一個提醒每個 tick 重來一次。
+      this.storage.markCalendarReminded(e.id, e.start);
+      this.handlers?.onCalendarReminder?.(e);
+    }
+    this.handlers?.onCalendar?.(this.storage.loadCalendar());
+  }
+
+  /**
    * 套用一則行程變更到本機（權威與新舊判定在 core 的 `applyCalendarChange`）。
    * 收端與自己送出時共用同一條路——**兩邊分歧就是 bug 的溫床**。
    */
@@ -3767,6 +3802,7 @@ export class RelayChatBackend implements ChatBackend {
     if (this.renderTimer) clearInterval(this.renderTimer);
     if (this.pumpTimer) clearInterval(this.pumpTimer);
     if (this.snapTimer) clearInterval(this.snapTimer);
+    if (this.remindTimer) clearInterval(this.remindTimer);
     if (this.turnTimer) clearInterval(this.turnTimer);
     if (this.retireTimer !== undefined) clearTimeout(this.retireTimer);
     this.outbox.clear();

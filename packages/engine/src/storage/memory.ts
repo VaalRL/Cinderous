@@ -272,6 +272,10 @@ export class MemoryStorage implements AppStorage {
       ...event,
       ...(prev?.rsvps ? { rsvps: { ...prev.rsvps, ...event.rsvps } } : {}),
       ...(prev?.delivered ? { delivered: { ...prev.delivered, ...event.delivered } } : {}),
+      // 提醒設定是**本機的**，收到的 rumor 裡不會有——不保留就等於「主揪一改時間，
+      // 全體的提醒設定都被清掉」（ADR-0262）。
+      ...(prev?.remindLead !== undefined ? { remindLead: prev.remindLead } : {}),
+      ...(prev?.remindedFor !== undefined ? { remindedFor: prev.remindedFor } : {}),
     });
     this.pruneCalendar(Math.floor(Date.now() / 1000)); // 上限（ADR-0260 §10）
   }
@@ -280,6 +284,19 @@ export class MemoryStorage implements AppStorage {
     if (!event) return;
     if ((event.delivered?.[pubkey] ?? 0) >= at) return; // 只往前推進
     this.calendar.set(eventId, { ...event, delivered: { ...event.delivered, [pubkey]: at } });
+  }
+  setCalendarReminder(eventId: string, lead: number | undefined): void {
+    const event = this.calendar.get(eventId);
+    if (!event) return;
+    const { remindLead: _drop, remindedFor: _drop2, ...rest } = event;
+    // 改設定＝重新武裝：清掉 remindedFor，否則「本來關著、現在打開」的行程若已提醒過
+    // 同一個 start 就永遠不會響。
+    this.calendar.set(eventId, lead === undefined ? rest : { ...rest, remindLead: lead });
+  }
+  markCalendarReminded(eventId: string, start: number): void {
+    const event = this.calendar.get(eventId);
+    if (!event) return;
+    this.calendar.set(eventId, { ...event, remindedFor: start });
   }
   removeCalendarEvent(id: string): void {
     this.calendar.delete(id);

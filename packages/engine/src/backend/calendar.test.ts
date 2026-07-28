@@ -314,3 +314,112 @@ describe("行程保留上限（ADR-0260 §10）", () => {
     expect(store.loadCalendar()).toHaveLength(1);
   });
 });
+
+describe("行程提醒（ADR-0262）：本機計時器、零中繼成本", () => {
+  /** 起一個接在記憶體 relay 上的後端，並回傳它與可觀察的提醒清單。 */
+  function loneBackend(store: MemoryStorage): { a: RelayChatBackend; fired: string[] } {
+    const net = createInMemoryRelayNetwork();
+    const a = new RelayChatBackend(store, (h) => net.connect("a", h), "Alice", {});
+    const fired: string[] = [];
+    a.start({ ...noop, onCalendarReminder: (e) => fired.push(e.id) });
+    return { a, fired };
+  }
+
+  it("開機時掃一次：App 關著錯過、但還在寬限窗內的提醒仍會響", () => {
+    const store = new MemoryStorage();
+    // 10 分鐘前就該提醒的行程（現在起算 1 分鐘後開始）。
+    store.upsertCalendarEvent({ id: "e1", title: "會議", start: NOW + 60, organizer: "x", updatedAt: 1 });
+    store.setCalendarReminder("e1", 10 * 60);
+
+    const { a, fired } = loneBackend(store);
+    expect(fired).toEqual(["e1"]);
+    a.stop();
+  });
+
+  it("同一個 start 只響一次（開機掃完就記下，不會每個 tick 重來）", () => {
+    const store = new MemoryStorage();
+    store.upsertCalendarEvent({ id: "e1", title: "會議", start: NOW + 60, organizer: "x", updatedAt: 1 });
+    store.setCalendarReminder("e1", 10 * 60);
+
+    const { a, fired } = loneBackend(store);
+    a.stop();
+    // 重開＝再掃一次；已記下的不該再響。**沒有這條，重開 App 就會被同一個提醒轟一次。**
+    const again = loneBackend(store);
+    expect(again.fired).toEqual([]);
+    expect(fired).toEqual(["e1"]);
+    again.a.stop();
+  });
+
+  it("沒設提醒 → 不響（沒表態＝不吵）", () => {
+    const store = new MemoryStorage();
+    store.upsertCalendarEvent({ id: "e1", title: "會議", start: NOW + 60, organizer: "x", updatedAt: 1 });
+    const { a, fired } = loneBackend(store);
+    expect(fired).toEqual([]);
+    a.stop();
+  });
+
+  it("還沒到提前量 → 不響", () => {
+    const store = new MemoryStorage();
+    store.upsertCalendarEvent({ id: "e1", title: "會議", start: NOW + 7200, organizer: "x", updatedAt: 1 });
+    store.setCalendarReminder("e1", 10 * 60);
+    const { a, fired } = loneBackend(store);
+    expect(fired).toEqual([]);
+    a.stop();
+  });
+
+  it("⚠ `calendarRemind` 不產生任何中繼流量（ADR-0259 §1.4 的紅線）", () => {
+    const store = new MemoryStorage();
+    store.upsertCalendarEvent({ id: "e1", title: "會議", start: NOW + 7200, organizer: "x", updatedAt: 1 });
+    const net = createInMemoryRelayNetwork();
+    // 攔在 client.publish：這就是真正上線的位元組——中繼看到什麼，這裡就是什麼。
+    const seen: unknown[] = [];
+    const wiretap = (h: Parameters<typeof net.connect>[1]): ReturnType<typeof net.connect> => {
+      const c = net.connect("a", h);
+      const publish = c.publish.bind(c);
+      c.publish = (e) => {
+        seen.push(e);
+        publish(e);
+      };
+      return c;
+    };
+    const a = new RelayChatBackend(store, wiretap, "Alice", {});
+    a.start(noop);
+    const before = seen.length;
+
+    a.calendarRemind("e1", 600);
+
+    expect(seen.length).toBe(before); // 一顆事件都沒多
+    expect(a.calendarList()[0]!.remindLead).toBe(600);
+    a.stop();
+  });
+
+  it("⚠ 主揪改時間 → 提醒重新武裝，且**本機的提醒設定不被收到的 rumor 清掉**", () => {
+    const net = createInMemoryRelayNetwork();
+    const bStore = new MemoryStorage(); // 留著參照：稍後要用同一份儲存重開 Bob
+    const a = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("a", h), "Alice", {});
+    const b = new RelayChatBackend(bStore, (h) => net.connect("b", h), "Bob", {});
+    a.start(noop);
+    const fired: string[] = [];
+    b.start({ ...noop, onCalendarReminder: (e) => fired.push(e.id) });
+    a.addContact(b.selfNpub);
+
+    // Alice 開一個很久以後的行程；Bob 設了提醒（此時當然還不該響）。
+    const id = a.calendarPublish({ contact: b.self.pubkey }, { title: "同步會", start: NOW + 30 * 86_400 })!;
+    b.calendarRemind(id, 10 * 60);
+    expect(fired).toEqual([]);
+
+    // Alice 把它改到「1 分鐘後」——Bob 收到的 rumor **不帶**提醒設定。
+    a.calendarPublish({ contact: b.self.pubkey }, { title: "同步會", start: NOW + 60 }, { action: "update", eventId: id });
+
+    expect(b.calendarList()[0]!.remindLead).toBe(600); // 設定還在
+    a.stop();
+    b.stop();
+    // 重新起一個接同一份儲存的後端＝下一次 tick；改過時間後該響。
+    const net2 = createInMemoryRelayNetwork();
+    const b2 = new RelayChatBackend(bStore, (h) => net2.connect("b2", h), "Bob", {});
+    const fired2: string[] = [];
+    b2.start({ ...noop, onCalendarReminder: (e) => fired2.push(e.id) });
+    expect(fired2).toEqual([id]);
+    b2.stop();
+  });
+});

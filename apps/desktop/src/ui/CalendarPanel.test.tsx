@@ -141,3 +141,34 @@ describe("由對話日期預填（ADR-0260 階段四）", () => {
     expect(html).toContain('data-testid="cal-new"');
   });
 });
+
+describe("行程提醒（ADR-0262）：本機設定，其他人不會知道", () => {
+  it("未提供 onRemind（後端無此能力）→ 完全不顯示提醒選單", () => {
+    expect(render()).not.toContain('data-testid="cal-remind"');
+  });
+
+  it("提供 onRemind → 顯示提醒選單，預設是「關」（不替使用者決定要被吵）", () => {
+    const html = render({ onRemind: () => {} });
+    expect(html).toContain('data-testid="cal-remind"');
+    // 未設 remindLead → select 的值為空字串＝「關」。
+    expect(/data-testid="cal-remind-evt1"[^>]*>/.test(html)).toBe(true);
+    expect(html).toContain('<option value="" selected="">關</option>');
+  });
+
+  it("已設提醒 → 選單反映目前的提前量", () => {
+    const html = render({ events: [evt({ remindLead: 15 * 60 })], onRemind: () => {} });
+    expect(html).toContain('<option value="900" selected="">15 分前</option>');
+  });
+
+  it("**已過去的行程不顯示提醒選單**——提醒一個過去的時間沒有意義", () => {
+    const html = render({ events: [evt({ start: NOW - 86_400 })], onRemind: () => {} });
+    expect(html).toContain('data-testid="cal-item"'); // 行程本身留著
+    expect(html).not.toContain('data-testid="cal-remind"');
+  });
+
+  it("非主揪也能設自己的提醒（提醒與權威無關——那是你自己的鬧鐘）", () => {
+    const html = render({ events: [evt({ organizer: OTHER })], onRemind: () => {} });
+    expect(html).not.toContain('data-testid="cal-edit"'); // 仍然改不動別人的行程
+    expect(html).toContain('data-testid="cal-remind"');
+  });
+});

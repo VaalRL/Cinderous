@@ -306,6 +306,7 @@ export function ConversationScreen({
   onCalendarPublish,
   onCalendarCancel,
   onCalendarRsvp,
+  onCalendarRemind,
   onSendFile,
   onDepositSlot,
   onStartCall,
@@ -416,6 +417,8 @@ export function ConversationScreen({
   onCalendarPublish?: (input: CalendarEventInput, opts?: { eventId?: string }) => void;
   onCalendarCancel?: (eventId: string) => void;
   onCalendarRsvp?: (eventId: string, status: RsvpStatus) => void;
+  /** 設定本機提醒（ADR-0262）；未提供＝不顯示提醒列。 */
+  onCalendarRemind?: (eventId: string, lead: number | undefined) => void;
   onBack: () => void;
   locale?: Locale;
   theme?: Theme;
@@ -884,6 +887,7 @@ export function ConversationScreen({
               onPublish={onCalendarPublish}
               onCancel={onCalendarCancel ?? ((): void => {})}
               onRsvp={onCalendarRsvp ?? ((): void => {})}
+              {...(onCalendarRemind ? { onRemind: onCalendarRemind } : {})}
               nameFor={(pk) => calendarNameFor?.(pk) ?? nameFor?.(pk) ?? `${pk.slice(0, 10)}…`}
               {...(calendarDraft ? { draft: calendarDraft } : {})}
               tk={tk}

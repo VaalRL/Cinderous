@@ -467,6 +467,23 @@ export function MobileApp({
       onContacts: setContacts,
       onGroups: setGroups,
       onCalendar: setCalendar,
+      // 行程提醒（ADR-0262）：**刻意不看 `document.hidden`**——訊息通知的「正在看就別打擾」
+      // 在這裡是錯的：你正盯著這個 App，不代表你知道十分鐘後有會。只受總開關管。
+      onCalendarReminder: (e) => {
+        if (!notifyRef.current) return;
+        void notifier.notify({
+          title: e.title,
+          body: translate(localeRef.current, "cal_reminderBody", {
+            when: new Date(e.start * 1000).toLocaleString(localeRef.current, {
+              month: "short",
+              day: "numeric",
+              hour: "2-digit",
+              minute: "2-digit",
+            }),
+          }),
+          ...(e.groupId ?? e.contact ? { convo: (e.groupId ?? e.contact) as string } : {}),
+        });
+      },
       onHistory: (pk, msgs) => setConvos((c) => ({ ...c, [pk]: msgs })),
       onMessage: (pk, m) => {
         setConvos((c) => {
@@ -1299,6 +1316,12 @@ export function MobileApp({
           publish(target, { title: e.title, start: e.start }, { action: "cancel", eventId });
         },
         ...(rsvp ? { onCalendarRsvp: (id: string, status: RsvpStatus) => rsvp(id, status) } : {}),
+        ...(backendRef.current?.calendarRemind
+          ? {
+              onCalendarRemind: (id: string, lead: number | undefined) =>
+                backendRef.current?.calendarRemind?.(id, lead),
+            }
+          : {}),
       };
     })();
     return (

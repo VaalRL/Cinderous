@@ -459,7 +459,7 @@ async function loadNsecFromVault(p: Profile): Promise<string | undefined> {
 }
 
 export function App(): JSX.Element {
-  const { t } = useI18n(); // 通知隱藏預覽的本地化文案（ADR-0076）；其餘 UI 文字仍由子元件各自取用。
+  const { t, locale } = useI18n(); // 通知隱藏預覽的本地化文案（ADR-0076）；其餘 UI 文字仍由子元件各自取用。
   const { alert, confirm, prompt } = useDialog(); // 統一自訂對話框（ADR-0139）。
   // 關閉視窗（Tauri）：Rust 攔下 close→emit「app://close-requested」，這裡以 app 風格確認框
   // 讓使用者選「縮到系統匣續連」或「直接結束」（ADR-0198，取代原生 rfd）。
@@ -898,6 +898,8 @@ export function App(): JSX.Element {
   requestsRef.current = requests;
   const tRef = useRef(t);
   tRef.current = t;
+  const localeRef = useRef(locale); // ADR-0262：提醒通知的時間格式化（閉包 handler 內取用）
+  localeRef.current = locale;
   // 三欄可視性（ADR-0079）：讓 onMessage/visibilitychange 這類閉包 handler 讀到當前佈局與作用中分頁。
   const layoutRef = useRef(layout);
   layoutRef.current = layout;
@@ -1227,6 +1229,24 @@ export function App(): JSX.Element {
         }
       },
       onCalendar: setCalendar,
+      // 行程提醒（ADR-0262）：**刻意不走 shouldNotify 的 `windowHidden` 閘**——
+      // 訊息通知的「看得到就別跳」在這裡是錯的：你正盯著這個 App，不代表你知道
+      // 十分鐘後有會。提醒只受總開關管。
+      onCalendarReminder: (e) => {
+        if (!notifyRef.current) return;
+        void getNotifier().notify({
+          title: e.title,
+          body: tRef.current("cal_reminderBody", {
+            when: new Date(e.start * 1000).toLocaleString(localeRef.current, {
+              month: "short",
+              day: "numeric",
+              hour: "2-digit",
+              minute: "2-digit",
+            }),
+          }),
+          ...(e.groupId ?? e.contact ? { convo: (e.groupId ?? e.contact) as string } : {}),
+        });
+      },
       onConnection: setConn,
       onRelayPool: setRelays,
       onPolicy: setPolicy,
@@ -2551,6 +2571,12 @@ export function App(): JSX.Element {
                 },
                 ...(activeBackend.calendarRsvp
                   ? { onCalendarRsvp: (id: string, status: RsvpStatus) => activeBackend.calendarRsvp!(id, status) }
+                  : {}),
+                ...(activeBackend.calendarRemind
+                  ? {
+                      onCalendarRemind: (id: string, lead: number | undefined) =>
+                        activeBackend.calendarRemind!(id, lead),
+                    }
                   : {}),
               };
             })()}

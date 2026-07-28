@@ -102,6 +102,8 @@ export interface DeckRightProps {
   onCalendarPublish?: (input: CalendarEventInput, opts?: { eventId?: string }) => void;
   onCalendarCancel?: (eventId: string) => void;
   onCalendarRsvp?: (eventId: string, status: RsvpStatus) => void;
+  /** 設定本機提醒（ADR-0262）；未提供＝不顯示提醒選單。 */
+  onCalendarRemind?: (eventId: string, lead: number | undefined) => void;
   /**
    * 使用者在對話中點了日期標記（ADR-0260 階段四）：切到行程分頁並預填。
    * **這是使用者觸發的導覽，不是 ADR-0259 §1.6 否決的自動切換**——沒有點就不會動。
@@ -228,6 +230,7 @@ export function DeckRight(props: DeckRightProps): JSX.Element {
             onPublish={props.onCalendarPublish}
             onCancel={props.onCalendarCancel ?? (() => {})}
             onRsvp={props.onCalendarRsvp ?? (() => {})}
+            {...(props.onCalendarRemind ? { onRemind: props.onCalendarRemind } : {})}
             {...(props.calendarDraft ? { draft: props.calendarDraft } : {})}
           />
         ) : null}

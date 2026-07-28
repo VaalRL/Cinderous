@@ -1247,6 +1247,14 @@ button:disabled { opacity: .5; cursor: default; filter: none; }
 .cal__descout { font-size: 11px; color: var(--ink); margin-top: 3px; white-space: pre-wrap; word-break: break-word; }
 .cal__going { font-size: 11px; color: var(--ink); margin-top: 4px; }
 .cal__acts { display: flex; gap: 4px; margin-top: 6px; flex-wrap: wrap; }
+/* 提醒選單（ADR-0262）：本機設定，刻意做得比 RSVP 低調——它不是給別人看的。 */
+.cal__remind { display: flex; align-items: center; gap: 5px; margin-top: 5px; }
+.cal__remindlbl { font-size: 10px; color: var(--muted); }
+.cal__remindsel {
+  border: 1px solid var(--border); background: var(--field); color: var(--muted);
+  border-radius: 5px; padding: 1px 4px; font-size: 10px; cursor: pointer;
+}
+.cal__remindsel:focus { outline: none; border-color: var(--accent); }
 
 /* 對話中的日期提示（ADR-0260 階段四）：偵測→提示，低調、可點、不搶版面。 */
 .datechips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }

@@ -364,3 +364,65 @@ export function pruneCalendar<T extends Prunable>(events: readonly T[], nowSec: 
     })
     .slice(0, max);
 }
+
+// ── 提醒（ADR-0262）：本機計時器、零中繼成本 ───────────────────────────────────
+//
+// ADR-0259 §1.4 給提醒畫的紅線只有一條：**不得產生任何中繼流量**。所以提醒在本專案裡
+// 不是「排程一則未來的事件」，而是**純本機的到期判定**——一個定時 tick 問一次
+// 「現在有哪些該提醒了」，沒有網路、沒有伺服器、沒有推播服務。
+//
+// 提醒設定也**刻意不進 rumor**：行程 id ＝ rumor 的雜湊，把個人偏好塞進去會改變雜湊
+// （ADR-0260 §8 補送踩過的同一顆地雷），而且「我要提前多久被叫」本來就是每個人自己的事，
+// 沒有理由讓群組其他人知道。故 `remindLead` 只存在本機那份。
+
+/** 可選的提前量（秒）。`0`＝準時提醒；`undefined`（不在此表中）＝不提醒。 */
+export const CALENDAR_REMINDER_LEADS = [0, 5 * 60, 15 * 60, 60 * 60, 24 * 3600] as const;
+
+/** 新行程的預設提前量：10 分鐘——足夠走到會議室，又不會早到讓人忘記。 */
+export const CALENDAR_REMINDER_DEFAULT_LEAD = 10 * 60;
+
+/**
+ * 到期判定的寬限（秒）。**沒有它，`lead = 0`（準時提醒）永遠不會觸發**：
+ * 提醒時刻恰好等於 `start`，而 tick 是離散的，不可能剛好落在那一秒。
+ *
+ * 同時它也涵蓋「App 關著錯過了、開起來時已經稍微遲了」——遲 5 分鐘內仍值得說一聲，
+ * 更晚就只是噪音（行程都開始了，通知你「即將開始」是錯的）。
+ */
+export const CALENDAR_REMINDER_GRACE_SECONDS = 5 * 60;
+
+/** 到期判定用的最小形狀（`StoredCalendarEvent` 滿足）。 */
+interface Remindable {
+  id: string;
+  start: number;
+  /** 本機提醒提前量（秒）；`undefined`＝不提醒。**不進 rumor**（見上方說明）。 */
+  remindLead?: number | undefined;
+  /** 已提醒過的那個 `start`（unix 秒）——不是「提醒的時間」，理由見 {@link dueReminders}。 */
+  remindedFor?: number | undefined;
+  rsvps?: Record<string, { status: RsvpStatus; at: number }> | undefined;
+}
+
+/**
+ * 算出**現在該提醒**的行程（純函式）。四道閘：
+ *
+ * 1. 有設 `remindLead`（沒設＝使用者選了不提醒，或這是還沒表態的舊資料）。
+ * 2. `start − lead ≤ now`，且 `now < start + `{@link CALENDAR_REMINDER_GRACE_SECONDS}。
+ * 3. **自己沒有回覆「不參加」**——明說不去的行程還叫你，是純粹的騷擾。
+ * 4. 這個 `start` 還沒提醒過。
+ *
+ * **第 4 條記的是 `start` 而不是「提醒過了」的布林**：主揪改時間時，那筆行程的提醒
+ * 必須重新算——改到明天的會議不該因為「昨天那場已經提醒過」就靜默。以 `start` 為鍵，
+ * 改時間自動重新武裝，不需要任何額外的清除邏輯。
+ */
+export function dueReminders<T extends Remindable>(
+  events: readonly T[],
+  nowSec: number,
+  selfPubkey: string,
+): T[] {
+  return events.filter((e) => {
+    if (e.remindLead === undefined) return false;
+    if (e.remindedFor === e.start) return false;
+    if (e.rsvps?.[selfPubkey]?.status === "declined") return false;
+    const at = e.start - e.remindLead;
+    return at <= nowSec && nowSec < e.start + CALENDAR_REMINDER_GRACE_SECONDS;
+  });
+}

@@ -317,6 +317,14 @@ export class LocalStorage implements AppStorage {
     this.mem.setCalendarDelivered(eventId, pubkey, at);
     this.writeCalendar();
   }
+  setCalendarReminder(eventId: string, lead: number | undefined): void {
+    this.mem.setCalendarReminder(eventId, lead);
+    this.writeCalendar();
+  }
+  markCalendarReminded(eventId: string, start: number): void {
+    this.mem.markCalendarReminded(eventId, start);
+    this.writeCalendar(); // 必須落盤：否則每次重開 App 都會把同一個提醒再響一次
+  }
   pruneCalendar(nowSec: number): number {
     const removed = this.mem.pruneCalendar(nowSec);
     if (removed > 0) this.writeCalendar(); // 沒清到就不必重寫（開機時最常見的情況）
