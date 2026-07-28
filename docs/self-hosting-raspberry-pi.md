@@ -57,12 +57,23 @@ wscat -c ws://localhost:8787
 | `PORT` | `8787` | 監聽通訊埠。 |
 | `DB_PATH` | `cinder-relay.db` | 離線留言的 SQLite 檔路徑（建議用絕對路徑）。 |
 | `REQUIRE_AUTH` | 開啟 | 設 `REQUIRE_AUTH=0` 可關閉 NIP-42 認證（**不建議**——關了任何人都能拉他人的加密收件匣元資料，雲端快照密文（ADR-0071）也會失去「只回作者本人」的閘門，見 ADR-0057）。 |
-| `MAX_PER_RECIPIENT` | `500` | 每位收件人的離線留言上限（防塞爆）。 |
+| `MAX_TTL_DAYS` | `7` | 離線留言保留天數上限（ADR-0160）。 |
+| `MAX_FILE_MB` | 未設 | 設 ≥1 才收檔案塊；未設＝整類拒收（ADR-0162/0244）。 |
+| `MAX_EVENTS_PER_MINUTE` | `120` | 每 pubkey 每分鐘事件上限；設 `0` 關閉（ADR-0235 H1）。 |
+| `RELAY_NAME`／`RELAY_CONTACT`／`RELAY_DESCRIPTION`／`RELAY_PUBKEY` | 未設 | NIP-11 節點資訊（ADR-0256）。**想被選座池收錄就填 `RELAY_CONTACT`**。 |
+| `NODE_ATTESTATION` | 未設 | 已簽章的節點自報事件 JSON（ADR-0092）。 |
+| `DONATE_GITHUB_SPONSORS`／`DONATE_BUY_ME_A_COFFEE`／`DONATE_LIBERAPAY`／`DONATE_LIGHTNING` | 未設 | 贊助入口（ADR-0089）：填了桌面版會顯示低調可關閉的「贊助此節點」小卡；一個都不填＝不顯示。三個網頁平台**只收 `https://`**。 |
+
+> **`MAX_PER_RECIPIENT`（每收件人 500 則）是程式內建常數，不是環境變數**——設了不會有作用。
+> 舊版本文件曾誤列為可設定，已更正。完整總表與 NIP-11／贊助入口的說明見
+> [`SELF-HOSTING.md`](./SELF-HOSTING.md#設定環境變數總表)。
 
 範例：
 
 ```bash
-PORT=9000 DB_PATH=/home/pi/cinder/relay.db pnpm --filter @cinderous/relay node-relay
+PORT=9000 DB_PATH=/home/pi/cinder/relay.db \
+  RELAY_NAME="某某的營火" RELAY_CONTACT="op@example.com" \
+  pnpm --filter @cinderous/relay node-relay
 ```
 
 ---

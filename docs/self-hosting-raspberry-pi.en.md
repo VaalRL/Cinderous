@@ -57,12 +57,24 @@ wscat -c ws://localhost:8787
 | `PORT` | `8787` | Listening port. |
 | `DB_PATH` | `cinder-relay.db` | Path to the SQLite file for offline messages (an absolute path is recommended). |
 | `REQUIRE_AUTH` | enabled | Set `REQUIRE_AUTH=0` to disable NIP-42 auth (**not recommended** — turning it off lets anyone pull other people's encrypted inbox metadata, and the cloud snapshot ciphertext (ADR-0071) also loses its "return to the author only" gate; see ADR-0057). |
-| `MAX_PER_RECIPIENT` | `500` | Maximum number of offline messages per recipient (prevents flooding). |
+| `MAX_TTL_DAYS` | `7` | Retention cap for offline messages, in days (ADR-0160). |
+| `MAX_FILE_MB` | unset | Set to ≥1 to accept file chunks; unset means the whole class is rejected (ADR-0162/0244). |
+| `MAX_EVENTS_PER_MINUTE` | `120` | Per-pubkey events-per-minute cap; set `0` to disable (ADR-0235 H1). |
+| `RELAY_NAME` / `RELAY_CONTACT` / `RELAY_DESCRIPTION` / `RELAY_PUBKEY` | unset | NIP-11 relay information (ADR-0256). **Set `RELAY_CONTACT` if you want to be listed in the seat pool.** |
+| `NODE_ATTESTATION` | unset | Your signed node self-declaration event, as a JSON string (ADR-0092). |
+| `DONATE_GITHUB_SPONSORS` / `DONATE_BUY_ME_A_COFFEE` / `DONATE_LIBERAPAY` / `DONATE_LIGHTNING` | unset | Sponsorship links (ADR-0089): fill these and the desktop app shows a small, dismissible “Support this node” card. Leave all of them empty and no card appears. The three web platforms accept **`https://` only**. |
+
+> **`MAX_PER_RECIPIENT` (500 per recipient) is a compile-time constant, not an environment
+> variable** — setting it has no effect. Earlier versions of this page listed it as configurable;
+> that was wrong. For the full table plus NIP-11 and sponsorship details, see
+> [`SELF-HOSTING.en.md`](./SELF-HOSTING.en.md#configuration-environment-variable-reference).
 
 Example:
 
 ```bash
-PORT=9000 DB_PATH=/home/pi/cinder/relay.db pnpm --filter @cinderous/relay node-relay
+PORT=9000 DB_PATH=/home/pi/cinder/relay.db \
+  RELAY_NAME="My campfire" RELAY_CONTACT="op@example.com" \
+  pnpm --filter @cinderous/relay node-relay
 ```
 
 ---
