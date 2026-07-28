@@ -20,6 +20,16 @@ export const KIND = {
   ASSET_REQUEST: 44,
   /** 自訂 emoji blob 分塊回應（經 FILE_WRAP 外層，與 FILE_CHUNK 區分；ADR-0223）。 */
   ASSET_CHUNK: 45,
+  /**
+   * 共享行程（ADR-0263；app 內部 rumor kind，經 Gift Wrap）。
+   *
+   * **刻意不用 NIP-52 的 31922/31923**：那是可尋址、且**全公開**的（`p`＝參與者、
+   * `location`/`g`＝地點、RSVP 是一條公開的社交圖譜邊）——正是本專案用 Gift Wrap 藏起來的東西。
+   * 這裡只**借它的資料形狀**（`title`/`start`/`end`/`location`），傳輸走既有 1059 管線。
+   */
+  CALENDAR_EVENT: 46,
+  /** 行程回覆（ADR-0263；每位參與者對某行程的自己的狀態，由本人簽章）。 */
+  CALENDAR_RSVP: 47,
   /** 離線留言：NIP-17/59 Gift Wrap。 */
   OFFLINE_DM_GIFT_WRAP: 1059,
   /**

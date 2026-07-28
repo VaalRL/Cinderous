@@ -57,7 +57,15 @@ Cinderous 客戶端連的是 `wss://`（加密 WebSocket）。你**不需要在�
 | `PORT` | Zeabur 自動注入 | **不用自己設**，node-relay 會讀。 |
 | `DB_PATH` | `/data/cinder-relay.db` | Dockerfile 已設；配合 §3.2 的 Volume。 |
 | `REQUIRE_AUTH` | 開啟 | 保持開啟。設 `0` 會關掉 NIP-42 認證——任何人都能拉他人加密收件匣元資料、雲端快照也失去「只回本人」閘門（ADR-0057/0071），**強烈不建議**。 |
-| `MAX_PER_RECIPIENT` | `500` | 每位收件人的離線留言上限。 |
+| `MAX_TTL_DAYS` | `7` | 離線留言保留天數上限（ADR-0160）。 |
+| `MAX_FILE_MB` | 未設 | 設 ≥1 才收檔案塊；未設＝整類拒收（ADR-0162/0244）。 |
+| `MAX_EVENTS_PER_MINUTE` | `120` | 每 pubkey 每分鐘事件上限；設 `0` 關閉（ADR-0235 H1）。 |
+| `RELAY_NAME`／`RELAY_CONTACT`／`RELAY_DESCRIPTION`／`RELAY_PUBKEY` | 未設 | NIP-11 節點資訊（ADR-0260）。**想被選座池收錄就填 `RELAY_CONTACT`**。 |
+| `NODE_ATTESTATION` | 未設 | 已簽章的節點自報事件 JSON（ADR-0092）。 |
+| `DONATE_GITHUB_SPONSORS`／`DONATE_BUY_ME_A_COFFEE`／`DONATE_LIBERAPAY`／`DONATE_LIGHTNING` | 未設 | 贊助入口（ADR-0089）：填了桌面版會顯示低調可關閉的「贊助此節點」小卡；一個都不填＝不顯示。三個網頁平台**只收 `https://`**。 |
+
+> **`MAX_PER_RECIPIENT`（每收件人 500 則）是程式內建常數，不是環境變數**——設了不會有作用。
+> 舊版本文件曾誤列為可設定，已更正。完整總表見 [`SELF-HOSTING.md`](./SELF-HOSTING.md#設定環境變數總表)。
 
 ### 3.4 開對外網域
 
@@ -68,6 +76,12 @@ Cinderous 客戶端連的是 `wss://`（加密 WebSocket）。你**不需要在�
 ### 3.5 驗證
 
 - 瀏覽器開 `https://你的服務.zeabur.app/` 應看到純文字 **`Cinderous relay`**（這也是健康檢查會打的端點）。
+- 想看 NIP-11 節點資訊（ADR-0260），加上 `Accept` header：
+  ```bash
+  curl -H "Accept: application/nostr+json" https://你的服務.zeabur.app/
+  ```
+  會回一份 JSON（站名、`supported_nips`、保留天數、贊助連結…）。**沒有這個 header 時仍是純文字**，
+  所以健康檢查不會受影響。
 - 進一步可用 `wscat -c wss://你的服務.zeabur.app`，連上會收到一則 `["AUTH", "<challenge>"]`（NIP-42 挑戰）＝一切正常。
 
 ---

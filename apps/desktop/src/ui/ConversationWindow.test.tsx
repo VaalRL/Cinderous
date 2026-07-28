@@ -557,3 +557,44 @@ describe("公司儲存槽存放鈕（ADR-0161）", () => {
     expect(renderSlot({}, fileMsg("C:/x/報表.xlsx"))).not.toContain('data-testid="slot-deposit"');
   });
 });
+
+describe("訊息中的日期提示（ADR-0264 階段四）", () => {
+  const withDate = (text: string, onPickDate?: (at: number, label: string) => void): string =>
+    renderToStaticMarkup(
+      <I18nProvider locale="zh-Hant">
+        <ThemeProvider>
+          <ConversationWindow
+            self={self}
+            contact={contact}
+            messages={[{ id: "m1", outgoing: false, text, at: 1 }]}
+            typing={false}
+            nudgeSignal={0}
+            onSend={() => {}}
+            onTyping={() => {}}
+            onNudge={() => {}}
+            onClose={() => {}}
+            {...(onPickDate ? { onPickDate } : {})}
+          />
+        </ThemeProvider>
+      </I18nProvider>,
+    );
+
+  it("偵測到日期 → 氣泡下方出現可點標記", () => {
+    const html = withDate("那就約明天下午3點", () => {});
+    expect(html).toContain('data-testid="date-chips"');
+    expect(html).toContain('data-testid="date-chip"');
+    expect(html).toContain("明天下午3點");
+  });
+
+  it("⚠ 未提供 onPickDate（後端無行事曆能力）→ 完全不偵測、不顯示", () => {
+    expect(withDate("那就約明天下午3點")).not.toContain('data-testid="date-chips"');
+  });
+
+  it("沒有日期的訊息不顯示標記", () => {
+    expect(withDate("今天天氣真好啊", () => {})).not.toContain('data-testid="date-chips"');
+  });
+
+  it("過去的日期不標（「我昨天看到」不是在約時間）", () => {
+    expect(withDate("我昨天看到那個", () => {})).not.toContain('data-testid="date-chips"');
+  });
+});

@@ -7,6 +7,7 @@ import { createRequire } from "node:module";
 import type { DatabaseSync as DatabaseSyncType } from "node:sqlite";
 import { WebSocketServer, type WebSocket } from "ws";
 import { ABUSE_GUARD, acceptFileEvents, eventsPerMinuteFrom, firstHost, storeOptions } from "./host-config.js";
+import { buildRelayInfo, NIP11_HEADERS, wantsRelayInfo } from "./nip11.js";
 import { RelayCore, type Outbound, type RelayCoreOptions } from "./relay-core.js";
 import { type SqlExec, SqlMessageStore } from "./sql-message-store.js";
 
@@ -38,6 +39,25 @@ else coreOptions.maxEventsPerMinute = rate;
 if (acceptFileEvents(process.env.MAX_FILE_MB)) coreOptions.acceptFileEvents = true;
 const core = new RelayCore(coreOptions);
 
+// NIP-11 文件（ADR-0260）：自架者以環境變數填站名/聯絡/贊助管道；未設的欄位不會出現。
+// 只組一次——內容全部來自啟動時的環境，執行期不會變。
+const relayInfo = buildRelayInfo({
+  name: process.env.RELAY_NAME,
+  description: process.env.RELAY_DESCRIPTION,
+  pubkey: process.env.RELAY_PUBKEY,
+  contact: process.env.RELAY_CONTACT,
+  maxTtlDays: process.env.MAX_TTL_DAYS,
+  acceptsFiles: acceptFileEvents(process.env.MAX_FILE_MB),
+  authRequired: requireAuth,
+  donations: {
+    github_sponsors: process.env.DONATE_GITHUB_SPONSORS,
+    buy_me_a_coffee: process.env.DONATE_BUY_ME_A_COFFEE,
+    liberapay: process.env.DONATE_LIBERAPAY,
+    lightning: process.env.DONATE_LIGHTNING,
+  },
+  nodeAttestation: process.env.NODE_ATTESTATION,
+});
+
 const sockets = new Map<string, WebSocket>();
 let counter = 0;
 const dispatch = (out: Outbound[]): void => {
@@ -46,7 +66,14 @@ const dispatch = (out: Outbound[]): void => {
 
 // 掛在 HTTP 伺服器上：一般請求回 200（讓 PaaS/容器健康檢查通過，比照 Cloudflare worker），
 // WebSocket 升級請求交給 ws。純 WS 伺服器對 GET / 不回應會被健康檢查誤判為離線。
-const httpServer = createServer((_req, res) => {
+const httpServer = createServer((req, res) => {
+  // NIP-11（ADR-0260）：只有明確要 `application/nostr+json` 的請求拿到 JSON；其餘維持純文字 200
+  // ——健康檢查靠那個 200（ADR-0089 的契約），改掉會讓部署中的站看起來像掛了。
+  if (wantsRelayInfo(req.headers.accept)) {
+    res.writeHead(200, NIP11_HEADERS);
+    res.end(JSON.stringify(relayInfo));
+    return;
+  }
   res.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
   res.end("Cinderous relay");
 });

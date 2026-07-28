@@ -94,6 +94,7 @@ import { useThreat } from "./threat-context.js";
 import { indentText } from "./composer-indent.js";
 import { ComposerInsert, type InsertTemplate } from "./ComposerInsert.js";
 import { renderMarkdown } from "./markdown.js";
+import { detectDateAtEnd, detectDates } from "@cinderous/core";
 import { ComposerRewrite } from "./ComposerRewrite.js";
 import { applyEmoticons } from "./emoticons.js";
 import { avatarColor, EMOTICONS, initial } from "./util.js";
@@ -247,6 +248,11 @@ const MSG_STATUS_KEY: Record<MessageStatus, MessageKey> = {
 };
 
 export interface ConversationProps {
+  /**
+   * 對話中偵測到日期時的可點提示（ADR-0263 §1.6／ADR-0264 階段四）：點了才開行程並預填。
+   * **偵測→提示，不自動導覽**；未提供＝完全不偵測、不顯示任何標記。
+   */
+  onPickDate?: (at: number, label: string) => void;
   self: Self;
   contact: Contact;
   messages: ChatMessage[];
@@ -926,6 +932,8 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
     ? []
     : matchTriggers(text, triggers, trigIndex).filter((m) => resolveAny(m.entry.ref) !== undefined);
   const trigActive = Math.min(trigSel, Math.max(trigMatches.length - 1, 0));
+  // 日期建議（ADR-0264 階段四）：草稿尾端剛打完日期才跳；沒有 onPickDate 就完全不算。
+  const dateHit = props.onPickDate ? detectDateAtEnd(text) : undefined;
   const acceptTrigger = (m: TriggerMatch): void => {
     setText(text.slice(0, text.length - m.matchedLen));
     setTrigSel(0);
@@ -1509,6 +1517,7 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
               onUnsend={askUnsend}
               onView={setLightbox}
               ownedIds={ownedIds} getBlob={getBlob}
+              {...(props.onPickDate ? { onPickDate: props.onPickDate } : {})}
               onOwnSticker={acquireSticker}
               replyCount={counts.get(m.id) ?? 0}
               onOpenThread={props.readOnly ? undefined : () => openThread(rootIdOf(m))}
@@ -2017,6 +2026,22 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
         </div>
       ) : null}
 
+      {/* 日期建議列（ADR-0264 階段四）：**只看游標前的尾端**剛打完的那個日期（同 ADR-0037 的
+          尾端比對語意）。點擊＝開行程並預填；**不劫持 Enter**——Enter 照樣送出訊息。 */}
+      {!props.readOnly && props.onPickDate && dateHit ? (
+        <div className="trigbar" data-testid="date-bar">
+          <button
+            type="button"
+            className="trigbar__item on"
+            data-testid="date-suggest"
+            onClick={() => props.onPickDate?.(dateHit.at, dateHit.text)}
+          >
+            🗓 <span>{dateHit.text}</span>
+          </button>
+          <span className="trigbar__hint">{t("date_barHint")}</span>
+        </div>
+      ) : null}
+
       {/* 算式即時預覽（ADR-0097）：純本地計算，草稿不外流。點擊把「= 結果」附加到草稿。 */}
       {!props.readOnly && calc ? (
         <button
@@ -2368,6 +2393,7 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
                 onUnsend={askUnsend}
                 onView={setLightbox}
                 ownedIds={ownedIds} getBlob={getBlob}
+              {...(props.onPickDate ? { onPickDate: props.onPickDate } : {})}
                 onOwnSticker={acquireSticker}
               />
             ))}
@@ -2467,6 +2493,7 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
               onUnsend={askUnsend}
               onView={setLightbox}
               ownedIds={ownedIds} getBlob={getBlob}
+              {...(props.onPickDate ? { onPickDate: props.onPickDate } : {})}
               onOwnSticker={acquireSticker}
               expanded
             />
@@ -2496,6 +2523,7 @@ function MessageLine({
   expanded = false,
   groupRead,
   onDeposit,
+  onPickDate,
 }: {
   message: ChatMessage;
   who: string;
@@ -2517,6 +2545,11 @@ function MessageLine({
   onExpand?: (() => void) | undefined;
   /** 於詳情面板中渲染時為 true：不截斷、顯示完整內文。 */
   expanded?: boolean;
+  /**
+   * 訊息中偵測到日期時的可點提示（ADR-0263 §1.6／ADR-0264 階段四）。
+   * **偵測→提示，不自動導覽**：點了才開行程分頁並預填；未提供＝不顯示標記。
+   */
+  onPickDate?: ((at: number, label: string) => void) | undefined;
   /** 群組已讀（ADR-0095）：名單制/計數制；大群或非群組為 undefined（不顯示）。 */
   groupRead?: GroupRead | undefined;
   /** 存入公司儲存槽（ADR-0161）：企業成員限定；App 依 savedPath 排隊背景傳給企業主。 */
@@ -2691,6 +2724,29 @@ function MessageLine({
           {renderRichText(bodyText, manifest, getBlob ?? (() => undefined))}
         </span>
       )}
+      {/* 日期提示（ADR-0264 階段四）：偵測→提示。已收回/過期的訊息不掃（內容不該再被解讀）。 */}
+      {onPickDate && !unsent && !expired && bodyText ? (
+        (() => {
+          const hits = detectDates(bodyText);
+          if (hits.length === 0) return null;
+          return (
+            <span className="datechips" data-testid="date-chips">
+              {hits.map((h) => (
+                <button
+                  type="button"
+                  key={`${h.start}-${h.end}`}
+                  className="datechip"
+                  data-testid="date-chip"
+                  title={t("date_chipHint")}
+                  onClick={() => onPickDate(h.at, h.text)}
+                >
+                  🗓 {h.text}
+                </button>
+              ))}
+            </span>
+          );
+        })()
+      ) : null}
       {reactions.length > 0 ? (
         <span className="reactions">
           {reactions.map((e) => (

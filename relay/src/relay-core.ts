@@ -1,4 +1,12 @@
-import { AUTH_KIND, authChallengeOf, authRelayMatches, verifyEvent, type NostrEvent } from "@cinderous/core";
+import {
+  AUTH_KIND,
+  authChallengeOf,
+  authRelayMatches,
+  VANISH_KIND,
+  vanishTargetsRelay,
+  verifyEvent,
+  type NostrEvent,
+} from "@cinderous/core";
 import { matchFilter } from "./filters.js";
 
 /**
@@ -199,6 +207,12 @@ export class RelayCore {
   private readonly allowedKinds: Set<number> | undefined;
   /** connId → NIP-42 認證狀態（挑戰、已認證 pubkey、本站主機）；ADR-0057／0235 H2。 */
   private readonly authState = new Map<string, { challenge: string; pubkey?: string; relayHost?: string }>();
+  /**
+   * connId → 本次連線打到的主機。**與 AUTH 狀態分離**（ADR-0260）：`authState` 只在
+   * `requireAuth` 時才建立，但 NIP-62 的「這份清除請求是不是給本站的」在**沒有 AUTH 的
+   * 自架站**同樣需要主機資訊——不分離的話，那些站會只認 `ALL_RELAYS`。
+   */
+  private readonly connHost = new Map<string, string>();
   /** 是否要求 NIP-42 AUTH（開放中繼；ADR-0057）。 */
   private readonly requireAuth: boolean;
 
@@ -229,6 +243,8 @@ export class RelayCore {
    */
   connect(connId: string, relayHost?: string): Outbound[] {
     if (!this.subs.has(connId)) this.subs.set(connId, new Map());
+    // 主機先記（ADR-0260）：無 AUTH 的站也要能判斷 NIP-62 的目標是不是自己。
+    if (relayHost) this.connHost.set(connId, relayHost);
     if (!this.requireAuth) return [];
     // 已有挑戰（含已認證）者只重發、不重置——避免重複呼叫把認證狀態洗掉。
     const existing = this.authState.get(connId);
@@ -243,6 +259,7 @@ export class RelayCore {
     if (conn) for (const entry of conn.values()) this.unindex(entry);
     this.subs.delete(connId);
     this.authState.delete(connId);
+    this.connHost.delete(connId);
   }
 
   /**
@@ -258,7 +275,8 @@ export class RelayCore {
       ...(auth?.challenge !== undefined ? { challenge: auth.challenge } : {}),
       ...(auth?.pubkey !== undefined ? { pubkey: auth.pubkey } : {}),
       // 少了這一行，DO 休眠喚醒後 `relayHost` 就消失 → relay tag 檢查靜默失效（ADR-0235 H2）。
-      ...(auth?.relayHost !== undefined ? { relayHost: auth.relayHost } : {}),
+      // 退回 `connHost`：無 AUTH 的站沒有 authState，但 NIP-62 仍需要主機（ADR-0260）。
+      ...(auth?.relayHost ?? this.connHost.get(connId) ? { relayHost: (auth?.relayHost ?? this.connHost.get(connId))! } : {}),
       subs,
     };
   }
@@ -267,6 +285,7 @@ export class RelayCore {
   rehydrate(snapshot: ConnSnapshot): void {
     if (!this.subs.has(snapshot.connId)) this.subs.set(snapshot.connId, new Map());
     const conn = this.subs.get(snapshot.connId)!;
+    if (snapshot.relayHost !== undefined) this.connHost.set(snapshot.connId, snapshot.relayHost);
     if (snapshot.challenge !== undefined || snapshot.pubkey !== undefined || snapshot.relayHost !== undefined) {
       this.authState.set(snapshot.connId, {
         challenge: snapshot.challenge ?? "",
@@ -521,6 +540,13 @@ export class RelayCore {
       return [{ to: connId, message: ["OK", event.id, false, "rate-limited: 發送過於頻繁，請稍後再試"] }];
     }
 
+    // NIP-62 清除請求（ADR-0260）：這是**命令**不是留言——不寫庫、不扇出，執行完就回 OK。
+    // 位置在速率限制**之後**（清除是昂貴操作，同樣要受速率桶約束）、寫庫之前（kind 62 落在
+    // 一般持久化區間，不攔就會被當成留言存起來）。
+    if (event.kind === VANISH_KIND) {
+      return this.handleVanish(connId, event);
+    }
+
     // 檔案塊（FILE_WRAP=1060，ADR-0162）：企業限定——`acceptFileEvents` 未啟用整類拒收
     //（公共站零儲存風險）；啟用後仍有單顆大小 sanity 上限。
     if (event.kind === FILE_WRAP_KIND) {
@@ -563,6 +589,34 @@ export class RelayCore {
       }
     }
     return out;
+  }
+
+  /**
+   * NIP-62 Request to Vanish（ADR-0260）：清除此 pubkey 在本站的一切。
+   *
+   * 三道閘，順序即嚴格程度：
+   *
+   * 1. **身分**：`requireAuth` 時要求已認證身分＝事件作者。簽章本身已證明作者身分，這一條擋的
+   *    是**重放**——側錄到一顆舊的 vanish 事件（它是公開的、任何連上的人都可能看到），日後拿來
+   *    重送。重放者過不了以該身分進行的 NIP-42 AUTH。（`seenIds` 只覆蓋近一小時。）
+   * 2. **目標**：`relay` tag 必須是本站或 `ALL_RELAYS`（`vanishTargetsRelay` 對缺主機資訊時
+   *    **fail-closed**，見 core `vanish.ts`）。
+   * 3. **執行**：交給 store 刪除，不寫庫、不扇出。
+   *
+   * **刻意不扇出**：把「某某人要求清除資料」廣播給所有訂閱者，等於用一則公開事件宣告這個人的
+   * 動作與時間點——與 Gift Wrap 藏元資料的整個立場相反。客戶端本來就是直接對每座 relay 送出
+   * 請求（見 engine `requestVanish`），不需要靠中繼轉發。
+   */
+  private handleVanish(connId: string, event: NostrEvent): Outbound[] {
+    const state = this.authState.get(connId);
+    if (this.requireAuth && state?.pubkey !== event.pubkey) {
+      return [{ to: connId, message: ["OK", event.id, false, "restricted: 只能清除自己的資料（NIP-62）"] }];
+    }
+    if (!vanishTargetsRelay(event, this.connHost.get(connId))) {
+      return [{ to: connId, message: ["OK", event.id, false, "invalid: relay tag 未指向本站（NIP-62）"] }];
+    }
+    this.opts.store?.vanish(event.pubkey, this.now());
+    return [{ to: connId, message: ["OK", event.id, true, ""] }];
   }
 
   private index(entry: SubEntry): void {

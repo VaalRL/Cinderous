@@ -1250,3 +1250,78 @@ button:disabled { opacity: .5; cursor: default; filter: none; }
 .group--requests { display: flex; align-items: center; justify-content: space-between; }
 .requests__clear { font-size: 10px; border: 1px solid #e5484d; background: var(--field); color: #e5484d; border-radius: 5px; cursor: pointer; padding: 1px 6px; }
 .requests__clear:hover { background: #e5484d; color: #fff; }
+
+/* 「贊助此節點」角落卡（ADR-0089／0262）：低調、可關閉、絕不擋操作。
+   z-index 刻意低於對話框/通話/貼圖編輯器（55–70）——它是最不重要的東西，不該蓋住任何互動。 */
+.sponsor {
+  position: fixed; right: 12px; bottom: 12px; z-index: 40; width: 232px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+  padding: 8px 10px; box-shadow: 0 4px 16px rgba(0,0,0,.18); font-size: 11px; color: var(--muted);
+}
+.sponsor__head { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.sponsor__title { color: var(--ink); font-weight: 700; font-size: 11px; }
+.sponsor__x { border: none; background: transparent; color: var(--muted); font-size: 13px; line-height: 1; cursor: pointer; padding: 0 2px; }
+.sponsor__x:hover { color: var(--accent); }
+.sponsor__who { margin: 4px 0 6px; line-height: 1.45; }
+.sponsor__links { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.sponsor__link {
+  display: block; padding: 3px 7px; border: 1px solid var(--border); border-radius: 5px;
+  background: var(--field); color: var(--ink); text-decoration: none; font-size: 11px;
+}
+.sponsor__link:hover { background: var(--hover); border-color: var(--accent); }
+/* 「不自動付款」的提醒刻意比連結更小、更淡——它是免責，不是行動呼籲。 */
+.sponsor__note { margin: 6px 0 0; font-size: 10px; line-height: 1.4; opacity: .8; }
+
+/* 右欄「行程」分頁（ADR-0263）。沿用 daux 的密度與色票，不另立一套視覺語言。 */
+.cal { display: flex; flex-direction: column; gap: 8px; padding: 8px; }
+.cal__new {
+  border: 1px dashed var(--border); background: var(--field); color: var(--ink);
+  border-radius: 6px; padding: 6px; font-size: 12px; cursor: pointer;
+}
+.cal__new:hover { border-color: var(--accent); background: var(--hover); }
+.cal__form { display: flex; flex-direction: column; gap: 6px; border: 1px solid var(--border); border-radius: 6px; padding: 8px; background: var(--surface2); }
+.cal__lbl { display: flex; flex-direction: column; gap: 2px; font-size: 10px; color: var(--muted); }
+.cal__in {
+  border: 1px solid var(--border); border-radius: 5px; padding: 4px 6px;
+  background: var(--field); color: var(--ink); font-size: 12px; font-family: inherit; width: 100%;
+}
+.cal__in:focus { outline: none; border-color: var(--accent); }
+.cal__desc { resize: vertical; min-height: 44px; }
+.cal__formbtns { display: flex; gap: 6px; }
+.cal__save { flex: 1; border: none; border-radius: 5px; padding: 5px; background: var(--accent); color: #fff; font-weight: 700; font-size: 12px; cursor: pointer; }
+.cal__save:disabled { opacity: .45; cursor: not-allowed; }
+.cal__ghost, .cal__danger, .cal__rsvp {
+  border: 1px solid var(--border); background: var(--field); color: var(--muted);
+  border-radius: 5px; padding: 3px 8px; font-size: 11px; cursor: pointer;
+}
+.cal__ghost:hover, .cal__rsvp:hover { background: var(--hover); color: var(--ink); }
+.cal__danger { color: #e5484d; border-color: #e5484d55; }
+.cal__danger:hover { background: #e5484d; color: #fff; }
+.cal__rsvp.on { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
+
+.cal__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.cal__item { border: 1px solid var(--border); border-radius: 6px; padding: 7px 8px; background: var(--panel); }
+/* 已過去的行程留著（本機是真實來源）但退到背景——不刪、也不搶注意力。 */
+.cal__item--past { opacity: .5; }
+.cal__when { font-size: 10px; color: var(--accent); font-weight: 700; }
+.cal__name { font-size: 13px; color: var(--ink); font-weight: 700; margin-top: 1px; }
+.cal__loc, .cal__by { font-size: 11px; color: var(--muted); margin-top: 2px; }
+.cal__descout { font-size: 11px; color: var(--ink); margin-top: 3px; white-space: pre-wrap; word-break: break-word; }
+.cal__going { font-size: 11px; color: var(--ink); margin-top: 4px; }
+.cal__acts { display: flex; gap: 4px; margin-top: 6px; flex-wrap: wrap; }
+/* 提醒選單（ADR-0266）：本機設定，刻意做得比 RSVP 低調——它不是給別人看的。 */
+.cal__remind { display: flex; align-items: center; gap: 5px; margin-top: 5px; }
+.cal__remindlbl { font-size: 10px; color: var(--muted); }
+.cal__remindsel {
+  border: 1px solid var(--border); background: var(--field); color: var(--muted);
+  border-radius: 5px; padding: 1px 4px; font-size: 10px; cursor: pointer;
+}
+.cal__remindsel:focus { outline: none; border-color: var(--accent); }
+
+/* 對話中的日期提示（ADR-0264 階段四）：偵測→提示，低調、可點、不搶版面。 */
+.datechips { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.datechip {
+  border: 1px solid var(--border); background: var(--field); color: var(--muted);
+  border-radius: 10px; padding: 1px 7px; font-size: 10px; cursor: pointer; line-height: 1.5;
+}
+.datechip:hover { border-color: var(--accent); color: var(--accent); background: var(--hover); }

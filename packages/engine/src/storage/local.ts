@@ -22,6 +22,7 @@ import type {
   StoredGroup,
   StoredIdentity,
   StoredMessage,
+  StoredCalendarEvent,
   StoredReaction,
 } from "./types.js";
 
@@ -157,6 +158,7 @@ export class LocalStorage implements AppStorage {
       contacts,
       blocked: read<StoredContact[]>(this.k("blocked"), [], this.dek),
       requests: read<StoredContact[]>(this.k("requests"), [], this.dek), // ADR-0121
+      calendar: read<StoredCalendarEvent[]>(this.k("calendar"), [], this.dek), // ADR-0263
       messages,
       reactions: read<StoredReaction[]>(this.k("reactions"), [], this.dek),
       deleted: read<string[]>(this.k("deleted"), [], this.dek),
@@ -291,6 +293,42 @@ export class LocalStorage implements AppStorage {
   }
   loadRequests(): StoredContact[] {
     return this.mem.loadRequests();
+  }
+  // 共享行程（ADR-0263）：與訊息請求同模式——記憶體為即時層，寫回加密落盤。
+  private writeCalendar(): void {
+    write(this.k("calendar"), this.mem.loadCalendar(), this.dek);
+  }
+  loadCalendar(): StoredCalendarEvent[] {
+    return this.mem.loadCalendar();
+  }
+  upsertCalendarEvent(event: StoredCalendarEvent): void {
+    this.mem.upsertCalendarEvent(event);
+    this.writeCalendar();
+  }
+  removeCalendarEvent(id: string): void {
+    this.mem.removeCalendarEvent(id);
+    this.writeCalendar();
+  }
+  setCalendarRsvp(eventId: string, pubkey: string, status: "accepted" | "declined" | "tentative", at: number): void {
+    this.mem.setCalendarRsvp(eventId, pubkey, status, at);
+    this.writeCalendar();
+  }
+  setCalendarDelivered(eventId: string, pubkey: string, at: number): void {
+    this.mem.setCalendarDelivered(eventId, pubkey, at);
+    this.writeCalendar();
+  }
+  setCalendarReminder(eventId: string, lead: number | undefined): void {
+    this.mem.setCalendarReminder(eventId, lead);
+    this.writeCalendar();
+  }
+  markCalendarReminded(eventId: string, start: number): void {
+    this.mem.markCalendarReminded(eventId, start);
+    this.writeCalendar(); // 必須落盤：否則每次重開 App 都會把同一個提醒再響一次
+  }
+  pruneCalendar(nowSec: number): number {
+    const removed = this.mem.pruneCalendar(nowSec);
+    if (removed > 0) this.writeCalendar(); // 沒清到就不必重寫（開機時最常見的情況）
+    return removed;
   }
   unblockContact(pubkey: string): void {
     this.mem.unblockContact(pubkey);

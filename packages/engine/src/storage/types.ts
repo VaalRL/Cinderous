@@ -180,6 +180,52 @@ export interface StoredReaction {
 }
 
 /**
+ * 一筆共享行程（ADR-0263）。**本機是真實來源**——中繼只是傳輸（1059＋7 天 TTL），
+ * 收到後就存在這裡，之後中繼上那份過期與否都不影響。
+ */
+export interface StoredCalendarEvent {
+  /** 行程 id ＝建立那則 rumor 的 id（跨成員一致，ADR-0095）。 */
+  id: string;
+  title: string;
+  /** 開始/結束時間（unix 秒）。 */
+  start: number;
+  end?: number;
+  location?: string;
+  description?: string;
+  /** 所屬群組；1:1 行程為 undefined。 */
+  groupId?: string;
+  /** 1:1 行程的對話對象（＝對方 pubkey）；群組行程為 undefined。 */
+  contact?: string;
+  /** 主揪（唯一有權修改/取消者，ADR-0263 §1.7）。 */
+  organizer: string;
+  /** 這筆目前內容的時間（unix 秒）——較舊的變更會被 `applyCalendarChange` 擋掉。 */
+  updatedAt: number;
+  /**
+   * 各參與者的回覆。鍵＝回覆者 pubkey。**RSVP 是每人對自己狀態的宣告**，由本人簽章，
+   * 故存在事件內即可，不需要另一個集合，也不會有多人衝突。
+   */
+  rsvps?: Record<string, { status: "accepted" | "declined" | "tentative"; at: number }>;
+  /**
+   * 送達確認（ADR-0264 §9 補送）：**只有主揪端有意義**——收件人 pubkey → 收到的時間（unix 秒）。
+   *
+   * 用來回答「誰還沒拿到這個邀請」。沒有這個欄位就無從判斷該補送給誰，只能每次上線都盲送。
+   */
+  delivered?: Record<string, number>;
+  /**
+   * 提醒提前量（秒，ADR-0266）；`undefined`＝不提醒。
+   *
+   * **純本機、不進 rumor**：塞進去會改變行程 id（＝rumor 雜湊，ADR-0264 §8 踩過的地雷），
+   * 而且「我要提前多久被叫」本來就是每個人自己的事，沒有理由讓群組其他人知道。
+   */
+  remindLead?: number;
+  /**
+   * 已提醒過的那個 `start`（unix 秒）。**記 `start` 而不是布林**：主揪改時間時提醒必須
+   * 重新武裝，以 `start` 為鍵就自動成立，不需要任何額外的清除邏輯。
+   */
+  remindedFor?: number;
+}
+
+/**
  * 前端本機儲存抽象。目前提供記憶體與 localStorage 實作；
  * Tauri 版之後以相同介面接原生 SQLite（SQLCipher）。
  */
@@ -240,6 +286,31 @@ export interface AppStorage {
   removeRequest(pubkey: string): void;
   /** 待處理的訊息請求。 */
   loadRequests(): StoredContact[];
+  /** 共享行程（ADR-0263）：全部行程，依 `start` 升冪。 */
+  loadCalendar(): StoredCalendarEvent[];
+  /** 新增/取代一筆行程（以 `id` 為鍵）。權威與新舊判定由呼叫端先做（`applyCalendarChange`）。 */
+  upsertCalendarEvent(event: StoredCalendarEvent): void;
+  /** 移除一筆行程（主揪取消時）。 */
+  removeCalendarEvent(id: string): void;
+  /**
+   * 記下某人對某行程的回覆。**只往前推進**：`at` 較舊即忽略——RSVP 可能亂序抵達
+   * （多裝置／重送），晚到的舊回覆不該把新的蓋掉。行程不存在時忽略（尚未收到邀請）。
+   */
+  setCalendarRsvp(eventId: string, pubkey: string, status: "accepted" | "declined" | "tentative", at: number): void;
+  /** 記下某人已收到某行程（ADR-0264 §9）；只往前推進，行程不存在時忽略。 */
+  setCalendarDelivered(eventId: string, pubkey: string, at: number): void;
+  /**
+   * 設定某行程的本機提醒提前量（秒，ADR-0266）；`undefined`＝不提醒。
+   * **不觸發任何網路動作**——提醒完全是本機的事。行程不存在時忽略。
+   */
+  setCalendarReminder(eventId: string, lead: number | undefined): void;
+  /** 記下「這個 `start` 已經提醒過了」（ADR-0266）；行程不存在時忽略。 */
+  markCalendarReminded(eventId: string, start: number): void;
+  /**
+   * 套用行程保留上限（ADR-0264 §10），回傳清掉的筆數。規則見 `core` 的 `pruneCalendar`。
+   * 開機時呼叫一次即可——`upsertCalendarEvent` 本身也會順手清，兩者合起來讓行程不會無界成長。
+   */
+  pruneCalendar(nowSec: number): number;
   loadMessages(contactPubkey: string): StoredMessage[];
   appendMessage(message: StoredMessage): void;
   /** 只往前推進某訊息的送達/已讀狀態（ADR-0058）；訊息不存在或狀態不前進則忽略。 */
@@ -396,6 +467,8 @@ export interface StorageSnapshot {
   blocked: StoredContact[];
   /** 訊息請求（ADR-0121）；舊快照沒有這個欄位 → 匯入時須容忍 `undefined`（退回 `[]`）。 */
   requests?: StoredContact[];
+  /** 共享行程（ADR-0263）；舊快照沒有 → 匯入時退回 `[]`。 */
+  calendar?: StoredCalendarEvent[];
   messages: Record<string, StoredMessage[]>;
   reactions: StoredReaction[];
   deleted: string[];

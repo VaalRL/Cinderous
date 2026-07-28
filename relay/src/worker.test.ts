@@ -319,6 +319,56 @@ describe("RelayRoom — 休眠→喚醒還原（ADR-0059 + ADR-0235 H2）", () =
   });
 });
 
+describe("NIP-11 端點（ADR-0260 worker fetch）", () => {
+  // 本檔的全域 `Response` 是假的（見 beforeAll）——只記 body 與 init，故這樣拆。
+  const get = async (
+    headers: Record<string, string> = {},
+    env: Partial<Env> = {},
+  ): Promise<{ body: string; status?: number; headers?: Record<string, string> }> => {
+    const r = (await worker.fetch(new Request(`https://${HOST}/`, { headers }), env as Env)) as unknown as {
+      body: string;
+      init: { status?: number; headers?: Record<string, string> };
+    };
+    return { body: r.body, ...r.init };
+  };
+  const docOf = async (env: Partial<Env> = {}): Promise<Record<string, unknown>> =>
+    JSON.parse((await get({ Accept: "application/nostr+json" }, env)).body) as Record<string, unknown>;
+
+  it("不帶 Accept → 維持純文字 200（健康檢查契約不破，ADR-0089）", async () => {
+    const r = await get();
+    expect(r.status).toBe(200);
+    expect(r.body).toBe("Cinderous relay");
+  });
+
+  it("帶 application/nostr+json → 回 NIP-11 文件（含 CORS，瀏覽器版要跨源抓）", async () => {
+    const r = await get({ Accept: "application/nostr+json" });
+    expect(r.status).toBe(200);
+    expect(r.headers?.["content-type"]).toContain("application/nostr+json");
+    expect(r.headers?.["Access-Control-Allow-Origin"]).toBe("*");
+    const doc = JSON.parse(r.body) as Record<string, unknown>;
+    expect(doc.supported_nips).toContain(62);
+    // worker 的 RelayCore 恆為 requireAuth: true——文件必須據實反映，不能各說各話。
+    expect((doc.limitation as Record<string, unknown>).auth_required).toBe(true);
+  });
+
+  it("營運者填了贊助管道就出現在文件裡（ADR-0089 的入口終於有載體）", async () => {
+    const doc = await docOf({
+      DONATE_GITHUB_SPONSORS: "https://github.com/sponsors/op",
+      RELAY_CONTACT: "op@example.com",
+    });
+    expect(doc.cinder_donations).toEqual({ github_sponsors: "https://github.com/sponsors/op" });
+    expect(doc.contact).toBe("op@example.com");
+  });
+
+  it("未填贊助管道＝整個欄位不出現（客戶端據此不顯示贊助卡）", async () => {
+    expect("cinder_donations" in (await docOf())).toBe(false);
+  });
+
+  it("站方 TTL 上限反映在 retention（企業站放寬後客戶端看得到）", async () => {
+    expect((await docOf({ MAX_TTL_DAYS: "90" })).retention).toEqual([{ time: 90 * 86_400 }]);
+  });
+});
+
 describe("分片路由（ADR-0241 worker fetch）", () => {
   const routeOf = async (path: string): Promise<string> => {
     let routed = "";

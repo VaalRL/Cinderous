@@ -10,6 +10,7 @@ export * from "./backend/search-util.js";
 export * from "./backend/relay-backend.js";
 export * from "./backend/browser-backend.js";
 // ── WebRTC 與 RTC 設定 ──
+export * from "./backend/relay-info.js";
 export * from "./backend/rtc-config.js";
 export * from "./backend/webrtc.js";
 export * from "./backend/webrtc-call.js";

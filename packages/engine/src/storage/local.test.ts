@@ -78,6 +78,18 @@ describe("LocalStorage（ADR-0110：狀態常駐記憶體 + 逐鍵寫回）", ()
     a.appendMessage(msg("m1", 1));
     expect(new LocalStorage("carol").loadMessages("bob")).toEqual([]);
   });
+
+  it("行程保留上限（ADR-0264 §10）：清掉的過去行程也要從磁碟消失，不是只在記憶體裡不見", () => {
+    const now = 1_800_000_000;
+    const ev = (id: string, start: number) => ({ id, title: id, start, organizer: "bob", updatedAt: start });
+    const s = new LocalStorage("ns");
+    s.upsertCalendarEvent(ev("old", now - 90 * 86400)); // 90 天前
+    s.upsertCalendarEvent(ev("soon", now + 86400));
+
+    expect(s.pruneCalendar(now)).toBe(1);
+    // 只回傳值對是不夠的——沒有 writeCalendar 的話，重新開機它會整筆復活。
+    expect(new LocalStorage("ns").loadCalendar().map((e) => e.id)).toEqual(["soon"]);
+  });
 });
 
 describe("LocalStorage 靜態加密（ADR-0112）", () => {

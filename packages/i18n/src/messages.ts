@@ -524,6 +524,59 @@ export interface Messages {
   settings_removeIdentityConfirm: string;
   settings_wipeDeviceHint: string;
   wipe_device: string;
+  /** 共享行程（ADR-0263）。 */
+  aux_tabCalendar: string;
+  /** 日期偵測提示（ADR-0264 階段四）。 */
+  date_chipHint: string;
+  date_barHint: string;
+  cal_new: string;
+  cal_title: string;
+  cal_start: string;
+  cal_end: string;
+  cal_location: string;
+  cal_desc: string;
+  cal_save: string;
+  cal_dismiss: string;
+  cal_edit: string;
+  cal_cancelEvent: string;
+  cal_cancelConfirm: string;
+  cal_rsvpYes: string;
+  cal_rsvpMaybe: string;
+  cal_rsvpNo: string;
+  cal_none: string;
+  cal_by: string;
+  cal_byYou: string;
+  /**
+   * 行動端專用（ADR-0265）：手機沒有 `datetime-local`，改用相對調整鈕，故多這幾個字串。
+   * `cal_durNone` ＝不設結束時間（單點行程）。
+   */
+  cal_durLabel: string;
+  cal_durNone: string;
+  cal_dur1h: string;
+  cal_dur2h: string;
+  cal_durAllDay: string;
+  cal_adjHint: string;
+  /** 行程提醒（ADR-0266）：本機計時器、零中繼成本。 */
+  cal_remindLabel: string;
+  cal_remindOff: string;
+  cal_remindNow: string;
+  cal_remind5m: string;
+  cal_remind15m: string;
+  cal_remind1h: string;
+  cal_remind1d: string;
+  cal_remindHint: string;
+  cal_reminderBody: string;
+  /** NIP-62 清除請求（ADR-0260）。 */
+  /** 贊助此節點角落卡（ADR-0089／0262）。 */
+  sponsor_title: string;
+  sponsor_who: string;
+  sponsor_note: string;
+  sponsor_dismiss: string;
+  vanish_title: string;
+  vanish_hint: string;
+  vanish_action: string;
+  vanish_confirm: string;
+  vanish_sent: string;
   wipe_confirmWord: string;
   wipe_confirm: string;
   wipe_mismatch: string;
@@ -1034,7 +1087,7 @@ const zhHant: Messages = {
   aux_tabMedia: "媒體",
   aux_tabThreads: "對話串",
   aux_tabNote: "便條",
-  aux_title: "對話輔助（媒體／對話串／便條）",
+  aux_title: "對話輔助（媒體／對話串／便條／行程）",
   note_placeholder: "便條…（記筆記；最後一行輸入算式如 12*8 會自動算出）",
   note_hint: "私人便條，每個對話一張，只存在這台裝置（不廣播、不上雲）。輸入算式會自動辨識，可插入對話。",
   note_placeholderM: "便條…（記筆記，只存這台裝置）",
@@ -1251,6 +1304,52 @@ const zhHant: Messages = {
   settings_removeIdentityConfirm: "確定要從這台裝置移除目前身分？私鑰與所有本機資料會被永久刪除、無法復原。若沒有救援登入碼，將無法再登入此身分。",
   settings_wipeDeviceHint: "刪除這台裝置上「所有」身分的私鑰與全部本機資料，回到全新狀態。此動作無法復原——請先確認你已有救援登入碼。",
   wipe_device: "清空裝置",
+  aux_tabCalendar: "行程",
+  date_chipHint: "建立行程（不會自動加入）",
+  date_barHint: "點擊建立行程；Enter 照常送出訊息",
+  cal_new: "新增行程",
+  cal_title: "行程名稱",
+  cal_start: "開始",
+  cal_end: "結束（可選）",
+  cal_location: "地點（可選）",
+  cal_desc: "備註（可選）",
+  cal_save: "送出",
+  cal_dismiss: "取消",
+  cal_edit: "編輯",
+  cal_cancelEvent: "取消行程",
+  cal_cancelConfirm: "取消「{title}」？所有參與者的行程都會移除，此動作不可復原。",
+  cal_rsvpYes: "參加",
+  cal_rsvpMaybe: "也許",
+  cal_rsvpNo: "不參加",
+  cal_none: "這個對話還沒有行程。",
+  cal_by: "由 {name} 發起",
+  cal_byYou: "由你發起",
+  cal_durLabel: "長度",
+  cal_durNone: "不設",
+  cal_dur1h: "1 小時",
+  cal_dur2h: "2 小時",
+  cal_durAllDay: "整天",
+  cal_adjHint: "點上下調整時間",
+  cal_remindLabel: "提醒",
+  cal_remindOff: "關",
+  cal_remindNow: "準時",
+  cal_remind5m: "5 分前",
+  cal_remind15m: "15 分前",
+  cal_remind1h: "1 小時前",
+  cal_remind1d: "1 天前",
+  cal_remindHint: "提醒只在這台裝置上，不會通知其他參與者。",
+  cal_reminderBody: "{when} 開始",
+  sponsor_title: "贊助此節點",
+  sponsor_who: "{relay} 由其營運者自費提供。以下連結由該節點自報，非官方背書。",
+  sponsor_note: "完全自願。點擊只會用瀏覽器或錢包開啟外部連結——本 App 不經手金流，也永不自動付款。",
+  sponsor_dismiss: "不再顯示",
+  vanish_title: "清除我在中繼站上的資料",
+  vanish_hint:
+    "中繼站暫存的離線留言預設 7 天後自動消失。你也可以現在就要求它們立刻刪除——包含寄給你但你還沒收到的訊息、你的加密雲端備份。**本機的對話不受影響**（那本來就只在你的裝置上）。",
+  vanish_action: "要求中繼站清除",
+  vanish_confirm:
+    "要求所有已連線的中繼站刪除你的資料？還沒收到的離線留言會一併消失且無法救回，你的加密雲端備份也會被刪除（若已開啟）。此動作不可復原。",
+  vanish_sent: "已送出清除請求給 {n} 座中繼站。刪除在對方機器上執行，我們無法代它們保證結果。",
   wipe_confirmWord: "CLEAR",
   wipe_confirm: "此動作會永久刪除這台裝置上的所有身分、私鑰與訊息，且無法復原。若你沒有救援登入碼，這些身分將永遠消失。\n\n確定要清空，請輸入 {word}：",
   wipe_mismatch: "輸入不符，已取消清空。",
@@ -1741,7 +1840,7 @@ const en: Messages = {
   aux_tabMedia: "Media",
   aux_tabThreads: "Threads",
   aux_tabNote: "Notes",
-  aux_title: "Conversation panels (media / threads / notes)",
+  aux_title: "Conversation panels (media / threads / notes / plans)",
   note_placeholder: "Notes… (jot anything; type a calc like 12*8 on the last line to evaluate)",
   note_hint: "Private notes, one per conversation, stored only on this device (never broadcast or synced). Calculations are auto-detected and can be inserted.",
   note_placeholderM: "Notes… (jot anything; stored only on this device)",
@@ -1958,6 +2057,52 @@ const en: Messages = {
   settings_removeIdentityConfirm: "Remove the current identity from this device? Its private key and all local data will be permanently deleted and cannot be recovered. Without a rescue login code you won't be able to sign in to this identity again.",
   settings_wipeDeviceHint: "Delete the private keys and all local data of EVERY identity on this device, returning it to a fresh state. This cannot be undone — make sure you have a rescue login code first.",
   wipe_device: "Wipe device",
+  aux_tabCalendar: "Plans",
+  date_chipHint: "Create a plan (nothing is added automatically)",
+  date_barHint: "Click to create a plan \u2014 Enter still sends the message",
+  cal_new: "New plan",
+  cal_title: "What's the plan?",
+  cal_start: "Starts",
+  cal_end: "Ends (optional)",
+  cal_location: "Location (optional)",
+  cal_desc: "Notes (optional)",
+  cal_save: "Send",
+  cal_dismiss: "Cancel",
+  cal_edit: "Edit",
+  cal_cancelEvent: "Cancel plan",
+  cal_cancelConfirm: "Cancel \u201c{title}\u201d? It will be removed for everyone, and this cannot be undone.",
+  cal_rsvpYes: "Going",
+  cal_rsvpMaybe: "Maybe",
+  cal_rsvpNo: "Can't make it",
+  cal_none: "No plans in this conversation yet.",
+  cal_by: "Organized by {name}",
+  cal_byYou: "Organized by you",
+  cal_durLabel: "Length",
+  cal_durNone: "None",
+  cal_dur1h: "1 hour",
+  cal_dur2h: "2 hours",
+  cal_durAllDay: "All day",
+  cal_adjHint: "Tap ↑↓ to adjust",
+  cal_remindLabel: "Remind",
+  cal_remindOff: "Off",
+  cal_remindNow: "On time",
+  cal_remind5m: "5 min before",
+  cal_remind15m: "15 min before",
+  cal_remind1h: "1 hour before",
+  cal_remind1d: "1 day before",
+  cal_remindHint: "Reminders live on this device only \u2014 no one else is notified.",
+  cal_reminderBody: "Starts {when}",
+  sponsor_title: "Support this node",
+  sponsor_who: "{relay} is run at its operator\u2019s own expense. The links below are self-reported by that node, not an official endorsement.",
+  sponsor_note: "Entirely optional. Clicking only opens an external link in your browser or wallet \u2014 this app never handles money and never pays automatically.",
+  sponsor_dismiss: "Don\u2019t show again",
+  vanish_title: "Erase my data on relays",
+  vanish_hint:
+    "Offline messages held by relays expire after 7 days by default. You can also ask them to delete everything now — including messages sent to you that you have not received yet, and your encrypted cloud backup. **Your local conversations are unaffected** (they only ever lived on your device).",
+  vanish_action: "Request erasure",
+  vanish_confirm:
+    "Ask every connected relay to delete your data? Undelivered offline messages will be gone for good, and your encrypted cloud backup will be deleted (if enabled). This cannot be undone.",
+  vanish_sent: "Erasure request sent to {n} relay(s). Deletion happens on their machines — we cannot guarantee the outcome on their behalf.",
   wipe_confirmWord: "CLEAR",
   wipe_confirm: "This permanently deletes every identity, private key and message on this device and cannot be undone. Without a rescue login code, these identities are gone forever.\n\nType {word} to confirm:",
   wipe_mismatch: "Text didn't match — wipe cancelled.",

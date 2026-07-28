@@ -63,3 +63,52 @@ describe("右欄便條分頁（ADR-0182，計算為其功能之一）", () => {
     expect(html).not.toContain('data-testid="aux-tab-calc"'); // 舊「計算」分頁已改名為便條
   });
 });
+
+describe("行程分頁的顯示條件與對話歸屬（ADR-0263 階段三）", () => {
+  const ev = (over: Record<string, unknown> = {}) => ({
+    id: "e1",
+    title: "週六爬山",
+    start: Math.floor(Date.now() / 1000) + 86_400,
+    organizer: "me",
+    updatedAt: 1,
+    ...over,
+  });
+
+  it("後端不支援（未提供 onCalendarPublish）→ 整個分頁不出現", () => {
+    expect(render({ calendar: [ev({ contact: "p1" })] as never })).not.toContain('data-testid="aux-tab-calendar"');
+  });
+
+  it("後端支援 → 分頁出現，計數為**本對話**的行程數", () => {
+    const html = render({
+      calendar: [ev({ id: "mine", contact: "p1" }), ev({ id: "other", contact: "zzz" })] as never,
+      onCalendarPublish: () => {},
+    });
+    expect(html).toContain('data-testid="aux-tab-calendar"');
+    expect(html).toContain('行程<span class="daux__count">1</span>'); // 只算本對話那筆
+  });
+
+  it("群組對話只看群組行程（1:1 的不混進來）", () => {
+    const html = render({
+      activeId: "g1",
+      calendar: [ev({ id: "g", groupId: "g1" }), ev({ id: "dm", contact: "p1" })] as never,
+      onCalendarPublish: () => {},
+    });
+    expect(html).toContain('行程<span class="daux__count">1</span>');
+  });
+});
+
+describe("日期標記點擊後切到行程分頁（ADR-0264 階段四）", () => {
+  it("有 calendarDraft → 直接停在行程分頁（**使用者點擊觸發**，非 ADR-0263 §1.6 否決的自動切換）", () => {
+    const html = render({
+      calendar: [] as never,
+      onCalendarPublish: () => {},
+      calendarDraft: { at: Math.floor(Date.now() / 1000) + 3600, nonce: 1 },
+    } as never);
+    expect(html).toContain('data-testid="aux-calendar"'); // 行程面板已渲染
+  });
+
+  it("沒有 calendarDraft → 停在預設的資訊分頁（不會自己跳走）", () => {
+    const html = render({ calendar: [] as never, onCalendarPublish: () => {} } as never);
+    expect(html).not.toContain('data-testid="aux-calendar"');
+  });
+});

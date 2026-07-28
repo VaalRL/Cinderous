@@ -16,6 +16,7 @@ import type {
   StoredGroup,
   StoredIdentity,
   StoredMessage,
+  StoredCalendarEvent,
   StoredReaction,
 } from "@cinderous/engine";
 
@@ -354,6 +355,39 @@ export class TauriStorage implements AppStorage {
   }
   loadRequests(): StoredContact[] {
     return this.mem.loadRequests();
+  }
+  // 共享行程（ADR-0263）：非訊息 → 落在 meta 部位（同訊息請求）。
+  loadCalendar(): StoredCalendarEvent[] {
+    return this.mem.loadCalendar();
+  }
+  upsertCalendarEvent(event: StoredCalendarEvent): void {
+    this.mem.upsertCalendarEvent(event);
+    this.persist(META);
+  }
+  removeCalendarEvent(id: string): void {
+    this.mem.removeCalendarEvent(id);
+    this.persist(META);
+  }
+  setCalendarRsvp(eventId: string, pubkey: string, status: "accepted" | "declined" | "tentative", at: number): void {
+    this.mem.setCalendarRsvp(eventId, pubkey, status, at);
+    this.persist(META);
+  }
+  setCalendarDelivered(eventId: string, pubkey: string, at: number): void {
+    this.mem.setCalendarDelivered(eventId, pubkey, at);
+    this.persist(META);
+  }
+  setCalendarReminder(eventId: string, lead: number | undefined): void {
+    this.mem.setCalendarReminder(eventId, lead);
+    this.persist(META);
+  }
+  markCalendarReminded(eventId: string, start: number): void {
+    this.mem.markCalendarReminded(eventId, start);
+    this.persist(META); // 必須落盤：否則每次重開 App 都會把同一個提醒再響一次
+  }
+  pruneCalendar(nowSec: number): number {
+    const removed = this.mem.pruneCalendar(nowSec);
+    if (removed > 0) this.persist(META); // 沒清到就不必重寫（開機時最常見的情況）
+    return removed;
   }
   appendMessage(message: StoredMessage): void {
     this.mem.appendMessage(message);

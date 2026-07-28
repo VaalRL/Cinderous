@@ -1,4 +1,5 @@
 import { ABUSE_GUARD, acceptFileEvents, firstHost, storeOptions } from "./host-config.js";
+import { buildRelayInfo, NIP11_HEADERS, wantsRelayInfo } from "./nip11.js";
 import { RelayCore, type ConnSnapshot, type Outbound } from "./relay-core.js";
 import { shardNameForPath } from "./shard.js";
 import { SqlMessageStore } from "./sql-message-store.js";
@@ -25,6 +26,19 @@ export interface Env {
   TURN_API_TOKEN?: string;
   /** 短期 TURN 憑證有效秒數（ADR-0243）；未設/壞值＝預設 86400（1 天）。客戶端於半 TTL 前刷新。 */
   TURN_TTL_SECONDS?: string;
+  // ── NIP-11 Relay Information Document（ADR-0260／0089／0092）─────────────────
+  /** 站名／描述／營運者公鑰（hex）／聯絡方式；未設＝該欄不出現在文件裡。 */
+  RELAY_NAME?: string;
+  RELAY_DESCRIPTION?: string;
+  RELAY_PUBKEY?: string;
+  RELAY_CONTACT?: string;
+  /** 營運者自報的贊助管道（ADR-0089）；**全部未設＝文件無 `cinder_donations`＝客戶端不顯示贊助卡**。 */
+  DONATE_GITHUB_SPONSORS?: string;
+  DONATE_BUY_ME_A_COFFEE?: string;
+  DONATE_LIBERAPAY?: string;
+  DONATE_LIGHTNING?: string;
+  /** 節點自報（ADR-0092）：已簽章的 `CinderNodeDeclaration` 事件 JSON 字串。 */
+  NODE_ATTESTATION?: string;
 }
 
 /** Cloudflare TURN 憑證換發 API（POST，Bearer token）。 */
@@ -65,6 +79,31 @@ export async function mintTurnResponse(env: Env, fetchFn: typeof fetch = fetch):
   }
 }
 
+/**
+ * 由 Worker 環境變數組出 NIP-11 文件（ADR-0260）。
+ *
+ * `authRequired: true` 是**寫死**的——worker 的 `RelayCore` 就是 `requireAuth: true`
+ * （見 `RelayRoom` 建構子），拿一個獨立的旗標去描述它遲早會說謊。
+ */
+export function relayInfoFrom(env: Env): Record<string, unknown> {
+  return buildRelayInfo({
+    name: env.RELAY_NAME,
+    description: env.RELAY_DESCRIPTION,
+    pubkey: env.RELAY_PUBKEY,
+    contact: env.RELAY_CONTACT,
+    maxTtlDays: env.MAX_TTL_DAYS,
+    acceptsFiles: acceptFileEvents(env.MAX_FILE_MB),
+    authRequired: true,
+    donations: {
+      github_sponsors: env.DONATE_GITHUB_SPONSORS,
+      buy_me_a_coffee: env.DONATE_BUY_ME_A_COFFEE,
+      liberapay: env.DONATE_LIBERAPAY,
+      lightning: env.DONATE_LIGHTNING,
+    },
+    nodeAttestation: env.NODE_ATTESTATION,
+  });
+}
+
 /** NIP-40 過期留言的清理間隔（C2）：DO alarm 每小時 prune 一次。 */
 const PRUNE_INTERVAL_MS = 60 * 60 * 1000;
 
@@ -75,6 +114,11 @@ export default {
     if (request.headers.get("Upgrade") !== "websocket") {
       // 公共 TURN 保底端點（ADR-0243）：換發短期憑證；未配 secret 則 204、客戶端退回純 STUN。
       if (url.pathname === "/turn") return mintTurnResponse(env);
+      // NIP-11（ADR-0260）：只有明確要 `application/nostr+json` 的請求拿到 JSON；
+      // 其餘維持純文字 200（PaaS／容器健康檢查靠它，ADR-0089 定下的契約）。
+      if (wantsRelayInfo(request.headers.get("Accept"))) {
+        return new Response(JSON.stringify(relayInfoFrom(env)), { status: 200, headers: NIP11_HEADERS });
+      }
       return new Response("Cinderous relay", { status: 200 });
     }
     // 分片路由（ADR-0241）：依 URL 路徑選 DO——`/s/<prefix>` 訊息片、`/presence` 獨立層、

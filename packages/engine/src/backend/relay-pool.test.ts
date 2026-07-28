@@ -1,5 +1,17 @@
-import { KIND, wrapMessage, type NostrEvent, type RelayClientHandlers } from "@cinderous/core";
-import { createInMemoryRelayNetwork } from "@cinderous/relay";
+import {
+  generateSecretKey,
+  getPublicKey,
+  finalizeEvent,
+  KIND,
+  npubEncode,
+  RelayClient,
+  VANISH_KIND,
+  vanishTargetsOf,
+  wrapMessage,
+  type NostrEvent,
+  type RelayClientHandlers,
+} from "@cinderous/core";
+import { createInMemoryRelayNetwork, MessageStore } from "@cinderous/relay";
 import { describe, expect, it, vi } from "vitest";
 import { MemoryStorage } from "../storage/memory.js";
 import type { ChatBackendEvents, ChatMessage } from "./types.js";
@@ -567,5 +579,79 @@ describe("跨中繼通訊：Relay Pool 與收件人路由（ADR-0034）", () => 
     expect(bIncoming.map((m) => m.text)).toContain("單機模式");
     a.stop();
     b.stop();
+  });
+});
+
+describe("NIP-62 清除請求（ADR-0260）", () => {
+  it("端到端：送出後，中繼站上寄給我的離線留言真的消失", () => {
+    // 具名目標要驗主機（fail-closed），故網路要知道自己是誰。
+    const store = new MessageStore({ maxPerRecipient: 500 });
+    const net = createInMemoryRelayNetwork({ host: "x", store });
+    const a = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("a", h), "Alice", {
+      relayUrl: "wss://x",
+    });
+    a.start(noop);
+
+    // 一則寄給 Alice、她還沒收到的離線留言（外層作者是一次性金鑰＝Gift Wrap 的形狀）。
+    const now = Math.floor(Date.now() / 1000);
+    store.put(
+      finalizeEvent(
+        { kind: KIND.OFFLINE_DM_GIFT_WRAP, created_at: now, tags: [["p", a.self.pubkey]], content: "\u5bc6\u6587" },
+        generateSecretKey(),
+      ),
+      now,
+    );
+    expect(store.query({ "#p": [a.self.pubkey] } as never, now)).toHaveLength(1);
+
+    expect(a.requestVanish()).toEqual(["wss://x"]);
+
+    expect(store.query({ "#p": [a.self.pubkey] } as never, now)).toEqual([]);
+    a.stop();
+  });
+
+  it("\u5c0d\u6bcf\u4e00\u5ea7\u5df2\u77e5\u4e2d\u7e7c\u5404\u9001\u4e00\u9846\uff0c\u4e14 relay tag \u5e36\u8a72\u5ea7\u81ea\u5df1\u7684 URL", () => {
+    // relay 端會驗 `relay` tag 指向自己 → 「簽一顆到處發」行不通，必須逐座簽。
+    const netX = createInMemoryRelayNetwork({ host: "x" });
+    const netY = createInMemoryRelayNetwork({ host: "y" });
+    const nets: Record<string, ReturnType<typeof createInMemoryRelayNetwork>> = {
+      "wss://x": netX,
+      "wss://y": netY,
+    };
+    const published: Record<string, NostrEvent[]> = { "wss://x": [], "wss://y": [] };
+    /** 側錄 publish：kind 62 不會被中繼扇出（刻意），所以只能在送出端量。 */
+    const recording = (url: string, client: RelayClient): RelayClient => {
+      const orig = client.publish.bind(client);
+      (client as { publish: (e: NostrEvent) => void }).publish = (e: NostrEvent) => {
+        published[url]!.push(e);
+        orig(e);
+      };
+      return client;
+    };
+    let n = 0;
+    const a = new RelayChatBackend(
+      new MemoryStorage(),
+      (h) => recording("wss://x", netX.connect("a", h)),
+      "Alice",
+      {
+        relayUrl: "wss://x",
+        connectorFor: (url: string) => (h: RelayClientHandlers) =>
+          recording(url, nets[url]!.connect(`pool-${n++}`, h)),
+      },
+    );
+    a.start(noop);
+    // 讓 pool 認得第二座：加一位 home 在 Y 的聯絡人。
+    a.addContact(`${npubEncode(getPublicKey(generateSecretKey()))}@wss://y`);
+
+    const sent = a.requestVanish();
+
+    expect(sent).toContain("wss://x");
+    expect(sent).toContain("wss://y");
+    for (const url of ["wss://x", "wss://y"]) {
+      const vanish = published[url]!.filter((e) => e.kind === VANISH_KIND);
+      expect(vanish).toHaveLength(1);
+      expect(vanishTargetsOf(vanish[0]!)).toEqual([url]); // 各自帶自己的 URL
+      expect(vanish[0]!.pubkey).toBe(a.self.pubkey); // 一律本人簽章
+    }
+    a.stop();
   });
 });

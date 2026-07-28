@@ -272,6 +272,43 @@ describe("SqlMessageStore — 查詢下推與筆數上限（ADR-0235 C2）", () 
     expect(s.query(f({ "#p": ["r"], limit: 999_999 }), 1000).length).toBeLessThanOrEqual(MAX_QUERY_ROWS);
   });
 
+  describe("NIP-62 vanish（ADR-0260）：行為須與記憶體版一致", () => {
+    it("刪掉他發的、寄給他的、以及他的可尋址事件", () => {
+      const s = new SqlMessageStore(nodeSqlExec());
+      s.put(ev("toMe", { p: ["alice"] }), 1000); // 寄給 alice（外層作者是別人＝一次性金鑰）
+      s.put(authored("byMe", "alice"), 1000); // alice 發的（收件人是 "r"）
+      s.put(ev("other", { p: ["bob"] }), 1000); // 與 alice 無關
+      const snap: NostrEvent = {
+        ...ev("snap", { kind: 30078, createdAt: 1000 }),
+        pubkey: "alice",
+        tags: [["d", "dev1"]],
+        content: "密文",
+      };
+      expect(s.putAddressable(snap, 1000)).toBe(true);
+
+      expect(s.vanish("alice", 1000)).toBeGreaterThan(0);
+
+      expect(s.query(f({ "#p": ["alice"] }), 1000)).toEqual([]);
+      expect(s.query(f({ authors: ["alice"] }), 1000)).toEqual([]);
+      expect(s.query(f({ "#p": ["bob"] }), 1000).map((e) => e.id)).toEqual(["other"]); // 別人的沒被波及
+    });
+
+    it("同一顆事件寄給多人：只清請求者那一份", () => {
+      const s = new SqlMessageStore(nodeSqlExec());
+      s.put(ev("shared", { p: ["alice", "bob"] }), 1000);
+
+      s.vanish("alice", 1000);
+
+      expect(s.query(f({ "#p": ["alice"] }), 1000)).toEqual([]);
+      expect(s.query(f({ "#p": ["bob"] }), 1000).map((e) => e.id)).toEqual(["shared"]);
+    });
+
+    it("沒有資料時不炸、回 0", () => {
+      const s = new SqlMessageStore(nodeSqlExec());
+      expect(s.vanish("nobody", 1000)).toBe(0);
+    });
+  });
+
   it("舊資料（升級前寫入、無 pubkey/kind 欄）也查得到——遷移有回填", () => {
     const db = nodeSqlExec();
     // 模擬舊 schema：先由舊版建表寫入，再以新版開啟同一個 DB。

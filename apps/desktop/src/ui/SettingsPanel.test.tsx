@@ -518,3 +518,26 @@ describe("離職帳號接管（ADR-0163）", () => {
     expect(html).not.toContain('data-testid="settings-offboard"');
   });
 });
+
+describe("NIP-62 清除請求（ADR-0260）", () => {
+  it("提供 onVanish → 隱私分頁顯示清除區塊（含危險樣式）", () => {
+    const html = render({ initialTab: "privacy", onVanish: () => [] });
+    expect(html).toContain('data-testid="vanish-section"');
+    expect(html).toContain('data-testid="vanish-btn"');
+    expect(html).toContain("要求中繼站清除");
+  });
+
+  it("未提供（示範後端）→ 不顯示", () => {
+    expect(render({ initialTab: "privacy" })).not.toContain('data-testid="vanish-section"');
+  });
+
+  it("措辭誠實：說明只影響中繼站、且結果不由本端保證", () => {
+    const html = render({ initialTab: "privacy", onVanish: () => [] });
+    expect(html).toContain("本機的對話不受影響"); // 不讓使用者誤以為會刪掉自己的歷史
+    expect(html).not.toContain("已刪除"); // 刪除在對方機器上，不做做不到的保證
+  });
+
+  it("按下之前不顯示結果（結果只在送出後出現）", () => {
+    expect(render({ initialTab: "privacy", onVanish: () => [] })).not.toContain('data-testid="vanish-result"');
+  });
+});

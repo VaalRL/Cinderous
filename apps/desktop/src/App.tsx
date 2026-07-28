@@ -31,6 +31,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { BrowserChatBackend } from "@cinderous/engine";
 import { normalizeRelayUrl, RelayChatBackend, shouldMuteOrgNotification, webSocketConnector } from "@cinderous/engine";
 import { DEFAULT_NOTIFY_PREFS, type NotifyPrefs, shouldNotify } from "@cinderous/engine";
+import { fetchRelayInfo, type RelayInfo } from "@cinderous/engine";
+import type { CalendarEventInput, RsvpStatus, StoredCalendarEvent } from "@cinderous/engine";
 import { browserStore } from "./native/browser-store.js";
 import { safeNsecDecode } from "./nsec.js";
 import { getKeyVault } from "./native/keyvault.js";
@@ -171,6 +173,8 @@ import { applyPairBundle } from "@cinderous/engine";
 import { PairDeviceModal, type PairPhase } from "./ui/PairDeviceModal.js";
 import { detectNowPlaying, npAutoEnabled, setNpAutoEnabled } from "./native/now-playing.js";
 import { SettingsPanel } from "./ui/SettingsPanel.js";
+import { SponsorCard } from "./ui/SponsorCard.js";
+import { dismissSponsor, isSponsorDismissed } from "./ui/sponsor-dismiss.js";
 import { ThemeToggleButton } from "./ui/ThemeToggleButton.js";
 import { useRegisterIdentityControls, useRegisterSettingsOpener } from "./titlebar.js";
 import { dialog, useDialog } from "./ui/Dialog.js";
@@ -456,7 +460,7 @@ async function loadNsecFromVault(p: Profile): Promise<string | undefined> {
 }
 
 export function App(): JSX.Element {
-  const { t } = useI18n(); // 通知隱藏預覽的本地化文案（ADR-0076）；其餘 UI 文字仍由子元件各自取用。
+  const { t, locale } = useI18n(); // 通知隱藏預覽的本地化文案（ADR-0076）；其餘 UI 文字仍由子元件各自取用。
   const { alert, confirm, prompt } = useDialog(); // 統一自訂對話框（ADR-0139）。
   // 關閉視窗（Tauri）：Rust 攔下 close→emit「app://close-requested」，這裡以 app 風格確認框
   // 讓使用者選「縮到系統匣續連」或「直接結束」（ADR-0198，取代原生 rfd）。
@@ -523,6 +527,15 @@ export function App(): JSX.Element {
   const [historyOf, setHistoryOf] = useState<string | null>(null);
   const [conn, setConn] = useState<ConnectionState>("online");
   const [relays, setRelays] = useState<{ url: string; state: ConnectionState; home: boolean; stale: boolean }[]>([]);
+  /** 共享行程（ADR-0263）：全部行程；右欄依當前對話篩選。 */
+  const [calendar, setCalendar] = useState<StoredCalendarEvent[]>([]);
+  /**
+   * 對話中的日期被點擊（ADR-0264 階段四）：切到行程分頁並預填時間。
+   * nonce 讓「點同一個日期兩次」也能重新開啟表單（同 pendingInsert 的作法）。
+   */
+  const [calendarDraft, setCalendarDraft] = useState<{ at: number; nonce: number } | null>(null);
+  /** 贊助此節點角落卡（ADR-0089／0262）：抓到且未被關閉才有值。 */
+  const [sponsor, setSponsor] = useState<{ url: string; info: RelayInfo } | null>(null);
   const [cleanPaste, setCleanPaste] = useState<boolean>(() => cleanOnPasteEnabled());
   const [autoAcquire, setAutoAcquire] = useState<boolean>(() => autoAcquireEnabled());
   /** 更新偵測（ADR-0228 P3）：opt-in 開關＋上次查到的可更新版本（開機先顯示、查完更新）。 */
@@ -636,12 +649,46 @@ export function App(): JSX.Element {
   const [policy, setPolicy] = useState<OrgPolicy>({});
   /** 組織資訊（ADR-0157）：採用名冊時由引擎發出；null＝非工作身分或尚未採用。 */
   const [orgInfo, setOrgInfo] = useState<OrgInfo | null>(null);
-  /** 入職金鑰託管（ADR-0163，企業主端）：依作用中身分載入。 */
+  /**
+   * 入職金鑰託管（ADR-0163，企業主端）：依作用中身分載入。
+   *
+   * ADR-0258 起清單以企業主 sk 導出的金鑰加密落盤，故**改依 backend 載入**（而非只看
+   * `profilesState.active`）——沒有 nsec 就沒有解密金鑰，此時保持空清單。
+   */
   const [escrow, setEscrow] = useState<EscrowEntry[]>([]);
   useEffect(() => {
-    const pk = profilesState.active;
-    setEscrow(pk ? loadEscrow(pk) : []);
-  }, [profilesState.active]);
+    const nsec = backend?.selfNsec;
+    setEscrow(backend && nsec ? loadEscrow(backend.self.pubkey, nsecDecode(nsec)) : []);
+  }, [backend]);
+  /**
+   * 贊助此節點角落卡（ADR-0089 決策 2／ADR-0262）。
+   *
+   * **只對 home 座抓**。ADR-0089 決策 2 明訂不對「錨點／簽章清單自動塞入、使用者未選擇」的
+   * relay 跳贊助卡（防蹭曝光／釣魚）——而 pool 裡的其他座正是這種：它們來自錨點常數
+   * （ADR-0039）或聯絡人 hint 自動學習（ADR-0035），使用者從沒選過。桌面目前也沒有「手動
+   * 加入 relay」的 UI，所以「使用者主動選擇的座」＝home，就這一座。
+   *
+   * 企業身分整個跳過（決策 4：無「贊助雇主 relay」語意）。
+   */
+  const homeRelayUrl = relays.find((r) => r.home)?.url ?? activeProfile(profilesState)?.relayUrl;
+  const sponsorBlocked = (() => {
+    const p = activeProfile(profilesState);
+    return p?.enterprise === true || p?.orgOwner === true;
+  })();
+  useEffect(() => {
+    setSponsor(null); // 換座/換身分先清掉，避免舊卡停在畫面上
+    if (sponsorBlocked || !homeRelayUrl || isSponsorDismissed(homeRelayUrl)) return;
+    let cancelled = false;
+    // 抓不到、沒填、格式怪 → fetchRelayInfo 回 undefined＝不顯示。贊助卡是純加分，
+    // 它的失敗不該在 UI 上留下任何痕跡。
+    void fetchRelayInfo(homeRelayUrl).then((info) => {
+      if (!cancelled && info) setSponsor({ url: homeRelayUrl, info });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [homeRelayUrl, sponsorBlocked]);
+
   /** 公司儲存槽（ADR-0161）：員工端待存放佇列＋企業主端槽目錄（依身分載入）。 */
   const [slotQueue, setSlotQueue] = useState<SlotItem[]>([]);
   const [slotDirVal, setSlotDirVal] = useState("");
@@ -855,6 +902,8 @@ export function App(): JSX.Element {
   requestsRef.current = requests;
   const tRef = useRef(t);
   tRef.current = t;
+  const localeRef = useRef(locale); // ADR-0266：提醒通知的時間格式化（閉包 handler 內取用）
+  localeRef.current = locale;
   // 三欄可視性（ADR-0079）：讓 onMessage/visibilitychange 這類閉包 handler 讀到當前佈局與作用中分頁。
   const layoutRef = useRef(layout);
   layoutRef.current = layout;
@@ -1183,17 +1232,39 @@ export function App(): JSX.Element {
           });
         }
       },
+      onCalendar: setCalendar,
+      // 行程提醒（ADR-0266）：**刻意不走 shouldNotify 的 `windowHidden` 閘**——
+      // 訊息通知的「看得到就別跳」在這裡是錯的：你正盯著這個 App，不代表你知道
+      // 十分鐘後有會。提醒只受總開關管。
+      onCalendarReminder: (e) => {
+        if (!notifyRef.current) return;
+        void getNotifier().notify({
+          title: e.title,
+          body: tRef.current("cal_reminderBody", {
+            when: new Date(e.start * 1000).toLocaleString(localeRef.current, {
+              month: "short",
+              day: "numeric",
+              hour: "2-digit",
+              minute: "2-digit",
+            }),
+          }),
+          ...(e.groupId ?? e.contact ? { convo: (e.groupId ?? e.contact) as string } : {}),
+        });
+      },
       onConnection: setConn,
       onRelayPool: setRelays,
       onPolicy: setPolicy,
       onOrgEscrow: (e) => {
         // ADR-0163：公司帳號成員入職託管的私鑰 → 持久化（依管理者身分），供日後離職接管。
+        // ADR-0258：加密落盤，故需企業主 sk；且**以磁碟為準做讀-改-寫**——託管在清單載入前
+        // 就到達時（backend 剛起、escrow 尚為空），拿 React state 當基底會把既有條目蓋掉。
         const adminPk = backend.self.pubkey;
-        setEscrow((prev) => {
-          const next = upsertEscrow(prev, { ...e, at: Date.now() });
-          saveEscrow(adminPk, next);
-          return next;
-        });
+        const nsec = backend.selfNsec;
+        if (!nsec) return; // 無身分私鑰＝無法加密落盤；寧可不存也不明文落地
+        const sk = nsecDecode(nsec);
+        const next = upsertEscrow(loadEscrow(adminPk, sk), { ...e, at: Date.now() });
+        saveEscrow(adminPk, sk, next);
+        setEscrow(next);
       },
       onSlotDeposit: (sender, dep) => {
         // 公司儲存槽（ADR-0161，企業主端）：靜默落盤（無通知）；槽目錄未設＝appData 預設槽。
@@ -2482,6 +2553,37 @@ export function App(): JSX.Element {
             convos={convos}
             unsent={unsent}
             purged={purged}
+            calendar={calendar}
+            {...(calendarDraft ? { calendarDraft } : {})}
+            {...(() => {
+              // 共享行程（ADR-0263）：示範後端沒有這些方法 → 整個分頁不出現。
+              const publish = activeBackend.calendarPublish;
+              if (!publish || !activeConvo) return {};
+              // 群組 vs 1:1 由當前對話 id 是否為群組決定（與訊息路由同一判準）。
+              const target = groups.some((g) => g.id === activeConvo)
+                ? { groupId: activeConvo }
+                : { contact: activeConvo };
+              return {
+                onCalendarPublish: (input: CalendarEventInput, opts?: { eventId?: string }) => {
+                  publish(target, input, opts?.eventId ? { action: "update", eventId: opts.eventId } : {});
+                },
+                onCalendarCancel: (eventId: string) => {
+                  // 取消只需要指名目標；欄位帶原值以滿足型別（收端只看 action 與 e tag）。
+                  const e = calendar.find((x) => x.id === eventId);
+                  if (!e) return;
+                  publish(target, { title: e.title, start: e.start }, { action: "cancel", eventId });
+                },
+                ...(activeBackend.calendarRsvp
+                  ? { onCalendarRsvp: (id: string, status: RsvpStatus) => activeBackend.calendarRsvp!(id, status) }
+                  : {}),
+                ...(activeBackend.calendarRemind
+                  ? {
+                      onCalendarRemind: (id: string, lead: number | undefined) =>
+                        activeBackend.calendarRemind!(id, lead),
+                    }
+                  : {}),
+              };
+            })()}
             {...(activeConvo
               ? {
                   onInsert: (text: string) =>
@@ -2491,6 +2593,17 @@ export function App(): JSX.Element {
           />
         </aside>
       ) : null}
+      {sponsor ? (
+        <SponsorCard
+          donations={sponsor.info.donations}
+          {...(sponsor.info.name ? { relayName: sponsor.info.name } : {})}
+          relayUrl={sponsor.url}
+          onDismiss={() => {
+            dismissSponsor(sponsor.url);
+            setSponsor(null);
+          }}
+        />
+      ) : null}
       {settingsOpen ? (
         <SettingsPanel
           selfName={self.name}
@@ -2498,6 +2611,10 @@ export function App(): JSX.Element {
           onLogout={() => void logout()}
           {...(profilesState.active ? { onRemoveIdentity: () => void removeIdentity(profilesState.active!) } : {})}
           onWipeDevice={() => void wipeDevice()}
+          {...(activeBackend.requestVanish
+            ? // NIP-62（ADR-0260）：只有真實 relay 後端有這個能力；示範後端不顯示此區塊。
+              { onVanish: () => activeBackend.requestVanish!() }
+            : {})}
           {...(orgInfo ? { orgInfo } : {})}
           {...(() => {
             // 企業頭銜（ADR-0158）：企業成員與企業主身分才顯示編輯欄。
@@ -2532,11 +2649,12 @@ export function App(): JSX.Element {
                 void addIdentity(`離職·${e.name}`, e.relayUrl, false, { nsec: e.nsec, orgOffboarded: true });
               },
               onDeleteEscrow: (pubkey: string) => {
-                setEscrow((prev) => {
-                  const next = removeEscrow(prev, pubkey);
-                  saveEscrow(backend.self.pubkey, next);
-                  return next;
-                });
+                const nsec = backend.selfNsec;
+                if (!nsec) return;
+                const sk = nsecDecode(nsec);
+                const next = removeEscrow(loadEscrow(backend.self.pubkey, sk), pubkey); // 以磁碟為準（ADR-0258）
+                saveEscrow(backend.self.pubkey, sk, next);
+                setEscrow(next);
               },
             };
           })()}
@@ -2859,6 +2977,9 @@ export function App(): JSX.Element {
           return (
             <div key={pk} className={`convotab${pk === activeConvo ? " on" : ""}`}>
             <ConversationWindow
+              {...(activeBackend.calendarPublish
+                ? { onPickDate: (at: number) => setCalendarDraft({ at, nonce: Date.now() }) }
+                : {})}
               embedded={layout === "modern"}
               {...(floating ? { floating } : {})}
               muted={isMuted(groupPrefs, pk)}
@@ -2970,6 +3091,9 @@ export function App(): JSX.Element {
         return (
           <div key={pk} className={`convotab${pk === activeConvo ? " on" : ""}`}>
           <ConversationWindow
+            {...(activeBackend.calendarPublish
+              ? { onPickDate: (at: number) => setCalendarDraft({ at, nonce: Date.now() }) }
+              : {})}
             embedded={layout === "modern"}
             {...(floating ? { floating } : {})}
             self={self}

@@ -5,6 +5,8 @@ import { useMemo, useRef, useState } from "react";
 import {
   applyMention,
   calcPreview,
+  detectDateAtEnd,
+  detectDates,
   formatSticker,
   groupReceiptMode,
   parseCustomSticker,
@@ -21,10 +23,11 @@ import {
 } from "@cinderous/core";
 import type { CallMedia, MentionCandidate } from "@cinderous/core";
 import { replyCounts } from "@cinderous/engine";
-import type { ChatMessage, MessageStatus } from "@cinderous/engine";
+import type { CalendarEventInput, ChatMessage, MessageStatus, RsvpStatus, StoredCalendarEvent } from "@cinderous/engine";
 import { type Locale, type MessageKey, translate } from "@cinderous/i18n";
 import { BG_PRESETS, type ChatBg, chatBgStyle, resolveTheme, type Theme, type ThemeTokens } from "@cinderous/theme";
 import { Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native-web";
+import { CalendarPanel } from "./CalendarPanel.js";
 import { MsgStatusIcon } from "./MsgStatusIcon.js";
 import { downloadImageFromUrl, shareImageFromUrl } from "../native/share.js";
 
@@ -215,6 +218,33 @@ function makeStyles(tk: ThemeTokens) {
     thumb: { width: 180, height: 135, borderRadius: 8, marginBottom: 6, resizeMode: "cover" },
     calcchipEq: { fontSize: 12, color: tk.muted },
     calcchipVal: { fontSize: 13, fontWeight: "700", color: tk.accent },
+    // 日期提示（ADR-0264 階段四／0265）：氣泡下方的可點標記＋草稿尾端的建議列。
+    datechips: { flexDirection: "row", flexWrap: "wrap", gap: 4, marginTop: 4 },
+    datechip: {
+      paddingHorizontal: 8,
+      paddingVertical: 2,
+      borderRadius: 999,
+      borderWidth: 1,
+      borderColor: tk.border,
+      backgroundColor: tk.field,
+    },
+    datechipText: { fontSize: 11, color: tk.accent },
+    datebar: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+      alignSelf: "flex-start",
+      marginHorizontal: 10,
+      marginBottom: 4,
+      paddingVertical: 4,
+      paddingHorizontal: 10,
+      borderRadius: 999,
+      borderWidth: 1,
+      borderColor: tk.accent,
+      backgroundColor: tk.field,
+    },
+    datebarText: { fontSize: 13, color: tk.accent, fontWeight: "700" },
+    datebarHint: { fontSize: 11, color: tk.muted },
     composer: {
       flexDirection: "row",
       alignItems: "center",
@@ -269,6 +299,14 @@ export function ConversationScreen({
   onClearChatBg,
   onNoteLoad,
   onNoteSave,
+  calendar,
+  calendarNameFor,
+  calendarDraft,
+  onPickDate,
+  onCalendarPublish,
+  onCalendarCancel,
+  onCalendarRsvp,
+  onCalendarRemind,
   onSendFile,
   onDepositSlot,
   onStartCall,
@@ -358,6 +396,29 @@ export function ConversationScreen({
    */
   onNoteLoad?: () => string;
   onNoteSave?: (text: string) => void;
+  /**
+   * 共享行程（ADR-0263／0264／0265）：本對話的行程（呼叫端已篩選）。
+   * **未提供 `onCalendarPublish` ＝整個行程分頁不出現、日期也完全不偵測**——沒有能力就不要
+   * 給提示（示範後端無此能力）。
+   */
+  calendar?: StoredCalendarEvent[];
+  /**
+   * 行程參與者的顯示名。**與 `nameFor` 分開**：後者只在群組提供（用來在氣泡上標發送者），
+   * 但行程在 1:1 也要列得出「誰要來」，兩者的提供條件不同，共用會讓 1:1 的名字全變成公鑰片段。
+   */
+  calendarNameFor?: (pubkey: string) => string;
+  /**
+   * 使用者點了對話中的日期標記（ADR-0264 階段四）。**狀態刻意由呼叫端持有**——見下方
+   * `calendarDraft` 的說明；未提供＝日期完全不偵測（不給做不到的事的提示）。
+   */
+  onPickDate?: (at: number) => void;
+  /** 預填：`nonce` 變動即開輔助面板、切到行程分頁、帶入時間。 */
+  calendarDraft?: { at: number; nonce: number } | undefined;
+  onCalendarPublish?: (input: CalendarEventInput, opts?: { eventId?: string }) => void;
+  onCalendarCancel?: (eventId: string) => void;
+  onCalendarRsvp?: (eventId: string, status: RsvpStatus) => void;
+  /** 設定本機提醒（ADR-0266）；未提供＝不顯示提醒列。 */
+  onCalendarRemind?: (eventId: string, lead: number | undefined) => void;
   onBack: () => void;
   locale?: Locale;
   theme?: Theme;
@@ -389,9 +450,29 @@ export function ConversationScreen({
   const [addMemberOpen, setAddMemberOpen] = useState(false);
   /** 對話背景挑選面板是否展開（ADR-0134）。 */
   const [bgOpen, setBgOpen] = useState(false);
-  /** 輔助面板（ADR-0183）：桌面右欄的行動端版——📋 開，內含媒體/對話串/便條分頁。 */
-  const [auxOpen, setAuxOpen] = useState(false);
-  const [auxTab, setAuxTab] = useState<"media" | "threads" | "note">("media");
+  /** 輔助面板（ADR-0183）：桌面右欄的行動端版——📋 開，內含媒體/對話串/便條/行程分頁。 */
+  const [auxOpen, setAuxOpen] = useState(!!calendarDraft);
+  const [auxTab, setAuxTab] = useState<"media" | "threads" | "note" | "calendar">(
+    calendarDraft ? "calendar" : "media",
+  );
+  /**
+   * 點了對話中的日期 → **開面板＋切到行程分頁＋預填**。這是**使用者觸發的導覽**，
+   * 不是 ADR-0263 §1.6 否決的自動切換——沒人點就什麼都不會動。
+   *
+   * **在 render 期間調整 state**（React 官方的 derived-state-from-props 模式）而非 `useEffect`：
+   * 少一次 paint，且這個測試環境是純 SSR（`renderToStaticMarkup`，vite config 的
+   * `environment: "node"`）——effect 在 SSR 不執行，用 effect 就等於這段行為沒有測試覆蓋。
+   * 預填狀態放在呼叫端而不是本元件內，也是為了這件事：內部 state 只能靠點擊觸發，SSR 點不了。
+   */
+  const draftNonce = calendarDraft?.nonce;
+  const [seenDraftNonce, setSeenDraftNonce] = useState(draftNonce);
+  if (draftNonce !== seenDraftNonce) {
+    setSeenDraftNonce(draftNonce);
+    if (draftNonce !== undefined) {
+      setAuxTab("calendar");
+      setAuxOpen(true);
+    }
+  }
   // 便條（ADR-0183）：本畫面以 key={activeId} 重掛（App 層），故 useState 初值即載對應對話的便條。
   const [noteText, setNoteText] = useState(() => onNoteLoad?.() ?? "");
   // 媒體相簿（ADR-0102/0183）：對話中可顯示的圖片。ADR-0184 審查修正：useMemo——只在 messages 變
@@ -465,6 +546,9 @@ export function ConversationScreen({
   };
   // 算式預覽（ADR-0097）：純函式判定草稿是否為算式；不是就回 null（不顯示）。
   const calc = calcPreview(draft);
+  // 日期建議（ADR-0264 階段四）：**只看游標前的尾端**剛打完的那個日期（同 ADR-0037 的尾端比對
+  // 語意）。沒有行事曆能力（無 `onCalendarPublish`）就完全不算——不給做不到的事的提示。
+  const dateHit = onPickDate ? detectDateAtEnd(draft) : undefined;
 
   /**
    * 貼圖判定（ADR-0137）：訊息本文是不是貼圖標記？回可渲染的 SVG，否則 null。
@@ -725,6 +809,17 @@ export function ConversationScreen({
                 <Text style={auxTabTxt(auxTab === "note")}>{t("aux_tabNote")}</Text>
               </Pressable>
             ) : null}
+            {onCalendarPublish ? (
+              <Pressable
+                style={auxTabStyle(auxTab === "calendar")}
+                testID="aux-tab-calendar"
+                onPress={() => setAuxTab("calendar")}
+              >
+                <Text style={auxTabTxt(auxTab === "calendar")}>
+                  {t("aux_tabCalendar")}（{(calendar ?? []).length}）
+                </Text>
+              </Pressable>
+            ) : null}
           </View>
 
           {auxTab === "media" ? (
@@ -782,6 +877,22 @@ export function ConversationScreen({
               />
               <Text style={styles.auxEmpty}>{t("note_hintM")}</Text>
             </View>
+          ) : null}
+
+          {/* 共享行程（ADR-0265）：權威、RSVP、二次確認全在面板內，本處只負責篩選與注入。 */}
+          {auxTab === "calendar" && onCalendarPublish ? (
+            <CalendarPanel
+              events={calendar ?? []}
+              selfPubkey={selfPubkey ?? ""}
+              onPublish={onCalendarPublish}
+              onCancel={onCalendarCancel ?? ((): void => {})}
+              onRsvp={onCalendarRsvp ?? ((): void => {})}
+              {...(onCalendarRemind ? { onRemind: onCalendarRemind } : {})}
+              nameFor={(pk) => calendarNameFor?.(pk) ?? nameFor?.(pk) ?? `${pk.slice(0, 10)}…`}
+              {...(calendarDraft ? { draft: calendarDraft } : {})}
+              tk={tk}
+              locale={locale}
+            />
           ) : null}
         </View>
       ) : null}
@@ -913,6 +1024,30 @@ export function ConversationScreen({
                 <Text style={styles.reactionText}>{emojis.join(" ")}</Text>
               </View>
             ) : null}
+            {/* 日期提示（ADR-0264 階段四）：偵測→提示，點了才建立行程。
+                **已收回的訊息不掃**——內容不該再被解讀。 */}
+            {onPickDate && !gone && !sticker && !m.file && m.text
+              ? (() => {
+                  const hits = detectDates(m.text);
+                  if (hits.length === 0) return null;
+                  return (
+                    <View style={styles.datechips} testID="date-chips">
+                      {hits.map((h) => (
+                        <Pressable
+                          key={`${h.start}-${h.end}`}
+                          style={styles.datechip}
+                          accessibilityRole="button"
+                          aria-label={t("date_chipHint")}
+                          testID="date-chip"
+                          onPress={() => onPickDate(h.at)}
+                        >
+                          <Text style={styles.datechipText}>🗓 {h.text}</Text>
+                        </Pressable>
+                      ))}
+                    </View>
+                  );
+                })()
+              : null}
             {/* 長按後的操作列。 */}
             {picked === m.id ? (
               <View style={styles.actions}>
@@ -1044,6 +1179,20 @@ export function ConversationScreen({
             </Pressable>
           ))}
         </ScrollView>
+      ) : null}
+
+      {/* 日期建議列（ADR-0264 階段四）：點擊＝開行程並預填。**不劫持送出**——送出鍵照常送訊息。 */}
+      {dateHit ? (
+        <Pressable
+          style={styles.datebar}
+          accessibilityRole="button"
+          aria-label={t("date_barHint")}
+          testID="date-suggest"
+          onPress={() => onPickDate?.(dateHit.at)}
+        >
+          <Text style={styles.datebarText}>🗓 {dateHit.text}</Text>
+          <Text style={styles.datebarHint}>{t("date_chipHint")}</Text>
+        </Pressable>
       ) : null}
 
       {/* 算式即時預覽（ADR-0097）：純本地計算，草稿不外流；點一下把「= 答案」加到草稿。 */}
