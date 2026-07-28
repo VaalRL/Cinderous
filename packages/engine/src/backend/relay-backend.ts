@@ -1,8 +1,19 @@
 import {
   applyGroupControl,
   BoundedSet,
+  applyCalendarChange,
   buildAuthEvent,
   buildVanishRequest,
+  calendarEventOf,
+  calendarRsvpOf,
+  rsvpAudience,
+  wrapCalendarEvent,
+  wrapCalendarRsvp,
+  wrapGroupCalendarEvent,
+  type CalendarAction,
+  type CalendarEvent,
+  type CalendarEventInput,
+  type RsvpStatus,
   canPostToGroup,
   CALL_SIGNAL_KIND,
   createHeartbeat,
@@ -131,7 +142,7 @@ import { WebRtcCall } from "./webrtc-call.js";
 import { WebRtcTransfer } from "./webrtc.js";
 import { buildSnapshotContent, mergeSnapshotContent, parseSnapshotContent } from "../storage/cloud-snapshot.js";
 import { getDeviceId } from "../storage/device-id.js";
-import type { AppStorage, MessageStatus, OrSetName, StoredFsState, StoredMessage } from "../storage/types.js";
+import type { AppStorage, MessageStatus, OrSetName, StoredCalendarEvent, StoredFsState, StoredMessage } from "../storage/types.js";
 import type {
   ChatBackend,
   ChatBackendEvents,
@@ -1572,6 +1583,21 @@ export class RelayChatBackend implements ChatBackend {
       if (!target) return;
       // 擁有者驗證（ADR-0233）：只有原寄件人能收回；無痕旗標（ADR-0234）一併傳遞。
       this.applyDeletion(target, sender, deletionTraceless(rumor));
+      return;
+    }
+
+    // 共享行程（ADR-0259）：權威與新舊判定在 core，這裡只負責歸屬（1:1 的對話對象）。
+    const calEvent = calendarEventOf(rumor);
+    if (calEvent) {
+      // 自封副本＝我在另一台裝置建的 → 對話對象是 rumor 的 `to`；否則就是寄件人。
+      const to = rumor.tags.find((t) => t[0] === "to")?.[1];
+      this.applyCalendar(calEvent, calEvent.groupId ? undefined : (selfCopy ? to : sender));
+      return;
+    }
+    const rsvp = calendarRsvpOf(rumor);
+    if (rsvp) {
+      this.storage.setCalendarRsvp(rsvp.eventId, rsvp.by, rsvp.status, rsvp.updatedAt);
+      this.handlers?.onCalendar?.(this.storage.loadCalendar());
       return;
     }
 
@@ -3421,6 +3447,119 @@ export class RelayChatBackend implements ChatBackend {
    * 自封副本因此是 best-effort——它的 event id 不在 `fanout` 裡，放棄時 `markFailed` 找不到、
    * 自然不影響狀態。
    */
+  /**
+   * 建立/修改/取消共享行程（ADR-0259）。`groupId` 給群組行程，`contact` 給 1:1。
+   *
+   * **主揪權威**：`action` 為 `update`／`cancel` 時，只有原主揪送出的才會被收端採納
+   * （`applyCalendarChange` 是執行點）；這裡也先擋一次，避免送出注定被忽略的事件。
+   *
+   * 回傳行程 id（`create` 時為新 id）；無法送出回 undefined。
+   */
+  calendarPublish(
+    target: { groupId: string } | { contact: PubkeyHex },
+    input: CalendarEventInput,
+    opts: { action?: CalendarAction; eventId?: string } = {},
+  ): string | undefined {
+    const action = opts.action ?? "create";
+    const now = nowSec();
+    if (action !== "create") {
+      const existing = this.storage.loadCalendar().find((e) => e.id === opts.eventId);
+      if (!existing || existing.organizer !== this.self.pubkey) return undefined; // 非主揪：不送
+    }
+    const wrapped = "groupId" in target
+      ? (() => {
+          const group = this.groups.find((g) => g.id === target.groupId);
+          if (!group) return undefined;
+          return wrapGroupCalendarEvent(input, this.sk, group, {
+            now,
+            action,
+            ...(opts.eventId ? { eventId: opts.eventId } : {}),
+            ...this.orgExpiration(now),
+          });
+        })()
+      : wrapCalendarEvent(input, this.sk, target.contact, {
+          now,
+          action,
+          ...(opts.eventId ? { eventId: opts.eventId } : {}),
+          ...this.orgExpiration(now),
+        });
+    if (!wrapped) return undefined;
+
+    const id = action === "create" ? wrapped.id : opts.eventId!;
+    // 先落本機（本機是真實來源，ADR-0259 §1.2）——送出成功與否不影響自己看得到。
+    this.applyCalendar({
+      id,
+      action,
+      title: input.title,
+      start: input.start,
+      ...(input.end !== undefined ? { end: input.end } : {}),
+      ...(input.location ? { location: input.location } : {}),
+      ...(input.description ? { description: input.description } : {}),
+      ...("groupId" in target ? { groupId: target.groupId } : {}),
+      organizer: this.self.pubkey,
+      updatedAt: now,
+    }, "contact" in target ? target.contact : undefined);
+
+    for (const evt of wrapped.events) this.publishReliable(evt);
+    this.publishReliable(wrapped.selfCopy); // 自己的其他裝置（ADR-0107）
+    return id;
+  }
+
+  /**
+   * 回覆某行程（ADR-0259）。送給誰由 {@link rsvpAudience} 決定——大群只送主揪，
+   * 把每輪從 O(N²) 降回 O(N)（見 core `calendar.ts` 的說明）。
+   */
+  calendarRsvp(eventId: string, status: RsvpStatus): void {
+    const event = this.storage.loadCalendar().find((e) => e.id === eventId);
+    if (!event) return;
+    const members = event.groupId
+      ? (this.groups.find((g) => g.id === event.groupId)?.members ?? [])
+      : [event.organizer, event.contact ?? "", this.self.pubkey].filter(Boolean);
+    const now = nowSec();
+    const audience = rsvpAudience(members, event.organizer, this.self.pubkey);
+    const wrapped = wrapCalendarRsvp(eventId, status, this.sk, audience, {
+      now,
+      ...(event.groupId ? { groupId: event.groupId } : {}),
+      ...this.orgExpiration(now),
+    });
+    this.storage.setCalendarRsvp(eventId, this.self.pubkey, status, now);
+    this.handlers?.onCalendar?.(this.storage.loadCalendar());
+    for (const evt of wrapped.events) this.publishReliable(evt);
+    this.publishReliable(wrapped.selfCopy);
+  }
+
+  /** 目前所有行程（依 start 升冪）。 */
+  calendarList(): StoredCalendarEvent[] {
+    return this.storage.loadCalendar();
+  }
+
+  /**
+   * 套用一則行程變更到本機（權威與新舊判定在 core 的 `applyCalendarChange`）。
+   * 收端與自己送出時共用同一條路——**兩邊分歧就是 bug 的溫床**。
+   */
+  private applyCalendar(incoming: CalendarEvent, contact?: PubkeyHex): void {
+    const existing = this.storage.loadCalendar().find((e) => e.id === incoming.id);
+    const next = applyCalendarChange(existing as CalendarEvent | undefined, incoming);
+    if (next === undefined) return; // 忽略（非主揪／較舊／無原行程）
+    if (next === null) {
+      this.storage.removeCalendarEvent(incoming.id);
+    } else {
+      this.storage.upsertCalendarEvent({
+        id: next.id,
+        title: next.title,
+        start: next.start,
+        ...(next.end !== undefined ? { end: next.end } : {}),
+        ...(next.location ? { location: next.location } : {}),
+        ...(next.description ? { description: next.description } : {}),
+        ...(next.groupId ? { groupId: next.groupId } : {}),
+        ...(contact ? { contact } : {}),
+        organizer: next.organizer,
+        updatedAt: next.updatedAt,
+      });
+    }
+    this.handlers?.onCalendar?.(this.storage.loadCalendar());
+  }
+
   private publishWrapped(convo: string, messageId: string, wrapped: WrappedMessage): void {
     this.trackFanout(convo, messageId, wrapped.events);
     for (const evt of wrapped.events) this.publishReliable(evt);

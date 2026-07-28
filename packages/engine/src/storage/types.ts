@@ -180,6 +180,34 @@ export interface StoredReaction {
 }
 
 /**
+ * 一筆共享行程（ADR-0259）。**本機是真實來源**——中繼只是傳輸（1059＋7 天 TTL），
+ * 收到後就存在這裡，之後中繼上那份過期與否都不影響。
+ */
+export interface StoredCalendarEvent {
+  /** 行程 id ＝建立那則 rumor 的 id（跨成員一致，ADR-0095）。 */
+  id: string;
+  title: string;
+  /** 開始/結束時間（unix 秒）。 */
+  start: number;
+  end?: number;
+  location?: string;
+  description?: string;
+  /** 所屬群組；1:1 行程為 undefined。 */
+  groupId?: string;
+  /** 1:1 行程的對話對象（＝對方 pubkey）；群組行程為 undefined。 */
+  contact?: string;
+  /** 主揪（唯一有權修改/取消者，ADR-0259 §1.7）。 */
+  organizer: string;
+  /** 這筆目前內容的時間（unix 秒）——較舊的變更會被 `applyCalendarChange` 擋掉。 */
+  updatedAt: number;
+  /**
+   * 各參與者的回覆。鍵＝回覆者 pubkey。**RSVP 是每人對自己狀態的宣告**，由本人簽章，
+   * 故存在事件內即可，不需要另一個集合，也不會有多人衝突。
+   */
+  rsvps?: Record<string, { status: "accepted" | "declined" | "tentative"; at: number }>;
+}
+
+/**
  * 前端本機儲存抽象。目前提供記憶體與 localStorage 實作；
  * Tauri 版之後以相同介面接原生 SQLite（SQLCipher）。
  */
@@ -240,6 +268,17 @@ export interface AppStorage {
   removeRequest(pubkey: string): void;
   /** 待處理的訊息請求。 */
   loadRequests(): StoredContact[];
+  /** 共享行程（ADR-0259）：全部行程，依 `start` 升冪。 */
+  loadCalendar(): StoredCalendarEvent[];
+  /** 新增/取代一筆行程（以 `id` 為鍵）。權威與新舊判定由呼叫端先做（`applyCalendarChange`）。 */
+  upsertCalendarEvent(event: StoredCalendarEvent): void;
+  /** 移除一筆行程（主揪取消時）。 */
+  removeCalendarEvent(id: string): void;
+  /**
+   * 記下某人對某行程的回覆。**只往前推進**：`at` 較舊即忽略——RSVP 可能亂序抵達
+   * （多裝置／重送），晚到的舊回覆不該把新的蓋掉。行程不存在時忽略（尚未收到邀請）。
+   */
+  setCalendarRsvp(eventId: string, pubkey: string, status: "accepted" | "declined" | "tentative", at: number): void;
   loadMessages(contactPubkey: string): StoredMessage[];
   appendMessage(message: StoredMessage): void;
   /** 只往前推進某訊息的送達/已讀狀態（ADR-0058）；訊息不存在或狀態不前進則忽略。 */
@@ -396,6 +435,8 @@ export interface StorageSnapshot {
   blocked: StoredContact[];
   /** 訊息請求（ADR-0121）；舊快照沒有這個欄位 → 匯入時須容忍 `undefined`（退回 `[]`）。 */
   requests?: StoredContact[];
+  /** 共享行程（ADR-0259）；舊快照沒有 → 匯入時退回 `[]`。 */
+  calendar?: StoredCalendarEvent[];
   messages: Record<string, StoredMessage[]>;
   reactions: StoredReaction[];
   deleted: string[];

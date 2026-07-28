@@ -13,6 +13,7 @@ import {
   type StoredGroup,
   type StoredIdentity,
   type StoredMessage,
+  type StoredCalendarEvent,
   type StoredReaction,
 } from "./types.js";
 
@@ -48,6 +49,8 @@ export class MemoryStorage implements AppStorage {
   /** 訊息請求（ADR-0121）：陌生人傳來的訊息，等使用者裁示。 */
   private requests: StoredContact[] = [];
   private groups: StoredGroup[] = [];
+  /** 共享行程（ADR-0259）：id → 行程。本機是真實來源，中繼只是傳輸。 */
+  private readonly calendar = new Map<string, StoredCalendarEvent>();
   /** 已讀水位（ADR-0108）：對話 → 已讀到的最新訊息時間（毫秒）。 */
   private readonly readAt = new Map<string, number>();
   /**
@@ -257,6 +260,24 @@ export class MemoryStorage implements AppStorage {
   loadRequests(): StoredContact[] {
     return [...this.requests];
   }
+  loadCalendar(): StoredCalendarEvent[] {
+    return [...this.calendar.values()].sort((a, b) => a.start - b.start);
+  }
+  upsertCalendarEvent(event: StoredCalendarEvent): void {
+    // 保留既有 rsvps：主揪改時間的那則 rumor 不帶回覆，直接覆寫會把大家的回覆清掉。
+    const prev = this.calendar.get(event.id);
+    this.calendar.set(event.id, { ...event, ...(prev?.rsvps ? { rsvps: { ...prev.rsvps, ...event.rsvps } } : {}) });
+  }
+  removeCalendarEvent(id: string): void {
+    this.calendar.delete(id);
+  }
+  setCalendarRsvp(eventId: string, pubkey: string, status: "accepted" | "declined" | "tentative", at: number): void {
+    const event = this.calendar.get(eventId);
+    if (!event) return; // 尚未收到邀請——回覆先丟掉，補送到時會重新帶出（ADR-0259 §1.5）
+    const prev = event.rsvps?.[pubkey];
+    if (prev && prev.at >= at) return; // 只往前推進：亂序抵達的舊回覆不覆蓋新的
+    this.calendar.set(eventId, { ...event, rsvps: { ...event.rsvps, [pubkey]: { status, at } } });
+  }
   unblockContact(pubkey: string): void {
     this.blocked = this.blocked.filter((b) => b.pubkey !== pubkey);
   }
@@ -456,6 +477,7 @@ export class MemoryStorage implements AppStorage {
       contacts: [...this.contacts],
       blocked: [...this.blocked],
       requests: [...this.requests],
+      calendar: this.loadCalendar(),
       messages,
       reactions: [...this.reactions],
       deleted: [...this.deleted],
@@ -480,6 +502,8 @@ export class MemoryStorage implements AppStorage {
     this.contacts = [...s.contacts];
     this.blocked = [...s.blocked];
     this.requests = [...(s.requests ?? [])]; // 舊快照沒有 requests（ADR-0121）
+    this.calendar.clear(); // 共享行程（ADR-0259）；舊快照沒有 → 空
+    for (const e of s.calendar ?? []) this.calendar.set(e.id, e);
     this.convos.clear();
     for (const [k, v] of Object.entries(s.messages)) {
       // 匯入即建索引（ADR-0110）：一次 O(n) 建好，之後所有查找 O(1)。

@@ -11,12 +11,15 @@ import type {
   OutgoingFile,
   PubkeyHex,
   ReceivedFile,
+  CalendarAction,
+  CalendarEventInput,
+  RsvpStatus,
 } from "@cinderous/core";
-import type { MessageStatus } from "../storage/types.js";
+import type { MessageStatus, StoredCalendarEvent } from "../storage/types.js";
 import { inWorkHours } from "@cinderous/core";
 
 export type { Group, OrgGroup, OrgMember, OrgPolicy, OrgRosterDoc, OrgWorkHours };
-export type { MessageStatus };
+export type { MessageStatus, StoredCalendarEvent };
 
 /** 組織資訊（ADR-0157）：採用名冊時發給前端的公司設定摘要。 */
 export interface OrgInfo {
@@ -236,6 +239,8 @@ export interface ChatBackendEvents {
   onFileError?(contact: PubkeyHex, reason: string): void;
   /** 群組清單更新（M9）。 */
   onGroups?(groups: Group[]): void;
+  /** 共享行程有變動（ADR-0259）：建立/修改/取消/收到 RSVP 皆會發，帶完整清單（依 start 升冪）。 */
+  onCalendar?(events: StoredCalendarEvent[]): void;
   /** 企業政策更新（ADR-0048，來自組織名冊）：前端據此隱藏對應功能。 */
   onPolicy?(policy: OrgPolicy): void;
   /**
@@ -294,6 +299,16 @@ export interface ChatBackend {
    * 僅真實 relay 後端支援。
    */
   requestVanish?(): string[];
+  /** 共享行程（ADR-0259）：建立/修改/取消；回傳行程 id。僅真實 relay 後端支援。 */
+  calendarPublish?(
+    target: { groupId: string } | { contact: PubkeyHex },
+    input: CalendarEventInput,
+    opts?: { action?: CalendarAction; eventId?: string },
+  ): string | undefined;
+  /** 回覆某行程（ADR-0259）。 */
+  calendarRsvp?(eventId: string, status: RsvpStatus): void;
+  /** 目前所有行程（依 start 升冪）。 */
+  calendarList?(): StoredCalendarEvent[];
   /**
    * 更改顯示名稱（ADR-0144）：更新記憶體、落地本機（nsec 不明文，只更名）、把新名廣播給所有
    * 聯絡人（ADR-0061 profile）。未實作的後端（如部分示範）由呼叫端以本機狀態更新即可。

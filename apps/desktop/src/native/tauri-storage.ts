@@ -16,6 +16,7 @@ import type {
   StoredGroup,
   StoredIdentity,
   StoredMessage,
+  StoredCalendarEvent,
   StoredReaction,
 } from "@cinderous/engine";
 
@@ -354,6 +355,22 @@ export class TauriStorage implements AppStorage {
   }
   loadRequests(): StoredContact[] {
     return this.mem.loadRequests();
+  }
+  // 共享行程（ADR-0259）：非訊息 → 落在 meta 部位（同訊息請求）。
+  loadCalendar(): StoredCalendarEvent[] {
+    return this.mem.loadCalendar();
+  }
+  upsertCalendarEvent(event: StoredCalendarEvent): void {
+    this.mem.upsertCalendarEvent(event);
+    this.persist(META);
+  }
+  removeCalendarEvent(id: string): void {
+    this.mem.removeCalendarEvent(id);
+    this.persist(META);
+  }
+  setCalendarRsvp(eventId: string, pubkey: string, status: "accepted" | "declined" | "tentative", at: number): void {
+    this.mem.setCalendarRsvp(eventId, pubkey, status, at);
+    this.persist(META);
   }
   appendMessage(message: StoredMessage): void {
     this.mem.appendMessage(message);
