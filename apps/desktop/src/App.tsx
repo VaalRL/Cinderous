@@ -31,6 +31,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { BrowserChatBackend } from "@cinderous/engine";
 import { normalizeRelayUrl, RelayChatBackend, shouldMuteOrgNotification, webSocketConnector } from "@cinderous/engine";
 import { DEFAULT_NOTIFY_PREFS, type NotifyPrefs, shouldNotify } from "@cinderous/engine";
+import { fetchRelayInfo, type RelayInfo } from "@cinderous/engine";
 import { browserStore } from "./native/browser-store.js";
 import { safeNsecDecode } from "./nsec.js";
 import { getKeyVault } from "./native/keyvault.js";
@@ -170,6 +171,8 @@ import { applyPairBundle } from "@cinderous/engine";
 import { PairDeviceModal, type PairPhase } from "./ui/PairDeviceModal.js";
 import { detectNowPlaying, npAutoEnabled, setNpAutoEnabled } from "./native/now-playing.js";
 import { SettingsPanel } from "./ui/SettingsPanel.js";
+import { SponsorCard } from "./ui/SponsorCard.js";
+import { dismissSponsor, isSponsorDismissed } from "./ui/sponsor-dismiss.js";
 import { ThemeToggleButton } from "./ui/ThemeToggleButton.js";
 import { useRegisterIdentityControls, useRegisterSettingsOpener } from "./titlebar.js";
 import { dialog, useDialog } from "./ui/Dialog.js";
@@ -522,6 +525,8 @@ export function App(): JSX.Element {
   const [historyOf, setHistoryOf] = useState<string | null>(null);
   const [conn, setConn] = useState<ConnectionState>("online");
   const [relays, setRelays] = useState<{ url: string; state: ConnectionState; home: boolean; stale: boolean }[]>([]);
+  /** 贊助此節點角落卡（ADR-0089／0258）：抓到且未被關閉才有值。 */
+  const [sponsor, setSponsor] = useState<{ url: string; info: RelayInfo } | null>(null);
   const [cleanPaste, setCleanPaste] = useState<boolean>(() => cleanOnPasteEnabled());
   const [autoAcquire, setAutoAcquire] = useState<boolean>(() => autoAcquireEnabled());
   /** 更新偵測（ADR-0228 P3）：opt-in 開關＋上次查到的可更新版本（開機先顯示、查完更新）。 */
@@ -646,6 +651,35 @@ export function App(): JSX.Element {
     const nsec = backend?.selfNsec;
     setEscrow(backend && nsec ? loadEscrow(backend.self.pubkey, nsecDecode(nsec)) : []);
   }, [backend]);
+  /**
+   * 贊助此節點角落卡（ADR-0089 決策 2／ADR-0258）。
+   *
+   * **只對 home 座抓**。ADR-0089 決策 2 明訂不對「錨點／簽章清單自動塞入、使用者未選擇」的
+   * relay 跳贊助卡（防蹭曝光／釣魚）——而 pool 裡的其他座正是這種：它們來自錨點常數
+   * （ADR-0039）或聯絡人 hint 自動學習（ADR-0035），使用者從沒選過。桌面目前也沒有「手動
+   * 加入 relay」的 UI，所以「使用者主動選擇的座」＝home，就這一座。
+   *
+   * 企業身分整個跳過（決策 4：無「贊助雇主 relay」語意）。
+   */
+  const homeRelayUrl = relays.find((r) => r.home)?.url ?? activeProfile(profilesState)?.relayUrl;
+  const sponsorBlocked = (() => {
+    const p = activeProfile(profilesState);
+    return p?.enterprise === true || p?.orgOwner === true;
+  })();
+  useEffect(() => {
+    setSponsor(null); // 換座/換身分先清掉，避免舊卡停在畫面上
+    if (sponsorBlocked || !homeRelayUrl || isSponsorDismissed(homeRelayUrl)) return;
+    let cancelled = false;
+    // 抓不到、沒填、格式怪 → fetchRelayInfo 回 undefined＝不顯示。贊助卡是純加分，
+    // 它的失敗不該在 UI 上留下任何痕跡。
+    void fetchRelayInfo(homeRelayUrl).then((info) => {
+      if (!cancelled && info) setSponsor({ url: homeRelayUrl, info });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [homeRelayUrl, sponsorBlocked]);
+
   /** 公司儲存槽（ADR-0161）：員工端待存放佇列＋企業主端槽目錄（依身分載入）。 */
   const [slotQueue, setSlotQueue] = useState<SlotItem[]>([]);
   const [slotDirVal, setSlotDirVal] = useState("");
@@ -2494,6 +2528,17 @@ export function App(): JSX.Element {
               : {})}
           />
         </aside>
+      ) : null}
+      {sponsor ? (
+        <SponsorCard
+          donations={sponsor.info.donations}
+          {...(sponsor.info.name ? { relayName: sponsor.info.name } : {})}
+          relayUrl={sponsor.url}
+          onDismiss={() => {
+            dismissSponsor(sponsor.url);
+            setSponsor(null);
+          }}
+        />
       ) : null}
       {settingsOpen ? (
         <SettingsPanel

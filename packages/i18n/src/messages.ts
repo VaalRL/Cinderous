@@ -503,6 +503,11 @@ export interface Messages {
   settings_wipeDeviceHint: string;
   wipe_device: string;
   /** NIP-62 清除請求（ADR-0256）。 */
+  /** 贊助此節點角落卡（ADR-0089／0258）。 */
+  sponsor_title: string;
+  sponsor_who: string;
+  sponsor_note: string;
+  sponsor_dismiss: string;
   vanish_title: string;
   vanish_hint: string;
   vanish_action: string;
@@ -1217,6 +1222,10 @@ const zhHant: Messages = {
   settings_removeIdentityConfirm: "確定要從這台裝置移除目前身分？私鑰與所有本機資料會被永久刪除、無法復原。若沒有救援登入碼，將無法再登入此身分。",
   settings_wipeDeviceHint: "刪除這台裝置上「所有」身分的私鑰與全部本機資料，回到全新狀態。此動作無法復原——請先確認你已有救援登入碼。",
   wipe_device: "清空裝置",
+  sponsor_title: "贊助此節點",
+  sponsor_who: "{relay} 由其營運者自費提供。以下連結由該節點自報，非官方背書。",
+  sponsor_note: "完全自願。點擊只會用瀏覽器或錢包開啟外部連結——本 App 不經手金流，也永不自動付款。",
+  sponsor_dismiss: "不再顯示",
   vanish_title: "清除我在中繼站上的資料",
   vanish_hint:
     "中繼站暫存的離線留言預設 7 天後自動消失。你也可以現在就要求它們立刻刪除——包含寄給你但你還沒收到的訊息、你的加密雲端備份。**本機的對話不受影響**（那本來就只在你的裝置上）。",
@@ -1913,6 +1922,10 @@ const en: Messages = {
   settings_removeIdentityConfirm: "Remove the current identity from this device? Its private key and all local data will be permanently deleted and cannot be recovered. Without a rescue login code you won't be able to sign in to this identity again.",
   settings_wipeDeviceHint: "Delete the private keys and all local data of EVERY identity on this device, returning it to a fresh state. This cannot be undone — make sure you have a rescue login code first.",
   wipe_device: "Wipe device",
+  sponsor_title: "Support this node",
+  sponsor_who: "{relay} is run at its operator\u2019s own expense. The links below are self-reported by that node, not an official endorsement.",
+  sponsor_note: "Entirely optional. Clicking only opens an external link in your browser or wallet \u2014 this app never handles money and never pays automatically.",
+  sponsor_dismiss: "Don\u2019t show again",
   vanish_title: "Erase my data on relays",
   vanish_hint:
     "Offline messages held by relays expire after 7 days by default. You can also ask them to delete everything now — including messages sent to you that you have not received yet, and your encrypted cloud backup. **Your local conversations are unaffected** (they only ever lived on your device).",
