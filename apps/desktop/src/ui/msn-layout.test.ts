@@ -19,3 +19,18 @@ describe("內嵌對話撐滿中欄（ADR-0079 Q3 回歸鎖）", () => {
     expect(css).toMatch(/\.convo-dock \{[^}]*align-items: flex-start/);
   });
 });
+
+describe("右欄分頁樣式（ADR-0270 回歸鎖）", () => {
+  const tabBlock = css.slice(css.indexOf(".daux__tab {"), css.indexOf(".daux__count"));
+  const onBlock = css.slice(css.indexOf(".daux__tab.on {"), css.indexOf(".daux__tab.on {") + 80);
+  it("固定高度＋不換行（切換分頁高度一致）", () => {
+    expect(tabBlock).toMatch(/height: 34px/);
+    expect(tabBlock).toContain("white-space: nowrap");
+  });
+  it("選中不用粗體、不用底線指示器（避免 reflow 跳高與 AI 風底線）", () => {
+    expect(tabBlock).not.toContain("font-weight"); // 基礎與選中都不變字重
+    expect(onBlock).not.toContain("font-weight");
+    expect(onBlock).not.toContain("border-bottom"); // 選中改填底、非底線
+    expect(onBlock).toContain("background: var(--surface2)"); // 填底標示
+  });
+});

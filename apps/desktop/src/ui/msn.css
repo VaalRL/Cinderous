@@ -169,10 +169,19 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
 /* 右側欄對話輔助區（ADR-0079 Q4）：四分頁 threads/members/media/info。 */
 .daux { display: flex; flex-direction: column; height: 100%; min-height: 0; }
 .daux__tabs { display: flex; flex: none; border-bottom: 1px solid var(--border); }
-.daux__tab { flex: 1; padding: 8px 4px; border: none; background: none; color: var(--muted); font: inherit; font-size: 12px; cursor: pointer; border-bottom: 2px solid transparent; }
+/* 右欄分頁（ADR-0270）：固定高度＋不換行＋不用粗體——切換不同分頁時高度一致（粗體會讓
+   選中分頁變寬而在窄欄換行、高度跳動）；選中以**填底**（surface2＋主色字）標示，
+   刻意不用底線指示器/陰影（那是 Material 風、顯得 AI 味重，與本專案懷舊即時通風格不合）。 */
+.daux__tab {
+  flex: 1; min-width: 0; height: 34px;
+  display: flex; align-items: center; justify-content: center; gap: 3px;
+  padding: 0 4px; border: none; background: none; color: var(--muted);
+  font: inherit; font-size: 12px; line-height: 1; white-space: nowrap; overflow: hidden;
+  cursor: pointer;
+}
 .daux__tab:hover { background: var(--hover); }
-.daux__tab.on { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
-.daux__count { display: inline-block; margin-left: 4px; font-size: 10px; color: var(--muted); }
+.daux__tab.on { color: var(--accent); background: var(--surface2); }
+.daux__count { font-size: 10px; color: var(--muted); }
 .daux__tab.on .daux__count { color: var(--accent); }
 .daux__body { flex: 1; min-height: 0; overflow-y: auto; padding: 12px; }
 .daux__info { display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; }
