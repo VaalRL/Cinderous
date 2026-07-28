@@ -58,6 +58,14 @@ describe("DeckSidebar 三欄左側欄（ADR-0079 Q2）", () => {
     expect(html).toContain("me__np");
   });
 
+  it("吉祥物在 me 列（ADR-0247 延伸）：與經典版對齊；有未讀＝alert 狀態", () => {
+    const idle = render({});
+    expect(idle).toContain("me__mascot");
+    expect(idle).toContain('aria-label="Cinderous"'); // 無未讀＝待機
+    const alerted = render({ unread: { p1: 2 } });
+    expect(alerted).toContain('aria-label="Cinderous（有新訊息）"'); // 未讀＝alert
+  });
+
   it("♪ 自動偵測切換（ADR-0252）：有 onToggleNpAuto 才是按鈕；開啟＝高亮＋偵測顯示取代輸入框", () => {
     // 無 onToggleNpAuto（瀏覽器）：♪ 是純圖示、無切換鈕
     expect(render({ onNowPlaying: () => {} })).not.toContain('data-testid="np-auto-toggle"');

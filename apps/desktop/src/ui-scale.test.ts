@@ -33,11 +33,16 @@ describe("UI 尺寸（ADR-0253）", () => {
     expect(getUiScale()).toBe(1);
   });
 
-  it("瀏覽器路徑：套用＝根元素 CSS zoom；1＝清掉屬性完全無痕", async () => {
+  it("瀏覽器路徑：套用＝根元素 CSS zoom＋視口單位校正；1＝全部清掉無痕", async () => {
     await applyUiScale(1.3);
-    expect((document.documentElement.style as CSSStyleDeclaration & { zoom: string }).zoom).toBe("1.3");
+    const st = document.documentElement.style as CSSStyleDeclaration & { zoom: string };
+    expect(st.zoom).toBe("1.3");
+    // CSS zoom 不縮放 vh → 版面高度以 calc(100vh / zoom) 還原「佔滿視窗」（審查修正：
+    // 90% 檔位底部露空白、放大檔位溢出捲軸）。
+    expect(st.getPropertyValue("--viewport-h")).toBe("calc(100vh / 1.3)");
     await applyUiScale(1);
-    expect((document.documentElement.style as CSSStyleDeclaration & { zoom: string }).zoom).toBe("");
+    expect(st.zoom).toBe("");
+    expect(st.getPropertyValue("--viewport-h")).toBe("");
   });
 
   it("setUiScale：落地＋套用；非法值回退 1", async () => {

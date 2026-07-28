@@ -32,7 +32,14 @@ export async function applyUiScale(scale: number): Promise<void> {
     return;
   }
   // CSS zoom（Chromium/WebKit/Firefox 126+ 皆已標準化）；1＝清掉屬性完全無痕。
-  (document.documentElement.style as CSSStyleDeclaration & { zoom: string }).zoom = scale === 1 ? "" : String(scale);
+  const st = document.documentElement.style as CSSStyleDeclaration & { zoom: string };
+  st.zoom = scale === 1 ? "" : String(scale);
+  // 視口單位校正（審查修正）：CSS zoom 不會縮放 vh——版面高度吃 `--viewport-h: 100vh`，
+  // 90% 檔位時 .deck 只有視窗的 90% 高（底部露出空白）、放大檔位則溢出捲軸。
+  // 以 calc(100vh / zoom) 覆寫還原「佔滿視窗」語意；Tauri 走原生縮放無此問題（且其
+  // 自繪外框另管 --viewport-h，本分支僅瀏覽器會執行、不互踩）。
+  if (scale === 1) st.removeProperty("--viewport-h");
+  else st.setProperty("--viewport-h", `calc(100vh / ${scale})`);
 }
 
 /** 設定並套用（落地為裝置偏好）。 */

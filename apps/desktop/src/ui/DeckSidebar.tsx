@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { CinderMascot } from "@cinderous/brand";
 import type { ChatMessage, Contact, Group, Self, Status } from "@cinderous/engine";
 import { useI18n } from "../i18n.js";
 import { EditableAvatar } from "./Avatar.js";
@@ -123,6 +124,11 @@ export function DeckSidebar(props: DeckSidebarProps): JSX.Element {
               )}
             </div>
           ) : null}
+        </div>
+        {/* 吉祥物（ADR-0247 延伸）：三欄側欄 me 列與經典版對齊——原本只在中欄空狀態出現，
+            開著對話時就整個消失（使用者回報）；有未讀時進入 alert 狀態，與經典同款。 */}
+        <div className="me__mascot" title="Cinderous">
+          <CinderMascot alert={Object.values(props.unread).some((n) => n > 0)} size={44} />
         </div>
       </div>
 
