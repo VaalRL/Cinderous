@@ -71,6 +71,17 @@ export function buildRewritePrompt(text: string, instruction: string): string {
   ].join("\n");
 }
 
+/**
+ * AI 改寫在此環境是否可用（ADR-0267）：Tauri（Rust IPC，無 CORS 面）恆可；瀏覽器版僅限
+ * **localhost origin**（開發/自架本機）——Ollama 預設 `OLLAMA_ORIGINS` 本就放行 localhost 系。
+ * 公網部署的 webapp 對 localhost 的 fetch 會被 CORS＋Chrome 本地網路管制實質封死，
+ * 死路功能不如不出現 → 整個 AI 區塊（設定/🧠/改寫）以此設閘。
+ */
+export function aiRewriteSupported(origin: string = typeof location !== "undefined" ? location.origin : ""): boolean {
+  if (isTauri()) return true;
+  return isLocalEndpoint(origin);
+}
+
 /** 隱私守則（ADR-0060）：只有 localhost 端點才保證文字不離開裝置。 */
 export function isLocalEndpoint(endpoint: string): boolean {
   try {

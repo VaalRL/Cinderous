@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  aiRewriteSupported,
   buildRewritePrompt,
   buildSummaryPrompt,
   DEFAULT_OLLAMA,
@@ -94,5 +95,13 @@ describe("Ollama 改寫（ADR-0060）", () => {
     expect(providerOf({ provider: "openai", endpoint: "x", model: "m" })).toBe("openai");
     expect(PROVIDER_DEFAULTS.openai.endpoint.startsWith("https://")).toBe(true);
     expect(isLocalEndpoint(PROVIDER_DEFAULTS.openai.endpoint)).toBe(false); // 線上＝非本機
+  });
+
+  it("aiRewriteSupported（ADR-0267）：瀏覽器僅 localhost origin；公網 webapp＝不支援", () => {
+    // 非 Tauri（node 測試環境）→ 依 origin 判斷：
+    expect(aiRewriteSupported("http://localhost:5173")).toBe(true); // 開發/自架本機
+    expect(aiRewriteSupported("http://127.0.0.1:8080")).toBe(true);
+    expect(aiRewriteSupported("https://cinderous.cinderous1.workers.dev")).toBe(false); // 部署版：CORS/LNA 封死
+    expect(aiRewriteSupported("")).toBe(false); // 無 origin（防呆）
   });
 });

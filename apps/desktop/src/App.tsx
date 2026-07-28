@@ -159,6 +159,7 @@ import { DeckTabs } from "./ui/DeckTabs.js";
 import { ConversationWindow } from "./ui/ConversationWindow.js";
 import { useFloatingWindows } from "./ui/useFloatingWindow.js";
 import {
+  aiRewriteSupported,
   DEFAULT_OLLAMA,
   ollamaAvailable,
   ollamaRewrite,
@@ -758,10 +759,13 @@ export function App(): JSX.Element {
     }
   };
   // AI 改寫/摘要回呼：僅在啟用時提供（否則不顯示入口）。localOnly 由 ollama 設定內強制。
-  const rewriteFn = ollama.enabled
+  // ADR-0267：公網部署的瀏覽器版連不到 localhost Ollama（CORS＋Chrome 本地網路管制）——
+  // 該環境整個 AI 面（設定/🧠/改寫）不出現；enabled 偏好仍保留（換回可用環境即恢復）。
+  const aiOk = aiRewriteSupported();
+  const rewriteFn = aiOk && ollama.enabled
     ? (text: string, instruction: string): Promise<string> => ollamaRewrite(text, instruction, ollama)
     : undefined;
-  const checkAiAvailable = ollama.enabled ? (): Promise<boolean> => ollamaAvailable(ollama) : undefined;
+  const checkAiAvailable = aiOk && ollama.enabled ? (): Promise<boolean> => ollamaAvailable(ollama) : undefined;
   // 未讀摘要（點開對話前）：狀態驅動的小視窗。
   const [summary, setSummary] = useState<{ pubkey: string; status: "busy" | "done" | "error" | "empty"; text: string } | null>(
     null,
@@ -2441,7 +2445,7 @@ export function App(): JSX.Element {
             onSelfAvatar={broadcastSelfAvatar}
             {...(activeBackend.removeContact ? { onRemoveContact: removeContact } : {})}
             {...(activeBackend.blockContact ? { onBlockContact: blockContact } : {})}
-            {...(ollama.enabled ? { onSummarize: summarizeUnread } : {})}
+            {...(aiOk && ollama.enabled ? { onSummarize: summarizeUnread } : {})}
             {...addContactProps}
           />
         ) : (
@@ -2456,7 +2460,7 @@ export function App(): JSX.Element {
             onNowPlaying={(text) => activeBackend.setNowPlaying(text)}
             {...(isTauri() ? { npAuto, npAutoText, onToggleNpAuto: toggleNpAuto } : {})}
             unread={unread}
-            {...(ollama.enabled ? { onSummarize: summarizeUnread } : {})}
+            {...(aiOk && ollama.enabled ? { onSummarize: summarizeUnread } : {})}
             connection={conn}
             convos={convos}
             contactLabels={Object.fromEntries(contacts.map((c) => [c.pubkey, labelsOf(groupPrefs, c.pubkey)]))}
@@ -2762,8 +2766,7 @@ export function App(): JSX.Element {
                 },
               }
             : {})}
-          ollama={ollama}
-          onOllamaChange={updateOllama}
+          {...(aiOk ? { ollama, onOllamaChange: updateOllama } : {})}
           {...(storageRef.current
             ? {
                 retention: { cap: retentionCap, onChange: setRetentionCap, full: storageFull },
