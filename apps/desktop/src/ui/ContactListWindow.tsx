@@ -7,7 +7,7 @@ import { qrDataUri } from "../qr.js";
 import { CinderMascot } from "./Brand.js";
 import { type ContactSection, groupContacts, type SortMode } from "./contact-grouping.js";
 import { ContactRow } from "./ContactRow.js";
-import { messagePreview } from "./deck-sidebar.js";
+import { messagePreview, nameOrMessagesMatch } from "./deck-sidebar.js";
 import { BrandWordmark } from "./BrandWordmark.js";
 import { hasRichStatus, renderStatus } from "./status-text.js";
 import { TitleControls } from "./TitleControls.js";
@@ -250,7 +250,13 @@ export function ContactListWindow(props: ContactListProps): JSX.Element {
   // 排序模式與收合狀態（ADR-0215）：皆持久化本機。
   const [sortMode, setSortMode] = useState<SortMode>(() => loadSortMode());
   const [collapsed, setCollapsed] = useState<Set<string>>(() => loadCollapsed());
-  const sections = groupContacts(contacts, sortMode, props.contactLabels ?? {});
+  // 經典佈局搜尋（ADR-0256）：名稱＋訊息內容（與三欄側欄同一套比對，ADR-0079 Q2）；
+  // 查詢非空時過濾聯絡人與群組（請求/封鎖區不在範圍）。
+  const [query, setQuery] = useState("");
+  const visibleContacts = query.trim()
+    ? contacts.filter((c) => nameOrMessagesMatch(contactLabel(c), c.pubkey, query, props.convos ?? {}))
+    : contacts;
+  const sections = groupContacts(visibleContacts, sortMode, props.contactLabels ?? {});
   const changeSort = (m: SortMode): void => {
     setSortMode(m);
     saveSortMode(m);
@@ -294,7 +300,9 @@ export function ContactListWindow(props: ContactListProps): JSX.Element {
     />
   );
   const [groupModal, setGroupModal] = useState(false);
-  const groups = props.groups ?? [];
+  const groups = (props.groups ?? []).filter(
+    (g) => !query.trim() || nameOrMessagesMatch(g.name, g.id, query, props.convos ?? {}),
+  );
   const requests = props.requests ?? [];
 
   return (
@@ -447,6 +455,16 @@ export function ContactListWindow(props: ContactListProps): JSX.Element {
       ) : null}
 
       <div className="roster">
+        {/* 搜尋（ADR-0256）：名稱＋訊息內容，與三欄側欄同一套比對。 */}
+        <div className="roster__search">
+          <input
+            data-testid="roster-search"
+            aria-label={t("roster_search")}
+            placeholder={t("roster_search")}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+          />
+        </div>
         {/* 排序切換（ADR-0215）：依 狀態/分組/名稱，只影響下方聯絡人分區。 */}
         <div className="sortbar" data-testid="sortbar">
           <span className="sortbar__label">{t("sort_label")}</span>

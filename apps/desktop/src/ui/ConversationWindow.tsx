@@ -105,6 +105,7 @@ import { MsgStatusIcon } from "./MsgStatusIcon.js";
 import { readOriginal, relocateOriginal } from "../native/save-file.js";
 import { copyImageFromUrl, copyText } from "../native/clipboard.js";
 import { chatBgCss, getChatBg, getConvoSize, setConvoSize } from "./personalize.js";
+import { searchChannel, stepHit } from "./msg-search.js";
 import { cssZoomFactor } from "../ui-scale.js";
 
 /**
@@ -464,6 +465,14 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
     onMarkRead?.();
   }, [contact.pubkey, messages.length, onMarkRead]);
   const [visibleCount, setVisibleCount] = useState(MESSAGE_WINDOW);
+  // 對話內搜尋（ADR-0256）：🔍 開關＋關鍵字＋命中巡覽；searchAt 以超大值起始＝夾限後落在最新命中。
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchAt, setSearchAt] = useState(Number.MAX_SAFE_INTEGER);
+  useEffect(() => {
+    setSearchOpen(false);
+    setSearchQuery("");
+  }, [contact.pubkey]);
   // ADR-0148：本地暱稱。標頭預設顯示暱稱（若有），點名字暫態切換為對方廣播名；換對話即重置。
   const hasAlias = !!contact.alias?.trim();
   const [showBroadcast, setShowBroadcast] = useState(false);
@@ -688,6 +697,30 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
   // 訊息列視窗化：只渲染最近 visibleCount 則，避免長對話一次渲染上千 DOM 節點。
   const hiddenCount = Math.max(0, channel.length - visibleCount);
   const shown = hiddenCount > 0 ? channel.slice(hiddenCount) : channel;
+  // 對話內搜尋（ADR-0256）：命中限熱區（封存另行，ADR-0111 冷熱分離）；at＝夾限後的目前命中。
+  const hits = searchOpen ? searchChannel(channel, searchQuery, { ...(props.unsent ? { unsent: props.unsent } : {}), ...(props.expired ? { expired: props.expired } : {}) }) : [];
+  const hitAt = hits.length === 0 ? 0 : Math.min(searchAt, hits.length - 1);
+  // 跳轉：目標在視窗外→先擴 visibleCount（effect 重跑再捲）；到位→捲動＋短暫高亮。
+  // `.log` 子元素＝〔載入更早鈕?〕＋shown（索引對映；免動 MessageLine 的多分支根節點）。
+  useEffect(() => {
+    if (!searchOpen || !searchQuery.trim()) return;
+    const hit = hits[hitAt];
+    if (!hit) return;
+    const needed = channel.length - hit.index;
+    if (visibleCount < needed) {
+      setVisibleCount(Math.ceil(needed / MESSAGE_WINDOW) * MESSAGE_WINDOW);
+      return; // 擴窗後 effect 依 visibleCount 重跑再捲
+    }
+    const log = logRef.current;
+    if (!log) return;
+    const el = log.children[hit.index - hiddenCount + (hiddenCount > 0 ? 1 : 0)] as HTMLElement | undefined;
+    if (!el) return;
+    el.scrollIntoView?.({ block: "center" });
+    el.classList.add("line--hit");
+    const timer = setTimeout(() => el.classList.remove("line--hit"), 1600);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- hits/channel 由 searchQuery 與訊息派生
+  }, [searchOpen, searchQuery, searchAt, visibleCount, messages.length]);
   // 擁有中的自製貼圖 id 集合：整個訊息列共用一份（不再每則訊息各建一個 Set）。
   const ownedIds = new Set(library.map((s) => s.id));
 
@@ -1375,7 +1408,61 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
           {contact.status === "offline" ? t("convo_offlineNotice") : contact.statusMessage}
           {contact.nowPlaying ? `　♪ ${contact.nowPlaying}` : ""}
         </div>
+        {/* 對話內搜尋開關（ADR-0256）。 */}
+        <button
+          type="button"
+          className="convo__searchbtn"
+          data-testid="msg-search-toggle"
+          aria-label={t("convo_search")}
+          title={t("convo_search")}
+          aria-pressed={searchOpen}
+          onClick={() => {
+            setSearchOpen((o) => !o);
+            setSearchQuery("");
+          }}
+        >
+          🔍
+        </button>
       </div>
+      {searchOpen ? (
+        <div className="convo__search" data-testid="msg-search-bar">
+          <input
+            autoFocus
+            value={searchQuery}
+            aria-label={t("convo_search")}
+            placeholder={t("convo_searchHint")}
+            onChange={(e) => {
+              setSearchQuery(e.target.value);
+              setSearchAt(Number.MAX_SAFE_INTEGER); // 新查詢→跳到最新命中
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") setSearchOpen(false);
+              if (e.key === "Enter") setSearchAt(stepHit(hitAt, hits.length, e.shiftKey ? 1 : -1)); // Enter＝往較舊
+            }}
+          />
+          <span className="cnt" data-testid="msg-search-count">
+            {searchQuery.trim() ? (hits.length === 0 ? t("convo_searchNone") : `${hitAt + 1}/${hits.length}`) : ""}
+          </span>
+          <button
+            type="button"
+            aria-label={t("convo_searchPrev")}
+            title={t("convo_searchPrev")}
+            disabled={hits.length === 0}
+            onClick={() => setSearchAt(stepHit(hitAt, hits.length, -1))}
+          >
+            ↑
+          </button>
+          <button
+            type="button"
+            aria-label={t("convo_searchNext")}
+            title={t("convo_searchNext")}
+            disabled={hits.length === 0}
+            onClick={() => setSearchAt(stepHit(hitAt, hits.length, 1))}
+          >
+            ↓
+          </button>
+        </div>
+      ) : null}
 
       <div
         className={`convo__body ${dragging || props.dropActive ? "dropping" : ""}`}

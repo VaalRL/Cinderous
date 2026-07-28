@@ -379,6 +379,13 @@ export interface Messages {
   convo_msgDetail: string;
   convo_unsent: string;
   convo_loadEarlier: string;
+  /** 對話內搜尋與經典佈局搜尋（ADR-0256）。 */
+  convo_search: string;
+  convo_searchHint: string;
+  convo_searchNone: string;
+  convo_searchPrev: string;
+  convo_searchNext: string;
+  roster_search: string;
   convo_timerTitle: string;
   convo_timerOff: string;
   convo_timer1m: string;
@@ -1099,6 +1106,12 @@ const zhHant: Messages = {
   convo_msgDetail: "訊息詳情",
   convo_unsent: "訊息已收回",
   convo_loadEarlier: "載入較早的 {count} 則訊息",
+  convo_search: "搜尋訊息",
+  convo_searchHint: "搜尋此對話…",
+  convo_searchNone: "無符合",
+  convo_searchPrev: "上一個（較舊）",
+  convo_searchNext: "下一個（較新）",
+  roster_search: "搜尋（名稱或訊息）",
   convo_timerTitle: "限時訊息（閱後即焚）",
   convo_timerOff: "限時：關",
   convo_timer1m: "限時：1 分鐘",
@@ -1796,6 +1809,12 @@ const en: Messages = {
   convo_msgDetail: "Message",
   convo_unsent: "Message unsent",
   convo_loadEarlier: "Load {count} earlier messages",
+  convo_search: "Search messages",
+  convo_searchHint: "Search this conversation…",
+  convo_searchNone: "No matches",
+  convo_searchPrev: "Previous (older)",
+  convo_searchNext: "Next (newer)",
+  roster_search: "Search (name or messages)",
   convo_timerTitle: "Disappearing message",
   convo_timerOff: "Timer: off",
   convo_timer1m: "Timer: 1 min",

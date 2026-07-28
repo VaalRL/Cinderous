@@ -67,13 +67,21 @@ export function buildEntries(
   return [...c, ...g];
 }
 
-/** 名稱或任一則訊息內容命中查詢（空查詢＝全中；大小寫不敏感）。 */
-export function matchesQuery(entry: SidebarEntry, query: string, convos: Record<string, ChatMessage[]>): boolean {
+/**
+ * 名稱或任一則訊息內容命中查詢（空查詢＝全中；大小寫不敏感）。
+ * 三欄側欄與經典聯絡人視窗共用（ADR-0256 經典補搜尋時自 matchesQuery 抽出）。
+ */
+export function nameOrMessagesMatch(name: string, id: string, query: string, convos: Record<string, ChatMessage[]>): boolean {
   const q = query.trim().toLowerCase();
   if (!q) return true;
-  if (entry.name.toLowerCase().includes(q)) return true;
-  const msgs = convos[entry.id];
+  if (name.toLowerCase().includes(q)) return true;
+  const msgs = convos[id];
   return !!msgs && msgs.some((m) => m.text?.toLowerCase().includes(q));
+}
+
+/** 名稱或任一則訊息內容命中查詢（SidebarEntry 便利包裝）。 */
+export function matchesQuery(entry: SidebarEntry, query: string, convos: Record<string, ChatMessage[]>): boolean {
+  return nameOrMessagesMatch(entry.name, entry.id, query, convos);
 }
 
 /** 依最近互動排序（新→舊）；無互動者殿後、同分依名稱。不改動輸入。 */
