@@ -849,6 +849,12 @@ button:disabled { opacity: .5; cursor: default; filter: none; }
 }
 .roster__search { padding: 6px 8px 0; }
 .roster__search input { width: 100%; box-sizing: border-box; }
+/* 封存搜尋（ADR-0256 階段 3）：歷史視窗頂端搜尋列＋掃描進度。 */
+.hist__search { display: flex; gap: 6px; padding: 6px 10px; border-bottom: 1px solid var(--border); background: var(--surface2); }
+.hist__search input { flex: 1; min-width: 0; }
+.hist__search button { border: 1px solid var(--border); background: var(--field); color: var(--ink); border-radius: 6px; cursor: pointer; padding: 2px 8px; font-size: 12px; }
+.hist__search button:disabled { opacity: .5; cursor: default; }
+.hist__scan { color: var(--muted); font-size: 12px; margin: 6px 0; }
 
 /* 無障礙設定（ADR-0253）：UI 尺寸檔位橫排；開啟/選中以主色描邊＋粗體標示（aria-pressed 同步，不只靠顏色）。 */
 .a11y__scale { display: flex; gap: 6px; flex-wrap: wrap; }

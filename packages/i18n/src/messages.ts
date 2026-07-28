@@ -237,6 +237,10 @@ export interface Messages {
   export_this: string;
   /** 歷史紀錄（ADR-0111）：讀封存的舊訊息。 */
   history_title: string;
+  /** 封存搜尋（ADR-0256 階段 3）。 */
+  history_search: string;
+  history_scanning: string;
+  history_searchClear: string;
   history_open: string;
   history_older: string;
   history_loading: string;
@@ -970,6 +974,9 @@ const zhHant: Messages = {
   export_run: "導出",
   export_this: "導出此對話",
   history_title: "歷史紀錄",
+  history_search: "搜尋封存的舊訊息…",
+  history_scanning: "掃描 {done}/{total} 塊（逐塊解密、不留索引）",
+  history_searchClear: "清除",
   history_open: "歷史紀錄（封存的舊訊息）",
   history_older: "載入更早",
   history_loading: "載入中…",
@@ -1673,6 +1680,9 @@ const en: Messages = {
   export_run: "Export",
   export_this: "Export this conversation",
   history_title: "History",
+  history_search: "Search archived messages…",
+  history_scanning: "Scanning chunk {done}/{total} (decrypt-and-discard, no index kept)",
+  history_searchClear: "Clear",
   history_open: "History (archived messages)",
   history_older: "Load older",
   history_loading: "Loading…",

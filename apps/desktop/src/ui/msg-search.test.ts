@@ -2,7 +2,7 @@
 import { describe, expect, it } from "vitest";
 import { appendAssetManifest } from "@cinderous/core";
 import type { ChatMessage } from "@cinderous/engine";
-import { searchChannel, stepHit } from "./msg-search.js";
+import { matchesStored, searchChannel, stepHit } from "./msg-search.js";
 
 const msg = (id: string, text: string, extra: Partial<ChatMessage> = {}): ChatMessage =>
   ({ id, text, outgoing: false, at: 1, ...extra }) as ChatMessage;
@@ -39,6 +39,15 @@ describe("searchChannel（ADR-0256）", () => {
     expect(searchChannel(withAsset, "哈囉").length).toBe(1);
     expect(searchChannel(withAsset, "獨特標籤詞")).toEqual([]); // manifest 內容不參與
     expect(searchChannel(withAsset, "ffd84d")).toEqual([]); // SVG 內容不參與
+  });
+});
+
+describe("matchesStored（封存比對，ADR-0256 階段 3）", () => {
+  it("文字/檔名命中；q 由呼叫端正規化；空 q 不命中", () => {
+    expect(matchesStored({ text: "晚餐約週五" }, "週五")).toBe(true);
+    expect(matchesStored({ text: "", file: { name: "報價單.PDF" } }, "pdf")).toBe(true);
+    expect(matchesStored({ text: "晚餐約週五" }, "")).toBe(false);
+    expect(matchesStored({ text: "晚餐約週五" }, "早餐")).toBe(false);
   });
 });
 

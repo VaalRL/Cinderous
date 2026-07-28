@@ -37,3 +37,13 @@ export function stepHit(current: number, total: number, dir: 1 | -1): number {
   if (total <= 0) return 0;
   return (current + dir + total) % total;
 }
+
+/**
+ * 封存訊息比對（ADR-0256 階段 3）：文字或檔名、大小寫不敏感；q 需先 trim+lowercase
+ * （掃描迴圈每塊上千則，正規化一次由呼叫端做）。空 q＝不命中。
+ */
+export function matchesStored(m: { text: string; file?: { name: string } }, q: string): boolean {
+  if (!q) return false;
+  if (m.file) return m.file.name.toLowerCase().includes(q);
+  return splitAssetManifest(m.text).text.toLowerCase().includes(q);
+}
