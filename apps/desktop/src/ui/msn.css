@@ -44,6 +44,28 @@
   --code-bg: #2a3344;
 }
 
+/* ── 高對比（ADR-0253，視障友善）：獨立軸、與亮/暗正交（可組合出亮+高對比、暗+高對比）。
+   值與 @cinderous/theme 的 HIGH_CONTRAST 對齊（SSOT；桌面測試讀本檔比對）。
+   驗收＝WCAG AA：文字 ≥4.5、邊框等非文字 ≥3（現行亮色 --muted 對白底僅 4.18，不足 AA）。 */
+:root[data-contrast="high"] {
+  --ink: #000000;
+  --muted: #445269;   /* vs #ffffff 7.90 */
+  --border: #56688a;  /* vs #ffffff 5.61 */
+  --in-name: #8f2468; /* vs #ffffff 8.01 */
+}
+:root[data-theme="dark"][data-contrast="high"] {
+  --ink: #ffffff;
+  --muted: #b9c5da;   /* vs panel 10.52 */
+  --border: #8195b8;  /* vs panel 6.04 */
+  --in-name: #ff9ed0; /* vs panel 9.64 */
+  --panel: #10151d;   /* 底色壓深爭取對比頭寸 */
+  --field: #0b0f15;   /* ink vs field 19.21 */
+}
+/* 高對比下：焦點環加粗（原全域 2px）、內文連結一律底線（不只靠顏色辨識）。 */
+:root[data-contrast="high"] button:focus-visible,
+:root[data-contrast="high"] [role="button"]:focus-visible { outline-width: 3px; }
+:root[data-contrast="high"] a { text-decoration: underline; }
+
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg-b); color: var(--ink); }
 
@@ -805,6 +827,15 @@ button:disabled { opacity: .5; cursor: default; filter: none; }
 .me__np-auto { background: none; border: none; padding: 0 2px; cursor: pointer; font: inherit; font-size: 12px; }
 .me__np-auto--on { color: var(--accent); font-weight: 700; }
 .me__np-live { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; color: var(--muted); font-style: italic; }
+
+/* 無障礙設定（ADR-0253）：UI 尺寸檔位橫排；開啟/選中以主色描邊＋粗體標示（aria-pressed 同步，不只靠顏色）。 */
+.a11y__scale { display: flex; gap: 6px; flex-wrap: wrap; }
+.a11y__scale button[aria-pressed="true"],
+.a11y__toggle[aria-pressed="true"] {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 40%, transparent);
+  font-weight: 700;
+}
 
 /* 設定面板 */
 .modal { position: fixed; inset: 0; background: rgba(0,0,0,.35); display: flex; align-items: center; justify-content: center; z-index: 50; }

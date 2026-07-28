@@ -105,6 +105,7 @@ import { MsgStatusIcon } from "./MsgStatusIcon.js";
 import { readOriginal, relocateOriginal } from "../native/save-file.js";
 import { copyImageFromUrl, copyText } from "../native/clipboard.js";
 import { chatBgCss, getChatBg, getConvoSize, setConvoSize } from "./personalize.js";
+import { cssZoomFactor } from "../ui-scale.js";
 
 /**
  * 燈箱項目（ADR-0102）：`preview` 是立刻能顯示的東西（本 session 的原圖 blob，或跨 session 存活的縮圖）；
@@ -666,9 +667,11 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
     const MIN_H = 320;
     const MAX_W = 900;
     const maxH = Math.round(window.innerHeight * 0.92);
+    // UI 尺寸（ADR-0253）：瀏覽器 CSS zoom 下位移除以縮放係數才 1:1 跟手（Tauri＝1）。
+    const zoom = cssZoomFactor();
     const onMove = (ev: MouseEvent): void => {
-      el.style.width = `${Math.max(MIN_W, Math.min(MAX_W, startW + ev.clientX - startX))}px`;
-      el.style.height = `${Math.max(MIN_H, Math.min(maxH, startH + ev.clientY - startY))}px`;
+      el.style.width = `${Math.max(MIN_W, Math.min(MAX_W, startW + (ev.clientX - startX) / zoom))}px`;
+      el.style.height = `${Math.max(MIN_H, Math.min(maxH, startH + (ev.clientY - startY) / zoom))}px`;
     };
     const onUp = (): void => {
       document.removeEventListener("mousemove", onMove);

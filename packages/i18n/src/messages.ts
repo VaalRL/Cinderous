@@ -316,6 +316,15 @@ export interface Messages {
   settings_accent2Follow: string;
   settings_accentCustom: string;
   settings_accentReset: string;
+  /** 無障礙設定（ADR-0253）：高對比＋UI 尺寸＋色覺友善色票。 */
+  settings_accentCb: string;
+  settings_a11y: string;
+  a11y_contrast: string;
+  a11y_contrastHint: string;
+  a11y_stateOn: string;
+  a11y_stateOff: string;
+  a11y_uiScale: string;
+  a11y_uiScaleHint: string;
   settings_accentHint: string;
   settings_aiProvider: string;
   settings_aiProviderOllama: string;
@@ -1029,6 +1038,14 @@ const zhHant: Messages = {
   settings_accent2Follow: "跟隨主色",
   settings_accentCustom: "自訂色",
   settings_accentReset: "預設",
+  settings_accentCb: "色覺友善（色盲可辨）",
+  settings_a11y: "無障礙",
+  a11y_contrast: "高對比模式",
+  a11y_contrastHint: "拉高文字與邊框對比（WCAG AA），與深淺主題可並用；未設定時跟隨系統的高對比偏好。",
+  a11y_stateOn: "開",
+  a11y_stateOff: "關",
+  a11y_uiScale: "介面尺寸",
+  a11y_uiScaleHint: "整體縮放文字與介面（立即生效、只存這台裝置）。",
   settings_accentHint: "即時套用、只存在本機；深色主題會自動提亮以維持對比。主色連吉祥物身體，副色驅動標題列與頂部漸層（留空＝跟隨主色）。",
   settings_aiProvider: "AI 服務",
   settings_aiProviderOllama: "本機 Ollama",
@@ -1718,6 +1735,14 @@ const en: Messages = {
   settings_accent2Follow: "Follow primary",
   settings_accentCustom: "Custom color",
   settings_accentReset: "Default",
+  settings_accentCb: "Color-vision friendly (colorblind-safe)",
+  settings_a11y: "Accessibility",
+  a11y_contrast: "High contrast",
+  a11y_contrastHint: "Boost text and border contrast (WCAG AA); combines with light/dark theme. Follows your system's contrast preference until set.",
+  a11y_stateOn: "On",
+  a11y_stateOff: "Off",
+  a11y_uiScale: "UI size",
+  a11y_uiScaleHint: "Scale the whole interface (applies instantly; stored on this device only).",
   settings_accentHint: "Applies instantly, stored locally; auto-brightened in dark theme. Primary recolors the mascot too; secondary drives the title bar and background gradient (blank = follow primary).",
   settings_aiProvider: "AI provider",
   settings_aiProviderOllama: "Local Ollama",

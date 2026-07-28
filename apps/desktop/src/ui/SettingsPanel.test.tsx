@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { AccentProvider } from "../accent.js";
+import { ContrastProvider } from "../contrast.js";
 import { I18nProvider } from "../i18n.js";
 import { LayoutProvider } from "../layout.js";
 import { ThemeProvider } from "../theme.js";
@@ -21,22 +22,43 @@ describe("relayChangeReady（更換輸入驗證）", () => {
 function render(extra: Partial<SettingsPanelProps> = {}): string {
   return renderToStaticMarkup(
     <ThemeProvider>
-      <AccentProvider>
-        <LayoutProvider>
-          <I18nProvider locale="zh-Hant">
-            <SettingsPanel
-              relayUrl="wss://x"
-              notifications={false}
-              onToggleNotifications={() => {}}
-              onClose={() => {}}
-              {...extra}
-            />
-          </I18nProvider>
-        </LayoutProvider>
-      </AccentProvider>
+      <ContrastProvider>
+        <AccentProvider>
+          <LayoutProvider>
+            <I18nProvider locale="zh-Hant">
+              <SettingsPanel
+                relayUrl="wss://x"
+                notifications={false}
+                onToggleNotifications={() => {}}
+                onClose={() => {}}
+                {...extra}
+              />
+            </I18nProvider>
+          </LayoutProvider>
+        </AccentProvider>
+      </ContrastProvider>
     </ThemeProvider>,
   );
 }
+
+describe("無障礙設定（ADR-0253）", () => {
+  it("外觀分頁有無障礙區：高對比切換（預設關）＋五檔尺寸（預設 100% 選中）", () => {
+    const out = render();
+    expect(out).toContain('data-testid="a11y-settings"');
+    const toggleAt = out.indexOf('data-testid="a11y-contrast-toggle"');
+    expect(toggleAt).toBeGreaterThanOrEqual(0);
+    expect(out.slice(toggleAt, toggleAt + 90)).toContain('aria-pressed="false"'); // 預設關
+    const at100 = out.indexOf('data-testid="a11y-scale-100"');
+    expect(at100).toBeGreaterThanOrEqual(0);
+    expect(out.slice(at100 - 70, at100)).toContain('aria-pressed="true"'); // 預設 100%
+    expect(out).toContain('data-testid="a11y-scale-90"');
+    expect(out).toContain('data-testid="a11y-scale-150"');
+  });
+
+  it("色覺友善色票列在主色設定內（accent-cb-row）", () => {
+    expect(render()).toContain('data-testid="accent-cb-row"');
+  });
+});
 
 describe("前向保密設定區（ADR-0245 Phase 2）", () => {
   const fsProps = (enabled: boolean) => ({ initialTab: "privacy" as const, fs: { enabled, onEnable: () => {}, onRotate: () => {} } });
@@ -348,15 +370,17 @@ describe("視窗外框設定（ADR-0150）", () => {
   const renderWithTitlebar = (extra: Partial<SettingsPanelProps> = {}): string =>
     renderToStaticMarkup(
       <ThemeProvider>
-        <AccentProvider>
-          <LayoutProvider>
-            <TitlebarProvider>
-              <I18nProvider locale="zh-Hant">
-                <SettingsPanel relayUrl="wss://x" notifications={false} onToggleNotifications={() => {}} onClose={() => {}} {...extra} />
-              </I18nProvider>
-            </TitlebarProvider>
-          </LayoutProvider>
-        </AccentProvider>
+        <ContrastProvider>
+          <AccentProvider>
+            <LayoutProvider>
+              <TitlebarProvider>
+                <I18nProvider locale="zh-Hant">
+                  <SettingsPanel relayUrl="wss://x" notifications={false} onToggleNotifications={() => {}} onClose={() => {}} {...extra} />
+                </I18nProvider>
+              </TitlebarProvider>
+            </LayoutProvider>
+          </AccentProvider>
+        </ContrastProvider>
       </ThemeProvider>,
     );
 
