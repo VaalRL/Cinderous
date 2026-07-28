@@ -57,6 +57,28 @@ describe("封存搜尋（ADR-0256 階段 3）", () => {
     m.unmount();
   });
 
+  it("跨塊重複 id 只列一次（與 pager 的 prependChunk 同去重語意）", async () => {
+    const dup = {
+      chunkCount: async () => 2,
+      loadChunk: async (_c: string, i: number) =>
+        i === 1 ? [sm("x", "重複的週五訊息", 200)] : [sm("x", "重複的週五訊息", 200)],
+    } as unknown as MessageArchive;
+    const m = mount(
+      <I18nProvider locale="zh-Hant">
+        <HistoryWindow convo="bb" name="Bob" archive={dup} selfLabel="我" onClose={() => {}} />
+      </I18nProvider>,
+    );
+    await act(async () => {});
+    const input = m.container.querySelector('[data-testid="history-search"]') as HTMLInputElement;
+    await act(async () => type(input, "週五"));
+    await act(async () => {
+      (m.container.querySelector('[data-testid="history-search-go"]') as HTMLButtonElement).click();
+    });
+    await act(async () => {});
+    expect((m.container.textContent?.match(/重複的週五訊息/g) ?? []).length).toBe(1);
+    m.unmount();
+  });
+
   it("查無命中：掃描完成後顯示無符合", async () => {
     const m = mount(
       <I18nProvider locale="zh-Hant">

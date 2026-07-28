@@ -80,10 +80,12 @@ export function HistoryWindow(props: Props): JSX.Element {
     const gen = ++scanGen.current;
     setHits([]);
     setScanned(0);
+    const seen = new Set<string>(); // 跨塊以 id 去重（審查修正：與 pager 的 prependChunk 同語意）
     for (let i = total - 1; i >= 0; i--) {
       const chunk = await props.archive.loadChunk(props.convo, i);
       if (scanGen.current !== gen) return; // 已被新搜尋/清除/卸載取代
-      const found = chunk.filter((m) => matchesStored(m, q)).reverse(); // 塊內新→舊
+      const found = chunk.filter((m) => matchesStored(m, q) && !seen.has(m.id)).reverse(); // 塊內新→舊
+      for (const m of found) seen.add(m.id);
       if (found.length > 0) setHits((prev) => [...prev, ...found]);
       setScanned(total - i);
     }

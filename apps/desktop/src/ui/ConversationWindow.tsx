@@ -718,7 +718,12 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
     el.scrollIntoView?.({ block: "center" });
     el.classList.add("line--hit");
     const timer = setTimeout(() => el.classList.remove("line--hit"), 1600);
-    return () => clearTimeout(timer);
+    return () => {
+      clearTimeout(timer);
+      // 審查修正：cleanup 也要卸 class——快速巡覽（<1.6s 再跳）時 timer 被清掉，
+      // 沒這行上一個命中的高亮會永久殘留。
+      el.classList.remove("line--hit");
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- hits/channel 由 searchQuery 與訊息派生
   }, [searchOpen, searchQuery, searchAt, visibleCount, messages.length]);
   // 擁有中的自製貼圖 id 集合：整個訊息列共用一份（不再每則訊息各建一個 Set）。

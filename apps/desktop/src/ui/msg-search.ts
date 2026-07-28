@@ -2,7 +2,9 @@
 //
 // 比對用**可見文字**（splitAssetManifest 剝掉行內資產 manifest，ADR-0220——否則會搜到
 // manifest 內部的 JSON）；檔案訊息比對檔名；已收回/已過期顯示的是占位文字，不參與搜尋。
-// 範圍＝熱區（主視窗持有的最近訊息）；封存搜尋另行處理（冷熱分離，ADR-0111）。
+// 範圍＝熱區的**主頻道**（呼叫端傳 mainMessages 結果）：串內回覆（ADR-0051）刻意不含
+// ——回覆只在串面板顯示，跳轉高亮無處落點；日後若納入需連同「開串定位」一起設計。
+// 封存搜尋另行處理（冷熱分離，ADR-0111）。
 import { splitAssetManifest } from "@cinderous/core";
 import type { ChatMessage } from "@cinderous/engine";
 
