@@ -1,13 +1,23 @@
 import { useState } from "react";
 import { calcPreview } from "@cinderous/core";
-import type { ChatMessage, Contact, Group, Self, Status } from "@cinderous/engine";
+import type {
+  CalendarEventInput,
+  ChatMessage,
+  Contact,
+  Group,
+  RsvpStatus,
+  Self,
+  Status,
+  StoredCalendarEvent,
+} from "@cinderous/engine";
 import type { MessageKey } from "@cinderous/i18n";
 import { useI18n } from "../i18n.js";
 import { Avatar } from "./Avatar.js";
 import { replyCounts } from "@cinderous/engine";
 import { loadNote, saveNote } from "./note-store.js";
+import { CalendarPanel } from "./CalendarPanel.js";
 
-type AuxTab = "info" | "members" | "media" | "threads" | "note";
+type AuxTab = "info" | "members" | "media" | "threads" | "note" | "calendar";
 
 /**
  * 右欄便條（ADR-0182）：**每對話一張私人便條**，純本機、不廣播、不上雲。**計算是其中一個功能**
@@ -84,6 +94,14 @@ export interface DeckRightProps {
   purged?: Set<string>;
   /** 把右欄計算機的結果插入主對話框草稿（ADR-0097）；未提供則不顯示插入鈕。 */
   onInsert?: (text: string) => void;
+  /**
+   * 共享行程（ADR-0259）：**全部**行程，本元件依當前對話篩選。
+   * 未提供 `onCalendarPublish` ＝不顯示行程分頁（示範後端無此能力）。
+   */
+  calendar?: StoredCalendarEvent[];
+  onCalendarPublish?: (input: CalendarEventInput, opts?: { eventId?: string }) => void;
+  onCalendarCancel?: (eventId: string) => void;
+  onCalendarRsvp?: (eventId: string, status: RsvpStatus) => void;
 }
 
 /** 三欄右側欄：對話輔助區（ADR-0079 Q4）。四分頁從當前對話資料衍生；深度操作為後續擴充。 */
@@ -107,12 +125,15 @@ export function DeckRight(props: DeckRightProps): JSX.Element {
   // ADR-0023／0102：可顯示＝本 session 有原圖 blob **或**有跨 session 存活的縮圖。
   const images = msgs.filter((m) => m.file?.mime.startsWith("image/") && (m.file.url || m.file.thumb));
   const threadRoots = [...replyCounts(msgs).entries()].filter(([, n]) => n > 0);
+  // 行程依對話歸屬：群組行程比 `groupId`、1:1 比 `contact`（兩端都存「對方」，故對稱）。
+  const events = (props.calendar ?? []).filter((e) => e.groupId === activeId || e.contact === activeId);
 
   const TABS: { key: AuxTab; label: string; count?: number }[] = [
     { key: "threads", label: t("aux_tabThreads"), count: threadRoots.length },
     { key: "members", label: t("aux_tabMembers"), count: members.length },
     { key: "media", label: t("aux_tabMedia"), count: images.length },
     { key: "note", label: t("aux_tabNote") },
+    ...(props.onCalendarPublish ? [{ key: "calendar" as const, label: t("aux_tabCalendar"), count: events.length }] : []),
     { key: "info", label: t("aux_tabInfo") },
   ];
 
@@ -183,6 +204,17 @@ export function DeckRight(props: DeckRightProps): JSX.Element {
               })}
             </div>
           )
+        ) : null}
+
+        {tab === "calendar" && props.onCalendarPublish ? (
+          <CalendarPanel
+            events={events}
+            selfPubkey={props.self.pubkey}
+            nameFor={nameFor}
+            onPublish={props.onCalendarPublish}
+            onCancel={props.onCalendarCancel ?? (() => {})}
+            onRsvp={props.onCalendarRsvp ?? (() => {})}
+          />
         ) : null}
 
         {tab === "threads" ? (

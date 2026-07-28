@@ -1209,3 +1209,41 @@ button:disabled { opacity: .5; cursor: default; filter: none; }
 .sponsor__link:hover { background: var(--hover); border-color: var(--accent); }
 /* 「不自動付款」的提醒刻意比連結更小、更淡——它是免責，不是行動呼籲。 */
 .sponsor__note { margin: 6px 0 0; font-size: 10px; line-height: 1.4; opacity: .8; }
+
+/* 右欄「行程」分頁（ADR-0259）。沿用 daux 的密度與色票，不另立一套視覺語言。 */
+.cal { display: flex; flex-direction: column; gap: 8px; padding: 8px; }
+.cal__new {
+  border: 1px dashed var(--border); background: var(--field); color: var(--ink);
+  border-radius: 6px; padding: 6px; font-size: 12px; cursor: pointer;
+}
+.cal__new:hover { border-color: var(--accent); background: var(--hover); }
+.cal__form { display: flex; flex-direction: column; gap: 6px; border: 1px solid var(--border); border-radius: 6px; padding: 8px; background: var(--surface2); }
+.cal__lbl { display: flex; flex-direction: column; gap: 2px; font-size: 10px; color: var(--muted); }
+.cal__in {
+  border: 1px solid var(--border); border-radius: 5px; padding: 4px 6px;
+  background: var(--field); color: var(--ink); font-size: 12px; font-family: inherit; width: 100%;
+}
+.cal__in:focus { outline: none; border-color: var(--accent); }
+.cal__desc { resize: vertical; min-height: 44px; }
+.cal__formbtns { display: flex; gap: 6px; }
+.cal__save { flex: 1; border: none; border-radius: 5px; padding: 5px; background: var(--accent); color: #fff; font-weight: 700; font-size: 12px; cursor: pointer; }
+.cal__save:disabled { opacity: .45; cursor: not-allowed; }
+.cal__ghost, .cal__danger, .cal__rsvp {
+  border: 1px solid var(--border); background: var(--field); color: var(--muted);
+  border-radius: 5px; padding: 3px 8px; font-size: 11px; cursor: pointer;
+}
+.cal__ghost:hover, .cal__rsvp:hover { background: var(--hover); color: var(--ink); }
+.cal__danger { color: #e5484d; border-color: #e5484d55; }
+.cal__danger:hover { background: #e5484d; color: #fff; }
+.cal__rsvp.on { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
+
+.cal__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.cal__item { border: 1px solid var(--border); border-radius: 6px; padding: 7px 8px; background: var(--panel); }
+/* 已過去的行程留著（本機是真實來源）但退到背景——不刪、也不搶注意力。 */
+.cal__item--past { opacity: .5; }
+.cal__when { font-size: 10px; color: var(--accent); font-weight: 700; }
+.cal__name { font-size: 13px; color: var(--ink); font-weight: 700; margin-top: 1px; }
+.cal__loc, .cal__by { font-size: 11px; color: var(--muted); margin-top: 2px; }
+.cal__descout { font-size: 11px; color: var(--ink); margin-top: 3px; white-space: pre-wrap; word-break: break-word; }
+.cal__going { font-size: 11px; color: var(--ink); margin-top: 4px; }
+.cal__acts { display: flex; gap: 4px; margin-top: 6px; flex-wrap: wrap; }

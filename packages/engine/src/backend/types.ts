@@ -20,6 +20,8 @@ import { inWorkHours } from "@cinderous/core";
 
 export type { Group, OrgGroup, OrgMember, OrgPolicy, OrgRosterDoc, OrgWorkHours };
 export type { MessageStatus, StoredCalendarEvent };
+// 共享行程（ADR-0259）：UI 直接用 core 的型別，不另造一份平行定義。
+export type { CalendarAction, CalendarEventInput, RsvpStatus };
 
 /** 組織資訊（ADR-0157）：採用名冊時發給前端的公司設定摘要。 */
 export interface OrgInfo {

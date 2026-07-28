@@ -32,6 +32,7 @@ import { BrowserChatBackend } from "@cinderous/engine";
 import { normalizeRelayUrl, RelayChatBackend, shouldMuteOrgNotification, webSocketConnector } from "@cinderous/engine";
 import { DEFAULT_NOTIFY_PREFS, type NotifyPrefs, shouldNotify } from "@cinderous/engine";
 import { fetchRelayInfo, type RelayInfo } from "@cinderous/engine";
+import type { CalendarEventInput, RsvpStatus, StoredCalendarEvent } from "@cinderous/engine";
 import { browserStore } from "./native/browser-store.js";
 import { safeNsecDecode } from "./nsec.js";
 import { getKeyVault } from "./native/keyvault.js";
@@ -525,6 +526,8 @@ export function App(): JSX.Element {
   const [historyOf, setHistoryOf] = useState<string | null>(null);
   const [conn, setConn] = useState<ConnectionState>("online");
   const [relays, setRelays] = useState<{ url: string; state: ConnectionState; home: boolean; stale: boolean }[]>([]);
+  /** 共享行程（ADR-0259）：全部行程；右欄依當前對話篩選。 */
+  const [calendar, setCalendar] = useState<StoredCalendarEvent[]>([]);
   /** 贊助此節點角落卡（ADR-0089／0258）：抓到且未被關閉才有值。 */
   const [sponsor, setSponsor] = useState<{ url: string; info: RelayInfo } | null>(null);
   const [cleanPaste, setCleanPaste] = useState<boolean>(() => cleanOnPasteEnabled());
@@ -1218,6 +1221,7 @@ export function App(): JSX.Element {
           });
         }
       },
+      onCalendar: setCalendar,
       onConnection: setConn,
       onRelayPool: setRelays,
       onPolicy: setPolicy,
@@ -2520,6 +2524,30 @@ export function App(): JSX.Element {
             convos={convos}
             unsent={unsent}
             purged={purged}
+            calendar={calendar}
+            {...(() => {
+              // 共享行程（ADR-0259）：示範後端沒有這些方法 → 整個分頁不出現。
+              const publish = activeBackend.calendarPublish;
+              if (!publish || !activeConvo) return {};
+              // 群組 vs 1:1 由當前對話 id 是否為群組決定（與訊息路由同一判準）。
+              const target = groups.some((g) => g.id === activeConvo)
+                ? { groupId: activeConvo }
+                : { contact: activeConvo };
+              return {
+                onCalendarPublish: (input: CalendarEventInput, opts?: { eventId?: string }) => {
+                  publish(target, input, opts?.eventId ? { action: "update", eventId: opts.eventId } : {});
+                },
+                onCalendarCancel: (eventId: string) => {
+                  // 取消只需要指名目標；欄位帶原值以滿足型別（收端只看 action 與 e tag）。
+                  const e = calendar.find((x) => x.id === eventId);
+                  if (!e) return;
+                  publish(target, { title: e.title, start: e.start }, { action: "cancel", eventId });
+                },
+                ...(activeBackend.calendarRsvp
+                  ? { onCalendarRsvp: (id: string, status: RsvpStatus) => activeBackend.calendarRsvp!(id, status) }
+                  : {}),
+              };
+            })()}
             {...(activeConvo
               ? {
                   onInsert: (text: string) =>

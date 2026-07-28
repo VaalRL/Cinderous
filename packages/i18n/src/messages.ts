@@ -502,6 +502,25 @@ export interface Messages {
   settings_removeIdentityConfirm: string;
   settings_wipeDeviceHint: string;
   wipe_device: string;
+  /** 共享行程（ADR-0259）。 */
+  aux_tabCalendar: string;
+  cal_new: string;
+  cal_title: string;
+  cal_start: string;
+  cal_end: string;
+  cal_location: string;
+  cal_desc: string;
+  cal_save: string;
+  cal_dismiss: string;
+  cal_edit: string;
+  cal_cancelEvent: string;
+  cal_cancelConfirm: string;
+  cal_rsvpYes: string;
+  cal_rsvpMaybe: string;
+  cal_rsvpNo: string;
+  cal_none: string;
+  cal_by: string;
+  cal_byYou: string;
   /** NIP-62 清除請求（ADR-0256）。 */
   /** 贊助此節點角落卡（ADR-0089／0258）。 */
   sponsor_title: string;
@@ -1222,6 +1241,24 @@ const zhHant: Messages = {
   settings_removeIdentityConfirm: "確定要從這台裝置移除目前身分？私鑰與所有本機資料會被永久刪除、無法復原。若沒有救援登入碼，將無法再登入此身分。",
   settings_wipeDeviceHint: "刪除這台裝置上「所有」身分的私鑰與全部本機資料，回到全新狀態。此動作無法復原——請先確認你已有救援登入碼。",
   wipe_device: "清空裝置",
+  aux_tabCalendar: "行程",
+  cal_new: "新增行程",
+  cal_title: "行程名稱",
+  cal_start: "開始",
+  cal_end: "結束（可選）",
+  cal_location: "地點（可選）",
+  cal_desc: "備註（可選）",
+  cal_save: "送出",
+  cal_dismiss: "取消",
+  cal_edit: "編輯",
+  cal_cancelEvent: "取消行程",
+  cal_cancelConfirm: "取消「{title}」？所有參與者的行程都會移除，此動作不可復原。",
+  cal_rsvpYes: "參加",
+  cal_rsvpMaybe: "也許",
+  cal_rsvpNo: "不參加",
+  cal_none: "這個對話還沒有行程。",
+  cal_by: "由 {name} 發起",
+  cal_byYou: "由你發起",
   sponsor_title: "贊助此節點",
   sponsor_who: "{relay} 由其營運者自費提供。以下連結由該節點自報，非官方背書。",
   sponsor_note: "完全自願。點擊只會用瀏覽器或錢包開啟外部連結——本 App 不經手金流，也永不自動付款。",
@@ -1922,6 +1959,24 @@ const en: Messages = {
   settings_removeIdentityConfirm: "Remove the current identity from this device? Its private key and all local data will be permanently deleted and cannot be recovered. Without a rescue login code you won't be able to sign in to this identity again.",
   settings_wipeDeviceHint: "Delete the private keys and all local data of EVERY identity on this device, returning it to a fresh state. This cannot be undone — make sure you have a rescue login code first.",
   wipe_device: "Wipe device",
+  aux_tabCalendar: "Plans",
+  cal_new: "New plan",
+  cal_title: "What's the plan?",
+  cal_start: "Starts",
+  cal_end: "Ends (optional)",
+  cal_location: "Location (optional)",
+  cal_desc: "Notes (optional)",
+  cal_save: "Send",
+  cal_dismiss: "Cancel",
+  cal_edit: "Edit",
+  cal_cancelEvent: "Cancel plan",
+  cal_cancelConfirm: "Cancel \u201c{title}\u201d? It will be removed for everyone, and this cannot be undone.",
+  cal_rsvpYes: "Going",
+  cal_rsvpMaybe: "Maybe",
+  cal_rsvpNo: "Can't make it",
+  cal_none: "No plans in this conversation yet.",
+  cal_by: "Organized by {name}",
+  cal_byYou: "Organized by you",
   sponsor_title: "Support this node",
   sponsor_who: "{relay} is run at its operator\u2019s own expense. The links below are self-reported by that node, not an official endorsement.",
   sponsor_note: "Entirely optional. Clicking only opens an external link in your browser or wallet \u2014 this app never handles money and never pays automatically.",
