@@ -761,6 +761,7 @@ export class RelayChatBackend implements ChatBackend {
     this.broadcastGroups(); // ADR-0068：管理員把自建群組快照廣播給成員（換機自癒）
     this.maybePublishSnapshot(); // ADR-0071：雲端快照（開機檢查；內容有變＋每日至多一次）
     this.reconcileCloudOff(); // 審查修正 #6：關閉狀態的雲端殘留對帳
+    this.pruneCalendarOnStart(); // ADR-0260 §10：清掉過久的過去行程
     this.snapTimer = setInterval(() => this.maybePublishSnapshot(), 30 * 60_000);
     this.scheduleBeat();
     this.renderTimer = setInterval(() => {
@@ -3577,6 +3578,18 @@ export class RelayChatBackend implements ChatBackend {
    * `delivered` 沒有他，且他也沒 RSVP（有回覆＝顯然拿到了，那是更強的證據）。
    * 只補**未來**的行程——過去的補了也沒意義。
    */
+  /**
+   * 開機清理過期行程（ADR-0260 §10）。**光靠寫入路徑不夠**——一筆過去行程會隨時間變舊，
+   * 但沒有任何寫入會碰到它；不在開機掃一次，過去的行程就只增不減。
+   */
+  /**
+   * 開機清一次過久的過去行程（ADR-0260 §10）。
+   * 只在真的清到東西時才回推 UI——沒清到就沒有狀態變化，不必多一次 render。
+   */
+  private pruneCalendarOnStart(): void {
+    if (this.storage.pruneCalendar(nowSec()) > 0) this.handlers?.onCalendar?.(this.storage.loadCalendar());
+  }
+
   private resendCalendarTo(pubkey: PubkeyHex): void {
     const now = nowSec();
     for (const e of this.storage.loadCalendar()) {

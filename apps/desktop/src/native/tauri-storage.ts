@@ -376,6 +376,11 @@ export class TauriStorage implements AppStorage {
     this.mem.setCalendarDelivered(eventId, pubkey, at);
     this.persist(META);
   }
+  pruneCalendar(nowSec: number): number {
+    const removed = this.mem.pruneCalendar(nowSec);
+    if (removed > 0) this.persist(META); // 沒清到就不必重寫（開機時最常見的情況）
+    return removed;
+  }
   appendMessage(message: StoredMessage): void {
     this.mem.appendMessage(message);
     this.persist(MSGS + message.contact);

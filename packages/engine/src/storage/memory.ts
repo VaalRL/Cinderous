@@ -1,4 +1,5 @@
 import type { AssetBlob, AssetTombstone, CustomAsset, OrSetTombstone, SyncedPrefs } from "@cinderous/core";
+import { pruneCalendar } from "@cinderous/core";
 import {
   advanceReceipt,
   type AppStorage,
@@ -272,6 +273,7 @@ export class MemoryStorage implements AppStorage {
       ...(prev?.rsvps ? { rsvps: { ...prev.rsvps, ...event.rsvps } } : {}),
       ...(prev?.delivered ? { delivered: { ...prev.delivered, ...event.delivered } } : {}),
     });
+    this.pruneCalendar(Math.floor(Date.now() / 1000)); // 上限（ADR-0260 §10）
   }
   setCalendarDelivered(eventId: string, pubkey: string, at: number): void {
     const event = this.calendar.get(eventId);
@@ -281,6 +283,21 @@ export class MemoryStorage implements AppStorage {
   }
   removeCalendarEvent(id: string): void {
     this.calendar.delete(id);
+  }
+  /**
+   * 套用保留政策（ADR-0260 §10）：清掉過久的過去行程，並在總數超上限時砍「最不可能馬上
+   * 用到」的。回傳被清掉的數量。
+   *
+   * 由寫入路徑與開機各呼叫一次——**光靠寫入不夠**：一筆過去行程會隨時間變舊，但沒有任何
+   * 寫入會碰到它。
+   */
+  pruneCalendar(nowSec: number): number {
+    const before = this.calendar.size;
+    const kept = pruneCalendar([...this.calendar.values()], nowSec);
+    if (kept.length === before) return 0;
+    this.calendar.clear();
+    for (const e of kept) this.calendar.set(e.id, e);
+    return before - kept.length;
   }
   setCalendarRsvp(eventId: string, pubkey: string, status: "accepted" | "declined" | "tentative", at: number): void {
     const event = this.calendar.get(eventId);

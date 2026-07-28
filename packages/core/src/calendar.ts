@@ -310,3 +310,57 @@ export function applyCalendarChange(
   if (incoming.action === "cancel") return null;
   return { ...existing, ...incoming, id: existing.id, action: "update" };
 }
+
+// ── 保留上限（ADR-0260 §10） ─────────────────────────────────────────────────
+
+/**
+ * 過去行程的保留天數：早於「現在 − 此值」的行程會被清掉。
+ *
+ * **這正是 ADR-0259 §1.5 那個「過去一個月＋未來兩個月」的提案——只是放在它真正做得到的那一層。**
+ * 中繼做不到（看不出是行事曆、也讀不到 `start`，做得到就得放棄隱私）；但**本機看得到日期**，
+ * 所以同一個政策在這裡是對的。取 30 天而非 1 個月是為了避免月長不一的邊界爭議。
+ *
+ * 未來的行程**一律不因時間被清**——那是行事曆存在的理由。
+ */
+export const CALENDAR_PAST_RETENTION_DAYS = 30;
+
+/**
+ * 行程總數硬上限（防呆的最後一道）：訊息有每對話 1000 則（`MESSAGES_PER_CONVO`），
+ * 行程本來就稀疏得多，500 已是極寬鬆。純粹擋住「某種 bug 或濫用讓它無界成長」。
+ */
+export const CALENDAR_MAX_EVENTS = 500;
+
+/** 保留判定用的最小形狀（`StoredCalendarEvent` 與 `CalendarEvent` 皆滿足）。 */
+interface Prunable {
+  start: number;
+  end?: number | undefined;
+}
+
+/**
+ * 算出**該保留**的行程（純函式）。兩道規則，順序有意義：
+ *
+ * 1. **時間**：結束（無結束則開始）早於 `now − CALENDAR_PAST_RETENTION_DAYS` 的清掉。
+ *    未來的不因時間被清。
+ * 2. **數量**：仍超過 {@link CALENDAR_MAX_EVENTS} 時，依「相關性」保留——
+ *    **未來的優先於過去的；同為未來取較近的，同為過去取較晚的**。
+ *
+ * 第 2 條的排序刻意不是單純的「按 start 排序砍尾」：那會在「有一堆未來行程」時砍掉**最近**的
+ * 幾筆，正好砍反。相關性排序讓被砍的永遠是「最不可能馬上用到」的那些。
+ */
+export function pruneCalendar<T extends Prunable>(events: readonly T[], nowSec: number, max = CALENDAR_MAX_EVENTS): T[] {
+  const cutoff = nowSec - CALENDAR_PAST_RETENTION_DAYS * DAY_SECONDS;
+  const kept = events.filter((e) => (e.end ?? e.start) >= cutoff);
+  if (kept.length <= max) return [...kept];
+  const rank = (e: T): [number, number] => {
+    const isPast = (e.end ?? e.start) < nowSec;
+    // 未來：距現在越近越優先（差值小）；過去：越晚發生越優先（差值小）。
+    return isPast ? [1, nowSec - (e.end ?? e.start)] : [0, e.start - nowSec];
+  };
+  return [...kept]
+    .sort((a, b) => {
+      const [ga, da] = rank(a);
+      const [gb, db] = rank(b);
+      return ga - gb || da - db;
+    })
+    .slice(0, max);
+}

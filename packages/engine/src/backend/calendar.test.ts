@@ -284,3 +284,33 @@ describe("未送達邀請的補送（ADR-0260 §9）", () => {
     for (const p of [a, b, c]) p.stop();
   });
 });
+
+describe("行程保留上限（ADR-0260 §10）", () => {
+  it("開機清掉過久的過去行程，未來的留著", () => {
+    const store = new MemoryStorage();
+    const old = { id: "old", title: "去年的事", start: NOW - 400 * 86_400, organizer: "x", updatedAt: 1 };
+    const soon = { id: "soon", title: "下週", start: NOW + 7 * 86_400, organizer: "x", updatedAt: 1 };
+    store.upsertCalendarEvent(old);
+    store.upsertCalendarEvent(soon);
+
+    const net = createInMemoryRelayNetwork();
+    const a = new RelayChatBackend(store, (h) => net.connect("a", h), "Alice", {});
+    a.start(noop);
+
+    expect(a.calendarList().map((e) => e.id)).toEqual(["soon"]);
+    a.stop();
+  });
+
+  it("寫入時就套用上限——過久的那筆不會因為新增一筆而復活", () => {
+    const store = new MemoryStorage();
+    store.upsertCalendarEvent({ id: "old", title: "舊", start: NOW - 400 * 86_400, organizer: "x", updatedAt: 1 });
+    store.upsertCalendarEvent({ id: "new", title: "新", start: NOW + 86_400, organizer: "x", updatedAt: 1 });
+    expect(store.loadCalendar().map((e) => e.id)).toEqual(["new"]);
+  });
+
+  it("保留窗內的過去行程留著（剛結束的活動不會馬上消失）", () => {
+    const store = new MemoryStorage();
+    store.upsertCalendarEvent({ id: "yesterday", title: "昨天", start: NOW - 86_400, organizer: "x", updatedAt: 1 });
+    expect(store.loadCalendar()).toHaveLength(1);
+  });
+});

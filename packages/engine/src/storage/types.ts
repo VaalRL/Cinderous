@@ -287,6 +287,11 @@ export interface AppStorage {
   setCalendarRsvp(eventId: string, pubkey: string, status: "accepted" | "declined" | "tentative", at: number): void;
   /** 記下某人已收到某行程（ADR-0260 §9）；只往前推進，行程不存在時忽略。 */
   setCalendarDelivered(eventId: string, pubkey: string, at: number): void;
+  /**
+   * 套用行程保留上限（ADR-0260 §10），回傳清掉的筆數。規則見 `core` 的 `pruneCalendar`。
+   * 開機時呼叫一次即可——`upsertCalendarEvent` 本身也會順手清，兩者合起來讓行程不會無界成長。
+   */
+  pruneCalendar(nowSec: number): number;
   loadMessages(contactPubkey: string): StoredMessage[];
   appendMessage(message: StoredMessage): void;
   /** 只往前推進某訊息的送達/已讀狀態（ADR-0058）；訊息不存在或狀態不前進則忽略。 */

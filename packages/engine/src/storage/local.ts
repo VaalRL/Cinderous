@@ -317,6 +317,11 @@ export class LocalStorage implements AppStorage {
     this.mem.setCalendarDelivered(eventId, pubkey, at);
     this.writeCalendar();
   }
+  pruneCalendar(nowSec: number): number {
+    const removed = this.mem.pruneCalendar(nowSec);
+    if (removed > 0) this.writeCalendar(); // 沒清到就不必重寫（開機時最常見的情況）
+    return removed;
+  }
   unblockContact(pubkey: string): void {
     this.mem.unblockContact(pubkey);
     write(this.k("blocked"), this.mem.loadBlocked(), this.dek);

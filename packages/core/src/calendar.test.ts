@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
   applyCalendarChange,
+  CALENDAR_PAST_RETENTION_DAYS,
   CALENDAR_RSVP_BROADCAST_MAX,
   calendarEventOf,
   calendarRsvpOf,
+  pruneCalendar,
   rsvpAudience,
   wrapCalendarEvent,
   wrapCalendarRsvp,
@@ -212,5 +214,56 @@ describe("共享行程（ADR-0259）", () => {
       const newer = { ...evt, updatedAt: evt.updatedAt + 5 };
       expect(applyCalendarChange(newer, evt)).toBe(newer);
     });
+  });
+});
+
+describe("行程保留上限（ADR-0260 §10）", () => {
+  const ev = (startOffsetDays: number, endOffsetDays?: number) => ({
+    start: NOW + startOffsetDays * 86_400,
+    ...(endOffsetDays !== undefined ? { end: NOW + endOffsetDays * 86_400 } : {}),
+  });
+
+  it("未來的行程一律保留——那是行事曆存在的理由", () => {
+    const events = [ev(1), ev(30), ev(365)];
+    expect(pruneCalendar(events, NOW)).toHaveLength(3);
+  });
+
+  it("過去超過保留天數的清掉；窗內的留著", () => {
+    const events = [ev(-CALENDAR_PAST_RETENTION_DAYS - 1), ev(-1), ev(1)];
+    const kept = pruneCalendar(events, NOW);
+    expect(kept).toHaveLength(2);
+    expect(kept.some((e) => e.start === NOW - (CALENDAR_PAST_RETENTION_DAYS + 1) * 86_400)).toBe(false);
+  });
+
+  it("以結束時間判定：跨日活動只要還沒結束就不算過去", () => {
+    // 開始在保留窗外、但結束在窗內 → 留著
+    const longEvent = ev(-CALENDAR_PAST_RETENTION_DAYS - 5, -1);
+    expect(pruneCalendar([longEvent], NOW)).toHaveLength(1);
+  });
+
+  it("數量超上限時砍「最不可能馬上用到」的——未來優先於過去", () => {
+    const future = Array.from({ length: 3 }, (_, i) => ev(i + 1));
+    const past = Array.from({ length: 3 }, (_, i) => ev(-(i + 1)));
+    const kept = pruneCalendar([...past, ...future], NOW, 3);
+    expect(kept).toHaveLength(3);
+    // 保留的全是未來的
+    expect(kept.every((e) => e.start > NOW)).toBe(true);
+  });
+
+  it("⚠ 全是未來行程且超上限 → 砍**最遠**的，不是砍最近的", () => {
+    const events = [ev(1), ev(2), ev(100), ev(200)];
+    const kept = pruneCalendar(events, NOW, 2);
+    expect(kept.map((e) => e.start)).toEqual([NOW + 86_400, NOW + 2 * 86_400]);
+  });
+
+  it("全是過去行程且超上限 → 留最晚發生的那些", () => {
+    const events = [ev(-1), ev(-2), ev(-3)];
+    const kept = pruneCalendar(events, NOW, 2);
+    expect(kept.map((e) => e.start)).toEqual([NOW - 86_400, NOW - 2 * 86_400]);
+  });
+
+  it("沒超過上限就原封不動（不重排、不丟）", () => {
+    const events = [ev(5), ev(1)];
+    expect(pruneCalendar(events, NOW)).toEqual(events);
   });
 });
