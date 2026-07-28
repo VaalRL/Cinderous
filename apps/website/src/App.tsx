@@ -137,9 +137,9 @@ export function App({ route: initialRoute }: { route: Route }): JSX.Element {
       ) : view === "tech" ? (
         <Tech c={c} />
       ) : view === "compare" ? (
-        <Compare c={c} />
+        <Compare c={c} locale={locale} />
       ) : view === "enterprise" ? (
-        <Enterprise c={c} />
+        <Enterprise c={c} locale={locale} />
       ) : view === "roadmap" ? (
         <Roadmap c={c} />
       ) : view === "faq" ? (

@@ -1,9 +1,12 @@
 import type { Copy } from "../copy.js";
+import { routeHref } from "../routes.js";
+import type { Locale } from "@cinderous/i18n";
 
 // 比較頁（ADR-0254）：與 Signal/LINE/WhatsApp 的誠實比較表——含對我方不利的列
 // （前向保密、功能成熟度），誠實即賣點；FS 列的 Cinderous 格由測試鎖住不得為 ✓（ADR-0245 硬閘）。
 // 只用文字名稱、不用任何第三方 logo（商標，ADR-0166）；表尾附商標聲明與資料時間。
-export function Compare({ c }: { c: Copy }): JSX.Element {
+// 企業導入者導流到企業版差異段（ADR-0255 互連）。
+export function Compare({ c, locale }: { c: Copy; locale: Locale }): JSX.Element {
   const rows: { label: string; cells: [string, string, string, string] }[] = [
     { label: c.cp_r1, cells: [c.cp_r1a, c.cp_r1b, c.cp_r1c, c.cp_r1d] },
     { label: c.cp_r2, cells: [c.cp_r2a, c.cp_r2b, c.cp_r2c, c.cp_r2d] },
@@ -56,6 +59,11 @@ export function Compare({ c }: { c: Copy }): JSX.Element {
         </p>
         <p className="hint" data-testid="compare-note">
           {c.cp_note}
+        </p>
+        <p style={{ marginTop: 10 }}>
+          <a href={routeHref({ view: "enterprise", locale })} data-testid="compare-ent-link">
+            {c.cp_entLink}
+          </a>
         </p>
       </div>
     </section>

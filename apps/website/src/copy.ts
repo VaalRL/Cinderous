@@ -212,6 +212,42 @@ export interface Copy {
   cp_r10d: string;
   cp_note1: string;
   cp_note: string;
+  /** 比較頁 → 企業版互連（ADR-0255）。 */
+  cp_entLink: string;
+  /** 企業版「與常見選擇的差異」段（ADR-0255）：按類別比、只打隱私主權軸；含誠實限制段。
+   * ec_r{n}＝列標籤；a/b/c/d＝Cinderous 企業版／雲端協作套件／自架開源通訊／E2E 自架。 */
+  ent_cmp_title: string;
+  ent_cmp_lead: string;
+  ent_cmp_colCloud: string;
+  ent_cmp_colSelf: string;
+  ent_cmp_colE2e: string;
+  ec_r1: string;
+  ec_r1a: string;
+  ec_r1b: string;
+  ec_r1c: string;
+  ec_r1d: string;
+  ec_r2: string;
+  ec_r2a: string;
+  ec_r2b: string;
+  ec_r2c: string;
+  ec_r2d: string;
+  ec_r3: string;
+  ec_r3a: string;
+  ec_r3b: string;
+  ec_r3c: string;
+  ec_r3d: string;
+  ec_r4: string;
+  ec_r4a: string;
+  ec_r4b: string;
+  ec_r4c: string;
+  ec_r4d: string;
+  ec_r5: string;
+  ec_r5a: string;
+  ec_r5b: string;
+  ec_r5c: string;
+  ec_r5d: string;
+  ent_cmp_note: string;
+  ent_cmp_more: string;
   tr_title: string;
   tr_intro: string;
   tr_loading: string;
@@ -500,6 +536,41 @@ const zhHant: Copy = {
   cp_note1: "¹ Signal 可用使用者名稱隱藏號碼，但註冊仍需手機號。",
   cp_note:
     "各商標與產品名稱屬其所有者。比較基於公開資訊（截至 2026 年 7 月），如有出入以各產品官方說明為準。",
+  cp_entLink: "企業導入？看企業版與常見選擇的差異 →",
+  ent_cmp_title: "與常見選擇的差異",
+  ent_cmp_lead:
+    "企業通訊的選項分三類：雲端協作套件、自架開源通訊、E2E 自架。這裡只比隱私與資料主權——功能廣度（整合、搜尋、SSO）它們更成熟，那不是我們的主場，也不假裝是。",
+  ent_cmp_colCloud: "雲端協作套件（Slack／Teams／LINE WORKS）",
+  ent_cmp_colSelf: "自架開源通訊（Mattermost 等）",
+  ent_cmp_colE2e: "E2E 自架（Element／Matrix）",
+  ec_r1: "預設端對端加密",
+  ec_r1a: "✓ 所有訊息——中繼只見密文",
+  ec_r1b: "✗ 伺服器可讀內容",
+  ec_r1c: "預設無，部分可選配",
+  ec_r1d: "✓",
+  ec_r2: "管理者／營運方能否讀成員訊息",
+  ec_r2a: "不能——零知識，連企業主也只見密文",
+  ec_r2b: "能",
+  ec_r2c: "能（伺服器端明文）",
+  ec_r2d: "不能（房間內容加密）",
+  ec_r3: "組織內「誰跟誰聊」（元資料）",
+  ec_r3a: "大幅隱藏（Gift Wrap 一次性寄件者）",
+  ec_r3b: "平台完整可見",
+  ec_r3c: "自家伺服器完整可見",
+  ec_r3d: "homeserver 可見房間與成員",
+  ec_r4: "資料所在",
+  ec_r4a: "自家基礎設施（自架封閉節點）",
+  ec_r4b: "供應商雲端",
+  ec_r4c: "自家基礎設施",
+  ec_r4d: "自家基礎設施",
+  ec_r5: "離職交接需要金鑰託管嗎",
+  ec_r5a: "不需要——接管流程不經金鑰託管",
+  ec_r5b: "不適用（非 E2E）",
+  ec_r5c: "不適用（預設非 E2E）",
+  ec_r5d: "視部署（常見伺服器端金鑰備份）",
+  ent_cmp_note:
+    "誠實的限制：零知識設計下，任何人——包括企業主與我們——都無法匯出成員訊息明文；需要完整訊息稽核留存的受監管行業，Cinderous 可能不適合。SSO／SCIM 目前未提供。",
+  ent_cmp_more: "看個人通訊的完整比較 →",
   tr_title: "資金透明度",
   tr_intro: "官方財務以維護者簽章的資料檔公開；前端驗簽通過才顯示數字，任何主機被入侵也無法竄改。",
   tr_loading: "載入並驗簽中…",
@@ -790,6 +861,41 @@ const en: Copy = {
   cp_note1: "¹ Signal usernames can hide your number, but registration still requires one.",
   cp_note:
     "All trademarks and product names belong to their respective owners. Comparison based on public information (as of July 2026); official product documentation prevails where they differ.",
+  cp_entLink: "Evaluating for a company? See how Enterprise differs from common options →",
+  ent_cmp_title: "How this differs from common options",
+  ent_cmp_lead:
+    "Enterprise messaging options fall into three groups: cloud suites, self-hosted open source, and E2E self-hosted. This table compares privacy and data sovereignty only — on feature breadth (integrations, search, SSO) they are more mature, that isn't our home turf and we won't pretend otherwise.",
+  ent_cmp_colCloud: "Cloud suites (Slack / Teams / LINE WORKS)",
+  ent_cmp_colSelf: "Self-hosted open source (Mattermost, etc.)",
+  ent_cmp_colE2e: "E2E self-hosted (Element / Matrix)",
+  ec_r1: "End-to-end encryption by default",
+  ec_r1a: "✓ All messages — relays see only ciphertext",
+  ec_r1b: "✗ Servers can read content",
+  ec_r1c: "Not by default; optional in some",
+  ec_r1d: "✓",
+  ec_r2: "Can admins / operators read members' messages",
+  ec_r2a: "No — zero-knowledge; even the org owner sees only ciphertext",
+  ec_r2b: "Yes",
+  ec_r2c: "Yes (server-side plaintext)",
+  ec_r2d: "No (room content encrypted)",
+  ec_r3: "Who-talks-to-whom inside the org (metadata)",
+  ec_r3a: "Largely hidden (Gift Wrap one-time senders)",
+  ec_r3b: "Fully visible to the vendor",
+  ec_r3c: "Fully visible on your server",
+  ec_r3d: "Homeserver sees rooms & membership",
+  ec_r4: "Where data lives",
+  ec_r4a: "Your infrastructure (self-hosted closed relay)",
+  ec_r4b: "Vendor cloud",
+  ec_r4c: "Your infrastructure",
+  ec_r4d: "Your infrastructure",
+  ec_r5: "Key escrow needed for offboarding",
+  ec_r5a: "No — takeover works without key escrow",
+  ec_r5b: "N/A (not E2E)",
+  ec_r5c: "N/A (not E2E by default)",
+  ec_r5d: "Deployment-dependent (server-side key backup is common)",
+  ent_cmp_note:
+    "An honest limitation: with zero-knowledge design, no one — including the org owner and us — can export members' messages in plaintext. Regulated industries that require full message archiving may find Cinderous unsuitable. SSO / SCIM are not yet available.",
+  ent_cmp_more: "See the full personal-messaging comparison →",
   tr_title: "Fund transparency",
   tr_intro:
     "Official finances are published as a maintainer-signed data file; numbers render only after the signature verifies, so a compromised host cannot tamper with them.",
