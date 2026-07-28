@@ -461,9 +461,9 @@ const zhHant: Copy = {
   ent_roster_t: "組織名冊與邀請碼入職",
   ent_roster_b:
     "管理者維護一份簽章的成員名冊；新人以一次性邀請碼加入，自動取得工作身分與預設聯絡人／群組。無需手機號碼或電子郵件即可完成入職。",
-  ent_offboard_t: "離職接管（無金鑰託管）",
+  ent_offboard_t: "離職接管（預設無金鑰託管）",
   ent_offboard_b:
-    "採「工作身分輪替」而非金鑰託管——公司不持有解密後門。成員離職或換機時，管理者以名冊撤舊、發新，成員端自動接續；想保留歷史者建議雙設備登記（ADR-0052）。",
+    "預設採「工作身分輪替」而非金鑰託管——公司不持有解密後門。成員離職或換機時，管理者以名冊撤舊、發新，成員端自動接續；想保留歷史者建議雙設備登記（ADR-0052）。如需離職後查看工作帳號歷史，可於入職時經成員明示同意，選擇性託管其工作身分金鑰。",
   ent_policy_t: "公司政策設定",
   ent_policy_b:
     "可設定離線留言保留天數、允許的事件類型（kind allowlist），以及強制通話只走 TURN（relay-only）以符合網路／稽核政策。政策由自架中繼執行，不外流給任何第三方。",
@@ -564,7 +564,7 @@ const zhHant: Copy = {
   ec_r4c: "自家基礎設施",
   ec_r4d: "自家基礎設施",
   ec_r5: "離職交接需要金鑰託管嗎",
-  ec_r5a: "不需要——接管流程不經金鑰託管",
+  ec_r5a: "不需要——身分輪替接管；金鑰託管為可選（成員入職時明示同意）",
   ec_r5b: "不適用（非 E2E）",
   ec_r5c: "不適用（預設非 E2E）",
   ec_r5d: "視部署（常見伺服器端金鑰備份）",
@@ -786,9 +786,9 @@ const en: Copy = {
   ent_roster_t: "Org roster & invite-code onboarding",
   ent_roster_b:
     "Admins maintain a signed member roster; new hires join with a one-time invite code and automatically receive a work identity plus default contacts/groups. Onboarding needs no phone number or email.",
-  ent_offboard_t: "Offboarding takeover (no key escrow)",
+  ent_offboard_t: "Offboarding takeover (no key escrow by default)",
   ent_offboard_b:
-    "Uses work-identity rotation rather than key escrow — the company holds no decryption backdoor. When a member leaves or switches devices, an admin revokes the old and issues a new identity via the roster, and the member's client picks up seamlessly; register two devices to retain history (ADR-0052).",
+    "Defaults to work-identity rotation rather than key escrow — the company holds no decryption backdoor. When a member leaves or switches devices, an admin revokes the old and issues a new identity via the roster, and the member's client picks up seamlessly; register two devices to retain history (ADR-0052). Optionally, with the member's explicit consent at onboarding, the work-identity key can be escrowed to allow reviewing that work account after offboarding.",
   ent_policy_t: "Company policy controls",
   ent_policy_b:
     "Set offline-message retention days, an allowed event-kind list, and force calls to relay-only (TURN) to meet network or audit policy. Policies are enforced by your self-hosted relay and never leave it.",
@@ -889,7 +889,7 @@ const en: Copy = {
   ec_r4c: "Your infrastructure",
   ec_r4d: "Your infrastructure",
   ec_r5: "Key escrow needed for offboarding",
-  ec_r5a: "No — takeover works without key escrow",
+  ec_r5a: "No — takeover via identity rotation; key escrow is optional (member's explicit consent at onboarding)",
   ec_r5b: "N/A (not E2E)",
   ec_r5c: "N/A (not E2E by default)",
   ec_r5d: "Deployment-dependent (server-side key backup is common)",

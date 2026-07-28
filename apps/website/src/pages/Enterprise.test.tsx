@@ -45,6 +45,15 @@ describe("與常見選擇的差異（ADR-0255）", () => {
     expect(en).toContain("SCIM");
   });
 
+  it("託管敘述＝可選＋明示同意（接管預設走身分輪替；不誇稱「無託管」）", () => {
+    const zh = renderToStaticMarkup(<Enterprise c={useCopy("zh-Hant")} locale="zh-Hant" />);
+    expect(zh).toContain("預設無金鑰託管"); // 卡片標題已限定「預設」
+    expect(zh).toContain("明示同意"); // 可選託管需入職時明示同意
+    const en = renderToStaticMarkup(<Enterprise c={useCopy("en")} locale="en" />);
+    expect(en).toContain("no key escrow by default");
+    expect(en).toContain("explicit consent");
+  });
+
   it("互連：企業頁有連往比較頁的 locale-aware 連結", () => {
     const zh = renderToStaticMarkup(<Enterprise c={useCopy("zh-Hant")} locale="zh-Hant" />);
     expect(zh).toContain('href="/Cinderous/zh-Hant/compare/"');
