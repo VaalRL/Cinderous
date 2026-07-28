@@ -75,6 +75,12 @@ Termux relay 與客戶端是獨立程序；同機連 `ws://127.0.0.1:8787`（瀏
   綁 CF 網域得 `wss://relay.<網域>`。不開入站 port、穿 CGNAT、**真 wss**（瀏覽器版客戶端
   也能連）。誠實取捨：TLS 於 CF 邊緣終止——訊息內容仍為 E2E 密文，但連線層元資料
   （誰何時連）CF 可見，與純自架的資料主權敘事有所折衷。
+  - **無網域變體：Quick Tunnel（TryCloudflare）**——免帳號免網域：
+    `cloudflared tunnel --url http://localhost:8787` 即得隨機
+    `https://<random>.trycloudflare.com`，客戶端填對應 `wss://`（客戶端 30s 心跳
+    〔ADR-0059〕恰好也讓 CF 閒置逾時咬不到長連線）。**定位＝臨時測試/短暫分享**：
+    網址每次重啟都變（常駐 relay 的硬傷——重開機後全部客戶端要重設）、官方定位測試用
+    無 SLA。常駐請走 ①（Tailscale 完全不需網域且位址穩定）或買網域走具名 tunnel。
 - **③ Port-forward＋DDNS**：路由器轉發 TCP 8787 → 手機固定區網 IP＋DDNS。前提是家用寬頻
   有公網 IPv4（部分 ISP／4G 家用寬頻為 CGNAT 即不通）。裸 `ws://` 走公網：內容有 E2E
   保護（relay 本就只見密文），但傳輸層無加密——要 wss 得再架反代＋憑證，家庭場景不划算，
