@@ -216,6 +216,13 @@ export interface Messages {
   fg_title: string;
   fg_text: string;
   settings_foreground: string;
+  /** 中繼健檢徽章（ADR-0275）。 */
+  relayCheck_ok: string;
+  relayCheck_warn: string;
+  relayCheck_down: string;
+  relayCheck_noAuth: string;
+  relayCheck_ephemeral: string;
+  relayCheck_expired: string;
   settings_foregroundHint: string;
   // 相簿/原圖（ADR-0102）
   image_originalMissing: string;
@@ -1024,6 +1031,12 @@ const zhHant: Messages = {
   fg_title: "Cinderous",
   fg_text: "保持連線中——訊息才收得到",
   settings_foreground: "背景保持連線",
+  relayCheck_ok: "✓ 中繼行為正常",
+  relayCheck_warn: "⚠ 這座中繼有隱私疑慮",
+  relayCheck_down: "✕ 中繼無回應",
+  relayCheck_noAuth: "不要求認證——任何人都能看到你何時收到訊息（訊息內容仍加密）",
+  relayCheck_ephemeral: "可能保存了本該即時轉發的暫態事件",
+  relayCheck_expired: "不遵守過期設定——你的密文可能被無限期留存",
   settings_foregroundHint:
     "以常駐通知讓連線在背景不中斷，訊息才收得到。不使用任何第三方推播服務——沒有人會知道你何時收到訊息；代價是通知列多一條狀態通知。關閉後，App 進背景可能就收不到訊息。",
   image_originalMissing: "找不到原圖——檔案可能已被移動或刪除。",
@@ -1790,6 +1803,13 @@ const en: Messages = {
   fg_title: "Cinderous",
   fg_text: "Staying connected so messages arrive",
   settings_foreground: "Stay connected in background",
+  relayCheck_ok: "✓ Relay behaves correctly",
+  relayCheck_warn: "⚠ Privacy concerns with this relay",
+  relayCheck_down: "✕ Relay not responding",
+  relayCheck_noAuth:
+    "No authentication required — anyone can see when you receive messages (contents stay encrypted)",
+  relayCheck_ephemeral: "May be storing ephemeral events that should only be relayed",
+  relayCheck_expired: "Ignores expiration — your ciphertext may be kept indefinitely",
   settings_foregroundHint:
     "Keeps the connection alive with an ongoing notification so messages arrive. No third-party push service is used — nobody learns when you receive messages. The cost is one persistent notification. With this off, messages may not arrive while the app is backgrounded.",
   image_originalMissing: "Original not found — the file may have been moved or deleted.",

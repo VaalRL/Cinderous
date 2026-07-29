@@ -49,6 +49,7 @@ export * from "./snapshot.js";
 export * from "./happy-eyeballs.js";
 export * from "./sync.js";
 export * from "./relay-client.js";
+export * from "./relay-probe.js";
 export * from "./outbox.js";
 export * from "./bounded-set.js";
 export * from "./bootstrap.js";

@@ -137,6 +137,7 @@ import {
   readEkAnnounce,
   type UnwrappedMessage,
 } from "@cinderous/core";
+import { loadRelayCheck, recordAuthObservation } from "./relay-check.js"; // ADR-0275：A 層健檢
 import { buildRtcConfig } from "./rtc-config.js";
 import { fetchTurnServers, turnEndpointFromRelay } from "./turn-fetch.js";
 import { WebRtcCall } from "./webrtc-call.js";
@@ -156,6 +157,8 @@ import type {
 
 /** pool relay 連續離線超過此時間即標記 hint 可能陳舊（ADR-0036）。 */
 export const RELAY_STALE_MS = 5 * 60_000;
+/** A 層健檢（ADR-0275）：連上後等這麼久仍沒收到 AUTH 挑戰，即判定該 relay 不要求認證。 */
+export const AUTH_OBSERVE_MS = 3_000;
 /** 主路由離線時的冗餘廣播座數上限（ADR-0039）。 */
 export const REDUNDANT_K = 2;
 /**
@@ -702,7 +705,12 @@ export class RelayChatBackend implements ChatBackend {
           if (accepted) this.markSent(id); // Tier 1（ADR-0058）：relay 接受＝已送中繼
         },
         // NIP-42 AUTH（ADR-0057）：回應挑戰；認證成功後重掛訂閱（解「訂閱早於認證」）。
-        authSigner: (challenge) => buildAuthEvent(challenge, this.homeUrl ?? "", this.sk),
+        authSigner: (challenge) => {
+          // A 層健檢（ADR-0275）：收到挑戰＝這座 relay 要求認證＝收件匣不是公開可讀。
+          // 零成本——正常連線就看得到，不需任何探測。
+          if (this.homeUrl) recordAuthObservation(this.homeUrl, true);
+          return buildAuthEvent(challenge, this.homeUrl ?? "", this.sk);
+        },
         onAuthenticated: (client) => this.subscribeOn(client, this.homeUrl),
       },
       (state) => this.onConnection(state),
@@ -2373,6 +2381,15 @@ export class RelayChatBackend implements ChatBackend {
       this.resubscribe();
       this.beat();
       this.outbox.onReconnect(); // 補送重連前未確認的可靠訊息（ADR-0041）
+      // A 層健檢（ADR-0275）：連上後短暫等待——期間若沒收到 AUTH 挑戰（`authSigner` 會回填 true），
+      // 即判定這座 relay **不要求認證**＝任何人都能訂閱 `#p: 你` 的收件匣、取得你每則訊息的
+      // 到達時間與訊息量（內容仍加密）。這是最重要的警訊，而它零成本。
+      const url = this.homeUrl;
+      if (url) {
+        setTimeout(() => {
+          if (loadRelayCheck(url)?.requiresAuth === undefined) recordAuthObservation(url, false);
+        }, AUTH_OBSERVE_MS);
+      }
     }
   }
 

@@ -1,7 +1,10 @@
 import { makeBackupCode } from "@cinderous/core";
 import { useEffect, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { ACCENT_PRESETS, ACCENT_PRESETS_CB, useAccent } from "../accent.js";
+import type { MessageKey } from "@cinderous/i18n";
 import { useContrast } from "../contrast.js";
+// ADR-0275：客戶端中繼健檢（首次自填 relay 探測一次；錨點由 CI 稽核不重複）。
+import { ANCHOR_RELAYS, checkRelayOnce, loadRelayCheck, relayGrade, type RelayGrade } from "@cinderous/engine";
 import { useLayout } from "../layout.js";
 import { useI18n } from "../i18n.js";
 import { getUiScale, setUiScale, UI_SCALE_STEPS } from "../ui-scale.js";
@@ -561,6 +564,48 @@ function TitlebarSettings(): JSX.Element {
  * 加密備份碼（ADR-0070）：以備份密碼把 nsec 包成 NIP-49 ncryptsec＋relay 信封，
  * 輸出字串與 QR——使用者自持（列印/存自選位置），不上雲、不發佈。
  */
+/**
+ * 中繼健檢徽章（ADR-0275）：顯示這座中繼的行為分級。
+ *
+ * **首次見到的自填 relay 會自動探測一次**（之後 30 天內不再跑——探測會寫入事件）；
+ * 官方錨點不探測（CI 每小時已稽核，ADR-0092）。結果只提示、不阻擋：使用者有權選擇
+ * 連哪座中繼，我們的責任是讓他知情。
+ */
+function RelayHealthBadge({ url }: { url: string }): JSX.Element | null {
+  const { t } = useI18n();
+  const [check, setCheck] = useState(() => loadRelayCheck(url));
+  useEffect(() => {
+    let live = true;
+    setCheck(loadRelayCheck(url));
+    void checkRelayOnce(url, ANCHOR_RELAYS).then((r) => {
+      if (live) setCheck(r);
+    });
+    return () => {
+      live = false;
+    };
+  }, [url]);
+
+  const grade = relayGrade(check);
+  if (grade === "unknown") return null; // 官方錨點／尚未檢查：不顯示徽章（沒有資訊就不製造噪音）
+  const KEY: Record<Exclude<RelayGrade, "unknown">, MessageKey> = {
+    ok: "relayCheck_ok",
+    warn: "relayCheck_warn",
+    down: "relayCheck_down",
+  };
+  // 警告時列出具體原因——「哪裡不對」比「有問題」有用得多。
+  const reasons: string[] = [];
+  if (check?.requiresAuth === false) reasons.push(t("relayCheck_noAuth"));
+  if (check && check.live && !check.ephemeral) reasons.push(t("relayCheck_ephemeral"));
+  if (check && check.live && !check.rejectsExpired) reasons.push(t("relayCheck_expired"));
+
+  return (
+    <div className={`relaycheck relaycheck--${grade}`} data-testid={`relay-check-${grade}`}>
+      <span className="relaycheck__badge">{t(KEY[grade])}</span>
+      {reasons.length > 0 ? <span className="relaycheck__why">{reasons.join("；")}</span> : null}
+    </div>
+  );
+}
+
 function BackupCode({ nsec, relayUrl }: { nsec: string; relayUrl: string }): JSX.Element {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
@@ -1172,6 +1217,9 @@ export function SettingsPanel(props: SettingsPanelProps): JSX.Element {
             ) : (
               <div className="settings__relay">{props.relayUrl || t("settings_relayDemo")}</div>
             )}
+            {/* 中繼健檢徽章（ADR-0275）：首次見到的自填 relay 會自動探測一次；官方錨點由 CI
+                每小時稽核、客戶端不重複。只提示不阻擋。 */}
+            {props.relayUrl ? <RelayHealthBadge url={props.relayUrl} /> : null}
             {props.onRelayChange ? (
               <RelayChange current={props.relayUrl} onApply={props.onRelayChange} />
             ) : null}

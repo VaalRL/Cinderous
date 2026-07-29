@@ -868,6 +868,14 @@ button:disabled { opacity: .5; cursor: default; filter: none; }
 .hist__search button:disabled { opacity: .5; cursor: default; }
 .hist__scan { color: var(--muted); font-size: 12px; margin: 6px 0; }
 
+/* 中繼健檢徽章（ADR-0275）：只提示不阻擋——警告用琥珀而非紅（不是錯誤，是取捨）。 */
+.relaycheck { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; font-size: 11.5px; }
+.relaycheck__badge { font-weight: 600; }
+.relaycheck__why { color: var(--muted); line-height: 1.45; }
+.relaycheck--ok .relaycheck__badge { color: #2f9e44; }
+.relaycheck--warn .relaycheck__badge { color: #b26a00; }
+.relaycheck--down .relaycheck__badge { color: #e5484d; }
+
 /* 無障礙設定（ADR-0253）：UI 尺寸檔位橫排；開啟/選中以主色描邊＋粗體標示（aria-pressed 同步，不只靠顏色）。 */
 .a11y__scale { display: flex; gap: 6px; flex-wrap: wrap; }
 .a11y__scale button[aria-pressed="true"],
