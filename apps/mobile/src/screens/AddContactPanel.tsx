@@ -13,6 +13,7 @@ import { resolveTheme, STATUS_COLORS, type Theme, type ThemeTokens } from "@cind
 import { Image, Pressable, StyleSheet, Text, TextInput, View } from "react-native-web";
 import { copyText } from "../native/clipboard.js";
 import { qrScanSupported, scanQr } from "../native/qr-scan.js";
+import { ActionIcon } from "./ActionIcon.js";
 
 function makeStyles(tk: ThemeTokens) {
   return StyleSheet.create({
@@ -34,6 +35,17 @@ function makeStyles(tk: ThemeTokens) {
     submitText: { color: "#ffffff", fontWeight: "700", fontSize: 13 },
     ghost: { borderWidth: 1, borderColor: tk.accent, borderRadius: 8, paddingVertical: 6, paddingHorizontal: 12, backgroundColor: tk.field },
     ghostText: { color: tk.accent, fontWeight: "600", fontSize: 13 },
+    /** 圖示鈕：與旁邊的「新增」鈕等高（padding 6+6＋內容 20 ≒ 32），維持同列基線齊平。 */
+    iconBtn: {
+      borderWidth: 1,
+      borderColor: tk.accent,
+      borderRadius: 8,
+      backgroundColor: tk.field,
+      paddingVertical: 6,
+      paddingHorizontal: 8,
+      alignItems: "center",
+      justifyContent: "center",
+    },
     npub: { flex: 1, fontSize: 11, color: tk.accent },
     qrWrap: { alignItems: "center", gap: 6, paddingVertical: 6 },
     qrImg: { width: 180, height: 180 },
@@ -153,22 +165,16 @@ export function AddContactPanel({
         </>
       ) : null}
 
-      {/* 掃描：不支援的環境（無 BarcodeDetector／無相機）不顯示——貼上那條永遠可用。 */}
-      {qrScanSupported() ? (
-        scanning ? (
-          <View style={styles.scanWrap} testID="qr-scanning">
-            {/* RNW 無 <Video>；用原生 DOM 元素承載預覽（盲掃體驗極差，一定要看得到）。 */}
-            <video ref={videoRef} playsInline muted style={{ width: 220, height: 220, objectFit: "cover", borderRadius: 8 }} />
-            <Text style={styles.label}>{t("qr_scanHint")}</Text>
-            <Pressable style={styles.ghost} accessibilityRole="button" testID="scan-cancel" onPress={stopScan}>
-              <Text style={styles.ghostText}>{t("dialog_cancel")}</Text>
-            </Pressable>
-          </View>
-        ) : (
-          <Pressable style={styles.ghost} accessibilityRole="button" testID="scan-qr" onPress={() => void startScan()}>
-            <Text style={styles.ghostText}>{t("qr_scan")}</Text>
+      {/* 掃描進行中：預覽必須看得到（盲掃體驗極差）。 */}
+      {scanning ? (
+        <View style={styles.scanWrap} testID="qr-scanning">
+          {/* RNW 無 <Video>；用原生 DOM 元素承載預覽。 */}
+          <video ref={videoRef} playsInline muted style={{ width: 220, height: 220, objectFit: "cover", borderRadius: 8 }} />
+          <Text style={styles.label}>{t("qr_scanHint")}</Text>
+          <Pressable style={styles.ghost} accessibilityRole="button" testID="scan-cancel" onPress={stopScan}>
+            <Text style={styles.ghostText}>{t("dialog_cancel")}</Text>
           </Pressable>
-        )
+        </View>
       ) : null}
 
       {error ? <Text style={styles.error}>{t(error)}</Text> : null}
@@ -184,6 +190,20 @@ export function AddContactPanel({
           autoCorrect={false}
           aria-label={t("mobileChats_add")}
         />
+        {/* 掃描＝「另一種輸入方式」，故與貼上欄同列（ADR-0282）。圖示鈕：文字標籤佔掉輸入欄
+            的寬度，而取景框圖示已是通用語彙。不支援的環境（無 BarcodeDetector／無相機）
+            整顆不顯示——貼上那條永遠可用。 */}
+        {qrScanSupported() && !scanning ? (
+          <Pressable
+            style={styles.iconBtn}
+            accessibilityRole="button"
+            testID="scan-qr"
+            aria-label={t("qr_scan")}
+            onPress={() => void startScan()}
+          >
+            <ActionIcon name="scanQr" color={tk.accent} size={20} />
+          </Pressable>
+        ) : null}
         <Pressable style={styles.submit} accessibilityRole="button" testID="add-submit" onPress={() => submit(draft)}>
           <Text style={styles.submitText}>{t("mobileChats_addBtn")}</Text>
         </Pressable>

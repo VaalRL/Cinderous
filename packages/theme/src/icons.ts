@@ -9,6 +9,37 @@
 
 export type MsgStatusIconName = "sending" | "failed" | "sent" | "delivered" | "read";
 
+/**
+ * 動作圖示（ADR-0282）：純描邊、`currentColor`、16×16，與上面的狀態圖示同一套規格。
+ * 放在這裡而不是各 App 內嵌，是為了兩端要用時不會各畫一個。
+ */
+export interface ActionIcon {
+  viewBox: string;
+  strokes: string[];
+  strokeWidth: number;
+}
+
+export const ACTION_ICONS = {
+  /**
+   * 掃描 QR：四個取景角 ＋ 中央掃描線。
+   * 刻意**不畫成完整 QR 圖案**——那與「顯示我的 QR」看起來會太像；
+   * 取景框＋掃描線是相機取景的通用語彙，一眼可辨「這是去掃別人的」。
+   */
+  scanQr: {
+    viewBox: "0 0 16 16",
+    strokes: [
+      "M2 5.5V3a1 1 0 0 1 1-1h2.5", // 左上角
+      "M10.5 2H13a1 1 0 0 1 1 1v2.5", // 右上角
+      "M14 10.5V13a1 1 0 0 1-1 1h-2.5", // 右下角
+      "M5.5 14H3a1 1 0 0 1-1-1v-2.5", // 左下角
+      "M4 8h8", // 掃描線
+    ],
+    strokeWidth: 1.4,
+  },
+} as const satisfies Record<string, ActionIcon>;
+
+export type ActionIconName = keyof typeof ACTION_ICONS;
+
 export interface MsgStatusIcon {
   /** SVG viewBox（統一 16×16）。 */
   viewBox: string;
