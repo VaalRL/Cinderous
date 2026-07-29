@@ -2071,7 +2071,7 @@ export class RelayChatBackend implements ChatBackend {
   addContact(input: string, relayUrl?: string): void {
     // ADR-0281：切分規則共用 core 的 `parseContactInput`——先前這裡內嵌一份，行動端 QR 掃描
     // 另寫一份「只認裸 npub」的檢查，導致掃桌面 QR（`npub@wss://…`）被打回。
-    const { npub: rawNpub, hint: inlineHint } = parseContactInput(input);
+    const { npub: rawNpub, hint: inlineHint, name: selfReported } = parseContactInput(input);
     const pubkey = npubDecode(rawNpub);
     // 自我防呆（ADR-0055）：不得加自己作用中身分（跨身分連結風險；App 層另擋其他自身身分）。
     if (pubkey === this.self.pubkey || this.isBlocked(pubkey) || this.contacts.some((c) => c.pubkey === pubkey)) return;
@@ -2079,7 +2079,9 @@ export class RelayChatBackend implements ChatBackend {
     this.storage.addContact(
       this.stampAt({
         pubkey,
-        name: shortNpub(rawNpub),
+        // ADR-0284：QR 帶來的自報名稱優先於 `npub1abc…` 佔位。對方接受後回送的個人檔
+        // 仍會覆寫它（ADR-0061 的既有路徑），所以這只是「接受之前」的更好預設值。
+        name: selfReported || shortNpub(rawNpub),
         ...(hint && hint !== this.homeUrl ? { relayUrl: hint } : {}),
       }),
     );

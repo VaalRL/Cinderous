@@ -7,7 +7,7 @@
 // QR 產生共用 `@cinderous/core` 的 `qrSvg`（本批自桌面搬入 core，兩端同一份實作）。
 // 掃描走 `native/qr-scan.ts` 的平台縫——**不支援就不顯示掃描鈕**，貼上那條永遠在。
 import { useEffect, useMemo, useRef, useState } from "react";
-import { isContactInput, qrSvg } from "@cinderous/core";
+import { formatContactInput, isContactInput, qrSvg } from "@cinderous/core";
 import { type Locale, type MessageKey, translate } from "@cinderous/i18n";
 import { resolveTheme, STATUS_COLORS, type Theme, type ThemeTokens } from "@cinderous/theme";
 import { Image, Pressable, StyleSheet, Text, TextInput, View } from "react-native-web";
@@ -58,6 +58,7 @@ function makeStyles(tk: ThemeTokens) {
 export function AddContactPanel({
   onAdd,
   selfNpub,
+  selfName,
   locale = "zh-Hant",
   theme = "light",
   accent = null,
@@ -66,6 +67,12 @@ export function AddContactPanel({
   onAdd: (npub: string) => void;
   /** 自己的 npub（供出示 QR 與複製）；未提供＝只顯示貼上欄。 */
   selfNpub?: string | undefined;
+  /**
+   * 自己的顯示名稱（ADR-0284）：**只編進 QR**，讓當面掃碼的人立刻看到名字，
+   * 而不是等對方接受請求（ADR-0121 在那之前不回送個人檔）。
+   * 複製出去的純文字不帶——那可能被貼到公開場合。
+   */
+  selfName?: string | undefined;
   locale?: Locale;
   theme?: Theme;
   accent?: string | null;
@@ -83,10 +90,12 @@ export function AddContactPanel({
   const abortRef = useRef<AbortController | null>(null);
 
   // 自己的 QR：npub 短、內容固定，直接算 SVG data URI（無需快取以外的處理）。
-  const qrUri = useMemo(
-    () => (selfNpub ? `data:image/svg+xml;utf8,${encodeURIComponent(qrSvg(selfNpub, { cell: 4 }))}` : null),
-    [selfNpub],
-  );
+  const qrUri = useMemo(() => {
+    if (!selfNpub) return null;
+    // ADR-0284：QR 帶名字（當面交換，對方本來就自願亮名）；複製的純文字則不帶。
+    const payload = formatContactInput(selfNpub, selfName);
+    return `data:image/svg+xml;utf8,${encodeURIComponent(qrSvg(payload, { cell: 4 }))}`;
+  }, [selfNpub, selfName]);
 
   // 卸載時務必中止掃描——否則相機會繼續開著（指示燈亮），是嚴重的隱私觀感問題。
   useEffect(() => () => abortRef.current?.abort(), []);

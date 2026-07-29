@@ -1,4 +1,4 @@
-import { qrDataUri } from "@cinderous/core";
+import { formatContactInput, qrDataUri } from "@cinderous/core";
 import type { MessageKey } from "@cinderous/i18n";
 import { Fragment, type ReactNode, useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n.js";
@@ -388,6 +388,7 @@ export function ContactListWindow(props: ContactListProps): JSX.Element {
       {props.onAddContact ? (
         <AddContact
           selfNpub={props.selfNpub ?? ""}
+          selfName={self.name}
           onAdd={props.onAddContact}
           myIdLabel={t("contact_myId")}
           placeholder={t("contact_addPlaceholder")}
@@ -733,12 +734,15 @@ function GroupModal({
 
 export function AddContact({
   selfNpub,
+  selfName,
   onAdd,
   myIdLabel,
   placeholder,
   addLabel,
 }: {
   selfNpub: string;
+  /** 自己的顯示名稱（ADR-0284）：**只編進 QR**，讓當面掃碼者立刻看到名字，不進複製的純文字。 */
+  selfName?: string;
   onAdd: (npub: string) => void;
   myIdLabel: string;
   placeholder: string;
@@ -796,7 +800,7 @@ export function AddContact({
               <span className="win__btn" role="button" aria-label="×" onClick={() => setShowQr(false)}>×</span>
             </div>
             <div className="qrcard__body">
-              <img className="qrcard__img" data-testid="qr-img" src={qrDataUri(selfNpub, { cell: 5 })} alt={t("qr_alt")} />
+              <img className="qrcard__img" data-testid="qr-img" src={qrDataUri(formatContactInput(selfNpub, selfName), { cell: 5 })} alt={t("qr_alt")} />
               <div className="qrcard__hint">{t("qr_hint")}</div>
               <code className="qrcard__npub">{selfNpub}</code>
             </div>

@@ -2,8 +2,16 @@
 <html lang="zh-Hant">
   <head>
     <meta charset="UTF-8" />
-    <!-- viewport-fit=cover：手勢列／瀏海區交給 CSS env() 處理，避免內容被系統列裁掉 -->
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <!--
+      viewport-fit=cover：版面延伸到瀏海／手勢列底下，再由下面的 env(safe-area-inset-*) 補回留白。
+      interactive-widget=resizes-content（ADR-0284）：**鍵盤彈出時縮小版面視窗**。
+      沒有它，Android WebView 的鍵盤只蓋住畫面而不縮版面 → 輸入列被壓在鍵盤底下看不見，
+      那正是「尺寸不合」最明顯的一種。
+    -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content"
+    />
     <meta name="description" content="Cinderous — 去中心化、端到端加密的即時通訊" />
     <title>Cinderous</title>
     <style>
@@ -18,10 +26,20 @@
       body {
         height: 100dvh; /* 行動瀏覽器網址列收合時不留白 */
         overscroll-behavior: none; /* 關掉整頁下拉回彈：在 WebView 裡那看起來像網頁、不像 App */
+        /* 內層 ScrollView 自己捲；整頁不該再捲一次（雙層捲動在手機上很難操作）。 */
+        overflow: hidden;
       }
       #root {
         display: flex;
         flex-direction: column;
+        /* 安全區（ADR-0284）：上面宣告了 viewport-fit=cover，就**必須**在這裡補回留白，
+           否則標頭會鑽到狀態列底下、底部分頁列會被手勢列蓋住。
+           左右也要——橫向時瀏海會吃掉一側。 */
+        padding-top: env(safe-area-inset-top);
+        padding-bottom: env(safe-area-inset-bottom);
+        padding-left: env(safe-area-inset-left);
+        padding-right: env(safe-area-inset-right);
+        box-sizing: border-box;
       }
     </style>
   </head>
