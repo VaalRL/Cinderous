@@ -107,6 +107,8 @@ export function ChatsListScreen({
     statusMessage: string;
     onStatusMessage: (msg: string) => void;
     avatar?: string | undefined;
+    /** 更換頭像（ADR-0283）；未提供＝頭像不可點。 */
+    onAvatar?: ((uri: string | undefined) => boolean) | undefined;
     invisible?: boolean;
   };
   now?: number;
@@ -155,6 +157,7 @@ export function ChatsListScreen({
             statusMessage={self.statusMessage}
             onStatusMessage={self.onStatusMessage}
             avatar={self.avatar}
+            onAvatar={self.onAvatar}
             invisible={self.invisible ?? false}
             locale={locale}
             theme={theme}

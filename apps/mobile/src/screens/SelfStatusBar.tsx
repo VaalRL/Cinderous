@@ -6,9 +6,10 @@
 // 狀態切換鈕（`StatusSegments`）獨立匯出並由 `SettingsScreen` 共用——同一個控制項不做兩份。
 import { useMemo } from "react";
 import { type Locale, type MessageKey, translate } from "@cinderous/i18n";
-import { resolveTheme, STATUS_COLORS, type Theme, type ThemeTokens } from "@cinderous/theme";
+import { contrastRatio, resolveTheme, STATUS_COLORS, type Theme, type ThemeTokens } from "@cinderous/theme";
 import { Image, Pressable, StyleSheet, Text, TextInput, View } from "react-native-web";
 import type { Status } from "@cinderous/engine";
+import { pickAvatarImage } from "../native/avatar.js";
 
 /** 狀態鍵（與 MobileApp／SettingsScreen 同一組 i18n 鍵）。 */
 const STATUS_KEY: Record<"online" | "away" | "busy", MessageKey> = {
@@ -23,9 +24,29 @@ export const PICKABLE_STATUS = ["online", "away", "busy"] as const;
 function segStyles(tk: ThemeTokens) {
   return StyleSheet.create({
     row: { flexDirection: "row", gap: 8, flexWrap: "wrap" },
-    seg: { paddingVertical: 6, paddingHorizontal: 12, borderRadius: 8, borderWidth: 1 },
+    seg: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+      paddingVertical: 6,
+      paddingHorizontal: 12,
+      borderRadius: 8,
+      borderWidth: 1,
+    },
+    /** 狀態色點：未選中時是唯一的顏色線索，選中時與底色一起確認選了哪一個。 */
+    dot: { width: 9, height: 9, borderRadius: 5 },
     segText: { fontSize: 13, fontWeight: "600" },
   });
+}
+
+/**
+ * 在該狀態色上該用什麼字色（ADR-0283）。
+ *
+ * 選中的鈕以**狀態色**填底——但白字在「離開」的琥珀 `#f2b134` 上只有 2.1:1，看不清楚。
+ * 用既有的 `contrastRatio` 挑對比較高的一邊，而不是一律白字。
+ */
+function inkOn(bg: string): string {
+  return contrastRatio(bg, "#ffffff") >= contrastRatio(bg, "#101828") ? "#ffffff" : "#101828";
 }
 
 /**
@@ -53,15 +74,21 @@ export function StatusSegments({
     <View style={styles.row}>
       {PICKABLE_STATUS.map((v) => {
         const on = value === v;
+        // ADR-0283：以**該狀態的顏色**標示，不再一律用主色——線上綠／離開黃／忙碌紅
+        // 與聯絡人清單的狀態點是同一組色，看一眼就知道自己現在對外顯示成什麼。
+        const c = STATUS_COLORS[v];
         return (
           <Pressable
             key={v}
             accessibilityRole="button"
+            aria-pressed={on}
             testID={`status-${v}`}
-            style={[styles.seg, { borderColor: on ? tk.accent : tk.border, backgroundColor: on ? tk.accent : tk.field }]}
+            style={[styles.seg, { borderColor: c, backgroundColor: on ? c : tk.field }]}
             onPress={() => onChange(v)}
           >
-            <Text style={[styles.segText, { color: on ? "#ffffff" : tk.ink }]}>{translate(locale, STATUS_KEY[v])}</Text>
+            {/* 選中時底色已是狀態色，色點改用字色以免糊成一塊。 */}
+            <View style={[styles.dot, { backgroundColor: on ? inkOn(c) : c }]} />
+            <Text style={[styles.segText, { color: on ? inkOn(c) : tk.ink }]}>{translate(locale, STATUS_KEY[v])}</Text>
           </Pressable>
         );
       })}
@@ -99,6 +126,7 @@ export function SelfStatusBar({
   statusMessage,
   onStatusMessage,
   avatar,
+  onAvatar,
   invisible = false,
   locale = "zh-Hant",
   theme = "light",
@@ -112,6 +140,11 @@ export function SelfStatusBar({
   onStatusMessage: (msg: string) => void;
   /** 廣播頭像（ADR-0154）；無則顯示名稱首字。 */
   avatar?: string | undefined;
+  /**
+   * 更換頭像（ADR-0283）：點頭像選圖 → 縮到 128px → 廣播。回 false＝後端不支援。
+   * 未提供＝頭像不可點（如示範後端，換了也沒有廣播對象）。
+   */
+  onAvatar?: ((uri: string | undefined) => boolean) | undefined;
   /**
    * 隱身中（ADR-0164）：對外一律顯示離線。此時狀態點畫成離線灰並加註說明——
    * 否則畫面會說「線上」而實際上沒人看得到你，那是 UI 在說謊。
@@ -127,16 +160,31 @@ export function SelfStatusBar({
   const t = (k: MessageKey): string => translate(locale, k);
   const dotColor = invisible ? STATUS_COLORS.offline : STATUS_COLORS[status];
 
+  /** 選圖 → 縮到 128px → 廣播。使用者取消（回 null）＝什麼都不做，不清掉現有頭像。 */
+  const changeAvatar = async (): Promise<void> => {
+    if (!onAvatar) return;
+    const uri = await pickAvatarImage();
+    if (uri) onAvatar(uri);
+  };
+
   return (
     <View style={styles.root} testID="self-status-bar">
-      <View style={styles.avatar}>
+      {/* 頭像（ADR-0283）：可點＝選圖更換。先前只有「設定」分頁能改，而這裡已經把頭像
+          畫出來了——擺著不能點反而讓人以為壞了。未提供 onAvatar 就退化成純顯示。 */}
+      <Pressable
+        style={styles.avatar}
+        disabled={!onAvatar}
+        testID="self-avatar"
+        {...(onAvatar ? { accessibilityRole: "button", "aria-label": t("avatar_change") } : {})}
+        onPress={() => void changeAvatar()}
+      >
         {avatar ? (
           <Image source={{ uri: avatar }} style={styles.avatarImg} accessibilityLabel={name} />
         ) : (
           <Text style={styles.avatarText}>{(name.trim()[0] ?? "?").toUpperCase()}</Text>
         )}
         <View style={[styles.dot, { backgroundColor: dotColor }]} testID="self-status-dot" />
-      </View>
+      </Pressable>
       <View style={styles.info}>
         <Text style={styles.name} numberOfLines={1}>
           {name}

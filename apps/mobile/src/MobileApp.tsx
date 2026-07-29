@@ -1446,6 +1446,8 @@ export function MobileApp({
                   onStatus: changeStatus,
                   statusMessage: selfStatusMessage,
                   onStatusMessage: changeStatusMessage,
+                  // 更換頭像（ADR-0283）：與設定分頁同一個 changeAvatar，不另開路徑。
+                  onAvatar: changeAvatar,
                   invisible,
                   ...(() => {
                     const av = backendRef.current?.selfAvatar?.();
