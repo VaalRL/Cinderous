@@ -1,17 +1,12 @@
 {
   "relays": [
-    "wss://cinder-relay.cinderous1.workers.dev",
-    "wss://cinder-relay.jt0856.workers.dev"
+    "wss://cinder-relay.cinderous1.workers.dev"
   ],
   "entries": [
     {
       "url": "wss://cinder-relay.cinderous1.workers.dev",
       "weight": 2
-    },
-    {
-      "url": "wss://cinder-relay.jt0856.workers.dev",
-      "weight": 2
     }
   ],
-  "updatedAt": 1784363346
+  "updatedAt": 1785320638
 }
