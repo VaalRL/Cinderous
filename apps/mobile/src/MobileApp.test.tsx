@@ -14,7 +14,7 @@ import { SettingsScreen } from "./screens/SettingsScreen.js";
 describe("行動端 app 殼與畫面（ADR-0085）", () => {
   it("MobileApp 初始渲染登入畫面（SSR 下 effect 不跑）", () => {
     const html = renderToStaticMarkup(<MobileApp initialLocale="zh-Hant" initialTheme="dark" initialAccent="#2f6cd6" />);
-    expect(html).toContain("用私鑰登入"); // mobileSignIn_title
+    expect(html).toContain("登入 Cinderous"); // mobileSignIn_title（ADR-0277）
   });
 
   it("BottomTabs：三分頁標籤＋未讀總數徽章（ADR-0087）", () => {

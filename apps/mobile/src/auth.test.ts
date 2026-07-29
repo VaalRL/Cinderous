@@ -16,7 +16,7 @@ import {
   runPairTarget,
 } from "@cinderous/engine";
 import { describe, expect, it } from "vitest";
-import { identityFromNsec, identityFromPairBundle, isRemembered, npubFromNsec, previewPairing, rememberIdentity, type MobileIdentity, unlockRemembered } from "./auth.js";
+import { createIdentity, identityFromNsec, identityFromPairBundle, isRemembered, npubFromNsec, previewPairing, rememberIdentity, type MobileIdentity, unlockRemembered } from "./auth.js";
 
 describe("行動端登入 A：nsec 匯入（ADR-0081）", () => {
   const sk = generateSecretKey();
@@ -172,5 +172,38 @@ describe("「記住我」：以本地密碼包裹 nsec（ADR-0117）", () => {
 
   it("同一身分兩次記住 → 密文不同（鹽每次隨機）", () => {
     expect(rememberIdentity(id, "pw")!.wrapped).not.toBe(rememberIdentity(id, "pw")!.wrapped);
+  });
+});
+
+// ADR-0277：行動端過去**沒有建立身分的路徑**——只能匯入桌面複製來的 nsec。
+// 這批把「手機是第一個裝置」補起來。
+describe("createIdentity：本機生成全新身分（ADR-0277）", () => {
+  it("只要顯示名稱即可建立，且導出的 npub/nsec 與金鑰自洽", () => {
+    const r = createIdentity("小明");
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.identity.name).toBe("小明");
+    expect(r.identity.npub.startsWith("npub1")).toBe(true);
+    expect(r.identity.nsec.startsWith("nsec1")).toBe(true);
+    // 自洽：nsec 再解一次要導回同一個 npub（不是隨手拼字串）
+    expect(npubFromNsec(r.identity.nsec)).toBe(r.identity.npub);
+    expect(getPublicKey(r.identity.sk)).toBe(r.identity.pubkey);
+  });
+
+  it("🔴 每次都是**新**金鑰——不得重用（重用等於兩人共用身分）", () => {
+    const a = createIdentity("甲");
+    const b = createIdentity("甲");
+    expect(a.ok && b.ok).toBe(true);
+    if (!a.ok || !b.ok) return;
+    expect(a.identity.pubkey).not.toBe(b.identity.pubkey);
+  });
+
+  it("名稱空白 → 擋下（與 identityFromSecret 同款錯誤鍵）", () => {
+    expect(createIdentity("   ")).toEqual({ ok: false, error: "mobileSignIn_errName" });
+  });
+
+  it("名稱前後空白會被修掉（避免「小明 」與「小明」被當兩個人）", () => {
+    const r = createIdentity("  小明  ");
+    expect(r.ok && r.identity.name).toBe("小明");
   });
 });

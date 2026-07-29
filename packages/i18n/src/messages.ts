@@ -46,6 +46,8 @@ export interface Messages {
   signIn_ambiguousName: string;
   // ── 行動端登入（ADR-0081）：nsec 匯入（A）＋配對匯入（B）──
   mobileSignIn_title: string;
+  /** 由「用私鑰登入」返回建立新身分（ADR-0277）。 */
+  mobileSignIn_backToCreate: string;
   mobileSignIn_nameLabel: string;
   mobileSignIn_nsecLabel: string;
   mobileSignIn_nsecPlaceholder: string;
@@ -875,7 +877,8 @@ const zhHant: Messages = {
   signIn_createHint: "這個名稱是新的，將建立新身分（本機生成金鑰）。",
   signIn_createButton: "建立新身分",
   signIn_ambiguousName: "本機有多個同名身分（可能是舊資料），無法自動判斷。請改用「用 nsec 登入」，或稍後在設定裡改名區分。",
-  mobileSignIn_title: "用私鑰登入",
+  mobileSignIn_title: "登入 Cinderous",
+  mobileSignIn_backToCreate: "← 改為建立新身分",
   mobileSignIn_nameLabel: "顯示名稱",
   mobileSignIn_nsecLabel: "私鑰（nsec）",
   mobileSignIn_nsecPlaceholder: "貼上 nsec1…",
@@ -884,7 +887,7 @@ const zhHant: Messages = {
   mobileSignIn_errName: "請輸入顯示名稱",
   mobileSignIn_errNsec: "nsec 格式不正確",
   mobileSignIn_nameTaken: "本機已有同名身分，請換一個名稱。",
-  mobileSignIn_hint: "在桌面版「設定 → 身分備份」複製你的 nsec；只存在本機、絕不外流。",
+  mobileSignIn_hint: "去中心化、端到端加密的即時通。輸入顯示名稱即可開始（你的身分是本機生成的金鑰，不需手機號碼或電子郵件）。",
   mobileSignIn_toPair: "改用從舊裝置匯入",
   mobilePair_title: "從舊裝置匯入",
   mobilePair_codeLabel: "配對碼",
@@ -1647,7 +1650,8 @@ const en: Messages = {
   signIn_createHint: "This name is new — a new identity will be created (key generated on your device).",
   signIn_createButton: "Create new identity",
   signIn_ambiguousName: "Multiple identities on this device share this name (likely old data), so it can't be resolved automatically. Use \"Sign in with nsec\" instead, or rename them later in Settings.",
-  mobileSignIn_title: "Sign in with secret key",
+  mobileSignIn_title: "Sign in to Cinderous",
+  mobileSignIn_backToCreate: "← Create a new identity instead",
   mobileSignIn_nameLabel: "Display name",
   mobileSignIn_nsecLabel: "Private key (nsec)",
   mobileSignIn_nsecPlaceholder: "Paste nsec1…",
@@ -1656,7 +1660,7 @@ const en: Messages = {
   mobileSignIn_errName: "Enter a display name",
   mobileSignIn_errNsec: "Invalid nsec key",
   mobileSignIn_nameTaken: "An identity with this name already exists on this device; pick another.",
-  mobileSignIn_hint: "Copy your nsec from Desktop → Settings → Identity backup. It stays on this device and is never uploaded.",
+  mobileSignIn_hint: "Decentralized, end-to-end encrypted messaging. Just enter a display name to start — your identity is a key generated on this device; no phone number or email required.",
   mobileSignIn_toPair: "Import from old device instead",
   mobilePair_title: "Import from old device",
   mobilePair_codeLabel: "Pairing code",

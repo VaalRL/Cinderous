@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Cinderous 行動端 web preview（開發用）" />
+    <title>Cinderous 行動端 — Web Preview</title>
+  </head>
+  <body>
+    <!--
+      開發預覽台（ADR-0085／0277）：手機外框＋示範後端切換＋示範 nsec。
+      **只在 `vite dev` 服務得到**——`vite.config.ts` 的 build 輸入只列 index.html，
+      故本頁不會進 `dist/`，也就不會被 Capacitor 打進 APK（ADR-0277 的重點）。
+      正式進入點是 `index.html` → `src/main.tsx`。
+    -->
+    <div id="root"></div>
+    <script type="module" src="/src/preview.tsx"></script>
+  </body>
+</html>

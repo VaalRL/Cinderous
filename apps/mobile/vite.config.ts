@@ -1,4 +1,5 @@
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
@@ -28,6 +29,10 @@ export default defineConfig({
   define: { __APP_VERSION__: JSON.stringify(version) },
   plugins: [react()],
   resolve: rnWeb,
+  // ADR-0277：build 輸入**只有** index.html（→ src/main.tsx，正式 App）。
+  // 開發預覽台 preview.html 刻意不列入——它只在 `vite dev` 服務得到，
+  // 不會進 dist/，也就不會被 Capacitor（webDir: "dist"）打進 APK。
+  build: { rollupOptions: { input: fileURLToPath(new URL("./index.html", import.meta.url)) } },
   test: {
     environment: "node",
     include: ["src/**/*.test.{ts,tsx}"],
