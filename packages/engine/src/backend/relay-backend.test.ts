@@ -2615,6 +2615,35 @@ describe("訊息請求（ADR-0121）", () => {
     stranger.stop();
   });
 
+  // ADR-0284：當面掃 QR 時，QR 帶了對方自報的名字——那是他自願亮出來的，
+  // 不需要協定層對陌生人回饋任何東西（ADR-0121 的紅線不動）。
+  it("🔴 QR 帶自報名稱 → 加完好友**立刻**看到名字，而不是 npub1abc…", () => {
+    const net = createInMemoryRelayNetwork();
+    const sa = new MemoryStorage();
+    const a = new RelayChatBackend(sa, (h) => net.connect("a", h), "Alice");
+    const b = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("b", h), "Bob");
+    a.start(noop);
+    b.start(noop);
+
+    a.addContact(`${b.selfNpub} #Bob`); // ＝掃到 B 的 QR（npub ＋ `#` 標記的自報名）
+    expect(sa.loadContacts().find((c) => c.pubkey === b.self.pubkey)?.name).toBe("Bob");
+    a.stop();
+    b.stop();
+  });
+
+  it("沒帶名稱時照舊退回 npub 縮寫（不改既有行為）", () => {
+    const net = createInMemoryRelayNetwork();
+    const sa = new MemoryStorage();
+    const a = new RelayChatBackend(sa, (h) => net.connect("a", h), "Alice");
+    const b = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("b", h), "Bob");
+    a.start(noop);
+    b.start(noop);
+    a.addContact(b.selfNpub);
+    expect(sa.loadContacts().find((c) => c.pubkey === b.self.pubkey)?.name).toMatch(/^npub1/);
+    a.stop();
+    b.stop();
+  });
+
   it("重載後請求區還在（持久化 ＋ 開機時 emit）", () => {
     const { me, stranger, sv } = strangerSends();
     me.stop();

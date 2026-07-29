@@ -70,6 +70,7 @@ export function ChatsListScreen({
   onCreateGroup,
   contacts,
   selfNpub,
+  selfName,
   convos,
   self,
   now = Date.now(),
@@ -94,6 +95,8 @@ export function ChatsListScreen({
   contacts?: { pubkey: string; name: string }[];
   /** 自己的 npub（真實 relay 模式顯示於加好友面板供分享）。 */
   selfNpub?: string;
+  /** 自己的顯示名稱（ADR-0284）：只編進加好友面板的 QR，讓當面掃碼者立刻看到名字。 */
+  selfName?: string;
   /** 各對話訊息（ADR-0256 階段 4）：供搜尋比對訊息內容；未提供＝只比名稱。 */
   convos?: Record<string, ChatMessage[]>;
   /**
@@ -215,6 +218,7 @@ export function ChatsListScreen({
               setAddOpen(false);
             }}
             selfNpub={selfNpub}
+            selfName={selfName}
             locale={locale}
             theme={theme}
             accent={accent}
