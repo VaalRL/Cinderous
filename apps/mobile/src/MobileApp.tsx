@@ -1436,6 +1436,20 @@ export function MobileApp({
                 // 建立群組（ADR-0114）：只有真實 relay 才有（示範後端無群組扇出）。
                 onCreateGroup: createGroup,
                 contacts: contacts.map((c) => ({ pubkey: c.pubkey, name: c.name })),
+                // 自己的狀態列（ADR-0278）：改狀態是高頻操作，擺在聊天頁頂部而非只在設定分頁。
+                // 示範後端無 presence 可廣播，故與其他真實 relay 功能同一個閘。
+                self: {
+                  name: selfName,
+                  status: selfStatus,
+                  onStatus: changeStatus,
+                  statusMessage: selfStatusMessage,
+                  onStatusMessage: changeStatusMessage,
+                  invisible,
+                  ...(() => {
+                    const av = backendRef.current?.selfAvatar?.();
+                    return av ? { avatar: av } : {};
+                  })(),
+                },
               }
             : {})}
           {...themeProps}

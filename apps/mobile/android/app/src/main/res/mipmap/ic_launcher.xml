@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  **API 23–25 的舊版圖示**（ADR-0278）：那些系統沒有自適應圖示，拿不到 mipmap-anydpi-v26，
+  只會落到這份無限定詞的資源。所以這裡必須自己畫背板（含圓角），不能只給前景。
+
+  幾何＝ `cinderous-ember.svg` 原稿：圓角 230 的深藍方板 ＋ 火焰。
+  用向量而非各密度 PNG——省掉一整套點陣圖、也不會有哪個密度忘了更新。
+  漸層要 API 24+，這裡是相容路徑，故一律用純色（外焰取漸層中段色）。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="1024"
+    android:viewportHeight="1024">
+    <path
+        android:fillColor="#0F1F3A"
+        android:pathData="M230,0 L794,0 A230,230 0 0 1 1024,230 L1024,794 A230,230 0 0 1 794,1024 L230,1024 A230,230 0 0 1 0,794 L0,230 A230,230 0 0 1 230,0 Z" />
+    <path
+        android:fillColor="#F07F2B"
+        android:pathData="M512 200C380 380 322 500 322 600C322 720 410 800 512 800C614 800 702 720 702 600C702 500 644 380 512 200Z" />
+    <path
+        android:fillColor="#FFD66B"
+        android:pathData="M512 380C448 480 418 550 418 610C418 690 462 740 512 740C562 740 606 690 606 610C606 550 576 480 512 380Z" />
+</vector>

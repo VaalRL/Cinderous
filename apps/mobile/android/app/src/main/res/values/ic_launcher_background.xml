@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="ic_launcher_background">#FFFFFF</color>
+    <!-- 品牌深藍背板（ADR-0278），取自 cinderous-ember.svg 的 #0f1f3a。 -->
+    <color name="ic_launcher_background">#0F1F3A</color>
 </resources>

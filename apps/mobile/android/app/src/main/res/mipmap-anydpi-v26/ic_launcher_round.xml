@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
     <background android:drawable="@color/ic_launcher_background"/>
-    <foreground android:drawable="@mipmap/ic_launcher_foreground"/>
+    <!-- ADR-0278：同 ic_launcher，圓形遮罩由系統套用（前景已留足安全區）。 -->
+    <foreground android:drawable="@drawable/ic_launcher_foreground"/>
 </adaptive-icon>

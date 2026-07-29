@@ -21,6 +21,7 @@ const SLOT_STATUS_KEY: Record<"pending" | "sending" | "done" | "failed", Message
 import { Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native-web";
 import { avatarFromUrl, pickAvatarImage } from "../native/avatar.js";
 import { copyText } from "../native/clipboard.js";
+import { StatusSegments } from "./SelfStatusBar.js";
 
 const ACCENTS: { label: string; hex: string | null }[] = [
   { label: "預設", hex: null },
@@ -589,22 +590,12 @@ export function SettingsScreen({
         </View>
 
         {/* 上線狀態（ADR-0114）：與桌面同一組。隱身（見下）優先於此——隱身時完全不廣播。 */}
-        {onStatus ? (
+        {/* status 與 onStatus 恆成對傳入（MobileApp 同一個 spread）；一起判斷讓型別也講清楚這件事。 */}
+        {onStatus && status ? (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>{t("settings_status")}</Text>
-            <View style={styles.rowSeg}>
-              {(["online", "away", "busy"] as const).map((v) => (
-                <Pressable
-                  key={v}
-                  style={seg(status === v)}
-                  accessibilityRole="button"
-                  testID={`status-${v}`}
-                  onPress={() => onStatus(v)}
-                >
-                  <Text style={segTxt(status === v)}>{t(STATUS_KEY[v])}</Text>
-                </Pressable>
-              ))}
-            </View>
+            {/* ADR-0278：與聊天清單頂部的狀態列共用同一個控制項——同一個開關不做兩份。 */}
+            <StatusSegments value={status} onChange={onStatus} locale={locale} theme={theme} accent={accent} />
             {/* 自訂狀態文字（ADR-0142／0168／0171）：逐字更新本機（即時記住），廣播於 MobileApp
                 以 ~600ms 節流合併（引擎 setStatus 本身是同步廣播、catch-up 依賴，故在 UI 層合併，
                 不逐字打中繼/P2P、也不外送打到一半的文字）。 */}

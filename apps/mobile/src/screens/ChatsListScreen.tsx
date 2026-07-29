@@ -7,7 +7,9 @@ import { type ChatMessage, nameOrMessagesMatch } from "@cinderous/engine";
 import { type Locale, type MessageKey, translate } from "@cinderous/i18n";
 import { resolveTheme, STATUS_COLORS, type Theme, type ThemeTokens } from "@cinderous/theme";
 import { Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native-web";
+import type { Status } from "@cinderous/engine";
 import { type ChatListEntry, chatTimeLabel } from "../chat-list.js";
+import { SelfStatusBar } from "./SelfStatusBar.js";
 
 /** 頭像底色：由 id 決定性挑一個柔和色（LINE/Signal 風格的彩色圓）。 */
 const AVATAR_COLORS = ["#5b8def", "#e0698f", "#3aaf9f", "#e0913a", "#8a6ee0", "#4aa96c"];
@@ -69,6 +71,7 @@ export function ChatsListScreen({
   contacts,
   selfNpub,
   convos,
+  self,
   now = Date.now(),
   locale = "zh-Hant",
   theme = "light",
@@ -93,6 +96,19 @@ export function ChatsListScreen({
   selfNpub?: string;
   /** 各對話訊息（ADR-0256 階段 4）：供搜尋比對訊息內容；未提供＝只比名稱。 */
   convos?: Record<string, ChatMessage[]>;
+  /**
+   * 自己的狀態列（ADR-0278）：顯示於清單最上方，可直接改上線狀態與自訂狀態文字。
+   * 未提供＝不顯示（示範模式無 presence 可廣播）。
+   */
+  self?: {
+    name: string;
+    status: Status;
+    onStatus: (s: Status) => void;
+    statusMessage: string;
+    onStatusMessage: (msg: string) => void;
+    avatar?: string | undefined;
+    invisible?: boolean;
+  };
   now?: number;
   locale?: Locale;
   theme?: Theme;
@@ -138,6 +154,22 @@ export function ChatsListScreen({
   return (
     <View style={styles.root}>
       <View style={styles.header}>
+        {/* 自己的狀態列（ADR-0278）：擺在標題列之上——改狀態是高頻操作，不該要人切到設定分頁。 */}
+        {self ? (
+          <SelfStatusBar
+            name={self.name}
+            status={self.status}
+            onStatus={self.onStatus}
+            statusMessage={self.statusMessage}
+            onStatusMessage={self.onStatusMessage}
+            avatar={self.avatar}
+            invisible={self.invisible ?? false}
+            locale={locale}
+            theme={theme}
+            accent={accent}
+            accent2={accent2}
+          />
+        ) : null}
         <View style={styles.headerRow}>
           <Text style={styles.headerTitle}>{t("mobileChats_title")}</Text>
           {onCreateGroup && (contacts?.length ?? 0) > 0 ? (

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  火焰前景的 **API 23 退化版**（ADR-0278）：VectorDrawable 的漸層要 API 24 才支援，
+  所以這裡用漸層中段的單色填滿外焰。API 24+ 會改吃 `drawable-v24/` 那份帶漸層的。
+  形狀完全相同——退化的只有漸層，不是設計。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="1024"
+    android:viewportHeight="1024">
+    <path
+        android:fillColor="#F07F2B"
+        android:pathData="M512 200C380 380 322 500 322 600C322 720 410 800 512 800C614 800 702 720 702 600C702 500 644 380 512 200Z" />
+    <path
+        android:fillColor="#FFD66B"
+        android:pathData="M512 380C448 480 418 550 418 610C418 690 462 740 512 740C562 740 606 690 606 610C606 550 576 480 512 380Z" />
+</vector>
