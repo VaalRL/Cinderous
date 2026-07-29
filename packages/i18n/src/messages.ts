@@ -788,6 +788,14 @@ export interface Messages {
   qr_title: string;
   qr_hint: string;
   qr_alt: string;
+  /** 掃描對方 QR 加好友（ADR-0280）。 */
+  qr_scan: string;
+  /** 掃描中的提示（對準對方的 QR）。 */
+  qr_scanHint: string;
+  /** 掃描失敗（權限被拒／無相機）。 */
+  qr_scanFailed: string;
+  /** 掃到的內容不是有效的 npub。 */
+  qr_scanNotNpub: string;
   call_audio: string;
   call_video: string;
   call_incoming: string;
@@ -1569,6 +1577,10 @@ const zhHant: Messages = {
   qr_title: "我的 QR",
   qr_hint: "請好友掃描以加你為好友",
   qr_alt: "我的 npub QR 碼",
+  qr_scan: "掃描 QR",
+  qr_scanHint: "把對方的 QR 對準框內",
+  qr_scanFailed: "開不了相機（可能是未授權相機權限）",
+  qr_scanNotNpub: "掃到的內容不是 npub",
   call_audio: "語音通話",
   call_video: "視訊通話",
   call_incoming: "來電中…",
@@ -2346,6 +2358,10 @@ const en: Messages = {
   qr_title: "My QR",
   qr_hint: "Have a friend scan this to add you",
   qr_alt: "My npub QR code",
+  qr_scan: "Scan QR",
+  qr_scanHint: "Point the camera at their QR code",
+  qr_scanFailed: "Couldn't open the camera (camera permission may be denied)",
+  qr_scanNotNpub: "That QR isn't an npub",
   call_audio: "Voice call",
   call_video: "Video call",
   call_incoming: "Incoming call…",

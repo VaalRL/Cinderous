@@ -1,9 +1,10 @@
+import { qrDataUri } from "@cinderous/core";
 import type { MessageKey } from "@cinderous/i18n";
 import { Fragment, type ReactNode, useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n.js";
 import type { BlockedContact, ChatMessage, ConnectionState, Contact, ContactRequest, Group, Self, Status } from "@cinderous/engine";
 import { contactLabel } from "@cinderous/engine";
-import { qrDataUri } from "../qr.js";
+
 import { CinderMascot } from "./Brand.js";
 import { type ContactSection, groupContacts, type SortMode } from "./contact-grouping.js";
 import { ContactRow } from "./ContactRow.js";
