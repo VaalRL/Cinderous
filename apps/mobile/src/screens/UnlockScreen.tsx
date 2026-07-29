@@ -52,8 +52,9 @@ export function UnlockScreen({
   return (
     <View style={styles.root}>
       <View style={styles.card}>
-        <Text style={styles.title}>{t("unlock_title")}</Text>
-        <Text style={styles.name}>{name}</Text>
+        {/* `unlock_title` 帶 `{name}` 佔位符——**一定要傳參數**，否則字面「歡迎回來，{name}」
+            會原樣印在畫面上（ADR-0281 修的就是這個）。名字內嵌於標題，與桌面同一種呈現。 */}
+        <Text style={styles.title}>{translate(locale, "unlock_title", { name })}</Text>
         <Text style={styles.hint}>{t("unlock_hint")}</Text>
 
         <TextInput

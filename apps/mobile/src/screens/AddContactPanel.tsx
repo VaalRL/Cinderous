@@ -7,22 +7,12 @@
 // QR 產生共用 `@cinderous/core` 的 `qrSvg`（本批自桌面搬入 core，兩端同一份實作）。
 // 掃描走 `native/qr-scan.ts` 的平台縫——**不支援就不顯示掃描鈕**，貼上那條永遠在。
 import { useEffect, useMemo, useRef, useState } from "react";
-import { npubDecode, qrSvg } from "@cinderous/core";
+import { isContactInput, qrSvg } from "@cinderous/core";
 import { type Locale, type MessageKey, translate } from "@cinderous/i18n";
 import { resolveTheme, STATUS_COLORS, type Theme, type ThemeTokens } from "@cinderous/theme";
 import { Image, Pressable, StyleSheet, Text, TextInput, View } from "react-native-web";
 import { copyText } from "../native/clipboard.js";
 import { qrScanSupported, scanQr } from "../native/qr-scan.js";
-
-/** npub 是否解得開（掃到的內容可能是任何東西——網址、Wi-Fi 設定、別人的名片）。 */
-function isNpub(v: string): boolean {
-  try {
-    npubDecode(v.trim());
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 function makeStyles(tk: ThemeTokens) {
   return StyleSheet.create({
@@ -116,8 +106,10 @@ export function AddContactPanel({
       if (r.reason === "failed") setError("qr_scanFailed");
       return; // cancelled＝使用者自己關掉，不報錯
     }
-    // 掃到的可能是任何東西——不是 npub 就說清楚，不要把垃圾送進 addContact。
-    if (!isNpub(r.text)) {
+    // 掃到的可能是任何東西——網址、Wi-Fi 設定、別人的名片。不驗就把垃圾送進 addContact。
+    // ADR-0281：用 core 的 `isContactInput`，與後端 `addContact` **同一條**切分規則——
+    // 先前這裡只認裸 npub，掃桌面版產出的 `npub@wss://…` QR 會被誤判成「不是 npub」。
+    if (!isContactInput(r.text)) {
       setError("qr_scanNotNpub");
       return;
     }

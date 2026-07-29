@@ -1432,7 +1432,9 @@ export function MobileApp({
           {...(relayUrl
             ? {
                 onAddContact: addContact,
-                selfNpub,
+                // ADR-0281：出示分享字串 `npub…@wss://…`（帶中繼提示，ADR-0034）而非裸 npub
+                // ——與桌面 QR 同一種內容，掃到的人才拿得到路由提示。無 home relay 時退回裸 npub。
+                selfNpub: backendRef.current?.selfShareUri ?? selfNpub,
                 // 建立群組（ADR-0114）：只有真實 relay 才有（示範後端無群組扇出）。
                 onCreateGroup: createGroup,
                 contacts: contacts.map((c) => ({ pubkey: c.pubkey, name: c.name })),
