@@ -21,6 +21,7 @@ const SLOT_STATUS_KEY: Record<"pending" | "sending" | "done" | "failed", Message
 import { Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native-web";
 import { avatarFromUrl, pickAvatarImage } from "../native/avatar.js";
 import { copyText } from "../native/clipboard.js";
+import { isNativeShell } from "../native/platform.js";
 import { StatusSegments } from "./SelfStatusBar.js";
 
 const ACCENTS: { label: string; hex: string | null }[] = [
@@ -824,6 +825,14 @@ export function SettingsScreen({
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>{t("settings_cloud")}</Text>
             <Text style={styles.label}>{t("settings_cloudHint")}</Text>
+            {/* ADR-0279：系統備份已關閉。使用者若不知道，換新機會發現「什麼都沒了」——
+                所以在這裡（唯一談備份的區塊）明說，並指向我們自己的兩條搬移路徑。
+                只在原生殼顯示：瀏覽器預覽沒有 Android 系統備份這回事。 */}
+            {isNativeShell() ? (
+              <Text style={styles.label} testID="no-system-backup">
+                {t("settings_noSystemBackup")}
+              </Text>
+            ) : null}
             <View style={[styles.rowSeg, { flexWrap: "wrap" }]}>
               {(["off", "basic", "full"] as CloudSyncMode[]).map((m) => (
                 <Pressable key={m} style={seg(cloudSync === m)} accessibilityRole="button" onPress={() => onCloudSync(m)}>

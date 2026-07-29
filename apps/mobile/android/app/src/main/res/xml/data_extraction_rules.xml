@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  資料萃取規則（ADR-0279）：把 app 私有資料排除在**雲端備份**與**裝置間轉移**之外。
+
+  為什麼光靠 `android:allowBackup="false"` 不夠：在 Android 12（API 31）以後，該屬性只擋掉
+  備份到 Google 伺服器，**裝置對裝置轉移（D2D，換新機時的「複製資料」）不受它管**——
+  要另外在這裡把 `<device-transfer>` 也排除掉，資料才真的不會被系統搬走。
+  本專案 targetSdk 是 35，所以這條路徑一定會走到。
+
+  兩段都排 `root`（app 私有目錄的根，涵蓋 file/database/sharedpref 與 WebView 的存放處）
+  與 `external`（外部儲存不在 root 底下，要各別排）。
+
+  代價：使用者換新機時系統不會幫忙搬 Cinderous 的資料。這是刻意的——我們自己有
+  配對搬家（ADR-0118，P2P 直傳、有 SAS 驗證）與加密雲端備份（ADR-0071），
+  兩條都在我們的加密與同意流程之內；讓系統多備一份只是多開一個我們管不到的暴露面。
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="root" />
+        <exclude domain="external" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" />
+        <exclude domain="external" />
+    </device-transfer>
+</data-extraction-rules>
