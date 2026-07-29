@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { CinderMascot } from "@cinderous/brand";
-import type { ChatMessage, Contact, Group, Self, Status } from "@cinderous/engine";
+import type { BlockedContact, ChatMessage, Contact, ContactRequest, Group, Self, Status } from "@cinderous/engine";
 import { useI18n } from "../i18n.js";
-import { EditableAvatar } from "./Avatar.js";
+import { Avatar, EditableAvatar } from "./Avatar.js";
 import { AddContact, StatusPicker } from "./ContactListWindow.js";
 import { ContactRow } from "./ContactRow.js";
 import { hasRichStatus, renderStatus } from "./status-text.js";
@@ -43,6 +43,25 @@ export interface DeckSidebarProps {
   onBlockContact?: (pubkey: string) => void;
   /** 點開前以本機 AI 摘要未讀（ADR-0060/0214：三欄版補上 🧠，有未讀才顯示）。 */
   onSummarize?: (pubkey: string) => void;
+  /**
+   * 訊息請求（ADR-0121／0285）：**三欄版過去完全沒有這一區**——`App.tsx` 只把
+   * `addContactProps` 傳進來，帶著 `requests` 的 `manageProps` 只給了經典版。
+   * 結果是：對方把你加為好友，你在三欄佈局下**看不到任何東西**，也就永遠不會接受，
+   * 於是雙方的顯示名稱都停在 `npub1abc…`。
+   */
+  requests?: ContactRequest[];
+  onAcceptRequest?: (pubkey: string) => void;
+  onDeclineRequest?: (pubkey: string) => void;
+  /** 預覽請求裡的訊息（只開窗、不接受——不送已讀回條給非聯絡人）。 */
+  onOpenRequest?: (pubkey: string) => void;
+  /** 全部刪除（ADR-0127 防洪）：被灌爆時一次清空。 */
+  onClearRequests?: () => void;
+  /**
+   * 已封鎖名單（ADR-0285）：三欄版同樣漏接——封鎖之後**沒有任何地方解得開**。
+   * 與請求區同一個成因（`manageProps` 只給了經典版）。
+   */
+  blocked?: BlockedContact[];
+  onUnblockContact?: (pubkey: string) => void;
 }
 
 /** 三欄左側欄（ADR-0079 Q2）：聯絡人＋群組混合、最近互動排序、搜尋、標籤篩選、雙擊開對話。 */
@@ -142,6 +161,66 @@ export function DeckSidebar(props: DeckSidebarProps): JSX.Element {
         />
       ) : null}
 
+      {/* 訊息請求（ADR-0121／0285）：放在名冊**之前**——這是需要你裁示的東西，不該被埋在清單裡。
+          與經典版同一套結構與 class，共用 msn.css 的 .requests 樣式。 */}
+      {(props.requests ?? []).length > 0 ? (
+        <div className="requests" data-testid="requests">
+          <div className="group group--requests">
+            <span>
+              {t("request_section")}（{(props.requests ?? []).length}）
+            </span>
+            {props.onClearRequests && (props.requests ?? []).length > 1 ? (
+              <button
+                type="button"
+                className="requests__clear"
+                data-testid="requests-clear"
+                onClick={() => props.onClearRequests?.()}
+              >
+                {t("request_clearAll")}
+              </button>
+            ) : null}
+          </div>
+          <div className="requests__hint">{t("request_hint")}</div>
+          {(props.requests ?? []).map((r) => (
+            <div className="request" key={r.pubkey} data-testid={`request-${r.pubkey}`}>
+              <Avatar id={r.pubkey} name={r.name} />
+              <button
+                type="button"
+                className="request__name"
+                title={t("request_preview")}
+                onClick={() => props.onOpenRequest?.(r.pubkey)}
+              >
+                {r.name}
+              </button>
+              <button
+                type="button"
+                className="request__ok"
+                data-testid={`request-accept-${r.pubkey}`}
+                onClick={() => props.onAcceptRequest?.(r.pubkey)}
+              >
+                {t("request_accept")}
+              </button>
+              <button
+                type="button"
+                className="request__no"
+                data-testid={`request-decline-${r.pubkey}`}
+                onClick={() => props.onDeclineRequest?.(r.pubkey)}
+              >
+                {t("request_decline")}
+              </button>
+              <button
+                type="button"
+                className="request__block"
+                data-testid={`request-block-${r.pubkey}`}
+                onClick={() => props.onBlockContact?.(r.pubkey)}
+              >
+                {t("contact_block")}
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
       <div className="dsb__search">
         <input
           aria-label={t("sidebar_search")}
@@ -218,6 +297,31 @@ export function DeckSidebar(props: DeckSidebarProps): JSX.Element {
             />
           ),
         )}
+        {/* 已封鎖（ADR-0285）：三欄版原本沒有這一區——封鎖之後沒有任何地方解得開。
+            與經典版同一套 class，共用既有樣式。 */}
+        {(props.blocked ?? []).length > 0 ? (
+          <div className="dsb__blocked" data-testid="sidebar-blocked">
+            <div className="group">{t("group_blocked", { count: (props.blocked ?? []).length })}</div>
+            {(props.blocked ?? []).map((b) => (
+              <div className="contact blocked" key={b.pubkey} data-testid={`blocked-${b.pubkey}`}>
+                <Avatar id={b.pubkey} name={b.name} />
+                <div className="contact__info">
+                  <div className="contact__name">{b.name}</div>
+                </div>
+                {props.onUnblockContact ? (
+                  <button
+                    type="button"
+                    className="contact__act"
+                    data-testid={`unblock-${b.pubkey}`}
+                    onClick={() => props.onUnblockContact?.(b.pubkey)}
+                  >
+                    {t("contact_unblock")}
+                  </button>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        ) : null}
       </div>
     </div>
   );

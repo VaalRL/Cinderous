@@ -101,3 +101,53 @@ describe("企業頭銜 chip（ADR-0158）", () => {
     expect(html).toContain("設計師");
   });
 });
+
+// ADR-0285：三欄版**完全沒有請求區**——`App.tsx` 只把 `addContactProps` 傳進來，
+// 帶著 `requests` 的 `manageProps` 只給了經典版。結果是「對方把你加為好友，
+// 你在三欄佈局下看不到任何東西」，於是永遠不會接受，雙方名稱都停在 `npub1abc…`。
+describe("訊息請求區（ADR-0121／0285）", () => {
+  const req = [{ pubkey: "p9", name: "小明", at: 1 }];
+
+  it("🔴 有請求 → 顯示請求區與接受鈕", () => {
+    const html = render({ requests: req, onAcceptRequest: () => {}, onDeclineRequest: () => {} });
+    expect(html).toContain('data-testid="requests"');
+    expect(html).toContain('data-testid="request-p9"');
+    expect(html).toContain('data-testid="request-accept-p9"');
+    expect(html).toContain("小明"); // 顯示對方自報的名字，而不是 npub 縮寫
+  });
+
+  it("無請求 → 整區不出現（不佔位）", () => {
+    expect(render()).not.toContain('data-testid="requests"');
+    expect(render({ requests: [] })).not.toContain('data-testid="requests"');
+  });
+
+  it("請求區排在名冊之前——需要裁示的東西不該被埋在清單裡", () => {
+    const html = render({ requests: req, onAcceptRequest: () => {} });
+    expect(html.indexOf('data-testid="requests"')).toBeLessThan(html.indexOf('data-testid="sidebar-list"'));
+  });
+
+  it("只有一筆時不顯示「全部刪除」（ADR-0127 是防洪，不是單筆操作）", () => {
+    const one = render({ requests: req, onClearRequests: () => {} });
+    expect(one).not.toContain('data-testid="requests-clear"');
+    const many = render({ requests: [...req, { pubkey: "pa", name: "阿華", at: 2 }], onClearRequests: () => {} });
+    expect(many).toContain('data-testid="requests-clear"');
+  });
+});
+
+// ADR-0285：封鎖名單與請求區同一個成因（`manageProps` 只給了經典版）。
+// 沒有這一區＝封鎖之後**沒有任何地方解得開**。
+describe("已封鎖名單（ADR-0285）", () => {
+  const blocked = [{ pubkey: "pb", name: "騷擾者", at: 1 }];
+
+  it("🔴 有封鎖 → 列出且提供解除鈕", () => {
+    const html = render({ blocked, onUnblockContact: () => {} });
+    expect(html).toContain('data-testid="sidebar-blocked"');
+    expect(html).toContain('data-testid="unblock-pb"');
+    expect(html).toContain("騷擾者");
+  });
+
+  it("無封鎖 → 整區不出現", () => {
+    expect(render()).not.toContain('data-testid="sidebar-blocked"');
+    expect(render({ blocked: [] })).not.toContain('data-testid="sidebar-blocked"');
+  });
+});
