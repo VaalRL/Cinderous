@@ -308,6 +308,7 @@ export function ConversationScreen({
   onCalendarRsvp,
   onCalendarRemind,
   onSendFile,
+  onSendPhoto,
   onDepositSlot,
   onStartCall,
   onNudge,
@@ -342,6 +343,8 @@ export function ConversationScreen({
   groupMembers?: string[];
   /** 傳送檔案（ADR-0100）；未提供則不顯示 📎（如示範模式）。 */
   onSendFile?: () => void;
+  /** 拍照直接傳（ADR-0274）；未提供＝不顯示 📷（如示範模式或後端不支援送檔）。 */
+  onSendPhoto?: () => void;
   /** 存入公司儲存槽（ADR-0161／0177，員工端）；未提供則不顯示 🗄（非企業成員）。 */
   onDepositSlot?: () => void;
   /** 發起通話（ADR-0101）；未提供則不顯示通話鈕（示範模式／平台無 WebRTC）。 */
@@ -1277,6 +1280,18 @@ export function ConversationScreen({
         {onSendFile ? (
           <Pressable style={styles.attach} accessibilityRole="button" aria-label={t("convo_attach")} onPress={onSendFile}>
             <Text style={styles.attachText}>📎</Text>
+          </Pressable>
+        ) : null}
+        {/* 拍照直接傳（ADR-0274）：開相機 → 清 EXIF（ADR-0273）→ 與 📎 同一條送出路徑。 */}
+        {onSendPhoto ? (
+          <Pressable
+            style={styles.attach}
+            accessibilityRole="button"
+            aria-label={t("convo_photo")}
+            testID="send-photo"
+            onPress={onSendPhoto}
+          >
+            <Text style={styles.attachText}>📷</Text>
           </Pressable>
         ) : null}
         {/* 存入公司儲存槽（ADR-0161／0177）：企業成員才有；挑檔 → 佇列 → 企業主上線背景送。 */}

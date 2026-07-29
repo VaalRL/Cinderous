@@ -50,6 +50,48 @@ export async function pickFile(): Promise<OutgoingFile | null> {
 }
 
 /**
+ * 開相機拍一張並回傳（ADR-0274）；取消回 null。
+ *
+ * 以 `<input capture="environment">` 實作——**行動瀏覽器與 Android WebView（含 Capacitor）
+ * 都會直接開相機**，因此不需任何額外相依即可運作。日後改用 `@capacitor/camera` 只是為了
+ * 在**原生層**先縮圖（省 WebView 記憶體，見 `docs/research/mobile-camera-capture.md`），
+ * 介面與呼叫端不變（比照本檔既有的「同介面、換內部」模式）。
+ *
+ * 位元組同樣經 `sanitizeImage` 清除 EXIF/GPS（ADR-0273）——剛拍的照片 GPS 最準，
+ * 這條路徑尤其不能漏。
+ */
+export async function takePhoto(): Promise<OutgoingFile | null> {
+  if (typeof document === "undefined") return null;
+  return await new Promise<OutgoingFile | null>((resolve) => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = "image/*";
+    input.capture = "environment"; // 後鏡頭；不支援 capture 的環境會退回一般選檔
+    input.style.display = "none";
+    input.onchange = () => {
+      const f = input.files?.[0];
+      input.remove();
+      if (!f) {
+        resolve(null);
+        return;
+      }
+      void f.arrayBuffer().then(async (buf) => {
+        const mime = f.type || "image/jpeg";
+        const s = await sanitizeImage(new Uint8Array(buf), mime); // ADR-0273
+        // 相機檔名常是裝置慣例（IMG_xxxx）；重編碼後副檔名同步調整。
+        resolve({ name: sanitizedFileName(f.name || "photo.jpg", s.changed), mime: s.mime, bytes: s.bytes });
+      });
+    };
+    input.oncancel = () => {
+      input.remove();
+      resolve(null);
+    };
+    document.body.appendChild(input);
+    input.click();
+  });
+}
+
+/**
  * 由圖片位元組產生縮圖 data URL（ADR-0102）——衍生的小預覽圖，**不是原檔**（原檔位元組仍不保存）。
  * 政策常數取自 @cinderous/engine，與桌面同一份，不會漂移。
  * 移植真 RN：改用 expo-image-manipulator（介面不變）。

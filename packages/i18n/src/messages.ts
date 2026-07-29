@@ -210,6 +210,8 @@ export interface Messages {
   calc_insertHint: string;
   // 行動端雲端備份與檔案（ADR-0100）
   convo_attach: string;
+  /** 拍照直接傳（ADR-0274）。 */
+  convo_photo: string;
   // 相簿/原圖（ADR-0102）
   image_originalMissing: string;
   image_relocate: string;
@@ -1013,6 +1015,7 @@ const zhHant: Messages = {
   calc_insertResult: "只插入答案",
   calc_insertHint: "點一下把「= 答案」加到訊息",
   convo_attach: "傳送檔案",
+  convo_photo: "拍照傳送",
   image_originalMissing: "找不到原圖——檔案可能已被移動或刪除。",
   image_relocate: "重新指定位置",
   image_thumbOnly: "此處只能顯示縮圖（瀏覽器無法讀取本機原檔）。",
@@ -1773,6 +1776,7 @@ const en: Messages = {
   calc_insertResult: "Insert answer only",
   calc_insertHint: "Click to append “= answer” to your message",
   convo_attach: "Send a file",
+  convo_photo: "Take a photo",
   image_originalMissing: "Original not found — the file may have been moved or deleted.",
   image_relocate: "Locate the file",
   image_thumbOnly: "Only the thumbnail can be shown here (browsers can't read local originals).",

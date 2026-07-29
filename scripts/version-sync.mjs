@@ -25,9 +25,22 @@ const targets = [
   // Cargo.lock 內本 crate 自身的版號（緊接 name 下一行），同步以維持 `--locked` 建置一致。
   ["apps/desktop/src-tauri/Cargo.lock", /(name = "cinder-desktop"\r?\nversion = ")([^"]+)(")/],
   ["apps/mobile/package.json", /("version":\s*")([^"]+)(")/],
+  // Android（ADR-0274）：Capacitor 產生的 gradle 有自己的 versionName，不納入就必然漂移。
+  // versionCode 另行處理（見下方）——它是遞增整數，不是語意版號。
+  ["apps/mobile/android/app/build.gradle", /(versionName\s+")([^"]+)(")/],
   ["apps/cli/package.json", /("version":\s*")([^"]+)(")/],
   ["apps/website/package.json", /("version":\s*")([^"]+)(")/],
 ];
+
+/**
+ * Android `versionCode`（ADR-0274）：Play 商店要求**單調遞增的整數**，語意版號不能直接用。
+ * 由 `major*10000 + minor*100 + patch` 決定性推導——同一個語意版號恆得同一個 code，
+ * 不需人工維護，也不會因為重建而跳號。
+ */
+function versionCodeOf(v) {
+  const [maj, min, pat] = v.split(".").map(Number);
+  return maj * 10000 + min * 100 + pat;
+}
 
 let drift = false;
 for (const [rel, re] of targets) {
@@ -47,6 +60,29 @@ for (const [rel, re] of targets) {
   }
   writeFileSync(file, text.replace(re, `$1${version}$3`));
   console.log(`✓ ${rel}：${current} → ${version}`);
+}
+
+// Android versionCode（整數、由語意版號推導；與上方字串替換分開處理）。
+{
+  const rel = "apps/mobile/android/app/build.gradle";
+  const file = p(rel);
+  const text = readFileSync(file, "utf8");
+  const re = /(versionCode\s+)(\d+)/;
+  const m = text.match(re);
+  if (!m) {
+    console.error(`✗ ${rel}：找不到 versionCode`);
+    process.exit(1);
+  }
+  const want = String(versionCodeOf(version));
+  if (m[2] !== want) {
+    if (check) {
+      console.error(`✗ ${rel} versionCode：${m[2]} ≠ ${want}`);
+      drift = true;
+    } else {
+      writeFileSync(file, text.replace(re, `$1${want}`));
+      console.log(`✓ ${rel} versionCode：${m[2]} → ${want}`);
+    }
+  }
 }
 
 if (check) {

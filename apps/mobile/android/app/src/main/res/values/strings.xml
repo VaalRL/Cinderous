@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Cinderous</string>
+    <string name="title_activity_main">Cinderous</string>
+    <string name="package_name">app.cinder.mobile</string>
+    <string name="custom_url_scheme">app.cinder.mobile</string>
+</resources>

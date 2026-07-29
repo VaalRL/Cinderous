@@ -28,7 +28,7 @@ import {
 import { notifier, onNotifyClick } from "./native/notify.js";
 import type { BlockedContact, CalendarEventInput, ContactRequest, RsvpStatus, StoredCalendarEvent } from "@cinderous/engine";
 import type { CallMedia, CallState } from "@cinderous/core";
-import { makeThumbnail, pickFile, saveFile } from "./native/files.js";
+import { makeThumbnail, pickFile, saveFile, takePhoto } from "./native/files.js";
 import { hasCallSupport } from "./native/call-media.js";
 import { CallScreen } from "./screens/CallScreen.js";
 import { type Locale, type MessageKey, translate } from "@cinderous/i18n";
@@ -994,6 +994,17 @@ export function MobileApp({
       b.sendFile?.(pk, f, thumb ? { thumb } : {});
     });
   };
+  /** 拍照直接傳（ADR-0274）：開相機 → 清 EXIF（ADR-0273，在平台縫內） → 走與選檔同一條送出路徑。 */
+  const sendPhotoFromCamera = (): void => {
+    const b = backendRef.current;
+    const pk = activeIdRef.current;
+    if (!b?.sendFile || !pk) return;
+    void takePhoto().then(async (f) => {
+      if (!f) return;
+      const thumb = await makeThumbnail(f.bytes, f.mime); // ADR-0102：只存本機、不外送
+      b.sendFile?.(pk, f, thumb ? { thumb } : {});
+    });
+  };
   /**
    * 存入公司儲存槽（ADR-0161／0177，員工端）：**主動**挑一個檔 → 入 session 佇列（不是監控）。
    * 企業主上線由背景效果逐一 P2P 送出；企業主端靜默落盤（ADR-0161，不跳通知）。`origin`＝來源
@@ -1280,7 +1291,9 @@ export function MobileApp({
           }
         : {};
     // 檔案：真實 relay 才有 P2P 傳輸（示範後端無 sendFile）。
-    const fileProps = backendRef.current?.sendFile ? { onSendFile: sendFileFromPicker } : {};
+    const fileProps = backendRef.current?.sendFile
+      ? { onSendFile: sendFileFromPicker, onSendPhoto: sendPhotoFromCamera } // ADR-0274：📷 拍照直傳
+      : {};
     // 便條（ADR-0183）：有作用中身分金鑰（selfNsec 導出）＋activeId 才提供；讀/寫加密便條，App 層
     // 持金鑰、元件只碰明文。（金鑰只看 selfNsec，與是否示範後端無關——登入後恆有。）
     const noteProps =
