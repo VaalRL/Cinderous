@@ -16,20 +16,21 @@
 //
 // 非 Capacitor 環境（瀏覽器預覽、桌面）一律 no-op 且回報不支援，呼叫端據此不顯示開關。
 
-/** Capacitor 執行期的最小型別（不引入 @capacitor/core 型別以維持此檔可在純瀏覽器建置）。 */
-interface CapacitorGlobal {
-  isNativePlatform?: () => boolean;
-  Plugins?: { Foreground?: { start(o: { title: string; text: string }): Promise<void>; stop(): Promise<void> } };
+import { capacitor, isNativeShell } from "./platform.js";
+
+/** 本檔用到的外掛形狀（原生殼判斷共用 `platform.ts`，不在此重複一份）。 */
+interface ForegroundPlugin {
+  start(o: { title: string; text: string }): Promise<void>;
+  stop(): Promise<void>;
 }
 
-function cap(): CapacitorGlobal | undefined {
-  return (globalThis as { Capacitor?: CapacitorGlobal }).Capacitor;
+function cap(): { Plugins?: { Foreground?: ForegroundPlugin } } | undefined {
+  return capacitor() as { Plugins?: { Foreground?: ForegroundPlugin } } | undefined;
 }
 
 /** 此環境是否支援背景保活（＝Capacitor 原生殼且外掛在）。 */
 export function foregroundSupported(): boolean {
-  const c = cap();
-  return !!c?.isNativePlatform?.() && !!c.Plugins?.Foreground;
+  return isNativeShell() && !!cap()?.Plugins?.Foreground;
 }
 
 /**

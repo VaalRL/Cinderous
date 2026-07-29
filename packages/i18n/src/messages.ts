@@ -642,6 +642,8 @@ export interface Messages {
   backup_wrong: string;
   settings_cloud: string;
   settings_cloudHint: string;
+  /** 系統備份不涵蓋本 App（ADR-0279）：換機請走配對搬家或加密雲端備份。 */
+  settings_noSystemBackup: string;
   settings_cloudOff: string;
   settings_cloudBasic: string;
   settings_cloudFull: string;
@@ -1428,6 +1430,8 @@ const zhHant: Messages = {
   backup_copy: "複製救援登入碼",
   backup_wrong: "救援密碼錯誤或救援登入碼格式不符",
   settings_cloud: "多裝置狀態同步（加密）",
+  settings_noSystemBackup:
+    "本 App 不參與 Android 系統備份，資料不會被上傳到 Google，換新機時系統也不會自動搬過去。要換裝置請用上面的「搬到新裝置」或加密雲端備份。",
   settings_cloudHint: "把加密的狀態存到你的中繼站，讓你的多台裝置自動同步聯絡人／群組／封鎖（＋近期訊息）。中繼站只見密文；由你的身分私鑰保護（本地密碼只保護這台裝置）。30 天未上線自動過期。",
   settings_cloudOff: "關閉（不同步）",
   settings_cloudBasic: "基本：聯絡人、群組、封鎖清單、設定",
@@ -2202,6 +2206,8 @@ const en: Messages = {
   backup_copy: "Copy rescue login code",
   backup_wrong: "Wrong rescue password or malformed rescue login code",
   settings_cloud: "Multi-device state sync (encrypted)",
+  settings_noSystemBackup:
+    "This app opts out of Android system backup: your data is never uploaded to Google, and it won't be carried over automatically when you switch phones. To move devices, use \"Move to a new device\" above or encrypted cloud backup.",
   settings_cloudHint: "Stores your encrypted state on your relay so your devices auto-sync contacts / groups / block list (+ recent messages). The relay only ever sees ciphertext; it's protected by your identity key (the local password only protects this device). Expires after 30 days offline.",
   settings_cloudOff: "Off (no sync)",
   settings_cloudBasic: "Basic: contacts, groups, block list, settings",
