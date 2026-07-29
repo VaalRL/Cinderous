@@ -1,5 +1,7 @@
 // 行動端底部分頁列（ADR-0087）：聊天／聯絡人／設定，參考 LINE/Signal。
-// 作用中分頁＝主色、其餘＝灰；聊天分頁帶未讀總數徽章。對話為 push 全螢幕（不在此列）。
+// 作用中分頁＝主色、其餘＝灰。徽章：聊天分頁＝未讀總數；聯絡人分頁＝待處理的好友請求數
+//（ADR-0286——先前只有聊天分頁有徽章，好友請求靜靜躺在聯絡人分頁裡沒人知道）。
+// 對話為 push 全螢幕（不在此列）。
 import { useMemo } from "react";
 import { type Locale, type MessageKey, translate } from "@cinderous/i18n";
 import { resolveTheme, type Theme, type ThemeTokens } from "@cinderous/theme";
@@ -46,6 +48,7 @@ export function BottomTabs({
   active,
   onSelect,
   unreadTotal = 0,
+  requestCount = 0,
   locale = "zh-Hant",
   theme = "light",
   accent = null,
@@ -55,6 +58,14 @@ export function BottomTabs({
   onSelect: (tab: Tab) => void;
   /** 聊天分頁的未讀總數（>0 顯示紅色徽章）。 */
   unreadTotal?: number;
+  /**
+   * 待處理的好友請求數（ADR-0286）：>0 時聯絡人分頁顯示徽章。
+   *
+   * 請求本身早就收得到、也早就顯示在聯絡人分頁——但分頁列沒有任何提示，
+   * 使用者停在聊天分頁就永遠不會發現。而在對方接受之前，ADR-0121 不回送個人檔，
+   * 於是雙方名字都停在 `npub1abc…`——體感是「加好友沒有用」。
+   */
+  requestCount?: number;
   locale?: Locale;
   theme?: Theme;
   accent?: string | null;
@@ -79,11 +90,15 @@ export function BottomTabs({
           >
             <Text style={[styles.icon, { opacity: on ? 1 : 0.6 }]}>{x.icon}</Text>
             <Text style={[styles.label, { color }]}>{t(x.label)}</Text>
-            {x.key === "chats" && unreadTotal > 0 ? (
-              <View style={styles.badge}>
-                <Text style={styles.badgeText}>{unreadTotal > 99 ? "99+" : unreadTotal}</Text>
-              </View>
-            ) : null}
+            {(() => {
+              const n = x.key === "chats" ? unreadTotal : x.key === "contacts" ? requestCount : 0;
+              if (n <= 0) return null;
+              return (
+                <View style={styles.badge} testID={`tab-badge-${x.key}`}>
+                  <Text style={styles.badgeText}>{n > 99 ? "99+" : n}</Text>
+                </View>
+              );
+            })()}
           </Pressable>
         );
       })}
