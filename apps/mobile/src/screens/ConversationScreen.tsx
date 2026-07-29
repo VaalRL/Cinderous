@@ -55,7 +55,9 @@ function makeStyles(tk: ThemeTokens) {
     },
     back: { paddingHorizontal: 6, paddingVertical: 2 },
     backText: { fontSize: 26, color: tk.accent, lineHeight: 26 },
-    headText: { flex: 1 },
+    // ADR-0287：`minWidth: 0` 讓它縮得下去——沒有這行，長名字會把整條標頭撐得比螢幕寬
+    // （與輸入列同一類問題：flex 子項預設不會縮到內容寬度以下）。
+    headText: { flex: 1, minWidth: 0 },
     callBtn: { paddingHorizontal: 6, paddingVertical: 4 },
     callIcon: { fontSize: 18 },
     headTitle: { fontSize: 16, fontWeight: "700", color: tk.ink },
@@ -247,6 +249,9 @@ function makeStyles(tk: ThemeTokens) {
     datebarHint: { fontSize: 11, color: tk.muted },
     composer: {
       flexDirection: "row",
+      // ADR-0287：**必須能折行**。這一列最多擠 5 顆圖示（📎📷🗄😊⏱）＋輸入框＋送出鈕；
+      // 在 360–412px 的手機上單列放不下，於是整條橫向溢出——使用者得往右滑才看得到送出鈕。
+      flexWrap: "wrap",
       alignItems: "center",
       gap: 8,
       padding: 8,
@@ -264,6 +269,10 @@ function makeStyles(tk: ThemeTokens) {
     },
     input: {
       flex: 1,
+      // 溢出的真兇：HTML `<input>` 有約 173px 的內建寬度，且 `min-width: auto` 讓它**拒絕收縮**。
+      // 給一個明確的最小寬度——放不下時輸入框連同送出鈕折到下一行（而不是把畫面撐爆），
+      // 且折行後仍有足以打字的寬度。
+      minWidth: 160,
       borderWidth: 1,
       borderColor: tk.border,
       borderRadius: 20,
@@ -273,7 +282,14 @@ function makeStyles(tk: ThemeTokens) {
       paddingHorizontal: 14,
       fontSize: 14,
     },
-    send: { backgroundColor: tk.accent, borderRadius: 20, paddingVertical: 8, paddingHorizontal: 16 },
+    // 送出鈕永不收縮：被擠掉的話這個畫面就沒有主要動作了。
+    send: {
+      flexShrink: 0,
+      backgroundColor: tk.accent,
+      borderRadius: 20,
+      paddingVertical: 8,
+      paddingHorizontal: 16,
+    },
     sendText: { color: "#ffffff", fontWeight: "700", fontSize: 14 },
   });
 }
@@ -612,7 +628,9 @@ export function ConversationScreen({
               onPress={() => setShowBroadcast((v) => !v)}
               testID="convo-title-name"
             >
-              <Text style={styles.headTitle}>{headerName}</Text>
+              <Text style={styles.headTitle} numberOfLines={1}>
+                {headerName}
+              </Text>
             </Pressable>
             {onSetAlias ? (
               <Pressable
@@ -1275,7 +1293,7 @@ export function ConversationScreen({
           🔥 {t(TTL_LABEL[ttl] ?? "convo_timerOff")}
         </Text>
       ) : null}
-      <View style={styles.composer}>
+      <View style={styles.composer} testID="composer">
         {/* 傳送檔案（ADR-0093/0100）：位元組走 P2P、metadata 走中繼。 */}
         {onSendFile ? (
           <Pressable style={styles.attach} accessibilityRole="button" aria-label={t("convo_attach")} onPress={onSendFile}>
@@ -1330,8 +1348,9 @@ export function ConversationScreen({
           onChangeText={onDraftChange}
           placeholder={t("mobileConvo_input")}
           aria-label={t("mobileConvo_input")}
+          testID="composer-input"
         />
-        <Pressable style={styles.send} accessibilityRole="button" onPress={submit}>
+        <Pressable style={styles.send} accessibilityRole="button" testID="composer-send" onPress={submit}>
           <Text style={styles.sendText}>{t("mobileConvo_send")}</Text>
         </Pressable>
       </View>
