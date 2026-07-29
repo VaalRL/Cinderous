@@ -64,6 +64,18 @@ ADR-0116 當年劃線「不做推播」，並為未來的 ADR 設下兩個條件
 隱私與預覽之間沒有取捨。要不要顯示預覽是既有的本機設定（`notifyHidePreview`，ADR-0076，
 防肩窺／鎖定畫面），與推播方案無關，行動端沿用同一個開關。
 
+**該開關行動端已經存在**（設定→通知→隱藏預覽，`notify-hide-toggle`），且與桌面共用 engine 的
+`notificationFor({ hidePreview })`——開＝「小美：有新訊息」、關＝顯示內文。推播上線後**沿用不改**：
+
+> 兩層防護互不干擾——`notifyHidePreview` 保護的是「誰站在你旁邊看你手機螢幕」；
+> 「Google／Apple 看到什麼」則由無內容 payload 保證，不論此開關開或關都不變。
+
+**iOS NSE 的實作陷阱（必記）**：Notification Service Extension 是**獨立行程**，讀不到 App 的
+一般儲存——`notifyHidePreview` 必須放進 **App Group 共享容器**供其讀取。沒處理好會出現
+「App 內設了隱藏預覽、推播來的通知卻顯示全文」這種最糟的失效模式。所幸**失效預設是安全的**：
+NSE 若來不及解密（iOS 給的執行時間有限），顯示的是 payload 裡的預留文字，而那本來就只能是
+「有新訊息」這類通用字樣。
+
 真正的差異在**可靠性**，而且平台不對稱：
 
 | 形態 | payload | iOS 可靠性 | 第三方額外看到 |
@@ -113,5 +125,7 @@ ADR-0116 當年劃線「不做推播」，並為未來的 ADR 設下兩個條件
 2. 中繼端：token 註冊事件（帶 TTL）、喚醒觸發器（合併＋抖動）、納入 NIP-62 清除範圍。
 3. 客戶端：同意畫面（逐條列洩漏；iOS 四項、Android 三項）、依身分設定、token 輪替、
    Android 前台服務實作、iOS Notification Service Extension（解密後改寫通知）。
-   通知預覽沿用既有 `notifyHidePreview` 開關，不另做一套。
+   通知預覽沿用既有 `notifyHidePreview` 開關（行動端已有），不另做一套；
+   **iOS 須把該偏好放進 App Group 共享容器**，否則 NSE 讀不到、推播會無視使用者的隱藏設定
+   （見 §5.1）。實作時應有一條測試覆蓋「隱藏預覽開啟時，NSE 產生的通知不含內文」。
 4. UnifiedPush 作為 Android 的第三選項，日後可另評估（不影響本決策）。
