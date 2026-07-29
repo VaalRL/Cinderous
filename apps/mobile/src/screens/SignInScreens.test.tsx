@@ -18,8 +18,25 @@ describe("行動端登入畫面（ADR-0081）", () => {
         accent2="#e2632b"
       />,
     );
-    expect(html).toContain("Sign in with secret key"); // mobileSignIn_title
+    expect(html).toContain("Sign in to Cinderous"); // mobileSignIn_title（ADR-0277）
     expect(html).toContain("Import from old device instead"); // mobileSignIn_toPair
+  });
+
+  // ADR-0277：初次登入只要「顯示名稱＋密碼」。過去這裡是 nsec 欄且標題寫「用私鑰登入」，
+  // 意謂手機使用者必須先有桌面版才進得來——「手機是第一個裝置」的人根本沒有入口。
+  it("🔴 預設不顯示 nsec 欄：初始只要名稱（＋記住我密碼），私鑰登入降為次要連結", () => {
+    const html = renderToStaticMarkup(<NsecSignInScreen onSignIn={() => {}} canRemember locale="zh-Hant" />);
+    expect(html).not.toContain('data-testid="nsec-input"');
+    expect(html).toContain("顯示名稱"); // mobileSignIn_nameLabel
+    expect(html).toContain('data-testid="remember-password"'); // 密碼欄（ADR-0117）
+    expect(html).toContain("建立新身分"); // signIn_createButton＝主要動作
+    expect(html).toContain('data-testid="use-nsec"'); // 次要路徑仍在，只是收合
+  });
+
+  it("初始畫面不出現任何「示範／貼上 nsec」字樣（ADR-0277：不讓使用者看到開發用詞）", () => {
+    const html = renderToStaticMarkup(<NsecSignInScreen onSignIn={() => {}} canRemember locale="zh-Hant" />);
+    expect(html).not.toContain("示範");
+    expect(html).not.toContain("nsec1");
   });
 
   it("NsecSignInScreen：提供 onJoinOrg → 顯示「可貼入職邀請碼」提示（入職入口，ADR-0176）", () => {

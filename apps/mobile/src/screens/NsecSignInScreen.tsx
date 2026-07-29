@@ -6,7 +6,7 @@ import { type OrgInvite, parseOrgInvite } from "@cinderous/core";
 import { type Locale, type MessageKey, translate } from "@cinderous/i18n";
 import { resolveTheme, STATUS_COLORS, type Theme, type ThemeTokens } from "@cinderous/theme";
 import { Pressable, StyleSheet, Text, TextInput, View } from "react-native-web";
-import { identityFromSecret, looksLikeBackupCode, type MobileIdentity, npubFromNsec } from "../auth.js";
+import { createIdentity, identityFromSecret, looksLikeBackupCode, type MobileIdentity, npubFromNsec } from "../auth.js";
 
 function makeStyles(tk: ThemeTokens) {
   return StyleSheet.create({
@@ -95,6 +95,8 @@ export function NsecSignInScreen({
   const [password, setPassword] = useState("");
   /** 備份密碼（ADR-0070／0135）：貼的是備份碼時才需要，用來解開 NIP-49 信封。 */
   const [backupPw, setBackupPw] = useState("");
+  // ADR-0277：既有私鑰登入降為次要路徑，預設收合。
+  const [nsecOpen, setNsecOpen] = useState(false);
   const [joinName, setJoinName] = useState(""); // 入職時的顯示名稱（同事看到的）
   const T = (k: MessageKey): string => translate(locale, k);
   const isBackup = looksLikeBackupCode(nsec); // 貼的是備份碼？→ 顯示備份密碼欄
@@ -115,7 +117,9 @@ export function NsecSignInScreen({
   }
 
   const submit = (): void => {
-    const r = identityFromSecret(nsec, name, backupPw);
+    // ADR-0277：預設路徑＝**建立新身分**（只要名稱）；展開「用私鑰登入」才走既有金鑰。
+    // 行動端過去只有後者，導致「手機是第一個裝置」的人根本進不來。
+    const r = nsecOpen ? identityFromSecret(nsec, name, backupPw) : createIdentity(name);
     if (!r.ok) {
       setError(r.error);
       return;
@@ -163,7 +167,8 @@ export function NsecSignInScreen({
             ) : null}
             {joinTaken ? <Text style={styles.error}>{T("mobileSignIn_nameTaken")}</Text> : null}
           </>
-        ) : (
+        ) : nsecOpen ? (
+          // 用既有私鑰／備份碼登入（ADR-0277：降為次要路徑，預設收合）。
           <>
             <Text style={styles.label}>{T("rescue_secret")}</Text>
             <TextInput
@@ -176,9 +181,10 @@ export function NsecSignInScreen({
               autoCapitalize="none"
               autoCorrect={false}
               aria-label={T("rescue_secret")}
+              testID="nsec-input"
             />
           </>
-        )}
+        ) : null}
 
         {/* 貼的是加密備份碼（ADR-0070）→ 需要備份密碼才解得開 NIP-49 信封。入職模式無 nsec 欄，不顯示。 */}
         {!invite && isBackup ? (
@@ -231,10 +237,16 @@ export function NsecSignInScreen({
           </Pressable>
         ) : (
           <Pressable style={styles.button} onPress={submit} accessibilityRole="button">
-            <Text style={styles.buttonText}>{T("mobileSignIn_button")}</Text>
+            <Text style={styles.buttonText}>{T(nsecOpen ? "mobileSignIn_button" : "signIn_createButton")}</Text>
           </Pressable>
         )}
 
+        {/* 次要路徑（ADR-0277）：用既有私鑰／備份碼登入——預設收合，點擊才展開。 */}
+        {!invite ? (
+          <Pressable onPress={() => setNsecOpen((v) => !v)} accessibilityRole="button" testID="use-nsec">
+            <Text style={styles.link}>{T(nsecOpen ? "mobileSignIn_backToCreate" : "signIn_useNsec")}</Text>
+          </Pressable>
+        ) : null}
         {onUsePairing ? (
           <Pressable onPress={onUsePairing} accessibilityRole="button">
             <Text style={styles.link}>{T("mobileSignIn_toPair")}</Text>

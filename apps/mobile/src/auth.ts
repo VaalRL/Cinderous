@@ -7,6 +7,7 @@
 // `parsePairing`，捆包身分萃取用 @cinderous/engine `PairBundle`。錯誤以 i18n MessageKey 回報，
 // 交由畫面翻譯。傳輸層（WebRTC＋relay）不在此——由呼叫端注入（產線需原生/EAS，見 ADR-0063）。
 import {
+  generateSecretKey,
   getPublicKey,
   isBackupCode,
   isWrapped,
@@ -34,6 +35,21 @@ export interface MobileIdentity {
 }
 
 export type SignInResult = { ok: true; identity: MobileIdentity } | { ok: false; error: MessageKey };
+
+/**
+ * 建立**全新身分**（ADR-0277）：本機生成 secp256k1 金鑰，只需顯示名稱。
+ *
+ * 行動端過去**沒有這條路**——登入畫面標題是「用私鑰登入」，使用者必須先在桌面版
+ * 複製 nsec 才能用手機。那讓「手機是第一個裝置」的人根本進不來。
+ * 與桌面的建立流程等價（ADR-0122：身分＝本機生成的金鑰，不需手機號/email）。
+ */
+export function createIdentity(name: string): SignInResult {
+  const nm = name.trim();
+  if (!nm) return { ok: false, error: "mobileSignIn_errName" };
+  const sk = generateSecretKey();
+  const pubkey = getPublicKey(sk);
+  return { ok: true, identity: { sk, pubkey, npub: npubEncode(pubkey), nsec: nsecEncode(sk), name: nm } };
+}
 
 /** 只由 nsec 導出 npub（供畫面即時預覽身分）；非法回 null。 */
 export function npubFromNsec(nsec: string): string | null {

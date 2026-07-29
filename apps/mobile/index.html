@@ -2,12 +2,31 @@
 <html lang="zh-Hant">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="Cinderous 行動端 web preview" />
-    <title>Cinderous 行動端 — Web Preview</title>
+    <!-- viewport-fit=cover：手勢列／瀏海區交給 CSS env() 處理，避免內容被系統列裁掉 -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="description" content="Cinderous — 去中心化、端到端加密的即時通訊" />
+    <title>Cinderous</title>
+    <style>
+      /* 滿版（ADR-0277）：App 本體是 flex 版面，需要一條 100% 高度的鏈才撐得開。
+         這裡不放任何配色——視覺一律由 App 內的 @cinderous/theme 決定，避免兩處主題打架。 */
+      html,
+      body,
+      #root {
+        height: 100%;
+        margin: 0;
+      }
+      body {
+        height: 100dvh; /* 行動瀏覽器網址列收合時不留白 */
+        overscroll-behavior: none; /* 關掉整頁下拉回彈：在 WebView 裡那看起來像網頁、不像 App */
+      }
+      #root {
+        display: flex;
+        flex-direction: column;
+      }
+    </style>
   </head>
   <body>
     <div id="root"></div>
-    <script type="module" src="/src/preview.tsx"></script>
+    <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
