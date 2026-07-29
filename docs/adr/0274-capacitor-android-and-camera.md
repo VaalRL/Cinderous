@@ -50,8 +50,11 @@ Capacitor 產生的 `android/app/build.gradle` 有自己的 `versionName`／`ver
 
 - 平台縫 `native/files.ts` 新增 **`takePhoto()`**，以 `<input capture="environment">` 實作
   ——**行動瀏覽器與 Android WebView（含 Capacitor）都直接開相機**，因此**零額外相依**即可運作。
-  日後改用 `@capacitor/camera` 只是為了**在原生層先縮圖**（省 WebView 記憶體），
+  日後若要在**原生層先縮圖**（省 WebView 記憶體）再改用 `@capacitor/camera`，
   介面與呼叫端不變（沿用本檔既有的「同介面、換內部」模式）。
+- **不預先安裝 `@capacitor/camera`**：實作既然走 `<input capture>`，該外掛就是未使用的相依——
+  而它（v8）要求 **Java 21 toolchain**，本機的 Java 17 因此建置失敗。用不到的相依不只是體積，
+  是**會擋住建置的真實風險**；需要時再裝（YAGNI）。
 - 位元組同樣經 `sanitizeImage`（ADR-0273）——**剛拍的照片 GPS 最準，這條路徑尤其不能漏**。
 - UI：對話輸入列新增 📷（與 📎 並列），`onSendPhoto` 未提供即不顯示（示範模式／後端不支援送檔）。
 
@@ -69,8 +72,18 @@ Capacitor 讓「可安裝的 Android app」在不凍結功能開發的前提下�
   - **背景收訊仍未解**——ADR-0272 的前台服務／FCM 尚未實作，App 進背景即斷線（下一步）。
   - APK 目前是 **debug 簽章**，未做 release 簽章與 F-Droid／Play 上架設定（後續）。
   - `<input capture>` 拿到的是**全解析度**照片，記憶體壓力由 `sanitizeImage` 的 2048px 重編碼
-    緩解，但解碼瞬間仍需完整影像——極低階裝置若 OOM，屆時改用 `@capacitor/camera`
-    的原生層縮圖（外掛已裝好、介面不變）。
+    緩解，但解碼瞬間仍需完整影像——極低階裝置若 OOM，屆時再裝 `@capacitor/camera`
+    走原生層縮圖（介面不變；注意其 v8 需 Java 21，見「不預先安裝」一節）。
+  - **Java 21 toolchain（實作時踩到、已解）**：Capacitor 的 android 函式庫硬寫
+    `sourceCompatibility JavaVersion.VERSION_21`，但那**不會**讓 Gradle 去找 JDK 21——
+    它只是把 `-source 21` 丟給執行 Gradle 的 JVM（本機 JDK 17）→ `invalid source release: 21`。
+    解法**不是**要求每位開發者裝 JDK 21，而是：`settings.gradle` 加 foojay toolchain resolver
+    ＋`build.gradle` 對**所有子專案**（含第三方模組）明確指定 `JavaLanguageVersion.of(21)`，
+    Gradle 便自行把 JDK 21 下載到自己的快取（`~/.gradle/jdks`，不動系統安裝，CI 可重現）。
+    註：Capacitor 7.6 與 8 皆已要求 21，降版無法迴避。
+  - **`cap add android` 會重生整個 `android/`**：AndroidManifest 權限、`settings.gradle`／
+    `build.gradle` 的 toolchain 設定、版號皆會被還原——重新生成後須重跑
+    `pnpm version:sync` 並補回上述三處（`cap sync` 則安全，只更新 web 資產與外掛清單）。
   - `android/` 原生專案進版控會增加 repo 體積與升級維護面（Capacitor 慣例做法）。
 
 ## 後續行動 / 待辦

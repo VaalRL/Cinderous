@@ -17,8 +17,7 @@
     "android:open": "cap open android"
   },
   "dependencies": {
-    "@capacitor/camera": "^8.2.1",
-    "@capacitor/core": "^8.4.2",
+    "@capacitor/core": "^7.6.8",
     "@cinderous/core": "workspace:*",
     "@cinderous/engine": "workspace:*",
     "@cinderous/i18n": "workspace:*",
@@ -29,8 +28,8 @@
     "react-native-web": "^0.21.2"
   },
   "devDependencies": {
-    "@capacitor/android": "^8.4.2",
-    "@capacitor/cli": "^8.4.2",
+    "@capacitor/android": "^7.6.8",
+    "@capacitor/cli": "^7.6.8",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",

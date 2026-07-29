@@ -7,8 +7,8 @@ buildscript {
         mavenCentral()
     }
     dependencies {
-        classpath 'com.android.tools.build:gradle:8.13.0'
-        classpath 'com.google.gms:google-services:4.4.4'
+        classpath 'com.android.tools.build:gradle:8.7.2'
+        classpath 'com.google.gms:google-services:4.4.2'
 
         // NOTE: Do not place your application dependencies here; they belong
         // in the individual module build.gradle files
@@ -21,6 +21,22 @@ allprojects {
     repositories {
         google()
         mavenCentral()
+    }
+}
+
+// Java 21 toolchain（ADR-0274）：Capacitor 的 android 函式庫硬寫
+// `sourceCompatibility JavaVersion.VERSION_21`，但那**不會**讓 Gradle 去找 JDK 21——
+// 它只是把 `-source 21` 丟給執行 Gradle 的那個 JVM（本機是 17）→ `invalid source release: 21`。
+// 這裡明確替**所有子專案**（含第三方模組）指定 toolchain，settings.gradle 的 foojay resolver
+// 才會在缺 JDK 21 時自動下載到 Gradle 快取（不動系統安裝，開發機與 CI 皆可重現）。
+subprojects {
+    afterEvaluate { proj ->
+        def toolchains = proj.extensions.findByType(JavaToolchainService)
+        if (toolchains != null) {
+            proj.tasks.withType(JavaCompile).configureEach {
+                javaCompiler.set(toolchains.compilerFor { languageVersion = JavaLanguageVersion.of(21) })
+            }
+        }
     }
 }
 

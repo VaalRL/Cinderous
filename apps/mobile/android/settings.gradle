@@ -1,3 +1,11 @@
+// Gradle toolchain 自動佈建（ADR-0274）：Capacitor 的 android 函式庫硬寫
+// `JavaVersion.VERSION_21`，但開發機／CI 可能只有 JDK 17。此 plugin 讓 Gradle 在需要時
+// **自行下載 JDK 21 到自己的快取**（`~/.gradle/jdks`），不動系統安裝、不必要求每位開發者
+// 手動裝 JDK，CI 也因此可重現。
+plugins {
+    id 'org.gradle.toolchains.foojay-resolver-convention' version '0.8.0'
+}
+
 include ':app'
 include ':capacitor-cordova-android-plugins'
 project(':capacitor-cordova-android-plugins').projectDir = new File('./capacitor-cordova-android-plugins/')
