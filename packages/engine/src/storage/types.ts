@@ -144,6 +144,24 @@ export function isThumbnailable(mime: string): boolean {
   return mime.startsWith("image/") && mime !== "image/svg+xml";
 }
 
+// ── 送出圖片的中繼資料清除政策（ADR-0273）：常數同置於此，與縮圖政策一起當 SSOT ──
+
+/** 送出圖片的最長邊（像素）：足以閱讀文件與照片細節，同時把 12MP 原圖大幅縮小。 */
+export const SEND_MAX_EDGE = 2048;
+/** 送出圖片的重編碼品質（JPEG）。 */
+export const SEND_QUALITY = 0.85;
+
+/**
+ * 此 mime 是否該在送出前重編碼以清除中繼資料（ADR-0273）。
+ *
+ * **排除 GIF**：canvas 重編碼會把動畫壓成單張——ADR-0222 明確支援動畫 GIF，
+ * 保住動畫比清掉 GIF 那點中繼資料（GIF 無 EXIF 標準）重要。
+ * **排除 SVG**：可執行標記，不餵 canvas（同 `isThumbnailable` 的理由）。
+ */
+export function isSanitizable(mime: string): boolean {
+  return mime.startsWith("image/") && mime !== "image/svg+xml" && mime !== "image/gif";
+}
+
 /**
  * 群組回條只前進（delivered→read，不倒退、不重複）（ADR-0095）。
  * 無變更回 `undefined`；有變更回新的回條表（不就地改，供儲存層決定是否寫回）。

@@ -8,7 +8,14 @@
 // 介面與呼叫端皆不變（比照桌面的 native/save-file.ts）。
 
 import type { OutgoingFile } from "@cinderous/core";
-import { isThumbnailable, THUMB_MAX_BYTES, THUMB_MAX_EDGE, THUMB_QUALITY } from "@cinderous/engine";
+import {
+  isThumbnailable,
+  sanitizedFileName,
+  sanitizeImage,
+  THUMB_MAX_BYTES,
+  THUMB_MAX_EDGE,
+  THUMB_QUALITY,
+} from "@cinderous/engine";
 
 /** 讓使用者選一個檔案；取消回 null。 */
 export async function pickFile(): Promise<OutgoingFile | null> {
@@ -24,9 +31,13 @@ export async function pickFile(): Promise<OutgoingFile | null> {
         resolve(null);
         return;
       }
-      void f.arrayBuffer().then((buf) =>
-        resolve({ name: f.name, mime: f.type || "application/octet-stream", bytes: new Uint8Array(buf) }),
-      );
+      // ADR-0273：圖片在轉成 OutgoingFile 前清除 EXIF/GPS（canvas 重編碼）；
+      // 不適用（GIF/SVG/非圖片）或失敗即原樣——不因為清不掉就讓使用者送不出檔案。
+      void f.arrayBuffer().then(async (buf) => {
+        const mime = f.type || "application/octet-stream";
+        const s = await sanitizeImage(new Uint8Array(buf), mime);
+        resolve({ name: sanitizedFileName(f.name, s.changed), mime: s.mime, bytes: s.bytes });
+      });
     };
     // 使用者取消時 change 不會觸發；靠 cancel 事件收尾（不支援的瀏覽器就讓它留著，無害）。
     input.oncancel = () => {

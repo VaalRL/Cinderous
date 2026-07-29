@@ -41,6 +41,7 @@ import { getNotifier, onNotificationClick } from "./native/notify.js";
 import { pickFileToSend, readFileAtPath, saveIncomingFile, saveTextFile } from "./native/save-file.js";
 import { onNativeFileDrop } from "./native/file-drop.js";
 import { makeThumbnail } from "./ui/thumbnail.js";
+import { sanitizedFileName, sanitizeImage } from "@cinderous/engine"; // ADR-0273：送圖去 EXIF
 import { useI18n } from "./i18n.js";
 import { type Layout, useLayout } from "./layout.js";
 import {
@@ -2256,15 +2257,25 @@ export function App(): JSX.Element {
 
   /** 瀏覽器 <input type=file> / 拖放路徑：拿不到完整路徑（瀏覽器安全限制）。 */
   const sendFile = async (pk: string, f: File) => {
-    const bytes = new Uint8Array(await f.arrayBuffer());
-    await sendFileBytes(pk, f.name, f.type || "application/octet-stream", bytes);
+    const raw = new Uint8Array(await f.arrayBuffer());
+    // ADR-0273：圖片送出前清除 EXIF/GPS 等中繼資料（canvas 重編碼）；不適用或失敗即原樣。
+    const s = await sanitizeImage(raw, f.type || "application/octet-stream");
+    await sendFileBytes(pk, sanitizedFileName(f.name, s.changed), s.mime, s.bytes);
   };
 
   /** Tauri 原生選檔（ADR-0103）：**拿得到完整路徑** → 自己送出的圖片重載後也能看原圖。 */
   const attachFile = async (pk: string) => {
     const picked = await pickFileToSend();
     if (!picked) return; // 取消，或非 Tauri（呼叫端會退回 <input>）
-    await sendFileBytes(pk, picked.name, picked.mime, picked.bytes, picked.path);
+    const s = await sanitizeImage(picked.bytes, picked.mime); // ADR-0273
+    // 重編碼後位元組已與磁碟原檔不同 → 不再帶 path（避免「重載時讀回未清除的原檔」）。
+    await sendFileBytes(
+      pk,
+      sanitizedFileName(picked.name, s.changed),
+      s.mime,
+      s.bytes,
+      s.changed ? undefined : picked.path,
+    );
   };
 
   // 原生拖放的送檔實作（ADR-0104）：監聽只註冊一次，故經 ref 取用**當前**這份（避免閉包陳舊）。

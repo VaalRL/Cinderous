@@ -21,6 +21,7 @@ export * from "./backend/pairing-transport.js";
 export * from "./bootstrap-config.js";
 export * from "./notify.js";
 export * from "./kv.js";
+export * from "./image-sanitize.js";
 export * from "./storage/types.js";
 export * from "./storage/local.js";
 export * from "./storage/memory.js";
