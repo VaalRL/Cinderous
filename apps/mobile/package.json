@@ -13,7 +13,7 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "android:sync": "pnpm build && cap sync android",
-    "android:build": "pnpm run android:sync && cd android && gradlew.bat assembleDebug",
+    "android:build": "pnpm run android:sync && cd android && .\\gradlew.bat assembleDebug",
     "android:open": "cap open android"
   },
   "dependencies": {
