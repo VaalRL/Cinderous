@@ -1574,7 +1574,14 @@ export function MobileApp({
           onWipeDevice={wipeDevice}
         />
       )}
-      <BottomTabs active={tab} onSelect={setTab} unreadTotal={unreadTotal} {...themeProps} />
+      {/* ADR-0286：聯絡人分頁帶待處理好友請求數——否則請求靜靜躺在那裡沒人知道。 */}
+      <BottomTabs
+        active={tab}
+        onSelect={setTab}
+        unreadTotal={unreadTotal}
+        requestCount={requests.length}
+        {...themeProps}
+      />
       {callOverlay}
     </View>
   );
