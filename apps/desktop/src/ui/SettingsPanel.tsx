@@ -832,7 +832,7 @@ function VanishSettings({ onVanish }: { onVanish: () => string[] }): JSX.Element
       </button>
       {sentTo !== null ? (
         <p className="hint" data-testid="vanish-result">
-          {t("vanish_sent").replace("{n}", String(sentTo))}
+          {t("vanish_sent", { n: sentTo })}
         </p>
       ) : null}
     </section>

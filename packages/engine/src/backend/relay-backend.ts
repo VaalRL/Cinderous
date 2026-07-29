@@ -38,6 +38,7 @@ import {
   TIMESTAMP_JITTER_SECONDS,
   messageExpiry,
   npubDecode,
+  parseContactInput,
   npubEncode,
   nsecDecode,
   newGroupId,
@@ -2068,15 +2069,17 @@ export class RelayChatBackend implements ChatBackend {
 
   /** 以 `npub…` 或 `npub…@wss://…`（亦可空白分隔）新增聯絡人；hint 供多中繼路由。 */
   addContact(input: string, relayUrl?: string): void {
-    const [rawNpub, inlineHint] = input.trim().split(/[@\s]+/, 2);
-    const pubkey = npubDecode((rawNpub ?? "").trim());
+    // ADR-0281：切分規則共用 core 的 `parseContactInput`——先前這裡內嵌一份，行動端 QR 掃描
+    // 另寫一份「只認裸 npub」的檢查，導致掃桌面 QR（`npub@wss://…`）被打回。
+    const { npub: rawNpub, hint: inlineHint } = parseContactInput(input);
+    const pubkey = npubDecode(rawNpub);
     // 自我防呆（ADR-0055）：不得加自己作用中身分（跨身分連結風險；App 層另擋其他自身身分）。
     if (pubkey === this.self.pubkey || this.isBlocked(pubkey) || this.contacts.some((c) => c.pubkey === pubkey)) return;
     const hint = normalizeRelayUrl(relayUrl ?? inlineHint);
     this.storage.addContact(
       this.stampAt({
         pubkey,
-        name: shortNpub((rawNpub ?? "").trim()),
+        name: shortNpub(rawNpub),
         ...(hint && hint !== this.homeUrl ? { relayUrl: hint } : {}),
       }),
     );
