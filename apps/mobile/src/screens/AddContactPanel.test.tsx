@@ -59,6 +59,25 @@ describe("AddContactPanel（ADR-0280）", () => {
     expect(renderToStaticMarkup(<AddContactPanel onAdd={() => {}} selfNpub={NPUB} />)).not.toContain('data-testid="scan-qr"');
   });
 
+  it("🔴 掃描鈕是圖示鈕，但**必須留 aria-label**——沒有文字的按鈕對讀螢幕者等於空白（ADR-0282）", () => {
+    setScanSupport(true);
+    const html = renderToStaticMarkup(<AddContactPanel onAdd={() => {}} selfNpub={NPUB} locale="zh-Hant" />);
+    expect(html).toContain('aria-label="掃描 QR"');
+    expect(html).toContain("<svg"); // 圖示畫得出來
+  });
+
+  it("掃描鈕與貼上欄同列（ADR-0282：掃描＝另一種輸入方式）", () => {
+    setScanSupport(true);
+    const html = renderToStaticMarkup(<AddContactPanel onAdd={() => {}} selfNpub={NPUB} locale="zh-Hant" />);
+    // 順序：輸入欄 → 掃描圖示鈕 → 新增鈕
+    const input = html.indexOf('aria-label="加好友"');
+    const scan = html.indexOf('data-testid="scan-qr"');
+    const add = html.indexOf('data-testid="add-submit"');
+    expect(input).toBeGreaterThan(-1);
+    expect(input).toBeLessThan(scan);
+    expect(scan).toBeLessThan(add);
+  });
+
   it("QR 內容是自己的 npub（不是別的東西）", () => {
     // qrSvg 對同一輸入是決定性的；比對 path 資料即可確認編的是這個 npub。
     const svg = qrSvg(NPUB, { cell: 4 });
