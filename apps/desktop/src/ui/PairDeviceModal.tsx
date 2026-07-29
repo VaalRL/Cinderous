@@ -1,6 +1,7 @@
+import { qrSvg } from "@cinderous/core";
 import { useEffect, useState } from "react";
 import { useI18n } from "../i18n.js";
-import { qrSvg } from "../qr.js";
+
 
 /** 配對階段（舊機視角）：顯示載荷 → 等新機接上 → SAS 確認 → 傳送 → 完成/失敗。 */
 export type PairPhase =

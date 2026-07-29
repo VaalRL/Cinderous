@@ -1,4 +1,5 @@
 export * from "./backup.js";
+export * from "./qr.js";
 export * from "./constants.js";
 export * from "./keys.js";
 export * from "./event.js";

@@ -1,6 +1,7 @@
 // 行動端聊天清單（ADR-0085/0086）：登入後的主畫面，參考 LINE/Signal——聯絡人＋群組合成單一清單、
 // 預設依最近互動排序，每列＝頭像＋名稱＋最後訊息預覽＋時間＋未讀徽章，點擊開啟對話。
-// 真實 relay 模式（ADR-0086）：標題列「＋」展開加好友面板（貼 npub），並顯示自己的 npub 供分享。
+// 真實 relay 模式（ADR-0086）：標題列「＋」展開加好友面板（AddContactPanel：貼 npub／出示自己的
+// QR＋複製／掃描對方的 QR，ADR-0280）。
 // 色彩吃 @cinderous/theme。清單資料由呼叫端以 chat-list.ts 的 chatList() 排好傳入。
 import { useMemo, useState } from "react";
 import { type ChatMessage, nameOrMessagesMatch } from "@cinderous/engine";
@@ -9,6 +10,7 @@ import { resolveTheme, STATUS_COLORS, type Theme, type ThemeTokens } from "@cind
 import { Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native-web";
 import type { Status } from "@cinderous/engine";
 import { type ChatListEntry, chatTimeLabel } from "../chat-list.js";
+import { AddContactPanel } from "./AddContactPanel.js";
 import { SelfStatusBar } from "./SelfStatusBar.js";
 
 /** 頭像底色：由 id 決定性挑一個柔和色（LINE/Signal 風格的彩色圓）。 */
@@ -32,8 +34,6 @@ function makeStyles(tk: ThemeTokens) {
     addBtnText: { color: "#ffffff", fontSize: 22, fontWeight: "700", lineHeight: 22 },
     addPanel: { marginTop: 10, gap: 6 },
     addLabel: { fontSize: 11, color: tk.muted },
-    myNpub: { fontSize: 11, color: tk.accent },
-    addRow: { flexDirection: "row", gap: 8, alignItems: "center" },
     addInput: { flex: 1, borderWidth: 1, borderColor: tk.border, borderRadius: 8, backgroundColor: tk.field, color: tk.ink, paddingVertical: 6, paddingHorizontal: 10, fontSize: 13 },
     searchInput: { marginTop: 8, flexGrow: 0 },
     addSubmit: { backgroundColor: tk.accent, borderRadius: 8, paddingVertical: 6, paddingHorizontal: 12 },
@@ -119,18 +119,10 @@ export function ChatsListScreen({
   const styles = useMemo(() => makeStyles(tk), [tk]);
   const t = (k: MessageKey): string => translate(locale, k);
   const [addOpen, setAddOpen] = useState(false);
-  const [draft, setDraft] = useState("");
   // 聊天清單搜尋（ADR-0256 階段 4）：名稱＋訊息內容，與桌面同一套比對（引擎共用）。
   const [search, setSearch] = useState("");
   const visible = search.trim() ? entries.filter((e) => nameOrMessagesMatch(e.name, e.id, search, convos ?? {})) : entries;
 
-  const submitAdd = (): void => {
-    const v = draft.trim();
-    if (!v) return;
-    onAddContact?.(v);
-    setDraft("");
-    setAddOpen(false);
-  };
 
   // 建立群組（ADR-0114）。
   const [groupOpen, setGroupOpen] = useState(false);
@@ -212,32 +204,19 @@ export function ChatsListScreen({
           aria-label={t("mobileChats_search")}
           testID="chats-search"
         />
+        {/* 加好友（ADR-0280）：貼 npub ／出示自己的 QR＋複製／掃描對方的 QR。 */}
         {addOpen && onAddContact ? (
-          <View style={styles.addPanel}>
-            {selfNpub ? (
-              <>
-                <Text style={styles.addLabel}>{t("mobileChats_myNpub")}</Text>
-                <Text style={styles.myNpub} numberOfLines={1}>
-                  {selfNpub}
-                </Text>
-              </>
-            ) : null}
-            <View style={styles.addRow}>
-              <TextInput
-                style={styles.addInput}
-                value={draft}
-                onChangeText={setDraft}
-                placeholder={t("mobileChats_addPlaceholder")}
-                placeholderTextColor={tk.muted}
-                autoCapitalize="none"
-                autoCorrect={false}
-                aria-label={t("mobileChats_add")}
-              />
-              <Pressable style={styles.addSubmit} accessibilityRole="button" onPress={submitAdd}>
-                <Text style={styles.addSubmitText}>{t("mobileChats_addBtn")}</Text>
-              </Pressable>
-            </View>
-          </View>
+          <AddContactPanel
+            onAdd={(npub) => {
+              onAddContact(npub);
+              setAddOpen(false);
+            }}
+            selfNpub={selfNpub}
+            locale={locale}
+            theme={theme}
+            accent={accent}
+            accent2={accent2}
+          />
         ) : null}
         {/* 建立群組（ADR-0114）：名稱 ＋ 從聯絡人挑成員。 */}
         {groupOpen && onCreateGroup ? (

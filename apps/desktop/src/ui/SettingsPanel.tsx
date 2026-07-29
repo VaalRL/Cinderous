@@ -1,4 +1,4 @@
-import { makeBackupCode } from "@cinderous/core";
+import { makeBackupCode, qrSvg } from "@cinderous/core";
 import { useEffect, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { ACCENT_PRESETS, ACCENT_PRESETS_CB, useAccent } from "../accent.js";
 import type { MessageKey } from "@cinderous/i18n";
@@ -16,7 +16,7 @@ import { CHIME_PRESETS, DEFAULT_CHIME_ID, playChime } from "./ringtone.js";
 import type { SlotItem } from "./slot-queue.js";
 import { placeControl, type ControlId, TITLEBAR_STYLES } from "./titlebar-controls.js";
 import { useTitlebar } from "../titlebar.js";
-import { qrSvg } from "../qr.js";
+
 import type { CloudSyncMode, NotifyPrefs } from "@cinderous/engine";
 import {
   type AiProvider,
