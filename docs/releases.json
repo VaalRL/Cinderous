@@ -1,5 +1,24 @@
 [
   {
+    "version": "0.0.14",
+    "date": "2026-07-29",
+    "released": true,
+    "zh": [
+      "Android App 首次登場：可安裝的 APK，聊天、通話、群組、行事曆等功能與桌面同源",
+      "手機拍照直接傳：對話中點 📷 開相機，拍完立即送出",
+      "背景保持連線：以常駐通知讓訊息在 App 進背景時仍收得到——不使用任何第三方推播服務，沒有人會知道你何時收到訊息（可於設定關閉）",
+      "隱私修復：傳送圖片時自動清除 EXIF 等中繼資料——先前照片會連 GPS 座標、拍攝時間與裝置型號一起送出，現在只保留畫面內容（桌面與手機都已修正）",
+      "圖片傳送順帶壓縮：上傳更快、更省流量"
+    ],
+    "en": [
+      "Android app, first release: an installable APK — chat, calls, groups and calendar all share the same core as desktop",
+      "Take a photo and send it right away: tap 📷 in a conversation to open the camera",
+      "Stay connected in the background: an ongoing notification keeps messages arriving while the app is backgrounded — no third-party push service is used, so nobody learns when you receive messages (can be turned off in settings)",
+      "Privacy fix: image metadata (EXIF) is now stripped on send — photos previously carried GPS coordinates, capture time and device model; only the picture itself is sent now (fixed on both desktop and mobile)",
+      "Images are also compressed on send: faster uploads, less data"
+    ]
+  },
+  {
     "version": "0.0.13",
     "date": "2026-07-29",
     "released": true,
