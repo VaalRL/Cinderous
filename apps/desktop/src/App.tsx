@@ -2529,6 +2529,7 @@ export function App(): JSX.Element {
             {...(activeBackend.blockContact ? { onBlockContact: blockContact } : {})}
             {...(aiOk && ollama.enabled ? { onSummarize: summarizeUnread } : {})}
             {...addContactProps}
+            {/* ADR-0285：三欄版過去沒吃 manageProps，於是看不到任何好友請求 */ ...manageProps}
           />
         ) : (
           <ContactListWindow
