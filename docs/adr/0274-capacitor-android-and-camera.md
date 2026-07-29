@@ -46,7 +46,26 @@ Capacitor 產生的 `android/app/build.gradle` 有自己的 `versionName`／`ver
   `major*10000 + minor*100 + patch` **決定性推導**（同一語意版號恆得同一 code，
   不需人工維護、重建不跳號）。CI 既有的 `version:check` 因此自動涵蓋 Android。
 
-### 4. 對話內「拍照直接傳」
+### 4. 背景收訊＝前台服務（ADR-0272 的 Android 預設路徑）
+
+- **原生層以 Java 實作**（`ConnectionService`＋`ForegroundPlugin`）——刻意不用 Kotlin，
+  以免為兩個檔案引入整套 Kotlin gradle 工具鏈。
+- **`foregroundServiceType="specialUse"`**：Android 14 起必須宣告類型，而 Android 15 把
+  `dataSync` 限為**每日 6 小時**——對「維持長連線的通訊軟體」不適用。`specialUse` 需在
+  manifest 附 `PROPERTY_SPECIAL_USE_FGS_SUBTYPE` 說明用途（Play 上架時亦須聲明）。
+- **通知文案由前端帶入**（`start({title,text})`），i18n 維持單一來源，不寫死在原生層。
+- **登入後才啟動、登出即停止**：沒有連線可保時不該佔著一條常駐通知。
+- **預設開、可關**（`nb.foreground`，裝置層——常駐通知是這台裝置的體驗，不隨身分）；
+  設定文案明講「不使用任何第三方推播服務」與「代價是一條常駐通知」。
+- **不支援時回報失敗而非假裝成功**：非原生殼、外掛不在、或啟動被系統拒絕（Android 12+
+  背景啟動限制）一律回 `false`——**不讓 UI 假裝連線受保護**。
+
+**誠實的限界（必須實機驗收）**：前台服務保證的是「**行程活著**」。WebView 在背景時
+Chromium 仍可能節流 JS 計時器（同瀏覽器分頁背景節流，ADR-0113 已記）——收訊是網路事件、
+通常不受計時器節流影響，但確切行為依 Android 版本與 OEM 省電策略而異。自動化測試只能鎖
+「不支援時不假裝成功」這條契約，**真正的背景收訊必須在實機上驗**。
+
+### 5. 對話內「拍照直接傳」
 
 - 平台縫 `native/files.ts` 新增 **`takePhoto()`**，以 `<input capture="environment">` 實作
   ——**行動瀏覽器與 Android WebView（含 Capacitor）都直接開相機**，因此**零額外相依**即可運作。
@@ -69,7 +88,8 @@ Capacitor 讓「可安裝的 Android app」在不凍結功能開發的前提下�
 
 - **正面**：可產出 APK（debug）；相機功能在瀏覽器與 APK 皆可用；版號漂移由 CI 自動擋。
 - **負面 / 已知殘餘風險**：
-  - **背景收訊仍未解**——ADR-0272 的前台服務／FCM 尚未實作，App 進背景即斷線（下一步）。
+  - **背景收訊的實際效果需實機驗收**——前台服務已實作（見決策 4），但「WebView 在背景是否
+    持續處理 WebSocket 事件」依 Android 版本／OEM 而異；FCM opt-in 路徑（ADR-0272）尚未實作。
   - APK 目前是 **debug 簽章**，未做 release 簽章與 F-Droid／Play 上架設定（後續）。
   - `<input capture>` 拿到的是**全解析度**照片，記憶體壓力由 `sanitizeImage` 的 2048px 重編碼
     緩解，但解碼瞬間仍需完整影像——極低階裝置若 OOM，屆時再裝 `@capacitor/camera`
@@ -88,6 +108,10 @@ Capacitor 讓「可安裝的 Android app」在不凍結功能開發的前提下�
 
 ## 後續行動 / 待辦
 
-1. **前台服務**（ADR-0272 的 Android 預設路徑）：常駐通知＋保住 WebSocket。
+1. ~~前台服務~~（已實作，見決策 4）；**FCM opt-in 路徑**（ADR-0272）仍待實作。
 2. release 簽章、F-Droid／Play 雙 flavor（F-Droid＝無 FCM，正是 ADR-0272 的 Android 預設）。
-3. 實機驗收：相機拍照→傳送→對方收到；EXIF 確實消失（以 exiftool 驗收到的檔案）。
+3. **實機驗收清單**：
+   - 相機拍照→傳送→對方收到；EXIF 確實消失（以 exiftool 驗收到的檔案）。
+   - **背景收訊**：App 切背景／鎖屏 10 分鐘後，對方傳訊是否仍即時收到通知。
+   - 前台通知是否出現、點擊是否回到 App；設定關閉後通知是否消失。
+   - OEM 省電策略（小米／華為等）下的存活狀況。

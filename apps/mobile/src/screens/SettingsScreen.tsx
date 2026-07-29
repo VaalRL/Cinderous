@@ -104,6 +104,8 @@ export function SettingsScreen({
   notify,
   onNotify,
   notifyHidePreview,
+  foreground,
+  onForeground,
   onNotifyHidePreview,
   onPairExport,
   retention,
@@ -162,6 +164,9 @@ export function SettingsScreen({
   onNotify?: (v: boolean) => void;
   /** 隱藏預覽：通知只說「有新訊息」，不把明文推到鎖定畫面。 */
   notifyHidePreview?: boolean;
+  /** ADR-0272/0274：背景保持連線（前台服務）；未提供＝非原生殼，不顯示。 */
+  foreground?: boolean;
+  onForeground?: (on: boolean) => void;
   onNotifyHidePreview?: (v: boolean) => void;
   /** 搬到新裝置（ADR-0118）：把整台的資料（含私鑰）P2P 搬走。未提供則不顯示。 */
   onPairExport?: () => void;
@@ -751,6 +756,30 @@ export function SettingsScreen({
                   <Text style={[styles.segText, { color: notifyHidePreview ? "#ffffff" : tk.ink }]}>
                     {t("settings_notifyHidePreview")}
                     {notifyHidePreview ? " ✓" : ""}
+                  </Text>
+                </Pressable>
+              </>
+            ) : null}
+            {/* 背景保持連線（ADR-0272/0274）：僅原生殼（Capacitor）顯示；瀏覽器預覽無此能力。 */}
+            {onForeground ? (
+              <>
+                <Text style={styles.label}>{t("settings_foregroundHint")}</Text>
+                <Pressable
+                  accessibilityRole="button"
+                  testID="foreground-toggle"
+                  onPress={() => onForeground(!foreground)}
+                  style={[
+                    styles.seg,
+                    {
+                      alignSelf: "flex-start",
+                      borderColor: foreground ? tk.accent : tk.border,
+                      backgroundColor: foreground ? tk.accent : tk.field,
+                    },
+                  ]}
+                >
+                  <Text style={[styles.segText, { color: foreground ? "#ffffff" : tk.ink }]}>
+                    {t("settings_foreground")}
+                    {foreground ? " ✓" : ""}
                   </Text>
                 </Pressable>
               </>

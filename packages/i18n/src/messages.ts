@@ -212,6 +212,11 @@ export interface Messages {
   convo_attach: string;
   /** 拍照直接傳（ADR-0274）。 */
   convo_photo: string;
+  /** 背景保活前台服務（ADR-0272/0274，Android）。 */
+  fg_title: string;
+  fg_text: string;
+  settings_foreground: string;
+  settings_foregroundHint: string;
   // 相簿/原圖（ADR-0102）
   image_originalMissing: string;
   image_relocate: string;
@@ -1016,6 +1021,11 @@ const zhHant: Messages = {
   calc_insertHint: "點一下把「= 答案」加到訊息",
   convo_attach: "傳送檔案",
   convo_photo: "拍照傳送",
+  fg_title: "Cinderous",
+  fg_text: "保持連線中——訊息才收得到",
+  settings_foreground: "背景保持連線",
+  settings_foregroundHint:
+    "以常駐通知讓連線在背景不中斷，訊息才收得到。不使用任何第三方推播服務——沒有人會知道你何時收到訊息；代價是通知列多一條狀態通知。關閉後，App 進背景可能就收不到訊息。",
   image_originalMissing: "找不到原圖——檔案可能已被移動或刪除。",
   image_relocate: "重新指定位置",
   image_thumbOnly: "此處只能顯示縮圖（瀏覽器無法讀取本機原檔）。",
@@ -1777,6 +1787,11 @@ const en: Messages = {
   calc_insertHint: "Click to append “= answer” to your message",
   convo_attach: "Send a file",
   convo_photo: "Take a photo",
+  fg_title: "Cinderous",
+  fg_text: "Staying connected so messages arrive",
+  settings_foreground: "Stay connected in background",
+  settings_foregroundHint:
+    "Keeps the connection alive with an ongoing notification so messages arrive. No third-party push service is used — nobody learns when you receive messages. The cost is one persistent notification. With this off, messages may not arrive while the app is backgrounded.",
   image_originalMissing: "Original not found — the file may have been moved or deleted.",
   image_relocate: "Locate the file",
   image_thumbOnly: "Only the thumbnail can be shown here (browsers can't read local originals).",

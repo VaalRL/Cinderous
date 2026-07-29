@@ -24,6 +24,19 @@
 
         </activity>
 
+        <!-- 前台服務（ADR-0272）：保住與中繼的長連線，零第三方推播。
+             `specialUse`——Android 14 起必須宣告類型，而 Android 15 把 dataSync 限制為
+             每日 6 小時，對「維持長連線的通訊軟體」不適用；specialUse 需附用途說明
+             （Play 上架時亦須聲明）。 -->
+        <service
+            android:name=".ConnectionService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Maintains the end-to-end encrypted relay connection so messages arrive while the app is in the background, without any third-party push service." />
+        </service>
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
@@ -50,4 +63,8 @@
 
     <!-- 通知（ADR-0116）：Android 13+ 顯示本機通知需執行期權限。 -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- 前台服務（ADR-0272）：背景保住中繼連線，不依賴任何第三方推播。 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 </manifest>

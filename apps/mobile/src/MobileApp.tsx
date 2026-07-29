@@ -29,6 +29,13 @@ import { notifier, onNotifyClick } from "./native/notify.js";
 import type { BlockedContact, CalendarEventInput, ContactRequest, RsvpStatus, StoredCalendarEvent } from "@cinderous/engine";
 import type { CallMedia, CallState } from "@cinderous/core";
 import { makeThumbnail, pickFile, saveFile, takePhoto } from "./native/files.js";
+import {
+  foregroundEnabled,
+  foregroundSupported,
+  setForegroundEnabled,
+  startForeground,
+  stopForeground,
+} from "./native/foreground.js";
 import { hasCallSupport } from "./native/call-media.js";
 import { CallScreen } from "./screens/CallScreen.js";
 import { type Locale, type MessageKey, translate } from "@cinderous/i18n";
@@ -198,6 +205,8 @@ export function MobileApp({
    */
   const [calDraft, setCalDraft] = useState<{ convo: string; at: number; nonce: number } | null>(null);
   /** 通知（ADR-0116）：預設關（需使用者明確授權）。 */
+  // 背景保活開關（ADR-0272/0274）：Android 預設開；非原生殼恆 false（設定不顯示）。
+  const [fgOn, setFgOn] = useState(foregroundEnabled);
   const [notify, setNotifyState] = useState(() => {
     try {
       return localStorage.getItem(NOTIFY_KEY) === "1";
@@ -429,6 +438,10 @@ export function MobileApp({
       ...(org ? { org } : {}),
     });
     backendRef.current = backend;
+    // 背景保活（ADR-0272 Android 預設路徑）：有連線可保了才啟動；非原生環境為 no-op。
+    if (foregroundEnabled()) {
+      void startForeground(translate(localeRef.current, "fg_title"), translate(localeRef.current, "fg_text"));
+    }
     setSelfStatus(pref?.status ?? "online");
     setSelfStatusMessage(pref?.statusMessage ?? "");
     setSelfNowPlaying("");
@@ -681,6 +694,7 @@ export function MobileApp({
   const logout = (): void => {
     backendRef.current?.stop();
     backendRef.current = null;
+    void stopForeground(); // ADR-0272：沒有連線要保了，撤掉常駐通知
     setTab("chats");
     setActiveId(null);
     setInvisible(false);
@@ -1494,6 +1508,21 @@ export function MobileApp({
                 onNotify: (v: boolean) => void setNotify(v),
                 notifyHidePreview: notifyHide,
                 onNotifyHidePreview: setNotifyHide,
+                // 背景保持連線（ADR-0272/0274）：僅原生殼提供 → 瀏覽器預覽不顯示此開關。
+                ...(foregroundSupported()
+                  ? {
+                      foreground: fgOn,
+                      onForeground: (on: boolean) => {
+                        setForegroundEnabled(on);
+                        setFgOn(on);
+                        if (on) {
+                          void startForeground(translate(locale, "fg_title"), translate(locale, "fg_text"));
+                        } else {
+                          void stopForeground();
+                        }
+                      },
+                    }
+                  : {}),
                 retention: retentionCap,
                 onRetention: changeRetention,
                 onExport: exportAll,
