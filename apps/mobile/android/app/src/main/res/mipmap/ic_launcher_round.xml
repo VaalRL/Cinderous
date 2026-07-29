@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  舊版圓形圖示（ADR-0278）：與 `ic_launcher.xml` 同一設計，背板改為滿圓
+  （API 23–25 的圓形啟動器會取 android:roundIcon，不會自己套遮罩）。
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="1024"
+    android:viewportHeight="1024">
+    <path
+        android:fillColor="#0F1F3A"
+        android:pathData="M512,0 A512,512 0 1 1 511.9,0 Z" />
+    <path
+        android:fillColor="#F07F2B"
+        android:pathData="M512 200C380 380 322 500 322 600C322 720 410 800 512 800C614 800 702 720 702 600C702 500 644 380 512 200Z" />
+    <path
+        android:fillColor="#FFD66B"
+        android:pathData="M512 380C448 480 418 550 418 610C418 690 462 740 512 740C562 740 606 690 606 610C606 550 576 480 512 380Z" />
+</vector>
