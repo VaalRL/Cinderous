@@ -18,6 +18,15 @@ function rnw(hex: string): string {
   return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},1.00)`;
 }
 
+/** 抽出某個 testID 元素的 inline style（斷言要指名道姓，別掃整份 HTML）。 */
+function styleOf(html: string, testId: string): string {
+  const i = html.indexOf(`data-testid="${testId}"`);
+  if (i < 0) return "";
+  const tagStart = html.lastIndexOf("<", i);
+  const m = /style="([^"]*)"/.exec(html.slice(tagStart, i));
+  return m?.[1] ?? "";
+}
+
 const base = {
   name: "小明",
   status: "online" as const,
@@ -37,15 +46,39 @@ describe("SelfStatusBar（ADR-0278）", () => {
     expect(html).toContain("在忙"); // 目前的自訂文字帶進輸入框
   });
 
-  it("狀態點用對應顏色（線上＝綠）", () => {
+  it("狀態點用對應顏色（忙碌＝紅）", () => {
     const html = renderToStaticMarkup(<SelfStatusBar {...base} status="busy" />);
-    expect(html).toContain(rnw(STATUS_COLORS.busy));
+    expect(styleOf(html, "self-status-dot")).toContain(rnw(STATUS_COLORS.busy));
   });
 
   it("🔴 隱身時狀態點畫成離線——否則畫面說「線上」但其實沒人看得到你（UI 說謊）", () => {
     const html = renderToStaticMarkup(<SelfStatusBar {...base} status="online" invisible locale="zh-Hant" />);
-    expect(html).toContain(rnw(STATUS_COLORS.offline));
-    expect(html).not.toContain(rnw(STATUS_COLORS.online));
+    const dot = styleOf(html, "self-status-dot");
+    expect(dot).toContain(rnw(STATUS_COLORS.offline));
+    expect(dot).not.toContain(rnw(STATUS_COLORS.online));
+  });
+
+  // ADR-0283：狀態鈕改用各自的狀態色（線上綠／離開黃／忙碌紅），不再一律主色。
+  it("每顆狀態鈕都帶自己的狀態色", () => {
+    const html = renderToStaticMarkup(<SelfStatusBar {...base} status="online" locale="zh-Hant" />);
+    expect(styleOf(html, "status-online")).toContain(rnw(STATUS_COLORS.online));
+    expect(styleOf(html, "status-away")).toContain(rnw(STATUS_COLORS.away));
+    expect(styleOf(html, "status-busy")).toContain(rnw(STATUS_COLORS.busy));
+  });
+
+  it("🔴 選中鈕的字色由對比決定，不是一律白字——白字在琥珀底上只有 2.1:1", () => {
+    const away = renderToStaticMarkup(<SelfStatusBar {...base} status="away" locale="zh-Hant" />);
+    // 「離開」選中時底是琥珀，字必須是深色
+    expect(styleOf(away, "status-away")).toContain(rnw(STATUS_COLORS.away)); // 底＝琥珀
+    expect(away).toContain("rgba(16,24,40,1.00)"); // 深色字（#101828）
+  });
+
+  it("提供 onAvatar → 頭像可點且有無障礙標籤；未提供 → 停用", () => {
+    const on = renderToStaticMarkup(<SelfStatusBar {...base} onAvatar={() => true} locale="zh-Hant" />);
+    expect(on).toContain('aria-label="更換頭像"');
+    expect(on).toContain('role="button"');
+    const off = renderToStaticMarkup(<SelfStatusBar {...base} locale="zh-Hant" />);
+    expect(off).toContain('aria-disabled="true"');
   });
 
   it("無頭像 → 顯示名稱首字（大寫）", () => {
