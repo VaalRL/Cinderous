@@ -301,6 +301,28 @@ Phase A（前端產品化，可在此環境大量推進）
 - **可立即在此環境推進**：Phase A 全部、Phase E 的「核心邏輯」（M6/M7 資料層、M8 信令、M9 QR）、Phase F 的 F3。
 - **需換環境**：Phase B（Tauri）、C（Cloudflare）、D（RN），以及 M8 真實通話 media、M7 媒體 UI。
 
+## 回滾錨點
+
+| Tag | 意義 |
+| --- | --- |
+| `baseline/pre-ratchet-fs` | **投入棘輪 FS 之前的最後一個已驗證狀態**（2026-07-30，含 ADR 0001–0302） |
+
+**為什麼有這個 tag**：棘輪 FS 的方向決定是「**取代**」ADR-0245 的輪替加密子鑰，
+而 ADR-0245 的 Phase 0–2 已實作完成且全測綠、只卡在外部審計（ADR-0290 §2）。
+「取代」意味著那份已完工的實作會被改寫或移除——若棘輪走不通（最可能卡在審計費用、
+TypeScript 自寫 double ratchet 的風險、或**裝置撤銷沒有執行點**），必須回得來。
+
+發版 tag `v0.0.14` 已落後 **77 個提交、29 份 ADR**，不能當回滾點。
+
+```
+git switch -c rollback/xxx baseline/pre-ratchet-fs
+```
+
+打 tag 當下：工作區乾淨、`pnpm -r typecheck` 0 錯、`pnpm -r test` 全綠
+（core 55／engine 31／desktop 75／mobile 44／website 9／relay 11／cli 2／i18n 2／theme 4／brand 1 檔）。
+
+⚠ Android debug APK 的簽章與正式版不同，回滾後重裝需先移除舊 App。
+
 ## 未決策 ADR（開工前需定案）
 
 - **M7 語音訊息離線退回策略**：⏸ **暫緩（2026-07-10 裁示：暫不實作）**。屆時方向已議定——短語音（低碼率、NIP-44 單包 64KB 內）走 Gift Wrap 離線退回、長語音誠實提示 P2P-only；分塊多事件方案傾向否決（吃配額）。
