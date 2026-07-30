@@ -12,9 +12,12 @@
   - 0245（手動 opt-in EK 輪替＝現行 FS）、**0290 §2**（現行阻擋＝外部密碼學審計）
   - 0068（群組快照廣播：**否決 relay 端群組狀態**）、0047/0049（組織簽章名冊＝權威整份對帳）
   - 0237（連線歸屬打穿事件層隱藏）
-- 資料來源：本倉庫程式碼查證；Signal Sesame 規格與兩篇 eprint 論文之**檢索引述**
-  （**原文未取得**——`signal.org` 與 `eprint.iacr.org` 皆被本工作環境的出口政策擋下，
-  gateway 對 CONNECT 回 403。詳見〈已知限制〉）
+- 資料來源：本倉庫程式碼查證；
+  **✅ 原文（2026-07-31 核對）**——Signal Sesame 規格、X3DH 規格、官方部落格
+  〈A Synchronized Start for Linked Devices〉；
+  **⚠ 仍為檢索引述**——`eprint.iacr.org/2021/626`（§4 用到，原文取不到）。
+  原稿撰寫環境擋下 `signal.org`，故 §1／§5.2 原記為檢索引述；已於後續環境補核，
+  詳見 §1 核對表、§5.2 更正框與〈已知限制〉。
 
 > **起點**：討論「群組能不能用棘輪保障 FS」時，順著 ADR-0236 §43 的敘述往下查 Signal
 > 實際怎麼解多設備——查出來的結果**與我們六份 ADR 引用的那句話不一致**。
@@ -37,19 +40,45 @@ ADR-0236 §43 寫道（本專案「FS 最尖銳的技術點」）：
 本身未列 Sesame 規格為資料來源。這與 ADR-0292 §5 對 Keychat 的處境完全同形
 （該節原寫「沒讀過原始碼或規格…**不應據此下任何結論**」，後由 0300 補上並更正兩處）。
 
-## 1. 查證：Signal 的多設備模型（⚠ 證據等級＝檢索引述，非原文）
+## 1. 查證：Signal 的多設備模型（✅ **證據等級已升級為原文**，2026-07-31）
+
+> **原文核對完成（2026-07-31）。** 本文原記「證據等級＝檢索引述，非原文」，因撰寫環境的
+> 出口政策擋下 `signal.org`。另一個工作環境取得得到，已逐條核對，**三段引述全部屬實且為逐字**：
+>
+> | § | 引述 | 來源 | 結果 |
+> | --- | --- | --- | --- |
+> | 1.1 | 「per-user identity keys, all devices under a user share the same key pair…」 | `signal.org/docs/specifications/sesame/` | ✅ 逐字相符 |
+> | 1.1 | 「Linked devices … share an identity key pair, but have independent prekeys, resulting in independent session keys」 | **`signal.org/blog/a-synchronized-start-for-linked-devices/`**（Signal 官方部落格） | ✅ 語意相符；⚠ 原稿為**意譯非逐字**，原文見下方 §1.1 |
+> | 1.3 | UserRecord／DeviceRecord 結構 | Sesame 規格 | ✅ 逐字相符 |
+> | 1.4 | 伺服器糾正裝置清單 | Sesame 規格 | ✅ 相符（原文更精確：伺服器**拒收**該批訊息，並回報 old/new DeviceIDs 與新裝置的身分公鑰） |
+>
+> ⚠ **一個必須指出的區分**（本文原稿把兩件事併在 §1.1）：
+> **Sesame 規格只說「支援兩種模型」，它沒有說 Signal 部署哪一種。**
+> 「Signal 用共用身分金鑰」這件事的來源是**官方部落格**，不是規格。
+> 兩個來源合起來才足以支撐 §1.1 的結論——單靠規格不行。
+>
+> ⇒ **〈提議〉1 的前提已滿足**：ADR-0236 §43「Signal 靠 Sesame 給每台裝置獨立身分」
+> **確為事實錯誤**，可據以更正。
+
+
 
 ### 1.1 Sesame 規格支援兩種身分模型，Signal 部署的是「共用」那種
 
-Sesame 規格原文（檢索引述）：
+Sesame 規格原文（✅ 已核對，逐字）：
 
-> With **per-user identity keys, all devices under a user share the same key pair**.
-> With per-device identity keys, each device may have a different key pair.
+> Sesame supports two different models for key pairs: With **per-user identity keys, all
+> devices under a user share the same key pair**. With per-device identity keys, each device
+> may have a different key pair.
 
-而 Signal 的實際部署（檢索引述）：
+⚠ **規格到此為止只說「支援兩種」，沒說 Signal 選哪一種。** 決定這件事的是官方部落格
+〈A Synchronized Start for Linked Devices〉（✅ 已核對，逐字）：
 
-> **Linked devices for a Signal account share an identity key pair**, but have
-> **independent prekeys**, resulting in **independent session keys**.
+> …linked devices for an account **share an identity key pair, but independent prekeys**,
+> so they end up with **independent session keys**.
+
+（本文原稿此處作「Linked devices for a Signal account share an identity key pair, but have
+independent prekeys, resulting in independent session keys」——**語意相同但非逐字**，
+且未標明其來源是部落格而非規格。以上為更正後的原文與出處。）
 
 ⇒ **Signal 的多台裝置也共用同一把身分金鑰**，與 Cinderous 共用 nsec 是同一個形狀。
 配對流程（掃 QR、`ProvisionMessage` 帶身分私鑰）與 ADR-0072 的桌面配對克隆亦同形。
@@ -65,7 +94,7 @@ Sesame 規格原文（檢索引述）：
 
 ### 1.3 狀態結構：session 掛在裝置那一層
 
-Sesame 規格（檢索引述）：
+Sesame 規格（✅ 已核對，逐字）：
 
 > Each device stores a set of **UserRecords** for its correspondents, indexed by UserID.
 > Each UserRecord contains a set of **DeviceRecords**, indexed by DeviceID.
@@ -75,10 +104,12 @@ Sesame 規格（檢索引述）：
 
 ### 1.4 裝置清單的權威是伺服器
 
-Sesame 規格（檢索引述）：
+Sesame 規格（✅ 已核對；⚠ 原文比原稿更精確——伺服器是**拒收整批訊息**，
+且回傳的清單**含新裝置的身分公鑰**）：
 
-> If some of the DeviceIDs are no longer up to date, **the server notifies the sender
-> and sends a current list of DeviceIDs.**
+> If some of the DeviceIDs are no longer up to date, the **server will reject the messages**,
+> and notify the sender of the **old and new DeviceIDs**… the server will also return the
+> **identity public keys** for any new devices.
 
 即 Signal 服務的 `MismatchedDevices` / `StaleDevices`（HTTP 409）糾正迴圈：
 送訊者持過期清單發訊 → 伺服器**主動糾正並附上正確清單** → 客戶端補建 session 重送。
@@ -186,8 +217,33 @@ Signal 的 one-time prekey 是**被消耗的資源**：伺服器每次發出一�
 
 ### 5.2 代價：首則訊息的 FS 要等棘輪推進一步
 
+> **✅ 原文核對（2026-07-31）＋⚠ 本節原稿說得比實際嚴重。** X3DH 規格逐字：
+>
+> - 沒有一次性預金鑰時協定照跑，只是少一個 DH：
+>   「If the bundle does not contain a one-time prekey, she calculates:
+>   `DH1 = DH(IK_A, SPK_B)`, `DH2 = DH(EK_A, IK_B)`, `DH3 = DH(EK_A, SPK_B)`, `SK = KDF(DH1 || DH2 || DH3)`」
+> - **`DH3` 本身就提供前向保密**（規格：「DH3 and DH4 provide forward secrecy」），
+>   而 `DH3` **不含**一次性預金鑰。
+> - 一次性預金鑰買到的是這一句：「If one-time prekeys are used for a protocol run then a
+>   compromise of Bob's identity key **and prekey private keys** at some future time will not
+>   compromise the older SK, assuming the private key for OPK_B was deleted.」
+>
+> ⇒ **修正**：無一次性預金鑰**不是「首則訊息沒有 FS」**，而是
+> **「首則訊息的 FS 改為取決於簽章預金鑰（SPK）的輪替與刪除，而非一次性預金鑰的刪除」**。
+> 只要 SPK 有確實輪替並刪除舊私鑰，FS 的缺口就**被輪替週期界住**，不是永久的。
+>
+> ⇒ 這**改善**了這條路的評估：§5.3 的「簽章預金鑰輪替搭開機廣播便車」從
+> 「衛生習慣」升級為**FS 的承重結構**——它決定缺口有多寬。
+> 同時 §5.2 末「必須先量化只有一則訊息的對話佔比」的急迫性下降（但仍值得量）。
+>
+> ⚠ 另一併核到 §5.1 的直接佐證：「**The server should provide one of Bob's one-time prekeys
+> if one exists, and then delete it.**」——一次性預金鑰的消耗語意**明文寫在規格裡由伺服器承擔**，
+> 我們沒有那個角色，§5.1 的推論成立。
+
 X3DH 允許在一次性預金鑰不可得時照跑（規格明定的降級模式），代價是
-**該次會話的第一則訊息不具前向保密，須待棘輪推進一步後才建立**。
+~~**該次會話的第一則訊息不具前向保密，須待棘輪推進一步後才建立**~~
+→ **更正**（見上框）：**該次會話首則訊息的前向保密改由簽章預金鑰的輪替與刪除界住**，
+不是消失。缺口寬度＝SPK 的輪替週期。
 
 這不是死路（是有文獻記載的取捨），但它**削弱一部分我們一開始想買的性質**，
 且對我們的使用形態特別不利：離線留言是主要路徑（ADR-0065 七天倉），
@@ -538,7 +594,13 @@ Signal 的答案是 **sealed sender certificate**（伺服器簽發、綁定帳�
 
 ## 已知限制
 
-- ⚠ **§1 全部為檢索引述，原文未取得。** `signal.org:443` 與 `eprint.iacr.org:443`
+- ~~⚠ **§1 全部為檢索引述，原文未取得。**~~ → **✅ 已於 2026-07-31 核到原文，本項解除**
+  （見 §1 開頭的核對表）。三段引述**全部逐字屬實**。核對時另發現一個原稿併在一起的區分：
+  **Sesame 規格只說「支援兩種模型」，沒說 Signal 部署哪一種**——後者的來源是
+  Signal 官方部落格 `a-synchronized-start-for-linked-devices`，不是規格。
+  兩個來源合起來才支撐 §1.1 的結論。⚠ 但 `eprint.iacr.org` **仍未取得**（見下方 §4 那項）。
+  以下為原始記載，保留供追溯：
+- ~~⚠ §1 全部為檢索引述，原文未取得。~~（原始記載）`signal.org:443` 與 `eprint.iacr.org:443`
   皆被本工作環境的出口政策擋下（gateway 對 CONNECT 回 403，`recentRelayFailures` 有記錄）。
   依代理規範未繞道取得。**本文最重要的結論（§1.1／§1.2）建立在三段檢索引述上：**
   1. Sesame 規格的 per-user / per-device identity keys 兩模型敘述
@@ -547,15 +609,34 @@ Signal 的答案是 **sealed sender certificate**（伺服器簽發、綁定帳�
 
   三者彼此獨立且互相印證，但**未在規格原文中核對其上下文**（特別是 Signal 部署實際
   選用哪一種模型、以及是否隨版本改變過）。**在據此更正 ADR-0236 之前必須取得原文。**
-- ⚠ **§5.2 的 X3DH 降級模式（無一次性預金鑰時的 FS 削弱）憑記憶陳述，未核對 X3DH 規格**
-  ——`signal.org` 同樣被出口政策擋下。這是 §5 的關鍵結論，取得原文時應一併核對。
-  §5.2 末的量化（單則對話佔比）**尚未進行**，那是判斷這條路 ROI 的前提。
+- ~~⚠ **§5.2 的 X3DH 降級模式憑記憶陳述，未核對 X3DH 規格**~~ → **✅ 已核對，本項解除**，
+  且核對結果**推翻了原稿的嚴重程度**：無一次性預金鑰**不是「首則訊息沒有 FS」**，
+  而是 FS 改由**簽章預金鑰的輪替週期**界住（詳見 §5.2 的更正框）。
+  ⇒ 這條路的 ROI **比原稿評估的高**。
+  §5.2 末的量化（單則對話佔比）**仍未進行**，但其急迫性隨之下降。
 - §4 的論文結論取自摘要與二手摘要，**未讀 2021/626 全文**；其攻擊前提
   （需要何種初始存取才能註冊惡意裝置）未核實，這會影響該弱點對我方模型的可轉移性。
 - 未評估 per-device session 對既有 **ADR-0107 自封副本**、**ADR-0071 雲端快照**、
   **ADR-0245 EK 共享**的具體衝擊——三者都假設「所有裝置解得開同一份密文」。
-- 未設計裝置**佈建**時新裝置如何取得歷史（Signal 到 2024–25 才補上加密封存檔傳輸；
-  ADR-0292 記 Marmot「新裝置沒有歷史」——這是同一個坑，我方亦未解）。
+- 未設計裝置**佈建**時新裝置如何取得歷史。
+  **✅ Signal 的做法已核到原文**（`signal.org/blog/a-synchronized-start-for-linked-devices/`）：
+  主裝置把聊天資料壓成一個 bundle，以**一次性 256-bit AES 金鑰**加密，
+  金鑰**隨佈建訊息（provisioning message）送出**；新裝置下載後在本機解密，
+  伺服器看不到明文。使用者可選擇傳訊息＋最近 45 天媒體，或不同步歷史。
+  ⇒ 對照我方 **ADR-0072 配對搬家 D4a**（一次性 P2P 全量搬家，0118 補身分與行動端送出端）：
+  兩者都用「一次性金鑰＋端到端加密捆包」，但**傳輸層不同，而那個不同是實質的**——
+
+  | | Signal | 我方 0072 |
+  | --- | --- | --- |
+  | 捆包經過 | **伺服器**（密文，一次性 AES 金鑰隨佈建訊息帶） | **P2P（WebRTC）**，不落任何伺服器 |
+  | 兩端須同時在線 | 否（可非同步取回） | **是** |
+  | 範圍 | 訊息＋最近 **45 天**媒體，可選不同步 | 全量 |
+
+  ⇒ 我方隱私較強（中繼連密文副本都沒有），代價是**必須兩台同時在線**。
+  ⇒ **這一格不必重新發明機制**，但要決定的是那個取捨：加裝置若沿用 0072，
+  就繼承「兩端同時在線」的限制；若要非同步，就得引入一份存在中繼的密文捆包——
+  那**與 PRD 的零伺服器狀態直接相關，不是純工程選擇**。
+  ⇒ 仍未設計「加裝置」與「換機搬家」如何共用同一條路徑。
 - 未估算 §3.4 版本號搭便車對事件體積與 0109 流量預算的影響（應該很小，但沒算）。
 - **§6.4 的「頻率」未量化**：一般使用者一年增刪幾次裝置沒有數據，而
   「接受現狀」這條路的成立與否完全取決於它。
@@ -574,8 +655,12 @@ Signal 的答案是 **sealed sender certificate**（伺服器簽發、綁定帳�
 
 ## 後續行動
 
-1. **取得原文核對**（阻擋項）：請將 `signal.org` 與 `eprint.iacr.org` 加入本環境出口白名單，
-   或由人工下載 `sesame.pdf` 與 `2021/626` 置入倉庫；核對後再執行〈提議〉1。
+1. ~~**取得原文核對**（阻擋項）~~ → **✅ 已完成（2026-07-31），阻擋解除。**
+   `signal.org` 在另一個工作環境取得得到；Sesame 規格、X3DH 規格與官方部落格
+   皆已逐字核對（見 §1 核對表與 §5.2 更正框）。**〈提議〉1 的前提已滿足，可執行。**
+   ⚠ **仍未取得**：`eprint.iacr.org/2021/626` 全文（§4 的 Signal 多裝置 PCS 弱點），
+   該站對本次嘗試同樣不通。**§4 的證據等級維持在「摘要與二手摘要」**，
+   本次解除**不涵蓋** §4；§6（撤銷授權）建立在 §4 上，其證據等級亦不變。
 2. 核對通過後，另立一份**更正 ADR**（或於 0236 加註修訂段），並掃過六處引用。
 3. 若〈提議〉2/3 被接受，再立實作 ADR 定義裝置清單的簽章格式、版本語意與對帳流程
    （可直接參照 0047 名冊的既有形狀）。
