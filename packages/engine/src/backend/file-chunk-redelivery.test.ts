@@ -1,6 +1,6 @@
-// ⚠⚠ 這是一份**特徵化測試（characterization test）**：它斷言的是**目前的錯誤行為**，
-// 不是規格。ADR-0294 §1 記錄了它證實的兩個缺陷；**修好之後這裡會紅**，屆時應把斷言
-// 改成正確行為（重開不重收、缺塊要報錯），而不是把測試刪掉。
+// ✅ 這**曾經**是一份特徵化測試（斷言當時的錯誤行為）。P1／P2 已修，斷言已按
+// ADR-0294 §1.4 的交代**翻正為規格**（重開不重收、缺塊要報錯），而不是把測試刪掉。
+// 原本的錯誤行為與修法記在 ADR-0294 §1.2／§1.3 與 ROADMAP 的 Phase P。
 //
 // 檔案塊訂閱的重取行為（ADR-0288 §2.2／§2.3 的查證）：那份研究只做靜態閱讀、明載
 // 「未寫測試重現」。本檔把它變成事實。
@@ -16,7 +16,7 @@
 
 import { generateSecretKey, getPublicKey, npubEncode, nsecEncode, wrapFileChunk } from "@cinderous/core";
 import { createInMemoryRelayNetwork, MessageStore } from "@cinderous/relay";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { MemoryStorage } from "../storage/memory.js";
 import { RelayChatBackend } from "./relay-backend.js";
 import type { ChatBackendEvents } from "./types.js";
@@ -43,8 +43,8 @@ function publishFile(
   }
 }
 
-describe("檔案塊訂閱缺少水位的後果（ADR-0288 §2.3）", () => {
-  it("⚠ 重開 App → TTL 內收過的檔案被整份重收並**再交一次**給 App", () => {
+describe("檔案塊重複交付（P1／ADR-0288 §2.3、ADR-0294 §1.2）", () => {
+  it("🔴 重開 App → 已收過的檔案**不再交付一次**（否則每次重開都跳一次「另存新檔」）", () => {
     // ⚠ 中繼預設整類拒收檔案塊（企業限定，ADR-0162）——測試要明示開啟。
     // ⚠ 記憶體網路預設**沒有離線留言庫**——不給 store 就沒有東西可重放，測不到重取行為。
     const net = createInMemoryRelayNetwork({ acceptFileEvents: true, store: new MessageStore() });
@@ -70,8 +70,9 @@ describe("檔案塊訂閱缺少水位的後果（ADR-0288 §2.3）", () => {
     const bob2 = new RelayChatBackend(store, (h) => net.connect("bob2", h), "Bob", { nsecOverride: bobNsec });
     bob2.start({ ...noop, onFileBytes: (_pk, _mid, f) => second.push(f.id) });
 
-    // ⚠ 這一行斷言的是**缺陷**：檔案被重新交付了一次。修好後應改為 `toEqual([])`。
-    expect(second).toEqual(["tid-1"]);
+    // P1 修好後的規格：中繼上的塊照樣重來，但 `StoredFileMeta.received` 這個持久化記號
+    // 讓它不再交付給 App。（水位只省重連時的下載量，救不了重開——見 `fileSince` 的註解。）
+    expect(second).toEqual([]);
     bob2.stop();
   });
 
@@ -104,8 +105,8 @@ describe("檔案塊訂閱缺少水位的後果（ADR-0288 §2.3）", () => {
   });
 });
 
-describe("截斷後的靜默失敗（ADR-0288 §2.2）", () => {
-  it("⚠ 缺一塊 → **永遠不重組、也沒有任何錯誤訊號**（寄件者卻已看到「已送出」）", () => {
+describe("截斷後的失敗訊號（P2／ADR-0288 §2.2、ADR-0294 §1.3）", () => {
+  it("🔴 缺一塊 → 交付不出來，但 TTL 到期時**必須報錯**（不得雙方都不知道）", () => {
     const net = createInMemoryRelayNetwork({ acceptFileEvents: true, store: new MessageStore() });
     const senderSk = generateSecretKey();
     const senderPk = getPublicKey(senderSk);
@@ -132,8 +133,23 @@ describe("截斷後的靜默失敗（ADR-0288 §2.2）", () => {
       );
     }
 
-    expect(got).toEqual([]); // 檔案永遠交付不出來
-    expect(errors).toEqual([]); // ⚠ 而且**一個錯誤都沒有**——這才是問題所在
+    expect(got).toEqual([]); // 缺塊 → 交付不出來（這一項不變，是物理事實）
+    expect(errors).toEqual([]); // 此刻還不該報錯——無法預知那一塊不會再來（亂序/重連補抓都正常）
+
+    // 推進到 CHUNK_ASM_TTL_SEC（120 秒）之後：這才是「等不到了」的可判定時點。
+    // 掃描由下一顆塊觸發（`receiveFileChunk` 開新重組時會先 sweep），故再發一顆別的 tid。
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(Date.now() + 121_000);
+      publishFile(net, senderSk, bob.self.pubkey, "another");
+      // P2 修好後的規格：殘骸被回收時要留下訊號，而不是靜默消失。
+      expect(errors).toHaveLength(1);
+      expect(errors[0]).toContain("file_incomplete");
+      expect(errors[0]).toContain("報表.bin"); // 帶上檔名與進度，比乾巴巴的「失敗」有用
+      expect(errors[0]).toContain("2/3");
+    } finally {
+      vi.useRealTimers();
+    }
     bob.stop();
   });
 });
