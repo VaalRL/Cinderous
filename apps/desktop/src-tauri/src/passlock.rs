@@ -223,4 +223,43 @@ mod tests {
         blob = B64.encode(raw);
         assert!(rescue_unwrap("nsec1abc", &blob).is_err());
     }
+
+    // ── ADR-0298 §2 的實證：救援 blob 使本地密碼的靜態保障失效 ──────────────
+    //
+    // 這不是在測「救援功能能不能用」（上面幾條已經在測了），而是在測**它的安全後果**：
+    // 攻擊者拿到磁碟映像（＝金鑰庫的三個條目）＋ nsec 之後，**完全不需要密碼**
+    // 就能解開資料庫。ADR-0298 §2 的整個論證靠這一條，所以要有實證而不只是讀碼。
+    #[test]
+    fn adr0298_rescue_blob_bypasses_the_password() {
+        let nsec = "nsec1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq";
+        let password = "使用者設的本地密碼-很長很難猜";
+
+        // ① 啟用本地密碼時實際落地的三個金鑰庫條目（照 main.rs:464–471 的順序與內容）
+        let db_key = encstore::generate_key();
+        let key_b64 = B64.encode(db_key);
+        let wrapped_nsec = wrap_fast(password, nsec); // keyvault: {pubkey}
+        let wrapped_key = wrap_fast(password, &key_b64); // keyvault: db:{ns}
+        let rescue_blob = rescue_wrap(nsec, &key_b64).unwrap(); // keyvault: rescue:{ns}
+
+        // ② 一份用資料金鑰加密的儲存內容（＝磁碟上的 encstore blob）
+        let secret_history = "小美：週五老地方見";
+        let disk_blob = encstore::encrypt(&db_key, secret_history.as_bytes()).unwrap();
+
+        // ③ 先確認密碼這條路是真的有保護：錯密碼解不開包裹
+        assert!(unwrap("錯的密碼", &wrapped_key).is_err(), "密碼包裹本身應該有效");
+        assert!(unwrap("錯的密碼", &wrapped_nsec).is_err());
+
+        // ④ 🔴 但攻擊者只要有 nsec，就能繞過密碼取回資料金鑰
+        let recovered_b64 = rescue_unwrap(nsec, &rescue_blob).expect("救援路徑不需要密碼");
+        let recovered: [u8; encstore::KEY_LEN] =
+            B64.decode(&recovered_b64).unwrap().try_into().expect("救回的金鑰長度正確");
+        assert_eq!(recovered, db_key, "取回的就是同一把資料金鑰");
+
+        // ⑤ 🔴 於是磁碟上的內容直接解得開——密碼從未參與
+        let plain = encstore::decrypt(&recovered, &disk_blob).expect("資料金鑰解得開磁碟 blob");
+        assert_eq!(String::from_utf8(plain).unwrap(), secret_history);
+
+        // ⑥ 對照組：錯的 nsec 解不開（確認 ④ 的成功不是因為測試寫鬆了）
+        assert!(rescue_unwrap("nsec1zzzz", &rescue_blob).is_err());
+    }
 }
