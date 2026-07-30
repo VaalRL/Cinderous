@@ -7,6 +7,7 @@
 // 匯出/套用走 `AppStorage` 介面（而非特定實作的 export/import），
 // 讓瀏覽器 LocalStorage 與 TauriStorage 一體適用。
 
+import { stripDeviceLocalFile } from "./types.js";
 import type { AppStorage, StorageSnapshot, StoredIdentity, StoredMessage } from "./types.js";
 
 /**
@@ -55,7 +56,8 @@ export function exportFullSnapshot(storage: AppStorage, identity?: StoredIdentit
   const blocked = storage.loadBlocked();
   const messages: Record<string, StoredMessage[]> = {};
   for (const key of [...contacts.map((c) => c.pubkey), ...groups.map((g) => g.id)]) {
-    const msgs = storage.loadMessages(key);
+    // 剝除裝置本地欄位（同雲端快照）：`received` 帶到新機會讓它永遠不收那個檔案。
+    const msgs = storage.loadMessages(key).map(stripDeviceLocalFile);
     if (msgs.length > 0) messages[key] = msgs;
   }
   return {

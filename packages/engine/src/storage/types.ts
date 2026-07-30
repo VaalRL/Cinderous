@@ -174,6 +174,24 @@ export function isSanitizable(mime: string): boolean {
 }
 
 /**
+ * 剝除**裝置本地**的檔案欄位，供跨裝置同步路徑使用（雲端快照 ADR-0071、配對搬家 ADR-0118）。
+ *
+ * 這兩個欄位描述的是「**這台裝置**發生過什麼」，跨裝置帶過去就是錯的：
+ *
+ * - `received`（P1／ADR-0294 §1.2）：**帶過去會讓另一台永遠收不到那個檔案**——
+ *   它會以為位元組已交付而跳過，但那台其實從來沒收到。這是最嚴重的一個。
+ * - `savedPath`：另一台上那個路徑不存在。`StoredFileMeta` 的註解本來就寫著
+ *   「裝置本地語意，不跨裝置同步」，但過去兩條同步路徑都沒有真的執行它。
+ *
+ * `thumb` **不剝**：它是可跨裝置沿用的衍生預覽（ADR-0102），且快照有位元組預算會自行停。
+ */
+export function stripDeviceLocalFile(message: StoredMessage): StoredMessage {
+  if (!message.file) return message;
+  const { received: _r, savedPath: _s, ...file } = message.file;
+  return { ...message, file };
+}
+
+/**
  * 群組回條只前進（delivered→read，不倒退、不重複）（ADR-0095）。
  * 無變更回 `undefined`；有變更回新的回條表（不就地改，供儲存層決定是否寫回）。
  */

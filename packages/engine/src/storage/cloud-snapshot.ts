@@ -21,6 +21,7 @@ import {
   type OrSetTombstone,
   type SyncedPrefs,
 } from "@cinderous/core";
+import { stripDeviceLocalFile } from "./types.js";
 import type {
   AppStorage,
   OrSetName,
@@ -141,7 +142,8 @@ export function buildSnapshotContent(
   if (mode !== "full") return base;
   const all: StoredMessage[] = [];
   for (const key of [...contacts.map((c) => c.pubkey), ...groups.map((g) => g.id)]) {
-    all.push(...storage.loadMessages(key));
+    // 剝除裝置本地欄位：`received` 帶過去會讓另一台**永遠收不到**那個檔案（見 stripDeviceLocalFile）。
+    all.push(...storage.loadMessages(key).map(stripDeviceLocalFile));
   }
   all.sort((a, b) => b.at - a.at);
   // 則數＋位元組雙預算（審查修正 #2）：由新到舊累計，超過任一上限即停——
