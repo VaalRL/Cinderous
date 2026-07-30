@@ -117,6 +117,17 @@ export interface StoredFileMeta {
    */
   savedPath?: string;
   /**
+   * 位元組**曾在這台裝置交付給 App**（P1／ADR-0294 §1.2）。
+   *
+   * 為什麼需要它：檔案塊是 13 組訂閱 filter 裡唯一「會累積的儲存型 kind」，中繼不因送達而刪，
+   * 而重組狀態與去重集都只在記憶體 ⇒ **重開 App 會把 TTL 內收過的每個檔案再交付一次**，
+   * 桌面端 `onFileBytes` 內是無條件 `saveIncomingFile` ⇒ 每次重開都再跳一次「另存新檔」。
+   *
+   * `savedPath` 不能拿來當這個記號——使用者可能按了取消（那樣會變成每次重開都被追問）。
+   * 這是**裝置本地**的事實（各裝置各自收檔），故不進雲端快照的同步語意。
+   */
+  received?: boolean;
+  /**
    * 圖片縮圖（ADR-0102）：`data:` URL，**縮小後的衍生預覽圖，不是原檔**。
    * 為的是讓相簿與聊天內嵌縮圖能**跨 session 存活**——原檔位元組依然不存（ADR-0093 裁示不變）。
    * 上限見 {@link THUMB_MAX_BYTES}；超過就不存（寧可沒縮圖，也不讓儲存膨脹）。
@@ -345,6 +356,11 @@ export interface AppStorage {
   setFileSavedPath(contactPubkey: string, messageId: string, savedPath: string): void;
   /** 記錄某圖片訊息的縮圖 data URL（ADR-0102）；超過上限或訊息不存在則忽略。 */
   setFileThumb(contactPubkey: string, messageId: string, thumb: string): void;
+  /**
+   * 標記某檔案訊息的位元組**已在本裝置交付給 App**（P1／ADR-0294 §1.2）。
+   * 供重開 App 後不再重複交付；已標記或訊息不存在則忽略。
+   */
+  markFileReceived(contactPubkey: string, messageId: string): void;
   /**
    * 記錄群組某成員對某訊息的回條（ADR-0095）；只前進（delivered→read，不倒退）。
    * 訊息不存在則忽略。回傳更新後的回條表（供 UI 立即渲染）；無變更回 undefined。

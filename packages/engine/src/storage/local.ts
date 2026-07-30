@@ -363,6 +363,10 @@ export class LocalStorage implements AppStorage {
     this.mem.setFileThumb(contactPubkey, messageId, thumb);
     this.writeConvo(contactPubkey);
   }
+  markFileReceived(contactPubkey: string, messageId: string): void {
+    this.mem.markFileReceived(contactPubkey, messageId);
+    this.writeConvo(contactPubkey);
+  }
   setMessageReceipt(
     convoKey: string,
     messageId: string,

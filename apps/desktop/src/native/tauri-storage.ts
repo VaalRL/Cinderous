@@ -406,6 +406,10 @@ export class TauriStorage implements AppStorage {
     this.mem.setFileThumb(contactPubkey, messageId, thumb);
     this.persist(MSGS + contactPubkey);
   }
+  markFileReceived(contactPubkey: string, messageId: string): void {
+    this.mem.markFileReceived(contactPubkey, messageId);
+    this.persist(MSGS + contactPubkey);
+  }
   /** ADR-0110：整個已讀水位一次改完、**一次寫回**。 */
   setMessageStatusBulk(contactPubkey: string, messageIds: string[], status: MessageStatus): string[] {
     const changed = this.mem.setMessageStatusBulk(contactPubkey, messageIds, status);

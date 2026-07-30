@@ -582,6 +582,11 @@ export class RelayChatBackend implements ChatBackend {
    * 只在記憶體：session 內重連走增量，App 重啟仍全量抓一次。
    */
   private readonly inboxWatermark = new Map<string, number>();
+  /**
+   * 檔案塊的逐中繼水位（P1／ADR-0294 §1.2）。**與 `inboxWatermark` 分開**——
+   * 共用會讓較快前進的 DM 水位跳掉檔案塊，見 {@link fileSince}。
+   */
+  private readonly fileWatermark = new Map<string, number>();
   private contacts: {
     pubkey: PubkeyHex;
     name: string;
@@ -766,6 +771,11 @@ export class RelayChatBackend implements ChatBackend {
 
   start(handlers: ChatBackendEvents): void {
     this.handlers = handlers;
+    // P1（ADR-0294 §1.2）：**必須在 resubscribe 之前**建好 tid→訊息索引。
+    // 訂閱一掛上，中繼就可能立刻把 TTL 內的檔案塊全推過來（記憶體網路是同步送達）；
+    // 索引若還沒建好，`onFileBytes` 查不到既有訊息 ⇒ 去重失效、又跳一次「另存新檔」。
+    // 這是把它放在下方歷史回放裡的第一版沒修好的原因。
+    this.hydrateFileIndex();
     this.resubscribe();
     this.beat();
     this.broadcastProfile(); // ADR-0061：把自己的顯示名稱廣播給聯絡人
@@ -993,7 +1003,10 @@ export class RelayChatBackend implements ChatBackend {
       // 帶內引導清單（ADR-0039）：訂閱維護者簽章的 relay 清單事件。
       ...(this.maintainerPubkey ? [{ kinds: [RELAY_LIST_KIND], authors: [this.maintainerPubkey] }] : []),
       // 檔案塊（ADR-0162）：組織小檔案經 relay 暫存；未啟用的站不會有這類事件，訂閱無成本。
-      { kinds: [KIND.FILE_WRAP], "#p": me },
+      // P1（ADR-0294 §1.2）：帶**自己的**水位。刻意不共用 `inboxSince`——那個水位只由
+      // `OFFLINE_DM_GIFT_WRAP` 推進（見 `onEvent`），套到這裡會**跳掉比 DM 水位舊的檔案塊**，
+      // 等於在修 bug 的過程中製造掉檔。
+      { kinds: [KIND.FILE_WRAP], "#p": me, ...this.fileSince(url) },
       // 企業組織名冊（ADR-0047）：訂閱管理者簽章的名冊事件。
       ...(this.orgAdminPubkey ? [{ kinds: [ORG_ROSTER_KIND], authors: [this.orgAdminPubkey] }] : []),
       // 企業主（ADR-0156）：訂閱**自己**簽章的名冊——重啟後找回 lastRoster，自動核准不失憶。
@@ -1019,6 +1032,47 @@ export class RelayChatBackend implements ChatBackend {
     const seen = url !== undefined ? this.inboxWatermark.get(url) : undefined;
     if (seen === undefined) return {}; // 沒水位（首次連上這座）→ 全量
     return { since: seen - TIMESTAMP_JITTER_SECONDS };
+  }
+
+  /**
+   * 檔案塊的增量抓取窗（P1／ADR-0294 §1.2）：與 {@link inboxSince} 同一套邏輯，
+   * 但**各自一個水位**。
+   *
+   * 為什麼不能共用：`inboxWatermark` 只由 `OFFLINE_DM_GIFT_WRAP` 推進。DM 通常比檔案頻繁，
+   * 所以它的水位會跑在前面——拿它當檔案塊的 `since`，就會跳掉那之前的塊，**造成掉檔**。
+   *
+   * `− TIMESTAMP_JITTER_SECONDS` 的理由與收件匣相同：檔案塊也走 `sealAndWrap`，
+   * 外層 `created_at` 被 `jitteredPast()` 隨機往前推最多 2 天。
+   *
+   * 同樣**只在記憶體**：這省的是重連時的重複下載，**不是**「重開 App 不重收」——
+   * 後者靠 `StoredFileMeta.received` 這個持久化記號（見 `onFileBytes`）。
+   */
+  private fileSince(url: string | undefined): { since?: number } {
+    const seen = url !== undefined ? this.fileWatermark.get(url) : undefined;
+    if (seen === undefined) return {};
+    return { since: seen - TIMESTAMP_JITTER_SECONDS };
+  }
+
+  /**
+   * 從儲存重建 `tid → 訊息` 索引（P1／ADR-0294 §1.2）。
+   *
+   * `fileMsgByTid` 只在記憶體，重開 App 後是空的——於是中繼重送的塊會被當成新檔案，
+   * 再走一次交付。**必須在 `resubscribe()` 之前**跑完，否則塊會比索引先到。
+   *
+   * 成本：開機一次、掃已知對話的訊息。與下方歷史回放的掃描重疊，但那個在訂閱之後，
+   * 不能拿來替代（第一版就是這樣寫而沒修好）。
+   */
+  private hydrateFileIndex(): void {
+    for (const c of this.contacts) {
+      for (const m of this.storage.loadMessages(c.pubkey)) {
+        if (m.file) this.fileMsgByTid.set(m.file.tid, { contact: c.pubkey, msgId: m.id });
+      }
+    }
+    for (const g of this.groups) {
+      for (const m of this.storage.loadMessages(g.id)) {
+        if (m.file) this.fileMsgByTid.set(m.file.tid, { contact: g.id, msgId: m.id });
+      }
+    }
   }
 
   private resubscribeRelay(url: string): void {
@@ -1431,6 +1485,11 @@ export class RelayChatBackend implements ChatBackend {
     if (url !== undefined && event.kind === KIND.OFFLINE_DM_GIFT_WRAP) {
       const prev = this.inboxWatermark.get(url) ?? 0;
       if (event.created_at > prev) this.inboxWatermark.set(url, event.created_at);
+    }
+    // 檔案塊自己的水位（P1／ADR-0294 §1.2）：同上理由在去重前更新，但**獨立一格**。
+    if (url !== undefined && event.kind === KIND.FILE_WRAP) {
+      const prev = this.fileWatermark.get(url) ?? 0;
+      if (event.created_at > prev) this.fileWatermark.set(url, event.created_at);
     }
     if (this.seenBefore(event.id)) return;
     if (event.kind === EK_ANNOUNCE_KIND) {
@@ -3129,7 +3188,12 @@ export class RelayChatBackend implements ChatBackend {
     let asm = this.chunkAsm.get(chunk.tid);
     if (!asm) {
       this.sweepChunkAsm(); // 先回收逾時的不完整重組（審查修正：避免一格永久佔用卡死）
-      if (this.chunkAsm.size >= 8) return; // 併發重組上限（防記憶體）
+      if (this.chunkAsm.size >= 8) {
+        // P2 同源（ADR-0294 §1.3）：併發上限也曾是靜默丟棄。這裡連追蹤格都沒有，
+        // 所以**立刻**報錯（不像逾時那條要等 TTL）——否則這個檔案永遠不會有任何訊號。
+        this.handlers?.onFileError?.(sender, `file_busy:${chunk.name}`);
+        return;
+      }
       asm = { sender, name: chunk.name, mime: chunk.mime, total: chunk.total, parts: new Map(), at: nowSec() };
       this.chunkAsm.set(chunk.tid, asm);
     }
@@ -3246,9 +3310,25 @@ export class RelayChatBackend implements ChatBackend {
   }
 
   /** 回收逾時未收齊的分塊重組（審查修正）：防單一聯絡人以殘缺傳輸永久佔滿 8 格。 */
+  /**
+   * 回收逾時的不完整重組。
+   *
+   * **P2（ADR-0294 §1.3）：丟棄前必須報錯。** 過去這裡是靜默 `delete`——缺一塊就
+   * 「`onFileBytes` 不觸發、`onFileError` 也不觸發」，殘骸 120 秒後無聲消失。結果是
+   * 寄件者看到「已送出」（ADR-0041 只保證中繼收下）、收件者什麼都沒有、**雙方都不知道**。
+   * 那正是 ADR-0264 §8 為行事曆解掉的那類靜默分歧。
+   *
+   * 為什麼在 TTL 到期時報、而不是更早：**無法預知某一塊不會再來**（亂序、重連補抓都正常）。
+   * TTL 是「等不到了」的唯一可判定時點。
+   */
   private sweepChunkAsm(): void {
     const cutoff = nowSec() - RelayChatBackend.CHUNK_ASM_TTL_SEC;
-    for (const [tid, asm] of this.chunkAsm) if (asm.at < cutoff) this.chunkAsm.delete(tid);
+    for (const [tid, asm] of this.chunkAsm) {
+      if (asm.at >= cutoff) continue;
+      this.chunkAsm.delete(tid);
+      // 帶上缺了幾塊：使用者不需要知道 seq，但「10 塊只到 7 塊」比「失敗」有用得多。
+      this.handlers?.onFileError?.(asm.sender, `file_incomplete:${asm.name}:${asm.parts.size}/${asm.total}`);
+    }
     for (const [hash, asm] of this.assetAsm) if (asm.at < cutoff) this.assetAsm.delete(hash); // ADR-0223
   }
 
@@ -3269,6 +3349,14 @@ export class RelayChatBackend implements ChatBackend {
     }
     const existing = this.fileMsgByTid.get(file.id);
     const msgId = existing?.msgId ?? `bf-${file.id}`;
+    // P1（ADR-0294 §1.2）：這台裝置已經收過這份位元組 → **不再交付一次**。
+    //
+    // 中繼不因送達而刪、檔案塊訂閱是唯一會累積的儲存型 kind，所以重開 App 後 TTL 內的塊
+    // 會全部再來一輪。過去這裡無條件往下走，桌面端的 `saveIncomingFile` 就再跳一次「另存新檔」。
+    // 記號存在 `StoredFileMeta.received`（持久化）——`savedPath` 不能當記號，使用者可能按取消。
+    if (existing && this.storage.loadMessages(existing.contact).some((m) => m.id === msgId && m.file?.received)) {
+      return;
+    }
     if (!existing) {
       // 位元組先到：以位元組自帶的 metadata 先建一則（sent=size＝位元組已在本機）。
       this.ensureFileMessage(
@@ -3283,7 +3371,19 @@ export class RelayChatBackend implements ChatBackend {
     //（`patchFileByMsgId(prev, pk, …)`、`setFileThumb(pk, …)`），介面上它也叫 `contact`。
     // 1:1 時 peer 就是對話鍵，所以一直沒事；但**群組檔案的對話鍵是 groupId**——傳 peer
     // 會讓收到的位元組被寫進「跟那位成員的 1:1 對話」，而不是群組裡。
-    this.handlers?.onFileBytes?.(existing?.contact ?? peer, msgId, file);
+    const convo = existing?.contact ?? peer;
+    const deliver = this.handlers?.onFileBytes;
+    if (!deliver) return; // 沒有交付對象＝什麼都沒發生，**不得留下記號**（見下）
+    deliver(convo, msgId, file);
+    // P1：記號的語意是「位元組**確實交付給 App 了**」。因此：
+    //  - 沒有 `onFileBytes` handler 時不標記；
+    //  - 交付**之後**才標記。
+    //
+    // 第一版反過來寫（先標再交付，理由是「交付中崩潰就不會重跳另存」），把語意變成
+    // 「試過了」——結果被既有測試抓到：`relay 檔案暫存` 那條裡有個 handler 為 noop 的實例
+    // 先收到塊、寫下記號，真正要收檔的實例就**永遠拿不到那個檔案**。
+    // 殘留風險：交付與標記之間崩潰 ⇒ 下次重開再跳一次另存。那比「永遠收不到」輕得多。
+    this.storage.markFileReceived(convo, msgId);
   }
 
   /** 回填某檔案訊息收檔後的本機儲存路徑（ADR-0093）：App 另存完成後呼叫，持久化路徑。 */

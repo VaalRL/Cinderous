@@ -243,14 +243,24 @@
 
 ## Phase P — 交付層可靠性與範圍隔離（🌐 可在此環境推進；ADR-0294）
 
-由 ADR-0293（White Noise 拆解）導出的自我審查結果。**P1／P2 是已用測試證實的缺陷**——
-特徵化測試已在 `packages/engine/src/backend/file-chunk-redelivery.test.ts`，**它們斷言的是目前的錯誤行為，
-修好後會紅，屆時把斷言翻正而不是刪掉**。
+由 ADR-0293（White Noise 拆解）導出的自我審查結果。
+
+**P1／P2 已修（2026-07-30）**。`packages/engine/src/backend/file-chunk-redelivery.test.ts` 原是
+特徵化測試（斷言當時的錯誤行為），現已按 ADR-0294 §1.4 的交代**把斷言翻正為規格**，而不是刪掉。
+
+修的過程中發現兩件 ADR-0294 沒寫到、但會讓「照字面修」修錯的事：
+
+1. **水位不能共用**。`inboxWatermark` 只由 `OFFLINE_DM_GIFT_WRAP` 推進，直接把 `inboxSince`
+   套到 FILE_WRAP 會**跳掉比 DM 水位舊的檔案塊** ⇒ 在修 bug 的過程中製造掉檔。已另開
+   `fileWatermark`。
+2. **補水位根本修不掉「重開 App 重收」**。水位只在記憶體（`inboxSince` 的註解自己寫著
+   「App 重啟仍全量抓一次」）。真正的修法是持久化記號 `StoredFileMeta.received`，
+   水位只省重連時的下載量。
 
 | # | 項目 | 狀態 |
 | --- | --- | --- |
-| P1 | 檔案塊訂閱補增量水位 | ⏳ **待做（已證實缺陷）**：`{kinds:[FILE_WRAP], "#p": me}` 是 13 組訂閱 filter 中**唯一「會累積的儲存型 kind」卻沒有 `since`** 的一條（離線私訊那條有 `inboxSince`）。後果：重開 App 會把 TTL 內收過的每個檔案重收、重組，並因桌面 `onFileBytes` 內無條件 `saveIncomingFile` 而**再跳一次「另存新檔」**。（ADR-0288 §2.3／0294 §1.2） |
-| P2 | 重組失敗要有訊號 | ⏳ **待做（已證實缺陷）**：缺塊時 `onFileBytes` 不觸發、**`onFileError` 也不觸發**，殘骸由 `sweepChunkAsm()` 在 120 秒後靜默刪除 ⇒ 寄件者看到「已送出」（ADR-0041 只保證中繼收下）、收件者什麼都沒有、**雙方都不知道**。與 ADR-0264 §8 為行事曆解掉的靜默分歧同一類。（ADR-0288 §2.2／0294 §1.3） |
+| P1 | 檔案塊訂閱補增量水位＋跨重啟去重 | ✅ **已修**：`{kinds:[FILE_WRAP], "#p": me}` 是 13 組訂閱 filter 中**唯一「會累積的儲存型 kind」卻沒有 `since`** 的一條（離線私訊那條有 `inboxSince`）。後果：重開 App 會把 TTL 內收過的每個檔案重收、重組，並因桌面 `onFileBytes` 內無條件 `saveIncomingFile` 而**再跳一次「另存新檔」**。（ADR-0288 §2.3／0294 §1.2） |
+| P2 | 重組失敗要有訊號 | ✅ **已修**：缺塊時 `onFileBytes` 不觸發、**`onFileError` 也不觸發**，殘骸由 `sweepChunkAsm()` 在 120 秒後靜默刪除 ⇒ 寄件者看到「已送出」（ADR-0041 只保證中繼收下）、收件者什麼都沒有、**雙方都不知道**。與 ADR-0264 §8 為行事曆解掉的靜默分歧同一類。（ADR-0288 §2.2／0294 §1.3） |
 | P3 | 重取策略成為訂閱工作負載的屬性 | ⏳ **待做（治本）**：目前一次 `subscribe("all", …)` 混了 13 組用途（presence／收件匣／快照／信令／檔案塊／名冊），而重取策略靠每個 filter 各自記得加——P1 正是這樣漏掉的。White Noise 因同一問題把單一 client 拆成四個 relay plane。**只做 P1 是治標**，下一個累積型 kind 仍會重蹈覆轍。（ADR-0293 §2.1／0294 §4） |
 | P4 | 行動端 per-identity 範圍隔離 | ⏳ **待做（結構性）**：桌面換身分走 `location.reload()`＝結構性保證；行動端是就地切換＋**手寫 reset 清單**，目前漏了 `archived`（歷史入口閘門，兩身分共用同一 pubkey 時會出現幽靈入口）、`purged`、`calDraft`。建議把 per-identity 狀態關進以身分為 `key` 的子元件（清單可整個刪掉），而非補三行。（ADR-0293 §2.2／0294 §2） |
 | P5 | 匿名發布 plane（評估） | ⏳ **待評估**：中繼在 `requireAuth` 時**連 EVENT 都要 AUTH**，而發布與訂閱共用同一條連線 ⇒ 中繼知道「這顆匿名 wrap 是誰送的」（ADR-0237 的洩漏在**發布側**）。拆開可修掉一半，但 gift wrap 的 author 是一次性金鑰、對企業 allowlist 無用，**AUTH 身分很可能正是 allowlist 唯一的執行點** ⇒ 只能分部署，且需先算公共節點的濫用面。（ADR-0293 §3） |

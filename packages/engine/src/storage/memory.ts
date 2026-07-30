@@ -382,6 +382,11 @@ export class MemoryStorage implements AppStorage {
     if (!msg?.file) return;
     msg.file = { ...msg.file, savedPath };
   }
+  markFileReceived(contactPubkey: string, messageId: string): void {
+    const msg = this.convos.get(contactPubkey)?.byId.get(messageId);
+    if (!msg?.file) return;
+    msg.file = { ...msg.file, received: true };
+  }
   setFileThumb(contactPubkey: string, messageId: string, thumb: string): void {
     if (thumb.length > THUMB_MAX_BYTES) return; // 超上限寧可不存（不讓儲存膨脹）
     const msg = this.convos.get(contactPubkey)?.byId.get(messageId);
