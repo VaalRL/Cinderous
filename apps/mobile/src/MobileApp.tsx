@@ -467,6 +467,14 @@ export function MobileApp({
     setSelfName(identity.name);
     setSelfNpub(identity.npub);
     setSelfNsec(identity.nsec);
+    // ── per-identity 重設區（P4／ADR-0294 §2）───────────────────────────────
+    // 換身分是**就地切換**（桌面走 `location.reload()`＝結構性保證，行動端沒有那個保證），
+    // 所以每一個 per-identity state 都必須在這裡歸零。手寫清單會漏——ADR-0294 §2 抓到
+    // `archived`／`purged`／`calDraft` 三個漏網，其中 `archived` 是歷史入口的閘門：
+    // 兩個身分若共用同一個 pubkey 鍵，切過去就會看到**上個身分的幽靈歷史入口**。
+    //
+    // `MobileApp.perIdentityState.test.ts` 現在會擋住下一個漏網：任何新 state 都必須先被
+    // 分類（per-identity 或裝置層），per-identity 的還必須在 `signInWith` 內被指派。
     setContacts([]);
     setGroups([]);
     setConvos({});
@@ -476,6 +484,19 @@ export function MobileApp({
     setRequests([]);
     setUnread({});
     setCalendar([]);
+    setArchived({}); // ADR-0294 §2 漏網①：歷史入口閘門——不清會出現幽靈入口
+    setPurged(new Set()); // 漏網②：上個身分的無痕收回名單
+    setCalDraft(null); // 漏網③：上個身分的行程草稿
+    setActiveId(null); // 上個身分的作用中對話（切身分後那個 id 不屬於這裡）
+    setTypingFrom(null); // 上個身分的「正在輸入」殘留
+    // 通話狀態（ADR-0101）：`backendRef.current?.stop()` 停了後端，但 React 這邊仍留著
+    // 「通話中」的畫面與串流參照 ⇒ 切身分後會看到上個身分的通話 UI。
+    setCallPeer(null);
+    setCallState("idle");
+    setCallMedia("audio");
+    setLocalStream(null);
+    setRemoteStream(null);
+    // ── per-identity 重設區 迄 ─────────────────────────────────────────────
     backend.start({
       onContacts: setContacts,
       onGroups: setGroups,

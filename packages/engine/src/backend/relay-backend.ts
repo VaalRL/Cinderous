@@ -155,6 +155,7 @@ import type {
   Self,
   Status,
 } from "./types.js";
+import { planFilters, sub, type SubDecl } from "./sub-plan.js";
 
 /** pool relay 連續離線超過此時間即標記 hint 可能陳舊（ADR-0036）。 */
 export const RELAY_STALE_MS = 5 * 60_000;
@@ -974,17 +975,17 @@ export class RelayChatBackend implements ChatBackend {
       .map((c) => c.pubkey);
     const all = this.contacts.map((c) => c.pubkey);
     const me = [this.self.pubkey];
-    const filters: Filter[] = [
+    const decls: SubDecl[] = [
       // F5：presence 心跳已彙整音樂狀態（np），不再單獨訂閱 MUSIC。
       // 真隱身（ADR-0240）：隱身時**不訂閱**聯絡人心跳——這條 `authors:[聯絡人]` 正是把
       // 你的**聯絡人集合**以真名交給中繼的洩漏（ADR-0237）。既有隱身只停「發布」（beat 早退），
       // 你卻還在訂閱別人 → 中繼照樣知道你有哪些聯絡人。補上這一側，隱身才名副其實：
       // 既不報自己、也不看別人 → 對中繼真正消失。訊息收發（收件匣 `#p:自己`）不受影響。
       // 分片模式：心跳改走 presence 獨立層（見上），訊息片不再訂心跳。真隱身時本就不訂。
-      ...(this.shardingBase || this.invisible ? [] : [{ kinds: [KIND.HEARTBEAT], authors }]),
+      ...(this.shardingBase || this.invisible ? [] : [sub({ kinds: [KIND.HEARTBEAT], authors }, "n/a")]),
       // ADR-0245：FS 啟用時訂閱聯絡人的 EK 公告（kind 10040），學到他們當前 EK 好加密給他們。
       // 搭 presence 便車（同 authors:[聯絡人]、零新增隱私面）、隨真隱身同進退（隱身不訂）。
-      ...(this.fsEnabled() && !this.invisible && authors.length > 0 ? [{ kinds: [EK_ANNOUNCE_KIND], authors }] : []),
+      ...(this.fsEnabled() && !this.invisible && authors.length > 0 ? [sub({ kinds: [EK_ANNOUNCE_KIND], authors }, "n/a")] : []),
       // ADR-0120：typing/nudge 已 NIP-59 封裝 → 外層作者是**一次性臨時金鑰**，`authors: all`
       // 永遠不會命中。改為只靠 `#p`（與 Gift Wrap 收件箱同形）。
       //
@@ -992,27 +993,27 @@ export class RelayChatBackend implements ChatBackend {
       // （而 nudge 會震動裝置、跳通知）→ 把關移到 `senderOfSealed()`，見該處。
       //
       // 附帶好處：這兩個 REQ 不再把整份聯絡人清單交給中繼。
-      { kinds: [KIND.TYPING], "#p": me },
-      { kinds: [KIND.NUDGE], "#p": me },
-      { kinds: [KIND.OFFLINE_DM_GIFT_WRAP], "#p": me, ...this.inboxSince(url) },
+      sub({ kinds: [KIND.TYPING], "#p": me }, "n/a"),
+      sub({ kinds: [KIND.NUDGE], "#p": me }, "n/a"),
+      sub({ kinds: [KIND.OFFLINE_DM_GIFT_WRAP], "#p": me }, (u) => this.inboxSince(u)),
       // 自己的雲端快照（ADR-0071 J3）：接收合併恆開——換機還原不需任何前置設定。
-      { kinds: [SNAPSHOT_KIND], authors: me },
-      { kinds: [SDP_SIGNAL_KIND], "#p": me },
-      { kinds: [CALL_SIGNAL_KIND], "#p": me },
-      { kinds: [PRESENCE_SIGNAL_KIND], "#p": me }, // 封裝的在線狀態（ADR-0129）
+      sub({ kinds: [SNAPSHOT_KIND], authors: me }, "n/a"),
+      sub({ kinds: [SDP_SIGNAL_KIND], "#p": me }, "n/a"),
+      sub({ kinds: [CALL_SIGNAL_KIND], "#p": me }, "n/a"),
+      sub({ kinds: [PRESENCE_SIGNAL_KIND], "#p": me }, "n/a"), // 封裝的在線狀態（ADR-0129）
       // 帶內引導清單（ADR-0039）：訂閱維護者簽章的 relay 清單事件。
-      ...(this.maintainerPubkey ? [{ kinds: [RELAY_LIST_KIND], authors: [this.maintainerPubkey] }] : []),
+      ...(this.maintainerPubkey ? [sub({ kinds: [RELAY_LIST_KIND], authors: [this.maintainerPubkey] }, "n/a")] : []),
       // 檔案塊（ADR-0162）：組織小檔案經 relay 暫存；未啟用的站不會有這類事件，訂閱無成本。
       // P1（ADR-0294 §1.2）：帶**自己的**水位。刻意不共用 `inboxSince`——那個水位只由
       // `OFFLINE_DM_GIFT_WRAP` 推進（見 `onEvent`），套到這裡會**跳掉比 DM 水位舊的檔案塊**，
       // 等於在修 bug 的過程中製造掉檔。
-      { kinds: [KIND.FILE_WRAP], "#p": me, ...this.fileSince(url) },
+      sub({ kinds: [KIND.FILE_WRAP], "#p": me }, (u) => this.fileSince(u)),
       // 企業組織名冊（ADR-0047）：訂閱管理者簽章的名冊事件。
-      ...(this.orgAdminPubkey ? [{ kinds: [ORG_ROSTER_KIND], authors: [this.orgAdminPubkey] }] : []),
+      ...(this.orgAdminPubkey ? [sub({ kinds: [ORG_ROSTER_KIND], authors: [this.orgAdminPubkey] }, "n/a")] : []),
       // 企業主（ADR-0156）：訂閱**自己**簽章的名冊——重啟後找回 lastRoster，自動核准不失憶。
-      ...(this.orgOwnerFlag ? [{ kinds: [ORG_ROSTER_KIND], authors: [this.self.pubkey] }] : []),
+      ...(this.orgOwnerFlag ? [sub({ kinds: [ORG_ROSTER_KIND], authors: [this.self.pubkey] }, "n/a")] : []),
     ];
-    client.subscribe("all", filters);
+    client.subscribe("all", planFilters(decls, url));
   }
 
   /**

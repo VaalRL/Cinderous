@@ -261,11 +261,31 @@
 | --- | --- | --- |
 | P1 | 檔案塊訂閱補增量水位＋跨重啟去重 | ✅ **已修**：`{kinds:[FILE_WRAP], "#p": me}` 是 13 組訂閱 filter 中**唯一「會累積的儲存型 kind」卻沒有 `since`** 的一條（離線私訊那條有 `inboxSince`）。後果：重開 App 會把 TTL 內收過的每個檔案重收、重組，並因桌面 `onFileBytes` 內無條件 `saveIncomingFile` 而**再跳一次「另存新檔」**。（ADR-0288 §2.3／0294 §1.2） |
 | P2 | 重組失敗要有訊號 | ✅ **已修**：缺塊時 `onFileBytes` 不觸發、**`onFileError` 也不觸發**，殘骸由 `sweepChunkAsm()` 在 120 秒後靜默刪除 ⇒ 寄件者看到「已送出」（ADR-0041 只保證中繼收下）、收件者什麼都沒有、**雙方都不知道**。與 ADR-0264 §8 為行事曆解掉的靜默分歧同一類。（ADR-0288 §2.2／0294 §1.3） |
-| P3 | 重取策略成為訂閱工作負載的屬性 | ⏳ **待做（治本）**：目前一次 `subscribe("all", …)` 混了 13 組用途（presence／收件匣／快照／信令／檔案塊／名冊），而重取策略靠每個 filter 各自記得加——P1 正是這樣漏掉的。White Noise 因同一問題把單一 client 拆成四個 relay plane。**只做 P1 是治標**，下一個累積型 kind 仍會重蹈覆轍。（ADR-0293 §2.1／0294 §4） |
-| P4 | 行動端 per-identity 範圍隔離 | ⏳ **待做（結構性）**：桌面換身分走 `location.reload()`＝結構性保證；行動端是就地切換＋**手寫 reset 清單**，目前漏了 `archived`（歷史入口閘門，兩身分共用同一 pubkey 時會出現幽靈入口）、`purged`、`calDraft`。建議把 per-identity 狀態關進以身分為 `key` 的子元件（清單可整個刪掉），而非補三行。（ADR-0293 §2.2／0294 §2） |
-| P5 | 匿名發布 plane（評估） | ⏳ **待評估**：中繼在 `requireAuth` 時**連 EVENT 都要 AUTH**，而發布與訂閱共用同一條連線 ⇒ 中繼知道「這顆匿名 wrap 是誰送的」（ADR-0237 的洩漏在**發布側**）。拆開可修掉一半，但 gift wrap 的 author 是一次性金鑰、對企業 allowlist 無用，**AUTH 身分很可能正是 allowlist 唯一的執行點** ⇒ 只能分部署，且需先算公共節點的濫用面。（ADR-0293 §3） |
+| P3 | 重取策略成為訂閱工作負載的屬性 | ✅ **已做**：目前一次 `subscribe("all", …)` 混了 13 組用途（presence／收件匣／快照／信令／檔案塊／名冊），而重取策略靠每個 filter 各自記得加——P1 正是這樣漏掉的。White Noise 因同一問題把單一 client 拆成四個 relay plane。**只做 P1 是治標**，下一個累積型 kind 仍會重蹈覆轍。（ADR-0293 §2.1／0294 §4） |
+| P4 | 行動端 per-identity 範圍隔離 | 🟡 **部分完成**：桌面換身分走 `location.reload()`＝結構性保證；行動端是就地切換＋**手寫 reset 清單**，目前漏了 `archived`（歷史入口閘門，兩身分共用同一 pubkey 時會出現幽靈入口）、`purged`、`calDraft`。建議把 per-identity 狀態關進以身分為 `key` 的子元件（清單可整個刪掉），而非補三行。（ADR-0293 §2.2／0294 §2） |
+| P5 | 匿名發布 plane（評估） | ✅ **已評估（ADR-0299：不建議現在動）**：中繼在 `requireAuth` 時**連 EVENT 都要 AUTH**，而發布與訂閱共用同一條連線 ⇒ 中繼知道「這顆匿名 wrap 是誰送的」（ADR-0237 的洩漏在**發布側**）。拆開可修掉一半，但 gift wrap 的 author 是一次性金鑰、對企業 allowlist 無用，**AUTH 身分很可能正是 allowlist 唯一的執行點** ⇒ 只能分部署，且需先算公共節點的濫用面。（ADR-0293 §3） |
 
-**完成定義**：P1+P2 修好且特徵化測試斷言翻正；P3 讓「這個 kind 會累積嗎、要怎麼續取」成為訂閱宣告的一部分而非慣例；P4 讓行動端新增 state 天然安全。**建議 P1 與 P3 一起做**（只補 `since` 是治標）。P5 獨立、需先做濫用面評估。
+**完成定義達成情況**（2026-07-30）：
+
+- ✅ P1+P2：修好，特徵化測試斷言已翻正為規格。
+- ✅ P3：新增 `backend/sub-plan.ts`——`sub(filter, resume)` 讓續取策略成為**宣告的必填項**；
+  累積性由 NIP-01 的 kind 區間判定（`isAccumulatingKind`），不是手維護名單（手維護會漏，
+  而漏掉的後果正是 P1）；累積型 kind 未宣告策略即 `throw`，`sub-plan.test.ts` 在 CI 先抓。
+- 🟡 P4：**補齊了漏網並加上守衛，但沒做 ADR-0294 建議的治本重構**。
+  已補 `archived`／`purged`／`calDraft`／`activeId`／`typingFrom` ＋ 5 個通話 state
+  （後端 `stop()` 了但 React 仍留著「通話中」畫面）。
+  `MobileApp.perIdentityState.test.ts` 掃原始碼強制：任何新 `useState` 都要先**分類**，
+  分到 per-identity 的必須在 `signInWith` 內被指派。
+  **未做**：以身分為 `key` 的子元件（清單可整個刪掉）——那是 1588 行、51 個 `useState`
+  的重構，而行動端測試只有靜態渲染、抓不到互動回歸，風險過高。守衛擋得住「忘了想」，
+  擋不住「分錯類」。
+- ✅ P5：評估完成（ADR-0299）。結論：拆匿名發布連線只修一半（同時性關聯仍在），
+  且會撞掉企業 allowlist 唯一的執行點，需分部署＋公開節點濫用面評估。**不建議現在動**；
+  先補揭露。
+
+**順帶發現（未處理）**：`retentionCap`／`readReceipts`／`cloudSync` 讀的是**全域** localStorage
+鍵、不帶 pubkey ⇒ 現行語意是裝置層，切身分不重載。一個身分想開雲端備份、另一個不想，
+目前分不開。這是設計題，不在 P4 範圍。
 
 ---
 
