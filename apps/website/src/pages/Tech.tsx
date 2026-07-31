@@ -68,6 +68,18 @@ export function Tech({ c }: { c: Copy }): JSX.Element {
           <h3>{c.tech_threat_t}</h3>
           <p>{c.tech_threat_b}</p>
         </div>
+
+        {/*
+          前向保密（ADR-0306 D2.2）：**得宣稱，但不得以對等形式宣稱**。
+          此處是「限定式」——名稱必須與「實驗性」「未經外部審計」同時出現，不得只有名稱。
+          比較表那格維持「開發中」不打勾（`cp_r9a`，由 Compare.test 鎖住）：
+          那張表的語意**就是**對等比較，而我們不對等。
+        */}
+        <div className="card" style={{ marginTop: 16 }} data-testid="tech-fs">
+          <div className="card__ember" />
+          <h3>{c.tech_fs_t}</h3>
+          <p>{c.tech_fs_b}</p>
+        </div>
       </div>
     </section>
   );

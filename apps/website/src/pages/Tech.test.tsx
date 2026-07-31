@@ -28,12 +28,28 @@ describe("Tech 底層機制（進階，ADR-0246）", () => {
     expect(en).toContain("TURN");
   });
 
-  // FS（前向保密）尚未通過外部審計——依上線硬閘，官網文案不得宣稱 FS（ADR-0245）。
-  it("進階區不得宣稱前向保密（審計前硬閘）", () => {
+  // FS（前向保密）尚未通過外部審計。
+  // ~~原規則：官網文案不得宣稱 FS（ADR-0245）~~
+  // → ADR-0306 D2 修訂為「**不得以對等形式宣稱**」：得列入，但必須同時帶
+  //   「實驗性」與「未經外部審計」，不得只有名稱。判準是**讀者的認知正不正確**。
+  it("技術原理頁有前向保密的限定式說明（ADR-0306 D2.2）", () => {
+    // 上一條是**形狀**守則（若提到就必須限定），它容許「乾脆不提」。
+    // 這一條釘住「確實有提」，兩條合起來才擋得住兩個方向的漂移。
+    expect(renderToStaticMarkup(<Tech c={useCopy("zh-Hant")} />)).toContain('data-testid="tech-fs"');
+    expect(renderToStaticMarkup(<Tech c={useCopy("en")} />)).toContain('data-testid="tech-fs"');
+  });
+
+  it("🔴 提到前向保密時，必須同時帶「實驗性」與「未經外部審計」——不得只有名稱", () => {
     const zh = renderToStaticMarkup(<Tech c={useCopy("zh-Hant")} />);
-    expect(zh).not.toContain("前向保密");
-    const en = renderToStaticMarkup(<Tech c={useCopy("en")} />);
-    expect(en.toLowerCase()).not.toContain("forward secrecy");
+    if (zh.includes("前向保密")) {
+      expect(zh).toContain("實驗性");
+      expect(zh).toContain("審計");
+    }
+    const en = renderToStaticMarkup(<Tech c={useCopy("en")} />).toLowerCase();
+    if (en.includes("forward secrecy")) {
+      expect(en).toContain("experimental");
+      expect(en).toContain("audit");
+    }
   });
 });
 
