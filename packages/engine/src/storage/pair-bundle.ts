@@ -88,6 +88,30 @@ export function exportFullSnapshot(storage: AppStorage, identity?: StoredIdentit
  * 寫進 `AppStorage`（ADR-0053：私鑰託給 OS 金鑰庫），於是 `storage.loadIdentity()` 回 `null`
  * ——**桌面的換機搬家一直是壞的**。呼叫端必須顯式傳入 `identity`（nsec 由金鑰庫/記憶體提供）。
  */
+/**
+ * 「大捆包」門檻（bytes）——**ADR-0072／0305 §7，2026-07-31**。
+ *
+ * **為什麼是提示而不是續傳**：查證後，傳輸層已有 60 KB 分塊（`pairing-transport.ts`），
+ * 大小本身傳得過去；缺的只有**中斷續傳**。而天真的續傳**省不到麻煩的那一半**——
+ * 重連時 `nonceA`／`nonceB` 是新的 ⇒ **SAS 會變** ⇒ 使用者仍要再比對一次，
+ * 而 SAS 比對正是這個流程最麻煩的部分。要真有價值得再加一層續傳票證（約 150–250 行）。
+ *
+ * ⇒ **決定：不做續傳**，階段 2 改為「可跳過、失敗可整份重來」，
+ * 但**在量大時誠實提示重來的風險**（使用者指定）。
+ *
+ * 取值依據**來自量測而非拍腦袋**：實測每則文字訊息約 200–300 bytes，
+ * 8 MB ≈ 三萬則上下——落在「累積了不少歷史」而非「用兩天就跳警告」。
+ * `pair-bundle.test.ts` 有測試把這個對應關係釘住，改門檻時會看到它的實際意義。
+ *
+ * ⚠ 注意：檔案**只帶 metadata 不帶位元組**（`StoredFileMeta` 無 bytes），故主要成本是訊息與頭像。
+ */
+export const LARGE_BUNDLE_BYTES = 8 * 1024 * 1024;
+
+/** 這份捆包是否大到值得先警告「失敗要整份重來」。 */
+export function isLargeBundle(bundleJson: string): boolean {
+  return bundleJson.length > LARGE_BUNDLE_BYTES;
+}
+
 export function buildPairBundle(
   storage: AppStorage,
   profile: { relayUrl: string; cloudSync?: "off" | "basic" | "full"; org?: PairBundleOrg },

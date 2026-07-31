@@ -9,7 +9,7 @@ import {
   runPairingSource,
   runPairingTarget,
 } from "@cinderous/core";
-import { buildPairBundle, type PairBundle, type PairBundleOrg, parsePairBundle } from "../storage/pair-bundle.js";
+import { buildPairBundle, isLargeBundle, type PairBundle, type PairBundleOrg, parsePairBundle } from "../storage/pair-bundle.js";
 import type { AppStorage, StoredIdentity } from "../storage/types.js";
 import { openPairingTransport } from "./pairing-transport.js";
 import type { RelayConnector } from "./relay-backend.js";
@@ -64,9 +64,24 @@ export async function runPairSource(opts: {
   identity?: StoredIdentity;
   transport: PairTransportFactory;
   confirmSas: (sas: string) => Promise<boolean>;
+  /**
+   * 資料量大時的事前確認（ADR-0072／0305 §7；可選，未提供＝不提示、行為不變）。
+   *
+   * **為什麼是提示而不是續傳**：查證後傳輸層已有 60 KB 分塊，大小傳得過去；缺的只有中斷續傳。
+   * 而天真的續傳**省不到麻煩的那一半**——重連時 nonce 是新的 ⇒ **SAS 會變** ⇒ 仍要再比對一次。
+   * ⇒ 決定不做續傳，改為**誠實告知重來的代價**（見 `LARGE_BUNDLE_BYTES`）。
+   *
+   * 位置刻意在**組包之後、連線之前**：組包才知道多大，而連線之前才來得及讓使用者
+   * 選時機（接電源、放一起）。回 `false`＝使用者取消，不連線。
+   */
+  confirmLargeBundle?: (megabytes: number) => Promise<boolean>;
 }): Promise<boolean> {
   // 先組包再連線：沒有身分就當場失敗，不要讓使用者比對完 SAS 才發現搬了個空殼。
   const bundle = buildPairBundle(opts.storage, opts.profile, opts.identity);
+  if (opts.confirmLargeBundle && isLargeBundle(bundle)) {
+    const mb = Math.round((bundle.length / (1024 * 1024)) * 10) / 10;
+    if (!(await opts.confirmLargeBundle(mb))) return false;
+  }
   const transport = await opts.transport("source", opts.key, opts.profile.relayUrl);
   return runPairingSource(transport, opts.key, bundle, opts.confirmSas);
 }

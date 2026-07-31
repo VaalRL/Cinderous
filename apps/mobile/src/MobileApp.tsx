@@ -919,6 +919,14 @@ export function MobileApp({
       identity: { nsec, name: selfName },
       profile: { relayUrl, ...(cloudSync !== "off" ? { cloudSync } : {}) },
       transport: webRtcPairTransport(webSocketConnector),
+      // 資料量大時先告知「不支援續傳、斷了要整份重來」（ADR-0072／0305 §7）。
+      // 位置在連線之前，使用者才來得及選時機（接電源、兩台放一起）。
+      confirmLargeBundle: (mb) =>
+        Promise.resolve(
+          typeof window === "undefined" || typeof window.confirm !== "function"
+            ? true // 沒有 confirm 就照舊進行——這只是提示，不是安全閘門（對比 confirmRequired）
+            : window.confirm(translate(localeRef.current, "pair_largeBundleWarn", { mb })),
+        ),
       // SAS 是這個流程的安全核心：**必須是使用者的明確裁示**，不能自動通過。
       confirmSas: (sas) =>
         new Promise<boolean>((resolve) => {

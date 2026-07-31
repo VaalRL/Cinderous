@@ -1812,6 +1812,9 @@ export function App(): JSX.Element {
           : {}),
       },
       transport,
+      // 資料量大時先告知「不支援續傳、斷了要整份重來」（ADR-0072／0305 §7）。
+      // 位置在連線之前，使用者才來得及選時機（接電源、兩台放一起）。
+      confirmLargeBundle: (mb) => dialog().confirm(tRef.current("pair_largeBundleWarn", { mb })),
       confirmSas: (sas) =>
         new Promise<boolean>((resolve) => {
           setPairPhase({ kind: "sas", sas });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { MemoryStorage } from "./memory.js";
-import { applyPairBundle, buildPairBundle, exportFullSnapshot, type PairBundle, parsePairBundle } from "./pair-bundle.js";
+import { applyPairBundle, buildPairBundle, exportFullSnapshot, isLargeBundle, LARGE_BUNDLE_BYTES, type PairBundle, parsePairBundle } from "./pair-bundle.js";
 
 /** 佈置一個「用了一陣子」的來源儲存：身分、聯絡人（含 hint）、群組、訊息、回應、收回、封鎖。 */
 function richStorage(): MemoryStorage {
@@ -158,5 +158,49 @@ describe("配對捆包帶 FS 金鑰（審查發現：不帶＝新裝置永遠解
     };
     expect(() => applyPairBundle(dst, legacy as unknown as PairBundle)).not.toThrow();
     expect(dst.loadFsState().keys).toEqual([]);
+  });
+});
+
+describe("配對捆包的大小（ADR-0072／0305 §7：不做續傳，改為誠實提示）", () => {
+  /** 造出 n 則有代表性的文字訊息（含 id／時間／方向等實際欄位）。 */
+  const withMessages = (n: number): MemoryStorage => {
+    const s = new MemoryStorage();
+    s.saveIdentity({ nsec: "nsec1abc", name: "我" });
+    s.addContact({ pubkey: "bob", name: "Bob", relayUrl: "wss://relay.example.com" });
+    for (let i = 0; i < n; i++) {
+      s.appendMessage({
+        id: `msg-${i}-${"a".repeat(24)}`,
+        contact: "bob",
+        outgoing: i % 2 === 0,
+        text: "這是一則長度接近日常平均的訊息，中文大約二十到四十個字之間。",
+        at: 1_700_000_000_000 + i * 1000,
+      });
+    }
+    return s;
+  };
+
+  it("量測：每則訊息的捆包成本（供 LARGE_BUNDLE_BYTES 門檻取值依據）", () => {
+    const base = buildPairBundle(withMessages(0), { relayUrl: "wss://r" }).length;
+    const k1 = buildPairBundle(withMessages(1000), { relayUrl: "wss://r" }).length;
+    const perMsg = (k1 - base) / 1000;
+    // 這條不是斷言效能，是**把數字釘在測試裡**——日後訊息結構變胖會在這裡看到。
+    // 目前約 200–300 bytes/則（UTF-8 中文 3 bytes/字）。
+    expect(perMsg).toBeGreaterThan(100);
+    expect(perMsg).toBeLessThan(600);
+  });
+
+  it("🔴 門檻要落在「重傳會讓人不爽」的量級，而不是隨手取的整數", () => {
+    // LARGE_BUNDLE_BYTES 對應約多少則訊息——若哪天改了門檻，這裡會顯示它的實際意義。
+    const base = buildPairBundle(withMessages(0), { relayUrl: "wss://r" }).length;
+    const perMsg = (buildPairBundle(withMessages(1000), { relayUrl: "wss://r" }).length - base) / 1000;
+    const msgsAtThreshold = LARGE_BUNDLE_BYTES / perMsg;
+    // 門檻應該落在「累積了不少歷史」的使用者，而不是剛用兩天就跳警告。
+    expect(msgsAtThreshold).toBeGreaterThan(5_000);
+    expect(msgsAtThreshold).toBeLessThan(100_000);
+  });
+
+  it("isLargeBundle：門檻上下", () => {
+    expect(isLargeBundle("a".repeat(LARGE_BUNDLE_BYTES - 1))).toBe(false);
+    expect(isLargeBundle("a".repeat(LARGE_BUNDLE_BYTES + 1))).toBe(true);
   });
 });
