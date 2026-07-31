@@ -15,14 +15,31 @@ describe("比較頁（ADR-0254）", () => {
     }
   });
 
-  it("🔴 FS 硬閘（ADR-0245）：前向保密列的 Cinderous 格不得為 ✓，只標開發中", () => {
+  // ADR-0306 D2.2：規則由「不得宣稱」改為「**不得以對等形式宣稱**」。
+  // 這張表的語意**就是**對等比較，故 ✓ 仍然禁止；但可以誠實說「已實作」——
+  // ~~原為「開發中」~~，那在功能實際出貨（實驗性）之後已是**低估**。
+  it("🔴 FS 對等式硬閘：前向保密列的 Cinderous 格**永遠不得**為 ✓", () => {
     for (const locale of ["zh-Hant", "en"] as const) {
       const c = useCopy(locale);
       expect(c.cp_r9a).not.toContain("✓");
       expect(c.cp_r9b).toContain("✓"); // Signal 誠實給 ✓（承認別人有≠宣稱自己有）
     }
-    expect(useCopy("zh-Hant").cp_r9a).toBe("開發中"); // 精簡版：不帶審計說明（使用者指定）
-    expect(useCopy("en").cp_r9a).toBe("In development");
+  });
+
+  it("🔴 該格得寫「已實作」，但必須同時帶限定——不得只有「已實作」三個字", () => {
+    // 只寫「已實作」而不限定，在這張與 Signal 並列的表裡讀起來就是對等宣稱。
+    expect(useCopy("zh-Hant").cp_r9a).toContain("已實作");
+    expect(useCopy("zh-Hant").cp_r9a).toContain("實驗性");
+    const en = useCopy("en").cp_r9a.toLowerCase();
+    expect(en).toContain("implemented");
+    expect(en).toContain("experimental");
+  });
+
+  it("🔴 表下註腳必須寫明「未經外部審計」——格子塞不下的那半要有地方講", () => {
+    for (const locale of ["zh-Hant", "en"] as const) {
+      const html = renderToStaticMarkup(<Compare c={useCopy(locale)} locale={locale} />);
+      expect(locale === "zh-Hant" ? html.includes("審計") : html.toLowerCase().includes("audit")).toBe(true);
+    }
   });
 
   it("誠實列存在：功能成熟度自承開發中（誠實表比全勝表可信）", () => {

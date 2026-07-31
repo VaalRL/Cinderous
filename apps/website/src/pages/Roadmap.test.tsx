@@ -37,10 +37,13 @@ describe("藍圖頁：前向保密的事實陳述（ADR-0306 D2）", () => {
     expect(box).not.toContain("✅");
   });
 
-  it("🔴 比較表那格不得因此鬆動（ADR-0245 硬閘仍在，ADR-0306 D2 更嚴格）", () => {
-    // 藍圖頁誠實陳述 ≠ 可以在比較表宣稱。兩者是不同的表面。
+  it("🔴 比較表得說「已實作」，但**永遠不得打勾**（ADR-0306 D2.2 的對等式界線）", () => {
+    // ~~原斷言：cp_r9a 必須是「開發中」、比較表不得出現「實驗性」~~
+    // → 規則已由「不得宣稱」改為「不得以**對等形式**宣稱」（D2.2）：
+    //   誠實說「已實作（實驗性）」是可以的；不可以的是那個 ✓——
+    //   在這張與 Signal 並列的表裡，✓ 的意思就是「同級」。
     const c = useCopy("zh-Hant");
-    expect(c.cp_r9a).toBe("開發中");
-    expect(renderToStaticMarkup(<Compare c={c} locale="zh-Hant" />)).not.toContain("實驗性");
+    expect(c.cp_r9a).toContain("已實作");
+    expect(c.cp_r9a).not.toContain("✓");
   });
 });

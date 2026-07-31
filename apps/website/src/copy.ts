@@ -534,7 +534,7 @@ const zhHant: Copy = {
   cp_r8c: "可",
   cp_r8d: "可",
   cp_r9: "前向保密",
-  cp_r9a: "開發中",
+  cp_r9a: "已實作（實驗性）",
   cp_r9b: "✓",
   cp_r9c: "未公開細節",
   cp_r9d: "✓",
@@ -545,7 +545,7 @@ const zhHant: Copy = {
   cp_r10d: "成熟",
   cp_note1: "¹ Signal 可用使用者名稱隱藏號碼，但註冊仍需手機號。",
   cp_note:
-    "各商標與產品名稱屬其所有者。比較基於公開資訊（截至 2026 年 7 月），如有出入以各產品官方說明為準。",
+    "各商標與產品名稱屬其所有者。比較基於公開資訊（截至 2026 年 7 月），如有出入以各產品官方說明為準。前向保密一列：我方**已實作但尚未經獨立第三方的密碼學審計**，預設關閉、須自行啟用；該列打勾的產品已經過多輪外部審計，兩者不對等，故我方不打勾。",
   cp_entLink: "企業導入？看企業版與常見選擇的差異 →",
   ent_cmp_title: "與常見選擇的差異",
   ent_cmp_lead:
@@ -865,7 +865,7 @@ const en: Copy = {
   cp_r8c: "Yes",
   cp_r8d: "Yes",
   cp_r9: "Forward secrecy",
-  cp_r9a: "In development",
+  cp_r9a: "Implemented (experimental)",
   cp_r9b: "✓",
   cp_r9c: "Undisclosed",
   cp_r9d: "✓",
@@ -876,7 +876,7 @@ const en: Copy = {
   cp_r10d: "Mature",
   cp_note1: "¹ Signal usernames can hide your number, but registration still requires one.",
   cp_note:
-    "All trademarks and product names belong to their respective owners. Comparison based on public information (as of July 2026); official product documentation prevails where they differ.",
+    "All trademarks and product names belong to their respective owners. Comparison based on public information (as of July 2026); official product documentation prevails where they differ. On the forward-secrecy row: ours is **implemented but has not been through an independent cryptography audit**, is off by default, and must be enabled manually; the products marked with a check have been through multiple external audits. These are not equivalent, which is why we do not use a check mark.",
   cp_entLink: "Evaluating for a company? See how Enterprise differs from common options →",
   ent_cmp_title: "How this differs from common options",
   ent_cmp_lead:
