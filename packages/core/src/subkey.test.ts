@@ -7,6 +7,7 @@ import {
   EK_ANNOUNCE_KIND,
   ekHintOf,
   FS_CAPABILITY,
+  FS_CAPABILITY_MAX_LEN,
   FS_GRACE_MS,
   FS_RETIRED,
   generateEncryptionKey,
@@ -229,5 +230,19 @@ describe("FS 能力宣告的解讀（ADR-0306 D3.3c）", () => {
 
   it("退場值與能力值不得相同（否則硬退無法表達）", () => {
     expect(FS_RETIRED).not.toBe(FS_CAPABILITY);
+  });
+});
+
+describe("能力字串的長度限制（審查發現：超長會靜默變成『沒有宣告』）", () => {
+  it("🔴 現有能力值都必須在 parseProfile 的 16 字元上限內", () => {
+    // `profile.ts` 只收 `fs.length <= 16`，超過即丟棄 ⇒ 對方會被當成 `absent`
+    // 而不是 `unknown`——**靜默失效**，收件端完全看不出對方宣告過什麼。
+    // 故新增能力值時必須先過這一關；這條測試就是那道門。
+    expect(FS_CAPABILITY.length).toBeLessThanOrEqual(FS_CAPABILITY_MAX_LEN);
+    expect(FS_RETIRED.length).toBeLessThanOrEqual(FS_CAPABILITY_MAX_LEN);
+  });
+
+  it("上限值必須與 profile.ts 的實際限制一致（改了一邊就會在這裡爆）", () => {
+    expect(FS_CAPABILITY_MAX_LEN).toBe(16);
   });
 });

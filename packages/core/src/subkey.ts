@@ -38,6 +38,15 @@ export const FS_CAPABILITY = "ek-v1";
 export const FS_RETIRED = "none";
 
 /**
+ * 能力字串的長度上限（**與 `profile.ts` 的實際限制對齊**）。
+ *
+ * ⚠ `parseProfile` 只收 `fs.length <= 16`，超過即**丟棄整個欄位** ⇒ 對方會被判為
+ * `absent`（沒有宣告）而不是 `unknown`（宣告了我不認得的機制）——**靜默失效**，
+ * 收件端完全看不出對方宣告過什麼。故**新增能力值時必須先過這一關**。
+ */
+export const FS_CAPABILITY_MAX_LEN = 16;
+
+/**
  * 對方的 FS 能力宣告，解讀為四種**互斥**狀態（ADR-0306 D3.3c／ADR-0302 §1–2）。
  *
  * - `fs`：正在做我們支援的 FS（`ek-v1`）⇒ TOFU 釘選。

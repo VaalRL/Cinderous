@@ -3411,3 +3411,99 @@ describe("FS 退場語意（ADR-0306 D3.3c：軟／硬退共用的能力宣告�
     a.stop();
   });
 });
+
+describe("FS 能力判定的時效性（審查發現：存下來的結論會過期）", () => {
+  it("🔴 存的是原始字串，判定必須在送訊當下重算——否則我們自己更新後仍叫使用者更新", () => {
+    // 情境：對方宣告 ek-v1（我們支援）。若把「不支援」當成結論存起來，
+    // 日後我們新增支援時那筆記錄還在 ⇒ 繼續叫使用者「請更新」，直到對方重送個人檔。
+    // 這裡直接把「已支援的字串」塞進 unsupported，模擬「當初不支援、現在支援了」。
+    const net = createInMemoryRelayNetwork();
+    const bobPk = getPublicKey(generateSecretKey());
+    const storeA = new MemoryStorage();
+    storeA.saveFsState({
+      enabled: true,
+      keys: [],
+      contactEks: {},
+      pinned: { [bobPk]: true },
+      unsupported: { [bobPk]: FS_CAPABILITY },
+    });
+    const a = new RelayChatBackend(storeA, (h) => net.connect("a", h), "Alice");
+    const unsupported: string[] = [];
+    const downgrades: string[] = [];
+    a.start({ ...noop, onFsUnsupported: (pk) => unsupported.push(pk), onFsDowngrade: (pk) => downgrades.push(pk) });
+
+    a.sendMessage(bobPk, "我們現在支援了");
+
+    expect(unsupported).toEqual([]); // 不得再叫人更新
+    expect(downgrades).toContain(bobPk); // 已釘選又無其 EK ＝真的降級，該走這條
+    a.stop();
+  });
+
+  it("明示退場值若殘留在 unsupported 也不得誤報為「請更新」", () => {
+    const net = createInMemoryRelayNetwork();
+    const bobPk = getPublicKey(generateSecretKey());
+    const storeA = new MemoryStorage();
+    storeA.saveFsState({ enabled: true, keys: [], contactEks: {}, pinned: {}, unsupported: { [bobPk]: FS_RETIRED } });
+    const a = new RelayChatBackend(storeA, (h) => net.connect("a", h), "Alice");
+    const unsupported: string[] = [];
+    a.start({ ...noop, onFsUnsupported: (pk) => unsupported.push(pk) });
+    a.sendMessage(bobPk, "對方已停用");
+    expect(unsupported).toEqual([]);
+    a.stop();
+  });
+});
+
+describe("FS 警告去重（審查發現：每送一則插一次會洗版）", () => {
+  const pinnedNoEk = (peer: string) => {
+    const s = new MemoryStorage();
+    s.saveFsState({ enabled: true, keys: [], contactEks: {}, pinned: { [peer]: true } });
+    return s;
+  };
+
+  it("🔴 連送多則只警告一次——洗版會直接導致無視，那等於揭露失效", () => {
+    const net = createInMemoryRelayNetwork();
+    const bobPk = getPublicKey(generateSecretKey());
+    const a = new RelayChatBackend(pinnedNoEk(bobPk), (h) => net.connect("a", h), "Alice");
+    const downgrades: string[] = [];
+    a.start({ ...noop, onFsDowngrade: (pk) => downgrades.push(pk) });
+    a.sendMessage(bobPk, "一");
+    a.sendMessage(bobPk, "二");
+    a.sendMessage(bobPk, "三");
+    expect(downgrades).toEqual([bobPk]);
+    a.stop();
+  });
+
+  it("每個聯絡人各自算——對 A 警告過不影響 B", () => {
+    const net = createInMemoryRelayNetwork();
+    const bobPk = getPublicKey(generateSecretKey());
+    const carolPk = getPublicKey(generateSecretKey());
+    const s = new MemoryStorage();
+    s.saveFsState({ enabled: true, keys: [], contactEks: {}, pinned: { [bobPk]: true, [carolPk]: true } });
+    const a = new RelayChatBackend(s, (h) => net.connect("a", h), "Alice");
+    const downgrades: string[] = [];
+    a.start({ ...noop, onFsDowngrade: (pk) => downgrades.push(pk) });
+    a.sendMessage(bobPk, "給 Bob");
+    a.sendMessage(carolPk, "給 Carol");
+    a.sendMessage(bobPk, "再給 Bob");
+    expect(downgrades).toEqual([bobPk, carolPk]);
+    a.stop();
+  });
+
+  it("🔴 狀況改變後要能再警告一次——否則使用者永遠看不到第二次出事", () => {
+    // 學到對方 EK（降級消失）→ 之後又失去 → 這是**新的**一次降級，該再說一次。
+    const net = createInMemoryRelayNetwork();
+    const bobPk = getPublicKey(generateSecretKey());
+    const store = pinnedNoEk(bobPk);
+    const a = new RelayChatBackend(store, (h) => net.connect("a", h), "Alice");
+    const downgrades: string[] = [];
+    a.start({ ...noop, onFsDowngrade: (pk) => downgrades.push(pk) });
+    a.sendMessage(bobPk, "一"); // 警告
+    store.saveFsState({ ...store.loadFsState(), contactEks: { [bobPk]: "a".repeat(64) } });
+    a.stop();
+    const b = new RelayChatBackend(store, (h) => net.connect("a2", h), "Alice");
+    b.start({ ...noop, onFsDowngrade: (pk) => downgrades.push(pk) });
+    b.sendMessage(bobPk, "二"); // 有 EK 了＝不降級，不該警告
+    expect(downgrades).toEqual([bobPk]);
+    b.stop();
+  });
+});

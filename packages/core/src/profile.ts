@@ -102,7 +102,9 @@ export function parseProfile(rumor: Rumor): ProfileData | undefined {
       const t = raw.title === "" ? "" : sanitizeTitle(raw.title);
       if (t !== "" || raw.title === "") out.title = t;
     }
-    // FS capability（ADR-0245）：短字串（≤16）才收，防畸形。
+    // FS capability（ADR-0245）：短字串（≤16，＝`subkey.ts` 的 `FS_CAPABILITY_MAX_LEN`）才收，防畸形。
+    // ⚠ 超長者**整個欄位丟棄** ⇒ 對方被判為 `absent` 而非 `unknown`（靜默失效）。
+    // 兩處的 16 由 `subkey.test.ts` 的長度測試綁在一起，改一邊就會爆。
     if (typeof raw.fs === "string" && raw.fs.length > 0 && raw.fs.length <= 16) out.fs = raw.fs;
     return out.name !== undefined || out.avatar !== undefined || out.title !== undefined || out.fs !== undefined
       ? out

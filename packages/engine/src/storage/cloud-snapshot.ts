@@ -321,6 +321,14 @@ export function mergeSnapshotContent(
       keys: pruneFsKeys([...byPk.values()], opts.now ?? Date.now()), // union 後修剪逾 grace
       contactEks: { ...(content.fs.contactEks ?? {}), ...local.contactEks }, // union，本地衝突優先
       pinned: { ...(content.fs.pinned ?? {}), ...(local.pinned ?? {}) }, // union 釘選（ADR-0245：一台釘＝全釘）
+      // ADR-0306 D3.3c：`unsupported`（對方宣告了本版不支援的機制）同樣要 union、本機優先。
+      // ⚠ 本物件是**逐欄位建構**的——漏一個欄位就是靜默丟資料，而丟掉這一格的後果不是
+      // 「少一個提示」，是 `fsWouldDowngrade` 接手 ⇒ 對**升級了的**聯絡人跳出
+      // 「疑似降級（對方可能被攻擊）」＝說謊（ADR-0302 §4 的紅線）。
+      // 僅在任一側有值時才寫入，避免對既有存檔憑空生欄位而觸發無謂的快照重寫。
+      ...(content.fs.unsupported || local.unsupported
+        ? { unsupported: { ...(content.fs.unsupported ?? {}), ...(local.unsupported ?? {}) } }
+        : {}),
     };
     if (JSON.stringify(merged) !== JSON.stringify(local)) {
       storage.saveFsState(merged);

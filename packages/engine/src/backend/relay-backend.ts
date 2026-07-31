@@ -544,6 +544,12 @@ export class RelayChatBackend implements ChatBackend {
   private readonly offlineSince = new Map<string, number>();
   /** 各發送頻道的最近內容簽章（防抖：見 emitIfChanged）。 */
   private readonly emitSigs = new Map<string, string>();
+  /**
+   * 每位聯絡人**最近一次通報過的 FS 警告種類**（ADR-0245／0306），用於去重。
+   * `undefined` 值＝目前沒有警告；記住它才能在「復原後又出事」時再說一次。
+   * 刻意不持久化：重啟後重講一次可接受（寧可多說，不可漏說）。
+   */
+  private readonly fsNoticed = new Map<PubkeyHex, "unsupported" | "downgrade" | undefined>();
   private readonly presence = new PresenceTracker();
   private readonly statuses = new Map<PubkeyHex, PresencePayload>();
   private nowPlaying = "";
@@ -2620,9 +2626,25 @@ export class RelayChatBackend implements ChatBackend {
     // ADR-0245 降級偵測：已釘選 FS 的聯絡人卻無其 EK → 不靜默退回靜態，發警告（訊息仍送出，非靜默）。
     // ADR-0306 D3.3c：先問「對方是不是升級到我們不支援的機制」——那不是降級，
     // 說成降級＝把「你該更新」講成「對方可能被攻擊」（ADR-0302 §4 的紅線）。
+    // ⚠ 存的是**原始字串**，判定在此處**重算**——不可把「不支援」當成結論存起來：
+    // 日後我們新增支援時那筆記錄還在，就會繼續叫使用者「請更新」，直到對方重送個人檔為止。
     const declared = this.fsState.unsupported?.[to];
-    if (declared !== undefined) this.handlers?.onFsUnsupported?.(to, declared);
-    else if (this.fsWouldDowngrade(to)) this.handlers?.onFsDowngrade?.(to);
+    const notice: "unsupported" | "downgrade" | undefined =
+      declared !== undefined && readFsCapability(declared) === "unknown"
+        ? "unsupported"
+        : this.fsWouldDowngrade(to)
+          ? "downgrade"
+          : undefined;
+    // 去重（每則都插一次會洗版，而洗版直接導致無視＝揭露失效）：
+    // 只在**該聯絡人的警告種類改變時**才通知一次。狀況復原（→ undefined）也記，
+    // 這樣之後若又出事，會再說一次——否則使用者永遠看不到第二次。
+    // ⚠ 去重刻意放在引擎層而非兩端 UI：兩端各自去重必然漂移。記憶體內即可，
+    // 不需持久化——重啟後重講一次是可接受的（寧可多說，不可漏說）。
+    if (this.fsNoticed.get(to) !== notice) {
+      this.fsNoticed.set(to, notice);
+      if (notice === "unsupported") this.handlers?.onFsUnsupported?.(to, declared as string);
+      else if (notice === "downgrade") this.handlers?.onFsDowngrade?.(to);
+    }
     const fs = this.fsSendOpt(); // ADR-0245：啟用 FS 時加密到收件人 EK＋內嵌我的 EK（不知對方 EK 則退回身分）
     const wrapped = wrapMessage(text, this.sk, to, {
       now,

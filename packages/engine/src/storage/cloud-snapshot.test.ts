@@ -495,3 +495,43 @@ describe("跨裝置資產同步（ADR-0224）", () => {
     expect(parseSnapshotContent(JSON.stringify(bad2))).toBeNull();
   });
 });
+
+describe("FS 狀態的快照合併（ADR-0306 D3.3c 的欄位不得掉）", () => {
+  const withFs = (fs: CloudSnapshotContent["fs"]): CloudSnapshotContent => ({
+    v: 1,
+    at: 1,
+    mode: "basic",
+    contacts: [],
+    groups: [],
+    blocked: [],
+    ...(fs ? { fs } : {}),
+  });
+
+  it("🔴 `unsupported` 不得被合併吃掉——掉了就會退回說謊的「疑似降級」", () => {
+    // merged 是逐欄位建構的，漏一個欄位就是靜默丟資料；而這個欄位掉了之後，
+    // fsWouldDowngrade 會接手，對「升級了的聯絡人」跳出「對方可能被攻擊」。
+    const dst = new MemoryStorage();
+    dst.saveFsState({ enabled: true, keys: [], contactEks: {}, pinned: { bob: true }, unsupported: { bob: "ratchet-v1" } });
+    mergeSnapshotContent(dst, withFs({ enabled: true, keys: [], contactEks: {}, pinned: {} }));
+    expect(dst.loadFsState().unsupported).toEqual({ bob: "ratchet-v1" });
+  });
+
+  it("遠端帶來的 `unsupported` 也要學到（本機衝突優先，同 contactEks 的規則）", () => {
+    const dst = new MemoryStorage();
+    dst.saveFsState({ enabled: true, keys: [], contactEks: {}, pinned: {}, unsupported: { bob: "本機值" } });
+    mergeSnapshotContent(
+      dst,
+      withFs({ enabled: true, keys: [], contactEks: {}, pinned: {}, unsupported: { bob: "遠端值", carol: "ek-v9" } }),
+    );
+    const out = dst.loadFsState().unsupported;
+    expect(out?.bob).toBe("本機值"); // 本機優先
+    expect(out?.carol).toBe("ek-v9"); // 遠端獨有的要收
+  });
+
+  it("雙方都沒有 `unsupported` 時不得憑空生出欄位（避免無謂的快照重寫）", () => {
+    const dst = new MemoryStorage();
+    dst.saveFsState({ enabled: true, keys: [], contactEks: {}, pinned: {} });
+    const { changed } = mergeSnapshotContent(dst, withFs({ enabled: true, keys: [], contactEks: {}, pinned: {} }));
+    expect(changed).toBe(false);
+  });
+});
