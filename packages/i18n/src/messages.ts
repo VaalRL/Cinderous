@@ -284,6 +284,7 @@ export interface Messages {
   fs_rotate: string;
   fs_rotateConfirm: string;
   fs_downgradeWarning: string;
+  fs_unsupportedWarning: string;
   ai_stylePolite: string;
   ai_styleConcise: string;
   ai_styleGrammar: string;
@@ -1101,6 +1102,7 @@ const zhHant: Messages = {
   fs_rotate: "立即更換加密金鑰",
   fs_rotateConfirm: "要立即更換加密金鑰嗎？\n\n更換後：\n・還沒學到你新金鑰、或離線中的聯絡人，送到你舊金鑰的在途訊息，過了保留期（約 7 天）可能收不到。\n・你的其他裝置需上線同步新金鑰。\n・你寫下來的備份碼仍可還原身分與本機歷史（不含加密子鑰）。",
   fs_downgradeWarning: "⚠️ 這位聯絡人啟用了前向保密，但你這端還沒收到他的目前金鑰——這則訊息暫時以一般方式加密（無前向保密）。可能是對方金鑰尚未同步（稍後會自動更新），若持續出現請留意。",
+  fs_unsupportedWarning: "ℹ️ 這位聯絡人使用了你這個版本還不支援的加密機制，因此這則訊息以你們雙方都支援的方式加密。請更新到最新版本。（這不是安全警告——對方並沒有降級。）",
   ai_stylePolite: "更客氣",
   ai_styleConcise: "更精簡",
   ai_styleGrammar: "修正錯字",
@@ -1881,6 +1883,7 @@ const en: Messages = {
   fs_rotate: "Rotate encryption key now",
   fs_rotateConfirm: "Rotate your encryption key now?\n\nAfter rotating:\n• Contacts who haven't learned your new key yet, or who are offline, may not receive in-flight messages sent to your old key after the retention window (~7 days).\n• Your other devices need to come online to sync the new key.\n• Your written-down backup code still restores your identity and local history (it never contains the encryption subkey).",
   fs_downgradeWarning: "⚠️ This contact has forward secrecy enabled, but you haven't received their current key yet — this message was encrypted the ordinary way (no forward secrecy). Their key may not be synced yet (it'll update automatically); take note if this persists.",
+  fs_unsupportedWarning: "ℹ️ This contact uses an encryption scheme your version doesn't support yet, so this message was encrypted with one you both support. Please update to the latest version. (This is not a security warning — they have not downgraded.)",
   ai_stylePolite: "More polite",
   ai_styleConcise: "More concise",
   ai_styleGrammar: "Fix grammar",

@@ -6,11 +6,14 @@ import {
   buildEkAnnounce,
   EK_ANNOUNCE_KIND,
   ekHintOf,
+  FS_CAPABILITY,
   FS_GRACE_MS,
+  FS_RETIRED,
   generateEncryptionKey,
   openWrapWithEks,
   pruneFsKeys,
   readEkAnnounce,
+  readFsCapability,
   withEkHint,
 } from "./subkey.js";
 
@@ -188,5 +191,43 @@ describe("wrapMessage FS 整合（ADR-0245 Phase 1a）", () => {
     const opened = openWrapWithEks(w.events[0]!, [bobIk]);
     expect(opened.rumor.content).toBe("靜態");
     expect(ekHintOf(opened.rumor.tags)).toBeUndefined();
+  });
+});
+
+describe("FS 能力宣告的解讀（ADR-0306 D3.3c）", () => {
+  it("ek-v1 ＝正在做 FS", () => {
+    expect(readFsCapability(FS_CAPABILITY)).toBe("fs");
+  });
+
+  it("缺席／空字串＝沒有宣告（＝今天絕大多數聯絡人）", () => {
+    expect(readFsCapability(undefined)).toBe("absent");
+    expect(readFsCapability("")).toBe("absent");
+    expect(readFsCapability("   ")).toBe("absent");
+  });
+
+  it("明示退場值＝已停止，這是硬退用的（ADR-0306 D3.3）", () => {
+    expect(readFsCapability(FS_RETIRED)).toBe("retired");
+  });
+
+  it("🔴 不認得的值＝unknown，不得與「缺席」混為一談", () => {
+    // 這正是 ADR-0302 §2 指出的缺陷：舊碼把兩者都當成「沒有 FS」。
+    expect(readFsCapability("ek-v2")).toBe("unknown");
+    expect(readFsCapability("ratchet-v1")).toBe("unknown");
+    expect(readFsCapability("subkey-only")).toBe("unknown");
+  });
+
+  it("非字串一律視為缺席（不信任網路來源）", () => {
+    expect(readFsCapability(42)).toBe("absent");
+    expect(readFsCapability(null)).toBe("absent");
+    expect(readFsCapability({ fs: "ek-v1" })).toBe("absent");
+  });
+
+  it("前後空白不影響判定", () => {
+    expect(readFsCapability(` ${FS_CAPABILITY} `)).toBe("fs");
+    expect(readFsCapability(` ${FS_RETIRED} `)).toBe("retired");
+  });
+
+  it("退場值與能力值不得相同（否則硬退無法表達）", () => {
+    expect(FS_RETIRED).not.toBe(FS_CAPABILITY);
   });
 });

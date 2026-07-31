@@ -1408,6 +1408,12 @@ export function App(): JSX.Element {
         const msg: ChatMessage = { id: uid("fsd"), outgoing: false, text: tRef.current("fs_downgradeWarning"), at: Date.now() };
         setConvos((prev) => ({ ...prev, [peer]: [...(prev[peer] ?? []), msg] }));
       },
+      // ADR-0306 D3.3c：對方宣告了我們不支援的機制＝**對方升級了**，不是降級。
+      // 這裡刻意用另一句文案——把「你該更新」顯示成「對方可能被攻擊」就是說謊（ADR-0302 §4）。
+      onFsUnsupported: (peer) => {
+        const msg: ChatMessage = { id: uid("fsu"), outgoing: false, text: tRef.current("fs_unsupportedWarning"), at: Date.now() };
+        setConvos((prev) => ({ ...prev, [peer]: [...(prev[peer] ?? []), msg] }));
+      },
       // ADR-0242 階段③：引擎同步來的每對話靜音 → 對帳本機 groupPrefs.muted（遠端 LWW 為權威）。
       onMutes: (ids) => {
         const muted = new Set(ids);

@@ -136,6 +136,7 @@ import {
   openWrapWithEks,
   pruneFsKeys,
   readEkAnnounce,
+  readFsCapability,
   type UnwrappedMessage,
 } from "@cinderous/core";
 import { loadRelayCheck, recordAuthObservation } from "./relay-check.js"; // ADR-0275：A 層健檢
@@ -189,6 +190,17 @@ const MAX_PENDING_PER_GROUP = 64;
 const nowSec = () => Math.floor(Date.now() / 1000);
 
 const shortNpub = (npub: string) => `${npub.slice(0, 12)}…`;
+
+/**
+ * 回傳去掉某個鍵的新物件。
+ * 一律回 `Record`（缺席時回 `{}`）——`exactOptionalPropertyTypes` 下回 `undefined`
+ * 無法指派給可選欄位，且空物件與缺席在儲存語意上等價（讀取端皆以 `?.[k]` 取值）。
+ */
+function omitKey<T>(map: Record<string, T> | undefined, key: string): Record<string, T> {
+  if (!map) return {};
+  const { [key]: _removed, ...rest } = map;
+  return rest;
+}
 
 /**
  * 持久化訊息 → UI 訊息映射（含檔案附件，ADR-0093）。檔案訊息不含位元組：
@@ -1166,8 +1178,35 @@ export class RelayChatBackend implements ChatBackend {
   }
   /** TOFU 釘選「此聯絡人期望 FS」（見其簽章個人檔 `fs` 宣告）。 */
   private pinFs(pubkey: PubkeyHex): void {
-    if (this.fsState.pinned?.[pubkey]) return;
-    this.fsState = { ...this.fsState, pinned: { ...(this.fsState.pinned ?? {}), [pubkey]: true } };
+    const wasUnsupported = this.fsState.unsupported?.[pubkey] !== undefined;
+    if (this.fsState.pinned?.[pubkey] && !wasUnsupported) return;
+    this.fsState = {
+      ...this.fsState,
+      pinned: { ...(this.fsState.pinned ?? {}), [pubkey]: true },
+      ...(wasUnsupported ? { unsupported: omitKey(this.fsState.unsupported, pubkey) } : {}),
+    };
+    this.persistFs();
+  }
+  /**
+   * 對方**明示退場**（`fs=none`，ADR-0306 D3.3 硬退）：解除釘選。
+   *
+   * 這是唯一會解除釘選的路徑，且其安全性來自 ADR-0245 §81——`fs` 在**簽章個人檔**內、
+   * **不可偽造** ⇒ 攻擊者無法偽造退場宣告來剝奪你的 FS，只能扣住對方的新個人檔，
+   * 而那樣我們仍看到舊的 `ek-v1`、仍然警告 ⇒ **失敗方向落在安全側**。
+   */
+  private unpinFs(pubkey: PubkeyHex): void {
+    if (!this.fsState.pinned?.[pubkey] && this.fsState.unsupported?.[pubkey] === undefined) return;
+    this.fsState = {
+      ...this.fsState,
+      pinned: omitKey(this.fsState.pinned, pubkey),
+      unsupported: omitKey(this.fsState.unsupported, pubkey),
+    };
+    this.persistFs();
+  }
+  /** 對方宣告了我們不支援的機制：記下原始字串，供送訊時給出**正確的**訊息（非降級）。 */
+  private markFsUnsupported(pubkey: PubkeyHex, declared: string): void {
+    if (this.fsState.unsupported?.[pubkey] === declared) return;
+    this.fsState = { ...this.fsState, unsupported: { ...(this.fsState.unsupported ?? {}), [pubkey]: declared } };
     this.persistFs();
   }
   /** 降級偵測（ADR-0245）：已釘選 FS 的聯絡人卻無其 EK → 送訊會退回靜態＝疑似降級，回 true 供警告。 */
@@ -1721,8 +1760,22 @@ export class RelayChatBackend implements ChatBackend {
 
     const profile = parseProfile(rumor);
     if (profile) {
-      // ADR-0245：對方簽章個人檔宣告 FS capability → TOFU 釘選（不可偽造；日後無其 EK 不得靜默退回靜態）。
-      if (profile.fs === FS_CAPABILITY) this.pinFs(sender);
+      // ADR-0245／0306 D3.3c：對方簽章個人檔的 FS 能力宣告（不可偽造）分四種處置。
+      // 舊碼只做 `=== FS_CAPABILITY` 的精確比對，於是「明示退場」與「宣告了更新的機制」
+      // 都掉進「沒有 FS」那一格——前者永遠解不掉釘選、後者被誤報為降級（ADR-0302 §2）。
+      switch (readFsCapability(profile.fs)) {
+        case "fs":
+          this.pinFs(sender);
+          break;
+        case "retired":
+          this.unpinFs(sender);
+          break;
+        case "unknown":
+          this.markFsUnsupported(sender, profile.fs as string);
+          break;
+        case "absent":
+          break; // 沒有宣告＝今天絕大多數聯絡人，行為不變
+      }
       // ADR-0061：以對方自選暱稱更新顯示名稱（僅在變動時）。
       // **請求區的人也算**（ADR-0121）：否則請求清單只看得到 `npub1abc…`，使用者無從判斷；
       // 而且 `acceptRequest()` 會把那個陳舊的縮寫帶進聯絡人。
@@ -2565,7 +2618,11 @@ export class RelayChatBackend implements ChatBackend {
     const now = nowSec();
     const disappearAt = ttlSeconds ? now + ttlSeconds : undefined;
     // ADR-0245 降級偵測：已釘選 FS 的聯絡人卻無其 EK → 不靜默退回靜態，發警告（訊息仍送出，非靜默）。
-    if (this.fsWouldDowngrade(to)) this.handlers?.onFsDowngrade?.(to);
+    // ADR-0306 D3.3c：先問「對方是不是升級到我們不支援的機制」——那不是降級，
+    // 說成降級＝把「你該更新」講成「對方可能被攻擊」（ADR-0302 §4 的紅線）。
+    const declared = this.fsState.unsupported?.[to];
+    if (declared !== undefined) this.handlers?.onFsUnsupported?.(to, declared);
+    else if (this.fsWouldDowngrade(to)) this.handlers?.onFsDowngrade?.(to);
     const fs = this.fsSendOpt(); // ADR-0245：啟用 FS 時加密到收件人 EK＋內嵌我的 EK（不知對方 EK 則退回身分）
     const wrapped = wrapMessage(text, this.sk, to, {
       now,

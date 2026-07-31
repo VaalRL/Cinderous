@@ -1,4 +1,4 @@
-import { ASSET_CHUNK_CHARS, contentHash, KIND, RelayClient, applyRosterRotations, generateSecretKey, getPublicKey, npubEncode, nsecDecode, nsecEncode, shardPrefix, signOrgRoster, type NostrEvent, type RelayClientHandlers, wrapGroupControl, wrapGroupMessage, wrapMessage, wrapReceipt } from "@cinderous/core";
+import { ASSET_CHUNK_CHARS, contentHash, FS_CAPABILITY, FS_RETIRED, KIND, RelayClient, applyRosterRotations, generateSecretKey, getPublicKey, npubEncode, nsecDecode, nsecEncode, shardPrefix, signOrgRoster, type NostrEvent, type RelayClientHandlers, wrapGroupControl, wrapGroupMessage, wrapMessage, wrapProfile, wrapReceipt } from "@cinderous/core";
 import { createInMemoryRelayNetwork, createShardedRelayNetwork, MessageStore } from "@cinderous/relay";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryStorage } from "../storage/memory.js";
@@ -3305,5 +3305,109 @@ describe("前向保密（ADR-0245 Phase 1b：opt-in 手動輪替）", () => {
     expect(bIncoming.map((m) => m.text)).toContain("退回靜態"); // B（未啟用、用 IK）照樣解得開
     a.stop();
     b.stop();
+  });
+});
+
+describe("FS 退場語意（ADR-0306 D3.3c：軟／硬退共用的能力宣告原語）", () => {
+  /** 以 Bob 的身分金鑰簽一份帶 `fs` 宣告的個人檔，直送 Alice。 */
+  const sendProfile = (bobSk: Uint8Array, alicePk: string, fs: string, net: ReturnType<typeof createInMemoryRelayNetwork>) => {
+    const ev = wrapProfile({ name: "Bob", fs }, bobSk, alicePk);
+    net.connect("bob-profile", {}).publish(ev);
+  };
+
+  it("🔴 硬退：對方明示 fs=none → 解除釘選，不再發降級警告", () => {
+    const net = createInMemoryRelayNetwork();
+    const bobSk = generateSecretKey();
+    const bobPk = getPublicKey(bobSk);
+    const storeA = new MemoryStorage();
+    storeA.saveFsState({ enabled: true, keys: [], contactEks: {}, pinned: { [bobPk]: true } });
+    const a = new RelayChatBackend(storeA, (h) => net.connect("a", h), "Alice");
+    const downgrades: string[] = [];
+    a.start({ ...noop, onFsDowngrade: (pk) => downgrades.push(pk) });
+
+    // 停用前：仍會警告（現況行為，不得改變）
+    a.sendMessage(bobPk, "停用前");
+    expect(downgrades).toContain(bobPk);
+    downgrades.length = 0;
+
+    sendProfile(bobSk, a.self.pubkey, FS_RETIRED, net);
+    a.sendMessage(bobPk, "停用後");
+
+    // 停用是**明示且不可偽造**的（簽章個人檔）⇒ 不得再說「對方可能正在被攻擊」
+    expect(downgrades).toEqual([]);
+    a.stop();
+  });
+
+  it("🔴 不認得的機制（升級）不得被當成降級——那句話會說謊", () => {
+    const net = createInMemoryRelayNetwork();
+    const bobSk = generateSecretKey();
+    const bobPk = getPublicKey(bobSk);
+    const storeA = new MemoryStorage();
+    storeA.saveFsState({ enabled: true, keys: [], contactEks: {}, pinned: { [bobPk]: true } });
+    const a = new RelayChatBackend(storeA, (h) => net.connect("a", h), "Alice");
+    const downgrades: string[] = [];
+    const unsupported: [string, string][] = [];
+    a.start({
+      ...noop,
+      onFsDowngrade: (pk) => downgrades.push(pk),
+      onFsUnsupported: (pk, declared) => unsupported.push([pk, declared]),
+    });
+
+    sendProfile(bobSk, a.self.pubkey, "ratchet-v1", net);
+    a.sendMessage(bobPk, "對方升級了");
+
+    // 對方是升級不是降級（ADR-0302 §2）⇒ 走另一條回報，且要帶出它宣告了什麼
+    expect(downgrades).toEqual([]);
+    expect(unsupported).toEqual([[bobPk, "ratchet-v1"]]);
+    a.stop();
+  });
+
+  it("軟退：對方從不認得的機制改回 ek-v1 → 回到正常釘選（狀態不得卡住）", () => {
+    const net = createInMemoryRelayNetwork();
+    const bobSk = generateSecretKey();
+    const bobPk = getPublicKey(bobSk);
+    const storeA = new MemoryStorage();
+    storeA.saveFsState({ enabled: true, keys: [], contactEks: {}, pinned: {} });
+    const a = new RelayChatBackend(storeA, (h) => net.connect("a", h), "Alice");
+    const downgrades: string[] = [];
+    const unsupported: string[] = [];
+    a.start({
+      ...noop,
+      onFsDowngrade: (pk) => downgrades.push(pk),
+      onFsUnsupported: (pk) => unsupported.push(pk),
+    });
+
+    sendProfile(bobSk, a.self.pubkey, "ek-v9", net);
+    sendProfile(bobSk, a.self.pubkey, FS_CAPABILITY, net);
+    a.sendMessage(bobPk, "改回來了");
+
+    expect(unsupported).toEqual([]);
+    expect(downgrades).toContain(bobPk); // 已釘選又無其 EK ＝真的降級，該警告
+    a.stop();
+  });
+
+  it("沒有宣告 fs 的聯絡人（今天絕大多數）行為完全不變", () => {
+    const net = createInMemoryRelayNetwork();
+    const bobSk = generateSecretKey();
+    const bobPk = getPublicKey(bobSk);
+    const storeA = new MemoryStorage();
+    storeA.saveFsState({ enabled: true, keys: [], contactEks: {}, pinned: {} });
+    const a = new RelayChatBackend(storeA, (h) => net.connect("a", h), "Alice");
+    const downgrades: string[] = [];
+    const unsupported: string[] = [];
+    a.start({
+      ...noop,
+      onFsDowngrade: (pk) => downgrades.push(pk),
+      onFsUnsupported: (pk) => unsupported.push(pk),
+    });
+
+    const ev = wrapProfile({ name: "Bob" }, bobSk, a.self.pubkey);
+    const c = net.connect("bob-profile", {});
+    c.publish(ev);
+    a.sendMessage(bobPk, "沒宣告");
+
+    expect(downgrades).toEqual([]); // 沒釘選＝不打擾
+    expect(unsupported).toEqual([]);
+    a.stop();
   });
 });

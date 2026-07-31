@@ -284,6 +284,16 @@ export interface ChatBackendEvents {
    * → 該則會退回靜態（無 FS）。UI 應提示使用者（非靜默）——可能是對方 EK 尚未同步（稍後重試），或疑似降級。
    */
   onFsDowngrade?(peer: PubkeyHex): void;
+  /**
+   * 對方宣告了**我們不支援的** FS 機制（ADR-0306 D3.3c／ADR-0302 §2）。
+   *
+   * ⚠ **不得**與 `onFsDowngrade` 混用：那句話的意思是「對方可能正在被攻擊」，
+   * 而這裡的事實是**對方升級了、我們這版跟不上** ⇒ 正確的訊息是「請更新」。
+   * 把後者顯示成前者＝說謊（同 ADR-0278／0287 的立場）。
+   *
+   * `declared` 為對方簽章個人檔內的原始能力字串（例如 `ratchet-v1`），供 UI 顯示與診斷。
+   */
+  onFsUnsupported?(peer: PubkeyHex, declared: string): void;
 }
 
 /**

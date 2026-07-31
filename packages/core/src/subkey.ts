@@ -24,6 +24,41 @@ export const EK_ANNOUNCE_KIND = 10040;
 /** FS 能力宣告版本字串（ADR-0245）：寫進簽章個人檔的 `fs` 欄位供 TOFU 釘選/降級偵測。 */
 export const FS_CAPABILITY = "ek-v1";
 
+/**
+ * **明示退場**的能力值（ADR-0306 D3.3）：宣告「我不再做 FS」。
+ *
+ * 為什麼需要一個明示值，而不是把欄位拿掉：欄位缺席與「刻意停止」在收件端**看起來一樣**，
+ * 而後者會讓已釘選的對方永遠觸發降級警告（`fsWouldDowngrade`），
+ * 那句警告的意思是「對方可能正在被攻擊」——**停用與被攻擊無法區分**。
+ *
+ * 安全性由 ADR-0245 §81 的既有性質保證：`fs` 寫在**簽章個人檔**內、**不可偽造**
+ * ⇒ 攻擊者無法偽造退場宣告來剝奪你的 FS，只能扣住你的新個人檔，
+ * 而那樣對方仍看到舊的 `ek-v1`、仍然警告 ⇒ **失敗方向落在安全側**。
+ */
+export const FS_RETIRED = "none";
+
+/**
+ * 對方的 FS 能力宣告，解讀為四種**互斥**狀態（ADR-0306 D3.3c／ADR-0302 §1–2）。
+ *
+ * - `fs`：正在做我們支援的 FS（`ek-v1`）⇒ TOFU 釘選。
+ * - `retired`：**明示停止**（硬退）⇒ 應解除釘選，不得再發降級警告。
+ * - `unknown`：宣告了我們不認得的機制（例如日後的 `ek-v2`／`ratchet-v1`）
+ *   ⇒ 對方是**升級**不是降級；⚠ 舊碼把它與 `absent` 混為一談（ADR-0302 §2 指出
+ *   那個「碰巧安全但語意錯誤」的缺陷）。
+ * - `absent`：沒有宣告（今天絕大多數聯絡人）。
+ */
+export type FsCapability = "fs" | "retired" | "unknown" | "absent";
+
+/** 解讀簽章個人檔的 `fs` 欄位。不信任網路來源：非字串／空白一律當 `absent`。 */
+export function readFsCapability(fs: unknown): FsCapability {
+  if (typeof fs !== "string") return "absent";
+  const v = fs.trim();
+  if (!v) return "absent";
+  if (v === FS_CAPABILITY) return "fs";
+  if (v === FS_RETIRED) return "retired";
+  return "unknown";
+}
+
 /** rumor 內嵌 EK hint 的 tag 名（比照 ADR-0035 relay hint；夾在**加密內層** rumor、中繼看不到）。 */
 export const EK_HINT_TAG = "ek";
 
