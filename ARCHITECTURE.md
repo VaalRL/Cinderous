@@ -162,7 +162,13 @@
 - ~~monorepo 工具與行動端共用程度？~~（已定案：**pnpm workspace**；行動端共用 core/engine/i18n/theme，ADR-0086。）
 - ~~各平台版號分歧、runtime 無版號、無 release note？~~（已定案 ADR-0227：**版號 SSOT＝root `package.json`**，`pnpm run version:sync` 同步四端 app＋desktop 三處，CI `version:check` 防漂移；runtime 經 vite `define __APP_VERSION__`；release note 單一雙語來源 `docs/releases.json`——app 依 locale 顯示、`release-notes.mjs` 生成 GitHub release 雙語 body。）
 - ~~Ephemeral 心跳的容量估算與批次/合併？~~（已由 ADR-0109 定案並實作：**自適應心跳 60/300s ＋ 合併 REQ ＋ 增量收件箱**，取代 ADR-0006 的 30s。）
-- **（方向已定，實作待排）** 前向保密：現行靜態金鑰模型無 FS/PCS（NIP-44 對話金鑰恆為同一把，Gift Wrap 臨時金鑰只藏寄件人元資料、不給內容 FS）。**ADR-0236（2026-07-23 修訂）**：更正「純對稱棘輪／定期換靜態導出金鑰對 nsec 威脅無效」；**推薦近期路徑＝輪替簽章加密子鑰（粗粒度 FS，IK 不動、只輪替加密子鑰、事後刪 priv、retarget gift wrap，無 per-message 鏈故避開棘輪多設備地雷；完整設計規格見 ADR-0238）**；per-message 棘輪延後、完整 PCS/群組走 MLS（不自捲）。FS 上線前文案不得宣稱前向保密。
+- **（已實作，實驗性上線；桌面端）** 前向保密：現行靜態金鑰模型無 FS/PCS（NIP-44 對話金鑰恆為同一把，Gift Wrap 臨時金鑰只藏寄件人元資料、不給內容 FS）。**ADR-0236（2026-07-23 修訂／2026-07-31 事實更正）**：更正「純對稱棘輪／定期換靜態導出金鑰對 nsec 威脅無效」；**近期路徑＝輪替簽章加密子鑰（粗粒度 FS，IK 不動、只輪替加密子鑰、事後刪 priv、retarget gift wrap；完整設計規格見 ADR-0238、使用者面設計見 ADR-0245）**。
+  **2026-07-31 狀態更新（ADR-0306）**：ADR-0245 Phase 0–2 早已實作全測綠，原卡於 Phase 3「外部密碼學審計通過前**不得產線啟用**、文案不得宣稱 FS」。該閘門已**一分為二**——
+  - 「不得產線啟用」**已推翻**：改為**實驗性選項、預設關、啟用時明示未經審計**（設定頁常駐揭露＋啟用確認對話，兩者皆為驗收條件）。
+  - 「**文案不得宣稱 FS**」**維持且更嚴格**：不進官網功能表、不進比較表、不進行銷文案；僅得於藍圖頁作事實陳述（`roadmap-fs`）。比較表 `cp_r9a` 由 `Compare.test` 鎖為「開發中」。
+
+  **事件契約新增（ADR-0306 D3.3c）**：簽章個人檔的 `fs` 能力欄位由「精確比對 `ek-v1`」改為四態解讀 `fs`／`retired`（`"none"`，明示退場）／`unknown`（宣告了本版不支援的機制）／`absent`。`retired` 是**軟／硬退共用的退場語意**——沒有它，「刻意停用」與「被攻擊剝除 EK」在收件端**看起來一樣**，會永遠觸發降級警告。其不可偽造性來自 ADR-0245 §81（`fs` 在簽章個人檔內）。`unknown` 走 `onFsUnsupported`（「請更新」）而非 `onFsDowngrade`（「對方可能被攻擊」）——把後者顯示成前者即說謊（ADR-0302 §4）。
+  ⚠ **行動端尚無 FS UI**（引擎層與桌面端已具備）；per-message 棘輪延後（其入場費見 **ADR-0303**：per-device **session** 而非 per-device 身分）、完整 PCS/群組走 MLS（不自捲）。
 - **（方向已定，實作待排）** 多設備可變狀態 CRDT 化：訊息 id 去重、已讀水位 LWW（ADR-0108）、資產 LWW＋墓碑（ADR-0224）已定；聯絡人/群組/封鎖/設定的合併仍是 add-biased（刪除復活、解封不傳、欄位/設定不同步）。**ADR-0242** 定案輕量系統化——OR-Set＋墓碑（聯絡人/群組/封鎖）＋per-field LWW（暱稱/設定），分階段逐坑觸發。
 - ~~群組加密方案？~~（已定案 ADR-0027：Gift-Wrap 成對扇出；MLS 延後。顯示名稱走加密個人檔 kind 已實作，ADR-0061。）
 - **（方向已定，實作待排）** 中繼層元資料可連結性：連線都綁真名 → 中繼可歸屬 presence 訂閱（聯絡人集合）與 Gift Wrap 發布（送出邊）。**ADR-0237** 定案分層——Tier 0 強化 P2P 卸載、Tier 1 opt-in 嚴格 presence 模式、**自架為官方解答**；輪替金鑰 presence 因 IP 關聯與 N× 容量而否決，臨時身分連線與傳輸匿名（Tor）延後、與 DO 分片一起評估。
