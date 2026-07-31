@@ -72,3 +72,25 @@ describe("FS 文案紅線（ADR-0302 §4／ADR-0306 D1）", () => {
     expect(translate("en", "fs_title").toLowerCase()).toContain("experimental");
   });
 });
+
+// ADR-0305 §6.1：這句文案在「還原範圍」上說得比實際多。與入口整併**脫鉤**、必改。
+describe("nsec 登入的還原範圍要誠實（ADR-0305 §6.1）", () => {
+  it("🔴 不得無條件宣稱「訊息會一起回來」——貼 nsec 拿不回本機歷史，也拿不回 EK", () => {
+    // 事實：`fsState` 來自 `storage.loadFsState()`（本機），而備份碼刻意身分-only（0245 §2）
+    // ⇒ 全新裝置貼 nsec／救援碼後，中繼 7 天窗內**加密到 EK 的那部分永遠解不開**。
+    const zh = translate("zh-Hant", "signIn_useNsecHint");
+    expect(zh).not.toContain("原本的聯絡人與訊息會一起回來");
+  });
+
+  it("🔴 必須指出「更早的歷史」要靠搬家或多裝置同步", () => {
+    const zh = translate("zh-Hant", "signIn_useNsecHint");
+    expect(zh).toMatch(/搬家|同步/);
+    const en = translate("en", "signIn_useNsecHint").toLowerCase();
+    expect(en).toMatch(/transfer|sync/);
+  });
+
+  it("🔴 必須指出前向保密的子鑰不含在 nsec 裡", () => {
+    expect(translate("zh-Hant", "signIn_useNsecHint")).toContain("子鑰");
+    expect(translate("en", "signIn_useNsecHint").toLowerCase()).toContain("subkey");
+  });
+});
