@@ -22,6 +22,8 @@ export interface Copy {
   roadmap_intro: string;
   roadmap_shipped_t: string;
   roadmap_shipped_b: string;
+  roadmap_fs_t: string;
+  roadmap_fs_b: string;
   roadmap_planned_t: string;
   roadmap_p_mobile_t: string;
   roadmap_p_mobile_b: string;
@@ -323,6 +325,9 @@ const zhHant: Copy = {
   roadmap_shipped_t: "✅ 已上線",
   roadmap_shipped_b:
     "桌面版（Windows）、網頁版（瀏覽器・本地優先加密）、端到端加密訊息（Nostr NIP-17/44/59）與去中心化中繼、WebRTC P2P（檔案／在線／通話）、群組、多身分、企業名冊、通知細分開關與每對話靜音、經典 MSN 佈局（浮動視窗、聯絡人分組）。",
+  roadmap_fs_t: "🔬 前向保密：已實作，等待外部審計",
+  roadmap_fs_b:
+    "程式已完成並通過我們自己的測試，但**尚未經獨立的第三方密碼學審計**。加密的錯誤不會讓程式壞掉——它只是不保護，而且沒有任何症狀，所以我們不打算在審計完成前把它當成賣點。想提前試的人可以在應用程式的「設定 → 隱私」中自行啟用（預設關閉，啟用時會再說明一次）。",
   roadmap_planned_t: "🗓️ 未來待辦",
   roadmap_p_mobile_t: "行動版原生 App（Android／iOS）",
   roadmap_p_mobile_b:
@@ -645,6 +650,9 @@ const en: Copy = {
   roadmap_shipped_t: "✅ Shipped",
   roadmap_shipped_b:
     "Desktop (Windows), web app (browser, local-first encrypted), end-to-end encrypted messaging (Nostr NIP-17/44/59) with decentralized relays, WebRTC P2P (files / presence / calls), groups, multi-identity, enterprise roster, per-event notification toggles and per-conversation mute, and the classic MSN layout (floating windows, contact grouping).",
+  roadmap_fs_t: "🔬 Forward secrecy: implemented, awaiting external audit",
+  roadmap_fs_b:
+    "The code is complete and passes our own tests, but it has **not been reviewed by an independent cryptography audit**. Crypto bugs don't break anything visibly — they just fail to protect, with no symptoms — so we won't treat it as a selling point until that review is done. If you want to try it early, you can turn it on yourself under Settings → Privacy in the app (off by default; we explain this again when you enable it).",
   roadmap_planned_t: "🗓️ Planned",
   roadmap_p_mobile_t: "Native mobile apps (Android / iOS)",
   roadmap_p_mobile_b:

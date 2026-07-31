@@ -1541,6 +1541,14 @@ export function SettingsPanel(props: SettingsPanelProps): JSX.Element {
             <section className="settings__sec">
               <h4>{t("fs_title")}</h4>
               <p className="settings__hint">{t("fs_hint")}</p>
+              {/*
+                ADR-0306 D1：未經審計必須**明示**，且**啟用前後都要在**——
+                啟用不是把警語關掉的開關。這句話放在 hint 之後、按鈕之前，
+                使用者不可能在按下去之前沒讀到它。
+              */}
+              <p className="settings__hint settings__warn" data-testid="fs-unaudited">
+                {t("fs_unaudited")}
+              </p>
               {props.fs.enabled ? (
                 <>
                   <p className="settings__hint">✅ {t("fs_enabled")}</p>

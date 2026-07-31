@@ -278,6 +278,8 @@ export interface Messages {
   settings_invisibleHint: string;
   /** 前向保密（ADR-0245）。 */
   fs_title: string;
+  fs_unaudited: string;
+  fs_enableConfirm: string;
   fs_hint: string;
   fs_enable: string;
   fs_enabled: string;
@@ -1095,8 +1097,10 @@ const zhHant: Messages = {
   export_empty: "沒有可導出的對話。",
   settings_invisible: "隱身",
   settings_invisibleHint: "開啟後你對中繼站完全消失——既不廣播自己的在線狀態，也不向中繼查詢聯絡人是否在線。因此你的聯絡人清單不會離開這台裝置（最強的元資料隱私）。代價：你也看不到聯絡人的在線綠點。訊息收發完全正常。",
-  fs_title: "前向保密（進階）",
+  fs_title: "前向保密（實驗性）",
   fs_hint: "啟用後，發給聯絡人的訊息會加密到一把「會過期的加密子鑰」。日後你按「立即更換金鑰」並讓舊金鑰過期後，就算你的身分私鑰被竊，被側錄的舊訊息密文也解不開。保護強度取決於你多常更換。本機歷史不受影響、身分不變。",
+  fs_unaudited: "⚠️ 尚未經外部密碼學審計。這個功能已經寫完並通過我們自己的測試，但還沒有獨立的第三方檢查過它。加密的錯誤不會讓程式壞掉——它只是不保護，而且沒有任何症狀。在審計完成前，請不要把它當成可靠的保障。",
+  fs_enableConfirm: "要啟用前向保密（實驗性）嗎？\n\n・這個功能**尚未經外部密碼學審計**。\n・我們自己的測試全過，但那只證明「我們想到的情況都對」，不證明沒有漏洞。\n・請把它當成「有比沒有好」，不要當成可靠的保障。\n・你可以隨時關閉；本機歷史與身分都不受影響。",
   fs_enable: "啟用前向保密",
   fs_enabled: "前向保密已啟用",
   fs_rotate: "立即更換加密金鑰",
@@ -1876,8 +1880,10 @@ const en: Messages = {
   export_empty: "No conversations to export.",
   settings_invisible: "Invisible",
   settings_invisibleHint: "When on, you vanish from the relay entirely — you neither broadcast your own presence nor ask the relay who's online. So your contact list never leaves this device (the strongest metadata privacy). Trade-off: you can't see contacts' online dots either. Messaging works normally.",
-  fs_title: "Forward secrecy (advanced)",
+  fs_title: "Forward secrecy (experimental)",
   fs_hint: "When enabled, messages you send are encrypted to a rotating encryption subkey. After you later \"rotate the key\" and let the old one expire, even a theft of your identity private key can't decrypt previously recorded ciphertext. Strength depends on how often you rotate. Local history is unaffected; your identity doesn't change.",
+  fs_unaudited: "⚠️ Not yet externally audited. This feature is complete and passes our own tests, but no independent third party has reviewed it. Crypto bugs don't break anything visibly — they just fail to protect, with no symptoms. Until the audit is done, please don't treat this as a dependable guarantee.",
+  fs_enableConfirm: "Enable forward secrecy (experimental)?\n\n・This feature has **not been externally audited**.\n・Our own tests all pass, but that only proves the cases we thought of — it doesn't prove there are no holes.\n・Treat it as \"better than nothing\", not as a dependable guarantee.\n・You can turn it off any time; local history and your identity are unaffected.",
   fs_enable: "Enable forward secrecy",
   fs_enabled: "Forward secrecy is on",
   fs_rotate: "Rotate encryption key now",

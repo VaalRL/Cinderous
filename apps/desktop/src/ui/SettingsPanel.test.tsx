@@ -75,6 +75,24 @@ describe("前向保密設定區（ADR-0245 Phase 2）", () => {
   it("未提供 fs（如瀏覽器示範）→ 不顯示區塊", () => {
     expect(render({ initialTab: "privacy" })).not.toContain('data-testid="fs-enable"');
   });
+
+  // ADR-0306 D1：實驗性上線的硬條件——未經審計必須「明示」，不得只寫在文件裡。
+  it("🔴 未啟用時就必須看得到「尚未經外部審計」，不能等按下去才說", () => {
+    const out = render(fsProps(false));
+    expect(out).toContain('data-testid="fs-unaudited"');
+  });
+
+  it("🔴 已啟用後那句揭露不得消失（啟用不是把警語關掉的開關）", () => {
+    const out = render(fsProps(true));
+    expect(out).toContain('data-testid="fs-unaudited"');
+  });
+
+  it("🔴 標題必須帶「實驗性」，不得只寫「進階」", () => {
+    // 「進階」讀起來像「給高階使用者的成熟功能」，那正是 ADR-0306 §3 說的遮羞布。
+    const out = render(fsProps(false));
+    expect(out).toContain("實驗性");
+    expect(out).not.toContain("前向保密（進階）");
+  });
 });
 
 describe("更改顯示名稱（ADR-0144）", () => {

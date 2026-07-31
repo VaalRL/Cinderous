@@ -350,18 +350,15 @@ function shardingEnabled(): boolean {
   }
 }
 
-/**
- * 前向保密 UI 開關（ADR-0245）：**預設關（對使用者隱藏）**。上線硬閘＝「外部密碼學審計通過前，不對使用者
- * 露出 FS、文案不宣稱 FS」。引擎已實作、可用旗標開發/驗證：設 `localStorage nb.fs=1` 才顯示設定頁的 FS 區塊
- * （手動啟用＋立即更換金鑰）。審計通過後再改預設開（或移除此閘）。
- */
-function fsUiEnabled(): boolean {
-  try {
-    return localStorage.getItem("nb.fs") === "1";
-  } catch {
-    return false;
-  }
-}
+// ADR-0306 D1（2026-07-31）：原本這裡有一道 `fsUiEnabled()`——以 `localStorage nb.fs=1`
+// 把整個 FS 區塊對使用者隱藏，來源是 ADR-0245 Phase 3「審計通過前不得產線啟用」。
+//
+// 該閘門已被 ADR-0306 **一分為二**：
+//   - 「不得產線啟用」→ **推翻**。改為實驗性選項、預設關、**啟用時明示未經審計**。
+//   - 「文案不得宣稱 FS」→ **維持且更嚴格**：不進功能表、不進比較表、不進行銷文案。
+//
+// 故此處不再有隱藏閘門；揭露改由 SettingsPanel 的 `fs-unaudited` 與啟用確認對話承擔。
+// ⚠ 兩者都是**驗收條件**，不是裝飾：拿掉任何一個，這條路就退回成「遮羞布」（ADR-0306 §3）。
 
 function buildBackend(p: Profile, nsecOverride?: string, storage?: AppStorage): ChatBackend {
   if (!p.relayUrl) return new BrowserChatBackend(p.name);
@@ -2883,13 +2880,21 @@ export function App(): JSX.Element {
           onToggleReadReceipts={toggleReadReceipts}
           invisible={invisible}
           onToggleInvisible={toggleInvisible}
-          {...(activeBackend.enableFs && fsUiEnabled()
+          {...(activeBackend.enableFs
             ? {
                 fs: {
                   enabled: fsEnabled,
+                  // ADR-0306 D1：啟用前必須明示「尚未經外部審計」並取得確認。
+                  // 設定頁那句 `fs-unaudited` 是常駐揭露，這裡是**動作當下**的確認——
+                  // 兩者職責不同，不可互相取代。
                   onEnable: () => {
-                    activeBackend.enableFs!();
-                    setFsEnabled(true);
+                    void dialog()
+                      .confirm(tRef.current("fs_enableConfirm"))
+                      .then((ok) => {
+                        if (!ok) return;
+                        activeBackend.enableFs!();
+                        setFsEnabled(true);
+                      });
                   },
                   // ADR-0245：換鑰前確認並提示會斷什麼（非靜默）。
                   onRotate: () => {
