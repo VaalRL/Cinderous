@@ -2,7 +2,7 @@
 // 瀏覽器清 localStorage / IndexedDB / OPFS。呼叫端負責二次確認與呼叫後 reload。
 
 import { invoke, isTauri } from "@tauri-apps/api/core";
-import type { Profile } from "@cinderous/engine";
+import { clearStorageNamespace, type Profile } from "@cinderous/engine";
 
 /** 供清除用的最小身分資訊（pubkey＋namespace）。 */
 export type WipeTarget = Pick<Profile, "pubkey" | "namespace">;
@@ -12,15 +12,11 @@ export type WipeTarget = Pick<Profile, "pubkey" | "namespace">;
  * 空 namespace（legacy 單一身分）刻意略過——其鍵是 `nb.{suffix}`、與全域鍵（nb.profiles…）
  * 無法安全區分；該資料為 DEK 加密、無 nsec 不可解，整台清空時才一併清掉。純函式、可測。
  */
+// 🔵 ADR-0202／Fix First（2026-07-31）：實作已搬到 `@cinderous/engine` 的
+// `clearStorageNamespace`，因為**行動端也需要它**（其「移除此身分」原本沒刪本機資料）。
+// 這裡保留原名的薄轉發，避免動桌面既有呼叫端；兩端共用同一份，不留兩份漂移。
 export function clearBrowserNamespace(namespace: string): void {
-  if (!namespace) return;
-  const prefix = `nb.${namespace}.`;
-  const keys: string[] = [];
-  for (let i = 0; i < localStorage.length; i++) {
-    const k = localStorage.key(i);
-    if (k?.startsWith(prefix)) keys.push(k);
-  }
-  keys.forEach((k) => localStorage.removeItem(k));
+  clearStorageNamespace(namespace);
 }
 
 /** 移除單一身分的本機資料（金鑰＋儲存）。桌面走 Rust `wipe_identity`；瀏覽器清 localStorage。 */

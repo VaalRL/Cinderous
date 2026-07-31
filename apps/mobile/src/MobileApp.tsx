@@ -9,6 +9,7 @@ import {
   exportMime,
   type ExportFormat,
   exportRecords,
+  clearStorageNamespace,
   getDeviceId,
   LocalStorage,
   openOpfsArchive,
@@ -788,11 +789,22 @@ export function MobileApp({
     };
     setConvos((c) => ({ ...c, [peer]: [...(c[peer] ?? []), msg] }));
   };
-  /** 移除此身分（ADR-0202，破壞性）：刪目前身分的私鑰 blob 與登錄。沿用 forgetActive（ADR-0138）。 */
+  /**
+   * 移除此身分（ADR-0202，破壞性）：刪私鑰 blob、登錄，**以及該身分的本機資料**。
+   *
+   * 🔴 最後那項原本沒做：只呼叫 `forgetActive()`（＝刪 nsec blob ＋登錄），
+   * `nb.<pubkey>.*` 整批留在 localStorage——與 ADR-0202 的決策
+   * 「唯一能徹底移除身分的方式是**刪本機資料**」不符（桌面 `wipeIdentityLocal` 有做，行動端沒有）。
+   * 而留著的不只是佔空間：`fsState` 以 `deriveStorageKey(nsec)` 加密，該導出是**決定性的**
+   * ⇒ 同一把 nsec 再輸入一次就解得開，於是**一批本該被 grace 政策刪掉的 EK 私鑰被凍結保留**，
+   * 在「nsec 日後外洩」這個 FS 正要防的情境下是實質削弱。
+   */
   const removeActiveIdentity = (): void => {
     if (!confirmAction("settings_removeIdentityConfirm")) return;
+    const target = activeProfile(profiles)?.pubkey;
     backendRef.current?.stop();
     backendRef.current = null;
+    if (target) clearStorageNamespace(target);
     forgetActive();
   };
   /** 清空裝置（ADR-0202，破壞性、不可逆）：刪所有身分＋所有本機資料，回全新狀態。輸入片語才執行。 */
