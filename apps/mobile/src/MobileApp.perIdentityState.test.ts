@@ -37,6 +37,9 @@ const PER_IDENTITY = new Set([
   "selfEnterprise", "selfAdmin", "selfOwner", "selfInviteToken", "escrowList", "slotQueue", "orgTitle",
   // 連線與通話（隨後端實例而生滅）
   "connState", "callPeer", "callState", "callMedia", "localStream", "remoteStream",
+  // 前向保密開關（ADR-0245／0306）：狀態存在**該身分的儲存區**（引擎 StoredFsState），
+  // 不是全域 localStorage 鍵——與 readReceipts／cloudSync 那三個不同類，故屬 per-identity。
+  "fsEnabled",
 ]);
 
 /**

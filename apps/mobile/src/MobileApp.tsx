@@ -232,6 +232,8 @@ export function MobileApp({
   const [invisible, setInvisible] = useState(false);
   const [retentionCap, setRetentionCapState] = useState<number>(() => readRetentionCap());
   const [readReceipts, setReadReceiptsState] = useState<boolean>(() => readReadReceipts());
+  /** 前向保密是否已啟用（ADR-0245／0306 D1）。實驗性、預設關；由引擎狀態決定初值。 */
+  const [fsEnabled, setFsEnabled] = useState(false);
   const [cloudSync, setCloudSyncState] = useState<CloudSyncMode>(() => readCloudSync());
   // 通話（ADR-0101）：媒體全程 P2P，不經中繼。
   const [callPeer, setCallPeer] = useState<string | null>(null);
@@ -496,6 +498,9 @@ export function MobileApp({
     setCallMedia("audio");
     setLocalStream(null);
     setRemoteStream(null);
+    // 前向保密開關（ADR-0245／0306）：狀態存在**該身分的儲存區**（引擎 StoredFsState），
+    // 不是全域 localStorage 鍵 ⇒ 切身分必須重讀，不可沿用上一個身分的值。
+    setFsEnabled(backend.fsEnabled?.() ?? false);
     // ── per-identity 重設區 迄 ─────────────────────────────────────────────
     backend.start({
       onContacts: setContacts,
@@ -689,6 +694,14 @@ export function MobileApp({
           navigator.vibrate([120, 60, 120]);
         }
       },
+      // ADR-0245：前向保密降級警告——對已釘選 FS 的聯絡人送訊卻無其 EK，該則退回靜態。
+      // **不得靜默**：在該對話留下提示。行動端先前完全沒接這兩個 handler，等於啟用 FS 後
+      // 降級是無聲的——那比「行動端沒有 FS」更糟，故與設定開關同一批補上（ADR-0306）。
+      onFsDowngrade: (peer) => pushFsNotice(peer, "fs_downgradeWarning"),
+      // ADR-0306 D3.3c：對方宣告了我們不支援的機制＝**對方升級了**，不是降級。
+      // 刻意用另一句文案——把「你該更新」顯示成「對方可能被攻擊」就是說謊（ADR-0302 §4）。
+      // 該紅線由 packages/i18n 的文案測試鎖住，兩端共用同一份。
+      onFsUnsupported: (peer) => pushFsNotice(peer, "fs_unsupportedWarning"),
     });
     backend.setReadReceipts?.(readReceipts); // ADR-0058：互惠開關（關＝不送也不顯示對方已讀）
     setTab("chats");
@@ -753,6 +766,27 @@ export function MobileApp({
   const confirmAction = (key: MessageKey): boolean => {
     if (typeof window === "undefined" || typeof window.confirm !== "function") return true;
     return window.confirm(translate(locale, key));
+  };
+  /**
+   * 同上，但**取不到 confirm 就不做**（fail-closed）。
+   *
+   * `confirmAction` 的 fail-open 對「移除身分」那類操作可以接受（使用者已經在按了），
+   * 但用在「啟用未經審計的加密功能」上，fail-open 等於**揭露被跳過**——
+   * 而那句揭露是 ADR-0306 D1 的**驗收條件**，不是提示。安全操作的失敗方向應朝安全側。
+   */
+  const confirmRequired = (key: MessageKey): boolean => {
+    if (typeof window === "undefined" || typeof window.confirm !== "function") return false;
+    return window.confirm(translate(locale, key));
+  };
+  /** 在某對話插入一則本機提示訊息（不上網、不落 relay），供 FS 相關警告使用。 */
+  const pushFsNotice = (peer: string, key: MessageKey): void => {
+    const msg: ChatMessage = {
+      id: `fsn-${key}-${peer}-${Date.now()}`,
+      outgoing: false,
+      text: translate(localeRef.current, key),
+      at: Date.now(),
+    };
+    setConvos((c) => ({ ...c, [peer]: [...(c[peer] ?? []), msg] }));
   };
   /** 移除此身分（ADR-0202，破壞性）：刪目前身分的私鑰 blob 與登錄。沿用 forgetActive（ADR-0138）。 */
   const removeActiveIdentity = (): void => {
@@ -1569,6 +1603,28 @@ export function MobileApp({
                 onExport: exportAll,
                 readReceipts,
                 onReadReceipts: toggleReadReceipts,
+                // 前向保密（ADR-0245／0306 D1）：實驗性、預設關。引擎層與桌面共用
+                // 同一個 RelayChatBackend，故此處只是接線；`enableFs` 缺席＝這個後端
+                // 不支援（如瀏覽器示範），區塊自動不顯示。
+                // ⚠ 兩個確認都用 **fail-closed** 的 `confirmRequired`：拿不到 confirm
+                // 就不做。啟用那顆是 ADR-0306 D1 的驗收條件（揭露不得被跳過）；
+                // 換鑰那顆會讓在途訊息收不到（ADR-0245），兩者都不該 fail-open。
+                ...(backendRef.current?.enableFs
+                  ? {
+                      fs: {
+                        enabled: fsEnabled,
+                        onEnable: () => {
+                          if (!confirmRequired("fs_enableConfirm")) return;
+                          backendRef.current?.enableFs?.();
+                          setFsEnabled(true);
+                        },
+                        onRotate: () => {
+                          if (!confirmRequired("fs_rotateConfirm")) return;
+                          backendRef.current?.rotateEncryptionKey?.();
+                        },
+                      },
+                    }
+                  : {}),
                 cloudSync,
                 onCloudSync: changeCloudSync,
                 // 加密備份碼（ADR-0070）：需 relay（信封含 home relay）＋在手的 nsec。

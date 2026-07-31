@@ -115,6 +115,7 @@ export function SettingsScreen({
   onExport,
   readReceipts,
   onReadReceipts,
+  fs,
   cloudSync,
   onCloudSync,
   identities,
@@ -180,6 +181,12 @@ export function SettingsScreen({
   /** 已讀回條（ADR-0058）：opt-in＋互惠；關閉則不送、也不顯示對方已讀。 */
   readReceipts?: boolean;
   onReadReceipts?: (v: boolean) => void;
+  /**
+   * 前向保密（ADR-0245／0306 D1）：**實驗性、預設關**。未提供則不顯示整個區塊。
+   * ⚠ 區塊內的「尚未經外部審計」揭露是 ADR-0306 D1 的**驗收條件**，不是提示文字——
+   * 拿掉它，這條路就退回成 ADR-0306 §3 說的遮羞布。
+   */
+  fs?: { enabled: boolean; onEnable: () => void; onRotate: () => void };
   /** 加密雲端備份（ADR-0071）：off／basic（不含訊息）／full（含訊息）。 */
   cloudSync?: CloudSyncMode;
   onCloudSync?: (mode: CloudSyncMode) => void;
@@ -794,6 +801,46 @@ export function SettingsScreen({
             </Text>
           </Pressable>
         </View>
+
+        {/*
+          前向保密（ADR-0245／0306 D1）：實驗性、預設關。
+          版面刻意與桌面 SettingsPanel 同構——說明 → **常駐揭露** → 按鈕，
+          使用者不可能在按下去之前沒讀到那句揭露；且啟用後它不消失。
+        */}
+        {fs ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>{t("fs_title")}</Text>
+            <Text style={styles.label}>{t("fs_hint")}</Text>
+            <Text
+              testID="fs-unaudited"
+              style={[styles.label, { color: "#c0392b" }]}
+            >
+              {t("fs_unaudited")}
+            </Text>
+            {fs.enabled ? (
+              <>
+                <Text style={styles.label}>✅ {t("fs_enabled")}</Text>
+                <Pressable
+                  accessibilityRole="button"
+                  testID="fs-rotate"
+                  onPress={fs.onRotate}
+                  style={[styles.seg, { alignSelf: "flex-start", borderColor: tk.border, backgroundColor: tk.field }]}
+                >
+                  <Text style={[styles.segText, { color: tk.ink }]}>{t("fs_rotate")}</Text>
+                </Pressable>
+              </>
+            ) : (
+              <Pressable
+                accessibilityRole="button"
+                testID="fs-enable"
+                onPress={fs.onEnable}
+                style={[styles.seg, { alignSelf: "flex-start", borderColor: tk.border, backgroundColor: tk.field }]}
+              >
+                <Text style={[styles.segText, { color: tk.ink }]}>{t("fs_enable")}</Text>
+              </Pressable>
+            )}
+          </View>
+        ) : null}
 
         {/* 已讀回條（ADR-0058）：互惠——關閉則不送也不顯示對方已讀 */}
         {onReadReceipts ? (
