@@ -71,6 +71,9 @@ export function exportFullSnapshot(storage: AppStorage, identity?: StoredIdentit
     deleted: storage.loadDeleted(),
     groups,
     bootstrapList: storage.loadBootstrapList(),
+    // FS 狀態（ADR-0245）：**帶金鑰、不帶 `enabled`**（語意與理由見 StorageSnapshot.fs）。
+    // 不帶金鑰的後果不是「少個功能」，是新機**靜默丟掉**所有加密到 EK 的訊息。
+    fs: { ...storage.loadFsState(), enabled: false },
   };
 }
 
@@ -157,4 +160,7 @@ export function applyPairBundle(storage: AppStorage, bundle: PairBundle): void {
   for (const id of s.deleted) storage.markDeleted(id);
   for (const b of s.blocked) storage.blockContact(b);
   if (s.bootstrapList) storage.saveBootstrapList(s.bootstrapList);
+  // FS（ADR-0245）：舊捆包沒有這個欄位 → 略過（向後相容）。
+  // `enabled` 在匯出端已被壓為 false；此處再明寫一次，避免日後有人改了匯出端就悄悄開啟。
+  if (s.fs) storage.saveFsState({ ...s.fs, enabled: false });
 }

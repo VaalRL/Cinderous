@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { MemoryStorage } from "./memory.js";
-import { applyPairBundle, buildPairBundle, parsePairBundle } from "./pair-bundle.js";
+import { applyPairBundle, buildPairBundle, exportFullSnapshot, type PairBundle, parsePairBundle } from "./pair-bundle.js";
 
 /** 佈置一個「用了一陣子」的來源儲存：身分、聯絡人（含 hint）、群組、訊息、回應、收回、封鎖。 */
 function richStorage(): MemoryStorage {
@@ -98,3 +98,65 @@ describe("配對捆包一定要有身分（ADR-0118）", () => {
     expect(bundle.snapshot.identity?.nsec).toBe("nsec1abc");
   });
 })
+
+describe("配對捆包帶 FS 金鑰（審查發現：不帶＝新裝置永遠解不開加密到 EK 的訊息）", () => {
+  const fsState = {
+    enabled: true,
+    keys: [{ nsec: "ek-nsec-1", pk: "ek-pk-1", at: 1000 }],
+    contactEks: { bob: "bob-ek" },
+    pinned: { bob: true },
+    unsupported: { carol: "ratchet-v1" },
+  };
+
+  it("🔴 匯出必須帶上 FS 金鑰——不帶的後果是靜默丟訊息，不是少個功能", () => {
+    // 沒有 EK 私鑰時，openWrapWithEks 的候選只剩 IK，而加密到 EK 的 wrap 用 IK 解不開
+    // ⇒ relay-backend 的 `catch { return; }` 靜默丟棄 ⇒ 訊息在舊機看得到、新機永遠看不到。
+    const src = new MemoryStorage();
+    src.saveIdentity({ nsec: "nsec1", name: "我" });
+    src.saveFsState(fsState);
+    const snap = exportFullSnapshot(src);
+    expect(snap.fs?.keys).toEqual(fsState.keys);
+    expect(snap.fs?.contactEks).toEqual(fsState.contactEks);
+  });
+
+  it("🔴 但**不得**帶 `enabled`——啟用送出端是新裝置上的新安全決定（ADR-0306 D1）", () => {
+    const src = new MemoryStorage();
+    src.saveIdentity({ nsec: "nsec1", name: "我" });
+    src.saveFsState(fsState);
+    expect(exportFullSnapshot(src).fs?.enabled).toBe(false);
+  });
+
+  it("釘選與不支援記錄一併帶——否則新機啟用後降級偵測是瞎的", () => {
+    const src = new MemoryStorage();
+    src.saveIdentity({ nsec: "nsec1", name: "我" });
+    src.saveFsState(fsState);
+    const snap = exportFullSnapshot(src);
+    expect(snap.fs?.pinned).toEqual({ bob: true });
+    expect(snap.fs?.unsupported).toEqual({ carol: "ratchet-v1" });
+  });
+
+  it("匯入端落地：新機拿得到金鑰，但 FS 仍是關的", () => {
+    const src = new MemoryStorage();
+    src.saveIdentity({ nsec: "nsec1", name: "我" });
+    src.saveFsState(fsState);
+    const dst = new MemoryStorage();
+    applyPairBundle(dst, JSON.parse(buildPairBundle(src, { relayUrl: "wss://r" })) as PairBundle);
+    const out = dst.loadFsState();
+    expect(out.keys).toEqual(fsState.keys);
+    expect(out.enabled).toBe(false);
+  });
+
+  it("舊捆包沒有 fs 欄位 → 匯入不得炸（向後相容）", () => {
+    const dst = new MemoryStorage();
+    const legacy = {
+      v: 1 as const,
+      relayUrl: "wss://r",
+      snapshot: {
+        identity: { nsec: "nsec1", name: "我" },
+        contacts: [], blocked: [], messages: {}, reactions: [], deleted: [], groups: [],
+      },
+    };
+    expect(() => applyPairBundle(dst, legacy as unknown as PairBundle)).not.toThrow();
+    expect(dst.loadFsState().keys).toEqual([]);
+  });
+});

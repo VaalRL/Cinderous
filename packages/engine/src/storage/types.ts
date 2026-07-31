@@ -530,6 +530,22 @@ export interface StorageSnapshot {
   requests?: StoredContact[];
   /** 共享行程（ADR-0263）；舊快照沒有 → 匯入時退回 `[]`。 */
   calendar?: StoredCalendarEvent[];
+  /**
+   * 前向保密狀態（ADR-0245）——**`enabled` 一律為 `false`**，見下。舊快照沒有 → 匯入時略過。
+   *
+   * **為什麼一定要帶**：EK 私鑰**只**經雲端快照（opt-in）同步。搬家不帶的話，
+   * 新裝置的解封候選只剩 IK，而**加密到 EK 的 wrap 用 IK 解不開**
+   * ⇒ `relay-backend` 的 `catch { return; }` 靜默丟棄 ⇒
+   * **訊息在舊機看得到、新機永遠看不到，且完全沒有症狀。**
+   *
+   * ⚠ **為什麼這不像 ADR-0245 §2「備份碼刻意排除 EK」那樣破壞 FS**——兩者形狀不同：
+   * 備份碼**長期留存、被寫下來**，含 EK 就等於一份舊備份能解舊密文；
+   * 配對捆包是**一次性、P2P、用完即棄**，不構成同一個威脅。**不可套用同一條規則。**
+   *
+   * ⚠ **`enabled` 不帶**：解得開歷史是「不弄丟資料」，啟用送出端是**新裝置上的新安全決定**
+   * ——後者須經該裝置上的使用者確認（ADR-0306 D1），不得由搬家代為決定。
+   */
+  fs?: StoredFsState;
   messages: Record<string, StoredMessage[]>;
   reactions: StoredReaction[];
   deleted: string[];
