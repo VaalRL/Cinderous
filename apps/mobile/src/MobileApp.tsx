@@ -15,7 +15,7 @@ import {
   type PairBundle,
   shouldMuteOrgNotification,
 } from "@cinderous/engine";
-import { deriveStorageKey, generateSecretKey, makeBackupCode, newInviteToken, nsecDecode, nsecEncode, type OrgInvite } from "@cinderous/core";
+import { deriveStorageKey, generateSecretKey, GROUP_MEMBERS_MAX, groupSizeExceeded, makeBackupCode, newInviteToken, nsecDecode, nsecEncode, type OrgInvite } from "@cinderous/core";
 import {
   contactLabel,
   createPairingOffer,
@@ -882,8 +882,17 @@ export function MobileApp({
    * 建立群組（ADR-0114）。群組**無共用金鑰**（ADR-0027）：對每位其他成員各包一個 Gift Wrap
    * 扇出——所以「成員清單」就是收件人清單。建立者自動是管理者。
    */
-  const createGroup = (name: string, memberPubkeys: string[]): void =>
+  // 人數上限（ADR-0303 A3）：引擎端會直接 return，UI 若不擋就變成「按了沒反應」。
+  // 兩層都留：這裡是告知，引擎那道是防繞過，責任不同不算重複。
+  const createGroup = (name: string, memberPubkeys: string[]): void => {
+    if (groupSizeExceeded(memberPubkeys.length + 1)) {
+      if (typeof window !== "undefined" && typeof window.alert === "function") {
+        window.alert(translate(localeRef.current, "group_tooManyMembers", { max: GROUP_MEMBERS_MAX }));
+      }
+      return;
+    }
     backendRef.current?.createGroup?.(name, memberPubkeys);
+  };
   // ── 配對搬家：送出端（ADR-0118）────────────────────────────────────────
   const [pairPhase, setPairPhase] = useState<PairPhase>({ kind: "idle" });
   /** SAS 裁示的 resolve（使用者按下「相符/不符」時呼叫）。 */

@@ -73,6 +73,47 @@ export const GROUP_RECEIPT_LIST_MAX = 5;
 /** 計數制上限（含）：成員數 ≤ 此值仍收回條（只顯示數字）；超過即完全不記。 */
 export const GROUP_RECEIPT_COUNT_MAX = 10;
 
+/**
+ * 群組成員數上限（含自己）——**ADR-0303 A3，2026-07-31 決定**。
+ *
+ * **為什麼要有**：per-device session 之後，一則群訊的扇出是 **O(N×D)**
+ * （N=15、D=5 ⇒ 一則 75 顆 wrap）。而我們**沒有量過中繼的實際負載**
+ * ⇒ 在沒有數據的情況下，**先緊後放寬是可逆的，先寬後收緊是拿走使用者已有的東西**。
+ *
+ * ⚠ **只擋新增，不動既有群。** 舊版沒有上限，既有群可能已超額；
+ * 收訊端**不得**用這個上限去拒絕既有群的控制訊息（見 `groupSizeExceeded` 的用法約束）。
+ *
+ * ⚠ 放寬時請一併重估回條分級（`GROUP_RECEIPT_COUNT_MAX`）與 ADR-0109 的流量預算。
+ */
+export const GROUP_MEMBERS_MAX = 15;
+
+/**
+ * 單一身分的裝置數上限——**ADR-0303 A3，2026-07-31 決定**。
+ *
+ * ⚠ **目前沒有執行點**：per-device session 與裝置清單（ADR-0303）尚未實作。
+ * 這裡先立常數是為了**把決定固定下來**，供日後實作依循——
+ * 不是宣稱它已被強制執行。
+ *
+ * **為什麼是 5 而不是 4**：ADR-0303 §6.5 **刻意**把「移除裝置」設計得很貴
+ * （要救援碼＋一台全新裝置）⇒ **緊的上限＋昂貴的移除＝使用者卡死**。
+ * 上限必須高到很少撞到：手機＋筆電＋桌機＋平板已經 4 台。
+ *
+ * ⚠ 另記一個**被推翻的理由**：原以為「裝置越少越容易察覺多一台」是主要論據，
+ * 但偵測性來自 **E-lite 的變動警示**（清單 3→4 會警示，11→12 也會），
+ * **與數字大小幾乎無關** ⇒ 該論據不成立，真正的理由只剩扇出成本與移除成本的耦合。
+ */
+export const DEVICE_COUNT_MAX = 5;
+
+/**
+ * 群組成員數是否超過上限（`GROUP_MEMBERS_MAX`）。
+ *
+ * ⚠ **用法約束**：僅用於**擋下新增**（建群、加成員）。
+ * **不得**用於拒絕既有群的控制訊息或裁切既有成員——那會是拿走使用者已有的東西。
+ */
+export function groupSizeExceeded(memberCount: number): boolean {
+  return memberCount > GROUP_MEMBERS_MAX;
+}
+
 /** 依群組成員數（含自己）決定回條模式。 */
 export function groupReceiptMode(memberCount: number): GroupReceiptMode {
   if (memberCount <= GROUP_RECEIPT_LIST_MAX) return "list";

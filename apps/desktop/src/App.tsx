@@ -4,6 +4,8 @@ import {
   type CallState,
   generateSecretKey,
   getPublicKey,
+  GROUP_MEMBERS_MAX,
+  groupSizeExceeded,
   isBackupCode,
   makeOrgInvite,
   newGroupId,
@@ -2393,7 +2395,15 @@ export function App(): JSX.Element {
   const groupProps = activeBackend.createGroup
     ? {
         groups: arrangedGroups,
-        onCreateGroup: (name: string, members: string[]) => activeBackend.createGroup!(name, members),
+        // 人數上限（ADR-0303 A3）：引擎端會直接 return，UI 若不擋就變成「按了沒反應」。
+        // 這裡先提示再交給引擎——引擎那道仍保留（防繞過），兩層不是重複而是不同層的責任。
+        onCreateGroup: (name: string, members: string[]) => {
+          if (groupSizeExceeded(members.length + 1)) {
+            void dialog().alert(tRef.current("group_tooManyMembers", { max: GROUP_MEMBERS_MAX }));
+            return;
+          }
+          activeBackend.createGroup!(name, members);
+        },
         onOpenGroup: openChat,
         groupLabels,
         groupPinned,

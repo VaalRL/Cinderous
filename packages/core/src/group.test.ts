@@ -3,7 +3,10 @@ import { KIND } from "./constants.js";
 import {
   applyGroupControl,
   canPostToGroup,
+  DEVICE_COUNT_MAX,
+  GROUP_MEMBERS_MAX,
   groupReceiptMode,
+  groupSizeExceeded,
   groupTarget,
   newGroupId,
   parseGroupControl,
@@ -218,5 +221,35 @@ describe("群組快照（ADR-0068）", () => {
     // 組織群由名冊權威管理（ADR-0049），快照不得觸碰
     const org: Group = { ...g, org: true };
     expect(applyGroupControl(org, snap, alicePk)).toEqual(org);
+  });
+});
+
+describe("規模上限（ADR-0303 A3：D=5／N=15，先緊後放寬）", () => {
+  it("常數本身", () => {
+    expect(DEVICE_COUNT_MAX).toBe(5);
+    expect(GROUP_MEMBERS_MAX).toBe(15);
+  });
+
+  it("建群：成員數（含自己）在上限內＝可建", () => {
+    expect(groupSizeExceeded(GROUP_MEMBERS_MAX)).toBe(false);
+    expect(groupSizeExceeded(1)).toBe(false);
+  });
+
+  it("🔴 超過上限＝擋下", () => {
+    expect(groupSizeExceeded(GROUP_MEMBERS_MAX + 1)).toBe(true);
+  });
+
+  it("🔴 上限只擋「新增」，不得弄壞既有超額群組——那會是拿走使用者已有的東西", () => {
+    // 舊版沒有上限，既有群可能已超額（或日後放寬後又收緊）。
+    // 判定函式只回答「這個數字超了嗎」，收訊端**不得**用它去拒絕既有群的控制訊息。
+    // 這條測試釘住語意：函式本身不帶副作用、不做「刪掉超額成員」之類的事。
+    const before: Group = { id: "g1", name: "舊群", admin: "a", members: Array.from({ length: 30 }, (_, i) => `m${i}`) };
+    const after = applyGroupControl(before, { type: "group-add", id: "g1", member: "新成員" }, "a");
+    expect(after.members).toHaveLength(31);
+  });
+
+  it("上限與回條分級相容：N=15 落在「完全不記回條」那一級（ADR-0095）", () => {
+    // 若日後放寬 N，這條會提醒回條成本也跟著變。
+    expect(groupReceiptMode(GROUP_MEMBERS_MAX)).toBe("off");
   });
 });

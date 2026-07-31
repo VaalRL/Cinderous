@@ -26,6 +26,7 @@ import {
   type Filter,
   groupTarget,
   groupReceiptMode,
+  groupSizeExceeded,
   generateSecretKey,
   getPublicKey,
   HEARTBEAT_ACTIVE_MS,
@@ -3619,6 +3620,12 @@ export class RelayChatBackend implements ChatBackend {
 
   createGroup(name: string, memberPubkeys: PubkeyHex[]): void {
     const members = [this.self.pubkey, ...memberPubkeys.filter((p) => p !== this.self.pubkey)];
+    // 人數上限（ADR-0303 A3：N=15）。per-device session 後一則群訊扇出為 O(N×D)，
+    // 而中繼實際負載**未量測** ⇒ 先緊後放寬（可逆），不先寬後收緊（那是拿走使用者已有的東西）。
+    // ⚠ **不建立**而非默默裁掉超額成員——裁掉是**靜默的資料損失**：
+    // 使用者以為那些人在群裡，實際上不在。
+    // ⚠ 只擋新增：既有超額群組（舊版沒有上限）完全不受影響。
+    if (groupSizeExceeded(members.length)) return;
     const group: Group = this.stampAt({ id: newGroupId(), name: name.trim() || "群組", admin: this.self.pubkey, members });
     this.storage.saveGroup(group);
     this.groups = this.storage.loadGroups();

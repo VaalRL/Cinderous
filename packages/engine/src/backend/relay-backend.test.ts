@@ -3507,3 +3507,39 @@ describe("FS 警告去重（審查發現：每送一則插一次會洗版）", (
     b.stop();
   });
 });
+
+describe("群組人數上限（ADR-0303 A3：N=15，先緊後放寬）", () => {
+  const pks = (n: number) => Array.from({ length: n }, () => getPublicKey(generateSecretKey()));
+
+  it("剛好在上限（含自己 15 人）→ 建得起來", () => {
+    const net = createInMemoryRelayNetwork();
+    const s = new MemoryStorage();
+    const a = new RelayChatBackend(s, (h) => net.connect("a", h), "Alice");
+    a.start(noop);
+    a.createGroup("剛好", pks(14)); // +自己＝15
+    expect(s.loadGroups()).toHaveLength(1);
+    a.stop();
+  });
+
+  it("🔴 超過上限 → 不建立（而非默默裁掉成員）", () => {
+    // 裁掉成員會是**靜默的資料損失**：使用者以為那些人在群裡，實際上不在。
+    const net = createInMemoryRelayNetwork();
+    const s = new MemoryStorage();
+    const a = new RelayChatBackend(s, (h) => net.connect("a", h), "Alice");
+    a.start(noop);
+    a.createGroup("太多", pks(15)); // +自己＝16
+    expect(s.loadGroups()).toHaveLength(0);
+    a.stop();
+  });
+
+  it("🔴 既有超額群組不受影響——上限只擋新增", () => {
+    const net = createInMemoryRelayNetwork();
+    const s = new MemoryStorage();
+    const big = { id: "g-old", name: "舊大群", admin: "a", members: pks(30) };
+    s.saveGroup(big);
+    const a = new RelayChatBackend(s, (h) => net.connect("a", h), "Alice");
+    a.start(noop);
+    expect(s.loadGroups().find((g) => g.id === "g-old")?.members).toHaveLength(30);
+    a.stop();
+  });
+});
