@@ -8,6 +8,7 @@
 // 讓瀏覽器 LocalStorage 與 TauriStorage 一體適用。
 
 import { stripDeviceLocalFile } from "./types.js";
+import { utf8ByteLength } from "./utf8-size.js";
 import type { AppStorage, StorageSnapshot, StoredIdentity, StoredMessage } from "./types.js";
 
 /**
@@ -99,17 +100,32 @@ export function exportFullSnapshot(storage: AppStorage, identity?: StoredIdentit
  * ⇒ **決定：不做續傳**，階段 2 改為「可跳過、失敗可整份重來」，
  * 但**在量大時誠實提示重來的風險**（使用者指定）。
  *
- * 取值依據**來自量測而非拍腦袋**：實測每則文字訊息約 200–300 bytes，
- * 8 MB ≈ 三萬則上下——落在「累積了不少歷史」而非「用兩天就跳警告」。
+ * 取值依據**來自量測而非拍腦袋**：實測每則中文文字訊息約 **193 UTF-8 bytes**
+ * （正文 ~90 ＋ id ~30 ＋ JSON 結構 ~70），8 MB ≈ **四萬則上下**
+ * ——落在「累積了不少歷史」而非「用兩天就跳警告」。
  * `pair-bundle.test.ts` 有測試把這個對應關係釘住，改門檻時會看到它的實際意義。
+ *
+ * ⚠ **原本這裡寫「200–300 bytes」的量測是用 `String.length` 做的**
+ * ⇒ **訂門檻的依據與門檻本身錯在同一個地方，兩個錯誤互相掩護，測試自然會過。**
+ * 已一併改為以 UTF-8 位元組量測。
+ * ⚠ 修正時另一個誇大也要記下：低估幅度對**真實捆包是約 1.4 倍**，不是三倍——
+ * 捆包裡有大量 ASCII（id、pubkey、時間戳、JSON 鍵），只有正文是中文。
  *
  * ⚠ 注意：檔案**只帶 metadata 不帶位元組**（`StoredFileMeta` 無 bytes），故主要成本是訊息與頭像。
  */
 export const LARGE_BUNDLE_BYTES = 8 * 1024 * 1024;
 
-/** 這份捆包是否大到值得先警告「失敗要整份重來」。 */
+/**
+ * 這份捆包是否大到值得先警告「失敗要整份重來」。
+ *
+ * 🔴 **以 UTF-8 位元組計，不是 `String.length`**（審查發現的錯誤，2026-08-01 修）：
+ * 傳輸實際送的是 `new TextEncoder().encode(bundleJson)`（`pairing.ts`），
+ * 而 `.length` 是 UTF-16 code unit——中文一字 1 unit 但 **3 bytes**
+ * ⇒ 舊寫法對中文內容**低估到三分之一**，警告會晚三倍才跳，
+ * 而那個警告存在的理由正是「早點講」。
+ */
 export function isLargeBundle(bundleJson: string): boolean {
-  return bundleJson.length > LARGE_BUNDLE_BYTES;
+  return utf8ByteLength(bundleJson) > LARGE_BUNDLE_BYTES;
 }
 
 export function buildPairBundle(

@@ -3619,7 +3619,10 @@ export class RelayChatBackend implements ChatBackend {
   }
 
   createGroup(name: string, memberPubkeys: PubkeyHex[]): void {
-    const members = [this.self.pubkey, ...memberPubkeys.filter((p) => p !== this.self.pubkey)];
+    // 去重（審查發現）：`Set` 保序，自己排第一。原本只濾掉自己、**不去重**，於是
+    // (a) 重複的 pubkey 會計入人數上限 ⇒ 15 個不同的人可能因為傳了重複而被擋；
+    // (b) 重複成員會留在清單裡 ⇒ **扇出對同一個人送兩次**（既有問題，一併修）。
+    const members = [...new Set([this.self.pubkey, ...memberPubkeys])];
     // 人數上限（ADR-0303 A3：N=15）。per-device session 後一則群訊扇出為 O(N×D)，
     // 而中繼實際負載**未量測** ⇒ 先緊後放寬（可逆），不先寬後收緊（那是拿走使用者已有的東西）。
     // ⚠ **不建立**而非默默裁掉超額成員——裁掉是**靜默的資料損失**：

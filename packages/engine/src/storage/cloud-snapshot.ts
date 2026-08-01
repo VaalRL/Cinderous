@@ -22,6 +22,7 @@ import {
   type SyncedPrefs,
 } from "@cinderous/core";
 import { stripDeviceLocalFile } from "./types.js";
+import { utf8ByteLength } from "./utf8-size.js";
 import type {
   AppStorage,
   OrSetName,
@@ -149,10 +150,16 @@ export function buildSnapshotContent(
   // 則數＋位元組雙預算（審查修正 #2）：由新到舊累計，超過任一上限即停——
   // 保證「最新優先的前綴」且序列化後不會被 relay 的單顆上限拒收。
   const kept: StoredMessage[] = [];
-  let used = JSON.stringify({ ...base, messages: [] }).length;
+  // 🔴 以 **UTF-8 位元組**計，不是 `String.length`（審查發現，2026-08-01 修）：
+  // 這個預算的目的是「序列化後不會被 relay 的**單顆位元組上限**拒收」，而 `.length` 是
+  // UTF-16 code unit——中文一字 1 unit 但 3 bytes ⇒ 舊寫法**低估**實際體積。
+  // ⚠ 方向本來是安全的（低估 ⇒ 更早停止裝訊息 ⇒ 不會撞破上限），
+  // 但那讓預算的**實際意義**變得不可知：同一個數字對中文與英文使用者代表不同的量。
+  // 改用真實位元組後，`SNAPSHOT_PLAINTEXT_BUDGET` 才真的是「180 KB」。
+  let used = utf8ByteLength(JSON.stringify({ ...base, messages: [] }));
   for (const m of all) {
     if (kept.length >= SNAPSHOT_MESSAGE_CAP) break;
-    const len = JSON.stringify(m).length + 1;
+    const len = utf8ByteLength(JSON.stringify(m)) + 1;
     if (used + len > SNAPSHOT_PLAINTEXT_BUDGET) break;
     kept.push(m);
     used += len;

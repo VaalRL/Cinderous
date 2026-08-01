@@ -3543,3 +3543,29 @@ describe("群組人數上限（ADR-0303 A3：N=15，先緊後放寬）", () => {
     a.stop();
   });
 });
+
+describe("建群的成員去重（審查發現：重複會誤觸人數上限）", () => {
+  it("🔴 重複的 pubkey 只算一次——15 個不同的人不該因為傳了重複而被擋", () => {
+    const net = createInMemoryRelayNetwork();
+    const s = new MemoryStorage();
+    const a = new RelayChatBackend(s, (h) => net.connect("a", h), "Alice");
+    a.start(noop);
+    const distinct = Array.from({ length: 14 }, () => getPublicKey(generateSecretKey()));
+    a.createGroup("有重複", [...distinct, distinct[0]!, distinct[1]!]); // 16 筆但只有 14 個不同的人
+    const g = s.loadGroups()[0];
+    expect(g).toBeDefined();
+    expect(g?.members).toHaveLength(15); // 自己 ＋ 14 位
+    a.stop();
+  });
+
+  it("成員清單本身也不得有重複（重複會讓扇出送兩次）", () => {
+    const net = createInMemoryRelayNetwork();
+    const s = new MemoryStorage();
+    const a = new RelayChatBackend(s, (h) => net.connect("a", h), "Alice");
+    a.start(noop);
+    const bob = getPublicKey(generateSecretKey());
+    a.createGroup("重複 bob", [bob, bob, bob]);
+    expect(s.loadGroups()[0]?.members.filter((m) => m === bob)).toHaveLength(1);
+    a.stop();
+  });
+});

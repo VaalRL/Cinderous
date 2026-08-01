@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { MemoryStorage } from "./memory.js";
 import { applyPairBundle, buildPairBundle, exportFullSnapshot, isLargeBundle, LARGE_BUNDLE_BYTES, type PairBundle, parsePairBundle } from "./pair-bundle.js";
+import { utf8ByteLength } from "./utf8-size.js";
 
 /** 佈置一個「用了一陣子」的來源儲存：身分、聯絡人（含 hint）、群組、訊息、回應、收回、封鎖。 */
 function richStorage(): MemoryStorage {
@@ -179,28 +180,47 @@ describe("配對捆包的大小（ADR-0072／0305 §7：不做續傳，改為誠
     return s;
   };
 
+  /** 🔴 一律以 **UTF-8 位元組**量測——用 `String.length` 的話，對中文會低估到三分之一，
+   *  而傳輸實際送的是 UTF-8（`pairing.ts` 的 `TextEncoder`）。當初就是這裡跟門檻錯在同一處，
+   *  兩個錯誤互相掩護，測試才會過。 */
+  const bundleBytes = (n: number) => utf8ByteLength(buildPairBundle(withMessages(n), { relayUrl: "wss://r" }));
+
   it("量測：每則訊息的捆包成本（供 LARGE_BUNDLE_BYTES 門檻取值依據）", () => {
-    const base = buildPairBundle(withMessages(0), { relayUrl: "wss://r" }).length;
-    const k1 = buildPairBundle(withMessages(1000), { relayUrl: "wss://r" }).length;
-    const perMsg = (k1 - base) / 1000;
+    const perMsg = (bundleBytes(1000) - bundleBytes(0)) / 1000;
     // 這條不是斷言效能，是**把數字釘在測試裡**——日後訊息結構變胖會在這裡看到。
-    // 目前約 200–300 bytes/則（UTF-8 中文 3 bytes/字）。
-    expect(perMsg).toBeGreaterThan(100);
-    expect(perMsg).toBeLessThan(600);
+    // 實測約 193 UTF-8 bytes/則（中文正文 ~90 ＋ id ~30 ＋ JSON 結構 ~70）。
+    expect(perMsg).toBeGreaterThan(150);
+    expect(perMsg).toBeLessThan(400);
+  });
+
+  it("🔴 量測必須用 UTF-8 位元組，不得用 String.length（這正是原本的錯）", () => {
+    const json = buildPairBundle(withMessages(200), { relayUrl: "wss://r" });
+    // 中文內容下兩者差距顯著；若哪天有人把量測改回 .length，這條會紅。
+    // ⚠ 差距是 **~1.4 倍**而非三倍：捆包裡有大量 ASCII（id、pubkey、時間戳、JSON 鍵），
+    // 只有正文是中文。純中文字串才會到三倍。
+    expect(utf8ByteLength(json)).toBeGreaterThan(json.length * 1.2);
   });
 
   it("🔴 門檻要落在「重傳會讓人不爽」的量級，而不是隨手取的整數", () => {
     // LARGE_BUNDLE_BYTES 對應約多少則訊息——若哪天改了門檻，這裡會顯示它的實際意義。
-    const base = buildPairBundle(withMessages(0), { relayUrl: "wss://r" }).length;
-    const perMsg = (buildPairBundle(withMessages(1000), { relayUrl: "wss://r" }).length - base) / 1000;
+    const perMsg = (bundleBytes(1000) - bundleBytes(0)) / 1000;
     const msgsAtThreshold = LARGE_BUNDLE_BYTES / perMsg;
     // 門檻應該落在「累積了不少歷史」的使用者，而不是剛用兩天就跳警告。
     expect(msgsAtThreshold).toBeGreaterThan(5_000);
     expect(msgsAtThreshold).toBeLessThan(100_000);
   });
 
-  it("isLargeBundle：門檻上下", () => {
+  it("isLargeBundle：門檻上下（ASCII，1 byte/字）", () => {
     expect(isLargeBundle("a".repeat(LARGE_BUNDLE_BYTES - 1))).toBe(false);
     expect(isLargeBundle("a".repeat(LARGE_BUNDLE_BYTES + 1))).toBe(true);
+  });
+
+  it("🔴 中文以 3 bytes 計——舊寫法在這裡會漏報", () => {
+    // 三分之一門檻的中文字串＝剛好未達；再多一點就超過。舊的 `.length` 寫法兩者都判 false。
+    const justUnder = "中".repeat(Math.floor(LARGE_BUNDLE_BYTES / 3) - 1);
+    const justOver = "中".repeat(Math.floor(LARGE_BUNDLE_BYTES / 3) + 2);
+    expect(isLargeBundle(justUnder)).toBe(false);
+    expect(isLargeBundle(justOver)).toBe(true);
+    expect(justOver.length).toBeLessThan(LARGE_BUNDLE_BYTES); // ← 證明 .length 會漏報
   });
 });
