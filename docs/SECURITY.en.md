@@ -81,6 +81,17 @@
 8. **Replay/clock**: ephemeral events use a `created_at` window + event-id deduplication to prevent replay (PRD §9); cross-device ordering does not trust `created_at` alone.
 9. **Dependency trust**: third-party libraries such as `nostr-tools`, `@noble/*`, `qrcode-generator`, `rusqlite`, and `tokio-tungstenite`; supply-chain risk is mitigated by pinning versions in the lockfile.
 
+## Inherent Limitations of the Implementation Language (TypeScript; ADR-0307)
+
+The cryptographic implementation stays as **a single TypeScript codebase** (no Rust/WASM, no per-platform rewrites; decision and rationale in **ADR-0307**). That decision carries two costs that are **real and do not go away**, and auditors should factor them in:
+
+- **Constant-time execution cannot be guaranteed.** JS engines make no constant-time guarantees. The primitives themselves are delegated to the already-audited `@noble` (whose implementations target constant time), but **whether our own layer (the 420 lines of composition) branches on secret values in hot paths has not been verified** — tracked as ADR-0307 follow-up 1, and it is **the one unverified load-bearing assumption of that decision**.
+- **Reliable memory zeroization is not achievable.** JS cannot guarantee erasure; secrets may linger in memory after GC.
+  ⚠ **Switching to WASM would not fix this**: keys are read from JS-side storage (`at-rest.ts`'s DEK and `passlock-web.ts` are both in TS) ⇒ the key has already been in JS memory, so moving only the ratchet into WASM cannot erase those copies (ADR-0307 §3-b).
+  **The right fix is ADR-0297's L2 device-bound keys** (TPM / Secure Enclave / StrongBox, where the key never leaves the chip), and **we are currently at L0/L1** — see the tiering and per-platform status in ADR-0297 §2.
+
+⇒ A precedent for selective native offload already exists: `apps/desktop/src-tauri/src/passlock.rs` moves the **Argon2id KDF** to the native layer, with a comment stating the reason as "avoiding JS-side timing/memory weaknesses"; browsers and mobile use the JS implementation in `packages/core/src/passlock-web.ts`. **That asymmetry is deliberate and accepted**, and any future primitive that is similarly unsuited to JS should be handled the same way.
+
 ## Suggested Third-Party Audit Scope
 
 > 🔵 **Primary target (added 2026-08-01): the 420 lines of forward secrecy.**
