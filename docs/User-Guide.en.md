@@ -108,6 +108,8 @@ This is where Cinderous differs from LINE the most, and where advance preparatio
 
 **What it recovers**: the identity itself plus your relay location. **Contacts and messages don't come back via this route** (that takes B or C) — but your identity is alive, so friends' messages will gradually reappear as they message you.
 
+> ⚠️ **If you ever enabled forward secrecy (§8)**: the subkey it encrypts to is **deliberately left out of the backup code** (including it would mean a leaked backup decrypts your old messages, which defeats the whole point). So when you sign in on a **brand-new device** with the backup code, messages from that period that were **encrypted to the subkey cannot be opened** — not "temporarily hidden", there is no key. To keep those, use **C pairing** or **B cloud backup**, which do carry the subkey across.
+
 > This is the "last line of defense," and it's strongly recommended everyone makes one. It's safer than copying the private key directly (an extra layer of password), and losing it just voids that one copy without affecting your identity.
 
 ### Route B: Encrypted cloud backup (the most LINE-like device-switch experience, but off by default)
@@ -138,6 +140,10 @@ This is where Cinderous differs from LINE the most, and where advance preparatio
 > Those 4 digits (called SAS) guard against "someone intercepting the pairing code midway to impersonate your new device." **If the digits don't match, something is definitely wrong — press "No match" to abort.** This step costs you three seconds but blocks the most dangerous attack.
 
 **Trade-off**: it moves the most complete data and the content never touches the relay (most private), but it **requires both devices to be on hand and powered on at the same time**. It's suited to "the old phone is still around and you're switching to a new one."
+
+**This route carries the forward-secrecy subkey across too** (§8), so the new device can open older messages.
+
+> ⚠️ **You'll get a heads-up first if you have a lot of data.** This transfer **cannot be resumed after an interruption** — if the connection drops you start over from scratch, including scanning the code and comparing those 4 digits again. So before you begin: **keep both devices together, screens on, and plugged in**.
 
 ### How to choose among the three routes
 
@@ -174,7 +180,56 @@ You can have multiple identities in the same app (for example "work" and "person
 
 ---
 
-## 8. Frequently asked questions (FAQ)
+## 8. Forward secrecy (experimental · off by default)
+
+Settings → Privacy has a switch called **"Forward secrecy (experimental)"**. Don't be alarmed by the red warning above it — that text is there on purpose, and this section explains what it means.
+
+### What it protects
+
+Normally your messages are encrypted to your **identity private key**. That means: if someone records your ciphertext **now** and obtains your private key **later**, they can decrypt all of those old messages.
+
+With forward secrecy on, messages are encrypted to a **rotating encryption subkey** instead. Once you press "Rotate encryption key now" and the old subkey expires and is deleted, **that ciphertext can never be opened again — even if your identity private key leaks later**.
+
+### ⚠️ Why it's marked experimental
+
+**It has not been reviewed by an independent cryptography audit.** The code is complete and passes our own tests, but that only proves the cases we thought of — it doesn't prove there are no holes.
+
+Crypto bugs have an unpleasant property: **they don't break anything visibly, they just fail to protect, with no symptoms at all**. Messages still send and arrive; everything looks fine. So until the audit is done, treat it as **"better than nothing"**, not as a dependable guarantee.
+
+### How to use it
+
+1. Settings → Privacy → "Enable forward secrecy" (you'll be asked to confirm)
+2. Later, when you want older messages "locked", press **"Rotate encryption key now"**
+
+**How much it protects depends on how often you rotate.** Never rotating is much like just having another long-term key.
+
+### Trade-offs to know
+
+- **After rotating**, friends who haven't learned your new key yet, or were offline at the time, may **not receive in-flight messages sent to the old key** once the retention window (about 7 days) passes.
+- **Your other devices** need to come online to sync the new key.
+- **The backup code cannot recover messages encrypted to a subkey** (see the note in §5 Route A) — that takes pairing or cloud backup.
+- The other party **cannot tell** whether you have it on; this is a setting on your side.
+
+---
+
+## 9. Removing an identity / wiping the device (destructive · irreversible)
+
+At the bottom of Settings there's a **"Danger zone"**. Both actions there are **irreversible, and no support desk can undo them**.
+
+| Action | What it does |
+| --- | --- |
+| **Remove this identity** | Deletes **this one identity's** private key and **all of its local data** on this device (messages, contacts, settings) |
+| **Wipe device** | Deletes **all identities** and all data on this device, returning it to a fresh state |
+
+**Make sure you have a backup first** (§5 Route A). With a backup code the identity can be restored on another device; without one, **that identity is gone permanently**.
+
+> "Wipe device" requires you to **type a confirmation phrase** before it runs. That's deliberate — there is no undo.
+
+**When to use it**: you're selling, servicing, or retiring the phone; or you're certain you no longer need a particular identity.
+
+---
+
+## 10. Frequently asked questions (FAQ)
 
 **Q: I just want to chat — why do I need to understand so much?**
 A: For everyday chatting you don't need to understand anything; use it just like LINE. The complicated parts of this guide are all for "switching devices" and "protecting your key" — and doing one thing sets your mind at ease: **go to Settings, generate an encrypted backup code, and keep it safe** (§5 Route A).
@@ -194,12 +249,19 @@ A: Correct. End-to-end encrypted; the relay and any third party see only ciphert
 **Q: Groups disappeared after switching phones?**
 A: Groups are a bit special. If you're the **group owner**, the groups are in your data and move with you. If you're a **member**, the group automatically adds you back the **next time the group owner comes online** (the owner's app periodically broadcasts the group roster); and group messages missed within 7 days are also filled back in once the group is restored.
 
+**Q: Is there a limit on group size?**
+A: Yes — currently **15 members (including you)**. Above that the group cannot be created.
+
+The reason is that Cinderous groups have **no "group key"**: every group message is **encrypted separately for each member** (which is why the relay does not even know the group exists, and why removing a member needs no re-keying). The cost is that the more members, the more copies each message has to be sent as.
+
+The number is a **conservative starting point**: we would rather set it tight and raise it once we know the real load, than open it up and pull it back later — the latter takes away something you already had.
+
 **Q: Enterprise/internal company use?**
 A: Cinderous has an enterprise mode — the company self-hosts a closed relay, an administrator distributes the member roster, and certain policies can be enforced (for example, disabling file transfer, or routing calls through the company server). This part is configured by the company administrator; ordinary members just use it as usual.
 
 ---
 
-## 9. Glossary
+## 11. Glossary
 
 | Cinderous term | Plain language / LINE analogy |
 | --- | --- |
@@ -214,7 +276,7 @@ A: Cinderous has an enterprise mode — the company self-hosts a closed relay, a
 
 ---
 
-## 10. In one sentence
+## 12. In one sentence
 
 **Cinderous takes "your data is controlled by you" all the way — at the cost of "switching devices and backups being your own responsibility."**
 Newcomers only need to remember one thing: **go into Settings right now, generate an encrypted backup code, and keep it somewhere safe.** Everything else is no different from the messaging app you use every day.

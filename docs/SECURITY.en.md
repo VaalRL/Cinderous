@@ -50,12 +50,28 @@
 - **Residual (current state)**: in the official desktop build, at-rest = private key (OS keystore) + DB (SQLCipher). In browser demo/development mode, app data is encrypted at rest with an nsec-derived DEK (ADR-0112); the nsec itself is either **wrapped with a user password** on disk (passlock) or **not persisted** (when no password is set). The **desktop build is not yet code-signed** (SmartScreen warning) — a distribution-side residual, not an at-rest gap.
 
 ### Forward secrecy / post-compromise security (across adversaries)
-- **Static ECDH, no FS/PCS**: a single private key leak can decrypt **all past and future** offline messages. See the decision in **ADR-0028**: real-time traffic uses DTLS (which already provides PFS); FS/PCS for offline messages will be handled uniformly by MLS in the future.
+**Status changed as of 2026-08-01** — this section previously read "Static ECDH, no FS/PCS", which is no longer complete:
+
+- **The default path is still static ECDH with no FS/PCS**: a single private key leak can decrypt **all past and future** offline messages. Nothing changes for users who have not enabled forward secrecy (i.e. the default).
+- **But forward secrecy is implemented and exposed as an experimental option** (design in ADR-0238, user-facing in ADR-0245, experimental rollout in **ADR-0306**): a rotating encryption subkey (EK); senders retarget the Gift Wrap to the recipient's current EK, and the recipient deletes the old EK private key after a 7-day grace period, so previously recorded ciphertext stays unreadable even if the nsec is stolen later.
+  - **Off by default**, with a persistent "not yet externally audited" disclosure in settings and a confirmation on enable.
+  - **Must not be claimed in parity form** (ADR-0306 D2.2): not in the feature list, comparison table, or marketing copy.
+  - **Granularity is per manual rotation, not per message**; a per-message ratchet is deferred (ADR-0236 / **ADR-0303**).
+- **PCS (post-compromise security) is still absent**: EK rotation does not provide automatic recovery from a compromise.
+- ⇒ **The audit priority is unchanged but the target has moved**: not "is there FS" but **"is this 420-line FS implementation correct"** — see the recommended audit scope below.
+
+⚠ **This section previously cited ADR-0028 ("keep static ECDH, leave FS to MLS") as its sole basis. That is outdated.** ADR-0236 (revised 2026-07-23) replaced it with "near-term path = rotating encryption subkey", which ADR-0245 / 0306 then implemented and shipped.
   **This is currently the most significant known cryptographic limitation, and an audit should examine it first.**
 
 ## Known Limitations (for audit focus)
 
-1. **No forward secrecy for offline messages** (ADR-0028) — highest priority.
+1. ~~**No forward secrecy for offline messages** (ADR-0028) — highest priority.~~
+   🔵 **Revised 2026-08-01**: **forward secrecy is implemented, off by default, and exposed as an experimental option** (ADR-0245 / 0306). Still highest priority, but **the question moved from "is it there" to "is it correct"**:
+   - **Not audited by any external party** — this is exactly why this document exists, and the part that most needs review.
+   - **PCS is still absent**: EK rotation gives no automatic recovery from compromise.
+   - **Granularity is per manual rotation**, not per message; strength depends on how often the user rotates.
+   - **The first message's FS is bounded by the signed-prekey rotation cadence**, not absolute (ADR-0303 §5.2, verified against the X3DH specification).
+   - **Multi-device**: EK private keys sync between the user's own devices via the encrypted cloud snapshot and device pairing; the **written-down rescue code deliberately excludes EKs** (ADR-0245 §2) ⇒ signing in on a brand-new device with the rescue code leaves **the entire EK-encrypted portion of the relay window unreadable** (a known and deliberate trade-off).
 2. **No key rotation/revocation**: the private key is the identity, so a leak means permanent impersonation risk (PRD §4).
 3. **At-rest encryption (in place)**: official desktop build = private key via OS keystore (B5, ADR-0053, implemented) + DB via SQLCipher; Web/development mode = app data encrypted with an nsec-derived DEK (ADR-0112), nsec password-wrapped (passlock) or not persisted. Residual = the desktop build is not yet code-signed (distribution-side, not at-rest).
 4. **Display names are not verified or propagated**: the npub is the sole authoritative identifier; names are purely local and can be duplicated (a Zooko trade-off).
@@ -66,6 +82,24 @@
 9. **Dependency trust**: third-party libraries such as `nostr-tools`, `@noble/*`, `qrcode-generator`, `rusqlite`, and `tokio-tungstenite`; supply-chain risk is mitigated by pinning versions in the lockfile.
 
 ## Suggested Third-Party Audit Scope
+
+> 🔵 **Primary target (added 2026-08-01): the 420 lines of forward secrecy.**
+> The scope has been measured (ADR-0302 §6.2): `nip44.ts` 28 + `giftwrap.ts` 221 + `subkey.ts` 119 + `keys.ts` 52.
+> **We do not implement a single cryptographic primitive ourselves** (ADR-0004 / 0007; `nip44.ts` is a 28-line
+> thin wrapper delegating to the already-audited `nostr-tools/nip44` / `@noble`) ⇒ **the target is the binding
+> and state machine around already-audited primitives, not the primitives themselves** — this is a
+> **protocol/composition review, not a primitive review**. Five things to look at:
+>
+> 1. **NIP-44 binding**: conversation-key derivation and use; whether the same key is ever misused.
+> 2. **Gift Wrap three-layer sealing**: field leakage across rumor/seal/wrap; whether outer tags leak inner data.
+> 3. **EK rotation state machine**: grace window and deletion discipline, downgrade detection, TOFU pinning,
+>    `readEkAnnounce` rejection conditions, and the four-state capability parse
+>    (`fs` / `retired` / `unknown` / `absent`, ADR-0306 D3.3c).
+> 4. **Randomness sources**: one-time key and nonce generation.
+> 5. **Multi-device EK sync**: both paths — cloud-snapshot merge and device pairing (see the exit table in ADR-0245 §2).
+>
+> ⚠ Honest note: line count ≠ price. A 420-line protocol review can still cost more than a routine
+> review of several thousand lines.
 
 - The cryptographic paths in `packages/core`: Gift Wrap wrapping/unwrapping, NIP-44 usage, signature verification, group fan-out, one-time key generation, and nonce uniqueness.
 - Key lifecycle: generation, storage (SQLCipher/OS keystore), and the impact of missing backups.
