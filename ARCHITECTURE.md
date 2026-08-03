@@ -68,6 +68,7 @@
 - **身分**：首次啟動生成 secp256k1 金鑰對（Nostr/NIP-01，簽章採 BIP-340 Schnorr）；公鑰 `npub` 為全網唯一 ID。私鑰**桌面**寫入 OS 安全儲存（Keychain/Credential Manager/Secret Service，ADR-0053）、**web/mobile** 以 Argon2id 本地密碼包裹（ADR-0112／0117／0122）。**協定層不提供金鑰輪替/撤銷**（取捨見 PRD §4、§7；企業範圍的名冊輪替見 §8）。多身分以 pubkey 命名空間隔離（ADR-0045）。
 - **加密儲存（SSOT）**：好友（npub、顯示名稱、上線狀態）、對話訊息（明文僅存本機）、設定、聯絡人同意/**訊息請求**（ADR-0121）/封鎖清單、群組。狀態常駐記憶體＋逐部位加密持久化（ADR-0110，桌面 AES blob 檔／web/mobile 加密 localStorage）；超出熱區上限的舊訊息移入**封存**而非刪除（ADR-0111，OPFS/塊檔）。對外傳輸前一律以 NIP-44 加密。
 - **換機搬家（配對克隆）**：實作採 **WebRTC 配對傳輸**（ADR-0072／0118）——舊機產生一次性載荷（會合 relay ＋ 一次性 AES-256-GCM 金鑰），新機貼上後經 WebRTC 打通、把全量捆包（身分＋聯絡人＋熱區歷史）端到端加密傳輸，雙方比對 **SAS** 相符才送出。（早期規劃的「QR＋LAN 內網 IP＋Happy Eyeballs 競速」未實作。）行動端送出端亦已補上（ADR-0118）。
+  **2026-08-01 兩項變更**：(1) **捆包新增 `snapshot.fs`——帶 EK 金鑰、`enabled` 兩端皆壓為 `false`**。不帶的後果不是「少個功能」：新機的解封候選只剩 IK，而加密到 EK 的 wrap 用 IK 解不開 ⇒ **靜默丟棄**（`catch { return; }`）⇒ 訊息在舊機看得到、新機永遠看不到。⚠ 這**不違反** ADR-0245 §2「備份碼排除 EK」——備份碼**長期留存**（含 EK 即破壞 FS），配對捆包**一次性、用完即棄**，兩者形狀不同、不可套用同一規則；`enabled` 不帶是因為「啟用送出端」屬新裝置上的新安全決定（ADR-0306 D1）。(2) **傳輸不支援中斷續傳**（評估見 ADR-0305 §7.1：續傳需重比 SAS，省不到麻煩的那一半），改為量大時**事前提示**（`LARGE_BUNDLE_BYTES`，以 **UTF-8 位元組**計）。
 - **多設備同步（持續）**：各設備就「新訊息、已讀位置、聯絡人/封鎖變更」持續對帳（自封 NIP-17 同步事件、ADR-0107；加密雲端快照、ADR-0071）。訊息以 rumor.id 去重；已讀水位本機持久化（ADR-0108）。**自訂資產庫（emoji/貼圖）與刪除墓碑亦隨雲端快照跨自己裝置同步（LWW＋墓碑交換律、重匯自動復活，ADR-0224）；大 emoji blob 不進快照，改「向自己 backfill」（`ASSET_REQUEST` 定址給自己 pubkey、任一持有裝置回應）。**
 
 ## 5. 事件契約（Nostr Kind 對照）
@@ -90,7 +91,7 @@
 | 正在輸入中／敲一下（✅ 封裝） | 20001／20100（**NIP-59 包封**） | 否（Ephemeral） | ADR-0120：改為 `sealAndWrap`——外層一次性臨時金鑰簽名，中繼看不到寄件人（原本以真名廣播指名事件，可靠時間相關反推 Gift Wrap 寄件人）。訂閱只靠 `#p`；只收聯絡人（防騷擾） |
 | 限時訊息（Disappearing，✅ M6） | 1059（rumor 內帶較短 NIP-40） | DO SQLite 至過期 | 送訊即帶較短過期：rumor 內層 `expiration` 供收件端到期隱藏，外層 wrap 同步縮短以利中繼清除；客戶端到期顯示「訊息已到期」（已實作，見 ADR-0013） |
 | 語音訊息／貼圖（規劃 M7） | WebRTC / 1059 | P2P 優先 | 錄音與媒體複用檔案分塊傳輸；貼圖以 `pack/id` 參照客戶端渲染 |
-| 群組聊天（✅ M9） | 1059（內含 kind 14 + `g` tag；控制為 kind 40） | 短期 | Gift-Wrap 成對扇出：群訊對每位成員各發一個 Gift Wrap（`g` tag = groupId）；控制訊息 create/add/remove/leave。對中繼完全不暴露群組/成員；移除即扇出略過、免 rekey（`group.ts`，ADR-0027） |
+| 群組聊天（✅ M9） | 1059（內含 kind 14 + `g` tag；控制為 kind 40） | 短期 | Gift-Wrap 成對扇出：群訊對每位成員各發一個 Gift Wrap（`g` tag = groupId）；控制訊息 create/add/remove/leave。對中繼完全不暴露群組/成員；移除即扇出略過、免 rekey（`group.ts`，ADR-0027）。**成員數上限 15（含自己）**，`GROUP_MEMBERS_MAX`／`createGroup` 直接擋（ADR-0303 §9，2026-08-01）——扇出為 O(N×D)、中繼實際負載未量測，故**先緊後放寬**（可逆）而非先寬後收緊（等於拿走使用者已有的東西）；⚠ **只擋新增**，既有超額群組不受影響 |
 | 語音/視訊通話（✅ M8） | 21002（NIP-59 包封） | 否（Ephemeral） | 通話控制 invite/accept/reject/hangup/candidate（`call.ts` 狀態機 + `WebRtcCall` 執行期）；媒體全程 P2P WebRTC track（DTLS）。假音源 + 真實 relay/WebRTC E2E 驗證（ADR-0025/0026） |
 | 訊息請求（✅ ADR-0121） | 1059（一般私訊即是） | DO SQLite（NIP-40） | 陌生人的訊息進**訊息請求區**而非聯絡人清單；接受前不通知、不能 nudge、看不到你上線。訊息本身仍會抵達中繼（Nostr 擋不掉），此為客戶端顯示層防禦 |
 | 群組檔案（✅ ADR-0124） | 1059（內含 kind 14 + `g` + `file` tag） | 短期 | metadata 扇給每位成員（共用 rumor 與 tid），位元組各自走 P2P（明文不上中繼） |
@@ -145,6 +146,8 @@
 **客戶端 — 多身分與資料隔離**
 - `packages/engine/src/storage/profiles.ts`：全域設定檔登錄（`nb.profiles`＋作用中 pubkey）；首次載入把既有單一身分遷移為 namespace 為空的 legacy 設定檔（向後相容）。（ADR-0074 起隨引擎抽出至 `packages/engine`。）
 - `packages/engine/src/storage/local.ts`：`LocalStorage(namespace)` 以 `nb.<pubkey>.<key>` 隔離各身分資料（聯絡人/訊息/群組/自訂資產庫 emoji＋貼圖…），空 namespace＝舊鍵；web 以 nsec 導出金鑰加密、Tauri 走 Rust AES-256-GCM（ADR-0112/0054）。自訂資產庫（emoji＋貼圖，ADR-0220）存於 `customAssets`＝每身分加密落地；自訂 emoji 走既有加密訊息通道，內容尾端附 `nb-assets:v1:{shortcode:{label,svg}}` 行內清單。大動畫 GIF 走內容定址 blob（`assetBlobs`＋清單只帶 `ref`，backfill/推播，ADR-0223）。跨裝置：庫（含 `assetTombstones` 刪除墓碑）隨加密雲端快照同步、大 blob 向自己 backfill（ADR-0224）。
+  **前向保密狀態（`fsState`，含 EK 私鑰）亦存於此命名空間、以同一把 DEK 加密**（ADR-0245）。
+- `packages/engine/src/storage/wipe-namespace.ts`：`clearStorageNamespace(namespace)`——刪除 `nb.<namespace>.` 下全部鍵（ADR-0202「移除身分＝刪本機資料」）。**2026-08-01 自 `apps/desktop/src/native/wipe.ts` 上移至引擎共用**：行動端的「移除此身分」原本只刪 nsec blob、命名空間資料整批留著，與 ADR-0202 的決策不符；而留著的不只是佔空間——`fsState` 的 DEK 由 nsec 決定性導出，同一把 nsec 再輸入即可解，等於**凍結一批本該被 grace 政策刪除的 EK 私鑰**。桌面保留同名薄轉發，兩端共用一份。
 - `apps/desktop/src/App.tsx`：`buildBackend(profile)` 依身分建立後端——**工作身分（enterprise）鎖定單座**（不給 `connectorFor`/`anchors`/`onHomeSwitched` → 不漫遊、不遞補，ADR-0044/0045）；個人身分走開放模式（relay pool/錨點/漫遊）。切換身分以 reload 乾淨重建 per-身分 狀態。
 
 **資料流（工作身分送一則群訊）**
