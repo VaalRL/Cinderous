@@ -10,6 +10,10 @@ import {
   type NostrEvent,
   type PubkeyHex,
   type SecretKey,
+  type VideoQuality,
+  DEFAULT_VIDEO_QUALITY,
+  videoConstraints,
+  videoProfile,
 } from "@cinderous/core";
 
 /** 通話執行期對外事件。 */
@@ -46,6 +50,8 @@ export class WebRtcCall {
   private seq = 0;
   /** 本通話的 P2P 是否曾經連通（ADR-0243）：區分「從未打通」與「連上後斷線」的失敗提示。 */
   private everConnected = false;
+  /** 視訊畫質檔位（ADR-0337）；跨通話沿用，由 App 於啟動時以裝置偏好設定。 */
+  private videoQuality: VideoQuality = DEFAULT_VIDEO_QUALITY;
 
   constructor(
     private readonly ownSk: SecretKey,
@@ -229,10 +235,59 @@ export class WebRtcCall {
 
   private async acquireMedia(media: CallMedia): Promise<void> {
     if (!this.pc) return;
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: media === "video" });
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: true,
+      // 不是裸 `true`（ADR-0337）：裸 true 拿相機預設（手機常見 720p 以上），
+      // 使用者付行動數據、站方付 TURN egress，而兩邊都無從得知。
+      video: media === "video" ? videoConstraints(this.videoQuality) : false,
+    });
     this.localStream = stream;
     for (const track of stream.getTracks()) this.pc.addTrack(track, stream);
+    this.applyVideoQuality();
     this.handlers.onLocalStream(stream);
+  }
+
+  /**
+   * 設定畫質檔位（ADR-0337）。**通話中呼叫即時生效**——畫質問題只有在通話中
+   * 才會被察覺，做成「下次通話才生效」等於要求使用者先掛斷再打一次。
+   *
+   * 無通話時只記住，下一通沿用。
+   */
+  setVideoQuality(q: VideoQuality): void {
+    this.videoQuality = q;
+    this.applyVideoQuality();
+  }
+
+  /**
+   * 兩段都要動：`setParameters` 改編碼上限（立即生效、免重新協商）、
+   * `applyConstraints` 改擷取解析度。
+   *
+   * ⚠ **順序有意義**：先降 bitrate 再降解析度。反過來會有一小段
+   * 「低解析度但高位元率」的浪費視窗。
+   *
+   * 失敗一律吞掉——畫質是加分項，不是通話前提。
+   */
+  private applyVideoQuality(): void {
+    const pc = this.pc;
+    if (!pc) return;
+    const profile = videoProfile(this.videoQuality);
+    void (async () => {
+      try {
+        for (const sender of pc.getSenders()) {
+          if (sender.track?.kind !== "video") continue;
+          const params = sender.getParameters();
+          const encodings = params.encodings?.length ? params.encodings : [{}];
+          encodings[0]!.maxBitrate = profile.maxBitrate;
+          // 視訊通話是看人臉：掉解析度比掉幀順眼。
+          await sender.setParameters({ ...params, encodings, degradationPreference: "maintain-framerate" });
+        }
+        for (const track of this.localStream?.getVideoTracks() ?? []) {
+          await track.applyConstraints(videoConstraints(this.videoQuality));
+        }
+      } catch {
+        /* 畫質套用失敗不影響通話本身 */
+      }
+    })();
   }
 
   private teardown(): void {

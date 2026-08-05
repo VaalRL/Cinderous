@@ -173,9 +173,12 @@ describe("per-identity state 範圍隔離（P4／ADR-0294 §2）", () => {
   it("🔴 外殼（MobileApp.tsx）只准放比一個 session 活得久的東西（ADR-0332 2b）", () => {
     const shell = readFileSync(new URL("./MobileApp.tsx", import.meta.url), "utf8");
     const inShell = [...shell.matchAll(/const \[(\w+),\s*\w+\] = useState/g)].map((m) => m[1]!);
-    // `profiles` 要跨 session 存活；外觀/語言是這台裝置的偏好；
+    // `profiles` 要跨 session 存活；外觀/語言/視訊畫質是這台裝置的偏好；
     // `active` 是**指向 session 的指標**，本身不能住在 session 裡（否則切身分時誰記得要切去哪）。
     // 多出任何一個都要先問它憑什麼在這裡。
-    expect(inShell.sort()).toEqual(["accent", "active", "locale", "profiles", "theme"]);
+    //
+    // `videoQuality`（ADR-0337）憑什麼：它是「**這台**的相機與網路」，與主題同類——
+    // 切身分不該讓畫質跳掉，而它要同時餵給 CallScreen 與後端，兩者都在 session 內 ⇒ 由外殼往下傳。
+    expect(inShell.sort()).toEqual(["accent", "active", "locale", "profiles", "theme", "videoQuality"]);
   });
 });

@@ -10,6 +10,8 @@ const base = {
   onAccept: () => {},
   onReject: () => {},
   onHangup: () => {},
+  quality: "medium" as const,
+  onQualityChange: () => {},
   locale: "zh-Hant" as const,
 };
 

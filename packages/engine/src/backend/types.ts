@@ -1,6 +1,7 @@
 import type {
   CallFailureReason,
   CallMedia,
+  VideoQuality,
   CallState,
   Group,
   OrgGroup,
@@ -569,6 +570,12 @@ export interface ChatBackend {
   rejectCall?(): void;
   /** 掛斷目前通話。 */
   hangupCall?(): void;
+  /**
+   * 設定視訊畫質檔位（ADR-0337）。**通話中呼叫即時生效**（改 sender 編碼上限＋擷取解析度）；
+   * 無通話時只記住，下一通沿用。關鏡頭不走這裡——UI 直接動 `getVideoTracks()`，
+   * 與靜音同一條路（ADR-0337 §3）。
+   */
+  setVideoQuality?(quality: VideoQuality): void;
   /** 以 NIP-19 `npub`（可附 `@wss://…` relay hint，ADR-0034）新增聯絡人（僅真實 relay 後端支援）。 */
   addContact?(npub: string, relayUrl?: string): void;
   /** 移除聯絡人並清除對話。 */

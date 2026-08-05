@@ -21,12 +21,15 @@
 // 行動端目前沒有那層，這裡只做裝置層——**不順手補**，那是另一個決策（要不要讓工作身分有自己的顏色）。
 
 import { getKv } from "@cinderous/engine";
+import { DEFAULT_VIDEO_QUALITY, isVideoQuality, type VideoQuality } from "@cinderous/core";
 import { LOCALES, type Locale } from "@cinderous/i18n";
 import type { Theme } from "@cinderous/theme";
 
 const THEME_KEY = "nb.theme";
 const LOCALE_KEY = "nb.locale";
 const ACCENT_KEY = "nb.accent";
+// 視訊通話畫質（ADR-0337）：與桌面同鍵名，兩端語意一致（皆裝置層）。
+const VIDEO_QUALITY_KEY = "nb.videoQuality";
 
 /** 讀不到／值不合法時一律回退呼叫端的預設——**壞掉的偏好不該讓 App 起不來**。 */
 function read(key: string): string | null {
@@ -77,4 +80,19 @@ export function readAccent(fallback: string | null): string | null {
 
 export function saveAccent(a: string | null): void {
   write(ACCENT_KEY, a);
+}
+
+/**
+ * 視訊通話畫質（ADR-0337）。裝置層——這是「**這台**的相機與網路」，
+ * 與主題／語言同類；切身分不該讓畫質跳掉。
+ *
+ * 髒值（舊版、手動竄改）一律退回預設，**不讓它傳進 `getUserMedia`**。
+ */
+export function readVideoQuality(): VideoQuality {
+  const v = read(VIDEO_QUALITY_KEY);
+  return isVideoQuality(v) ? v : DEFAULT_VIDEO_QUALITY;
+}
+
+export function saveVideoQuality(q: VideoQuality): void {
+  write(VIDEO_QUALITY_KEY, q);
 }

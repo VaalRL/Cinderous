@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import type { CloudSyncMode, Status } from "@cinderous/engine";
 import { type Locale, type MessageKey, type TranslateParams, translate } from "@cinderous/i18n";
 import { resolveTheme, type Theme, type ThemeTokens } from "@cinderous/theme";
-import { policyNotices, type OrgPolicy } from "@cinderous/core";
+import { policyNotices, VIDEO_QUALITIES, type OrgPolicy, type VideoQuality } from "@cinderous/core";
 
 /** 上線狀態的 i18n 鍵（與桌面同一組）。 */
 const STATUS_KEY: Record<"online" | "away" | "busy", MessageKey> = {
@@ -117,6 +117,8 @@ export function SettingsScreen({
   onRetention,
   onExport,
   readReceipts,
+  videoQuality,
+  onVideoQuality,
   onReadReceipts,
   groupInviteFromAnyone,
   onGroupInvite,
@@ -197,6 +199,9 @@ export function SettingsScreen({
   onExport?: () => void;
   /** 已讀回條（ADR-0058）：opt-in＋互惠；關閉則不送、也不顯示對方已讀。 */
   readReceipts?: boolean;
+  /** 視訊通話畫質預設（ADR-0337）：通話中可在通話畫面即時改，這裡設下一通的起點。 */
+  videoQuality?: VideoQuality;
+  onVideoQuality?: (q: VideoQuality) => void;
   onReadReceipts?: (v: boolean) => void;
   /** 入群邀請閘門（ADR-0317）：true＝任何人可邀；false（預設）＝只有聯絡人。 */
   groupInviteFromAnyone?: boolean;
@@ -1129,6 +1134,35 @@ export function SettingsScreen({
                 {readReceipts ? " ✓" : ""}
               </Text>
             </Pressable>
+          </View>
+        ) : null}
+
+        {/* 視訊通話畫質（ADR-0337）：預設 medium；通話中可即時改，這裡是下一通的起點 */}
+        {onVideoQuality && videoQuality ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>{t("settings_videoQuality")}</Text>
+            <Text style={styles.label}>{t("settings_videoQualityHint")}</Text>
+            <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}>
+              {VIDEO_QUALITIES.map((q) => (
+                <Pressable
+                  key={q}
+                  accessibilityRole="button"
+                  testID={`video-quality-${q}`}
+                  onPress={() => onVideoQuality(q)}
+                  style={[
+                    styles.seg,
+                    {
+                      borderColor: videoQuality === q ? tk.accent : tk.border,
+                      backgroundColor: videoQuality === q ? tk.accent : tk.field,
+                    },
+                  ]}
+                >
+                  <Text style={[styles.segText, { color: videoQuality === q ? "#ffffff" : tk.ink }]}>
+                    {t(`call_quality_${q}` as MessageKey)}
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
           </View>
         ) : null}
 

@@ -26,6 +26,9 @@ import {
   type CustomAsset,
   type PubkeyHex,
   type ThreatDb,
+  type VideoQuality,
+  DEFAULT_VIDEO_QUALITY,
+  isVideoQuality,
 } from "@cinderous/core";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
@@ -209,6 +212,8 @@ const NOTIFY_CHIME_KEY = "nb.notifyChime";
 const NOTIFY_PREVIEW_KEY = "nb.notifyHidePreview";
 const NOTIFY_EVENTS_KEY = "nb.notifyEvents"; // ADR-0217：各事件通知開關
 const READ_RECEIPTS_KEY = "nb.readReceipts";
+// 視訊通話畫質（ADR-0337）：裝置層——這是「這台的相機與網路」，同 readReceipts/retentionCap。
+const VIDEO_QUALITY_KEY = "nb.videoQuality";
 // 企業主首次進入自動開名冊管理（ADR-0155）：建立時寫入、開啟一次即清除（跨 Tauri reload）。
 const ROSTER_INTRO_PREFIX = "nb.rosterIntro.";
 const INVISIBLE_KEY = "nb.invisible";
@@ -787,6 +792,23 @@ export function App(): JSX.Element {
       return false;
     }
   });
+  const [videoQuality, setVideoQualityState] = useState<VideoQuality>(() => {
+    try {
+      const raw = localStorage.getItem(VIDEO_QUALITY_KEY);
+      // 髒值（舊版／手動竄改）一律退回預設，不讓它傳進 getUserMedia。
+      return isVideoQuality(raw) ? raw : DEFAULT_VIDEO_QUALITY;
+    } catch {
+      return DEFAULT_VIDEO_QUALITY;
+    }
+  });
+  const changeVideoQuality = (q: VideoQuality): void => {
+    setVideoQualityState(q);
+    try {
+      localStorage.setItem(VIDEO_QUALITY_KEY, q);
+    } catch {
+      /* 隱私模式等無 localStorage：僅本 session 生效 */
+    }
+  };
   const [invisible, setInvisible] = useState<boolean>(() => {
     try {
       return localStorage.getItem(INVISIBLE_KEY) === "1";
@@ -945,6 +967,10 @@ export function App(): JSX.Element {
   useEffect(() => {
     backend?.setReadReceipts?.(readReceipts);
   }, [backend, readReceipts]);
+  // 視訊畫質同步到後端（ADR-0337）；後端重建或檔位變動時皆推送，通話中即時生效。
+  useEffect(() => {
+    backend?.setVideoQuality?.(videoQuality);
+  }, [backend, videoQuality]);
   // 隱身開關同步到後端（ADR-0088）；後端重建或開關變動時皆推送。
   useEffect(() => {
     backend?.setInvisible?.(invisible);
@@ -2693,6 +2719,8 @@ export function App(): JSX.Element {
           onLogout={() => void logout()}
           {...(profilesState.active ? { onRemoveIdentity: () => void removeIdentity(profilesState.active!) } : {})}
           onWipeDevice={() => void wipeDevice()}
+          {/* 視訊畫質預設（ADR-0337）：通話中可在通話視窗即時改，這裡設下一通的起點。 */
+          ...{ videoQuality: { value: videoQuality, onChange: changeVideoQuality } }}
           {...(activeBackend.requestVanish
             ? // NIP-62（ADR-0260）：只有真實 relay 後端有這個能力；示範後端不顯示此區塊。
               { onVanish: () => activeBackend.requestVanish!() }
@@ -3363,6 +3391,8 @@ export function App(): JSX.Element {
           onAccept={() => activeBackend.acceptCall?.()}
           onReject={() => activeBackend.rejectCall?.()}
           onHangup={() => activeBackend.hangupCall?.()}
+          quality={videoQuality}
+          onQualityChange={changeVideoQuality}
         />
       ) : null}
     </div>

@@ -3,7 +3,8 @@
 // 媒體全程 P2P（ADR-0025/0026），不經中繼。
 
 import { useEffect, useState } from "react";
-import type { CallMedia, CallState } from "@cinderous/core";
+import type { CallMedia, CallState, VideoQuality } from "@cinderous/core";
+import { VIDEO_QUALITIES } from "@cinderous/core";
 import { type Locale, type MessageKey, translate } from "@cinderous/i18n";
 import { resolveTheme, type Theme, type ThemeTokens } from "@cinderous/theme";
 import { Pressable, StyleSheet, Text, View } from "react-native-web";
@@ -48,6 +49,8 @@ function makeStyles(tk: ThemeTokens) {
     hangup: { backgroundColor: "#e5484d" },
     neutral: { backgroundColor: "#ffffff28" },
     btnText: { fontSize: 24 },
+    /** 畫質鍵放的是文字而非 emoji（「省流量」要看得懂），字級因此縮小。 */
+    qualityText: { fontSize: 12, fontWeight: "600", color: "#ffffff", textAlign: "center" },
   });
 }
 
@@ -67,6 +70,8 @@ export function CallScreen({
   onAccept,
   onReject,
   onHangup,
+  quality,
+  onQualityChange,
   locale = "zh-Hant",
   theme = "dark",
   accent = null,
@@ -79,6 +84,10 @@ export function CallScreen({
   onAccept: () => void;
   onReject: () => void;
   onHangup: () => void;
+  /** 目前視訊畫質檔位（ADR-0337）。 */
+  quality: VideoQuality;
+  /** 改畫質。必須往上回報——`setParameters` 要 `RTCRtpSender`，只有 engine 拿得到。 */
+  onQualityChange: (q: VideoQuality) => void;
   locale?: Locale;
   theme?: Theme;
   accent?: string | null;
@@ -89,6 +98,7 @@ export function CallScreen({
   const isVideo = media === "video";
 
   const [muted, setMuted] = useState(false);
+  const [cameraOff, setCameraOff] = useState(false);
   const [since, setSince] = useState<number | null>(null);
   const [now, setNow] = useState(() => Date.now());
 
@@ -107,6 +117,28 @@ export function CallScreen({
     const next = !muted;
     for (const track of localStream.getAudioTracks()) track.enabled = !next;
     setMuted(next);
+  };
+
+  /**
+   * 關鏡頭（ADR-0337 §3）：與靜音對稱，只是換成視訊軌 ⇒ 走同一條路，不新增後端方法。
+   *
+   * ⚠ `enabled = false` 的語意是**送黑畫面**，不是關閉相機——軌道仍開著、
+   * 指示燈可能仍亮。文案因此用「停止視訊」。
+   */
+  const toggleCamera = (): void => {
+    if (!localStream) return;
+    const next = !cameraOff;
+    for (const track of localStream.getVideoTracks()) track.enabled = !next;
+    setCameraOff(next);
+  };
+
+  /**
+   * 畫質輪替：手機底部沒有空間放三顆按鈕，所以一顆按鈕循環 low→medium→high→low。
+   * 按鈕上顯示的是**目前**檔位（不是「下一個」），與靜音鍵顯示目前狀態一致。
+   */
+  const cycleQuality = (): void => {
+    const i = VIDEO_QUALITIES.indexOf(quality);
+    onQualityChange(VIDEO_QUALITIES[(i + 1) % VIDEO_QUALITIES.length]!);
   };
 
   const stateLabel = STATE_KEY[state] ? t(STATE_KEY[state]!) : "";
@@ -166,10 +198,34 @@ export function CallScreen({
               style={[styles.btn, styles.neutral]}
               accessibilityRole="button"
               aria-label={t(muted ? "call_unmute" : "call_mute")}
+              testID="call-mute"
               onPress={toggleMute}
             >
               <Text style={styles.btnText}>{muted ? "🔇" : "🎤"}</Text>
             </Pressable>
+            {isVideo ? (
+              <>
+                <Pressable
+                  style={[styles.btn, styles.neutral]}
+                  accessibilityRole="button"
+                  aria-label={t(cameraOff ? "call_camera_on" : "call_camera_off")}
+                  testID="call-camera"
+                  onPress={toggleCamera}
+                >
+                  <Text style={styles.btnText}>{cameraOff ? "🚫" : "📹"}</Text>
+                </Pressable>
+                {/* 畫質問題只有通話中才察覺得到——所以按鈕在這裡，不是埋在設定頁（ADR-0337 §2）。 */}
+                <Pressable
+                  style={[styles.btn, styles.neutral]}
+                  accessibilityRole="button"
+                  aria-label={`${t("call_quality")}：${t(`call_quality_${quality}` as MessageKey)}`}
+                  testID="call-quality"
+                  onPress={cycleQuality}
+                >
+                  <Text style={styles.qualityText}>{t(`call_quality_${quality}` as MessageKey)}</Text>
+                </Pressable>
+              </>
+            ) : null}
             <Pressable
               style={[styles.btn, styles.hangup]}
               accessibilityRole="button"

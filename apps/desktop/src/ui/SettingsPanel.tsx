@@ -1,4 +1,12 @@
-import { makeBackupCode, policyNotices, qrSvg, type OrgPolicy, type PolicyNotice } from "@cinderous/core";
+import {
+  makeBackupCode,
+  policyNotices,
+  qrSvg,
+  VIDEO_QUALITIES,
+  type OrgPolicy,
+  type PolicyNotice,
+  type VideoQuality,
+} from "@cinderous/core";
 import { useEffect, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { ACCENT_PRESETS, ACCENT_PRESETS_CB, useAccent } from "../accent.js";
 import type { MessageKey } from "@cinderous/i18n";
@@ -127,6 +135,11 @@ export interface SettingsPanelProps {
   retention?: { cap: number; onChange: (n: number) => void; full: boolean };
   /** 導出紀錄（ADR-0094）；未提供則不顯示。 */
   onExport?: () => void;
+  /**
+   * 視訊通話畫質預設（ADR-0337）；未提供則不顯示。
+   * 這裡設的是**下一通的起點**——通話中可在通話視窗即時改。
+   */
+  videoQuality?: { value: VideoQuality; onChange: (q: VideoQuality) => void };
   /** 隱身（ADR-0088）：停止一切在線廣播（relay＋P2P）；未提供則不顯示該區塊。 */
   invisible?: boolean;
   onToggleInvisible?: () => void;
@@ -1415,7 +1428,8 @@ export function SettingsPanel(props: SettingsPanelProps): JSX.Element {
 
   // 只顯示有內容的分頁（身分/進階全條件式，可能為空）。
   const hasIdentity = !!props.onRename || !!props.selfNsec || !!props.security || !!props.onPairDevice;
-  const hasAdvanced = !!props.retention || !!props.onExport || !!(props.ollama && props.onOllamaChange);
+  const hasAdvanced =
+    !!props.retention || !!props.onExport || !!props.videoQuality || !!(props.ollama && props.onOllamaChange);
   const TABS: { key: SettingsTab; label: string }[] = [
     { key: "appearance", label: t("settingsTab_appearance") },
     ...(hasIdentity ? [{ key: "identity" as const, label: t("settingsTab_identity") }] : []),
@@ -1928,6 +1942,24 @@ export function SettingsPanel(props: SettingsPanelProps): JSX.Element {
             </section>
           ) : null}
           {tab === "advanced" && props.retention ? <RetentionSettings {...props.retention} /> : null}
+          {tab === "advanced" && props.videoQuality ? (
+            <section className="settings__sec">
+              <h4>{t("settings_videoQuality")}</h4>
+              <p className="settings__hint">{t("settings_videoQualityHint")}</p>
+              <select
+                className="retention__opt"
+                value={props.videoQuality.value}
+                onChange={(ev) => props.videoQuality!.onChange(ev.target.value as VideoQuality)}
+                data-testid="settings-video-quality"
+              >
+                {VIDEO_QUALITIES.map((q) => (
+                  <option key={q} value={q}>
+                    {t(`call_quality_${q}` as MessageKey)}
+                  </option>
+                ))}
+              </select>
+            </section>
+          ) : null}
           {tab === "advanced" && props.onExport ? (
             <section className="settings__sec">
               <h4>{t("settings_export")}</h4>

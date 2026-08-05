@@ -872,6 +872,17 @@ export interface Messages {
   call_hangup: string;
   call_mute: string;
   call_unmute: string;
+  /** 停止/恢復傳送視訊（ADR-0337）。文案刻意不說「關閉相機」——軌道仍開著，相機指示燈可能仍亮。 */
+  call_camera_off: string;
+  call_camera_on: string;
+  /** 視訊畫質檔位（ADR-0337）。 */
+  call_quality: string;
+  call_quality_low: string;
+  call_quality_medium: string;
+  call_quality_high: string;
+  /** 設定頁的預設畫質（ADR-0337）：通話中可隨時改，這裡設的是下一通的起點。 */
+  settings_videoQuality: string;
+  settings_videoQualityHint: string;
   /** 通話連不通（限制網路、無 TURN 退路）；ADR-0243。 */
   call_failed_unreachable: string;
   /** 通話已連上後中途斷線；ADR-0243。 */
@@ -1722,6 +1733,15 @@ const zhHant: Messages = {
   call_hangup: "掛斷",
   call_mute: "靜音",
   call_unmute: "取消靜音",
+  call_camera_off: "停止視訊",
+  call_camera_on: "恢復視訊",
+  call_quality: "畫質",
+  call_quality_low: "省流量",
+  call_quality_medium: "標準",
+  call_quality_high: "高畫質",
+  settings_videoQuality: "視訊通話畫質",
+  settings_videoQualityHint:
+    "省流量約 180 MB/小時、標準約 585 MB/小時、高畫質約 1.4 GB/小時。通話中可隨時調整，這裡設的是下一通的起點。",
   call_failed_unreachable: "通話接不通——限制網路（對稱 NAT／嚴格防火牆）下無法建立直連。可改用 Wi-Fi 或其他網路再撥；文字與檔案不受影響。",
   call_failed_lost: "通話中斷——連線中途斷開（可能網路不穩）。可再撥一次。",
   group_create: "建立群組",
@@ -2568,6 +2588,15 @@ const en: Messages = {
   call_hangup: "Hang up",
   call_mute: "Mute",
   call_unmute: "Unmute",
+  call_camera_off: "Stop video",
+  call_camera_on: "Resume video",
+  call_quality: "Quality",
+  call_quality_low: "Data saver",
+  call_quality_medium: "Standard",
+  call_quality_high: "High",
+  settings_videoQuality: "Video call quality",
+  settings_videoQualityHint:
+    "Data saver uses about 180 MB/hour, Standard about 585 MB/hour, High about 1.4 GB/hour. You can change this during a call; this sets the starting point for the next one.",
   call_failed_unreachable:
     "Call couldn't connect — a restricted network (symmetric NAT / strict firewall) blocked a direct link. Try Wi-Fi or another network; text and files are unaffected.",
   call_failed_lost: "Call dropped — the connection was lost mid-call (network may be unstable). You can call again.",

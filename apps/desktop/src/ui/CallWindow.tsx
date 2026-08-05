@@ -1,4 +1,5 @@
-import type { CallMedia, CallState } from "@cinderous/core";
+import type { CallMedia, CallState, VideoQuality } from "@cinderous/core";
+import { VIDEO_QUALITIES } from "@cinderous/core";
 import { useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n.js";
 import { avatarColor, initial } from "./util.js";
@@ -13,7 +14,21 @@ export interface CallWindowProps {
   onAccept: () => void;
   onReject: () => void;
   onHangup: () => void;
+  /** 目前視訊畫質檔位（ADR-0337）。 */
+  quality: VideoQuality;
+  /**
+   * 改畫質。**必須往上回報**——`setParameters` 需要 `RTCRtpSender`，只有 engine 拿得到；
+   * UI 手上只有 `MediaStream`。（關鏡頭則相反，UI 自己動軌道就夠，見下方 `toggleCamera`。）
+   */
+  onQualityChange: (q: VideoQuality) => void;
 }
+
+/** 畫質檔位的 i18n 鍵（順序即由省到清晰）。 */
+const QUALITY_KEY = {
+  low: "call_quality_low",
+  medium: "call_quality_medium",
+  high: "call_quality_high",
+} as const;
 
 /** 把 MediaStream 綁到 media 元素的 srcObject。 */
 function useStream<T extends HTMLMediaElement>(stream: MediaStream | null) {
@@ -41,6 +56,7 @@ export function CallWindow(props: CallWindowProps): JSX.Element {
   const remoteAudioRef = useStream<HTMLAudioElement>(props.remoteStream);
 
   const [muted, setMuted] = useState(false);
+  const [cameraOff, setCameraOff] = useState(false);
   const [activeSince, setActiveSince] = useState<number | null>(null);
   const [, forceTick] = useState(0);
 
@@ -60,6 +76,20 @@ export function CallWindow(props: CallWindowProps): JSX.Element {
     const next = !muted;
     for (const track of s.getAudioTracks()) track.enabled = !next;
     setMuted(next);
+  };
+
+  /**
+   * 關鏡頭（ADR-0337 §3）：與靜音完全對稱，只是換成視訊軌——所以走同一條路，不新增後端方法。
+   *
+   * ⚠ `enabled = false` 的語意是**送黑畫面**，不是停止傳送、也不是關閉相機：
+   * 軌道仍開著、相機指示燈可能仍亮。文案因此用「停止視訊」而非「關閉相機」。
+   */
+  const toggleCamera = () => {
+    const s = props.localStream;
+    if (!s) return;
+    const next = !cameraOff;
+    for (const track of s.getVideoTracks()) track.enabled = !next;
+    setCameraOff(next);
   };
 
   const statusText =
@@ -117,6 +147,28 @@ export function CallWindow(props: CallWindowProps): JSX.Element {
                 <button className="callbtn" onClick={toggleMute} aria-pressed={muted} data-testid="call-mute">
                   {muted ? t("call_unmute") : t("call_mute")}
                 </button>
+              ) : null}
+              {state === "active" && isVideo ? (
+                <>
+                  <button className="callbtn" onClick={toggleCamera} aria-pressed={cameraOff} data-testid="call-camera">
+                    {cameraOff ? t("call_camera_on") : t("call_camera_off")}
+                  </button>
+                  {/* 畫質問題只有通話中才察覺得到——所以選擇器在這裡，不是埋在設定頁（ADR-0337 §2）。 */}
+                  <label className="callwin__quality">
+                    <span>{t("call_quality")}</span>
+                    <select
+                      value={props.quality}
+                      onChange={(e) => props.onQualityChange(e.target.value as VideoQuality)}
+                      data-testid="call-quality"
+                    >
+                      {VIDEO_QUALITIES.map((q) => (
+                        <option key={q} value={q}>
+                          {t(QUALITY_KEY[q])}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </>
               ) : null}
               <button className="callbtn callbtn--hangup" onClick={props.onHangup} data-testid="call-hangup">
                 {t("call_hangup")}

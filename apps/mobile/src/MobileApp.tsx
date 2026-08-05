@@ -3,7 +3,7 @@
 // 這裡**只放比一個 session 活得久的東西**：
 //
 //   - `profiles`：身分登錄（ADR-0138）。切身分時它必須存活，否則切完就找不到要切去哪。
-//   - `theme`／`locale`／`accent`：**這台裝置**的偏好（ADR-0294 §2 的分類），切身分不重設。
+//   - `theme`／`locale`／`accent`／`videoQuality`：**這台裝置**的偏好（ADR-0294 §2 的分類），切身分不重設。
 //
 // 其餘（一個身分的全部 session state、後端生命週期、所有畫面）都在 `AppSession.tsx`。
 //
@@ -11,10 +11,20 @@
 import { useState } from "react";
 import type { Locale } from "@cinderous/i18n";
 import type { Theme } from "@cinderous/theme";
+import type { VideoQuality } from "@cinderous/core";
 import { type ProfilesState } from "@cinderous/engine";
 import { type ActiveSession, AppSession, type SessionOpts } from "./AppSession.js";
 import type { MobileIdentity } from "./auth.js";
-import { readAccent, readLocale, readTheme, saveAccent, saveLocale, saveTheme } from "./device-prefs.js";
+import {
+  readAccent,
+  readLocale,
+  readTheme,
+  readVideoQuality,
+  saveAccent,
+  saveLocale,
+  saveTheme,
+  saveVideoQuality,
+} from "./device-prefs.js";
 import { loadIdentities } from "./identities.js";
 
 export function MobileApp({
@@ -47,6 +57,13 @@ export function MobileApp({
     setAccentState(a);
     saveAccent(a);
   };
+  // 視訊畫質（ADR-0337）：裝置層——這是「這台的相機與網路」，與主題同類。
+  // 由外殼往下傳，因為 CallScreen 與後端（setVideoQuality）都在 session 內。
+  const [videoQuality, setVideoQualityState] = useState<VideoQuality>(() => readVideoQuality());
+  const setVideoQuality = (q: VideoQuality): void => {
+    setVideoQualityState(q);
+    saveVideoQuality(q);
+  };
   /**
    * 作用中的 session（ADR-0332 2b）。
    *
@@ -78,6 +95,8 @@ export function MobileApp({
       onLocale={setLocale}
       accent={accent}
       onAccent={setAccent}
+      videoQuality={videoQuality}
+      onVideoQuality={setVideoQuality}
       active={active?.session ?? null}
       onEnter={enter}
       onLeave={() => setActive(null)}

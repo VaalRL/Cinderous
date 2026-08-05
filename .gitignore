@@ -81,3 +81,6 @@ gemini.md
 claude/
 .claude/
 docs/PENDING-ADR-WORK.md
+
+# 發版成品與 release note 暫存（本機建置產物，不進版控）
+dist-release/

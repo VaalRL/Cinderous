@@ -181,6 +181,7 @@ import type {
   Self,
   Status,
 } from "./types.js";
+import type { VideoQuality } from "@cinderous/core";
 import { planFilters, sub, type SubDecl } from "./sub-plan.js";
 
 /** pool relay 連續離線超過此時間即標記 hint 可能陳舊（ADR-0036）。 */
@@ -4596,6 +4597,10 @@ export class RelayChatBackend implements ChatBackend {
   }
   hangupCall(): void {
     this.call.hangup();
+  }
+  /** 視訊畫質檔位（ADR-0337）：通話中即時生效，無通話時記住供下一通。 */
+  setVideoQuality(quality: VideoQuality): void {
+    this.call.setVideoQuality(quality);
   }
 
   sendTyping(to: PubkeyHex): void {

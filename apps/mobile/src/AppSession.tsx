@@ -44,7 +44,7 @@ import {
 } from "@cinderous/engine";
 import { notifier, onNotifyClick } from "./native/notify.js";
 import type { BlockedContact, CalendarEventInput, ContactRequest, RsvpStatus, StoredCalendarEvent } from "@cinderous/engine";
-import type { CallMedia, CallState } from "@cinderous/core";
+import type { CallMedia, CallState, VideoQuality } from "@cinderous/core";
 import { makeThumbnail, pickFile, saveFile, takePhoto } from "./native/files.js";
 import {
   foregroundEnabled,
@@ -197,6 +197,8 @@ export function AppSession({
   onLocale: setLocale,
   accent,
   onAccent: setAccent,
+  videoQuality,
+  onVideoQuality: setVideoQuality,
   active,
   onEnter,
   onLeave,
@@ -213,6 +215,9 @@ export function AppSession({
   onLocale: (l: Locale) => void;
   accent: string | null;
   onAccent: (a: string | null) => void;
+  /** 視訊通話畫質（ADR-0337）：同樣是這台裝置的偏好，住在外殼。 */
+  videoQuality: VideoQuality;
+  onVideoQuality: (q: VideoQuality) => void;
   /** 外殼記下的「作用中身分」；`null`＝尚未登入（顯示登入／解鎖畫面）。 */
   active: ActiveSession | null;
   /** 開始一個 session。畫面只做這件事，真正的接線由下方 effect 負責（ADR-0332 2b）。 */
@@ -291,6 +296,9 @@ export function AppSession({
   const orgInfoRef = useRef<OrgInfo | null>(null);
   const localeRef = useRef(locale);
   localeRef.current = locale;
+  // 視訊畫質（ADR-0337）：render 期鏡像，供 `signInWith` 建後端時取當前值（prop 會變，閉包會 stale）。
+  const videoQualityRef = useRef(videoQuality);
+  videoQualityRef.current = videoQuality;
 
   useEffect(() => () => backendRef.current?.stop(), []);
 
@@ -746,6 +754,7 @@ export function AppSession({
       },
     });
     backend.setReadReceipts?.(readReceipts); // ADR-0058：互惠開關（關＝不送也不顯示對方已讀）
+    backend.setVideoQuality?.(videoQualityRef.current); // ADR-0337：沿用這台裝置上次選的畫質
     setTab("chats");
     setScreen(opts.landOn ?? "main");
   };
@@ -1234,6 +1243,15 @@ export function AppSession({
   // 便條金鑰（ADR-0183）：以作用中身分 nsec 導出，供便條加密落盤（每對話一張、只存本機）。
   const noteKey = useMemo(() => (self.nsec ? deriveStorageKey(nsecDecode(self.nsec)) : null), [self.nsec]);
 
+  /**
+   * 改畫質（ADR-0337）：**兩件事都要做**——寫回外殼（跨重啟記住、切身分不變）
+   * 與推給後端（通話中即時生效）。只做前者的話，使用者在通話中調了卻沒有反應。
+   */
+  const changeVideoQuality = (q: VideoQuality): void => {
+    setVideoQuality(q);
+    backendRef.current?.setVideoQuality?.(q);
+  };
+
   // 通話覆蓋層（ADR-0101）：來電/通話中一律蓋在最上層，不論當下在哪個畫面。
   const callOverlay = call.active ? (
     <CallScreen
@@ -1245,6 +1263,8 @@ export function AppSession({
       onAccept={() => backendRef.current?.acceptCall?.()}
       onReject={() => backendRef.current?.rejectCall?.()}
       onHangup={() => backendRef.current?.hangupCall?.()}
+      quality={videoQuality}
+      onQualityChange={changeVideoQuality}
       locale={locale}
       theme={theme}
       accent={accent}
@@ -1695,6 +1715,9 @@ export function AppSession({
                 onExport: exportAll,
                 readReceipts,
                 onReadReceipts: toggleReadReceipts,
+                // ADR-0337：預設畫質；通話中另有即時切換（CallScreen）。
+                videoQuality,
+                onVideoQuality: changeVideoQuality,
                 ...(settings.devices.length > 0 ? { devices: settings.devices } : {}),
                 // ADR-0322 S2：撤銷三態；行動端只呈現狀態，移除入口留桌面。
                 ...(backendRef.current?.revocationState
