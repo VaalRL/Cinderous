@@ -138,7 +138,13 @@ export function RosterAdminScreen({
   return (
     <View style={styles.root}>
       <View style={styles.header}>
-        <Pressable style={styles.back} accessibilityRole="button" aria-label={t("mobileConvo_back")} onPress={onBack}>
+        <Pressable
+          style={styles.back}
+          accessibilityRole="button"
+          aria-label={t("mobileConvo_back")}
+          testID="roster-back"
+          onPress={onBack}
+        >
           <Text style={styles.backText}>‹</Text>
         </Pressable>
         <Text style={styles.headerTitle}>{t("settings_orgRoster")}</Text>

@@ -327,6 +327,9 @@ export function ConversationScreen({
   onSendPhoto,
   onDepositSlot,
   onStartCall,
+  stickersDisabled,
+  fsPeerState,
+  initialMembersOpen,
   onNudge,
   onHistory,
   onLeaveGroup,
@@ -365,6 +368,19 @@ export function ConversationScreen({
   onDepositSlot?: () => void;
   /** 發起通話（ADR-0101）；未提供則不顯示通話鈕（示範模式／平台無 WebRTC）。 */
   onStartCall?: (media: CallMedia) => void;
+  /**
+   * 企業政策停用貼圖（ADR-0048／0311）：隱藏 😊 與貼圖面板。
+   * 貼圖面板送出走共用的 `onSend`，沒有專屬 callback 可拿掉，故以旗標設閘（同桌面 `stickersDisabled`）。
+   * **只擋送出**——收到的貼圖照常渲染。
+   */
+  stickersDisabled?: boolean;
+  /**
+   * 某位成員現在的 FS 狀態（ADR-0319）：提供才在成員面板顯示這一欄。
+   * `unknown` 是**常態**（同群但非聯絡人就學不到 EK），不得呈現為警告。
+   */
+  fsPeerState?: (pubkey: string) => "known" | "unknown" | "lost";
+  /** 測試用：初始展開成員面板（SSR 測不到點擊；同桌面 `initialSoundEditing` 的慣例）。 */
+  initialMembersOpen?: boolean;
   /** 敲一下（ADR-0114）：1:1 才有；過去行動端只能收、不能發。 */
   onNudge?: () => void;
   /** 開啟歷史紀錄（ADR-0111）；只有該對話真的有封存時才傳入。 */
@@ -464,7 +480,7 @@ export function ConversationScreen({
     setShowBroadcast(false);
   };
   /** 群組成員面板是否展開（ADR-0114）。 */
-  const [membersOpen, setMembersOpen] = useState(false);
+  const [membersOpen, setMembersOpen] = useState(initialMembersOpen ?? false);
   /** 新增成員挑選是否展開（ADR-0170）：管理者才有；避免成員面板一開就塞一長串聯絡人。 */
   const [addMemberOpen, setAddMemberOpen] = useState(false);
   /** 對話背景挑選面板是否展開（ADR-0134）。 */
@@ -616,7 +632,13 @@ export function ConversationScreen({
   return (
     <View style={styles.root}>
       <View style={styles.header}>
-        <Pressable style={styles.back} accessibilityRole="button" aria-label={t("mobileConvo_back")} onPress={onBack}>
+        <Pressable
+          style={styles.back}
+          accessibilityRole="button"
+          aria-label={t("mobileConvo_back")}
+          testID="convo-back"
+          onPress={onBack}
+        >
           <Text style={styles.backText}>‹</Text>
         </Pressable>
         <View style={styles.headText}>
@@ -756,9 +778,37 @@ export function ConversationScreen({
       {/* 群組成員面板（ADR-0114）：管理者可移除成員；任何人都能離開。 */}
       {membersOpen && groupMembers ? (
         <View style={styles.members}>
+          {/* 群組 FS 狀態（ADR-0319）：**靜態呈現，不發 per-member 警告**——「未知」在群組是
+              常態（同群但非聯絡人就學不到 EK），把常態顯示成「對方可能被攻擊」是 0302 §4 的紅線。 */}
+          {fsPeerState ? (
+            <Text style={styles.headSub} testID="group-fs-summary">
+              {t("groupFs_summary", {
+                total: String(groupMembers.filter((pk) => pk !== selfPubkey).length),
+                covered: String(
+                  groupMembers.filter((pk) => pk !== selfPubkey && fsPeerState(pk) === "known").length,
+                ),
+              })}
+            </Text>
+          ) : null}
           {groupMembers.map((pk) => (
             <View key={pk} style={styles.memberRow}>
               <Text style={styles.memberName}>{nameFor ? nameFor(pk) : `${pk.slice(0, 10)}…`}</Text>
+              {fsPeerState && pk !== selfPubkey
+                ? (() => {
+                    const st = fsPeerState(pk);
+                    const label = t(st === "known" ? "groupFs_known" : st === "lost" ? "groupFs_lost" : "groupFs_unknown");
+                    // 只有 `lost` 用警示色；`unknown` 是常態，維持次要灰。
+                    return (
+                      <Text
+                        testID={`member-fs-${st}`}
+                        style={[styles.headSub, st === "known" ? { color: "#2f9e44" } : st === "lost" ? { color: "#c0392b" } : null]}
+                      >
+                        {st === "lost" ? "⚠ " : ""}
+                        {label}
+                      </Text>
+                    );
+                  })()
+                : null}
               {isGroupAdmin && onRemoveMember && pk !== selfPubkey ? (
                 <Pressable
                   style={styles.memberBtn}
@@ -1253,7 +1303,7 @@ export function ConversationScreen({
       ) : null}
 
       {/* 貼圖挑選面板（ADR-0137）：內建貼圖包分頁＋圖格；點一下即送出（走既有加密訊息通道）。 */}
-      {stickerOpen ? (
+      {stickerOpen && !stickersDisabled ? (
         <View style={styles.stickerPanel} testID="sticker-panel">
           <ScrollView horizontal contentContainerStyle={styles.stickerTabs}>
             {STICKER_PACK_ORDER.map((pk) => (
@@ -1318,16 +1368,18 @@ export function ConversationScreen({
             <Text style={styles.attachText}>🗄</Text>
           </Pressable>
         ) : null}
-        {/* 貼圖（ADR-0137）：切換貼圖面板。 */}
-        <Pressable
-          style={styles.attach}
-          accessibilityRole="button"
-          aria-label={t("sticker_title")}
-          testID="sticker-btn"
-          onPress={() => setStickerOpen((v) => !v)}
-        >
-          <Text style={styles.attachText}>😊</Text>
-        </Pressable>
+        {/* 貼圖（ADR-0137）：切換貼圖面板；企業政策停用時整個入口不顯示（ADR-0311）。 */}
+        {stickersDisabled ? null : (
+          <Pressable
+            style={styles.attach}
+            accessibilityRole="button"
+            aria-label={t("sticker_title")}
+            testID="sticker-btn"
+            onPress={() => setStickerOpen((v) => !v)}
+          >
+            <Text style={styles.attachText}>😊</Text>
+          </Pressable>
+        )}
         {/* 限時訊息（ADR-0057）：點一下循環關/1m/1h/1d；1:1 才有（群組扇出不帶 ttl）。 */}
         {!groupMembers ? (
           <Pressable

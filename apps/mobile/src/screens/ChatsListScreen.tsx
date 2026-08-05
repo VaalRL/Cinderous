@@ -189,6 +189,7 @@ export function ChatsListScreen({
               style={styles.addBtn}
               accessibilityRole="button"
               aria-label={t("mobileChats_add")}
+              testID="add-contact-toggle"
               onPress={() => {
                 setAddOpen((v) => !v);
                 setGroupOpen(false);
@@ -273,7 +274,13 @@ export function ChatsListScreen({
       ) : (
         <ScrollView style={styles.list}>
           {visible.map((e) => (
-            <Pressable key={e.id} style={styles.row} accessibilityRole="button" onPress={() => onOpen(e.id)}>
+            <Pressable
+            key={e.id}
+            style={styles.row}
+            accessibilityRole="button"
+            testID={`chat-${e.id}`}
+            onPress={() => onOpen(e.id)}
+          >
               <View style={[styles.avatar, { backgroundColor: avatarColor(e.id) }]}>
                 {e.avatar ? (
                   <Image source={{ uri: e.avatar }} style={styles.avatarImg} accessibilityLabel={e.name} />

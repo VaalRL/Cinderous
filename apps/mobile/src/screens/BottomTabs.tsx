@@ -86,6 +86,7 @@ export function BottomTabs({
             style={styles.tab}
             accessibilityRole="button"
             aria-label={t(x.label)}
+            testID={`tab-${x.key}`}
             onPress={() => onSelect(x.key)}
           >
             <Text style={[styles.icon, { opacity: on ? 1 : 0.6 }]}>{x.icon}</Text>

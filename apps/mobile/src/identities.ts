@@ -9,6 +9,8 @@
 
 import {
   activeProfile,
+  type CloudSyncMode,
+  getKv,
   loadProfiles,
   nameTaken,
   type PairBundleOrg,
@@ -17,6 +19,7 @@ import {
   removeProfile,
   saveProfiles,
   setActive,
+  setProfileCloudSync,
   upsertProfile,
   visibleProfiles,
 } from "@cinderous/engine";
@@ -29,6 +32,49 @@ export { activeProfile, nameTaken, type Profile, type ProfilesState, visibleProf
 const REMEMBER_PREFIX = "nb.remembered.";
 /** 舊的單一記住身分鍵（多身分之前）。 */
 const LEGACY_REMEMBER_KEY = "nb.remembered";
+
+/** 舊的**裝置層**雲端備份鍵（ADR-0327 之前，行動端獨有；桌面一向是身分層）。 */
+const LEGACY_CLOUD_SYNC_KEY = "nb.cloudSync";
+
+/**
+ * 某身分的雲端備份模式（ADR-0327）。
+ *
+ * ⚠ 讀**持久化的登錄檔**而不是 React state：`signInWith` 呼叫它的那一輪，
+ * `profiles` 可能還是 stale（剛 remember/switch，`setProfiles` 未 commit）——
+ * 該檔案內已有一段註解為同樣的理由要求「不依賴 prof」。
+ */
+export function cloudSyncOf(pubkey: string): CloudSyncMode {
+  return loadProfiles().profiles.find((p) => p.pubkey === pubkey)?.cloudSync ?? "off";
+}
+
+/**
+ * 一次性遷移（ADR-0327）：舊的**裝置層** `nb.cloudSync` → 每個身分各一份。
+ *
+ * 🔴 **只在舊值是 `basic`／`full` 時才寫進 profile**。那是使用者明確開啟過的東西，
+ * 不遷移＝**他的備份靜默停掉**，而他以為還開著。
+ * 舊值是 `off`（或沒有）則只清鍵、不寫入——留著 `undefined` 讓 `adoptCloudSyncMode`
+ * 的「還原時接續備份習慣」仍然有效（寫死 `off` 會把那條路堵掉）。
+ *
+ * ⚠ 遷移後，**新建立的身分預設 `off`**，不再繼承上一個身分的選擇。那正是這次要修的東西。
+ */
+export function migrateLegacyCloudSync(): void {
+  const kv = getKv();
+  const legacy = kv.getItem(LEGACY_CLOUD_SYNC_KEY);
+  if (legacy === null) return;
+  if (legacy === "basic" || legacy === "full") {
+    let next = loadProfiles();
+    for (const p of next.profiles) {
+      if (p.cloudSync === undefined) next = setProfileCloudSync(next, p.pubkey, legacy);
+    }
+    saveProfiles(next);
+  }
+  kv.removeItem(LEGACY_CLOUD_SYNC_KEY);
+}
+
+/** 設定某身分的雲端備份模式並持久化（ADR-0327）。 */
+export function saveCloudSyncFor(pubkey: string, mode: CloudSyncMode): void {
+  saveProfiles(setProfileCloudSync(loadProfiles(), pubkey, mode));
+}
 
 const blobKey = (pubkey: string): string => REMEMBER_PREFIX + pubkey;
 
@@ -65,8 +111,11 @@ function deleteRemembered(pubkey: string): void {
 /**
  * 載入身分登錄。首次（無 `nb.profiles`）且存在舊的單一記住身分（`nb.remembered`）時，
  * 遷移為一個 profile ＋ 每身分 blob，並清掉舊鍵（單一真實來源），向後相容。
+ *
+ * 也是 `nb.cloudSync`（裝置層 → 身分層，ADR-0327）的遷移點：**同一件事只做一個入口**。
  */
 export function loadIdentities(relayUrl: string): ProfilesState {
+  migrateLegacyCloudSync(); // ADR-0327：裝置層備份偏好 → 每身分一份（本函式已是既有的遷移點）
   const state = loadProfiles(); // engine：行動端無 nb.identity → 空；或既有 nb.profiles
   if (state.profiles.length > 0) return state;
   try {

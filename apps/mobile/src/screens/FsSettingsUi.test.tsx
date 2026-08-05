@@ -59,3 +59,49 @@ describe("行動端前向保密設定區（ADR-0306 D1）", () => {
     expect(html).not.toContain("前向保密（進階）");
   });
 });
+
+describe("FS 自動輪替與停用的 UI（ADR-0313／0314）", () => {
+  type FsProp = NonNullable<Parameters<typeof SettingsScreen>[0]["fs"]>;
+  const render = (fs: FsProp): string => renderToStaticMarkup(<SettingsScreen {...base} fs={fs} />);
+
+  it("已啟用時說明「每 7 天自動更換」——保護來自自動，不是那顆手動鈕", () => {
+    const html = render({ enabled: true, onEnable: () => {}, onRotate: () => {} });
+    expect(html).toContain('data-testid="fs-auto-rotate"');
+    expect(html).toContain("7");
+  });
+
+  it("🔴 提供 onDisable 時顯示停用鈕——啟用確認說了「可以隨時關閉」", () => {
+    const html = render({ enabled: true, onEnable: () => {}, onRotate: () => {}, onDisable: () => {} });
+    expect(html).toContain('data-testid="fs-disable"');
+  });
+
+  it("未啟用時不顯示停用鈕（沒有可停用的東西）", () => {
+    const html = render({ enabled: false, onEnable: () => {}, onRotate: () => {}, onDisable: () => {} });
+    expect(html).not.toContain('data-testid="fs-disable"');
+    expect(html).not.toContain('data-testid="fs-auto-rotate"');
+  });
+});
+
+describe("解封失敗的可見性（ADR-0316）", () => {
+  type FsProp = NonNullable<Parameters<typeof SettingsScreen>[0]["fs"]>;
+  const render = (fs: FsProp): string => renderToStaticMarkup(<SettingsScreen {...base} fs={fs} />);
+  const enabled = { enabled: true, onEnable: () => {}, onRotate: () => {} };
+
+  it("沒發生過就不顯示（不用一段警告文字佔版面）", () => {
+    expect(render(enabled)).not.toContain('data-testid="fs-undecryptable"');
+    expect(render({ ...enabled, undecryptable: { count: 0, lastAt: 0 } })).not.toContain('data-testid="fs-undecryptable"');
+  });
+
+  it("🔴 發生過就要看得見——這正是 ADR-0315 第 1 步要解的「靜默消失」", () => {
+    const html = render({ ...enabled, undecryptable: { count: 3, lastAt: Date.now() } });
+    expect(html).toContain('data-testid="fs-undecryptable"');
+    expect(html).toContain("3");
+  });
+
+  it("🔴 文案不得把「可能」寫成「是」——無法分辨要講出來", () => {
+    const html = render({ ...enabled, undecryptable: { count: 1, lastAt: Date.now() } });
+    expect(html).toContain("可能");
+    expect(html).toContain("無法分辨");
+    expect(html).toContain("查不出是誰送的"); // NIP-59 的必然限制，別讓使用者以為我們藏著
+  });
+});

@@ -2,8 +2,9 @@
 // 主題/主色/語言由 MobileApp 掌管、經 callback 即時切換；色彩吃 @cinderous/theme。
 import { useMemo, useState } from "react";
 import type { CloudSyncMode, Status } from "@cinderous/engine";
-import { type Locale, type MessageKey, translate } from "@cinderous/i18n";
+import { type Locale, type MessageKey, type TranslateParams, translate } from "@cinderous/i18n";
 import { resolveTheme, type Theme, type ThemeTokens } from "@cinderous/theme";
+import { policyNotices, type OrgPolicy } from "@cinderous/core";
 
 /** 上線狀態的 i18n 鍵（與桌面同一組）。 */
 const STATUS_KEY: Record<"online" | "away" | "busy", MessageKey> = {
@@ -55,6 +56,7 @@ function makeStyles(tk: ThemeTokens) {
     logoutText: { color: "#ffffff", fontWeight: "700", fontSize: 15 },
     dangerTitle: { color: "#c0392b" },
     dangerText: { color: "#c0392b", fontWeight: "700", fontSize: 15, paddingVertical: 10 },
+    deviceRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 8 },
     // 改密碼／備份碼（ADR-0135/0070）。
     pwInput: {
       borderWidth: 1,
@@ -100,6 +102,7 @@ export function SettingsScreen({
   title,
   onSetTitle,
   onOpenRoster,
+  orgPolicy,
   slotQueue,
   onSlotRetry,
   onSlotRemove,
@@ -115,6 +118,15 @@ export function SettingsScreen({
   onExport,
   readReceipts,
   onReadReceipts,
+  groupInviteFromAnyone,
+  onGroupInvite,
+  devices,
+  revocation,
+  selfDevicePk,
+  deviceKeyTier,
+  deviceKeyEverPlaintext,
+  onRemoveDevice,
+  onForgetDevice,
   fs,
   cloudSync,
   onCloudSync,
@@ -158,6 +170,11 @@ export function SettingsScreen({
   onSetTitle?: (title: string) => void;
   /** 組織名冊管理入口（ADR-0178，企業主）：未提供則不顯示（非企業主）。 */
   onOpenRoster?: () => void;
+  /**
+   * 企業政策（ADR-0312）：條列「公司政策做了什麼」。
+   * 未提供或全空＝整段不顯示（一般個人身分看不到這一區）。
+   */
+  orgPolicy?: OrgPolicy;
   /** 公司儲存槽佇列（ADR-0177／0180，員工端）：待傳/已送/失敗項；未提供/空則不顯示。 */
   slotQueue?: { id: string; name: string; status: "pending" | "sending" | "done" | "failed" }[];
   onSlotRetry?: () => void;
@@ -181,12 +198,39 @@ export function SettingsScreen({
   /** 已讀回條（ADR-0058）：opt-in＋互惠；關閉則不送、也不顯示對方已讀。 */
   readReceipts?: boolean;
   onReadReceipts?: (v: boolean) => void;
+  /** 入群邀請閘門（ADR-0317）：true＝任何人可邀；false（預設）＝只有聯絡人。 */
+  groupInviteFromAnyone?: boolean;
+  onGroupInvite?: (v: boolean) => void;
+  /** 觀測到的裝置（ADR-0321）：提供才顯示「我的裝置」。 */
+  devices?: { id: string; firstSeen: number; source: string; inDirectory?: boolean; revoked?: boolean; stale?: boolean }[];
+  /** 移除某台裝置（ADR-0322 S3／ADR-0323 補上行動端入口）。未提供＝不顯示移除鈕。 */
+  onRemoveDevice?: (id: string) => void;
+  /** 忘掉一筆觀測（ADR-0324）：只清本機紀錄，不撤銷任何東西。 */
+  onForgetDevice?: (id: string) => void;
+  /** 撤銷三態（ADR-0322 S2）。⚠ 行動端 v1 只呈現狀態，移除入口留桌面（需二次確認對話框）。 */
+  revocation?: { state: "unknown" | "dual-track" | "active"; devices?: string[] };
+  /**
+   * 本機裝置代碼（ADR-0322 S5）：在**桌面**（已在清單上的裝置）貼上即可授權這一台。
+   * ⚠ 行動端 v1 只顯示自己的代碼、不提供授權入口——授權需要二次確認對話框，桌面才有統一入口。
+   */
+  selfDevicePk?: string;
+  /** 本機裝置金鑰的保護等級（ADR-0297 §6 紅線：必須如實顯示）。 */
+  deviceKeyTier?: "keystore" | "encrypted" | "plaintext" | "ephemeral";
+  /** 裝置金鑰曾經明文落盤過（ADR-0323）。 */
+  deviceKeyEverPlaintext?: boolean;
   /**
    * 前向保密（ADR-0245／0306 D1）：**實驗性、預設關**。未提供則不顯示整個區塊。
    * ⚠ 區塊內的「尚未經外部審計」揭露是 ADR-0306 D1 的**驗收條件**，不是提示文字——
    * 拿掉它，這條路就退回成 ADR-0306 §3 說的遮羞布。
    */
-  fs?: { enabled: boolean; onEnable: () => void; onRotate: () => void };
+  fs?: {
+    enabled: boolean;
+    onEnable: () => void;
+    onRotate: () => void;
+    onDisable?: () => void;
+    /** 本裝置解不開的訊息數與最後時間（ADR-0316）；`count` 為 0 時不顯示。 */
+    undecryptable?: { count: number; lastAt: number };
+  };
   /** 加密雲端備份（ADR-0071）：off／basic（不含訊息）／full（含訊息）。 */
   cloudSync?: CloudSyncMode;
   onCloudSync?: (mode: CloudSyncMode) => void;
@@ -212,7 +256,8 @@ export function SettingsScreen({
 }): JSX.Element {
   const tk = useMemo(() => resolveTheme({ theme, accent }), [theme, accent]);
   const styles = useMemo(() => makeStyles(tk), [tk]);
-  const t = (k: MessageKey): string => translate(locale, k);
+  // 帶 params 的鍵（如 ADR-0312 的「保留 {days} 天」）需要內插，故轉發第三個參數。
+  const t = (k: MessageKey, params?: TranslateParams): string => translate(locale, k, params);
   const [showNsec, setShowNsec] = useState(false);
   // 更改顯示名稱（ADR-0144）。
   const [nameDraft, setNameDraft] = useState(selfName);
@@ -251,6 +296,28 @@ export function SettingsScreen({
     onSetTitle?.(titleDraft.trim()); // 空＝移除
     setTitleSaved(true);
   };
+
+  // 公司政策條列（ADR-0312）：清單與順序來自 core（與桌面同一份），這裡只接文案。
+  const policyRows = policyNotices(orgPolicy).map((n) => ({
+    id: n.id,
+    kind: n.kind,
+    text:
+      n.id === "files"
+        ? t("orgPolicy_files")
+        : n.id === "calls"
+          ? t("orgPolicy_calls")
+          : n.id === "stickers"
+            ? t("orgPolicy_stickers")
+            : n.id === "cloudBackup"
+              ? t("orgPolicy_cloudBackup")
+              : n.id === "forceTurn"
+                ? t("orgPolicy_forceTurn")
+                : n.id === "ttlDays"
+                  ? t("orgPolicy_ttlDays", { days: String(n.value ?? "") })
+                  : t("orgPolicy_relayFilesMb", { mb: String(n.value ?? "") }),
+  }));
+  const policyDisabled = policyRows.filter((r) => r.kind === "disabled");
+  const policyRules = policyRows.filter((r) => r.kind === "rule");
 
   const changePassword = (): void => {
     if (!onChangePassword || !pwOld || !pwNew || pwNew !== pwNew2) {
@@ -564,10 +631,20 @@ export function SettingsScreen({
           <Text style={styles.sectionTitle}>{t("mobileSettings_appearance")}</Text>
           <Text style={styles.label}>{t("mobileSettings_theme")}</Text>
           <View style={styles.rowSeg}>
-            <Pressable style={seg(theme === "light")} accessibilityRole="button" onPress={() => onTheme("light")}>
+            <Pressable
+              style={seg(theme === "light")}
+              accessibilityRole="button"
+              testID="theme-light"
+              onPress={() => onTheme("light")}
+            >
               <Text style={segTxt(theme === "light")}>{t("mobileSettings_light")}</Text>
             </Pressable>
-            <Pressable style={seg(theme === "dark")} accessibilityRole="button" onPress={() => onTheme("dark")}>
+            <Pressable
+              style={seg(theme === "dark")}
+              accessibilityRole="button"
+              testID="theme-dark"
+              onPress={() => onTheme("dark")}
+            >
               <Text style={segTxt(theme === "dark")}>{t("mobileSettings_dark")}</Text>
             </Pressable>
           </View>
@@ -588,10 +665,20 @@ export function SettingsScreen({
           </View>
           <Text style={styles.label}>{t("mobileSettings_language")}</Text>
           <View style={styles.rowSeg}>
-            <Pressable style={seg(locale === "zh-Hant")} accessibilityRole="button" onPress={() => onLocale("zh-Hant")}>
+            <Pressable
+              style={seg(locale === "zh-Hant")}
+              accessibilityRole="button"
+              testID="locale-zh"
+              onPress={() => onLocale("zh-Hant")}
+            >
               <Text style={segTxt(locale === "zh-Hant")}>繁中</Text>
             </Pressable>
-            <Pressable style={seg(locale === "en")} accessibilityRole="button" onPress={() => onLocale("en")}>
+            <Pressable
+              style={seg(locale === "en")}
+              accessibilityRole="button"
+              testID="locale-en"
+              onPress={() => onLocale("en")}
+            >
               <Text style={segTxt(locale === "en")}>EN</Text>
             </Pressable>
           </View>
@@ -665,6 +752,35 @@ export function SettingsScreen({
             {titleSaved ? (
               <Text style={styles.okMsg} testID="org-title-ok">{t("settings_orgTitleUpdated")}</Text>
             ) : null}
+          </View>
+        ) : null}
+
+        {/* 公司政策（ADR-0312）：條列「公司政策做了什麼」——沒有這一段，政策只表現為按鈕消失。
+            清單與順序來自 core 的 policyNotices，與桌面同一份。 */}
+        {policyRows.length > 0 ? (
+          <View style={styles.section} testID="org-policy">
+            <Text style={styles.sectionTitle}>{t("orgPolicy_title")}</Text>
+            {policyDisabled.length > 0 ? (
+              <>
+                <Text style={styles.label}>{t("orgPolicy_disabledHead")}</Text>
+                {policyDisabled.map((row) => (
+                  <Text key={row.id} style={styles.value} testID={`org-policy-${row.id}`}>
+                    ・{row.text}
+                  </Text>
+                ))}
+              </>
+            ) : null}
+            {policyRules.length > 0 ? (
+              <>
+                <Text style={styles.label}>{t("orgPolicy_rulesHead")}</Text>
+                {policyRules.map((row) => (
+                  <Text key={row.id} style={styles.value} testID={`org-policy-${row.id}`}>
+                    ・{row.text}
+                  </Text>
+                ))}
+              </>
+            ) : null}
+            <Text style={styles.label}>{t("orgPolicy_hint")}</Text>
           </View>
         ) : null}
 
@@ -820,6 +936,8 @@ export function SettingsScreen({
             {fs.enabled ? (
               <>
                 <Text style={styles.label}>✅ {t("fs_enabled")}</Text>
+                {/* ADR-0313：保護來自自動輪替；手動鈕是「我現在就被入侵了」用的。 */}
+                <Text style={styles.label} testID="fs-auto-rotate">{t("fs_autoRotate")}</Text>
                 <Pressable
                   accessibilityRole="button"
                   testID="fs-rotate"
@@ -828,6 +946,26 @@ export function SettingsScreen({
                 >
                   <Text style={[styles.segText, { color: tk.ink }]}>{t("fs_rotate")}</Text>
                 </Pressable>
+                {/* ADR-0316：解不開不再是「什麼都沒發生」；只在 >0 時出現。 */}
+                {fs.undecryptable && fs.undecryptable.count > 0 ? (
+                  <Text testID="fs-undecryptable" style={[styles.label, { color: "#c0392b" }]}>
+                    {t("fs_undecryptable", {
+                      count: String(fs.undecryptable.count),
+                      when: new Date(fs.undecryptable.lastAt).toLocaleString(),
+                    })}
+                  </Text>
+                ) : null}
+                {/* ADR-0314：啟用確認說了「可以隨時關閉」，這裡把那句話變成真的。 */}
+                {fs.onDisable ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    testID="fs-disable"
+                    onPress={fs.onDisable}
+                    style={[styles.seg, { alignSelf: "flex-start", borderColor: tk.border, backgroundColor: tk.field }]}
+                  >
+                    <Text style={[styles.segText, { color: tk.ink }]}>{t("fs_disable")}</Text>
+                  </Pressable>
+                ) : null}
               </>
             ) : (
               <Pressable
@@ -839,6 +977,133 @@ export function SettingsScreen({
                 <Text style={[styles.segText, { color: tk.ink }]}>{t("fs_enable")}</Text>
               </Pressable>
             )}
+          </View>
+        ) : null}
+
+        {/* 我的裝置（ADR-0321 E-lite）：今天使用者根本看不到自己有幾台裝置。
+            🔴 下方那句限制揭露是**驗收條件**——這份清單看不到純被動讀取的裝置，
+            拿掉它，使用者會把「只有一台」讀成「沒有人在偷看」。 */}
+        {devices && devices.length > 0 ? (
+          <View style={styles.section} testID="devices">
+            <Text style={styles.sectionTitle}>{t("devices_title")}</Text>
+            {devices.map((d) => (
+              <View key={d.id} style={styles.deviceRow}>
+                <Text style={[styles.value, { flexShrink: 1 }]} testID={`device-${d.source}`}>
+                  ・{d.id.slice(0, 8)}
+                  {d.source === "local" ? `（${t("devices_thisOne")}）` : ""} ·{" "}
+                  {d.source === "local"
+                    ? t("devices_source_local")
+                    : d.source === "pairing"
+                      ? t("devices_source_pairing")
+                      : t("devices_source_snapshot")}
+                  {d.inDirectory === false ? ` ${t("devices_notInDirectory")}` : ""}
+                  {d.revoked ? `（${t("devices_revoked")}）` : ""}
+                  {/* ADR-0324：久未出現＝已被排除在撤銷判定之外，會影響行為，所以要說。 */}
+                  {d.stale ? ` ${t("devices_stale")}` : ""}
+                </Text>
+                {/* ADR-0323：移除入口只給「不是這台、且尚未移除」的裝置
+                    ——移除自己只會把這台鎖在門外（引擎也會拒絕）。 */}
+                {onRemoveDevice && d.source !== "local" && !d.revoked && d.inDirectory !== false ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    testID={`device-remove-${d.id}`}
+                    onPress={() => onRemoveDevice(d.id)}
+                  >
+                    <Text style={styles.dangerText}>{t("devices_remove")}</Text>
+                  </Pressable>
+                ) : null}
+                {/* ADR-0324：不在目錄內的沒有目錄項，撤銷按下去會靜默什麼都不做
+                    ⇒ 改給「從清單移除」，且文案明說那不撤銷任何東西。 */}
+                {onForgetDevice && d.source !== "local" && d.inDirectory === false ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    testID={`device-forget-${d.id}`}
+                    onPress={() => onForgetDevice(d.id)}
+                  >
+                    <Text style={styles.label}>{t("devices_forget")}</Text>
+                  </Pressable>
+                ) : null}
+              </View>
+            ))}
+            {/* ADR-0297 §6 紅線：**設定頁必須如實顯示本機在哪一級**。 */}
+            {deviceKeyTier ? (
+              <>
+                <Text style={styles.sectionTitle}>{t("devices_tierTitle")}</Text>
+                <Text
+                  testID={`key-tier-${deviceKeyTier}`}
+                  style={[
+                    styles.label,
+                    deviceKeyTier === "plaintext" || deviceKeyTier === "ephemeral" ? { color: "#c0392b" } : null,
+                  ]}
+                >
+                  {deviceKeyTier === "plaintext"
+                    ? t("devices_tierPlaintext")
+                    : deviceKeyTier === "ephemeral"
+                      ? t("devices_tierEphemeral")
+                      : deviceKeyTier === "encrypted"
+                        ? t("devices_tierEncrypted")
+                        : t("devices_tierKeystore")}
+                </Text>
+                {/* ADR-0323：遷移進金鑰庫的舊金鑰曾經明文躺過——刪副本收不回已被拿走的東西。 */}
+                {deviceKeyTier === "keystore" && deviceKeyEverPlaintext ? (
+                  <Text testID="key-tier-was-plain" style={[styles.label, { color: "#c0392b" }]}>
+                    {t("devices_tierWasPlain")}
+                  </Text>
+                ) : null}
+              </>
+            ) : null}
+            {/* ADR-0322 S5：這台的代碼——在桌面（已授權的裝置）上貼上即可把這台加入清單。 */}
+            {selfDevicePk ? (
+              <>
+                <Text style={styles.sectionTitle}>{t("devices_myCode")}</Text>
+                <Text style={styles.npub} testID="my-device-code">{selfDevicePk}</Text>
+                <Text style={styles.label}>{t("devices_myCodeHint")}</Text>
+              </>
+            ) : null}
+            {/* ADR-0322 S2：撤銷三態。雙軌期間必須明說「移除還不會生效」。 */}
+            {revocation ? (
+              <Text
+                testID={`revocation-${revocation.state}`}
+                style={[styles.label, revocation.state === "dual-track" ? { color: "#c0392b" } : null]}
+              >
+                {revocation.state === "unknown"
+                  ? t("devices_revUnknown")
+                  : revocation.state === "dual-track"
+                    ? t("devices_revDualTrack", {
+                        ids: (revocation.devices ?? []).map((i) => i.slice(0, 8)).join("、"),
+                      })
+                    : t("devices_revActive")}
+              </Text>
+            ) : null}
+            <Text style={[styles.label, { color: "#c0392b" }]} testID="devices-limit">
+              {t("devices_limit")}
+            </Text>
+          </View>
+        ) : null}
+
+        {/* 入群邀請的同意閘門（ADR-0317）：預設只有聯絡人可以把你加進群組。 */}
+        {onGroupInvite ? (
+          <View style={styles.section} testID="group-invite-setting">
+            <Text style={styles.sectionTitle}>{t("settings_groupInvite")}</Text>
+            <Text style={styles.label}>{t("settings_groupInviteHint")}</Text>
+            <Pressable
+              accessibilityRole="button"
+              testID="group-invite-anyone"
+              onPress={() => onGroupInvite(!groupInviteFromAnyone)}
+              style={[
+                styles.seg,
+                {
+                  alignSelf: "flex-start",
+                  borderColor: groupInviteFromAnyone ? tk.accent : tk.border,
+                  backgroundColor: groupInviteFromAnyone ? tk.accent : tk.field,
+                },
+              ]}
+            >
+              <Text style={[styles.segText, { color: groupInviteFromAnyone ? "#ffffff" : tk.ink }]}>
+                {t("settings_groupInvite")}
+                {groupInviteFromAnyone ? " ✓" : ""}
+              </Text>
+            </Pressable>
           </View>
         ) : null}
 
@@ -932,7 +1197,7 @@ export function SettingsScreen({
           <Text style={styles.value} numberOfLines={1}>{relayUrl ?? t("mobileSettings_relayDemo")}</Text>
         </View>
 
-        <Pressable style={styles.logout} accessibilityRole="button" onPress={onLogout}>
+        <Pressable style={styles.logout} accessibilityRole="button" testID="logout" onPress={onLogout}>
           <Text style={styles.logoutText}>{t("mobileSettings_logout")}</Text>
         </Pressable>
 

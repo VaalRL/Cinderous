@@ -193,6 +193,7 @@ export function AddContactPanel({
           style={styles.input}
           value={draft}
           onChangeText={setDraft}
+          testID="add-contact-input"
           placeholder={t("mobileChats_addPlaceholder")}
           placeholderTextColor={tk.muted}
           autoCapitalize="none"

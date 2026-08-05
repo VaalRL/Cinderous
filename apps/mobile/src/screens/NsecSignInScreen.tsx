@@ -141,7 +141,13 @@ export function NsecSignInScreen({
         <Text style={styles.hint}>{T("mobileSignIn_hint")}</Text>
 
         <Text style={styles.label}>{T("mobileSignIn_nameLabel")}</Text>
-        <TextInput style={styles.input} value={name} onChangeText={setName} aria-label={T("mobileSignIn_nameLabel")} />
+        <TextInput
+          style={styles.input}
+          value={name}
+          onChangeText={setName}
+          aria-label={T("mobileSignIn_nameLabel")}
+          testID="signin-name"
+        />
         {onJoinOrg && !invite ? <Text style={styles.hint}>{T("addId_invite")}</Text> : null}
 
         {invite ? (
@@ -236,7 +242,7 @@ export function NsecSignInScreen({
             <Text style={styles.buttonText}>{T("signIn_joinButton")}</Text>
           </Pressable>
         ) : (
-          <Pressable style={styles.button} onPress={submit} accessibilityRole="button">
+          <Pressable style={styles.button} onPress={submit} accessibilityRole="button" testID="signin-submit">
             <Text style={styles.buttonText}>{T(nsecOpen ? "mobileSignIn_button" : "signIn_createButton")}</Text>
           </Pressable>
         )}
