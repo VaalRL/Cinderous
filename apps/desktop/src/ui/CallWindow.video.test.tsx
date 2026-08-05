@@ -49,6 +49,7 @@ const view = (opts: {
       remoteStream={opts.stream}
       quality={opts.quality ?? "medium"}
       onQualityChange={opts.onQuality ?? (() => {})}
+      onCameraChange={() => {}}
       onAccept={() => {}}
       onReject={() => {}}
       onHangup={() => {}}

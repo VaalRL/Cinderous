@@ -1252,6 +1252,27 @@ export function AppSession({
     backendRef.current?.setVideoQuality?.(q);
   };
 
+  /**
+   * 這台有幾個鏡頭（ADR-0339）：只有一個就不顯示翻面鈕。
+   *
+   * ⚠ 只在通話中列舉——`enumerateDevices` 在未取得相機權限前不給有意義的資料，
+   * 而且平時去問它沒有意義。
+   */
+  const [cameraCount, setCameraCount] = useState(0);
+  useEffect(() => {
+    if (!call.active || !navigator.mediaDevices?.enumerateDevices) return;
+    let alive = true;
+    void navigator.mediaDevices
+      .enumerateDevices()
+      .then((all) => {
+        if (alive) setCameraCount(all.filter((d) => d.kind === "videoinput").length);
+      })
+      .catch(() => {
+        /* 列舉失敗＝不顯示按鈕，不是錯誤 */
+      });
+    return () => void (alive = false);
+  }, [call.active]);
+
   // 通話覆蓋層（ADR-0101）：來電/通話中一律蓋在最上層，不論當下在哪個畫面。
   const callOverlay = call.active ? (
     <CallScreen
@@ -1269,6 +1290,9 @@ export function AppSession({
       remoteMedia={call.remoteMedia}
       canChangeMedia={backendRef.current?.canChangeCallMedia?.() ?? false}
       onMediaChange={(m) => backendRef.current?.setCallMedia?.(m)}
+      facing={call.facing}
+      canFlipCamera={cameraCount > 1}
+      onFlipCamera={(next) => backendRef.current?.setCamera?.({ facingMode: next })}
       locale={locale}
       theme={theme}
       accent={accent}

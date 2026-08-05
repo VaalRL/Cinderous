@@ -16,6 +16,9 @@ const base = {
   remoteMedia: "audio" as const,
   canChangeMedia: false,
   onMediaChange: () => {},
+  facing: null,
+  canFlipCamera: false,
+  onFlipCamera: () => {},
   locale: "zh-Hant" as const,
 };
 

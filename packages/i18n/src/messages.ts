@@ -882,6 +882,12 @@ export interface Messages {
   call_toAudio: string;
   /** 對方只送語音時的說明（ADR-0338：媒體型態每方向獨立，UI 要照實說）。 */
   call_remoteAudioOnly: string;
+  /**
+   * 切換鏡頭（ADR-0339）。手機是翻面（一顆按鈕），桌面是選裝置（一份清單）
+   * ——**刻意是兩組文案**，因為桌面的多鏡頭沒有前後可言。
+   */
+  call_flipCamera: string;
+  call_camera: string;
   /** 視訊畫質檔位（ADR-0337）。 */
   call_quality: string;
   call_quality_low: string;
@@ -1743,6 +1749,8 @@ const zhHant: Messages = {
   call_toVideo: "開啟我的視訊",
   call_toAudio: "關閉我的視訊",
   call_remoteAudioOnly: "對方未開啟視訊",
+  call_flipCamera: "切換鏡頭",
+  call_camera: "鏡頭",
   call_quality: "畫質",
   call_quality_low: "省流量",
   call_quality_medium: "標準",
@@ -2599,6 +2607,8 @@ const en: Messages = {
   call_toVideo: "Turn on my video",
   call_toAudio: "Turn off my video",
   call_remoteAudioOnly: "They aren't sending video",
+  call_flipCamera: "Flip camera",
+  call_camera: "Camera",
   call_quality: "Quality",
   call_quality_low: "Data saver",
   call_quality_medium: "Standard",

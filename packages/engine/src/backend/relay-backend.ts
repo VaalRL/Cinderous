@@ -181,7 +181,7 @@ import type {
   Self,
   Status,
 } from "./types.js";
-import type { VideoQuality } from "@cinderous/core";
+import type { CameraSelection, VideoQuality } from "@cinderous/core";
 import { planFilters, sub, type SubDecl } from "./sub-plan.js";
 
 /** pool relay 連續離線超過此時間即標記 hint 可能陳舊（ADR-0036）。 */
@@ -837,6 +837,7 @@ export class RelayChatBackend implements ChatBackend {
         publishCallSignal: (evt) => this.publishAddressed(evt),
         onState: (peer, state, media) => this.handlers?.onCallState?.(peer, state, media),
         onMedia: (local, remote) => this.handlers?.onCallMedia?.(local, remote),
+        onCamera: (facing) => this.handlers?.onCallCamera?.(facing),
         onLocalStream: (stream) => this.handlers?.onCallLocalStream?.(stream),
         onRemoteStream: (stream) => this.handlers?.onCallRemoteStream?.(stream),
         onError: (reason) => this.handlers?.onFileError?.(this.self.pubkey, reason),
@@ -4610,6 +4611,10 @@ export class RelayChatBackend implements ChatBackend {
   /** 這通能不能改型態（ADR-0338 §4）：舊版對端沒有視訊 m-line 就不行。 */
   canChangeCallMedia(): boolean {
     return this.call.canChangeMedia();
+  }
+  /** 切換鏡頭（ADR-0339）：手機翻面或桌面選裝置。 */
+  setCamera(selection: CameraSelection): void {
+    this.call.setCamera(selection);
   }
 
   sendTyping(to: PubkeyHex): void {

@@ -1,4 +1,4 @@
-import type { CallMedia, CallState, VideoQuality } from "@cinderous/core";
+import type { CallMedia, CallState, CameraSelection, VideoQuality } from "@cinderous/core";
 import { VIDEO_QUALITIES } from "@cinderous/core";
 import { useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n.js";
@@ -31,6 +31,35 @@ export interface CallWindowProps {
    * UI 手上只有 `MediaStream`。（靜音則相反，UI 自己動音軌就夠。）
    */
   onQualityChange: (q: VideoQuality) => void;
+  /**
+   * 換鏡頭（ADR-0339）。**桌面是選裝置，不是翻面**——內建／外接／擷取卡是一份清單，
+   * 沒有前後可言。硬做成翻面會做出一個「轉了不知道轉到哪」的按鈕。
+   */
+  onCameraChange: (sel: CameraSelection) => void;
+}
+
+/**
+ * 可用的視訊輸入裝置（ADR-0339）。
+ *
+ * ⚠ **標籤在取得相機權限前是空字串**（規格防指紋）⇒ 只有通話中（權限已給）才有
+ * 有意義的名稱。因此這個清單只在通話視窗裡用，不放設定頁。
+ */
+function useCameras(active: boolean): MediaDeviceInfo[] {
+  const [list, setList] = useState<MediaDeviceInfo[]>([]);
+  useEffect(() => {
+    if (!active || !navigator.mediaDevices?.enumerateDevices) return;
+    let alive = true;
+    void navigator.mediaDevices
+      .enumerateDevices()
+      .then((all) => {
+        if (alive) setList(all.filter((d) => d.kind === "videoinput"));
+      })
+      .catch(() => {
+        /* 列舉失敗＝不顯示選擇器，不是錯誤 */
+      });
+    return () => void (alive = false);
+  }, [active]);
+  return list;
 }
 
 /** 畫質檔位的 i18n 鍵（順序即由省到清晰）。 */
@@ -64,6 +93,7 @@ export function CallWindow(props: CallWindowProps): JSX.Element {
   // ADR-0338：畫質與關鏡頭只在**我**送視訊時才有意義；遠端版面看的是對方那一方。
   const iSendVideo = props.localMedia === "video";
   const theySendVideo = props.remoteMedia === "video";
+  const cameras = useCameras(state === "active" && iSendVideo);
   const remoteVideoRef = useStream<HTMLVideoElement>(props.remoteStream);
   const localVideoRef = useStream<HTMLVideoElement>(props.localStream);
   const remoteAudioRef = useStream<HTMLAudioElement>(props.remoteStream);
@@ -168,6 +198,23 @@ export function CallWindow(props: CallWindowProps): JSX.Element {
               ) : null}
               {state === "active" && iSendVideo ? (
                 <>
+                  {/* ADR-0339：只有一台鏡頭就不顯示——寧可少一個按鈕，也不要一個按了沒反應的。 */}
+                  {cameras.length > 1 ? (
+                    <label className="callwin__quality">
+                      <span>{t("call_camera")}</span>
+                      <select
+                        onChange={(e) => props.onCameraChange({ deviceId: e.target.value })}
+                        data-testid="call-camera-select"
+                      >
+                        {cameras.map((d, i) => (
+                          <option key={d.deviceId} value={d.deviceId}>
+                            {/* 權限已給時才有名稱；沒有就用序號，不留一個空白選項。 */}
+                            {d.label || `${t("call_camera")} ${i + 1}`}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : null}
                   {/* 畫質問題只有通話中才察覺得到——所以選擇器在這裡，不是埋在設定頁（ADR-0337 §2）。 */}
                   <label className="callwin__quality">
                     <span>{t("call_quality")}</span>

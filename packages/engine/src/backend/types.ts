@@ -1,6 +1,8 @@
 import type {
   CallFailureReason,
   CallMedia,
+  CameraFacing,
+  CameraSelection,
   VideoQuality,
   CallState,
   Group,
@@ -278,6 +280,11 @@ export interface ChatBackendEvents {
    * 則是**有效值**（任一方視訊即視訊），供只想知道「要不要開視訊版面」的地方使用。
    */
   onCallMedia?(local: CallMedia, remote: CallMedia): void;
+  /**
+   * 目前鏡頭的**實際**朝向（ADR-0339）。`null`＝裝置不回報（桌面 webcam 常見）。
+   * UI 的自我預覽鏡像要跟著這個走——前鏡頭鏡像、後鏡頭不鏡像。
+   */
+  onCallCamera?(facing: CameraFacing | null): void;
   /** 本端通話媒體串流（自我預覽；null 表示結束）。 */
   onCallLocalStream?(stream: MediaStream | null): void;
   /** 遠端通話媒體串流（播放；null 表示結束）。 */
@@ -594,6 +601,11 @@ export interface ChatBackend {
    * **UI 據此決定要不要顯示入口**——寧可少一個按鈕，也不要一個按了沒反應的按鈕。
    */
   canChangeCallMedia?(): boolean;
+  /**
+   * 切換鏡頭（ADR-0339）：手機翻面（`facingMode`）或桌面選裝置（`deviceId`）。
+   * 沒在送視訊時只記住選擇，下次開視訊沿用。
+   */
+  setCamera?(selection: CameraSelection): void;
   /** 以 NIP-19 `npub`（可附 `@wss://…` relay hint，ADR-0034）新增聯絡人（僅真實 relay 後端支援）。 */
   addContact?(npub: string, relayUrl?: string): void;
   /** 移除聯絡人並清除對話。 */

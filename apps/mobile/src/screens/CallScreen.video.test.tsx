@@ -46,6 +46,9 @@ const view = (opts: {
     remoteMedia={opts.media}
     canChangeMedia={false}
     onMediaChange={() => {}}
+    facing={null}
+    canFlipCamera={false}
+    onFlipCamera={() => {}}
     onAccept={() => {}}
     onReject={() => {}}
     onHangup={() => {}}

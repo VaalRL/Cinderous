@@ -3409,6 +3409,7 @@ export function App(): JSX.Element {
           remoteMedia={callRemoteMedia}
           canChangeMedia={activeBackend.canChangeCallMedia?.() ?? false}
           onMediaChange={(m) => activeBackend.setCallMedia?.(m)}
+          onCameraChange={(sel) => activeBackend.setCamera?.(sel)}
         />
       ) : null}
     </div>

@@ -3,8 +3,8 @@
 // 媒體全程 P2P（ADR-0025/0026），不經中繼。
 
 import { useEffect, useState } from "react";
-import type { CallMedia, CallState, VideoQuality } from "@cinderous/core";
-import { VIDEO_QUALITIES } from "@cinderous/core";
+import type { CallMedia, CallState, CameraFacing, VideoQuality } from "@cinderous/core";
+import { VIDEO_QUALITIES, flipFacing, shouldMirror } from "@cinderous/core";
 import { type Locale, type MessageKey, translate } from "@cinderous/i18n";
 import { resolveTheme, type Theme, type ThemeTokens } from "@cinderous/theme";
 import { Pressable, StyleSheet, Text, View } from "react-native-web";
@@ -76,6 +76,9 @@ export function CallScreen({
   remoteMedia,
   canChangeMedia,
   onMediaChange,
+  facing,
+  canFlipCamera,
+  onFlipCamera,
   locale = "zh-Hant",
   theme = "dark",
   accent = null,
@@ -102,6 +105,15 @@ export function CallScreen({
   canChangeMedia: boolean;
   /** 改**我**這一方的型態。不會讓對方開鏡頭。 */
   onMediaChange: (m: CallMedia) => void;
+  /**
+   * 目前鏡頭的**實際**朝向（ADR-0339）；`null`＝裝置不回報 ⇒ 當作前鏡頭。
+   * ⚠ 這是實際取得的，不是我們要求的——`facingMode` 是偏好不是保證。
+   */
+  facing: CameraFacing | null;
+  /** 這台有沒有第二個鏡頭可翻（ADR-0339）；false＝不顯示按鈕。 */
+  canFlipCamera: boolean;
+  /** 翻面。**手機是翻面，桌面是選裝置**——刻意是兩個不同的東西。 */
+  onFlipCamera: (next: CameraFacing) => void;
   locale?: Locale;
   theme?: Theme;
   accent?: string | null;
@@ -166,7 +178,12 @@ export function CallScreen({
       {/* ADR-0338：我沒開視訊就不該有自我預覽——否則看起來像我在送畫面。靜音以免回授。 */}
       {iSendVideo && localStream ? (
         <View style={styles.localWrap}>
-          <StreamView stream={localStream} muted mirror />
+          {/*
+            🔴 ADR-0339 §4：鏡像**不能寫死**。前鏡頭該鏡像（照鏡子的直覺），
+            後鏡頭不該——鏡像等於把字反過來給自己看。
+            ⚠ 只鏡像自我預覽；送出去的畫面從來不該鏡像（對方看到的字必須是正的）。
+          */}
+          <StreamView stream={localStream} muted mirror={shouldMirror(facing)} />
         </View>
       ) : null}
 
@@ -229,6 +246,18 @@ export function CallScreen({
             ) : null}
             {iSendVideo ? (
               <>
+                {/* ADR-0339：只有一個鏡頭就不顯示——寧可少一個按鈕，也不要一個按了沒反應的。 */}
+                {canFlipCamera ? (
+                  <Pressable
+                    style={[styles.btn, styles.neutral]}
+                    accessibilityRole="button"
+                    aria-label={t("call_flipCamera")}
+                    testID="call-flip-camera"
+                    onPress={() => onFlipCamera(flipFacing(facing ?? "user"))}
+                  >
+                    <Text style={styles.btnText}>🔄</Text>
+                  </Pressable>
+                ) : null}
                 {/* 畫質問題只有通話中才察覺得到——所以按鈕在這裡，不是埋在設定頁（ADR-0337 §2）。 */}
                 <Pressable
                   style={[styles.btn, styles.neutral]}

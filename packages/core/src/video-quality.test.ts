@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_VIDEO_QUALITY,
   VIDEO_QUALITIES,
+  flipFacing,
   isVideoQuality,
+  shouldMirror,
   videoConstraints,
   videoProfile,
   type VideoQuality,
@@ -72,5 +74,53 @@ describe("視訊畫質檔位（ADR-0337）", () => {
     } else {
       throw new Error("應收窄成功");
     }
+  });
+});
+
+describe("鏡頭選擇（ADR-0339）", () => {
+  it("不指定鏡頭時，約束與原本完全相同（不憑空多出欄位）", () => {
+    expect(videoConstraints("medium")).toEqual({
+      width: { ideal: 640 },
+      height: { ideal: 480 },
+      frameRate: { ideal: 24 },
+    });
+  });
+
+  it("🔴 facingMode 用 ideal——只有一個鏡頭的裝置仍要拿得到畫面", () => {
+    const c = videoConstraints("low", { facingMode: "environment" });
+    expect(c.facingMode).toEqual({ ideal: "environment" });
+  });
+
+  it("🔴 deviceId 用 exact——使用者明確挑了那一台，給他別台而不說是說謊", () => {
+    const c = videoConstraints("high", { deviceId: "cam-2" });
+    expect(c.deviceId).toEqual({ exact: "cam-2" });
+  });
+
+  it("兩者的嚴格程度刻意不同（同時給時各自維持）", () => {
+    const c = videoConstraints("medium", { facingMode: "user", deviceId: "cam-1" });
+    expect(c.facingMode).toEqual({ ideal: "user" });
+    expect(c.deviceId).toEqual({ exact: "cam-1" });
+  });
+
+  it("解析度仍隨檔位走（選鏡頭不影響畫質檔位）", () => {
+    const c = videoConstraints("high", { facingMode: "environment" });
+    expect(c.width).toEqual({ ideal: 1280 });
+    expect(c.frameRate).toEqual({ ideal: 30 });
+  });
+
+  it("flipFacing 來回翻面", () => {
+    expect(flipFacing("user")).toBe("environment");
+    expect(flipFacing("environment")).toBe("user");
+    expect(flipFacing(flipFacing("user"))).toBe("user");
+  });
+
+  it("🔴 前鏡頭鏡像、後鏡頭不鏡像（後鏡頭鏡像等於把字反過來給自己看）", () => {
+    expect(shouldMirror("user")).toBe(true);
+    expect(shouldMirror("environment")).toBe(false);
+  });
+
+  it("朝向未知時當作前鏡頭——桌面 webcam 是最常見的情形", () => {
+    expect(shouldMirror(null)).toBe(true);
+    expect(shouldMirror(undefined)).toBe(true);
   });
 });

@@ -33,6 +33,9 @@ const view = (opts: {
     remoteMedia={opts.remote}
     canChangeMedia={opts.canChange ?? true}
     onMediaChange={opts.onChange ?? (() => {})}
+    facing={null}
+    canFlipCamera={false}
+    onFlipCamera={() => {}}
     localStream={stream}
     remoteStream={stream}
     quality="medium"

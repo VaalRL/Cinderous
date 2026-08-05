@@ -11,6 +11,8 @@ import {
   type PubkeyHex,
   type SecretKey,
   type VideoQuality,
+  type CameraFacing,
+  type CameraSelection,
   DEFAULT_VIDEO_QUALITY,
   videoConstraints,
   videoProfile,
@@ -41,6 +43,13 @@ export interface CallHandlers {
    * **兩者各自獨立**——「我送視訊、他只送語音」是合法狀態，UI 要照實呈現。
    */
   onMedia?: (local: CallMedia, remote: CallMedia) => void;
+  /**
+   * 目前鏡頭的**實際**朝向（ADR-0339）。`null`＝裝置不回報（桌面 webcam 常見）。
+   *
+   * ⚠ 回報的是 `getSettings().facingMode`，不是我們要求了什麼——`facingMode` 是
+   * 偏好不是保證，只有一個鏡頭的裝置會給它有的那個。UI 的鏡像與按鈕狀態要跟著這個走。
+   */
+  onCamera?: (facing: CameraFacing | null) => void;
   onError: (reason: string) => void;
   /**
    * 通話**連線失敗**（ADR-0243）：與 `onError`（處理例外）不同——這是 P2P 連不通/斷線，
@@ -67,6 +76,8 @@ export class WebRtcCall {
   private everConnected = false;
   /** 視訊畫質檔位（ADR-0337）；跨通話沿用，由 App 於啟動時以裝置偏好設定。 */
   private videoQuality: VideoQuality = DEFAULT_VIDEO_QUALITY;
+  /** 目前選定的鏡頭（ADR-0339）；沿用到下次開視訊，升級時不必再選一次。 */
+  private camera: CameraSelection = {};
 
   constructor(
     private readonly ownSk: SecretKey,
@@ -274,7 +285,7 @@ export class WebRtcCall {
     const sender = this.videoSender();
     if (!sender) throw new Error("這通沒有可用的視訊軌道");
     const stream = await navigator.mediaDevices.getUserMedia({
-      video: videoConstraints(this.videoQuality),
+      video: videoConstraints(this.videoQuality, this.camera),
     });
     const track = stream.getVideoTracks()[0];
     if (!track) throw new Error("取不到視訊軌");
@@ -283,6 +294,7 @@ export class WebRtcCall {
     this.localStream?.addTrack?.(track);
     this.applyVideoQuality();
     if (this.localStream) this.handlers.onLocalStream(this.localStream);
+    this.emitCamera();
   }
 
   /** 降級：卸下視訊軌並**真的停掉相機**（與 ADR-0337 的關鏡頭不同，那個只送黑畫面）。 */
@@ -295,6 +307,62 @@ export class WebRtcCall {
       this.localStream?.removeTrack?.(track);
     }
     if (this.localStream) this.handlers.onLocalStream(this.localStream);
+  }
+
+  /**
+   * 切換鏡頭（ADR-0339）：手機翻面（`facingMode`）或桌面選裝置（`deviceId`）。
+   *
+   * 沒在送視訊時只記住選擇，下次開視訊時沿用。
+   */
+  setCamera(sel: CameraSelection): void {
+    this.camera = { ...sel };
+    void this.swapCamera();
+  }
+
+  /**
+   * 換上新鏡頭的軌。
+   *
+   * 🔴 **順序**：先取新軌 → `replaceTrack` → **才**停舊軌。
+   *
+   * 反過來（先停舊軌）會有一段沒有畫面的空窗，而且**新軌取失敗時就回不去了**
+   * ——使用者的畫面會就此消失。故失敗時舊軌原封不動。
+   */
+  private async swapCamera(): Promise<void> {
+    const sender = this.videoSender();
+    const old = sender?.track ?? null;
+    if (!sender || !old) return; // 沒在送視訊：只記住選擇（見 setCamera）
+    let track: MediaStreamTrack | undefined;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: videoConstraints(this.videoQuality, this.camera),
+      });
+      track = stream.getVideoTracks()[0];
+      if (!track) throw new Error("取不到視訊軌");
+      await sender.replaceTrack(track);
+    } catch (e) {
+      track?.stop(); // 取到了但換軌失敗：別讓它留著佔用相機
+      this.handlers.onError(`無法切換鏡頭：${String(e)}`);
+      return; // 舊軌原封不動
+    }
+    old.stop();
+    this.localStream?.removeTrack?.(old);
+    this.localStream?.addTrack?.(track);
+    this.applyVideoQuality();
+    if (this.localStream) this.handlers.onLocalStream(this.localStream);
+    this.emitCamera();
+  }
+
+  /**
+   * 回報**實際**朝向（ADR-0339）。
+   *
+   * ⚠ 讀的是軌道的 `getSettings().facingMode`，不是 `this.camera.facingMode`——
+   * 後者是我們要求的，而 `facingMode` 是偏好不是保證。只有一個鏡頭的裝置
+   * 會給它有的那個，UI 必須跟著事實走而不是跟著請求走。
+   */
+  private emitCamera(): void {
+    const track = this.videoSender()?.track ?? null;
+    const facing = (track?.getSettings?.() as { facingMode?: string } | undefined)?.facingMode;
+    this.handlers.onCamera?.(facing === "user" || facing === "environment" ? facing : null);
   }
 
   private emitMedia(): void {
@@ -367,7 +435,7 @@ export class WebRtcCall {
       audio: true,
       // 不是裸 `true`（ADR-0337）：裸 true 拿相機預設（手機常見 720p 以上），
       // 使用者付行動數據、站方付 TURN egress，而兩邊都無從得知。
-      video: media === "video" ? videoConstraints(this.videoQuality) : false,
+      video: media === "video" ? videoConstraints(this.videoQuality, this.camera) : false,
     });
     this.localStream = stream;
     for (const track of stream.getTracks()) this.pc.addTrack(track, stream);
@@ -410,7 +478,7 @@ export class WebRtcCall {
           await sender.setParameters({ ...params, encodings, degradationPreference: "maintain-framerate" });
         }
         for (const track of this.localStream?.getVideoTracks() ?? []) {
-          await track.applyConstraints(videoConstraints(this.videoQuality));
+          await track.applyConstraints(videoConstraints(this.videoQuality, this.camera));
         }
       } catch {
         /* 畫質套用失敗不影響通話本身 */

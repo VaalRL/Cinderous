@@ -465,3 +465,201 @@ describe("通話中媒體升降級（ADR-0338）", () => {
     expect(published).toEqual([]);
   });
 });
+
+// ── 切換鏡頭（ADR-0339）────────────────────────────────────────────────────
+
+describe("切換鏡頭（ADR-0339）", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  /** 記錄取媒體的約束與軌道生命週期。 */
+  const setup = () => {
+    order = [];
+    const asked: Array<{ video?: { facingMode?: { ideal: string }; deviceId?: { exact: string } } }> = [];
+    const madeTracks: FakeTrack[] = [];
+    vi.stubGlobal("RTCPeerConnection", NegoPc);
+    vi.stubGlobal("navigator", {
+      mediaDevices: {
+        getUserMedia: async (c: { video?: unknown; audio?: unknown }) => {
+          asked.push(c as never);
+          const kinds = c.video ? (c.audio ? ["audio", "video"] : ["video"]) : ["audio"];
+          const list = kinds.map((k) => {
+            const t = new FakeTrack(k);
+            if (k === "video") madeTracks.push(t);
+            return t;
+          });
+          return {
+            getTracks: () => list,
+            getVideoTracks: () => list.filter((t) => t.kind === "video"),
+            getAudioTracks: () => list.filter((t) => t.kind === "audio"),
+            addTrack: () => {},
+            removeTrack: () => {},
+          };
+        },
+      },
+    });
+    lastPc = undefined;
+    const mySk = generateSecretKey();
+    const peerSk = generateSecretKey();
+    const facings: Array<string | null> = [];
+    const call = new WebRtcCall(mySk, {
+      publishCallSignal: () => {},
+      onState: () => {},
+      onLocalStream: () => {},
+      onRemoteStream: () => {},
+      onCamera: (f) => facings.push(f),
+      onError: () => {},
+      onFailed: () => {},
+    });
+    call.startCall(getPublicKey(peerSk), "video");
+    return { call, asked, madeTracks, facings, mySk, peerSk };
+  };
+
+  const flush = async (): Promise<void> => {
+    for (let i = 0; i < 12; i++) await Promise.resolve();
+  };
+
+  const activate = async (c: { call: WebRtcCall; mySk: Uint8Array; peerSk: Uint8Array }): Promise<void> => {
+    await flush();
+    const callId = (c.call as unknown as { session: { activeCallId: string } }).session.activeCallId;
+    c.call.onCallSignalEvent(
+      createCallSignal({ type: "call-accept", callId, sdp: "a" }, c.peerSk, getPublicKey(c.mySk)),
+    );
+    await flush();
+    lastPc!.connectionState = "connected";
+    lastPc!.onconnectionstatechange!();
+    await flush();
+  };
+
+  it("切鏡頭時把選擇帶進 getUserMedia 的約束", async () => {
+    const c = setup();
+    await activate(c);
+    c.asked.length = 0;
+    c.call.setCamera({ facingMode: "environment" });
+    await flush();
+    expect(c.asked[0]?.video?.facingMode).toEqual({ ideal: "environment" });
+  });
+
+  it("桌面選裝置：deviceId 以 exact 帶入", async () => {
+    const c = setup();
+    await activate(c);
+    c.asked.length = 0;
+    c.call.setCamera({ deviceId: "cam-2" });
+    await flush();
+    expect(c.asked[0]?.video?.deviceId).toEqual({ exact: "cam-2" });
+  });
+
+  it("🔴 換鏡頭必須停掉舊軌——不停就是兩個相機同時開著、指示燈全亮", async () => {
+    const c = setup();
+    await activate(c);
+    const old = c.madeTracks[0]!;
+    let stopped = false;
+    old.stop = () => void (stopped = true);
+    c.call.setCamera({ facingMode: "environment" });
+    await flush();
+    expect(stopped).toBe(true);
+  });
+
+  it("🔴 順序：先取新軌 → replaceTrack → **才**停舊軌", async () => {
+    const c = setup();
+    await activate(c);
+    const pc = lastPc as unknown as NegoPc;
+    const sender = pc.transceivers.find((t) => t.kind === "video")!.sender;
+    const old = c.madeTracks[0]!;
+    const seq: string[] = [];
+    old.stop = () => void seq.push("stop-old");
+    const origReplace = sender.replaceTrack.bind(sender);
+    sender.replaceTrack = async (t) => {
+      seq.push("replace");
+      await origReplace(t);
+    };
+    c.call.setCamera({ facingMode: "environment" });
+    await flush();
+    // 反過來會有一段沒有畫面的空窗，而且新軌取失敗時就回不去了。
+    expect(seq).toEqual(["replace", "stop-old"]);
+  });
+
+  it("換上去的是新軌，不是原本那條", async () => {
+    const c = setup();
+    await activate(c);
+    const pc = lastPc as unknown as NegoPc;
+    const sender = pc.transceivers.find((t) => t.kind === "video")!.sender;
+    const old = sender.track;
+    c.call.setCamera({ facingMode: "environment" });
+    await flush();
+    expect(sender.track).not.toBe(old);
+    expect(sender.track?.kind).toBe("video");
+  });
+
+  it("🔴 取新軌失敗 → 舊軌留著不動（不能把使用者的畫面弄不見）", async () => {
+    const c = setup();
+    await activate(c);
+    const pc = lastPc as unknown as NegoPc;
+    const sender = pc.transceivers.find((t) => t.kind === "video")!.sender;
+    const old = sender.track!;
+    let stopped = false;
+    old.stop = () => void (stopped = true);
+    vi.stubGlobal("navigator", {
+      mediaDevices: { getUserMedia: async () => { throw new Error("NotFoundError"); } },
+    });
+    c.call.setCamera({ deviceId: "unplugged" });
+    await flush();
+    expect(sender.track, "失敗後仍是舊軌").toBe(old);
+    expect(stopped, "失敗時不得停掉舊軌").toBe(false);
+  });
+
+  it("🔴 朝向以**實際取得的軌**回報，不是以我要求了什麼（facingMode 是偏好非保證）", async () => {
+    const c = setup();
+    await activate(c);
+    c.facings.length = 0;
+    // 裝置只有前鏡頭：要求 environment，實際仍給 user。
+    const t = new FakeTrack("video");
+    (t as unknown as { getSettings(): unknown }).getSettings = () => ({ facingMode: "user" });
+    vi.stubGlobal("navigator", {
+      mediaDevices: {
+        getUserMedia: async () => ({
+          getTracks: () => [t],
+          getVideoTracks: () => [t],
+          getAudioTracks: () => [],
+          addTrack: () => {},
+          removeTrack: () => {},
+        }),
+      },
+    });
+    c.call.setCamera({ facingMode: "environment" });
+    await flush();
+    expect(c.facings.at(-1)).toBe("user");
+  });
+
+  it("裝置不回報朝向 → null（UI 據此當作前鏡頭）", async () => {
+    const c = setup();
+    await activate(c);
+    c.facings.length = 0;
+    c.call.setCamera({ facingMode: "user" });
+    await flush();
+    expect(c.facings.at(-1)).toBeNull();
+  });
+
+  it("沒在送視訊時切鏡頭不做事（沒有軌可換）", async () => {
+    const c = setup();
+    await activate(c);
+    c.call.setLocalMedia("audio");
+    await flush();
+    c.asked.length = 0;
+    c.call.setCamera({ facingMode: "environment" });
+    await flush();
+    expect(c.asked).toEqual([]);
+  });
+
+  it("選擇會沿用到下次開視訊（升級時不必再選一次）", async () => {
+    const c = setup();
+    await activate(c);
+    c.call.setCamera({ facingMode: "environment" });
+    await flush();
+    c.call.setLocalMedia("audio");
+    await flush();
+    c.asked.length = 0;
+    c.call.setLocalMedia("video");
+    await flush();
+    expect(c.asked[0]?.video?.facingMode).toEqual({ ideal: "environment" });
+  });
+});

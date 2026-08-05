@@ -18,7 +18,7 @@
 // 並把責任移到看得見的地方。
 
 import { useState } from "react";
-import type { CallMedia, CallState } from "@cinderous/core";
+import type { CallMedia, CallState, CameraFacing } from "@cinderous/core";
 import type { ChatBackendEvents } from "@cinderous/engine";
 
 export interface CallSession {
@@ -35,10 +35,12 @@ export interface CallSession {
    */
   localMedia: CallMedia;
   remoteMedia: CallMedia;
+  /** 目前鏡頭的**實際**朝向（ADR-0339）；`null`＝裝置不回報 ⇒ UI 當作前鏡頭。 */
+  facing: CameraFacing | null;
   /** 掛給後端 `start()` 的通話事件（展開即可）。 */
   handlers: Pick<
     ChatBackendEvents,
-    "onCallState" | "onCallLocalStream" | "onCallRemoteStream" | "onCallMedia"
+    "onCallState" | "onCallLocalStream" | "onCallRemoteStream" | "onCallMedia" | "onCallCamera"
   >;
 }
 
@@ -50,6 +52,7 @@ export function useCallSession(): CallSession {
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [localMedia, setLocalMedia] = useState<CallMedia>("audio");
   const [remoteMedia, setRemoteMedia] = useState<CallMedia>("audio");
+  const [facing, setFacing] = useState<CameraFacing | null>(null);
 
   return {
     active: state !== "idle" && state !== "ended",
@@ -60,6 +63,7 @@ export function useCallSession(): CallSession {
     remoteStream,
     localMedia,
     remoteMedia,
+    facing,
     handlers: {
       // ADR-0101：來電自動開通話畫面；結束時把 peer 與兩條串流一起放掉
       //（只清 state 不清串流 ⇒ 畫面沒了但 MediaStream 還在，麥克風/鏡頭燈不會滅）。
@@ -73,6 +77,7 @@ export function useCallSession(): CallSession {
           // 兩個方向都歸位，否則下一通會沿用上一通的型態（ADR-0338）。
           setLocalMedia("audio");
           setRemoteMedia("audio");
+          setFacing(null);
         } else {
           setPeer(p);
         }
@@ -82,6 +87,8 @@ export function useCallSession(): CallSession {
         setLocalMedia(local);
         setRemoteMedia(remote);
       },
+      // ADR-0339：實際朝向（不是我們要求的）；UI 的鏡像跟著它走。
+      onCallCamera: setFacing,
       onCallLocalStream: setLocalStream,
       onCallRemoteStream: setRemoteStream,
     },
