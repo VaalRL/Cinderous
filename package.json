@@ -1,6 +1,6 @@
 {
   "name": "cinder",
-  "version": "0.0.14",
+  "version": "0.0.15",
   "private": true,
   "description": "去中心化、無中央資料庫的即時通訊軟體（Nostr + WebRTC）",
   "license": "AGPL-3.0-only",

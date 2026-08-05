@@ -1,6 +1,6 @@
 {
   "name": "@cinderous/website",
-  "version": "0.0.14",
+  "version": "0.0.15",
   "private": true,
   "type": "module",
   "description": "Cinderous 官方網站（ADR-0090）：靜態站——開源/永久免費/隱私主張、下載、捐款導流、簽章透明度（funds.json 前端驗簽＋runway）。與 E2E 通訊平面硬隔離、零追蹤。",
