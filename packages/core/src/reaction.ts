@@ -22,7 +22,17 @@ export function wrapReaction(
   /** 收件人；群組傳成員清單（扇出），1:1 傳單一 pubkey。 */
   recipients: PubkeyHex | PubkeyHex[],
   targetEventId: string,
-  opts: { now?: number } = {},
+  opts: {
+    now?: number;
+    /**
+     * FS retarget（ADR-0315 第 3 步；形狀同 ADR-0318／0320）：身分 pk → 其 EK；
+     * 逐位收件人各自決定，不知道就退回身分。
+     *
+     * ⚠ 同樣**不帶 `ek` hint**——`wrapForBoth` 的 `id` 是 rumor 雜湊，群組扇出時跨成員一致，
+     * 把每 7 天輪替的值放進 rumor 會讓它變成非決定性（ADR-0318 的同一條理由）。
+     */
+    encryptToFor?: (identityPk: PubkeyHex) => PubkeyHex;
+  } = {},
 ): WrappedMessage {
   const nowSec = opts.now ?? Math.floor(Date.now() / 1000);
   return wrapForBoth(
@@ -30,6 +40,7 @@ export function wrapReaction(
     senderSk,
     recipients,
     nowSec + DEFAULT_TTL_SECONDS,
+    opts.encryptToFor ? { encryptToFor: opts.encryptToFor } : {},
   );
 }
 

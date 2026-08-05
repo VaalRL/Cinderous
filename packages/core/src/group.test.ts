@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { generateEncryptionKey, openWrapWithEks } from "./subkey.js";
+import { wrapGroupFile } from "./group.js";
 import { KIND } from "./constants.js";
 import {
   applyGroupControl,
@@ -251,5 +253,53 @@ describe("規模上限（ADR-0303 A3：D=5／N=15，先緊後放寬）", () => {
   it("上限與回條分級相容：N=15 落在「完全不記回條」那一級（ADR-0095）", () => {
     // 若日後放寬 N，這條會提醒回條成本也跟著變。
     expect(groupReceiptMode(GROUP_MEMBERS_MAX)).toBe("off");
+  });
+});
+
+describe("群訊的 FS retarget（ADR-0320 批二）", () => {
+  const alice = generateSecretKey();
+  const alicePk = getPublicKey(alice);
+  const bobIk = generateSecretKey();
+  const bobPk = getPublicKey(bobIk);
+  const carolIk = generateSecretKey();
+  const carolPk = getPublicKey(carolIk);
+  const bobEk = generateEncryptionKey();
+  const group = { id: "g1", name: "群", admin: alicePk, members: [alicePk, bobPk, carolPk] };
+
+  it("🔴 **rumor.id 不變**——回條與引用都以它為鍵（ADR-0095）", () => {
+    const plain = wrapGroupMessage("嗨", alice, alicePk, group, { now: 1 });
+    const fs = wrapGroupMessage("嗨", alice, alicePk, group, { now: 1, encryptToFor: () => bobEk.pk });
+    expect(fs.id).toBe(plain.id);
+  });
+
+  it("🔴 逐位成員各自決定：Bob 有 EK → 用 EK 鎖；Carol 沒有 → 退回身分（同一則訊息混合）", () => {
+    const w = wrapGroupMessage("午餐吃什麼", alice, alicePk, group, {
+      now: 1,
+      encryptToFor: (pk) => (pk === bobPk ? bobEk.pk : pk), // 只知道 Bob 的 EK
+    });
+    const forBob = w.events.find((e) => e.tags.some((t) => t[0] === "p" && t[1] === bobPk))!;
+    const forCarol = w.events.find((e) => e.tags.some((t) => t[0] === "p" && t[1] === carolPk))!;
+
+    // Bob：EK 解得開、身分解不開（＝這一份有 FS）
+    expect(openWrapWithEks(forBob, [bobEk.sk]).rumor.content).toBe("午餐吃什麼");
+    expect(() => openWrapWithEks(forBob, [bobIk])).toThrow();
+    // Carol：退回身分（＝這一份沒有 FS，但照樣收得到——不是失敗）
+    expect(openWrapWithEks(forCarol, [carolIk]).rumor.content).toBe("午餐吃什麼");
+  });
+
+  it("外層 #p 仍為身分（中繼照樣路由；EK 只換加密對象）", () => {
+    const w = wrapGroupMessage("嗨", alice, alicePk, group, { now: 1, encryptToFor: () => bobEk.pk });
+    for (const ev of w.events) {
+      expect(ev.tags.some((t) => t[0] === "p" && (t[1] === bobPk || t[1] === carolPk))).toBe(true);
+    }
+  });
+
+  it("群組檔案 metadata 走同一條路（檔名同樣敏感）", () => {
+    const meta = { tid: "t1", name: "薪資表.xlsx", size: 10, mime: "application/vnd.ms-excel" };
+    const plain = wrapGroupFile(meta, alice, alicePk, group, { now: 1 });
+    const fs = wrapGroupFile(meta, alice, alicePk, group, { now: 1, encryptToFor: () => bobEk.pk });
+    expect(fs.id).toBe(plain.id); // id 不變
+    const forBob = fs.events.find((e) => e.tags.some((t) => t[0] === "p" && t[1] === bobPk))!;
+    expect(openWrapWithEks(forBob, [bobEk.sk]).rumor.tags.find((t) => t[0] === "file")?.[2]).toBe("薪資表.xlsx");
   });
 });

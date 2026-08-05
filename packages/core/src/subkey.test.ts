@@ -13,6 +13,10 @@ import {
   generateEncryptionKey,
   openWrapWithEks,
   pruneFsKeys,
+  shouldRotateFs,
+  recordFsFailure,
+  EMPTY_FS_FAILURE_LOG,
+  FS_ROTATE_INTERVAL_MS,
   readEkAnnounce,
   readFsCapability,
   withEkHint,
@@ -244,5 +248,75 @@ describe("能力字串的長度限制（審查發現：超長會靜默變成『�
 
   it("上限值必須與 profile.ts 的實際限制一致（改了一邊就會在這裡爆）", () => {
     expect(FS_CAPABILITY_MAX_LEN).toBe(16);
+  });
+});
+
+describe("shouldRotateFs（ADR-0313 自動輪替）", () => {
+  const t0 = 1_700_000_000_000;
+  const day = 24 * 60 * 60 * 1000;
+
+  it("尚未啟用（無金鑰）不輪替——生成第一把是 enableFs 的事", () => {
+    expect(shouldRotateFs([], t0)).toBe(false);
+  });
+
+  it("剛生成不輪替；滿 7 天才輪替", () => {
+    const keys = [{ at: t0 }];
+    expect(shouldRotateFs(keys, t0)).toBe(false);
+    expect(shouldRotateFs(keys, t0 + 6 * day)).toBe(false);
+    expect(shouldRotateFs(keys, t0 + FS_ROTATE_INTERVAL_MS)).toBe(true);
+  });
+
+  it("看的是 current（最新那把）的年齡，不是最舊的", () => {
+    // 舊把很老、current 剛生成 → 不該輪替（否則每次開機都換一把）
+    const keys = [{ at: t0 - 30 * day }, { at: t0 }];
+    expect(shouldRotateFs(keys, t0 + day)).toBe(false);
+  });
+
+  it("離線期間照算——年齡而非計時器（App 關著時間也累積）", () => {
+    expect(shouldRotateFs([{ at: t0 }], t0 + 90 * day)).toBe(true);
+  });
+
+  it("穩態：每 7 天輪替 ＋ grace 7 天 ⇒ 手上 2–3 把，不會無限累積", () => {
+    let keys = [{ at: t0 }];
+    for (let week = 1; week <= 8; week++) {
+      const now = t0 + week * FS_ROTATE_INTERVAL_MS;
+      expect(shouldRotateFs(keys, now)).toBe(true);
+      keys = pruneFsKeys([...keys, { at: now }], now);
+      // 輪替**當下**是 3 把：grace 邊界是閉區間（`<=`），剛好滿 grace 的那把還留著。
+      expect(keys).toHaveLength(week === 1 ? 2 : 3);
+    }
+    // 邊界過了就回到 2 把（current ＋ 一把 grace 內）。
+    const later = t0 + 8 * FS_ROTATE_INTERVAL_MS + 1;
+    expect(pruneFsKeys(keys, later)).toHaveLength(2);
+  });
+});
+
+describe("recordFsFailure（ADR-0316 可觀測性）", () => {
+  const t = 1_700_000_000_000;
+
+  it("從未持有 EK → 記進 notFs（確定與 FS 無關），不動 maybeEkLoss", () => {
+    const out = recordFsFailure(EMPTY_FS_FAILURE_LOG, t, false);
+    expect(out).toEqual({ notFs: 1, maybeEkLoss: 0 });
+    expect(out.lastEkLossAt).toBeUndefined();
+  });
+
+  it("有或曾有 EK → 記進 maybeEkLoss 並記時間", () => {
+    const out = recordFsFailure(EMPTY_FS_FAILURE_LOG, t, true);
+    expect(out.maybeEkLoss).toBe(1);
+    expect(out.notFs).toBe(0);
+    expect(out.lastEkLossAt).toBe(t);
+  });
+
+  it("累加並更新最後時間", () => {
+    let log = recordFsFailure(EMPTY_FS_FAILURE_LOG, t, true);
+    log = recordFsFailure(log, t + 1000, true);
+    log = recordFsFailure(log, t + 2000, false);
+    expect(log).toEqual({ notFs: 1, maybeEkLoss: 2, lastEkLossAt: t + 1000 });
+  });
+
+  it("純函式：不變更輸入", () => {
+    const before = { ...EMPTY_FS_FAILURE_LOG };
+    recordFsFailure(EMPTY_FS_FAILURE_LOG, t, true);
+    expect(EMPTY_FS_FAILURE_LOG).toEqual(before);
   });
 });

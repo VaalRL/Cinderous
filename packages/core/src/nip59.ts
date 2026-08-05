@@ -31,6 +31,14 @@ export interface Opened {
   /** 經身分驗證的寄件人公鑰。 */
   sender: PubkeyHex;
   rumor: Rumor;
+  /**
+   * seal（kind 13）層的 tags（ADR-0326）。
+   *
+   * **只有解得開 wrap 的收件人看得到**——seal 被加密在 wrap 內層，中繼與其他人都讀不到。
+   * 用途：夾帶「不能進 rumor」的逐收件人資訊（如寄件人當前 EK），
+   * 因為 `rumor.id` 是跨成員一致的識別碼，放進去會讓每次輪替都產生不同的 id（ADR-0318）。
+   */
+  sealTags: string[][];
 }
 
 /** 外層 Gift Wrap 的設定。 */
@@ -55,6 +63,11 @@ export function sealAndWrap(
   senderSk: SecretKey,
   recipientPk: PubkeyHex,
   wrap: WrapSpec,
+  /**
+   * seal 層 tags（ADR-0326）：**只有收件人看得到**（seal 加密在 wrap 內），且不影響 `rumor.id`。
+   * 預設空＝與 NIP-59 慣例一致。
+   */
+  sealTags: string[][] = [],
 ): NostrEvent {
   const base = { ...rumorInput, pubkey: getPublicKey(senderSk) };
   const rumor: Rumor = { id: getEventHash(base), ...base };
@@ -63,7 +76,7 @@ export function sealAndWrap(
     {
       kind: KIND_SEAL,
       created_at: jitteredPast(rumorInput.created_at),
-      tags: [],
+      tags: sealTags,
       content: encryptDM(JSON.stringify(rumor), senderSk, recipientPk),
     },
     senderSk,
@@ -103,5 +116,5 @@ export function openWrap(wrapEvent: NostrEvent, recipientSk: SecretKey): Opened 
     throw new Error("NIP-59：rumor id 與內容不符");
   }
 
-  return { sender: seal.pubkey, rumor };
+  return { sender: seal.pubkey, rumor, sealTags: seal.tags };
 }

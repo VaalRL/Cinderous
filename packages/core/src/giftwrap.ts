@@ -166,7 +166,19 @@ export function wrapFileMessage(
   senderSk: SecretKey,
   recipientPk: PubkeyHex,
   meta: FileMeta,
-  opts: { now?: number; expiration?: number; relayHint?: string } = {},
+  opts: {
+    now?: number;
+    expiration?: number;
+    relayHint?: string;
+    /**
+     * FS retarget（ADR-0318）：身分 pk → 其 EK。省略＝加密到身分本身（現況）。
+     *
+     * ⚠ **刻意不收 `myEk`**——1:1 會在 rumor 內嵌 `ek` hint，但檔案 metadata 的 `rumor.id`
+     * 是跨成員/跨時間的識別（ADR-0095），把會輪替的值放進去會讓識別碼變成非決定性。
+     * hint 的功能由 kind 10040 公告承擔（ADR-0313 讓它每 7 天刷新）。
+     */
+    encryptToFor?: (identityPk: PubkeyHex) => PubkeyHex;
+  } = {},
 ): WrappedMessage {
   const nowSec = opts.now ?? Math.floor(Date.now() / 1000);
   const outerExpiration = opts.expiration ?? nowSec + DEFAULT_TTL_SECONDS;
@@ -181,6 +193,7 @@ export function wrapFileMessage(
     senderSk,
     recipientPk,
     outerExpiration,
+    opts.encryptToFor ? { encryptToFor: opts.encryptToFor } : {},
   );
 }
 

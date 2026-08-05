@@ -133,18 +133,28 @@ function eventTags(
   ];
 }
 
-/** 對一組收件人扇出同一個 rumor；回傳跨成員一致的 `id`、各收件人的 wrap 與自封副本。 */
+/**
+ * 對一組收件人扇出同一個 rumor；回傳跨成員一致的 `id`、各收件人的 wrap 與自封副本。
+ *
+ * FS（ADR-0318）：`encryptToFor` 把**加密對象**換成該收件人的 EK；外層 `#p` 仍為身分（供路由）。
+ *
+ * ⚠ **`input` 一個位元組都不能動。** `id` 就是它的雜湊，而行程 id 是 RSVP 的對應鍵、
+ * 補送時還必須逐位元組重現同一個形狀（ADR-0264 §9）。1:1 訊息那套「在 rumor 內嵌 `ek` hint」
+ * 在這裡會讓 id 隨金鑰輪替改變 ⇒ 重複行程 ＋ 孤兒 RSVP。hint 由 kind 10040 公告承擔。
+ */
 function fanOut(
   input: RumorInput,
   senderSk: SecretKey,
   senderPk: PubkeyHex,
   recipients: PubkeyHex[],
   expiration?: number,
+  encryptToFor?: (identityPk: PubkeyHex) => PubkeyHex,
 ): WrappedMessage {
   const id = getEventHash({ ...input, pubkey: senderPk });
   const outerExpiration = expiration ?? input.created_at + DEFAULT_TTL_SECONDS;
+  const encryptTo = encryptToFor ?? ((pk: PubkeyHex) => pk);
   const wrapFor = (pk: PubkeyHex): NostrEvent =>
-    sealAndWrap(input, senderSk, pk, {
+    sealAndWrap(input, senderSk, encryptTo(pk), {
       kind: KIND.OFFLINE_DM_GIFT_WRAP,
       tags: [
         ["p", pk],
@@ -178,6 +188,8 @@ export function wrapCalendarEvent(
      * 而且原本的 RSVP 全對不回去。給了 `groupId` 就照群組形狀重建，id 與原件一致。
      */
     groupId?: string;
+    /** FS retarget（ADR-0318）：身分 pk → 其 EK。省略＝加密到身分（現況）。 */
+    encryptToFor?: (identityPk: PubkeyHex) => PubkeyHex;
   } = {},
 ): WrappedMessage {
   const senderPk = getPublicKey(senderSk);
@@ -192,7 +204,7 @@ export function wrapCalendarEvent(
     }),
     content: input.description ?? "",
   };
-  return fanOut(rumor, senderSk, senderPk, [recipientPk], opts.expiration);
+  return fanOut(rumor, senderSk, senderPk, [recipientPk], opts.expiration, opts.encryptToFor);
 }
 
 /** 群組行程邀請：對每位其他成員各一份 wrap，`id` 跨成員一致（ADR-0095）。 */
@@ -200,7 +212,14 @@ export function wrapGroupCalendarEvent(
   input: CalendarEventInput,
   senderSk: SecretKey,
   group: Group,
-  opts: { now?: number; action?: CalendarAction; eventId?: string; expiration?: number } = {},
+  opts: {
+    now?: number;
+    action?: CalendarAction;
+    eventId?: string;
+    expiration?: number;
+    /** FS retarget（ADR-0318）：身分 pk → 其 EK。省略＝加密到身分（現況）。 */
+    encryptToFor?: (identityPk: PubkeyHex) => PubkeyHex;
+  } = {},
 ): WrappedMessage {
   const senderPk = getPublicKey(senderSk);
   const action = opts.action ?? "create";
@@ -210,7 +229,7 @@ export function wrapGroupCalendarEvent(
     tags: eventTags(input, action, { groupId: group.id, ...(opts.eventId ? { eventId: opts.eventId } : {}) }),
     content: input.description ?? "",
   };
-  return fanOut(rumor, senderSk, senderPk, group.members, opts.expiration);
+  return fanOut(rumor, senderSk, senderPk, group.members, opts.expiration, opts.encryptToFor);
 }
 
 /**
@@ -223,7 +242,13 @@ export function wrapCalendarRsvp(
   status: RsvpStatus,
   senderSk: SecretKey,
   audience: PubkeyHex[],
-  opts: { now?: number; groupId?: string; expiration?: number } = {},
+  opts: {
+    now?: number;
+    groupId?: string;
+    expiration?: number;
+    /** FS retarget（ADR-0318）：身分 pk → 其 EK。省略＝加密到身分（現況）。 */
+    encryptToFor?: (identityPk: PubkeyHex) => PubkeyHex;
+  } = {},
 ): WrappedMessage {
   const senderPk = getPublicKey(senderSk);
   const rumor: RumorInput = {
@@ -236,7 +261,7 @@ export function wrapCalendarRsvp(
     ],
     content: "",
   };
-  return fanOut(rumor, senderSk, senderPk, audience, opts.expiration);
+  return fanOut(rumor, senderSk, senderPk, audience, opts.expiration, opts.encryptToFor);
 }
 
 /** 取一個 tag 值。 */

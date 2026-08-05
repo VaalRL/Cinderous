@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { generateEncryptionKey, openWrapWithEks } from "./subkey.js";
 import { KIND } from "./constants.js";
 import { generateSecretKey, getPublicKey } from "./keys.js";
 import { openWrap } from "./nip59.js";
@@ -33,5 +34,40 @@ describe("訊息回應（NIP-25，Gift Wrap 包封）", () => {
     expect(sender).toBe(alicePk); // 收端據此把 mine 標為 true
     expect(reactionTarget(rumor)).toBe("msg-1");
     expect(rumor.content).toBe("🎉");
+  });
+});
+
+describe("回應的 FS retarget（ADR-0315 第 3 步）", () => {
+  const alice = generateSecretKey();
+  const bobIk = generateSecretKey();
+  const bobPk = getPublicKey(bobIk);
+  const carolIk = generateSecretKey();
+  const carolPk = getPublicKey(carolIk);
+  const bobEk = generateEncryptionKey();
+
+  it("🔴 **id 不變**——群組扇出時跨成員一致，不得隨金鑰輪替改變", () => {
+    const plain = wrapReaction("👍", alice, [bobPk], "m1", { now: 1 });
+    const fs = wrapReaction("👍", alice, [bobPk], "m1", { now: 1, encryptToFor: () => bobEk.pk });
+    expect(fs.id).toBe(plain.id);
+  });
+
+  it("加密到 EK：EK 解得開、身分解不開（＝真的 retarget）", () => {
+    const w = wrapReaction("❤️", alice, [bobPk], "m1", { now: 1, encryptToFor: () => bobEk.pk });
+    const ev = w.events[0]!;
+    expect(openWrapWithEks(ev, [bobEk.sk]).rumor.content).toBe("❤️");
+    expect(() => openWrapWithEks(ev, [bobIk])).toThrow();
+    expect(ev.tags).toContainEqual(["p", bobPk]); // 外層 #p 仍為身分（路由）
+  });
+
+  it("群組扇出逐位決定：Bob 有 EK、Carol 沒有 → 同一則回應混合", () => {
+    const w = wrapReaction("🎉", alice, [bobPk, carolPk], "m1", {
+      now: 1,
+      encryptToFor: (pk) => (pk === bobPk ? bobEk.pk : pk),
+    });
+    const forBob = w.events.find((e) => e.tags.some((t) => t[0] === "p" && t[1] === bobPk))!;
+    const forCarol = w.events.find((e) => e.tags.some((t) => t[0] === "p" && t[1] === carolPk))!;
+    expect(openWrapWithEks(forBob, [bobEk.sk]).rumor.content).toBe("🎉");
+    expect(() => openWrapWithEks(forBob, [bobIk])).toThrow();
+    expect(openWrapWithEks(forCarol, [carolIk]).rumor.content).toBe("🎉"); // 退回身分，照樣收得到
   });
 });

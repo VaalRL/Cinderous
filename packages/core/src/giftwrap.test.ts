@@ -4,6 +4,7 @@ import { getEventHash } from "./event.js";
 import { generateSecretKey, getPublicKey } from "./keys.js";
 import { encryptDM } from "./nip44.js";
 import { finalizeEvent } from "./sign.js";
+import { generateEncryptionKey, openWrapWithEks } from "./subkey.js";
 import {
   messageExpiry,
   parseFileMeta,
@@ -248,5 +249,40 @@ describe("NIP-17/59 Gift Wrap 離線私訊", () => {
       wrapSk,
     );
     expect(() => unwrapMessage(wrap, bobSk)).toThrow(/id/);
+  });
+});
+
+describe("檔案 metadata 的 FS retarget（ADR-0318）", () => {
+  const alice = generateSecretKey();
+  const bobIk = generateSecretKey();
+  const bobPk = getPublicKey(bobIk);
+  const meta = { tid: "t1", name: "裁員名單.xlsx", size: 4096, mime: "application/vnd.ms-excel" };
+
+  it("🔴 **id 不變**——訊息 id 是跨裝置/回條的對應鍵（ADR-0095/0107）", () => {
+    const ek = generateEncryptionKey();
+    const plain = wrapFileMessage(alice, bobPk, meta, { now: 1 });
+    const fs = wrapFileMessage(alice, bobPk, meta, { now: 1, encryptToFor: () => ek.pk });
+    expect(fs.id).toBe(plain.id);
+  });
+
+  it("🔴 檔名/大小/MIME 進入 FS 保護：EK 解得開，刪掉 EK 後同身分也解不開", () => {
+    const ek = generateEncryptionKey();
+    const w = wrapFileMessage(alice, bobPk, meta, { now: 1, encryptToFor: () => ek.pk });
+    const ev = w.events[0]!;
+    const opened = openWrapWithEks(ev, [ek.sk]);
+    expect(opened.rumor.tags.find((t) => t[0] === "file")?.[2]).toBe("裁員名單.xlsx");
+    expect(() => openWrapWithEks(ev, [bobIk])).toThrow();
+    expect(ev.tags).toContainEqual(["p", bobPk]); // 外層 #p 仍為身分（路由）
+  });
+
+  it("不給 encryptToFor＝現況（加密到身分，身分金鑰解得開）", () => {
+    const w = wrapFileMessage(alice, bobPk, meta, { now: 1 });
+    expect(openWrapWithEks(w.events[0]!, [bobIk]).rumor.tags).toContainEqual([
+      "file",
+      "t1",
+      "裁員名單.xlsx",
+      "4096",
+      "application/vnd.ms-excel",
+    ]);
   });
 });

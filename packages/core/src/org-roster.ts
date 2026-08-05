@@ -57,6 +57,49 @@ export function policyTtlSeconds(policy: OrgPolicy | undefined): number | undefi
   return d !== undefined ? d * 86_400 : undefined;
 }
 
+/**
+ * 政策在使用者眼中的一條規則（ADR-0312）：供設定頁條列「公司政策做了什麼」。
+ *
+ * 過去政策只表現為「按鈕消失」——使用者看不出是壞掉還是被公司關掉。
+ * 這裡把 `OrgPolicy` 攤成可讀清單；**文案留給各端的 i18n**（core 不認識 i18n），
+ * 本函式只負責「有哪幾條、什麼順序」，讓桌面與行動端不會各列一份、也不會漏掉新旗標。
+ */
+export type PolicyNoticeId =
+  | "files"
+  | "calls"
+  | "stickers"
+  | "cloudBackup"
+  | "forceTurn"
+  | "ttlDays"
+  | "relayFilesMb";
+
+export interface PolicyNotice {
+  id: PolicyNoticeId;
+  /** `disabled`＝功能被關掉；`rule`＝功能還在，但行為受限。 */
+  kind: "disabled" | "rule";
+  /** 帶數值的規則（`ttlDays`／`relayFilesMb`）。 */
+  value?: number;
+}
+
+/**
+ * 攤平政策為顯示清單：先列停用的功能，再列生效中的規則。
+ * 無政策（或政策為空）回空陣列——呼叫端據此整段不顯示。
+ */
+export function policyNotices(policy: OrgPolicy | undefined): PolicyNotice[] {
+  if (!policy) return [];
+  const out: PolicyNotice[] = [];
+  if (policy.disableFiles) out.push({ id: "files", kind: "disabled" });
+  if (policy.disableCalls) out.push({ id: "calls", kind: "disabled" });
+  if (policy.disableStickers) out.push({ id: "stickers", kind: "disabled" });
+  if (policy.disableCloudBackup) out.push({ id: "cloudBackup", kind: "disabled" });
+  if (policy.forceTurn) out.push({ id: "forceTurn", kind: "rule" });
+  if (policy.messageTtlDays !== undefined) out.push({ id: "ttlDays", kind: "rule", value: policy.messageTtlDays });
+  if (policy.relayFilesMaxMb !== undefined) {
+    out.push({ id: "relayFilesMb", kind: "rule", value: policy.relayFilesMaxMb });
+  }
+  return out;
+}
+
 /** 組織群組（ADR-0049）：管理者佈建的部門群／公告頻道。 */
 export interface OrgGroup {
   id: string;

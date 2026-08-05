@@ -4,6 +4,7 @@ import {
   applyRosterRotations,
   diffRoster,
   inWorkHours,
+  policyNotices,
   policyTtlSeconds,
   type OrgRosterDoc,
   rosterAllowlist,
@@ -287,5 +288,56 @@ describe("訊息保留政策（ADR-0160）", () => {
     expect(policyTtlSeconds({ messageTtlDays: 30 })).toBe(30 * 86_400);
     expect(policyTtlSeconds({ forceTurn: true })).toBeUndefined();
     expect(policyTtlSeconds(undefined)).toBeUndefined();
+  });
+});
+
+describe("policyNotices（ADR-0312）：政策攤平成設定頁的條列", () => {
+  it("無政策／空政策＝空清單（呼叫端據此整段不顯示）", () => {
+    expect(policyNotices(undefined)).toEqual([]);
+    expect(policyNotices({})).toEqual([]);
+  });
+
+  it("停用旗標在前、生效中的規則在後", () => {
+    const out = policyNotices({
+      messageTtlDays: 30,
+      disableCalls: true,
+      forceTurn: true,
+      disableFiles: true,
+    });
+    expect(out.map((n) => n.id)).toEqual(["files", "calls", "forceTurn", "ttlDays"]);
+    expect(out.filter((n) => n.kind === "disabled").map((n) => n.id)).toEqual(["files", "calls"]);
+  });
+
+  it("帶數值的規則保留數值供文案內插", () => {
+    const out = policyNotices({ messageTtlDays: 14, relayFilesMaxMb: 8 });
+    expect(out).toEqual([
+      { id: "ttlDays", kind: "rule", value: 14 },
+      { id: "relayFilesMb", kind: "rule", value: 8 },
+    ]);
+  });
+
+  it("false 的旗標不列（只列真正生效的）", () => {
+    expect(policyNotices({ disableFiles: false, disableCalls: false })).toEqual([]);
+  });
+
+  it("涵蓋全部七個欄位——新增政策旗標時本測試會提醒補上", () => {
+    const out = policyNotices({
+      disableFiles: true,
+      disableCalls: true,
+      disableStickers: true,
+      disableCloudBackup: true,
+      forceTurn: true,
+      messageTtlDays: 7,
+      relayFilesMaxMb: 16,
+    });
+    expect(out.map((n) => n.id)).toEqual([
+      "files",
+      "calls",
+      "stickers",
+      "cloudBackup",
+      "forceTurn",
+      "ttlDays",
+      "relayFilesMb",
+    ]);
   });
 });

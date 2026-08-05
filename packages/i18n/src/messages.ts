@@ -148,6 +148,17 @@ export interface Messages {
   orgInfo_title: string;
   orgInfo_hours: string;
   orgInfo_muteNote: string;
+  orgPolicy_title: string;
+  orgPolicy_disabledHead: string;
+  orgPolicy_rulesHead: string;
+  orgPolicy_files: string;
+  orgPolicy_calls: string;
+  orgPolicy_stickers: string;
+  orgPolicy_cloudBackup: string;
+  orgPolicy_forceTurn: string;
+  orgPolicy_ttlDays: string;
+  orgPolicy_relayFilesMb: string;
+  orgPolicy_hint: string;
   settings_orgTitle: string;
   settings_orgTitleHint: string;
   settings_orgTitleUpdated: string;
@@ -287,6 +298,51 @@ export interface Messages {
   fs_enabled: string;
   fs_rotate: string;
   fs_rotateConfirm: string;
+  fs_disable: string;
+  fs_disableConfirm: string;
+  fs_autoRotate: string;
+  fs_undecryptable: string;
+  settings_groupInvite: string;
+  settings_groupInviteHint: string;
+  groupInvite_held: string;
+  groupFs_summary: string;
+  groupFs_known: string;
+  groupFs_unknown: string;
+  groupFs_lost: string;
+  devices_title: string;
+  devices_thisOne: string;
+  devices_firstSeen: string;
+  devices_limit: string;
+  devices_new: string;
+  devices_source_local: string;
+  devices_source_snapshot: string;
+  devices_source_pairing: string;
+  devices_notInDirectory: string;
+  devices_stale: string;
+  devices_forget: string;
+  devices_forgetConfirm: string;
+  devices_conflict: string;
+  devices_revUnknown: string;
+  devices_revDualTrack: string;
+  devices_revActive: string;
+  devices_remove: string;
+  devices_removeConfirm: string;
+  devices_revoked: string;
+  devices_conflictLog: string;
+  devices_conflictRow: string;
+  devices_myCode: string;
+  devices_myCodeHint: string;
+  devices_authorize: string;
+  devices_authorizeHint: string;
+  devices_authorizePlaceholder: string;
+  devices_authorizeConfirm: string;
+  devices_noAuthority: string;
+  devices_tierTitle: string;
+  devices_tierPlaintext: string;
+  devices_tierEncrypted: string;
+  devices_tierKeystore: string;
+  devices_tierEphemeral: string;
+  devices_tierWasPlain: string;
   fs_downgradeWarning: string;
   fs_unsupportedWarning: string;
   ai_stylePolite: string;
@@ -724,6 +780,10 @@ export interface Messages {
   trigger_conflict: string;
   trigger_skipped: string;
   trigger_hint: string;
+  slash_hint: string;
+  settings_composer: string;
+  settings_enterToSend: string;
+  settings_enterToSendHint: string;
   mention_hint: string;
   mention_you: string;
   thread_title: string;
@@ -987,6 +1047,17 @@ const zhHant: Messages = {
   orgInfo_title: "組織資訊",
   orgInfo_hours: "表定上班時間：{start}–{end}",
   orgInfo_muteNote: "下班時間，來自公司成員與組織群組的通知會自動靜音（未讀照常累計）。",
+  orgPolicy_title: "公司政策",
+  orgPolicy_disabledHead: "已停用的功能",
+  orgPolicy_rulesHead: "生效中的規則",
+  orgPolicy_files: "檔案傳輸（含拍照直傳）",
+  orgPolicy_calls: "發起語音／視訊通話（仍可接聽）",
+  orgPolicy_stickers: "貼圖與自訂 emoji（仍看得到別人送的）",
+  orgPolicy_cloudBackup: "加密雲端備份",
+  orgPolicy_forceTurn: "通話與檔案只走 TURN 中繼（不揭露內網 IP）",
+  orgPolicy_ttlDays: "訊息保留 {days} 天",
+  orgPolicy_relayFilesMb: "組織檔案可經中繼暫存，單檔上限 {mb} MB",
+  orgPolicy_hint: "以上由貴公司簽章的名冊設定，無法在本機關閉。",
   settings_orgTitle: "頭銜",
   settings_orgTitleHint: "自填頭銜（最多 24 字），會廣播給這個身分的所有聯絡人——工作身分即全組織同事看得到。留空套用＝移除。",
   settings_orgTitleUpdated: "頭銜已更新並廣播。",
@@ -1100,7 +1171,7 @@ const zhHant: Messages = {
   settings_invisible: "隱身",
   settings_invisibleHint: "開啟後你對中繼站完全消失——既不廣播自己的在線狀態，也不向中繼查詢聯絡人是否在線。因此你的聯絡人清單不會離開這台裝置（最強的元資料隱私）。代價：你也看不到聯絡人的在線綠點。訊息收發完全正常。",
   fs_title: "前向保密（實驗性）",
-  fs_hint: "啟用後，發給聯絡人的訊息會加密到一把「會過期的加密子鑰」。日後你按「立即更換金鑰」並讓舊金鑰過期後，就算你的身分私鑰被竊，被側錄的舊訊息密文也解不開。保護強度取決於你多常更換。本機歷史不受影響、身分不變。",
+  fs_hint: "啟用後，你送出的**訊息內容**（文字、貼圖、自訂 emoji、檔案名稱、共享行程、訊息回應，群組也包含在內）會加密到一把「會過期的加密子鑰」；金鑰每 7 天自動更換，舊金鑰過期後，就算你的身分私鑰被竊，被側錄的舊密文也解不開。**不涵蓋：收回訊息、群組成員變更、已讀回條、正在輸入中／敲一下、語音視訊通話。**本機歷史不受影響、身分不變。",
   group_tooManyMembers: "群組人數上限為 {max} 人（含你自己）。請先減少一些成員再建立。",
   pair_largeBundleWarn: "你的資料量比較大（約 {mb} MB），傳輸會花一些時間。\n\n⚠️ 這個傳輸**不支援中斷後續傳**——如果中途斷線，必須從頭再來一次（含重新掃碼與比對安全碼）。\n\n建議：兩台裝置放在一起、保持螢幕開啟、接上電源，再開始。",
   fs_unaudited: "⚠️ 尚未經外部密碼學審計。這個功能已經寫完並通過我們自己的測試，但還沒有獨立的第三方檢查過它。加密的錯誤不會讓程式壞掉——它只是不保護，而且沒有任何症狀。在審計完成前，請不要把它當成可靠的保障。",
@@ -1109,6 +1180,51 @@ const zhHant: Messages = {
   fs_enabled: "前向保密已啟用",
   fs_rotate: "立即更換加密金鑰",
   fs_rotateConfirm: "要立即更換加密金鑰嗎？\n\n更換後：\n・還沒學到你新金鑰、或離線中的聯絡人，送到你舊金鑰的在途訊息，過了保留期（約 7 天）可能收不到。\n・你的其他裝置需上線同步新金鑰。\n・你寫下來的備份碼仍可還原身分與本機歷史（不含加密子鑰）。",
+  fs_autoRotate: "金鑰每 7 天自動更換一次；下面那顆是「我懷疑現在就被入侵了」時用的。",
+  fs_undecryptable: "⚠️ 這台裝置有 {count} 則收到的訊息解不開（最後一次：{when}）。可能是對方用了你已更換掉的舊金鑰，也可能只是損壞的資料——這兩者無法分辨。解不開的訊息不會顯示，也查不出是誰送的。若經常發生，請讓對方更新到最新版並保持上線。",
+  settings_groupInvite: "允許任何人把我加進群組",
+  settings_groupInviteHint: "關閉（預設）：只有你的聯絡人可以把你加進群組；陌生人的邀請會先進「訊息請求」，你接受那個人之後群組才會出現。開啟：任何知道你 npub 的人都能直接把你拉進群組。封鎖的人永遠擋得住，與此設定無關。",
+  groupInvite_held: "{name} 想把你加進「{group}」。在「訊息請求」接受他之後，群組才會出現。",
+  groupFs_summary: "本群 {total} 位成員中，{covered} 位的訊息有前向保密。",
+  groupFs_known: "加密子鑰已知",
+  groupFs_unknown: "未知",
+  groupFs_lost: "曾知現無",
+  devices_title: "我的裝置",
+  devices_thisOne: "這台",
+  devices_firstSeen: "首次看到 {when}",
+  devices_limit: "⚠️ 這份清單只看得到**會寫入的裝置**（有開雲端備份、或與你配對過的）。任何拿到你身分私鑰的人都能安靜地讀取訊息而不留下痕跡——**看到只有一台，不等於沒有人在讀你的訊息**。",
+  devices_new: "⚠️ 偵測到一台你沒見過的裝置（{id}）。如果不是你自己新增的，請立即更換身分金鑰。",
+  devices_source_local: "這台裝置",
+  devices_source_snapshot: "雲端備份",
+  devices_source_pairing: "配對搬家",
+  devices_notInDirectory: "⚠ 不在裝置目錄內",
+  devices_stale: "（久未出現）",
+  devices_forget: "從清單移除",
+  devices_forgetConfirm: "要把這台從清單移除嗎？\n\n這只是清掉這台電腦上的一筆紀錄——**不會撤銷任何東西、也不會動到任何金鑰**。\n如果它哪天又出現，它會再次被記錄下來。",
+  devices_conflict: "⚠️ 偵測到兩份互相衝突的裝置目錄（版本 {v}）。這代表有人用你的身分私鑰簽了另一份——**你的私鑰可能已經外洩**。本機沒有採用任何一份（選邊等於幫對方決定）。請考慮更換身分金鑰。",
+  devices_revUnknown: "裝置目錄還在建立中，請稍候再試移除。",
+  devices_revDualTrack: "⚠️ 目前移除裝置**還不會生效**：裝置 {ids} 仍在使用舊的金鑰同步方式，只要它還在，被移除的裝置照樣拿得到新金鑰。請先更新那台裝置。",
+  devices_revActive: "移除裝置後，它將無法讀取之後的新訊息（已收到的歷史不受影響）。",
+  devices_remove: "移除這台裝置",
+  devices_removeConfirm: "要移除這台裝置嗎？\n\n・它將無法讀取**之後**的新訊息。\n・它已經收到的歷史**不受影響**，你救不回來。\n・保留期內（約 7 天）它仍能解開在途的舊訊息——這是為了不讓所有在途訊息一起掉。\n・如果它拿到的是你的身分私鑰而不只是那台裝置，移除**擋不住**——那種情況要換身分金鑰。",
+  devices_revoked: "已移除",
+  devices_conflictLog: "偵測到的目錄異常",
+  devices_conflictRow: "{when}：收到版本 {incoming} 的目錄，但本機已在版本 {mine}（版本倒退）。這只可能來自重放或有人用你的身分私鑰簽了舊版本。本機沒有採用它。",
+  devices_myCode: "這台的裝置代碼",
+  devices_myCodeHint: "要讓這台加入你的裝置清單，請在**另一台已在清單上的裝置**貼上這串代碼並授權。代碼不是祕密，但請**比對兩邊顯示的字元是否一致**——貼錯就是授權了別人。",
+  devices_authorize: "授權裝置",
+  devices_authorizeHint: "貼上新裝置顯示的代碼。只有已在清單上的裝置能授權——這是為了讓「拿到你身分私鑰但沒碰到你這台」的人加不進來。",
+  devices_authorizePlaceholder: "貼上裝置代碼",
+  devices_authorizeConfirm: "要授權這台裝置嗎？\n\n・它將能讀取你之後收到的所有訊息。\n・請先確認代碼與那台裝置螢幕上顯示的**完全一致**。\n・授權後可以隨時移除。",
+  devices_noAuthority: "這台裝置還不在清單上，因此不能授權其他裝置。請先在已在清單上的裝置授權這一台。",
+  devices_tierTitle: "這台的金鑰保護等級",
+  devices_tierPlaintext: "⚠️ **明文存放**。這台的裝置金鑰目前直接存在瀏覽器／App 的本機儲存區，沒有加密。若有人取得這台電腦的磁碟內容（備份、舊機沒清、或惡意程式），他就能拿到這把金鑰——**這種情況下「移除裝置」擋不住他**。真正的保護要等這把金鑰移進作業系統金鑰庫。",
+  devices_tierEncrypted: "已加密存放，但**包裹它的那把金鑰是軟體保管的**（瀏覽器或系統代管，沒有你的密碼參與）。所以：想偷金鑰的腳本**偷不走**它——這相對於明文是實質改善；但**完整複製這台的資料**、而且知道怎麼做的人，仍有機會解開。真正擋得住磁碟複製的是安全晶片，這台沒有或不支援。",
+  devices_tierKeystore: "存在作業系統金鑰庫（桌面）或裝置安全晶片（Android）。磁碟被複製也解不開；但**這不代表裝置被入侵時也安全**——我們是在需要時把金鑰**取出來用**，不是請晶片代簽，所以以你的身分執行的惡意程式一樣讀得到。",
+  devices_tierEphemeral: "⚠️ **這次開機沒能打開金鑰庫**（例如系統的金鑰服務沒啟動）。目前用的是臨時金鑰、沒有存下來——所以**這台不會出現在你的裝置清單裡**，重開又是新的一把。我們刻意不在這種時候偷偷生一把新的長期金鑰把你換掉。修好金鑰庫後重開即可恢復原本的裝置身分。",
+  devices_tierWasPlain: "⚠️ 這把金鑰是從舊版的明文儲存**搬進**金鑰庫的。搬進來以後磁碟被複製已經沒用了，但**在那之前備份過磁碟的人可能已經有一份**——刪掉舊副本收不回已經被拿走的東西。若你在意這點，可以移除這台再重新配對，換一把從未明文躺過的金鑰。",
+  fs_disable: "停用前向保密",
+  fs_disableConfirm: "要停用前向保密嗎？\n\n・之後送出的訊息**不再**有前向保密（回到與一般訊息相同的保護）。\n・已經送出的訊息不受影響。\n・你的聯絡人會收到「已停用」的明確通知——這是必要的，否則他們會以為你還開著。\n・本機歷史、身分、備份碼都不受影響。\n・可以隨時再開啟。",
   fs_downgradeWarning: "⚠️ 這位聯絡人啟用了前向保密，但你這端還沒收到他的目前金鑰——這則訊息暫時以一般方式加密（無前向保密）。可能是對方金鑰尚未同步（稍後會自動更新），若持續出現請留意。",
   fs_unsupportedWarning: "ℹ️ 這位聯絡人使用了你這個版本還不支援的加密機制，因此這則訊息以你們雙方都支援的方式加密。請更新到最新版本。（這不是安全警告——對方並沒有降級。）",
   ai_stylePolite: "更客氣",
@@ -1522,6 +1638,10 @@ const zhHant: Messages = {
   trigger_conflict: "「{trigger}」已對應其他貼圖，改為對應此貼圖？",
   trigger_skipped: "已略過無效觸發文字：{list}",
   trigger_hint: "Tab 送出・↑↓ 選擇・Esc 關閉",
+  slash_hint: "↵/Tab 執行 · ↑↓ 選擇 · Esc 關閉",
+  settings_composer: "輸入行為",
+  settings_enterToSend: "按 Enter 送出訊息",
+  settings_enterToSendHint: "開啟：Enter 送出、Shift+Enter 換行。關閉：Enter 換行、Ctrl/⌘+Enter 送出。",
   mention_hint: "Tab/Enter 選取・↑↓ 選擇・Esc 關閉",
   mention_you: "提及了你",
   thread_title: "討論串",
@@ -1771,6 +1891,17 @@ const en: Messages = {
   orgInfo_title: "Organization",
   orgInfo_hours: "Work hours: {start}–{end}",
   orgInfo_muteNote: "Outside work hours, notifications from company members and org groups are muted automatically (unread still accrues).",
+  orgPolicy_title: "Company policy",
+  orgPolicy_disabledHead: "Disabled features",
+  orgPolicy_rulesHead: "Rules in effect",
+  orgPolicy_files: "File transfer (including camera photos)",
+  orgPolicy_calls: "Starting voice/video calls (you can still answer)",
+  orgPolicy_stickers: "Stickers and custom emoji (you still see ones others send)",
+  orgPolicy_cloudBackup: "Encrypted cloud backup",
+  orgPolicy_forceTurn: "Calls and files go through a TURN relay only (no local IP exposure)",
+  orgPolicy_ttlDays: "Messages are kept for {days} days",
+  orgPolicy_relayFilesMb: "Org files may be staged on the relay, up to {mb} MB each",
+  orgPolicy_hint: "Set by your company's signed roster; this cannot be turned off locally.",
   settings_orgTitle: "Job title",
   settings_orgTitleHint: "Self-declared title (up to 24 chars), broadcast to all contacts of this identity — on a work identity that means every colleague. Apply empty to remove.",
   settings_orgTitleUpdated: "Title updated and broadcast.",
@@ -1885,7 +2016,7 @@ const en: Messages = {
   settings_invisible: "Invisible",
   settings_invisibleHint: "When on, you vanish from the relay entirely — you neither broadcast your own presence nor ask the relay who's online. So your contact list never leaves this device (the strongest metadata privacy). Trade-off: you can't see contacts' online dots either. Messaging works normally.",
   fs_title: "Forward secrecy (experimental)",
-  fs_hint: "When enabled, messages you send are encrypted to a rotating encryption subkey. After you later \"rotate the key\" and let the old one expire, even a theft of your identity private key can't decrypt previously recorded ciphertext. Strength depends on how often you rotate. Local history is unaffected; your identity doesn't change.",
+  fs_hint: "Once enabled, the **content you send** — text, stickers, custom emoji, file names, shared events and reactions, in groups too — is encrypted to an expiring subkey; it rotates automatically every 7 days, and once an old key expires, recorded ciphertext stays unreadable even if your identity key is later stolen. **Not covered: unsending, group membership changes, read receipts, typing/nudges, and calls.** Local history and your identity are unaffected.",
   group_tooManyMembers: "Groups are limited to {max} members (including you). Please remove some before creating.",
   pair_largeBundleWarn: "You have a fair amount of data (about {mb} MB), so this will take a while.\n\n⚠️ This transfer **cannot be resumed if it is interrupted** — if the connection drops you have to start over, including scanning the code and comparing the safety number again.\n\nSuggestion: keep both devices together, screens on, and plugged in before you start.",
   fs_unaudited: "⚠️ Not yet externally audited. This feature is complete and passes our own tests, but no independent third party has reviewed it. Crypto bugs don't break anything visibly — they just fail to protect, with no symptoms. Until the audit is done, please don't treat this as a dependable guarantee.",
@@ -1894,6 +2025,51 @@ const en: Messages = {
   fs_enabled: "Forward secrecy is on",
   fs_rotate: "Rotate encryption key now",
   fs_rotateConfirm: "Rotate your encryption key now?\n\nAfter rotating:\n• Contacts who haven't learned your new key yet, or who are offline, may not receive in-flight messages sent to your old key after the retention window (~7 days).\n• Your other devices need to come online to sync the new key.\n• Your written-down backup code still restores your identity and local history (it never contains the encryption subkey).",
+  fs_autoRotate: "Your key rotates automatically every 7 days. The button below is for \"I think I'm compromised right now\".",
+  fs_undecryptable: "⚠️ This device could not decrypt {count} received message(s) (last: {when}). It may be that the sender used a key you have since rotated away, or the data was simply corrupt — the two cannot be told apart. Undecryptable messages are not shown, and there is no way to tell who sent them. If this keeps happening, ask your contacts to update and stay online.",
+  settings_groupInvite: "Let anyone add me to groups",
+  settings_groupInviteHint: "Off (default): only your contacts can add you to a group; an invite from a stranger waits in Message requests and the group appears once you accept that person. On: anyone who knows your npub can add you directly. Blocked people are always refused, regardless of this setting.",
+  groupInvite_held: "{name} wants to add you to \"{group}\". The group will appear once you accept them in Message requests.",
+  groupFs_summary: "{covered} of {total} members receive forward-secret messages.",
+  groupFs_known: "Encryption subkey known",
+  groupFs_unknown: "Unknown",
+  groupFs_lost: "Previously known, now missing",
+  devices_title: "My devices",
+  devices_thisOne: "this one",
+  devices_firstSeen: "first seen {when}",
+  devices_limit: "⚠️ This list only shows devices that **write** (ones with cloud backup on, or that you paired with). Anyone holding your identity key can read your messages silently without leaving a trace — **seeing only one device does not mean nobody is reading them**.",
+  devices_new: "⚠️ A device you have not seen before appeared ({id}). If you did not add it, rotate your identity key now.",
+  devices_source_local: "this device",
+  devices_source_snapshot: "cloud backup",
+  devices_source_pairing: "device pairing",
+  devices_notInDirectory: "⚠ not in device directory",
+  devices_stale: "(not seen in a long time)",
+  devices_forget: "Remove from list",
+  devices_forgetConfirm: "Remove this device from the list?\n\nThis only clears a record on this computer — it **revokes nothing and touches no keys**.\nIf it shows up again, it will simply be recorded again.",
+  devices_conflict: "⚠️ Two conflicting device directories were seen (version {v}). Someone signed another one with your identity key — **your key may have leaked**. Neither was adopted (picking a side would decide it for them). Consider rotating your identity key.",
+  devices_revUnknown: "The device directory is still being set up; try removing again shortly.",
+  devices_revDualTrack: "⚠️ Removing a device will **not take effect yet**: device {ids} still uses the old key-sync path, so a removed device would still receive new keys. Update that device first.",
+  devices_revActive: "Once removed, a device can no longer read new messages (history it already has is unaffected).",
+  devices_remove: "Remove this device",
+  devices_removeConfirm: "Remove this device?\n\n• It will no longer be able to read **new** messages.\n• History it already received is **unaffected** — you cannot claw that back.\n• During the grace window (~7 days) it can still open in-flight older messages; that is deliberate.\n• If what leaked was your identity key rather than just that device, removal does **not** help — rotate your identity key instead.",
+  devices_revoked: "removed",
+  devices_conflictLog: "Directory anomalies seen",
+  devices_conflictRow: "{when}: received a directory at version {incoming} while this device is already at {mine} (rollback). That can only come from a replay or from someone signing an older version with your identity key. It was not adopted.",
+  devices_myCode: "This device's code",
+  devices_myCodeHint: "To add this device to your list, paste this code on **another device that is already on the list** and authorize it. The code is not a secret, but do **compare the characters on both screens** — pasting the wrong one authorizes someone else.",
+  devices_authorize: "Authorize a device",
+  devices_authorizeHint: "Paste the code shown by the new device. Only a device already on the list can authorize — that is what keeps out someone who has your identity key but never touched this device.",
+  devices_authorizePlaceholder: "Paste device code",
+  devices_authorizeConfirm: "Authorize this device?\n\n• It will be able to read every message you receive from now on.\n• Check that the code matches **exactly** what is shown on that device.\n• You can remove it again at any time.",
+  devices_noAuthority: "This device is not on the list yet, so it cannot authorize others. Authorize this one from a device that is already on the list.",
+  devices_tierTitle: "Key protection on this device",
+  devices_tierPlaintext: "⚠️ **Stored in the clear.** This device's key currently sits unencrypted in browser/app local storage. Anyone who obtains this machine's disk contents (a backup, a wiped-but-not-really old machine, malware) gets the key — and in that case **removing the device does not stop them**. Real protection waits on moving this key into the OS keystore.",
+  devices_tierEncrypted: "Stored encrypted, but **the key that wraps it is held in software** (by the browser or the system, with no password of yours involved). So: a script trying to steal the key **cannot take it** — a real improvement over plaintext; but someone who copies all of this device's data and knows what they are doing may still open it. What actually stops a disk copy is a secure element, which this device lacks or does not expose.",
+  devices_tierKeystore: "Held in the OS keystore (desktop) or the device secure element (Android). A copied disk cannot open it — but this does **not** mean you are safe if the device itself is compromised: we read the key **out** when we need it rather than asking the chip to sign, so malware running as you can read it too.",
+  devices_tierEphemeral: "⚠️ **The keystore could not be opened this session** (for example, the system keyring service is not running). A temporary key is in use and nothing was saved — so **this device will not appear in your device list**, and a restart makes another one. We deliberately do not quietly mint a new long-term key here. Fix the keystore and restart to get the original device identity back.",
+  devices_tierWasPlain: "⚠️ This key was **migrated in** from an older plaintext store. A copied disk is useless from now on, but **anyone who backed up the disk before the move may already hold a copy** — deleting the old copy cannot take back what was already taken. If that matters to you, remove this device and pair it again to get a key that never sat in plaintext.",
+  fs_disable: "Turn off forward secrecy",
+  fs_disableConfirm: "Turn off forward secrecy?\n\n• Messages you send from now on will **no longer** have forward secrecy (same protection as ordinary messages).\n• Messages already sent are unaffected.\n• Your contacts will be told explicitly that you turned it off — this is necessary, otherwise they would keep assuming you still have it on.\n• Local history, identity and backup code are unaffected.\n• You can turn it back on at any time.",
   fs_downgradeWarning: "⚠️ This contact has forward secrecy enabled, but you haven't received their current key yet — this message was encrypted the ordinary way (no forward secrecy). Their key may not be synced yet (it'll update automatically); take note if this persists.",
   fs_unsupportedWarning: "ℹ️ This contact uses an encryption scheme your version doesn't support yet, so this message was encrypted with one you both support. Please update to the latest version. (This is not a security warning — they have not downgraded.)",
   ai_stylePolite: "More polite",
@@ -2308,6 +2484,10 @@ const en: Messages = {
   trigger_conflict: "\"{trigger}\" is mapped to another sticker. Remap it to this one?",
   trigger_skipped: "Skipped invalid triggers: {list}",
   trigger_hint: "Tab to send · ↑↓ select · Esc dismiss",
+  slash_hint: "↵/Tab run · ↑↓ choose · Esc close",
+  settings_composer: "Typing",
+  settings_enterToSend: "Press Enter to send",
+  settings_enterToSendHint: "On: Enter sends, Shift+Enter adds a line. Off: Enter adds a line, Ctrl/⌘+Enter sends.",
   mention_hint: "Tab/Enter to pick · ↑↓ select · Esc dismiss",
   mention_you: "mentioned you",
   thread_title: "Thread",

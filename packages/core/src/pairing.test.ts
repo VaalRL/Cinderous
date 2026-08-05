@@ -165,3 +165,52 @@ describe("配對會合原語（D4a）", () => {
     expect(openSignal(key, sealed.slice(0, -4) + "AAAA")).toBeNull();
   });
 });
+
+describe("配對回傳裝置公鑰（ADR-0322 S5：配對＝授權）", () => {
+  /** 自足的記憶體雙工對接（不依賴其他 describe 的區域函式）。 */
+  const duo = (): [PairTransport, PairTransport] => {
+    const mk = () => {
+      const q: Uint8Array[] = [];
+      let h: ((d: Uint8Array) => void) | undefined;
+      return {
+        deliver: (d: Uint8Array) => (h ? h(d) : void q.push(d)),
+        t: (peer: () => { deliver: (d: Uint8Array) => void }): PairTransport => ({
+          send: (d) => peer().deliver(d),
+          onMessage(cb) {
+            h = cb;
+            for (const d of q.splice(0)) cb(d);
+          },
+          close() {},
+        }),
+      };
+    };
+    const a = mk();
+    const b = mk();
+    return [a.t(() => b), b.t(() => a)];
+  };
+
+  const pair = async (devicePk?: string): Promise<{ ok: boolean; got: string[] }> => {
+    const key = new Uint8Array(32).fill(7);
+    const [a, b] = duo();
+    const got: string[] = [];
+    const src = runPairingSource(a, key, '{"v":1}', async () => true, {
+      onTargetDevice: (pk) => got.push(pk),
+    });
+    const tgt = runPairingTarget(b, key, undefined, devicePk ? { devicePk } : {});
+    const [ok] = await Promise.all([src, tgt]);
+    return { ok, got };
+  };
+
+  it("🔴 新機在 DONE 回傳裝置公鑰 → 舊機收得到（可據此授權）", async () => {
+    const pk = "ab".repeat(32);
+    const { ok, got } = await pair(pk);
+    expect(ok).toBe(true);
+    expect(got).toEqual([pk]);
+  });
+
+  it("🔴 舊版新機不回傳 → 不觸發，配對本身照樣成功（向後相容，退回手動授權）", async () => {
+    const { ok, got } = await pair();
+    expect(ok).toBe(true);
+    expect(got).toEqual([]);
+  });
+});

@@ -134,7 +134,19 @@ export async function runPairingSource(
   key: Uint8Array,
   bundleJson: string,
   confirmSas: (sas: string) => Promise<boolean>,
-  opts: { timeoutMs?: number } = {},
+  opts: {
+    timeoutMs?: number;
+    /**
+     * 新機在 `DONE` 回傳的**裝置公鑰**（ADR-0322 S5 接配對）。
+     *
+     * 為什麼放在 `DONE`：它發生在 **SAS 人工比對之後**，且走同一條一次性金鑰加密的通道
+     * ⇒ 這把公鑰是「這場**已由人確認過**的配對裡的對方」，正是 ADR-0303 §4.4 要求的
+     * 「授權憑證＝當期短期狀態」。舊機據此呼叫 `authorizeDevice()`，不必另建管道。
+     *
+     * 舊版新機的 `DONE` 酬載為空 ⇒ 不呼叫此 callback（向後相容，退回手動授權）。
+     */
+    onTargetDevice?: (devicePk: string) => void;
+  } = {},
 ): Promise<boolean> {
   const next = makeInbox(transport, opts.timeoutMs ?? STEP_TIMEOUT_MS);
   try {
@@ -147,7 +159,15 @@ export async function runPairingSource(
       return false;
     }
     transport.send(frame(FRAME.BUNDLE, encryptBundle(key, new TextEncoder().encode(bundleJson))));
-    await next(FRAME.DONE);
+    const done = await next(FRAME.DONE);
+    if (done.length > 0 && opts.onTargetDevice) {
+      try {
+        const pk = new TextDecoder().decode(decryptBundle(key, done));
+        if (/^[0-9a-f]{64}$/.test(pk)) opts.onTargetDevice(pk);
+      } catch {
+        // 解不開＝舊版或壞酬載；配對本身已完成，不因此失敗（退回手動授權）。
+      }
+    }
     return true;
   } finally {
     transport.close();
@@ -162,7 +182,14 @@ export async function runPairingTarget(
   transport: PairTransport,
   key: Uint8Array,
   onSas?: (sas: string) => void,
-  opts: { timeoutMs?: number } = {},
+  opts: {
+    timeoutMs?: number;
+    /**
+     * 本機裝置公鑰（ADR-0322 S5）：隨 `DONE` 回傳給舊機，讓它把這台加進裝置目錄。
+     * 省略＝`DONE` 酬載為空（舊行為），舊機退回手動授權。
+     */
+    devicePk?: string;
+  } = {},
 ): Promise<string> {
   const next = makeInbox(transport, opts.timeoutMs ?? STEP_TIMEOUT_MS);
   try {
@@ -172,7 +199,14 @@ export async function runPairingTarget(
     onSas?.(deriveSas(key, nonceA, nonceB));
     const cipher = await next(FRAME.BUNDLE);
     const json = new TextDecoder().decode(decryptBundle(key, cipher));
-    transport.send(frame(FRAME.DONE, new Uint8Array()));
+    // ADR-0322 S5：把自己的裝置公鑰隨 DONE 回傳（同一把一次性金鑰加密）——
+    // 這一步在 SAS 比對之後，故舊機收到的是「已由人確認過的這場配對的對方」。
+    transport.send(
+      frame(
+        FRAME.DONE,
+        opts.devicePk ? encryptBundle(key, new TextEncoder().encode(opts.devicePk)) : new Uint8Array(),
+      ),
+    );
     return json;
   } finally {
     transport.close();

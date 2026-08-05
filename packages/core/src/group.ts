@@ -11,6 +11,7 @@ import { getEventHash, type NostrEvent } from "./event.js";
 import type { FileMeta, WrappedMessage } from "./giftwrap.js";
 import { getPublicKey, type PubkeyHex, type SecretKey } from "./keys.js";
 import { mentionTags } from "./mention.js";
+import { EK_HINT_TAG } from "./subkey.js";
 import type { Rumor, RumorInput } from "./nip59.js";
 import { sealAndWrap } from "./nip59.js";
 import { alsoMainTag, replyTag } from "./thread.js";
@@ -181,17 +182,42 @@ function fanOutGroupRumor(
   group: Group,
   /** 外層過期（unix 秒；ADR-0160 組織保留政策可覆寫）；省略＝created_at＋7 天。 */
   expiration?: number,
+  /**
+   * FS retarget（ADR-0320）：身分 pk → 其 EK；**逐位成員各自決定**，不知道就退回身分。
+   * 同一則群訊因此可能「部分成員有 FS、部分沒有」——那不是失敗，是盡力而為。
+   *
+   * ⚠ **`input` 不得因此改變**（同 ADR-0318）：`rumor.id` 是跨成員一致的群訊識別，
+   * 回條與引用都以它為鍵（ADR-0095）。1:1 那套「在 rumor 內嵌 ek hint」在這裡會讓
+   * 每次輪替都產生不同的 id。
+   */
+  encryptToFor?: (identityPk: PubkeyHex) => PubkeyHex,
+  /**
+   * 我的當前 EK（ADR-0326）：夾在 **seal 層** tags 裡，讓收件人學到我的 EK。
+   *
+   * 🔴 **為什麼是 seal 而不是 rumor**：`rumor.id` 是跨成員一致的群訊識別碼（回條與引用的鍵），
+   * 而 EK 每 7 天輪替 ⇒ 放進 rumor 會讓同一則訊息在不同時間得到不同 id（ADR-0318 已否決）。
+   * seal 是**逐收件人**的一層、加密在 wrap 內，改它既不動 id 也不對中繼多洩漏任何東西。
+   */
+  myEk?: PubkeyHex,
 ): WrappedMessage {
   const id = getEventHash({ ...input, pubkey: getPublicKey(senderSk) });
   const outerExpiration = expiration ?? input.created_at + DEFAULT_TTL_SECONDS;
+  const encryptTo = encryptToFor ?? ((pk: PubkeyHex) => pk);
+  const sealTags = myEk ? [[EK_HINT_TAG, myEk]] : [];
   const wrapFor = (pk: PubkeyHex): NostrEvent =>
-    sealAndWrap(input, senderSk, pk, {
-      kind: KIND.OFFLINE_DM_GIFT_WRAP,
-      tags: [
-        ["p", pk],
-        ["expiration", String(outerExpiration)],
-      ],
-    });
+    sealAndWrap(
+      input,
+      senderSk,
+      encryptTo(pk),
+      {
+        kind: KIND.OFFLINE_DM_GIFT_WRAP,
+        tags: [
+          ["p", pk],
+          ["expiration", String(outerExpiration)],
+        ],
+      },
+      sealTags,
+    );
   return { id, events: others(group.members, senderPk).map(wrapFor), selfCopy: wrapFor(senderPk) };
 }
 
@@ -200,7 +226,18 @@ export function wrapGroupMessage(
   senderSk: SecretKey,
   senderPk: PubkeyHex,
   group: Group,
-  opts: { now?: number; relayHint?: string; mentions?: PubkeyHex[]; replyTo?: string; alsoMain?: boolean; expiration?: number } = {},
+  opts: {
+    now?: number;
+    relayHint?: string;
+    mentions?: PubkeyHex[];
+    replyTo?: string;
+    alsoMain?: boolean;
+    expiration?: number;
+    /** FS retarget（ADR-0320）：身分 pk → 其 EK；逐位成員決定，不知道就退回身分。 */
+    encryptToFor?: (identityPk: PubkeyHex) => PubkeyHex;
+    /** 我的當前 EK（ADR-0326）：夾在 seal 層讓收件人學到，不動 `rumor.id`。 */
+    myEk?: PubkeyHex;
+  } = {},
 ): WrappedMessage {
   const nowSec = opts.now ?? Math.floor(Date.now() / 1000);
   const input: RumorInput = {
@@ -215,7 +252,7 @@ export function wrapGroupMessage(
     ],
     content: text,
   };
-  return fanOutGroupRumor(input, senderSk, senderPk, group, opts.expiration);
+  return fanOutGroupRumor(input, senderSk, senderPk, group, opts.expiration, opts.encryptToFor, opts.myEk);
 }
 
 /**
@@ -229,7 +266,15 @@ export function wrapGroupFile(
   senderSk: SecretKey,
   senderPk: PubkeyHex,
   group: Group,
-  opts: { now?: number; relayHint?: string; expiration?: number } = {},
+  opts: {
+    now?: number;
+    relayHint?: string;
+    expiration?: number;
+    /** FS retarget（ADR-0320）：檔名/大小/類型與 1:1 同樣敏感（ADR-0318）。 */
+    encryptToFor?: (identityPk: PubkeyHex) => PubkeyHex;
+    /** 我的當前 EK（ADR-0326）：夾在 seal 層讓收件人學到，不動 `rumor.id`。 */
+    myEk?: PubkeyHex;
+  } = {},
 ): WrappedMessage {
   const nowSec = opts.now ?? Math.floor(Date.now() / 1000);
   const input: RumorInput = {
@@ -242,7 +287,7 @@ export function wrapGroupFile(
     ],
     content: "",
   };
-  return fanOutGroupRumor(input, senderSk, senderPk, group, opts.expiration);
+  return fanOutGroupRumor(input, senderSk, senderPk, group, opts.expiration, opts.encryptToFor, opts.myEk);
 }
 
 /** 將群組控制訊息扇出給指定收件人（各一個 Gift Wrap）。 */

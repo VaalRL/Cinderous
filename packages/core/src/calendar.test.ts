@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { generateEncryptionKey, openWrapWithEks } from "./subkey.js";
 import {
   applyCalendarChange,
   CALENDAR_PAST_RETENTION_DAYS,
@@ -328,5 +329,42 @@ describe("行程提醒到期判定（ADR-0266）：本機計時器、零中繼�
     // 昨天那場已經提醒過（remindedFor 指向舊 start）；改到現在的 10 分鐘後 → 該再響一次。
     const e = ev(600, 600, { remindedFor: NOW - 86_400 });
     expect(dueReminders([e], NOW, ME)).toHaveLength(1);
+  });
+});
+
+describe("FS retarget（ADR-0318）：只換加密對象，rumor 一個位元組都不動", () => {
+  const alice = generateSecretKey();
+  const bobPk = getPublicKey(generateSecretKey());
+  const bobEk = generateEncryptionKey();
+  const trip = { title: "午餐", start: 1000 };
+
+  it("🔴 **id 不變**——行程 id 是 RSVP 的對應鍵，不得隨金鑰輪替改變（ADR-0264 §9）", () => {
+    const plain = wrapCalendarEvent(trip, alice, bobPk, { now: 1 });
+    const fs = wrapCalendarEvent(trip, alice, bobPk, { now: 1, encryptToFor: () => bobEk.pk });
+    expect(fs.id).toBe(plain.id);
+  });
+
+  it("🔴 兩次輪替後的補送仍是同一個行程（不會變成重複行程＋孤兒 RSVP）", () => {
+    const ek1 = generateEncryptionKey();
+    const ek2 = generateEncryptionKey();
+    const a = wrapCalendarEvent(trip, alice, bobPk, { now: 1, encryptToFor: () => ek1.pk });
+    const b = wrapCalendarEvent(trip, alice, bobPk, { now: 1, encryptToFor: () => ek2.pk });
+    expect(a.id).toBe(b.id);
+  });
+
+  it("加密到 EK：EK 解得開、身分金鑰解不開（＝真的 retarget 了）", () => {
+    const bobIk = generateSecretKey();
+    const w = wrapCalendarEvent(trip, alice, getPublicKey(bobIk), { now: 1, encryptToFor: () => bobEk.pk });
+    const ev = w.events[0]!;
+    expect(openWrapWithEks(ev, [bobEk.sk]).rumor.tags).toContainEqual(["title", "午餐"]);
+    expect(() => openWrapWithEks(ev, [bobIk])).toThrow(); // FS：刪掉 EK 後同身分也解不開
+    expect(ev.tags).toContainEqual(["p", getPublicKey(bobIk)]); // 外層 #p 仍為身分（路由）
+  });
+
+  it("RSVP 同樣可 retarget，且 rumor 不動", () => {
+    const plain = wrapCalendarRsvp("ev1", "accepted", alice, [bobPk], { now: 1 });
+    const fs = wrapCalendarRsvp("ev1", "accepted", alice, [bobPk], { now: 1, encryptToFor: () => bobEk.pk });
+    expect(fs.id).toBe(plain.id);
+    expect(openWrapWithEks(fs.events[0]!, [bobEk.sk]).rumor.tags).toContainEqual(["status", "accepted"]);
   });
 });
