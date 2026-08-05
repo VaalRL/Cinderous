@@ -37,7 +37,7 @@ import { fetchRelayInfo, type RelayInfo } from "@cinderous/engine";
 import type { CalendarEventInput, RsvpStatus, StoredCalendarEvent } from "@cinderous/engine";
 import { browserStore } from "./native/browser-store.js";
 import { safeNsecDecode } from "./nsec.js";
-import { getKeyVault } from "./native/keyvault.js";
+import { getKeyVault, tauriKeyVault } from "./native/keyvault.js";
 import { wipeDeviceLocal, wipeIdentityLocal } from "./native/wipe.js";
 import { getNotifier, onNotificationClick } from "./native/notify.js";
 import { pickFileToSend, readFileAtPath, saveIncomingFile, saveTextFile } from "./native/save-file.js";
@@ -79,6 +79,7 @@ import {
   visibleProfiles,
 } from "@cinderous/engine";
 import { getDeviceId } from "@cinderous/engine";
+import { DEVICE_KEY_SLOT, openDeviceKey, setDeviceKeyVault, webDeviceKeyVault } from "@cinderous/engine";
 import type { CloudSyncMode } from "@cinderous/engine";
 import type {
   BlockedContact,
@@ -362,8 +363,28 @@ function shardingEnabled(): boolean {
 // 故此處不再有隱藏閘門；揭露改由 SettingsPanel 的 `fs-unaudited` 與啟用確認對話承擔。
 // ⚠ 兩者都是**驗收條件**，不是裝飾：拿掉任何一個，這條路就退回成「遮羞布」（ADR-0306 §3）。
 
-function buildBackend(p: Profile, nsecOverride?: string, storage?: AppStorage): ChatBackend {
+// ADR-0323：**裝置金鑰進 OS 金鑰庫**，做法比照身分私鑰的 B5（ADR-0053）。
+//
+// 🔴 只在 Tauri 裝——瀏覽器的 `browserKeyVault` 只收 Argon2id 密碼包裹的 blob（見該模組），
+// 沒有密碼就沒有比 localStorage 更好的地方放。硬塞進去只會讓 `deviceKeyTier()` 說謊，
+// 而那個函式存在的唯一理由就是不說謊（ADR-0297 §6 紅線）。瀏覽器維持 `plaintext` 並如實顯示。
+if (isTauri()) {
+  setDeviceKeyVault({
+    load: () => tauriKeyVault.getKey(DEVICE_KEY_SLOT),
+    save: (nsec) => tauriKeyVault.setKey(DEVICE_KEY_SLOT, nsec),
+  });
+} else {
+  // 瀏覽器：IndexedDB 裡一把**不可匯出**的 WebCrypto 金鑰包住它（`encrypted`，非 `keystore`）。
+  // 這買到的是「XSS 偷不走」，不是「複製設定檔也拿不到」——差別已寫進 tier 文案。
+  // 不支援（非安全脈絡、無 IDB）時回 null ⇒ 不注入，維持明文並如實顯示。
+  setDeviceKeyVault(webDeviceKeyVault());
+}
+
+async function buildBackend(p: Profile, nsecOverride?: string, storage?: AppStorage): Promise<ChatBackend> {
   if (!p.relayUrl) return new BrowserChatBackend(p.name);
+  // ADR-0323：金鑰庫是非同步的，而 `RelayChatBackend` 在建構時就要拿裝置金鑰
+  // （它得知道自己是誰才能查裝置目錄）⇒ **先 await 再建構**。這是 buildBackend 變 async 的原因。
+  await openDeviceKey();
   // ADR-0164：本機記住的手動狀態——**建構時就 seed**，讓 start() 首拍 beat() 尊重離線（不事後補正）。
   const pref = loadPresence(p.pubkey);
   // 儲存一律由呼叫端提供（ADR-0119）：過去這裡會自己 `new LocalStorage(...)` 當退路，
@@ -775,6 +796,12 @@ export function App(): JSX.Element {
   });
   // 前向保密（ADR-0245）：opt-in 開關狀態，由後端 fsEnabled() 提供。
   const [fsEnabled, setFsEnabled] = useState<boolean>(false);
+  /** 本裝置解不開的訊息數（ADR-0316）；開機自後端讀一次，之後由 onFsUndecryptable 更新。 */
+  const [fsFailures, setFsFailures] = useState<{ count: number; lastAt: number }>({ count: 0, lastAt: 0 });
+  /** 入群邀請閘門（ADR-0317）：值在跨裝置同步設定裡，開機自後端讀。 */
+  const [groupInviteAnyone, setGroupInviteAnyone] = useState(false);
+  /** 觀測到的裝置（ADR-0321 E-lite）；開機自後端讀，之後由 onDevices 更新。 */
+  const [devices, setDevices] = useState<{ id: string; firstSeen: number; source: string; inDirectory?: boolean }[]>([]);
   // 每對話保留上限（ADR-0094）：0＝無上限（預設）。
   const [retentionCap, setRetentionCapState] = useState<number>(() => readRetentionCap());
   const [storageFull, setStorageFull] = useState<boolean>(false);
@@ -1058,7 +1085,7 @@ export function App(): JSX.Element {
         const store: AppStorage | undefined =
           storage ?? (active.relayUrl ? browserStore(active.namespace, override) : undefined);
         storageRef.current = store ?? null;
-        const b = buildBackend(active, override, store);
+        const b = await buildBackend(active, override, store);
         setConn(active.relayUrl ? "connecting" : "online");
         // ADR-0164：狀態已在 buildBackend 建構時 seed 進 b.self（initialStatus），故 setSelf 直接鏡射；
         // 稍後的閒置初始化讀 selfRef 也以此為基準，不會被重置回 online。
@@ -1413,6 +1440,27 @@ export function App(): JSX.Element {
         const msg: ChatMessage = { id: uid("fsu"), outgoing: false, text: tRef.current("fs_unsupportedWarning"), at: Date.now() };
         setConvos((prev) => ({ ...prev, [peer]: [...(prev[peer] ?? []), msg] }));
       },
+      // ADR-0316：有訊息解不開。**不放進任何對話**——NIP-59 的外層作者是一次性臨時金鑰，
+      // 解不開就不知道是誰送的，硬塞進某個對話會是編造的歸屬。只更新設定頁的全域計數。
+      // ADR-0334：別台的快照把開關翻掉了 → 設定頁要跟著動（否則顯示與實際不一致）。
+      onFsEnabled: (v) => setFsEnabled(v),
+      onFsUndecryptable: (log) => setFsFailures({ count: log.maybeEkLoss, lastAt: log.lastEkLossAt ?? Date.now() }),
+      // ADR-0321：裝置清單變動 → 更新設定頁；首見一台沒看過的 → **顯著提示**（不是小徽章）。
+      onDevices: (list) => setDevices(list),
+      onNewDevice: (id) => void dialog().alert(tRef.current("devices_new", { id: id.slice(0, 8) })),
+      // ADR-0322 S1：兩份互相衝突的目錄＝有人用你的 nsec 簽了另一份。不自動選邊，只告知。
+      onDeviceDirectoryConflict: (_mine, v) => void dialog().alert(tRef.current("devices_conflict", { v: String(v) })),
+      // ADR-0317：入群邀請被閘門擋下。**不靜默**——在該邀請者的對話裡留一句，
+      // 使用者在請求區接受他之後群組才會出現。
+      onGroupInviteHeld: (from, groupName) => {
+        // 他還不是聯絡人（那正是被擋的原因）⇒ 沒有暱稱可用，顯示縮寫 npub（同請求區的呈現）。
+        const text = tRef.current("groupInvite_held", {
+          name: `${npubEncode(from).slice(0, 12)}…`,
+          group: groupName,
+        });
+        const msg: ChatMessage = { id: uid("ginv"), outgoing: false, text, at: Date.now() };
+        setConvos((prev) => ({ ...prev, [from]: [...(prev[from] ?? []), msg] }));
+      },
       // ADR-0242 階段③：引擎同步來的每對話靜音 → 對帳本機 groupPrefs.muted（遠端 LWW 為權威）。
       onMutes: (ids) => {
         const muted = new Set(ids);
@@ -1439,6 +1487,8 @@ export function App(): JSX.Element {
       onGroups: setGroups,
     });
     setFsEnabled(backend.fsEnabled?.() ?? false); // ADR-0245：讀前向保密開關狀態
+    setGroupInviteAnyone(backend.groupInviteFromAnyone?.() ?? false); // ADR-0317：讀入群邀請閘門
+    setDevices(backend.devices?.() ?? []); // ADR-0321：讀觀測到的裝置
     // ADR-0164：狀態已於 buildBackend 建構時 seed 進 self（initialStatus），start() 首拍 beat()
     // 就尊重離線——不再事後 setStatus 補正（那會先漏一拍上線信標，見程式碼審查 CRITICAL 修正）。
     return () => backend.stop();
@@ -1586,7 +1636,7 @@ export function App(): JSX.Element {
       store = browserStore(p.namespace, nsec); // 以解出的 nsec 導出 DEK（ADR-0112）
     }
     storageRef.current = store; // ADR-0094：讓保留上限與導出用到後端同一份儲存
-    const b = buildBackend(p, nsec, store);
+    const b = await buildBackend(p, nsec, store);
     setConn(p.relayUrl ? "connecting" : "online");
     setSelf({ ...b.self });
     setBackend(b);
@@ -1718,7 +1768,7 @@ export function App(): JSX.Element {
       const ts = new TauriStorage(namespace);
       await ts.hydrate(); // 首個身分：空
       storageRef.current = ts; // ADR-0094：與後端同一份儲存
-      b = buildBackend(first, nsec, ts);
+      b = await buildBackend(first, nsec, ts);
     } else {
       // 瀏覽器（ADR-0119 修正）：**絕不讓後端自己產生 nsec 並存進 localStorage**。
       // 舊版 `buildBackend(first, undefined, ls)` 不帶 nsecOverride → 後端 `generateSecretKey()` ＋
@@ -1729,7 +1779,7 @@ export function App(): JSX.Element {
       // 並以它導出 DEK 加密 localStorage。
       const ls = browserStore(namespace, nsec);
       storageRef.current = ls; // ADR-0094：與後端同一份儲存
-      b = buildBackend(first, nsec, ls);
+      b = await buildBackend(first, nsec, ls);
       ls.saveIdentity({ nsec: "", name }); // 只存名稱；私鑰不落地
 
       // 🔴 ADR-0122：**這把 nsec 使用者從沒看過**，而瀏覽器沒有 OS 金鑰庫。
@@ -1794,6 +1844,10 @@ export function App(): JSX.Element {
       key,
       storage: store,
       identity: { nsec, name: p.name },
+      // ADR-0322 S5：配對成功 ⇒ 新機隨 DONE 回傳裝置公鑰 ⇒ 直接授權它進裝置目錄。
+      // 這一步在 SAS 人工比對之後，故授權憑證是「這場已確認過的配對」＝當期短期狀態
+      // （ADR-0303 §4.4 的承重點），不是 nsec 這種長期祕密。
+      onTargetDevice: (devicePk) => backendRef.current?.authorizeDevice?.(devicePk),
       profile: {
         relayUrl: p.relayUrl,
         ...(p.cloudSync ? { cloudSync: p.cloudSync } : {}),
@@ -2644,6 +2698,64 @@ export function App(): JSX.Element {
               { onVanish: () => activeBackend.requestVanish!() }
             : {})}
           {...(orgInfo ? { orgInfo } : {})}
+          {/* 公司政策條列（ADR-0312）：有政策才傳；空政策時 SettingsPanel 那段不渲染。 */
+          ...(Object.keys(policy).length > 0 ? { orgPolicy: policy } : {})}
+          {...(devices.length > 0 ? { devices } : {})}
+          {/* ADR-0322 S2／S3：撤銷三態＋移除入口。移除需二次確認並說明後果（含「救不回歷史」）。 */
+          ...(activeBackend.revocationState ? { revocation: activeBackend.revocationState() } : {})}
+          {...(activeBackend.directoryConflicts && activeBackend.directoryConflicts().length > 0
+            ? { deviceConflicts: activeBackend.directoryConflicts() }
+            : {})}
+          {/* ADR-0322 S5：手動授權。授權入口只給**已在清單上**的裝置——沒有資格時顯示原因。 */
+          ...(activeBackend.selfDevicePk ? { selfDevicePk: activeBackend.selfDevicePk() } : {})}
+          {/* ADR-0297 §6 紅線：如實顯示本機金鑰在哪一級（Tauri＝OS 金鑰庫，瀏覽器＝明文）。 */
+          ...(activeBackend.deviceKeyTier ? { deviceKeyTier: activeBackend.deviceKeyTier() } : {})}
+          {...(activeBackend.deviceKeyEverPlaintext?.() ? { deviceKeyEverPlaintext: true } : {})}
+          {...(activeBackend.authorizeDevice && activeBackend.selfDevicePk
+            ? {
+                canAuthorizeDevice: !!activeBackend
+                  .deviceDirectory?.()
+                  ?.devices.some((d) => d.pk === activeBackend.selfDevicePk!()),
+                onAuthorizeDevice: (pk: string) => {
+                  void dialog()
+                    .confirm(tRef.current("devices_authorizeConfirm"))
+                    .then((ok) => {
+                      if (!ok) return;
+                      activeBackend.authorizeDevice!(pk);
+                      setDevices(activeBackend.devices?.() ?? []);
+                    });
+                },
+              }
+            : {})}
+          {...(activeBackend.removeDevice && devices.length > 1
+            ? {
+                // ADR-0324：不在目錄內的觀測沒有 pk，撤銷按鈕對它們是靜默無效的；改給這個。
+                ...(activeBackend.forgetDevice
+                  ? {
+                      onForgetDevice: (id: string) => {
+                        void dialog()
+                          .confirm(tRef.current("devices_forgetConfirm"))
+                          .then((ok) => {
+                            if (!ok) return;
+                            activeBackend.forgetDevice!(id);
+                            setDevices(activeBackend.devices?.() ?? []);
+                          });
+                      },
+                    }
+                  : {}),
+                onRemoveDevice: (id: string) => {
+                  const pk = activeBackend.deviceDirectory?.()?.devices.find((d) => d.id === id)?.pk;
+                  if (!pk) return;
+                  void dialog()
+                    .confirm(tRef.current("devices_removeConfirm"))
+                    .then((ok) => {
+                      if (!ok) return;
+                      activeBackend.removeDevice!(pk);
+                      setDevices(activeBackend.devices?.() ?? []);
+                    });
+                },
+              }
+            : {})}
           {...(() => {
             // 企業頭銜（ADR-0158）：企業成員與企業主身分才顯示編輯欄。
             const p = activeProfile(profilesState);
@@ -2835,6 +2947,16 @@ export function App(): JSX.Element {
             setAutoAcquireEnabled(!autoAcquire);
             setAutoAcquire(!autoAcquire);
           }}
+          {/* ADR-0317：入群邀請閘門。存跨裝置同步設定，故值取自後端而非本機 localStorage。 */
+          ...(activeBackend.setGroupInviteFromAnyone
+            ? {
+                groupInviteFromAnyone: groupInviteAnyone,
+                onToggleGroupInvite: () => {
+                  activeBackend.setGroupInviteFromAnyone!(!groupInviteAnyone);
+                  setGroupInviteAnyone(!groupInviteAnyone);
+                },
+              }
+            : {})}
           threat={{
             enabled: threatOn,
             sendWarn: threatSendWarn,
@@ -2897,6 +3019,14 @@ export function App(): JSX.Element {
             ? {
                 fs: {
                   enabled: fsEnabled,
+                  // ADR-0316：開設定頁當下讀後端的持久記錄（不只本 session 的 handler 累積）。
+                  ...(() => {
+                    const log = activeBackend.fsFailures?.();
+                    const count = Math.max(log?.maybeEkLoss ?? 0, fsFailures.count);
+                    return count > 0
+                      ? { undecryptable: { count, lastAt: log?.lastEkLossAt ?? fsFailures.lastAt } }
+                      : {};
+                  })(),
                   // ADR-0306 D1：啟用前必須明示「尚未經外部審計」並取得確認。
                   // 設定頁那句 `fs-unaudited` 是常駐揭露，這裡是**動作當下**的確認——
                   // 兩者職責不同，不可互相取代。
@@ -2917,6 +3047,20 @@ export function App(): JSX.Element {
                         if (ok) activeBackend.rotateEncryptionKey?.();
                       });
                   },
+                  // ADR-0314：停用＝廣播明示退場。確認文案講清楚會發生什麼，不是「確定嗎？」
+                  ...(activeBackend.disableFs
+                    ? {
+                        onDisable: () => {
+                          void dialog()
+                            .confirm(tRef.current("fs_disableConfirm"))
+                            .then((ok) => {
+                              if (!ok) return;
+                              activeBackend.disableFs!();
+                              setFsEnabled(false);
+                            });
+                        },
+                      }
+                    : {}),
                 },
               }
             : {})}
@@ -3060,6 +3204,10 @@ export function App(): JSX.Element {
                 .filter((m) => m !== self.pubkey)
                 .map((m) => ({ pubkey: m, name: senderName(m) }))}
               groupMembers={group.members.map((m) => ({ pubkey: m, name: senderName(m) }))}
+              {/* 群組 FS 狀態（ADR-0319）：只在啟用 FS 時提供 —— 沒開的人不需要知道這個維度存在。 */
+              ...(fsEnabled && activeBackend.fsPeerState
+                ? { fsPeerState: (pk: string) => activeBackend.fsPeerState!(pk) }
+                : {})}
               // 組織群（ADR-0049）由名冊權威管理，不開放手動增/移成員（避免與名冊分歧）。
               isGroupAdmin={group.admin === self.pubkey && !group.org}
               addableContacts={contacts

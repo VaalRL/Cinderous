@@ -559,3 +559,340 @@ describe("NIP-62 清除請求（ADR-0260）", () => {
     expect(render({ initialTab: "privacy", onVanish: () => [] })).not.toContain('data-testid="vanish-result"');
   });
 });
+
+describe("公司政策條列（ADR-0312）", () => {
+  const identity = { initialTab: "identity" as const, selfNsec: "nsec1abc" };
+
+  it("沒有政策：整段不顯示", () => {
+    expect(render(identity)).not.toContain('data-testid="org-policy"');
+  });
+
+  it("空政策物件同樣不顯示（有企業身分但政策全空）", () => {
+    expect(render({ ...identity, orgPolicy: {} })).not.toContain('data-testid="org-policy"');
+  });
+
+  it("🔴 停用的功能逐條列出——使用者看得出是被公司關掉、不是壞了", () => {
+    const html = render({ ...identity, orgPolicy: { disableFiles: true, disableStickers: true } });
+    expect(html).toContain('data-testid="org-policy"');
+    expect(html).toContain('data-testid="org-policy-disabled"');
+    expect(html).toContain("已停用的功能");
+    expect(html).toContain("無法在本機關閉"); // 明示不是本機開關
+  });
+
+  it("生效中的規則另立一段，數值有內插", () => {
+    const html = render({ ...identity, orgPolicy: { forceTurn: true, messageTtlDays: 30 } });
+    expect(html).toContain('data-testid="org-policy-rules"');
+    expect(html).toContain("生效中的規則");
+    expect(html).toContain("30");
+    expect(html).not.toContain("{days}");
+  });
+
+  it("只有停用、沒有規則時不顯示「生效中的規則」標頭", () => {
+    const html = render({ ...identity, orgPolicy: { disableCalls: true } });
+    expect(html).toContain('data-testid="org-policy-disabled"');
+    expect(html).not.toContain('data-testid="org-policy-rules"');
+  });
+});
+
+describe("FS 自動輪替與停用（ADR-0313／0314）", () => {
+  const fsProp = (extra: Record<string, unknown> = {}) => ({
+    initialTab: "privacy" as const,
+    fs: { enabled: true, onEnable: () => {}, onRotate: () => {}, ...extra },
+  });
+
+  it("已啟用時說明「每 7 天自動更換」——保護來自自動，不是那顆手動鈕", () => {
+    const html = render(fsProp());
+    expect(html).toContain('data-testid="fs-auto-rotate"');
+    expect(html).toContain("7");
+  });
+
+  it("🔴 提供 onDisable 時顯示停用鈕——啟用確認說了「可以隨時關閉」", () => {
+    expect(render(fsProp({ onDisable: () => {} }))).toContain('data-testid="fs-disable"');
+  });
+
+  it("未啟用時不顯示停用鈕與自動輪替說明", () => {
+    const html = render({
+      initialTab: "privacy" as const,
+      fs: { enabled: false, onEnable: () => {}, onRotate: () => {}, onDisable: () => {} },
+    });
+    expect(html).not.toContain('data-testid="fs-disable"');
+    expect(html).not.toContain('data-testid="fs-auto-rotate"');
+    expect(html).toContain('data-testid="fs-unaudited"'); // 揭露仍在（ADR-0306 D1）
+  });
+});
+
+describe("解封失敗的可見性（ADR-0316）", () => {
+  const base = { initialTab: "privacy" as const, fs: { enabled: true, onEnable: () => {}, onRotate: () => {} } };
+
+  it("沒發生過就不顯示", () => {
+    expect(render(base)).not.toContain('data-testid="fs-undecryptable"');
+    expect(render({ ...base, fs: { ...base.fs, undecryptable: { count: 0, lastAt: 0 } } })).not.toContain(
+      'data-testid="fs-undecryptable"',
+    );
+  });
+
+  it("🔴 發生過就要看得見——ADR-0315 第 1 步要解的正是「靜默消失」", () => {
+    const html = render({ ...base, fs: { ...base.fs, undecryptable: { count: 3, lastAt: Date.now() } } });
+    expect(html).toContain('data-testid="fs-undecryptable"');
+    expect(html).toContain("3");
+  });
+
+  it("🔴 文案不得把「可能」寫成「是」，且要講明查不出是誰送的（NIP-59 的必然限制）", () => {
+    const html = render({ ...base, fs: { ...base.fs, undecryptable: { count: 1, lastAt: Date.now() } } });
+    expect(html).toContain("可能");
+    expect(html).toContain("無法分辨");
+    expect(html).toContain("查不出是誰送的");
+  });
+});
+
+describe("入群邀請閘門的設定（ADR-0317）", () => {
+  it("未提供 handler → 不顯示（示範後端）", () => {
+    expect(render({ initialTab: "privacy" })).not.toContain('data-testid="group-invite-anyone"');
+  });
+
+  it("關閉時＝只有聯絡人可以把我加進群組，且說明講清楚封鎖優先", () => {
+    const html = render({ initialTab: "privacy", groupInviteFromAnyone: false, onToggleGroupInvite: () => {} });
+    const at = html.indexOf('data-testid="group-invite-anyone"');
+    expect(at).toBeGreaterThanOrEqual(0);
+    expect(html.slice(at - 120, at + 120)).not.toContain("checked");
+    expect(html).toContain("只有你的聯絡人");
+    expect(html).toContain("封鎖");
+  });
+
+  it("開啟時勾選", () => {
+    const html = render({ initialTab: "privacy", groupInviteFromAnyone: true, onToggleGroupInvite: () => {} });
+    const at = html.indexOf('data-testid="group-invite-anyone"');
+    expect(html.slice(at - 120, at + 120)).toContain("checked");
+  });
+});
+
+describe("我的裝置（ADR-0321 E-lite）", () => {
+  const devices = [
+    { id: "aabbccdd11223344", firstSeen: Date.now(), source: "local" },
+    { id: "eeff001122334455", firstSeen: Date.now(), source: "snapshot" },
+  ];
+
+  it("未提供裝置時不顯示（示範後端）", () => {
+    expect(render({ initialTab: "identity", selfNsec: "nsec1" })).not.toContain('data-testid="devices"');
+  });
+
+  it("🔴 列出裝置並標明「這台」——今天使用者根本看不到自己有幾台", () => {
+    const html = render({ initialTab: "identity", selfNsec: "nsec1", devices });
+    expect(html).toContain('data-testid="device-list"');
+    expect(html).toContain("aabbccdd"); // 縮寫 id
+    expect(html).toContain("這台");
+  });
+
+  it("🔴 限制揭露是驗收條件：必須說出「看到只有一台不等於沒有人在讀」", () => {
+    const html = render({ initialTab: "identity", selfNsec: "nsec1", devices });
+    expect(html).toContain('data-testid="devices-limit"');
+    expect(html).toContain("會寫入的裝置");
+    expect(html).toContain("不等於沒有人在讀你的訊息");
+  });
+});
+
+describe("裝置目錄狀態（ADR-0322 S1）", () => {
+  it("🔴 觀測到但不在目錄內 → 顯著標示（今天完全看不出來的那種）", () => {
+    const html = render({
+      initialTab: "identity",
+      selfNsec: "nsec1",
+      devices: [
+        { id: "aabbccdd11223344", firstSeen: Date.now(), source: "local", inDirectory: true },
+        { id: "eeff001122334455", firstSeen: Date.now(), source: "snapshot", inDirectory: false },
+      ],
+    });
+    expect(html).toContain('data-testid="device-not-in-dir"');
+  });
+
+  it("全部在目錄內時不標示（避免常態被當警告）", () => {
+    const html = render({
+      initialTab: "identity",
+      selfNsec: "nsec1",
+      devices: [{ id: "aabbccdd11223344", firstSeen: Date.now(), source: "local", inDirectory: true }],
+    });
+    expect(html).not.toContain('data-testid="device-not-in-dir"');
+  });
+});
+
+describe("撤銷三態與移除入口（ADR-0322 S2／S3）", () => {
+  const two = [
+    { id: "aabbccdd11223344", firstSeen: Date.now(), source: "local", inDirectory: true },
+    { id: "eeff001122334455", firstSeen: Date.now(), source: "snapshot", inDirectory: true },
+  ];
+  const base = { initialTab: "identity" as const, selfNsec: "nsec1", devices: two };
+
+  it("🔴 雙軌期間必須明說「移除還不會生效」，且指出是哪一台", () => {
+    const html = render({ ...base, revocation: { state: "dual-track" as const, devices: ["eeff001122334455"] } });
+    expect(html).toContain('data-testid="revocation-dual-track"');
+    expect(html).toContain("還不會生效");
+    expect(html).toContain("eeff0011");
+  });
+
+  it("目錄建立中＝「請稍候」，不是「不能撤銷」", () => {
+    const html = render({ ...base, revocation: { state: "unknown" as const } });
+    expect(html).toContain('data-testid="revocation-unknown"');
+    expect(html).toContain("請稍候");
+  });
+
+  it("生效時說明後果（歷史不受影響）", () => {
+    const html = render({ ...base, revocation: { state: "active" as const } });
+    expect(html).toContain('data-testid="revocation-active"');
+    expect(html).toContain("歷史不受影響");
+  });
+
+  it("🔴 移除入口只給別台，不給「這台」", () => {
+    const html = render({ ...base, onRemoveDevice: () => {} });
+    expect(html).toContain('data-testid="device-remove-eeff001122334455"');
+    expect(html).not.toContain('data-testid="device-remove-aabbccdd11223344"');
+  });
+
+  it("已移除的裝置標示出來且不再提供移除", () => {
+    const html = render({
+      ...base,
+      devices: [two[0]!, { ...two[1]!, revoked: true, inDirectory: false }],
+      onRemoveDevice: () => {},
+    });
+    expect(html).toContain("已移除");
+    expect(html).not.toContain('data-testid="device-remove-eeff001122334455"');
+  });
+});
+
+describe("目錄異常的常駐呈現（ADR-0322 S4）", () => {
+  const base = {
+    initialTab: "identity" as const,
+    selfNsec: "nsec1",
+    devices: [{ id: "aabbccdd11223344", firstSeen: Date.now(), source: "local", inDirectory: true }],
+  };
+
+  it("沒有異常時不顯示", () => {
+    expect(render(base)).not.toContain('data-testid="device-conflicts"');
+  });
+
+  it("🔴 有異常時常駐顯示（不是一次性對話框——重開還在）", () => {
+    const html = render({ ...base, deviceConflicts: [{ at: Date.now(), mineV: 3, incomingV: 1 }] });
+    expect(html).toContain('data-testid="device-conflicts"');
+    expect(html).toContain("版本倒退");
+    expect(html).toContain("本機沒有採用它");
+  });
+});
+
+describe("手動授權裝置（ADR-0322 S5）", () => {
+  const base = {
+    initialTab: "identity" as const,
+    selfNsec: "nsec1",
+    devices: [{ id: "aabbccdd11223344", firstSeen: Date.now(), source: "local", inDirectory: true }],
+  };
+  const pk = "ab".repeat(32);
+
+  it("顯示這台的裝置代碼，並要求比對兩邊字元", () => {
+    const html = render({ ...base, selfDevicePk: pk });
+    expect(html).toContain('data-testid="my-device-code"');
+    expect(html).toContain(pk);
+    expect(html).toContain("比對兩邊顯示的字元");
+  });
+
+  it("🔴 已在清單上 → 顯示授權欄位；按鈕預設停用（代碼未填）", () => {
+    const html = render({ ...base, selfDevicePk: pk, onAuthorizeDevice: () => {}, canAuthorizeDevice: true });
+    expect(html).toContain('data-testid="authorize-input"');
+    const at = html.indexOf('data-testid="authorize-go"');
+    expect(html.slice(at - 100, at + 100)).toContain("disabled");
+  });
+
+  it("🔴 不在清單上 → **不給授權入口**，並說明原因（授權資格＝已在清單上）", () => {
+    const html = render({ ...base, selfDevicePk: pk, onAuthorizeDevice: () => {}, canAuthorizeDevice: false });
+    expect(html).not.toContain('data-testid="authorize-input"');
+    expect(html).toContain('data-testid="no-authority"');
+    expect(html).toContain("還不在清單上");
+  });
+});
+
+describe("久未出現與從清單移除（ADR-0324）", () => {
+  const self = { id: "aaaa1111", firstSeen: Date.now(), source: "local", inDirectory: true };
+  const gone = { id: "cccc3333", firstSeen: Date.now(), source: "snapshot", inDirectory: false, stale: true };
+  const view = (p: Record<string, unknown>) =>
+    render({ initialTab: "identity" as const, selfNsec: "nsec1", devices: [self, gone], ...p });
+
+  it("🔴 久未出現要標出來——它已被排除在撤銷判定之外，那會影響行為", () => {
+    expect(view({})).toContain('data-testid="device-stale-cccc3333"');
+  });
+
+  it("🔴 不在目錄內的不給撤銷鈕——它沒有目錄項，按下去是靜默什麼都不做", () => {
+    expect(view({ onRemoveDevice: () => {} })).not.toContain('data-testid="device-remove-cccc3333"');
+  });
+
+  it("改給「從清單移除」", () => {
+    expect(view({ onForgetDevice: () => {} })).toContain('data-testid="device-forget-cccc3333"');
+  });
+
+  it("在目錄內的給撤銷、不給「從清單移除」——後者只會把它藏起來，授權原封不動", () => {
+    const inDir = { id: "cccc3333", firstSeen: Date.now(), source: "snapshot", inDirectory: true };
+    const html = render({
+      initialTab: "identity" as const,
+      selfNsec: "nsec1",
+      devices: [self, inDir],
+      onRemoveDevice: () => {},
+      onForgetDevice: () => {},
+    });
+    expect(html).toContain('data-testid="device-remove-cccc3333"');
+    expect(html).not.toContain('data-testid="device-forget-cccc3333"');
+  });
+});
+
+describe("金鑰保護等級的誠實揭露（ADR-0297 §6 紅線）", () => {
+  const base = {
+    initialTab: "identity" as const,
+    selfNsec: "nsec1",
+    devices: [{ id: "aabbccdd11223344", firstSeen: Date.now(), source: "local", inDirectory: true }],
+  };
+
+  it("🔴 明文時必須說出後果：磁碟被複製 ⇒ 移除裝置擋不住他", () => {
+    const html = render({ ...base, deviceKeyTier: "plaintext" as const });
+    expect(html).toContain('data-testid="key-tier-plaintext"');
+    expect(html).toContain("明文存放");
+    expect(html).toContain("「移除裝置」擋不住他");
+  });
+
+  it("🔴 就算到了最高級也不得宣稱「裝置被入侵也安全」（ADR-0297 §5 的界線）", () => {
+    const html = render({ ...base, deviceKeyTier: "keystore" as const });
+    expect(html).toContain('data-testid="key-tier-keystore"');
+    expect(html).toContain("不代表裝置被入侵時也安全");
+    // 🔴 而且要說對「為什麼不安全」：我們是把金鑰**取出來用**，不是請晶片代簽
+    // ——後者的說法會讓人以為金鑰不出晶片，那高估了實作（ADR-0323 §5-1 校正）。
+    expect(html).toContain("取出來用");
+    expect(html).not.toContain("請金鑰庫代簽");
+  });
+
+  it("🔴 encrypted 不得宣稱有密碼保護——包裹金鑰是軟體保管的，沒有使用者祕密參與", () => {
+    const html = render({ ...base, deviceKeyTier: "encrypted" as const });
+    expect(html).toContain('data-testid="key-tier-encrypted"');
+    expect(html).toContain("包裹它的那把金鑰是軟體保管的");
+    expect(html).not.toContain("以密碼包裹"); // 曾經這樣寫過，是承諾了不存在的東西
+    expect(html).toContain("仍有機會解開"); // 且要說出它擋不住什麼
+  });
+
+  it("未提供時不顯示（避免猜平台猜出一個比實情好看的答案）", () => {
+    expect(render(base)).not.toContain("key-tier-");
+  });
+
+  it("🔴 金鑰庫打不開時要說出後果：這台不會出現在裝置清單（ADR-0323）", () => {
+    const html = render({ ...base, deviceKeyTier: "ephemeral" as const });
+    expect(html).toContain('data-testid="key-tier-ephemeral"');
+    expect(html).toContain("這台不會出現在你的裝置清單裡");
+    expect(html).toContain("settings__warn"); // 這是警告，不是中性資訊
+  });
+
+  it("🔴 由明文遷入金鑰庫者：不得只說「已受保護」，要說舊備份可能已有一份", () => {
+    const html = render({ ...base, deviceKeyTier: "keystore" as const, deviceKeyEverPlaintext: true });
+    expect(html).toContain('data-testid="key-tier-was-plain"');
+    expect(html).toContain("在那之前備份過磁碟的人可能已經有一份");
+  });
+
+  it("原生於金鑰庫者不掛那句告白（沒發生過的事不要嚇人）", () => {
+    expect(render({ ...base, deviceKeyTier: "keystore" as const })).not.toContain("key-tier-was-plain");
+  });
+
+  it("明文時不掛「曾經明文」——它還在明文，講「曾經」會讓人以為已經搬走了", () => {
+    const html = render({ ...base, deviceKeyTier: "plaintext" as const, deviceKeyEverPlaintext: true });
+    expect(html).not.toContain("key-tier-was-plain");
+  });
+});

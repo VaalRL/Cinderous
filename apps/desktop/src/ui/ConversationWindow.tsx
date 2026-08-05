@@ -1,12 +1,12 @@
 import {
   applyMention,
+  applySlash,
   calcPreview,
   contentHash,
   groupReceiptMode,
   inWorkHours,
   parseMentions,
   REACTION_EMOJIS,
-  suggestMentions,
 } from "@cinderous/core";
 import { Fragment, type MouseEvent as ReactMouseEvent, useEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "../i18n.js";
@@ -14,7 +14,7 @@ import { nameColor } from "@cinderous/theme";
 import { useThemeMode } from "../theme.js";
 import { useContrastMode } from "../contrast.js";
 import type { FloatingWindow } from "./useFloatingWindow.js";
-import type { CallMedia, MentionCandidate } from "@cinderous/core";
+import type { CallMedia, MentionCandidate, MentionSuggest, SlashCommand } from "@cinderous/core";
 import { getKv, mainMessages, replyCounts, rootIdOf, threadMessages } from "@cinderous/engine";
 import type { MessageKey } from "@cinderous/i18n";
 import type { ChatMessage, Contact, MessageStatus, Self } from "@cinderous/engine";
@@ -30,7 +30,6 @@ import {
   STICKER_PACKS,
   stickerSvg,
   svgToDataUri,
-  activeEmojiQuery,
   appendAssetManifest,
   assetFromManifestEntry,
   assetManifestBytes,
@@ -80,7 +79,6 @@ import { validateStickerSvg, wrapRasterAsSvg } from "@cinderous/core";
 import {
   buildTriggerIndex,
   loadTriggers,
-  matchTriggers,
   normalizeTrigger,
   removeTrigger,
   removeTriggersFor,
@@ -95,8 +93,24 @@ import {
 import { cleanOnPasteEnabled, cleanText, threatHits } from "./url-hygiene.js";
 import { useThreat } from "./threat-context.js";
 import { indentText } from "./composer-indent.js";
-import { ComposerInsert, type InsertTemplate } from "./ComposerInsert.js";
-import { renderMarkdown } from "./markdown.js";
+import {
+  calloutTemplate,
+  codeTemplate,
+  ComposerInsert,
+  listTemplate,
+  type InsertTemplate,
+} from "./ComposerInsert.js";
+import { CALLOUT_MENU, calloutSpec, renderMarkdown } from "./markdown.js";
+import {
+  activeSuggest,
+  clampSel,
+  moveSel,
+  suggestAcceptOnEnter,
+  suggestCount,
+  type ActiveSuggest,
+} from "./composer-suggest.js";
+import { resolveComposerKey } from "./composer-keys.js";
+import { enterToSendEnabled } from "./composer-prefs.js";
 import { detectDateAtEnd, detectDates } from "@cinderous/core";
 import { ComposerRewrite } from "./ComposerRewrite.js";
 import { applyEmoticons } from "./emoticons.js";
@@ -352,6 +366,11 @@ export interface ConversationProps {
   insert?: { text: string; nonce: number };
   /** 群組成員清單（提供即顯示 👥 成員管理入口，M9）。 */
   groupMembers?: MentionCandidate[];
+  /**
+   * 某位成員現在的 FS 狀態（ADR-0319）：提供才在成員面板顯示這一欄。
+   * `unknown` 是**常態**（同群但非聯絡人就學不到 EK），不得呈現為警告。
+   */
+  fsPeerState?: (pubkey: string) => "known" | "unknown" | "lost";
   /** 自己是否為群組管理者（可增/移成員）。 */
   isGroupAdmin?: boolean;
   /** 可加入的聯絡人（不在群內者），供管理者新增成員。 */
@@ -529,12 +548,21 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
   const [text, setText] = useState("");
   const composerRef = useRef<HTMLTextAreaElement>(null);
   /** 快速插入模板（➕ 選單）：插到游標處（非行首自動補換行），並選取佔位字。 */
-  const insertSnippet = (tpl: InsertTemplate): void => {
-    const el = composerRef.current;
-    const at = el?.selectionStart ?? text.length;
-    const end = el?.selectionEnd ?? text.length;
-    const prefix = at > 0 && text[at - 1] !== "\n" ? "\n" : "";
-    setText(text.slice(0, at) + prefix + tpl.text + text.slice(end));
+  /**
+   * 插入模板到某個 composer（➕ 選單、`/` 斜線指令、主對話與串內回覆共用，ADR-0308／0309）。
+   * `insertAt` 省略＝插入游標處並取代選取範圍；斜線指令會先剝掉 `/命令` 再指定插入點。
+   */
+  const insertInto = (
+    el: HTMLTextAreaElement | null,
+    src: string,
+    setValue: (v: string) => void,
+    tpl: InsertTemplate,
+    insertAt?: number,
+  ): void => {
+    const at = insertAt ?? el?.selectionStart ?? src.length;
+    const end = insertAt ?? el?.selectionEnd ?? src.length;
+    const prefix = at > 0 && src[at - 1] !== "\n" ? "\n" : "";
+    setValue(src.slice(0, at) + prefix + tpl.text + src.slice(end));
     const s = at + prefix.length + tpl.selStart;
     const e2 = at + prefix.length + tpl.selEnd;
     requestAnimationFrame(() => {
@@ -542,6 +570,9 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
       el?.setSelectionRange(s, e2);
     });
   };
+
+  const insertSnippet = (tpl: InsertTemplate, base?: string, insertAt?: number): void =>
+    insertInto(composerRef.current, base ?? text, setText, tpl, insertAt);
   const [showEmo, setShowEmo] = useState(false);
   const [showStickers, setShowStickers] = useState(false);
   const [stickerTab, setStickerTab] = useState<string>(STICKER_PACK_ORDER[0] ?? "");
@@ -597,15 +628,13 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
   const [editor, setEditor] = useState<{ base?: string; label?: string } | null>(null);
   /** 文字觸發貼圖（ADR-0037）。 */
   const [triggers, setTriggers] = useState<TriggerEntry[]>(() => loadTriggers());
-  const [trigSel, setTrigSel] = useState(0);
-  const [trigDismissed, setTrigDismissed] = useState(false);
   const [showTrigPanel, setShowTrigPanel] = useState(false);
-  /** @提及建議（ADR-0050）。 */
-  const [menSel, setMenSel] = useState(0);
-  const [menDismissed, setMenDismissed] = useState(false);
-  /** :自訂 emoji 短碼自動補全（ADR-0220，步驟 4）。 */
-  const [emojiSel, setEmojiSel] = useState(0);
-  const [emojiDismissed, setEmojiDismissed] = useState(false);
+  /**
+   * 建議列的選取與關閉狀態（ADR-0308）：@提及／`:短碼`／斜線／貼圖觸發字同時只顯示一列，
+   * 故一組 state 即可——過去這裡是三組六個、且串內回覆只有其中一組。
+   */
+  const [sel, setSel] = useState(0);
+  const [dismissed, setDismissed] = useState(false);
   /** 對話串面板（ADR-0051）：開啟中的串根訊息 id（null＝未開）。 */
   const [threadRoot, setThreadRoot] = useState<string | null>(null);
   const [threadText, setThreadText] = useState("");
@@ -648,9 +677,10 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [threadRoot, detailMsgId]);
-  /** 串內 composer 的 @提及建議（獨立於主 composer）。 */
-  const [threadMenSel, setThreadMenSel] = useState(0);
-  const [threadMenDismissed, setThreadMenDismissed] = useState(false);
+  /** 串內 composer 的建議列狀態（ADR-0308：與主 composer 同一套聚合器，能力不再分裂）。 */
+  const [threadSel, setThreadSel] = useState(0);
+  const [threadDismissed, setThreadDismissed] = useState(false);
+  const threadRef = useRef<HTMLTextAreaElement>(null);
   const [showAlbum, setShowAlbum] = useState(false);
   const [showMembers, setShowMembers] = useState(false);
   // 燈箱（ADR-0102）：帶著訊息資訊，才能在只有縮圖時嘗試讀回原檔／讓使用者重新指定位置。
@@ -842,6 +872,11 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
     persistLib(r.list);
     return true;
   };
+  /**
+   * 「點收到的貼圖＝收藏」入口（ADR-0310）：企業政策停用貼圖時不提供。
+   * 與下方的**自動**收藏閘門一致——手動與自動不該有兩套政策語意。
+   */
+  const ownSticker = props.stickersDisabled ? undefined : acquireSticker;
   const deleteCustom = (id: string): void => {
     // 先記刪除墓碑（ADR-0224），再存庫——persistLib 會觸發重發快照，此時墓碑須已在 storage。
     const ts = props.tombstoneStore;
@@ -934,15 +969,11 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
 
   // 文字觸發貼圖（ADR-0037）：尾端比對（字首索引）、Tab/點擊送出、⌨ 設定。
   const trigIndex = useMemo(() => buildTriggerIndex(triggers), [triggers]);
-  const trigMatches: TriggerMatch[] = trigDismissed
-    ? []
-    : matchTriggers(text, triggers, trigIndex).filter((m) => resolveAny(m.entry.ref) !== undefined);
-  const trigActive = Math.min(trigSel, Math.max(trigMatches.length - 1, 0));
   // 日期建議（ADR-0264 階段四）：草稿尾端剛打完日期才跳；沒有 onPickDate 就完全不算。
   const dateHit = props.onPickDate ? detectDateAtEnd(text) : undefined;
   const acceptTrigger = (m: TriggerMatch): void => {
     setText(text.slice(0, text.length - m.matchedLen));
-    setTrigSel(0);
+    setSel(0);
     const ref = m.entry.ref;
     if (ref.pack === CUSTOM_PACK) {
       const st = findSticker(library, ref.id);
@@ -1161,33 +1192,155 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
     el.classList.add("nudging");
   }, [props.nudgeSignal]);
 
-  // @提及自動完成（ADR-0050）：進行中的 @token → 候選列。
-  const menSuggest = !menDismissed && props.mentionCandidates ? suggestMentions(text, props.mentionCandidates) : null;
-  const menList = menSuggest?.candidates ?? [];
-  const menActive = Math.min(menSel, Math.max(menList.length - 1, 0));
-  const acceptMention = (cand: MentionCandidate): void => {
-    setText(applyMention(text, menSuggest!, cand));
-    setMenSel(0);
+  // ── 建議列（ADR-0308 統一）──
+  // @提及／`:短碼`／斜線／貼圖觸發字**同時只顯示一列**，主 composer 與串內回覆共用同一條路徑。
+
+  /** 斜線指令目錄（ADR-0309）：依情境裁切——不列出使用者按不到的東西。 */
+  const slashCommands = useMemo<SlashCommand[]>(() => {
+    if (props.readOnly) return [];
+    const list: SlashCommand[] = [
+      { id: "code", aliases: ["程式碼"] },
+      { id: "list", aliases: ["清單"] },
+    ];
+    if (!props.stickersDisabled) list.push({ id: "sticker", aliases: ["貼圖"] });
+    list.push({ id: "album", aliases: ["相簿"] });
+    if (props.onSendFile) list.push({ id: "file", aliases: ["檔案", "附檔"] });
+    list.push({ id: "search", aliases: ["搜尋"] });
+    if (props.groupMembers) list.push({ id: "members", aliases: ["成員"] });
+    if (props.onExport) list.push({ id: "export", aliases: ["匯出"] });
+    if (props.onHistory) list.push({ id: "history", aliases: ["歷史"] });
+    for (const type of CALLOUT_MENU) list.push({ id: type });
+    return list;
+  }, [props.readOnly, props.stickersDisabled, props.onSendFile, props.groupMembers, props.onExport, props.onHistory]);
+
+  /** 建議列上的圖示與說明；callout 型別走既有 `calloutSpec`（與 ➕ 選單同一份定義）。 */
+  const slashMeta = (id: string): { icon: string; label: string } => {
+    switch (id) {
+      case "code":
+        return { icon: "⌨", label: t("insert_codeBlock") };
+      case "list":
+        return { icon: "•", label: t("insert_list") };
+      case "sticker":
+        return { icon: "🧸", label: t("sticker_title") };
+      case "album":
+        return { icon: "🖼", label: t("album_open") };
+      case "file":
+        return { icon: "📎", label: t("file_attach") };
+      case "search":
+        return { icon: "🔍", label: t("convo_search") };
+      case "members":
+        return { icon: "👥", label: t("members_title") };
+      case "export":
+        return { icon: "📤", label: t("export_this") };
+      case "history":
+        return { icon: "🗄", label: t("history_open") };
+      default:
+        return { icon: calloutSpec(id).icon, label: id.charAt(0).toUpperCase() + id.slice(1) };
+    }
   };
 
-  // :自訂 emoji 短碼自動補全（ADR-0220）：尾端 :query → 依短碼前綴比對本機庫（企業停用時不補全）。
-  const emojiSuggest = !props.stickersDisabled && !emojiDismissed ? activeEmojiQuery(text) : null;
-  const emojiMatches: CustomSticker[] = emojiSuggest
-    ? library
-        .filter((a) => a.shortcode && a.shortcode.toLowerCase().startsWith(emojiSuggest.query.toLowerCase()))
-        .slice(0, 8)
-    : [];
-  const emojiActive = Math.min(emojiSel, Math.max(emojiMatches.length - 1, 0));
-  const acceptEmoji = (a: CustomSticker): void => {
-    if (!emojiSuggest || !a.shortcode) return;
-    const next = text.slice(0, emojiSuggest.start) + `:${a.shortcode}:`;
+  /**
+   * 執行斜線指令（ADR-0309）。`base`＝已剝掉 `/命令` 的草稿、`at`＝原本 `/` 的位置。
+   * 插入型走 `insertSnippet`（與 ➕ 選單同一份模板）；開面板型只把草稿還原成 `base`。
+   * v1 不收不可逆動作（nudge/call/voice/unsend）。
+   */
+  const runSlashOn = (
+    cmd: SlashCommand,
+    base: string,
+    insert: (tpl: InsertTemplate) => void,
+    setBase: (v: string) => void,
+  ): void => {
+    switch (cmd.id) {
+      case "code":
+        insert(codeTemplate(t("insert_codePh"), t("insert_codeBlock")));
+        return;
+      case "list":
+        insert(listTemplate(t("insert_itemPh"), t("insert_list")));
+        return;
+      case "sticker":
+        setShowStickers(true);
+        break;
+      case "album":
+        setShowAlbum(true);
+        break;
+      case "file":
+        if (props.onAttach) props.onAttach();
+        else fileRef.current?.click();
+        break;
+      case "search":
+        setSearchOpen(true);
+        break;
+      case "members":
+        setShowMembers(true);
+        break;
+      case "export":
+        props.onExport?.();
+        break;
+      case "history":
+        props.onHistory?.();
+        break;
+      default:
+        insert(calloutTemplate(cmd.id, t("insert_titlePh"), t("insert_bodyPh")));
+        return;
+    }
+    setBase(base); // 開面板型：草稿只是少了 `/命令`
+  };
+
+  const runSlash = (cmd: SlashCommand, base: string, at: number): void =>
+    runSlashOn(cmd, base, (tpl) => insertInto(composerRef.current, base, setText, tpl, at), setText);
+
+  const acceptMention = (s: MentionSuggest, cand: MentionCandidate): void => {
+    setText(applyMention(text, s, cand));
+    setSel(0);
+  };
+
+  const acceptEmoji = (a: CustomSticker, start: number): void => {
+    if (!a.shortcode) return;
+    const next = text.slice(0, start) + `:${a.shortcode}:`;
     setText(next);
-    setEmojiSel(0);
+    setSel(0);
     const el = composerRef.current;
     requestAnimationFrame(() => {
       el?.focus();
       el?.setSelectionRange(next.length, next.length);
     });
+  };
+
+  const suggest = activeSuggest({
+    text,
+    ...(props.mentionCandidates ? { mentionCandidates: props.mentionCandidates } : {}),
+    emojiLibrary: library,
+    slashCommands,
+    triggers,
+    triggerIndex: trigIndex,
+    triggerResolvable: (m) => resolveAny(m.entry.ref) !== undefined,
+    ...(props.stickersDisabled ? { stickersDisabled: true } : {}),
+    dismissed,
+  });
+  const suggestLen = suggestCount(suggest);
+  const active = clampSel(sel, suggestLen);
+
+  /** 接受第 `index` 個候選；各型別的語意不同（提及/短碼/斜線＝填入，觸發字＝送出貼圖）。 */
+  const acceptSuggest = (s: ActiveSuggest, index: number): void => {
+    if (s.kind === "mention") {
+      const cand = s.items[index];
+      if (cand) acceptMention(s.mention, cand);
+      return;
+    }
+    if (s.kind === "emoji") {
+      const a = s.items[index];
+      if (a) acceptEmoji(a, s.start);
+      return;
+    }
+    if (s.kind === "slash") {
+      const cmd = s.items[index];
+      if (!cmd) return;
+      setSel(0);
+      runSlash(cmd, applySlash(text, s.slash), s.slash.start);
+      return;
+    }
+    const m = s.items[index];
+    if (m) acceptTrigger(m);
   };
 
   // 送出前附上行內自訂 emoji 資產清單（ADR-0220）；超過每則預算回 null（呼叫端提示）。
@@ -1244,13 +1397,47 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
     });
   };
   // 串內 @提及自動完成（ADR-0050/0051）。
-  const threadMenSuggest =
-    !threadMenDismissed && props.mentionCandidates ? suggestMentions(threadText, props.mentionCandidates) : null;
-  const threadMenList = threadMenSuggest?.candidates ?? [];
-  const threadMenActive = Math.min(threadMenSel, Math.max(threadMenList.length - 1, 0));
-  const acceptThreadMention = (cand: MentionCandidate): void => {
-    setThreadText(applyMention(threadText, threadMenSuggest!, cand));
-    setThreadMenSel(0);
+  // 串內 composer 的建議（ADR-0308）：與主 composer 同一套聚合器與鍵盤鏈。
+  // **刻意不含貼圖觸發字**——接受觸發字＝立刻送出一則貼圖訊息，而送貼圖的路徑沒有串內語意
+  // （會落到主對話），在串內回覆給這個入口只會製造意外。串內只給「填入草稿」型建議。
+  const threadSuggest = activeSuggest({
+    text: threadText,
+    ...(props.mentionCandidates ? { mentionCandidates: props.mentionCandidates } : {}),
+    emojiLibrary: library,
+    slashCommands,
+    ...(props.stickersDisabled ? { stickersDisabled: true } : {}),
+    dismissed: threadDismissed,
+  });
+  const threadSuggestLen = suggestCount(threadSuggest);
+  const threadActive = clampSel(threadSel, threadSuggestLen);
+
+  const acceptThreadSuggest = (s: ActiveSuggest, index: number): void => {
+    if (s.kind === "mention") {
+      const cand = s.items[index];
+      if (!cand) return;
+      setThreadText(applyMention(threadText, s.mention, cand));
+      setThreadSel(0);
+      return;
+    }
+    if (s.kind === "emoji") {
+      const a = s.items[index];
+      if (!a?.shortcode) return;
+      setThreadText(threadText.slice(0, s.start) + `:${a.shortcode}:`);
+      setThreadSel(0);
+      return;
+    }
+    if (s.kind === "slash") {
+      const cmd = s.items[index];
+      if (!cmd) return;
+      setThreadSel(0);
+      const base = applySlash(threadText, s.slash);
+      runSlashOn(
+        cmd,
+        base,
+        (tpl) => insertInto(threadRef.current, base, setThreadText, tpl, s.slash.start),
+        setThreadText,
+      );
+    }
   };
 
   return (
@@ -1531,7 +1718,7 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
               onView={setLightbox}
               ownedIds={ownedIds} getBlob={getBlob}
               {...(props.onPickDate ? { onPickDate: props.onPickDate } : {})}
-              onOwnSticker={acquireSticker}
+              onOwnSticker={ownSticker}
               replyCount={counts.get(m.id) ?? 0}
               onOpenThread={props.readOnly ? undefined : () => openThread(rootIdOf(m))}
               onExpand={() => openDetail(m.id)}
@@ -1977,17 +2164,17 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
         );
       })()}
 
-      {menList.length > 0 ? (
+      {suggest?.kind === "mention" ? (
         <div className="menbar" data-testid="mention-bar">
-          {menList.map((c, i) => (
+          {suggest.items.map((c, i) => (
             <button
               key={c.pubkey}
               type="button"
-              className={`menbar__item${i === menActive ? " on" : ""}`}
+              className={`menbar__item${i === active ? " on" : ""}`}
               title={c.name}
               onMouseDown={(e) => {
                 e.preventDefault(); // 避免 textarea 失焦
-                acceptMention(c);
+                acceptSuggest(suggest, i);
               }}
             >
               <span className="menbar__avatar" style={{ background: avatarColor(c.pubkey) }}>{initial(c.name)}</span>
@@ -1998,17 +2185,17 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
         </div>
       ) : null}
 
-      {emojiMatches.length > 0 ? (
+      {suggest?.kind === "emoji" ? (
         <div className="emojibar" data-testid="emoji-bar">
-          {emojiMatches.map((a, i) => (
+          {suggest.items.map((a, i) => (
             <button
               key={a.id}
               type="button"
-              className={`emojibar__item${i === emojiActive ? " on" : ""}`}
+              className={`emojibar__item${i === active ? " on" : ""}`}
               title={`:${a.shortcode}:`}
               onMouseDown={(e) => {
                 e.preventDefault(); // 避免 textarea 失焦
-                acceptEmoji(a);
+                acceptSuggest(suggest, i);
               }}
             >
               <img src={assetImgSrc(a)} alt="" />
@@ -2019,17 +2206,42 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
         </div>
       ) : null}
 
-      {trigMatches.length > 0 ? (
+      {/* 斜線指令建議列（ADR-0309）：沿用 trigbar 樣式，不另立第二套 UI 慣例。 */}
+      {suggest?.kind === "slash" ? (
+        <div className="trigbar" data-testid="slash-bar">
+          {suggest.items.map((cmd, i) => {
+            const meta = slashMeta(cmd.id);
+            return (
+              <button
+                key={cmd.id}
+                type="button"
+                className={`trigbar__item${i === active ? " on" : ""}`}
+                title={meta.label}
+                onMouseDown={(e) => {
+                  e.preventDefault(); // 避免 textarea 失焦
+                  acceptSuggest(suggest, i);
+                }}
+              >
+                <span aria-hidden="true">{meta.icon}</span>
+                <span>/{cmd.id}</span>
+              </button>
+            );
+          })}
+          <span className="trigbar__hint">{t("slash_hint")}</span>
+        </div>
+      ) : null}
+
+      {suggest?.kind === "trigger" ? (
         <div className="trigbar" data-testid="trigger-bar">
-          {trigMatches.map((m, i) => {
+          {suggest.items.map((m, i) => {
             const st = resolveAny(m.entry.ref)!;
             return (
               <button
                 key={m.entry.trigger}
                 type="button"
-                className={`trigbar__item${i === trigActive ? " on" : ""}`}
+                className={`trigbar__item${i === active ? " on" : ""}`}
                 title={m.entry.trigger}
-                onClick={() => acceptTrigger(m)}
+                onClick={() => acceptSuggest(suggest, i)}
               >
                 <img src={assetImgSrc(st)} alt={st.label} />
                 <span>{m.entry.trigger}</span>
@@ -2082,12 +2294,8 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
           placeholder={t("convo_composerPlaceholder")}
           onChange={(e) => {
             setText(e.target.value);
-            setTrigSel(0);
-            setTrigDismissed(false);
-            setMenSel(0);
-            setMenDismissed(false);
-            setEmojiSel(0);
-            setEmojiDismissed(false);
+            setSel(0);
+            setDismissed(false); // Esc 關閉只到下次輸入變化（ADR-0037）
             props.onTyping();
           }}
           onPaste={(e) => {
@@ -2103,74 +2311,44 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
             setText(text.slice(0, start) + cleanedPaste + text.slice(end));
             const caret = start + cleanedPaste.length;
             requestAnimationFrame(() => el.setSelectionRange(caret, caret));
-            setTrigSel(0);
-            setTrigDismissed(false);
+            setSel(0);
+            setDismissed(false);
             props.onTyping();
           }}
           onKeyDown={(e) => {
-            if (menList.length > 0) {
-              if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
-                e.preventDefault();
-                acceptMention(menList[menActive]!);
+            // 統一鍵盤鏈（ADR-0308）：IME 守衛、建議列導覽、Tab 縮排、Enter 政策都在 resolveComposerKey。
+            const act = resolveComposerKey(
+              { key: e.key, shiftKey: e.shiftKey, ctrlKey: e.ctrlKey, metaKey: e.metaKey, isComposing: e.nativeEvent.isComposing },
+              {
+                hasSuggest: suggestLen > 0,
+                acceptOnEnter: suggestAcceptOnEnter(suggest),
+                enterToSend: enterToSendEnabled(),
+                allowIndent: true,
+              },
+            );
+            if (act.type === "none") return;
+            e.preventDefault();
+            switch (act.type) {
+              case "accept":
+                if (suggest) acceptSuggest(suggest, active);
+                return;
+              case "move":
+                setSel(moveSel(active, act.delta, suggestLen));
+                return;
+              case "dismiss":
+                setDismissed(true);
+                return;
+              case "indent": {
+                // Tab 縮排／Shift+Tab 退排（供清單巢狀與程式碼區塊）
+                const el = e.currentTarget;
+                const r = indentText(text, el.selectionStart ?? 0, el.selectionEnd ?? 0, act.outdent);
+                setText(r.text);
+                requestAnimationFrame(() => el.setSelectionRange(r.start, r.end));
                 return;
               }
-              if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-                e.preventDefault();
-                const delta = e.key === "ArrowDown" ? 1 : -1;
-                setMenSel((menActive + delta + menList.length) % menList.length);
+              case "send":
+                send();
                 return;
-              }
-              if (e.key === "Escape") {
-                setMenDismissed(true);
-                return;
-              }
-            }
-            if (emojiMatches.length > 0) {
-              if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
-                e.preventDefault();
-                acceptEmoji(emojiMatches[emojiActive]!);
-                return;
-              }
-              if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-                e.preventDefault();
-                const delta = e.key === "ArrowDown" ? 1 : -1;
-                setEmojiSel((emojiActive + delta + emojiMatches.length) % emojiMatches.length);
-                return;
-              }
-              if (e.key === "Escape") {
-                setEmojiDismissed(true);
-                return;
-              }
-            }
-            if (trigMatches.length > 0) {
-              if (e.key === "Tab") {
-                e.preventDefault();
-                acceptTrigger(trigMatches[trigActive]!);
-                return;
-              }
-              if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-                e.preventDefault();
-                const delta = e.key === "ArrowDown" ? 1 : -1;
-                setTrigSel((trigActive + delta + trigMatches.length) % trigMatches.length);
-                return;
-              }
-              if (e.key === "Escape") {
-                setTrigDismissed(true);
-                return;
-              }
-            }
-            if (e.key === "Tab") {
-              // Tab 縮排／Shift+Tab 退排（快選未開啟時；供清單巢狀與程式碼區塊）
-              e.preventDefault();
-              const el = e.currentTarget;
-              const r = indentText(text, el.selectionStart ?? 0, el.selectionEnd ?? 0, e.shiftKey);
-              setText(r.text);
-              requestAnimationFrame(() => el.setSelectionRange(r.start, r.end));
-              return;
-            }
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              send();
             }
           }}
         />
@@ -2270,6 +2448,20 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
               <span className="win__btn" role="button" aria-label={t("convo_close")} onClick={() => setShowMembers(false)}>×</span>
             </div>
             <div className="groupmodal" data-testid="members-panel">
+              {/* 群組 FS 狀態（ADR-0319）：**靜態呈現，不發 per-member 警告**——
+                  「未知」在群組是常態（同群但沒加為聯絡人就學不到 EK），把常態顯示成
+                  「對方可能被攻擊」是 ADR-0302 §4 的紅線；而洗版會連 1:1 那條真警告一起廢掉。 */}
+              {props.fsPeerState ? (
+                <div className="groupmodal__label" data-testid="group-fs-summary">
+                  {t("groupFs_summary", {
+                    total: String(props.groupMembers.filter((m) => m.pubkey !== self.pubkey).length),
+                    covered: String(
+                      props.groupMembers.filter((m) => m.pubkey !== self.pubkey && props.fsPeerState!(m.pubkey) === "known")
+                        .length,
+                    ),
+                  })}
+                </div>
+              ) : null}
               {props.groupMembers.map((m) => (
                 <div className="member__row" key={m.pubkey}>
                   <span className="menbar__avatar" style={{ background: avatarColor(m.pubkey) }}>{initial(m.name)}</span>
@@ -2277,6 +2469,22 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
                     {m.name}
                     {m.pubkey === self.pubkey ? `（${t("members_you")}）` : ""}
                   </span>
+                  {props.fsPeerState && m.pubkey !== self.pubkey
+                    ? (() => {
+                        const st = props.fsPeerState(m.pubkey);
+                        // 只有 `lost`（曾知現無）用警示色；`unknown` 是常態，不上色。
+                        return (
+                          <span
+                            className={`member__fs member__fs--${st}`}
+                            data-testid={`member-fs-${st}`}
+                            title={t(st === "known" ? "groupFs_known" : st === "lost" ? "groupFs_lost" : "groupFs_unknown")}
+                          >
+                            {st === "lost" ? "⚠ " : ""}
+                            {t(st === "known" ? "groupFs_known" : st === "lost" ? "groupFs_lost" : "groupFs_unknown")}
+                          </span>
+                        );
+                      })()
+                    : null}
                   {props.isGroupAdmin && props.onRemoveMember && m.pubkey !== self.pubkey ? (
                     <button
                       type="button"
@@ -2408,22 +2616,22 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
                 onView={setLightbox}
                 ownedIds={ownedIds} getBlob={getBlob}
               {...(props.onPickDate ? { onPickDate: props.onPickDate } : {})}
-                onOwnSticker={acquireSticker}
+                onOwnSticker={ownSticker}
               />
             ))}
           </div>
         </div>
-        {threadMenList.length > 0 ? (
+        {threadSuggest?.kind === "mention" ? (
           <div className="menbar" data-testid="thread-mention-bar">
-            {threadMenList.map((c, i) => (
+            {threadSuggest.items.map((c, i) => (
               <button
                 key={c.pubkey}
                 type="button"
-                className={`menbar__item${i === threadMenActive ? " on" : ""}`}
+                className={`menbar__item${i === threadActive ? " on" : ""}`}
                 title={c.name}
                 onMouseDown={(e) => {
                   e.preventDefault();
-                  acceptThreadMention(c);
+                  acceptThreadSuggest(threadSuggest, i);
                 }}
               >
                 <span className="menbar__avatar" style={{ background: avatarColor(c.pubkey) }}>{initial(c.name)}</span>
@@ -2433,37 +2641,110 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
             <span className="trigbar__hint">{t("mention_hint")}</span>
           </div>
         ) : null}
+
+        {threadSuggest?.kind === "emoji" ? (
+          <div className="emojibar" data-testid="thread-emoji-bar">
+            {threadSuggest.items.map((a, i) => (
+              <button
+                key={a.id}
+                type="button"
+                className={`emojibar__item${i === threadActive ? " on" : ""}`}
+                title={`:${a.shortcode}:`}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  acceptThreadSuggest(threadSuggest, i);
+                }}
+              >
+                <img src={assetImgSrc(a)} alt="" />
+                <span>:{a.shortcode}:</span>
+              </button>
+            ))}
+            <span className="trigbar__hint">{t("emoji_hint")}</span>
+          </div>
+        ) : null}
+
+        {threadSuggest?.kind === "slash" ? (
+          <div className="trigbar" data-testid="thread-slash-bar">
+            {threadSuggest.items.map((cmd, i) => {
+              const meta = slashMeta(cmd.id);
+              return (
+                <button
+                  key={cmd.id}
+                  type="button"
+                  className={`trigbar__item${i === threadActive ? " on" : ""}`}
+                  title={meta.label}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    acceptThreadSuggest(threadSuggest, i);
+                  }}
+                >
+                  <span aria-hidden="true">{meta.icon}</span>
+                  <span>/{cmd.id}</span>
+                </button>
+              );
+            })}
+            <span className="trigbar__hint">{t("slash_hint")}</span>
+          </div>
+        ) : null}
         <div className="composer">
           <textarea
+            ref={threadRef}
             aria-label={t("thread_reply")}
             value={threadText}
             placeholder={t("thread_reply")}
             onChange={(e) => {
               setThreadText(e.target.value);
-              setThreadMenSel(0);
-              setThreadMenDismissed(false);
+              setThreadSel(0);
+              setThreadDismissed(false);
+            }}
+            onPaste={(e) => {
+              // ADR-0308：這條原本只有主 composer 有——串內回覆的貼上不清追蹤參數（ADR-0038 缺口）。
+              if (!cleanOnPasteEnabled()) return;
+              const pasted = e.clipboardData.getData("text/plain");
+              const { text: cleanedPaste, cleaned } = cleanText(pasted);
+              if (cleaned === 0) return;
+              e.preventDefault();
+              const el = e.currentTarget;
+              const start = el.selectionStart ?? threadText.length;
+              const end = el.selectionEnd ?? threadText.length;
+              setThreadText(threadText.slice(0, start) + cleanedPaste + threadText.slice(end));
+              const caret = start + cleanedPaste.length;
+              requestAnimationFrame(() => el.setSelectionRange(caret, caret));
+              setThreadSel(0);
+              setThreadDismissed(false);
             }}
             onKeyDown={(e) => {
-              if (threadMenList.length > 0) {
-                if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
-                  e.preventDefault();
-                  acceptThreadMention(threadMenList[threadMenActive]!);
+              const act = resolveComposerKey(
+                { key: e.key, shiftKey: e.shiftKey, ctrlKey: e.ctrlKey, metaKey: e.metaKey, isComposing: e.nativeEvent.isComposing },
+                {
+                  hasSuggest: threadSuggestLen > 0,
+                  acceptOnEnter: suggestAcceptOnEnter(threadSuggest),
+                  enterToSend: enterToSendEnabled(),
+                  allowIndent: true,
+                },
+              );
+              if (act.type === "none") return;
+              e.preventDefault();
+              switch (act.type) {
+                case "accept":
+                  if (threadSuggest) acceptThreadSuggest(threadSuggest, threadActive);
+                  return;
+                case "move":
+                  setThreadSel(moveSel(threadActive, act.delta, threadSuggestLen));
+                  return;
+                case "dismiss":
+                  setThreadDismissed(true);
+                  return;
+                case "indent": {
+                  const el = e.currentTarget;
+                  const r = indentText(threadText, el.selectionStart ?? 0, el.selectionEnd ?? 0, act.outdent);
+                  setThreadText(r.text);
+                  requestAnimationFrame(() => el.setSelectionRange(r.start, r.end));
                   return;
                 }
-                if (e.key === "ArrowDown" || e.key === "ArrowUp") {
-                  e.preventDefault();
-                  const delta = e.key === "ArrowDown" ? 1 : -1;
-                  setThreadMenSel((threadMenActive + delta + threadMenList.length) % threadMenList.length);
+                case "send":
+                  sendThread();
                   return;
-                }
-                if (e.key === "Escape") {
-                  setThreadMenDismissed(true);
-                  return;
-                }
-              }
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                sendThread();
               }
             }}
           />
@@ -2508,7 +2789,7 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
               onView={setLightbox}
               ownedIds={ownedIds} getBlob={getBlob}
               {...(props.onPickDate ? { onPickDate: props.onPickDate } : {})}
-              onOwnSticker={acquireSticker}
+              onOwnSticker={ownSticker}
               expanded
             />
           </div>
@@ -2549,7 +2830,11 @@ function MessageLine({
   onUnsend?: ((messageId: string) => void) | undefined;
   onView?: ((item: LightboxItem) => void) | undefined;
   ownedIds: Set<string>;
-  onOwnSticker: (label: string, svg: string) => void;
+  /**
+   * 點收到的自訂貼圖＝收藏進自己的庫。**企業政策停用貼圖時傳 `undefined`**（ADR-0310）——
+   * 貼圖照常顯示，只是不再是可點擊的收藏按鈕（與既有的自動收藏閘門一致）。
+   */
+  onOwnSticker?: ((label: string, svg: string) => void) | undefined;
   /** 內容定址 blob 查找（ADR-0223）：參照筆據此解析；未提供＝參照顯示占位。 */
   getBlob?: ((hash: string) => string | undefined) | undefined;
   /** 此訊息作為串根的回覆數（ADR-0051）。 */
@@ -2708,7 +2993,7 @@ function MessageLine({
         </span>
       ) : customOk ? (
         <span className="sticker">
-          {!message.outgoing && !owned ? (
+          {!message.outgoing && !owned && onOwnSticker ? (
             <button
               type="button"
               className="sticker__own"

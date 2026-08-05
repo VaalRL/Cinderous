@@ -1,4 +1,4 @@
-import { makeBackupCode, qrSvg } from "@cinderous/core";
+import { makeBackupCode, policyNotices, qrSvg, type OrgPolicy, type PolicyNotice } from "@cinderous/core";
 import { useEffect, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { ACCENT_PRESETS, ACCENT_PRESETS_CB, useAccent } from "../accent.js";
 import type { MessageKey } from "@cinderous/i18n";
@@ -12,6 +12,7 @@ import { APP_VERSION } from "../version.js";
 import { releaseFor } from "../releases.js";
 import { GITHUB_RELEASES } from "../update-check.js";
 import { useDialog } from "./Dialog.js";
+import { enterToSendEnabled, setEnterToSendEnabled } from "./composer-prefs.js";
 import { CHIME_PRESETS, DEFAULT_CHIME_ID, playChime } from "./ringtone.js";
 import type { SlotItem } from "./slot-queue.js";
 import { placeControl, type ControlId, TITLEBAR_STYLES } from "./titlebar-controls.js";
@@ -51,6 +52,31 @@ export interface SettingsPanelProps {
   initialTab?: SettingsTab;
   /** 組織資訊（ADR-0157，工作身分）：公司名稱/歡迎詞/班表的唯讀摘要；未採用名冊則不顯示。 */
   orgInfo?: { org: string; welcome?: string; workHours?: { start: string; end: string } };
+  /**
+   * 企業政策（ADR-0312）：條列「公司政策做了什麼」。
+   * 沒有這一段時，政策只表現為**按鈕消失**——使用者分不出是壞掉還是被公司關掉。
+   */
+  orgPolicy?: OrgPolicy;
+  /** 觀測到的裝置（ADR-0321）：提供才顯示「我的裝置」。 */
+  devices?: { id: string; firstSeen: number; source: string; inDirectory?: boolean; revoked?: boolean; stale?: boolean }[];
+  /** 撤銷三態（ADR-0322 S2）：**雙軌期間不得讓使用者以為移除會生效**。 */
+  revocation?: { state: "unknown" | "dual-track" | "active"; devices?: string[] };
+  /** 移除一台裝置（ADR-0322 S3）；未提供則不顯示移除入口。 */
+  onRemoveDevice?: (id: string) => void;
+  /** 忘掉一筆觀測（ADR-0324）：只清本機紀錄，不撤銷任何東西。 */
+  onForgetDevice?: (id: string) => void;
+  /** 目錄異常紀錄（ADR-0322 S4）：常駐呈現。 */
+  deviceConflicts?: { at: number; mineV: number; incomingV: number }[];
+  /** 本機裝置代碼（ADR-0322 S5）：供在另一台已授權的裝置上貼上。 */
+  selfDevicePk?: string;
+  /** 授權新裝置；未提供則不顯示入口。 */
+  onAuthorizeDevice?: (pk: string) => void;
+  /** 本機是否已在清單上（＝有沒有授權資格）。 */
+  canAuthorizeDevice?: boolean;
+  /** 本機裝置金鑰的保護等級（ADR-0297 §6 紅線：必須如實顯示）。 */
+  deviceKeyTier?: "keystore" | "encrypted" | "plaintext" | "ephemeral";
+  /** 裝置金鑰曾經明文落盤過（ADR-0323）。 */
+  deviceKeyEverPlaintext?: boolean;
   /** 自己的企業頭銜（ADR-0158）；與 onSetTitle 一起提供才顯示編輯欄（企業身分限定）。 */
   myTitle?: string;
   /** 設定/移除頭銜（空＝移除）；廣播給該身分的所有聯絡人（工作身分＝全組織同事）。 */
@@ -108,7 +134,14 @@ export interface SettingsPanelProps {
    * 前向保密（ADR-0245，opt-in）：啟用後加密到會過期的子鑰；`onEnable` 啟用、`onRotate` 立即更換金鑰。
    * 未提供則不顯示該區塊（如瀏覽器示範）。
    */
-  fs?: { enabled: boolean; onEnable: () => void; onRotate: () => void };
+  fs?: {
+    enabled: boolean;
+    onEnable: () => void;
+    onRotate: () => void;
+    onDisable?: (() => void) | undefined;
+    /** 本裝置解不開的訊息數與最後時間（ADR-0316）；`count` 為 0 時不顯示。 */
+    undecryptable?: { count: number; lastAt: number } | undefined;
+  };
   /** 本機 AI 改寫設定（ADR-0060）；未提供則不顯示該區塊。 */
   ollama?: OllamaSettingsValue;
   onOllamaChange?: (next: OllamaSettingsValue) => void;
@@ -118,6 +151,9 @@ export interface SettingsPanelProps {
   /** 收到別人的自訂 emoji／貼圖時自動收藏（ADR-0220）；未提供則不顯示。 */
   autoAcquireAssets?: boolean;
   onToggleAutoAcquire?: () => void;
+  /** 入群邀請閘門（ADR-0317）：true＝任何人可邀；false（預設）＝只有聯絡人。 */
+  groupInviteFromAnyone?: boolean;
+  onToggleGroupInvite?: () => void;
   /** 威脅情報防護（ADR-0231 P3）：設定四項（啟用/送出警示/嚴格/自訂清單）；未提供則不顯示。 */
   threat?: {
     enabled: boolean;
@@ -191,6 +227,257 @@ const STATE_DOT: Record<RelayPoolEntry["state"], string> = {
 
 /** 主題色設定（ADR-0064）：預設色票 + 自訂色 + 重設；即時套用、只存本機。 */
 /** 更改顯示名稱（ADR-0144）：輸入新名 → 落地本機＋廣播給聯絡人（ADR-0061）。 */
+/** 授權新裝置（ADR-0322 S5）：貼上對方顯示的代碼。格式不合就不讓按，避免送出垃圾。 */
+function AuthorizeDevice({ onAuthorize }: { onAuthorize: (pk: string) => void }): JSX.Element {
+  const { t } = useI18n();
+  const [code, setCode] = useState("");
+  const ok = /^[0-9a-f]{64}$/i.test(code.trim());
+  return (
+    <>
+      <p className="settings__desc">{t("devices_authorize")}</p>
+      <p className="hint">{t("devices_authorizeHint")}</p>
+      <input
+        type="text"
+        data-testid="authorize-input"
+        placeholder={t("devices_authorizePlaceholder")}
+        value={code}
+        onChange={(e) => setCode(e.target.value)}
+      />
+      <button
+        type="button"
+        className="retention__opt"
+        data-testid="authorize-go"
+        disabled={!ok}
+        onClick={() => {
+          onAuthorize(code.trim().toLowerCase());
+          setCode("");
+        }}
+      >
+        {t("devices_authorize")}
+      </button>
+    </>
+  );
+}
+
+/**
+ * 我的裝置（ADR-0321 E-lite）：顯著呈現「我有哪些裝置」。
+ *
+ * 🔴 清單下方那句限制揭露是**驗收條件**，不是提示文字——這份清單看不到純被動讀取的裝置
+ * （中繼只按 `#p` 轉發，持有 nsec 者可安靜訂閱）。拿掉它，使用者會把「只有一台」讀成
+ * 「沒有人在偷看」，那就是 ADR-0278／0287 的「UI 不得說謊」反例。
+ */
+function DeviceSettings({
+  devices,
+  revocation,
+  onRemove,
+  onForget,
+  conflicts,
+  selfDevicePk,
+  onAuthorize,
+  canAuthorize,
+  keyTier,
+  keyEverPlaintext,
+}: {
+  devices: { id: string; firstSeen: number; source: string; inDirectory?: boolean; revoked?: boolean; stale?: boolean }[];
+  revocation?: { state: "unknown" | "dual-track" | "active"; devices?: string[] };
+  onRemove?: (id: string) => void;
+  onForget?: (id: string) => void;
+  conflicts?: { at: number; mineV: number; incomingV: number }[];
+  selfDevicePk?: string;
+  onAuthorize?: (pk: string) => void;
+  canAuthorize?: boolean;
+  keyTier?: "keystore" | "encrypted" | "plaintext" | "ephemeral";
+  /** 這把金鑰曾經明文落盤過（ADR-0323 遷移）——即使現在在金鑰庫，也不能宣稱一直安全。 */
+  keyEverPlaintext?: boolean;
+}): JSX.Element {
+  const { t } = useI18n();
+  const label = (src: string): string =>
+    src === "local" ? t("devices_source_local") : src === "pairing" ? t("devices_source_pairing") : t("devices_source_snapshot");
+  return (
+    <section className="settings__sec" data-testid="devices">
+      <h4>{t("devices_title")}</h4>
+      <ul className="settings__list" data-testid="device-list">
+        {devices.map((d) => (
+          <li key={d.id}>
+            <code>{d.id.slice(0, 8)}</code>
+            {d.source === "local" ? ` （${t("devices_thisOne")}）` : ""} · {label(d.source)} ·{" "}
+            {t("devices_firstSeen", { when: new Date(d.firstSeen).toLocaleDateString() })}
+            {/* ADR-0322 S1：觀測到卻不在簽章目錄內——今天完全看不出來的那種。 */}
+            {d.inDirectory === false ? (
+              <span className="settings__warn" data-testid="device-not-in-dir">
+                {" "}
+                {t("devices_notInDirectory")}
+              </span>
+            ) : null}
+            {d.revoked ? <span className="hint"> （{t("devices_revoked")}）</span> : null}
+            {/* ADR-0324：久未出現＝已被排除在撤銷判定之外。這件事會影響行為，所以要說。 */}
+            {d.stale ? (
+              <span className="hint" data-testid={`device-stale-${d.id}`}>
+                {" "}
+                {t("devices_stale")}
+              </span>
+            ) : null}
+            {/* 撤銷入口只給**在目錄內**、不是這台、且尚未移除的裝置。
+                ⚠ 過去這裡也給不在目錄內的裝置，但那些沒有目錄項 ⇒ 按下去靜默什麼都不做
+                （ADR-0324 修正）。它們改給「從清單移除」，且文案明說那不撤銷任何東西。 */}
+            {onRemove && d.source !== "local" && !d.revoked && d.inDirectory !== false ? (
+              <button
+                type="button"
+                className="member__remove"
+                data-testid={`device-remove-${d.id}`}
+                title={t("devices_remove")}
+                onClick={() => onRemove(d.id)}
+              >
+                ✕
+              </button>
+            ) : null}
+            {onForget && d.source !== "local" && d.inDirectory === false ? (
+              <button
+                type="button"
+                className="member__remove"
+                data-testid={`device-forget-${d.id}`}
+                title={t("devices_forget")}
+                onClick={() => onForget(d.id)}
+              >
+                ✕
+              </button>
+            ) : null}
+          </li>
+        ))}
+      </ul>
+      {/* ADR-0322 S2／S3：撤銷的三態。**在雙軌期間不得讓使用者以為移除會生效**。 */}
+      {revocation ? (
+        <p
+          className={`hint${revocation.state === "dual-track" ? " settings__warn" : ""}`}
+          data-testid={`revocation-${revocation.state}`}
+        >
+          {revocation.state === "unknown"
+            ? t("devices_revUnknown")
+            : revocation.state === "dual-track"
+              ? t("devices_revDualTrack", { ids: (revocation.devices ?? []).map((i) => i.slice(0, 8)).join("、") })
+              : t("devices_revActive")}
+        </p>
+      ) : null}
+      {/* ADR-0322 S4：**常駐**呈現，不是一次性對話框——這是「身分私鑰可能外洩」等級的事件，
+          看過一次就消失太輕。 */}
+      {conflicts && conflicts.length > 0 ? (
+        <>
+          <p className="settings__desc settings__warn">{t("devices_conflictLog")}</p>
+          <ul className="settings__list" data-testid="device-conflicts">
+            {conflicts.map((c) => (
+              <li key={`${c.at}-${c.incomingV}`} className="settings__warn">
+                {t("devices_conflictRow", {
+                  when: new Date(c.at).toLocaleString(),
+                  incoming: String(c.incomingV),
+                  mine: String(c.mineV),
+                })}
+              </li>
+            ))}
+          </ul>
+        </>
+      ) : null}
+      {/* ADR-0297 §6 紅線：**設定頁必須如實顯示本機在哪一級**，不得靜默降級。 */}
+      {keyTier ? (
+        <>
+          <p className="settings__desc">{t("devices_tierTitle")}</p>
+          <p
+            className={`hint${keyTier === "plaintext" || keyTier === "ephemeral" ? " settings__warn" : ""}`}
+            data-testid={`key-tier-${keyTier}`}
+          >
+            {keyTier === "plaintext"
+              ? t("devices_tierPlaintext")
+              : keyTier === "ephemeral"
+                ? t("devices_tierEphemeral")
+                : keyTier === "encrypted"
+                  ? t("devices_tierEncrypted")
+                  : t("devices_tierKeystore")}
+          </p>
+          {/* ADR-0323：遷移進金鑰庫的舊金鑰**曾經明文躺在磁碟上**——刪掉那份副本
+              並不能收回可能已被複製走的東西，所以不能只說「已受金鑰庫保護」。 */}
+          {keyTier === "keystore" && keyEverPlaintext ? (
+            <p className="hint settings__warn" data-testid="key-tier-was-plain">
+              {t("devices_tierWasPlain")}
+            </p>
+          ) : null}
+        </>
+      ) : null}
+      {/* ADR-0322 S5：這台的代碼——供在**另一台已授權的裝置**上貼上授權。 */}
+      {selfDevicePk ? (
+        <>
+          <p className="settings__desc">{t("devices_myCode")}</p>
+          <code className="settings__relay" data-testid="my-device-code">{selfDevicePk}</code>
+          <p className="hint">{t("devices_myCodeHint")}</p>
+        </>
+      ) : null}
+      {/* 授權入口只給**已在清單上**的裝置——這正是「當期短期狀態才有授權資格」的落實。 */}
+      {onAuthorize ? (
+        canAuthorize ? (
+          <AuthorizeDevice onAuthorize={onAuthorize} />
+        ) : (
+          <p className="hint settings__warn" data-testid="no-authority">{t("devices_noAuthority")}</p>
+        )
+      ) : null}
+      <p className="hint settings__warn" data-testid="devices-limit">{t("devices_limit")}</p>
+    </section>
+  );
+}
+
+/**
+ * 公司政策條列（ADR-0312）：先列被停用的功能，再列生效中的規則。
+ * 清單與順序來自 `policyNotices`（core，兩端共用）；這裡只負責文案與版面。
+ */
+function OrgPolicySettings({ policy }: { policy: OrgPolicy }): JSX.Element | null {
+  const { t } = useI18n();
+  const notices = policyNotices(policy);
+  if (notices.length === 0) return null;
+  const disabled = notices.filter((n) => n.kind === "disabled");
+  const rules = notices.filter((n) => n.kind === "rule");
+  const label = (n: PolicyNotice): string => {
+    switch (n.id) {
+      case "files":
+        return t("orgPolicy_files");
+      case "calls":
+        return t("orgPolicy_calls");
+      case "stickers":
+        return t("orgPolicy_stickers");
+      case "cloudBackup":
+        return t("orgPolicy_cloudBackup");
+      case "forceTurn":
+        return t("orgPolicy_forceTurn");
+      case "ttlDays":
+        return t("orgPolicy_ttlDays", { days: String(n.value ?? "") });
+      case "relayFilesMb":
+        return t("orgPolicy_relayFilesMb", { mb: String(n.value ?? "") });
+    }
+  };
+  return (
+    <section className="settings__sec" data-testid="org-policy">
+      <h4>{t("orgPolicy_title")}</h4>
+      {disabled.length > 0 ? (
+        <>
+          <p className="settings__desc">{t("orgPolicy_disabledHead")}</p>
+          <ul className="settings__list" data-testid="org-policy-disabled">
+            {disabled.map((n) => (
+              <li key={n.id}>{label(n)}</li>
+            ))}
+          </ul>
+        </>
+      ) : null}
+      {rules.length > 0 ? (
+        <>
+          <p className="settings__desc">{t("orgPolicy_rulesHead")}</p>
+          <ul className="settings__list" data-testid="org-policy-rules">
+            {rules.map((n) => (
+              <li key={n.id}>{label(n)}</li>
+            ))}
+          </ul>
+        </>
+      ) : null}
+      <p className="hint">{t("orgPolicy_hint")}</p>
+    </section>
+  );
+}
+
 /** 企業頭銜編輯（ADR-0158）：≤24 字、留空套用＝移除；廣播給該身分的所有聯絡人。 */
 function TitleEditor({ title, onSet }: { title: string; onSet: (t: string) => void }): JSX.Element {
   const { t } = useI18n();
@@ -315,6 +602,30 @@ function AccessibilitySettings(): JSX.Element {
           </button>
         ))}
       </div>
+    </section>
+  );
+}
+
+/** 輸入行為（ADR-0308）：Enter 是送出還是換行。純本機設定，自管 localStorage（同 A11y/Accent 模式）。 */
+function ComposerSettings(): JSX.Element {
+  const { t } = useI18n();
+  const [enterToSend, setEnter] = useState(() => enterToSendEnabled());
+  return (
+    <section className="settings__sec" data-testid="composer-settings">
+      <h4>{t("settings_composer")}</h4>
+      <label className="settings__toggle">
+        <input
+          type="checkbox"
+          data-testid="enter-to-send"
+          checked={enterToSend}
+          onChange={(e) => {
+            setEnter(e.target.checked);
+            setEnterToSendEnabled(e.target.checked);
+          }}
+        />
+        <span>{t("settings_enterToSend")}</span>
+      </label>
+      <p className="hint">{t("settings_enterToSendHint")}</p>
     </section>
   );
 }
@@ -1149,6 +1460,7 @@ export function SettingsPanel(props: SettingsPanelProps): JSX.Element {
             <>
               <LayoutSettings />
               <AccentSettings />
+              <ComposerSettings />
               <AccessibilitySettings />
               {props.showTitlebarSettings ? <TitlebarSettings /> : null}
             </>
@@ -1329,6 +1641,25 @@ export function SettingsPanel(props: SettingsPanelProps): JSX.Element {
             </section>
           ) : null}
 
+          {/* 公司政策（ADR-0312）：政策不再只表現為「按鈕消失」。 */}
+          {tab === "identity" && props.orgPolicy ? <OrgPolicySettings policy={props.orgPolicy} /> : null}
+
+          {/* 我的裝置（ADR-0321 E-lite）：今天使用者根本看不到自己有幾台裝置。 */}
+          {tab === "identity" && props.devices && props.devices.length > 0 ? (
+            <DeviceSettings
+              devices={props.devices}
+              {...(props.revocation ? { revocation: props.revocation } : {})}
+              {...(props.onRemoveDevice ? { onRemove: props.onRemoveDevice } : {})}
+              {...(props.onForgetDevice ? { onForget: props.onForgetDevice } : {})}
+              {...(props.deviceConflicts ? { conflicts: props.deviceConflicts } : {})}
+              {...(props.selfDevicePk ? { selfDevicePk: props.selfDevicePk } : {})}
+              {...(props.onAuthorizeDevice ? { onAuthorize: props.onAuthorizeDevice } : {})}
+              {...(props.canAuthorizeDevice !== undefined ? { canAuthorize: props.canAuthorizeDevice } : {})}
+              {...(props.deviceKeyTier ? { keyTier: props.deviceKeyTier } : {})}
+              {...(props.deviceKeyEverPlaintext ? { keyEverPlaintext: true } : {})}
+            />
+          ) : null}
+
           {tab === "identity" && props.selfNsec ? (
             <section className="settings__sec">
               <h4>{t("settings_identityBackup")}</h4>
@@ -1396,7 +1727,7 @@ export function SettingsPanel(props: SettingsPanelProps): JSX.Element {
             </section>
           ) : null}
 
-          {tab === "privacy" && (props.onToggleCleanOnPaste || props.onToggleAutoAcquire) ? (
+          {tab === "privacy" && (props.onToggleCleanOnPaste || props.onToggleAutoAcquire || props.onToggleGroupInvite) ? (
             <section className="settings__sec">
               <h4>{t("settings_privacy")}</h4>
               {props.onToggleCleanOnPaste ? (
@@ -1409,6 +1740,21 @@ export function SettingsPanel(props: SettingsPanelProps): JSX.Element {
                   />
                   <span>{t("settings_cleanOnPaste")}</span>
                 </label>
+              ) : null}
+              {/* ADR-0317：入群邀請的同意閘門。放隱私區、緊鄰其他「誰能碰到我」的開關。 */}
+              {props.onToggleGroupInvite ? (
+                <>
+                  <label className="settings__toggle">
+                    <input
+                      type="checkbox"
+                      data-testid="group-invite-anyone"
+                      checked={props.groupInviteFromAnyone ?? false}
+                      onChange={props.onToggleGroupInvite}
+                    />
+                    <span>{t("settings_groupInvite")}</span>
+                  </label>
+                  <p className="hint">{t("settings_groupInviteHint")}</p>
+                </>
               ) : null}
               {props.onToggleAutoAcquire ? (
                 <label className="settings__toggle">
@@ -1552,9 +1898,27 @@ export function SettingsPanel(props: SettingsPanelProps): JSX.Element {
               {props.fs.enabled ? (
                 <>
                   <p className="settings__hint">✅ {t("fs_enabled")}</p>
+                  {/* ADR-0313：自動輪替才是保護的來源；手動鈕是「我現在就被入侵了」用的。 */}
+                  <p className="settings__hint" data-testid="fs-auto-rotate">{t("fs_autoRotate")}</p>
                   <button className="retention__opt" data-testid="fs-rotate" onClick={props.fs.onRotate}>
                     {t("fs_rotate")}…
                   </button>
+                  {/* ADR-0316：解不開不再是「什麼都沒發生」。只在 >0 時出現——
+                      沒發生過就不該用一段警告文字佔版面。 */}
+                  {props.fs.undecryptable && props.fs.undecryptable.count > 0 ? (
+                    <p className="settings__hint settings__warn" data-testid="fs-undecryptable">
+                      {t("fs_undecryptable", {
+                        count: String(props.fs.undecryptable.count),
+                        when: new Date(props.fs.undecryptable.lastAt).toLocaleString(),
+                      })}
+                    </p>
+                  ) : null}
+                  {/* ADR-0314：啟用確認說了「可以隨時關閉」，這裡把那句話變成真的。 */}
+                  {props.fs.onDisable ? (
+                    <button className="retention__opt" data-testid="fs-disable" onClick={props.fs.onDisable}>
+                      {t("fs_disable")}…
+                    </button>
+                  ) : null}
                 </>
               ) : (
                 <button className="retention__opt" data-testid="fs-enable" onClick={props.fs.onEnable}>
