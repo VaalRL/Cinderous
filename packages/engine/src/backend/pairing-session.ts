@@ -9,6 +9,7 @@ import {
   runPairingSource,
   runPairingTarget,
 } from "@cinderous/core";
+import { getDeviceKey } from "../storage/device-key.js";
 import { buildPairBundle, isLargeBundle, type PairBundle, type PairBundleOrg, parsePairBundle } from "../storage/pair-bundle.js";
 import type { AppStorage, StoredIdentity } from "../storage/types.js";
 import { openPairingTransport } from "./pairing-transport.js";
@@ -75,6 +76,12 @@ export async function runPairSource(opts: {
    * 選時機（接電源、放一起）。回 `false`＝使用者取消，不連線。
    */
   confirmLargeBundle?: (megabytes: number) => Promise<boolean>;
+  /**
+   * 配對成功時，新機回傳的裝置公鑰（ADR-0322 S5）。
+   * 呼叫端據此 `authorizeDevice(pk)`——**配對＝授權**，不必再手動貼代碼。
+   * 舊版新機不回傳 ⇒ 不觸發（退回手動授權）。
+   */
+  onTargetDevice?: (devicePk: string) => void;
 }): Promise<boolean> {
   // 先組包再連線：沒有身分就當場失敗，不要讓使用者比對完 SAS 才發現搬了個空殼。
   const bundle = buildPairBundle(opts.storage, opts.profile, opts.identity);
@@ -83,7 +90,9 @@ export async function runPairSource(opts: {
     if (!(await opts.confirmLargeBundle(mb))) return false;
   }
   const transport = await opts.transport("source", opts.key, opts.profile.relayUrl);
-  return runPairingSource(transport, opts.key, bundle, opts.confirmSas);
+  return runPairingSource(transport, opts.key, bundle, opts.confirmSas, {
+    ...(opts.onTargetDevice ? { onTargetDevice: opts.onTargetDevice } : {}),
+  });
 }
 
 /**
@@ -98,7 +107,8 @@ export async function runPairTarget(opts: {
   const { payload, key } = parsePairing(opts.code.trim()); // 非法載荷即拋
   // 會合中繼站由載荷指定：新機此時尚無身分與設定。
   const transport = await opts.transport("target", key, payload.relay ?? "");
-  const json = await runPairingTarget(transport, key, opts.onSas);
+  // ADR-0322 S5：把本機裝置公鑰隨 DONE 回傳，讓舊機把這台加進目錄（配對＝授權）。
+  const json = await runPairingTarget(transport, key, opts.onSas, { devicePk: getDeviceKey().pk });
   const bundle = parsePairBundle(json);
   if (!bundle) throw new Error("配對捆包格式不符");
   return bundle;

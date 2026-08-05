@@ -5,6 +5,7 @@ import type {
   Group,
   OrgGroup,
   OrgMember,
+  FsFailureLog,
   OrgPolicy,
   OrgRosterDoc,
   OrgWorkHours,
@@ -15,11 +16,12 @@ import type {
   CalendarEventInput,
   RsvpStatus,
 } from "@cinderous/core";
-import type { MessageStatus, StoredCalendarEvent } from "../storage/types.js";
+import type { MessageStatus, StoredCalendarEvent, StoredDevice, StoredDirectoryConflict } from "../storage/types.js";
+import type { DeviceKeyTier } from "../storage/device-key.js";
 import { inWorkHours } from "@cinderous/core";
 
 export type { Group, OrgGroup, OrgMember, OrgPolicy, OrgRosterDoc, OrgWorkHours };
-export type { MessageStatus, StoredCalendarEvent };
+export type { MessageStatus, StoredCalendarEvent, StoredDevice, StoredDirectoryConflict };
 // 共享行程（ADR-0263）：UI 直接用 core 的型別，不另造一份平行定義。
 export type { CalendarAction, CalendarEventInput, RsvpStatus };
 
@@ -294,6 +296,47 @@ export interface ChatBackendEvents {
    * `declared` 為對方簽章個人檔內的原始能力字串（例如 `ratchet-v1`），供 UI 顯示與診斷。
    */
   onFsUnsupported?(peer: PubkeyHex, declared: string): void;
+  /**
+   * 有一顆定址給我的 wrap **解不開**，而我有或曾有 EK（ADR-0316）。
+   *
+   * ⚠ **沒有 `peer` 參數，這不是疏漏**：NIP-59 的外層作者是一次性臨時金鑰，寄件人身分在
+   * **加密的內層** ⇒ 解不開就不知道是誰送的，也就無從放進某個對話。UI 只能做全域呈現。
+   *
+   * ⚠ 也**無法保證**這就是 EK 遺失——密碼學上「沒有正確金鑰」與「密文是垃圾」都是 MAC 失敗。
+   * 型別 `FsFailureLog.maybeEkLoss` 的名字已帶著這份不確定性，文案不得把它寫成事實。
+   */
+  onFsUndecryptable?(log: FsFailureLog): void;
+  /**
+   * FS 開關被**多裝置合併**改變了（ADR-0334）。
+   *
+   * 🔴 不是使用者在這台按的——是別台的快照合併進來後翻轉了它。沒有這條通知，
+   * 設定頁會停在使用者上次看到的值，與引擎實際狀態靜默不一致。
+   */
+  onFsEnabled?(enabled: boolean): void;
+  /**
+   * 一封入群邀請被同意閘門擋下（ADR-0317）：邀請者不是聯絡人，且設定為「只有聯絡人可邀」。
+   *
+   * **不是丟掉**——邀請已緩存，邀請者已進訊息請求區；使用者接受他時邀請就會生效。
+   * 這個 handler 供 UI 提示（例如「◯◯ 想把你加進『某群』」），不提示也不會壞。
+   */
+  onGroupInviteHeld?(from: PubkeyHex, groupName: string): void;
+  /** 觀測到的裝置清單有變動（ADR-0321）：供 UI 更新「我的裝置」。 */
+  onDevices?(list: (StoredDevice & { inDirectory: boolean; isSelf: boolean })[]): void;
+  /**
+   * 看到一台**從未見過**的裝置（ADR-0321）：顯著提示，不是預設關的小徽章。
+   *
+   * ⚠ 本機那台不觸發（`source: "local"`）——它就是使用者正在看的這台。
+   * ⚠ 也**不代表沒有其他裝置**：只讀取的裝置不會被看到（見 `StoredDevice` 的說明）。
+   */
+  onNewDevice?(id: string, source: "snapshot" | "pairing"): void;
+  /**
+   * 收到一份**與本機衝突**的裝置目錄（ADR-0322 S1／S4）：同版本內容不同，或版本倒退。
+   *
+   * 🔴 **只在版本倒退時觸發**（S4 修正）：同版本的分歧**判不出是加還是減**，
+   * 一律誤報成攻擊會製造假警報 ⇒ 已改以聯集收斂，安全訊號改由「新裝置警示 ＋ 可移除」承擔。
+   * 倒退則不含糊——較低的版本只可能來自重放或倒退。
+   */
+  onDeviceDirectoryConflict?(mineV: number, incomingV: number): void;
 }
 
 /**
@@ -353,6 +396,12 @@ export interface ChatBackend {
   setConvoMuted?(convoId: string, muted: boolean): void;
   /** 目前靜音的對話集合（ADR-0242 階段③）：供 UI 初始化。 */
   mutedConvos?(): string[];
+  /**
+   * 入群邀請閘門（ADR-0317）：`true`＝任何人可把我加進群組；`false`（**預設**）＝只有聯絡人。
+   * 存於跨裝置同步設定——身分層級的隱私決定，在一台設嚴格另一台照收等於沒設。
+   */
+  groupInviteFromAnyone?(): boolean;
+  setGroupInviteFromAnyone?(anyone: boolean): void;
   /** 一次性遷移（ADR-0242 階段③）：把本機舊有靜音種進同步設定，僅在鍵不存在時（不蓋遠端解除靜音）。 */
   seedMutesIfAbsent?(convoIds: string[]): void;
   /**
@@ -362,6 +411,66 @@ export interface ChatBackend {
   enableFs?(): void;
   /** 手動更換加密金鑰（ADR-0245）：生成新 EK、發新 10040；保留舊 EK 至 grace 供解在途。需先 enableFs。 */
   rotateEncryptionKey?(): void;
+  /**
+   * 停用前向保密（ADR-0314）：廣播**明示退場** `fs: "none"`、停發 10040。
+   * 金鑰**不立即刪除**（在途訊息還加密到它），交給 grace 修剪自然老化。可再 `enableFs` 重啟。
+   */
+  disableFs?(): void;
+  /** 本裝置的解封失敗觀測（ADR-0316）：持久記錄，跨重啟保留。 */
+  fsFailures?(): FsFailureLog;
+  /**
+   * 某位聯絡人／群成員現在的 FS 狀態（ADR-0319）：供群組成員面板靜態呈現。
+   *
+   * `unknown` 是**常態**（同群但沒加為聯絡人就學不到 EK），不得顯示成警告；
+   * 只有 `lost`（曾知現無）值得警示，且措辭必須沿用「可能」而非斷言（ADR-0302 §4）。
+   */
+  fsPeerState?(pubkey: PubkeyHex): "known" | "unknown" | "lost";
+  /**
+   * 觀測到的裝置清單（ADR-0321 E-lite ＋ ADR-0322 S1）：供設定頁「我的裝置」。
+   * `inDirectory: false` ＝**觀測到但不在簽章目錄內**（今天完全看不出來的那種）。
+   * `stale: true` ＝久未出現、**已被排除在撤銷判定之外**（ADR-0324）。
+   */
+  devices?(): (StoredDevice & { inDirectory: boolean; isSelf: boolean; stale: boolean })[];
+  /** 本機裝置公鑰（ADR-0322 S1）。 */
+  selfDevicePk?(): string;
+  /**
+   * 本機裝置金鑰的保護等級（ADR-0297 §6 紅線）：**設定頁必須如實顯示**。
+   * 回報實作現況而非平台能力——後者會給出比實情好看的答案。
+   */
+  deviceKeyTier?(): DeviceKeyTier;
+  /**
+   * 這把裝置金鑰**曾經**明文落盤過（ADR-0323 由 KV 遷入金鑰庫者）。
+   * 刪掉舊副本收不回可能已被複製走的東西 ⇒ 不能只說「已受金鑰庫保護」。
+   */
+  deviceKeyEverPlaintext?(): boolean;
+  /**
+   * 撤銷目前的**三態**（ADR-0322 S2，A+B+D 修正）。
+   *
+   * 布林值會把三種對使用者意義完全不同的狀態壓成一個（同 ADR-0316／0319 的分桶理由）：
+   * - `unknown`：目錄還沒建立／本機還不在目錄內 ⇒ 「請稍候」
+   * - `dual-track`：**有具體證據**顯示某台的快照仍帶著 EK 私鑰 ⇒ 「請更新裝置 xxxx」
+   * - `active`：沒有任何裝置仍在舊路徑的證據
+   *
+   * ⚠ `active` 仍**不代表沒有隱藏的裝置**（ADR-0321 的永久限制）。
+   */
+  revocationState?(): { state: "unknown" | "dual-track" | "active"; devices?: string[] };
+  /** 移除一台裝置（ADR-0322 S3）：簽 v+1 目錄 ＋ 立刻輪替 EK ＋ 只分發給剩下的。 */
+  removeDevice?(pk: string): void;
+  /**
+   * 授權一台新裝置進入目錄（ADR-0322 S5）：**只有已在目錄內的裝置能授權**。
+   * 自我登記已移除——它讓 S3 的移除完全失效（被移除的那台會自己加回來）。
+   */
+  authorizeDevice?(pk: string, label?: string): void;
+  /** 已記下的裝置目錄衝突（ADR-0322 S4）：常駐呈現用，不是一次性提示。 */
+  directoryConflicts?(): StoredDirectoryConflict[];
+  /**
+   * 忘掉一筆**觀測**（ADR-0324）：只刪本機紀錄，不動金鑰、不發事件。
+   * 供「觀測到但不在目錄內」的舊裝置用；**在目錄內的會被拒絕**——
+   * 對那些裝置「從清單移除」只是把它藏起來，授權原封不動＝假的安全感。
+   */
+  forgetDevice?(id: string): void;
+  /** 目前的裝置目錄（ADR-0322 S1）；供 UI 由可觀測 id 反查裝置公鑰。 */
+  deviceDirectory?(): { v: number; devices: { pk: string; id?: string; label?: string; at: number }[] } | null;
   /** 前向保密是否已啟用（ADR-0245）：供 UI 顯示開關狀態。 */
   fsEnabled?(): boolean;
   /**

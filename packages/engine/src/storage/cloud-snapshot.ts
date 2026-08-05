@@ -13,6 +13,7 @@ import {
   mergeAssetLibrary,
   mergeOrSet,
   mergeSyncedPrefs,
+  mergeFsEnabled,
   OR_SET_TOMBSTONE_RETENTION_MS,
   pruneFsKeys,
   pruneTombstonesByTime,
@@ -88,6 +89,12 @@ export interface CloudSnapshotContent {
  * 剝除廣播頭像（ADR-0154）：data URI 每人數 KB，N 個聯絡人即撐爆 180KB 明文預算
  * （relay 單顆 256KB 上限、超過即拒收＝備份靜默失敗）。開機廣播會重新學到，不損失。
  */
+/** 去掉某個欄位（回新物件，不變更輸入）。供剝除不該外流的裝置本地欄位。 */
+function omitKeyOf<T extends object, K extends keyof T>(obj: T, key: K): Omit<T, K> {
+  const { [key]: _drop, ...rest } = obj;
+  return rest;
+}
+
 function stripAvatar(c: StoredContact): StoredContact {
   const { avatar: _drop, ...rest } = c;
   return rest;
@@ -96,7 +103,17 @@ function stripAvatar(c: StoredContact): StoredContact {
 export function buildSnapshotContent(
   storage: AppStorage,
   mode: Exclude<CloudSyncMode, "off">,
-  opts: { now?: number } = {},
+  opts: {
+    now?: number;
+    /**
+     * ADR-0322 S2：**不要把 EK 私鑰放進快照**。
+     *
+     * 快照加密到 nsec 導出金鑰 ⇒ 任何持有 nsec 的裝置都拿得到 ⇒ 移除裝置毫無作用。
+     * 撤銷生效（所有觀測到的裝置都在目錄內）後由呼叫端傳 `true`，EK 改走 per-device 分發。
+     * ⚠ 雙軌期間必須為 `false`，否則還沒升級的自己的裝置會**靜默收不到新 EK**。
+     */
+    omitFsKeys?: boolean;
+  } = {},
 ): CloudSnapshotContent {
   const contacts = storage.loadContacts().map(stripAvatar);
   const groups = storage.loadGroups();
@@ -123,7 +140,13 @@ export function buildSnapshotContent(
   const localFs = storage.loadFsState();
   const fs: StoredFsState | undefined =
     localFs.enabled || localFs.keys.length > 0
-      ? { ...localFs, keys: pruneFsKeys(localFs.keys, opts.now ?? Date.now()) }
+      ? // ADR-0316／0325：`failures` 與 `pending` 都是**這台裝置**的東西（別台可能有那把 EK），不上雲。
+        // ⚠ `pending` 尤其不能上——那是**任何人都塞得進來**的原始密文，搬上去只是在傳遞垃圾。
+        {
+          ...omitKeyOf(omitKeyOf(localFs, "failures"), "pending"),
+          // ADR-0322 S2：撤銷生效後 EK 私鑰改走 per-device 分發，不再隨快照給所有持 nsec 者。
+          keys: opts.omitFsKeys ? [] : pruneFsKeys(localFs.keys, opts.now ?? Date.now()),
+        }
       : undefined;
   const base: CloudSnapshotContent = {
     v: 1,
@@ -228,7 +251,17 @@ function saveTombstonesIfChanged(storage: AppStorage, set: OrSetName, merged: Or
 export function mergeSnapshotContent(
   storage: AppStorage,
   content: CloudSnapshotContent,
-  opts: { now?: number } = {},
+  opts: {
+    now?: number;
+    /**
+     * 來源裝置**已被撤銷**（ADR-0334）：它的快照不得對 FS 開關投票。
+     *
+     * 🔴 一台弄丟／已交還的裝置留下的快照是**可取代事件、留在中繼上**，那台不必還在線上。
+     * 若讓它繼續投票，使用者在手上的裝置怎麼關都會被那份殭屍快照翻回來——
+     * 而他**沒有辦法清掉別台的快照**（`purgeCloudSnapshot` 只能清自己那份）。
+     */
+    fromRevokedDevice?: boolean;
+  } = {},
 ): { changed: boolean; convos: string[] } {
   let changed = false;
   // 時間 GC（ADR-0242）：合併後回寫墓碑前，丟棄早於保留窗者——超窗回收、收斂大小。
@@ -323,8 +356,17 @@ export function mergeSnapshotContent(
     for (const k of [...local.keys, ...content.fs.keys]) {
       if (k && typeof k.nsec === "string" && typeof k.pk === "string" && typeof k.at === "number") byPk.set(k.pk, k);
     }
+    // ADR-0334：帶時間戳的 LWW 取代原本的 OR——沒有時間概念的 OR 會讓**停用永遠被舊快照撤銷**。
+    // 已撤銷裝置不投票（見 `fromRevokedDevice` 的說明）。
+    const vote = opts.fromRevokedDevice
+      ? { enabled: local.enabled, ...(local.enabledAt !== undefined ? { at: local.enabledAt } : {}) }
+      : mergeFsEnabled(
+          { enabled: local.enabled, ...(local.enabledAt !== undefined ? { at: local.enabledAt } : {}) },
+          { enabled: content.fs.enabled === true, ...(content.fs.enabledAt !== undefined ? { at: content.fs.enabledAt } : {}) },
+        );
     const merged: StoredFsState = {
-      enabled: local.enabled || content.fs.enabled === true,
+      enabled: vote.enabled,
+      ...(vote.at !== undefined ? { enabledAt: vote.at } : {}),
       keys: pruneFsKeys([...byPk.values()], opts.now ?? Date.now()), // union 後修剪逾 grace
       contactEks: { ...(content.fs.contactEks ?? {}), ...local.contactEks }, // union，本地衝突優先
       pinned: { ...(content.fs.pinned ?? {}), ...(local.pinned ?? {}) }, // union 釘選（ADR-0245：一台釘＝全釘）
@@ -336,6 +378,15 @@ export function mergeSnapshotContent(
       ...(content.fs.unsupported || local.unsupported
         ? { unsupported: { ...(content.fs.unsupported ?? {}), ...(local.unsupported ?? {}) } }
         : {}),
+      // ADR-0314：明示退場旗標。**這是上面那段警告的第二個受害者候選**——逐欄位建構漏掉它，
+      // 個人檔就會從 `"none"` 退回欄位缺席，而缺席在對方那裡＝「可能被攻擊」的假警報。
+      // OR 合併與 `enabled` 同構（一台重新啟用即整體視為啟用，`enabled` 會蓋過去）。
+      ...(local.retired || content.fs.retired ? { retired: true } : {}),
+      // ADR-0316：`failures` 是裝置本地觀測——**只保留本機的**，不接受快照帶來的計數。
+      ...(local.failures ? { failures: local.failures } : {}),
+      // ADR-0325：`pending` 同理——只保留本機的。**逐欄位建構的老陷阱**（`unsupported`／`retired`
+      // 都在這裡被漏掉過）：漏了它，同步一次就會把本機待補解的密文清光。
+      ...(local.pending ? { pending: local.pending } : {}),
     };
     if (JSON.stringify(merged) !== JSON.stringify(local)) {
       storage.saveFsState(merged);

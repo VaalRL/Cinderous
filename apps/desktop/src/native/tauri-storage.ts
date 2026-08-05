@@ -11,6 +11,8 @@ import type {
   OrSetName,
   StorageSnapshot,
   StoredFsState,
+  StoredDevice,
+  StoredDirectoryConflict,
   StoredBootstrapList,
   StoredContact,
   StoredGroup,
@@ -514,6 +516,20 @@ export class TauriStorage implements AppStorage {
   }
   saveFsState(state: StoredFsState): void {
     this.mem.saveFsState(state); // ADR-0245：隨 META 加密落地
+    this.persist(META);
+  }
+  loadDirectoryConflicts(): StoredDirectoryConflict[] {
+    return this.mem.loadDirectoryConflicts();
+  }
+  saveDirectoryConflicts(list: StoredDirectoryConflict[]): void {
+    this.mem.saveDirectoryConflicts(list); // ADR-0322 S4：隨 META 加密落地
+    this.persist(META);
+  }
+  loadDevices(): StoredDevice[] {
+    return this.mem.loadDevices();
+  }
+  saveDevices(list: StoredDevice[]): void {
+    this.mem.saveDevices(list); // ADR-0321：隨 META 加密落地
     this.persist(META);
   }
   loadSyncedPrefs(): SyncedPrefs {

@@ -1,6 +1,6 @@
 /** 本機持久化的資料型別（身分、聯絡人、訊息）。 */
 
-import type { AssetBlob, AssetTombstone, CustomAsset, OrSetTombstone, SyncedPrefs } from "@cinderous/core";
+import type { AssetBlob, AssetTombstone, CustomAsset, FsFailureLog, OrSetTombstone, PendingFsEvent, SyncedPrefs } from "@cinderous/core";
 import type { MessageArchive } from "./archive.js";
 
 /**
@@ -465,6 +465,12 @@ export interface AppStorage {
    * 前向保密狀態（ADR-0245）：opt-in 開關、我的 EK 金鑰（current＋grace 內舊把）、每聯絡人學到的 EK。
    * EK 私鑰加密落地（同 at-rest 保護）；grace 後由引擎刪除（刪除紀律）。未設過回傳預設空狀態。
    */
+  /** 觀測到的裝置清單（ADR-0321）。**不進雲端快照、不進配對捆包**——這台裝置的觀測。 */
+  loadDevices(): StoredDevice[];
+  saveDevices(list: StoredDevice[]): void;
+  /** 裝置目錄衝突紀錄（ADR-0322 S4）；裝置本地，不進同步路徑。 */
+  loadDirectoryConflicts(): StoredDirectoryConflict[];
+  saveDirectoryConflicts(list: StoredDirectoryConflict[]): void;
   loadFsState(): StoredFsState;
   saveFsState(state: StoredFsState): void;
 }
@@ -480,6 +486,16 @@ export interface StoredFsKey {
 export interface StoredFsState {
   /** opt-in：啟用才生成 EK、retarget、發 10040、宣告 capability。預設 false。 */
   enabled: boolean;
+  /**
+   * `enabled` 最後一次被**使用者動作**改變的時間（毫秒；ADR-0334）。
+   *
+   * 🔴 存在的理由：多裝置合併原本是 `local.enabled || remote.enabled`——沒有時間概念的 OR，
+   * 於是**停用永遠會被另一台的舊快照撤銷**（那份快照是可取代事件，留在中繼上，
+   * 那台裝置甚至不必還在線上）。有了時間戳才分得出「舊的啟用」與「新的停用」。
+   *
+   * 缺省（舊資料／舊版快照）視為**比任何有時間戳的一方更舊**。
+   */
+  enabledAt?: number;
   /** 我的 EK 金鑰：current（最大 at）＋grace 內舊把（供解在途/自我副本）。 */
   keys: StoredFsKey[];
   /** 每聯絡人學到的當前 EK 公鑰（聯絡人 pubkey → ek pubkey）。 */
@@ -498,6 +514,76 @@ export interface StoredFsState {
    * 可選（舊存檔缺＝視為空）。清空的時機：對方改回我們支援的機制或明示退場。
    */
   unsupported?: Record<string, string>;
+  /**
+   * 曾啟用後又停用（ADR-0314）：個人檔改宣告 `fs: "none"`（明示退場）而非讓欄位缺席。
+   *
+   * 不能用 `enabled === false` 推導——「從未啟用過」與「啟用過又關掉」必須是兩種宣告：
+   * 前者是絕大多數使用者，對他們送 `"none"` 等於向全網宣告一件沒發生過的事；
+   * 而後者若送成缺席，會讓釘選過我的聯絡人永久看到「對方可能正在被攻擊」的假警報。
+   */
+  retired?: boolean;
+  /**
+   * 解封失敗的觀測記錄（ADR-0316）。**這台裝置**的觀測——另一台裝置可能有那把 EK，
+   * 故**不進雲端快照、不進配對捆包**（兩處的淨化邏輯各自剝除）。
+   */
+  failures?: FsFailureLog;
+  /**
+   * 暫時解不開、留著等 EK 同步回來再試的事件（ADR-0325）。
+   *
+   * 同 `failures`：**這台裝置**的東西——別台可能早就有那把 EK 而順利解開了，
+   * 把它搬過去只是在傳遞垃圾。故**不進雲端快照、不進配對捆包**。
+   * 🔴 這個清單**攻擊者填得進來**（分不出缺 EK 與垃圾密文），上限與 TTL 在 `subkey.ts`。
+   */
+  pending?: PendingFsEvent[];
+}
+
+/**
+ * 觀測到的裝置（ADR-0321 E-lite）。**這是「這台裝置看到過什麼」的本地觀測**，
+ * 不是權威的裝置目錄（那是 ADR-0303 選項 A，且 §7「清單住在哪」尚未決策）。
+ *
+ * 🔴 **看不到純被動讀取的裝置**：中繼只按 `#p` 轉發，任何持有 nsec 的人都能安靜地訂閱並解密，
+ * 不必向任何人宣告存在。本清單偵測得到的是**會寫入的裝置**。UI 必須說出這件事。
+ */
+export interface StoredDevice {
+  /** `getDeviceId()` 產生的隨機 id（8 bytes hex）。 */
+  id: string;
+  /** 首次見到（毫秒）——新裝置警示以此判定，不是每次看到都喊。 */
+  firstSeen: number;
+  /** 最近一次見到（毫秒）。 */
+  lastSeen: number;
+  /** 從哪個訊號看到的。 */
+  source: "local" | "snapshot" | "pairing";
+  /**
+   * 這台裝置**最近一份快照是否仍帶著 EK 私鑰**（ADR-0322 S2）。
+   *
+   * 這是「還有裝置走舊路徑」的**直接證據**，不是推論——舊路徑就是「EK 隨快照走」，
+   * 而快照的內容我們解得開、也知道是哪台發的（`d` tag）。
+   */
+  carriesEkKeys?: boolean;
+  /**
+   * 已被使用者移除（ADR-0322 S3）。
+   *
+   * ⚠ **必須記下來**：移除後它就不在目錄內了，若不標記，它會被當成「還沒升級的裝置」
+   * ⇒ 本機又把 EK 放回快照 ⇒ **剛撤銷的裝置立刻拿回金鑰**。
+   */
+  revoked?: boolean;
+}
+
+/**
+ * 一次裝置目錄衝突的紀錄（ADR-0322 S4）。**持久化**——這是「身分私鑰可能已外洩」等級的事件，
+ * 只彈一次對話框、重開就消失太輕。裝置本地觀測，不進雲端快照／配對捆包。
+ */
+export interface StoredDirectoryConflict {
+  /** 發生時間（毫秒）。 */
+  at: number;
+  /** 當時本機目錄的版本。 */
+  mineV: number;
+  /** 收到那份的版本。 */
+  incomingV: number;
+  /** 目前只有 `rollback`（同版本分歧判不出方向，已改以聯集收斂）。 */
+  reason: "rollback";
+  /** 那份目錄裡列出的裝置公鑰（供事後比對）。 */
+  devicePks: string[];
 }
 
 /** OR-Set 集合名（ADR-0242）：多設備可變集合的三個墓碑桶。 */

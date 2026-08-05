@@ -9,7 +9,7 @@
 
 import { stripDeviceLocalFile } from "./types.js";
 import { utf8ByteLength } from "./utf8-size.js";
-import type { AppStorage, StorageSnapshot, StoredIdentity, StoredMessage } from "./types.js";
+import type { AppStorage, StorageSnapshot, StoredFsState, StoredIdentity, StoredMessage } from "./types.js";
 
 /**
  * 企業身分精華（ADR-0172）：搬家時把「這是不是工作/企業主身分」隨捆包帶到新機，
@@ -74,7 +74,8 @@ export function exportFullSnapshot(storage: AppStorage, identity?: StoredIdentit
     bootstrapList: storage.loadBootstrapList(),
     // FS 狀態（ADR-0245）：**帶金鑰、不帶 `enabled`**（語意與理由見 StorageSnapshot.fs）。
     // 不帶金鑰的後果不是「少個功能」，是新機**靜默丟掉**所有加密到 EK 的訊息。
-    fs: { ...storage.loadFsState(), enabled: false },
+    // ADR-0316／0325：`failures`／`pending` 是**來源裝置**的東西，不隨捆包搬到新機。
+    fs: { ...omitFailures(storage.loadFsState()), enabled: false },
   };
 }
 
@@ -150,6 +151,13 @@ export function buildPairBundle(
 }
 
 /** 淨化 org（ADR-0172）：只留合法欄位；全空回 undefined（＝一般身分，不帶）。 */
+/** 剝掉裝置本地的解封失敗觀測與待補解密文（ADR-0316／0325）；其餘 FS 狀態原樣帶走。 */
+function omitFailures(fs: StoredFsState): StoredFsState {
+  if (!fs.failures && !fs.pending) return fs;
+  const { failures: _drop, pending: _alsoDrop, ...rest } = fs;
+  return rest;
+}
+
 function sanitizeBundleOrg(raw: unknown): PairBundleOrg | undefined {
   if (!raw || typeof raw !== "object") return undefined;
   const o = raw as Record<string, unknown>;

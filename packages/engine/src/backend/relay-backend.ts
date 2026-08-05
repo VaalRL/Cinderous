@@ -132,8 +132,29 @@ import {
   buildEkAnnounce,
   EK_ANNOUNCE_KIND,
   ekHintOf,
+  buildDeviceDirectory,
+  buildEkEnvelope,
+  withoutDevice,
+  EK_ENVELOPE_KIND,
+  openEkEnvelope,
+  DEVICE_DIRECTORY_KIND,
+  classifyDirectory,
+  incomingWins,
+  EMPTY_FS_FAILURE_LOG,
+  deviceIdInDirectory,
+  inDirectory,
+  readDeviceDirectory,
+  withDevice,
+  type DeviceDirectory,
   FS_CAPABILITY,
+  FS_RETIRED,
   generateEncryptionKey,
+  recordFsFailure,
+  retainPendingFs,
+  prunePendingFs,
+  type PendingFsEvent,
+  shouldRotateFs,
+  type FsFailureLog,
   openWrapWithEks,
   pruneFsKeys,
   readEkAnnounce,
@@ -147,6 +168,9 @@ import { WebRtcCall } from "./webrtc-call.js";
 import { WebRtcTransfer } from "./webrtc.js";
 import { buildSnapshotContent, mergeSnapshotContent, parseSnapshotContent } from "../storage/cloud-snapshot.js";
 import { getDeviceId } from "../storage/device-id.js";
+import { deviceKeyEverPlaintext, deviceKeyTier, getDeviceKey, type DeviceKeyTier } from "../storage/device-key.js";
+import { isDeviceStale } from "../storage/device-age.js";
+import type { StoredDevice, StoredDirectoryConflict } from "../storage/types.js";
 import type { AppStorage, MessageStatus, OrSetName, StoredCalendarEvent, StoredFsState, StoredMessage } from "../storage/types.js";
 import type {
   ChatBackend,
@@ -187,6 +211,8 @@ const MAX_REQUESTS = 100;
 
 /** 早到群訊緩存的上限（ADR-0131）：防止惡意假 `g` tag 撐爆記憶體。 */
 const MAX_PENDING_GROUPS = 32;
+/** 每位邀請者最多緩存幾封被擋下的入群邀請（ADR-0317）。 */
+const MAX_HELD_INVITES_PER_PEER = 8;
 const MAX_PENDING_PER_GROUP = 64;
 const nowSec = () => Math.floor(Date.now() / 1000);
 
@@ -450,6 +476,15 @@ export interface RelayPoolOptions {
 
 /** 每對話靜音在同步設定表中的鍵前綴（ADR-0242 階段③）：`mute:<convoId>` → v "1"＝靜音。 */
 const MUTE_PREFIX = "mute:";
+/**
+ * 入群邀請閘門的同步設定鍵（ADR-0317）。值：`"contacts"`＝只有聯絡人可邀；
+ * 其餘（含缺席／空字串）＝**任何人**（今日行為，預設）。
+ *
+ * ⚠ 預設**刻意不收緊**：本 ADR 初稿選了嚴格預設，實作後 17 個既有測試變紅——
+ * 因為**加聯絡人是單方面的**（ADR-0121），Alice 把 Bob 加進聯絡人不代表 Bob 有 Alice
+ * ⇒ 「同事把你拉進工作群」這個正常用法會被大量擋下。那不是測試的問題，是預設值的問題。
+ */
+const GROUP_INVITE_PREF = "groupInvite";
 
 export class RelayChatBackend implements ChatBackend {
   readonly self: Self;
@@ -574,6 +609,26 @@ export class RelayChatBackend implements ChatBackend {
   private readonly pendingDeletes = new Map<string, { from: PubkeyHex; traceless?: boolean }[]>();
   /** 早到群訊緩存（ADR-0131）：指向本地還不存在的群組的訊息，待加入後重放（有界）。 */
   private readonly pendingGroupMsgs = new Map<string, { sender: PubkeyHex; rumor: Rumor }[]>();
+  /** 被入群閘門擋下、等待邀請者被接受的邀請（ADR-0317）；邀請者 pubkey → 控制訊息。 */
+  private readonly heldInvites = new Map<PubkeyHex, GroupControl[]>();
+  /** 目前採用的裝置目錄（ADR-0322 S1）；尚未建立為 null。 */
+  private deviceDir: DeviceDirectory | null = null;
+  /** 產生本機目前這份目錄的那顆事件（ADR-0099 §2 決勝用）。 */
+  private deviceDirEvent: { created_at: number; id: string } | null = null;
+  /**
+   * 本機裝置金鑰，**建構時讀一次**（ADR-0322 S1）。
+   * KV 不可用時 `getDeviceKey()` 每次都生新的一把（見該模組），不快取就會讓
+   * 「我是誰」在同一個 session 內飄移——目錄裡簽的是 A、`selfDevicePk()` 回 B。
+   */
+  private readonly deviceKey = getDeviceKey();
+  /**
+   * 本機裝置 id，**建構時讀一次**。`getDeviceId()` 在 KV 不可用時會**每次回一個新的隨機值**
+   * （它只在整段 try 拋出時才回固定的 "dev"，而 KV 的 get/set 各自吞掉例外）
+   * ⇒ 每呼叫一次就是一台「不同的裝置」。這與 `deviceKey` 是同一類陷阱。
+   */
+  private readonly deviceIdCached = getDeviceId();
+  /** 已回報過的目錄衝突（避免同一份重複洗版；同 `fsNoticed` 的去重理由）。 */
+  private conflictNoticed = "";
   /** 已送出的最新「已讀」水位訊息 id（避免重複送已讀回條）。
    *  鍵：1:1 為對方 pubkey；群組為 `<groupId>:<發訊者pubkey>`（每位發訊者各一條水位，ADR-0095）。 */
   private readonly lastReadSent = new Map<string, string>();
@@ -705,6 +760,7 @@ export class RelayChatBackend implements ChatBackend {
     this.contacts = storage.loadContacts();
     this.fsState = storage.loadFsState(); // ADR-0245：前向保密狀態
     this.pruneFs(); // 開機即執行刪除紀律：修剪逾 grace 的舊 EK
+    this.noteDevice(this.deviceIdCached, "local"); // ADR-0321：本機恆在清單上
     this.myAvatar = storage.loadSelfAvatar(); // ADR-0154：開機廣播帶上頭像（或移除記號）
     this.myTitle = storage.loadSelfTitle(); // ADR-0158：企業頭銜同理
     this.blocked = storage.loadBlocked();
@@ -1017,6 +1073,8 @@ export class RelayChatBackend implements ChatBackend {
       sub({ kinds: [KIND.OFFLINE_DM_GIFT_WRAP], "#p": me }, (u) => this.inboxSince(u)),
       // 自己的雲端快照（ADR-0071 J3）：接收合併恆開——換機還原不需任何前置設定。
       sub({ kinds: [SNAPSHOT_KIND], authors: me }, "n/a"),
+      sub({ kinds: [DEVICE_DIRECTORY_KIND], authors: me }, "n/a"), // ADR-0322 S1：自己的裝置目錄
+      sub({ kinds: [EK_ENVELOPE_KIND], authors: me }, "n/a"), // ADR-0322 S2：EK 的 per-device 分發
       sub({ kinds: [SDP_SIGNAL_KIND], "#p": me }, "n/a"),
       sub({ kinds: [CALL_SIGNAL_KIND], "#p": me }, "n/a"),
       sub({ kinds: [PRESENCE_SIGNAL_KIND], "#p": me }, "n/a"), // 封裝的在線狀態（ADR-0129）
@@ -1172,6 +1230,33 @@ export class RelayChatBackend implements ChatBackend {
       encryptToFor: (pk) => (pk === selfPk ? my.pk : this.fsState.contactEks[pk] ?? pk),
     };
   }
+  /**
+   * Tier A 的 FS 選項（ADR-0318）：**只給 `encryptToFor`，刻意不給 `myEk`**。
+   *
+   * 1:1 會在 rumor 內嵌 `ek` hint 讓對方即時學到；但檔案 metadata 與行程的 `rumor.id`
+   * 是跨成員／跨時間的識別碼（ADR-0095／0264 §9），把每 7 天輪替一次的值放進去
+   * ⇒ 同一個行程補送前後會得到不同 id ＝ 重複行程 ＋ 孤兒 RSVP。hint 由 kind 10040 承擔。
+   */
+  private fsRetarget(): { encryptToFor: (pk: PubkeyHex) => PubkeyHex } | Record<string, never> {
+    const fs = this.fsSendOpt();
+    return fs ? { encryptToFor: fs.encryptToFor } : {};
+  }
+
+  /**
+   * 群訊專用（ADR-0326）：retarget ＋ **seal 層的 EK hint**。
+   *
+   * 為什麼群訊要多這一味：EK 只能從「他也是我的聯絡人」的 kind 10040 訂閱學到，
+   * 而**加聯絡人是單方面的**（ADR-0317）⇒ 同群但沒加過的人，他的 EK 我**永遠**學不到、
+   * 也不會隨時間改善（實測見 ADR-0326 §1）。seal 層 hint 讓群訊自己帶著發現機制，
+   * 不必為此把群成員集合也交給中繼（那才是真正的代價）。
+   */
+  private fsRetargetGroup(): { encryptToFor?: (pk: PubkeyHex) => PubkeyHex; myEk?: PubkeyHex } {
+    const fs = this.fsSendOpt();
+    if (!fs) return {};
+    const myEk = this.myCurrentEk();
+    return { encryptToFor: fs.encryptToFor, ...(myEk ? { myEk: myEk.pk } : {}) };
+  }
+
   /** 學到某聯絡人當前 EK（收 10040 或訊息內嵌 hint）；順帶 TOFU 釘選「此人用 FS」。 */
   private learnContactEk(pubkey: PubkeyHex, ek: string): void {
     const known = this.fsState.contactEks[pubkey] === ek && (this.fsState.pinned?.[pubkey] ?? false);
@@ -1223,7 +1308,9 @@ export class RelayChatBackend implements ChatBackend {
   /** 多鑰解封並順帶學對方 EK（rumor 內嵌 hint）。取代裸 unwrapMessage——FS 未啟用時候選只有 IK＝行為不變。 */
   private openFs(event: NostrEvent): UnwrappedMessage {
     const opened = openWrapWithEks(event, this.fsDecryptCandidates());
-    const ek = ekHintOf(opened.rumor.tags);
+    // rumor 內嵌 hint（1:1，ADR-0245）；seal 層 hint（群訊，ADR-0326——rumor.id 必須穩定，
+    // 所以群訊的 hint 只能放 seal，那層是逐收件人的、且加密在 wrap 內）。
+    const ek = ekHintOf(opened.rumor.tags) ?? ekHintOf(opened.sealTags);
     if (ek) this.learnContactEk(opened.sender, ek);
     return opened;
   }
@@ -1243,13 +1330,439 @@ export class RelayChatBackend implements ChatBackend {
     this.fsState = {
       ...this.fsState,
       enabled: true,
+      enabledAt: Date.now(), // ADR-0334：使用者動作的時間，供多裝置 LWW
+      retired: false, // ADR-0314：重新啟用即清掉退場旗標（否則個人檔會繼續宣告 "none"）
       keys: [...this.fsState.keys, { nsec: nsecEncode(ek.sk), pk: ek.pk, at: Date.now() }],
     };
     this.persistFs();
     this.resubscribe(); // 掛上 `{kinds:[10040], authors:[聯絡人]}` 訂閱（搭 presence）
     this.publishEkAnnounce();
+    this.publishEkEnvelope(); // ADR-0322 S2
     this.profileSentTo.clear(); // 重新廣播個人檔 → 聯絡人學到我的 FS capability（TOFU 釘選）
     this.broadcastProfile();
+  }
+
+  /**
+   * 停用前向保密（ADR-0314）：**明示退場**，不是把宣告拿掉。
+   *
+   * 廣播 `fs: "none"` 而非讓欄位缺席——後者在收件端與「被攻擊剝除 EK」看起來一樣，
+   * 會讓每個釘選過我的聯絡人永久看到一句關於我的假警報（ADR-0306 D3.3c 造 `FS_RETIRED`
+   * 的全部理由）。
+   *
+   * **不刪金鑰**：停用當下仍有在途訊息加密到我的 EK（對方還沒學到我退場）。
+   * 立刻刪＝那些訊息靜默消失。交給既有的 grace 修剪自然老化即可。
+   */
+  disableFs(): void {
+    if (!this.fsState.enabled) return;
+    // ADR-0334：蓋上時間戳——沒有它，這次停用會被另一台的舊快照以 OR 撤銷。
+    this.fsState = { ...this.fsState, enabled: false, enabledAt: Date.now(), retired: true };
+    this.persistFs();
+    this.resubscribe(); // 卸掉 10040 訂閱
+    this.profileSentTo.clear(); // 重播個人檔 → 聯絡人讀到 "none" 並解除釘選
+    this.broadcastProfile();
+  }
+
+  /**
+   * 記一次解封失敗（ADR-0316）。
+   *
+   * 密碼學上**無法**區分「我沒有正確的金鑰」與「這段密文是垃圾」——兩者都是 MAC 驗證失敗。
+   * 唯一確定的方向是不對稱的：從未持有過 EK 時的失敗確定與 FS 無關。故 `hadEk` 決定進哪個桶，
+   * 而 `maybeEkLoss` 的名字帶著「可能」。
+   */
+  private noteUndecryptable(event?: NostrEvent): void {
+    const now = Date.now();
+    const hadEk = this.fsState.keys.length > 0 || this.fsState.retired === true;
+    const failures = recordFsFailure(this.fsState.failures ?? EMPTY_FS_FAILURE_LOG, now, hadEk);
+    this.fsState = { ...this.fsState, failures };
+    // ADR-0325：留著等 EK 同步回來再試。
+    // **只留 `hadEk` 的那一桶**——從未持有過 EK 時的失敗確定與 FS 無關（ADR-0316 的不對稱），
+    // 留下來永遠不會解得開，只是白白給攻擊者一個塞東西的地方。
+    if (hadEk && event) {
+      const prev = this.fsState.pending ?? [];
+      const next = retainPendingFs(prev, { id: event.id, at: now, json: JSON.stringify(event) }, now);
+      if (next !== prev) this.fsState = { ...this.fsState, pending: next };
+    }
+    this.persistFs();
+    if (hadEk) this.handlers?.onFsUndecryptable?.(failures);
+  }
+
+  /**
+   * EK 同步回來後，重試留著的密文（ADR-0325）。
+   *
+   * 🔴 **不能走 `onEvent()` 重放**：那裡第一件事就是 `seenBefore(event.id)`，而這些事件的 id
+   * 早就在 `seenEvt` 裡了 ⇒ 重放會被自己的去重悄悄吃掉。故直接分派到對應的收件處理。
+   *
+   * 🔴 **先用 `openFs()` 試一次，成功才分派**：直接分派的話，還是解不開的那些會再次走進
+   * `noteUndecryptable()` ⇒ **每次 EK 到貨就把失敗計數灌大一輪**，而那個數字是 ADR-0316
+   * 給使用者看的東西。試一次的代價是多解一次，換掉一個會讓計數失去意義的迴圈。
+   */
+  private retryPendingFs(): void {
+    const pending = this.fsState.pending ?? [];
+    if (pending.length === 0) return;
+    const stuck: PendingFsEvent[] = [];
+    const ready: NostrEvent[] = [];
+    for (const p of prunePendingFs(pending, Date.now())) {
+      let evt: NostrEvent;
+      try {
+        evt = JSON.parse(p.json) as NostrEvent;
+      } catch {
+        continue; // 存壞了就丟掉，沒有補救價值
+      }
+      try {
+        this.openFs(evt);
+        ready.push(evt);
+      } catch {
+        stuck.push(p);
+      }
+    }
+    if (ready.length === 0 && stuck.length === pending.length) return;
+    this.fsState = { ...this.fsState, pending: stuck };
+    this.persistFs();
+    for (const evt of ready) {
+      if (evt.kind === KIND.FILE_WRAP) this.receiveFileChunk(evt);
+      else this.receiveDm(evt);
+    }
+  }
+
+  /**
+   * 某位群成員現在的 FS 狀態（ADR-0319）：**三態，且名稱帶著它真正的意思**。
+   *
+   * - `known`：我有他的 EK ⇒ 送給他的那一份有前向保密。
+   * - `unknown`：我沒有他的 EK ⇒ 退回加密到身分。**這是常態，不是警告**——
+   *   EK 只從「他也是我的聯絡人」的 10040 訂閱或他的 1:1 hint 學到，而加聯絡人是單方面的
+   *   （ADR-0317）⇒ 同群但沒加過的人，本來就學不到。
+   * - `lost`：**曾知現無**（`pinned && !contactEks`）——與 1:1 的降級條件相同，值得注意。
+   *
+   * 三態不合併成二元「安全／不安全」的理由同 ADR-0316 的兩桶：把不同的事實合併成一個
+   * 紅色驚嘆號，會讓真正該注意的那一態失去意義。
+   */
+  fsPeerState(pubkey: PubkeyHex): "known" | "unknown" | "lost" {
+    if (this.fsState.contactEks[pubkey]) return "known";
+    return this.fsState.pinned?.[pubkey] ? "lost" : "unknown";
+  }
+
+  /**
+   * 記錄一次「看到某台裝置」（ADR-0321 E-lite）。首見即發 `onNewDevice`。
+   *
+   * 🔴 **看得到的是「會寫入的裝置」。** 中繼只按 `#p` 轉發，任何持有 nsec 的人都能
+   * **純被動訂閱並解密**、不必宣告存在 ⇒ 只讀取的攻擊者這裡完全看不到。
+   * 這個限制必須在 UI 說出來，否則使用者會把「清單只有一台」讀成「沒有人在偷看」。
+   */
+  private noteDevice(id: string, source: "local" | "snapshot" | "pairing"): void {
+    if (!id) return;
+    const now = Date.now();
+    const list = this.storage.loadDevices();
+    const existing = list.find((d) => d.id === id);
+    if (existing) {
+      if (now - existing.lastSeen < 60_000) return; // 節流：同一台一分鐘內不重複寫
+      this.storage.saveDevices(list.map((d) => (d.id === id ? { ...d, lastSeen: now } : d)));
+      this.emitDevices();
+      return;
+    }
+    this.storage.saveDevices([...list, { id, firstSeen: now, lastSeen: now, source }]);
+    this.emitDevices();
+    // 本機那台不算「多了一台」——它就是使用者正在看的這台。
+    if (source !== "local") this.handlers?.onNewDevice?.(id, source);
+  }
+
+  /**
+   * 收到自己的裝置目錄（ADR-0322 S1）。
+   *
+   * ⚠ **分歧先判、再採用**：同版本內容不同或版本倒退 ⇒ 有人用你的 nsec 簽了另一份
+   * （〈買不到什麼〉第 1 點）。S1 先發訊號，S4 再做完整呈現——但**不自動選邊**。
+   */
+  private receiveDeviceDirectory(event: NostrEvent): void {
+    const incoming = readDeviceDirectory(event, this.sk);
+    if (!incoming) return;
+    const div = classifyDirectory(this.deviceDir, incoming);
+    if (div.kind === "conflict") {
+      // 去重：同一份經多座中繼到達會重複觸發，洗版會讓使用者無視它（同 fsNoticed 的理由）。
+      const key = `${this.deviceDir?.v ?? 0}:${incoming.v}:${event.id}`;
+      if (this.conflictNoticed !== key) {
+        this.conflictNoticed = key;
+        this.recordDirectoryConflict(incoming, div.reason);
+        this.handlers?.onDeviceDirectoryConflict?.(this.deviceDir?.v ?? 0, incoming.v);
+      }
+      return; // 版本倒退：不採用（採用等於接受重放）
+    }
+    if (div.kind === "concurrent") {
+      // 同版本分歧**不合併**（S5）：合併等於讓自我登記從另一扇門回來。
+      // 以 ADR-0099 §2 的既有決勝規則選出唯一勝方，兩邊必然收斂到同一份。
+      // 輸的那台不會失聯——它照舊走舊路徑，使用者在勝方按一次「授權」即可把它加回來。
+      if (!incomingWins(this.deviceDirEvent, event)) return; // 我方勝：不動
+      this.deviceDir = incoming;
+      this.deviceDirEvent = { created_at: event.created_at, id: event.id };
+      this.emitDevices();
+      return;
+    }
+    if (this.deviceDir && incoming.v <= this.deviceDir.v) return;
+    this.deviceDir = incoming;
+    this.deviceDirEvent = { created_at: event.created_at, id: event.id };
+    this.emitDevices();
+    // ⚠ **刻意不在這裡把自己加進去**（S5）：那就是讓 S3 失效的自我登記。
+    // 不在目錄內的裝置照舊走舊路徑，並由 `revocationState()` 回報 dual-track。
+  }
+
+  /**
+   * 授權一台新裝置進入目錄（ADR-0322 S5）。
+   *
+   * **只有已在目錄內的裝置能授權**——這是論文（DIMVA 2021 §5.2）指出的承重點：
+   * 授權憑證必須是**當期的短期狀態**，不能是長期祕密。一台**現役且活著**的裝置主動按下授權，
+   * 正好具備那個性質；而自我登記（舊行為）只需要 nsec ＝ 長期祕密 ⇒ 一次外洩即永久可加裝置。
+   *
+   * ⚠ 這**擋不住**已經在你機器上有執行權的攻擊者（他可以直接操作這個 UI，
+   * ADR-0303 §6.7-1b）。它擋的是「只拿到 nsec／磁碟映像、沒有你這台的活體參與」的那一類。
+   */
+  authorizeDevice(pk: PubkeyHex, label?: string): void {
+    if (!this.deviceDir) return; // 還沒有目錄 → 先讓本機創世
+    if (!inDirectory(this.deviceDir, this.deviceKey.pk)) return; // 本機不在目錄內＝沒有授權資格
+    const next = withDevice(this.deviceDir, { pk, at: nowSec(), ...(label ? { label } : {}) });
+    if (next === this.deviceDir) return;
+    this.deviceDir = next;
+    const evt = buildDeviceDirectory(this.sk, next);
+    this.deviceDirEvent = { created_at: evt.created_at, id: evt.id };
+    this.client.publish(evt);
+    for (const c of this.relayPool.values()) c.publish(evt);
+    this.publishEkEnvelope(); // 新裝置立刻拿得到當前 EK
+    this.emitDevices();
+  }
+
+  /**
+   * 記下一次目錄衝突（ADR-0322 S4）。
+   *
+   * **持久化**是刻意的：這是「你的身分私鑰可能已外洩」等級的事件，只彈一次對話框、
+   * 重開就消失太輕了——使用者事後想確認「我到底看到了什麼」必須查得到。有界（保留最近 8 筆）。
+   */
+  private recordDirectoryConflict(incoming: DeviceDirectory, reason: "rollback"): void {
+    const list = this.storage.loadDirectoryConflicts();
+    const next = [
+      ...list,
+      {
+        at: Date.now(),
+        mineV: this.deviceDir?.v ?? 0,
+        incomingV: incoming.v,
+        reason,
+        devicePks: incoming.devices.map((d) => d.pk),
+      },
+    ];
+    this.storage.saveDirectoryConflicts(next.slice(-8));
+  }
+
+  /** 已記下的目錄衝突（ADR-0322 S4）：供設定頁常駐呈現，不是一次性提示。 */
+  directoryConflicts(): StoredDirectoryConflict[] {
+    return this.storage.loadDirectoryConflicts();
+  }
+
+  /**
+   * **建立**裝置目錄（ADR-0322 S1；S5 修正：只做創世，不做自我登記）。
+   *
+   * 🔴 **原本這裡會把自己加進「已存在的」目錄，那讓 S3 的移除完全失效**——
+   * 被移除的那台收到 v+1 後發現自己不在，就自己簽 v+2 加回來，而本機因為版本較新照單全收。
+   * 實測顯示這整串**在 `removeDevice()` 的同一個呼叫堆疊裡就完成了**。
+   * 撤銷與自我登記在同一個系統裡是互相抵銷的。
+   *
+   * ⇒ 現在只處理**創世**（目錄尚不存在）。加入既有目錄一律走 {@link authorizeDevice}
+   * ——由一台**已在目錄內的現役裝置**主動授權，這正是 ADR-0303 §4.4 引論文要求的
+   * 「授權憑證必須是當期的短期狀態，不能是長期祕密」。
+   *
+   * ⚠ 沒被授權的裝置**不會失聯**：它仍走舊路徑（快照帶 EK），而 `revocationState()`
+   * 會如實回報 `dual-track`。撤銷要生效，前提就是使用者真的把每台都授權過。
+   */
+  private ensureSelfInDirectory(): void {
+    if (this.deviceDir) return; // 已有目錄 → 只能被授權，不能自己加
+    const next = withDevice(null, { pk: this.deviceKey.pk, id: this.deviceIdCached, at: nowSec() });
+    this.deviceDir = next;
+    const evt = buildDeviceDirectory(this.sk, next);
+    this.deviceDirEvent = { created_at: evt.created_at, id: evt.id };
+    this.client.publish(evt);
+    for (const c of this.relayPool.values()) c.publish(evt);
+    this.publishEkEnvelope(); // ADR-0322 S2：目錄變了 → 重新分發，否則新裝置永遠拿不到 EK
+    this.emitDevices();
+  }
+
+  /** 觀測清單 ＋ 目錄狀態合併後發給 UI（ADR-0321／0322 S1）。 */
+  private emitDevices(): void {
+    this.handlers?.onDevices?.(this.devices());
+  }
+
+  /**
+   * 發佈 EK 的 per-device 分發（ADR-0322 S2）：對目錄內每台裝置各加密一份當前 EK 清單。
+   *
+   * 沒有目錄（S1 尚未跑到）時**不發**——沒有收件人，發了也只是佔頻寬。
+   */
+  private publishEkEnvelope(): void {
+    if (!this.fsState.enabled || !this.deviceDir || this.fsState.keys.length === 0) return;
+    const evt = buildEkEnvelope(this.sk, this.deviceDir.devices.map((d) => d.pk), this.fsState.keys);
+    this.client.publish(evt);
+    for (const c of this.relayPool.values()) c.publish(evt);
+  }
+
+  /**
+   * 收到 EK 分發（ADR-0322 S2）：以**本機裝置私鑰**解，合併進本機 EK 集合。
+   *
+   * 解不開＝這份不是給我的（我不在目錄內）——**那正是撤銷生效的樣子**，不是錯誤。
+   */
+  private receiveEkEnvelope(event: NostrEvent): void {
+    const keys = openEkEnvelope(event, this.deviceKey.sk, this.self.pubkey);
+    if (!keys || keys.length === 0) return;
+    const byPk = new Map(this.fsState.keys.map((k) => [k.pk, k]));
+    let changed = false;
+    for (const k of keys) {
+      if (byPk.has(k.pk)) continue;
+      byPk.set(k.pk, k);
+      changed = true;
+    }
+    if (!changed) return;
+    this.fsState = { ...this.fsState, keys: pruneFsKeys([...byPk.values()], Date.now()) };
+    this.persistFs();
+    this.retryPendingFs(); // ADR-0325：EK 到貨 → 之前解不開的現在可能解得開
+  }
+
+  /**
+   * 撤銷目前的三態（ADR-0322 S2；A+B+D 修正）。
+   *
+   * **以證據判定，不以推論判定**：舊路徑就是「EK 隨快照走」，而快照我們解得開、
+   * 也知道是哪台發的 ⇒ 「某台的最近一份快照仍帶著 EK 私鑰」是**直接證據**。
+   * 這比原本的「觀測到的裝置都在目錄內」精確，也**不受中繼扣住某台的影響**
+   * （扣住只會讓證據晚到，不會讓它假陽性）。
+   *
+   * ⚠ **D：`active` 需要條件成立才敢宣稱**，不是「沒看到反例就算」。
+   */
+  revocationState(): { state: "unknown" | "dual-track" | "active"; devices?: string[] } {
+    if (!this.deviceDir) return { state: "unknown" };
+    if (!inDirectory(this.deviceDir, this.deviceKey.pk)) return { state: "unknown" }; // 本機還沒登記
+    // ADR-0324：**證據會過期**。四個月前那份快照帶著 EK，不代表那台今天還讀得到新訊息
+    // ——不排除它，這個狀態就永遠卡在 dual-track（同 S2a 抓過的單調卡死，只是換一扇門）。
+    const stillOld = this.storage
+      .loadDevices()
+      .filter((d) => d.carriesEkKeys && !d.revoked && d.id !== this.deviceIdCached && !isDeviceStale(d))
+      .map((d) => d.id);
+    return stillOld.length > 0 ? { state: "dual-track", devices: stillOld } : { state: "active" };
+  }
+
+  /**
+   * 本機**這一台**是否該停止把 EK 放進自己的快照（ADR-0322 S2）。
+   *
+   * ⚠ 刻意**不用** `revocationState()`：那會造成死鎖——A 因為看到 B 還帶著而繼續帶，
+   * B 也因為看到 A 還帶著而繼續帶，誰都不先停。
+   * ⇒ 這個決定必須是**單方面**的：只看「有沒有觀測得到、卻不在目錄內、且未被我移除的裝置」。
+   * 那種裝置只能從快照拿 EK，貿然停掉會讓它靜默失聯；除此之外就可以停。
+   */
+  private shouldOmitFsKeys(): boolean {
+    if (!this.deviceDir) return false;
+    // ADR-0324：久未出現的不再擋住。不排除它，**撤銷對這台永遠不會生效**，而且完全靜默
+    // ——那比「某台回來後要重新授權」嚴重得多，且後者看得見（清單上標著不在目錄內）。
+    return this.devices().every((d) => d.inDirectory || d.revoked || d.stale);
+  }
+
+  /**
+   * 移除一台裝置（ADR-0322 S3）：簽 v+1 目錄（不含它）＋**立刻輪替 EK**＋只分發給剩下的。
+   *
+   * ⚠ 三件事缺一不可：只改目錄，它手上的當前 EK 照樣能用到 grace 結束；
+   * 只輪替不改目錄，新 EK 還是會分發給它。
+   * ⚠ 不能移除自己——那只會讓這台把自己鎖在門外。
+   */
+  removeDevice(pk: PubkeyHex): void {
+    if (pk === this.deviceKey.pk) return;
+    const removedId = this.deviceDir?.devices.find((d) => d.pk === pk)?.id; // 目錄項移掉前先記
+    const next = withoutDevice(this.deviceDir, pk);
+    if (next === this.deviceDir) return;
+    this.deviceDir = next;
+    const evt = buildDeviceDirectory(this.sk, next);
+    this.deviceDirEvent = { created_at: evt.created_at, id: evt.id };
+    this.client.publish(evt);
+    for (const c of this.relayPool.values()) c.publish(evt);
+    // 標記已撤銷：不標的話它會被當成「還沒升級的裝置」⇒ 本機又把 EK 放回快照 ⇒ 它立刻拿回金鑰。
+    if (removedId) {
+      this.storage.saveDevices(
+        this.storage.loadDevices().map((d) => (d.id === removedId ? { ...d, revoked: true } : d)),
+      );
+    }
+    if (this.fsState.enabled) this.rotateEncryptionKey(); // 內含 publishEkEnvelope（只給剩下的）
+    else this.publishEkEnvelope();
+    this.emitDevices();
+  }
+
+
+  /**
+   * 從清單裡忘掉一筆**觀測**（ADR-0324）：只刪本機紀錄，不動任何金鑰、不發任何事件。
+   *
+   * 這是給「觀測到但不在目錄內」的舊裝置用的——它們沒有目錄項，`removeDevice()` 找不到 pk，
+   * 過去按下去是**靜默什麼都不做**（一個假裝有作用的按鈕）。
+   *
+   * 🔴 **在目錄內的一律拒絕**。對那些裝置「從清單移除」只會把它從你眼前藏起來，
+   * 而它手上的授權原封不動——那是假的安全感，比看得見的髒清單糟得多。要斷它就走 `removeDevice()`。
+   * 🔴 **不能忘掉自己**：下次啟動又會記回來，只是白白丟掉 `firstSeen`。
+   */
+  forgetDevice(id: string): void {
+    if (!id || id === this.deviceIdCached) return;
+    if (deviceIdInDirectory(this.deviceDir, id) === true) return;
+    const list = this.storage.loadDevices();
+    if (!list.some((d) => d.id === id)) return;
+    this.storage.saveDevices(list.filter((d) => d.id !== id));
+    this.emitDevices();
+  }
+
+  /** 目前的裝置目錄（ADR-0322 S1）；尚未建立回 null。 */
+  deviceDirectory(): DeviceDirectory | null {
+    return this.deviceDir;
+  }
+
+  /** 記錄某台的快照是否仍帶 EK 私鑰（ADR-0322 S2 的直接證據）。 */
+  private noteEkCarrier(id: string, carries: boolean): void {
+    if (!id) return;
+    const list = this.storage.loadDevices();
+    const cur = list.find((d) => d.id === id);
+    if (!cur || cur.carriesEkKeys === carries) return;
+    this.storage.saveDevices(list.map((d) => (d.id === id ? { ...d, carriesEkKeys: carries } : d)));
+    this.emitDevices();
+  }
+
+  /** 觀測到的裝置清單（ADR-0321）。 */
+  devices(): (StoredDevice & { inDirectory: boolean; isSelf: boolean; stale: boolean })[] {
+    const selfId = this.deviceIdCached;
+    return this.storage.loadDevices().map((d) => ({
+      ...d,
+      isSelf: d.id === selfId,
+      // ADR-0322 S1：觀測到但**不在目錄內**＝今天完全看不出來的那種東西。
+      // ⚠ 目錄尚未建立時 `deviceIdInDirectory` 回 null＝**未知**，此時一律視為 true
+      //   ——否則升級當下整份清單會被誤報成「不在目錄內」。
+      inDirectory: d.id === selfId || (deviceIdInDirectory(this.deviceDir, d.id) ?? true),
+      // ADR-0324：久未出現＝已被排除在撤銷判定之外，這件事使用者要看得到。
+      stale: d.id !== selfId && isDeviceStale(d),
+    }));
+  }
+
+  /** 本機裝置公鑰（ADR-0322 S1）：供 UI 顯示與比對。 */
+  selfDevicePk(): string {
+    return this.deviceKey.pk;
+  }
+
+  /**
+   * 本機裝置金鑰的保護等級（ADR-0297 §6 紅線：**設定頁要如實顯示本機在哪一級**）。
+   * 回報的是實作現況，不是平台能力——猜平台會給出比實情好看的答案。
+   */
+  deviceKeyTier(): DeviceKeyTier {
+    return deviceKeyTier();
+  }
+
+  deviceKeyEverPlaintext(): boolean {
+    return deviceKeyEverPlaintext();
+  }
+
+  /** 本裝置的解封失敗觀測（ADR-0316）。 */
+  fsFailures(): FsFailureLog {
+    return this.fsState.failures ?? EMPTY_FS_FAILURE_LOG;
+  }
+
+  /**
+   * 自動輪替檢查（ADR-0313）：current EK 年齡達間隔即換一把。
+   * 看年齡而非計時器——App 大部分時間關著，計時器在關閉期間不跑。
+   */
+  private maybeAutoRotateFs(): void {
+    if (!this.fsState.enabled) return;
+    if (!shouldRotateFs(this.fsState.keys, Date.now())) return;
+    this.rotateEncryptionKey();
   }
 
   /** 手動更換加密金鑰（ADR-0245）：生成新 EK（保留舊把至 grace，供解在途）、發新 10040。需先啟用。 */
@@ -1263,6 +1776,7 @@ export class RelayChatBackend implements ChatBackend {
     this.persistFs();
     this.pruneFs(); // 換鑰時順帶修剪（前一輪逾 grace 的更舊 EK）
     this.publishEkAnnounce();
+    this.publishEkEnvelope(); // ADR-0322 S2：新 EK 只送給目錄內的裝置
   }
 
   /**
@@ -1513,6 +2027,10 @@ export class RelayChatBackend implements ChatBackend {
   private scheduleBeat(): void {
     if (this.heartbeatTimer !== undefined) clearTimeout(this.heartbeatTimer);
     this.heartbeatTimer = setTimeout(() => {
+      // ADR-0313：自動輪替掛在**排程 tick**而非 `beat()` 內部——`beat()` 對隱身/離線者
+      // 直接 return，掛在裡面等於「隱身的人永遠不輪替」，而那正是最需要 FS 的一群人。
+      this.maybeAutoRotateFs();
+      this.ensureSelfInDirectory(); // ADR-0322 S1：等目錄先到再補自己，避免兩台同時建 v1
       this.beat();
       this.scheduleBeat();
     }, jitter(this.beatInterval()));
@@ -1547,6 +2065,14 @@ export class RelayChatBackend implements ChatBackend {
     }
     if (event.kind === SNAPSHOT_KIND) {
       this.receiveSnapshot(event); // 加密雲端快照（ADR-0071 J3）
+      return;
+    }
+    if (event.kind === DEVICE_DIRECTORY_KIND) {
+      this.receiveDeviceDirectory(event); // ADR-0322 S1：裝置目錄
+      return;
+    }
+    if (event.kind === EK_ENVELOPE_KIND) {
+      this.receiveEkEnvelope(event); // ADR-0322 S2：EK 分發
       return;
     }
     if (event.kind === RELAY_LIST_KIND) {
@@ -1660,6 +2186,7 @@ export class RelayChatBackend implements ChatBackend {
     try {
       opened = this.openFs(event); // ADR-0245：多鑰解封（我的 EK→IK）＋順帶學對方 EK；FS 未啟用時＝裸解
     } catch {
+      this.noteUndecryptable(event); // ADR-0316 記一筆；ADR-0325 留著等 EK 回來再試
       return;
     }
     const { sender, rumor } = opened;
@@ -1964,6 +2491,35 @@ export class RelayChatBackend implements ChatBackend {
     }
   }
 
+  /**
+   * 緩存一封被閘門擋下的入群邀請（ADR-0317）——邀請者被接受為聯絡人後由
+   * {@link drainHeldInvites} 重放。
+   *
+   * 有界（每人 8、總人數 32，FIFO 逐出），形狀比照 ADR-0131 的 `pendingGroupMsgs`：
+   * 惡意灌爆只會佔一小段有界記憶體後被逐出，**從不重放、從不入庫**。
+   * ⚠ **只在記憶體**：重啟後未處理的邀請消失，需邀請者重邀（ADR-0317 已知限制）。
+   */
+  private holdGroupInvite(from: PubkeyHex, control: GroupControl): void {
+    const queue = this.heldInvites.get(from) ?? [];
+    if (queue.some((c) => c.id === control.id)) return; // 同一個群不重複緩存
+    queue.push(control);
+    while (queue.length > MAX_HELD_INVITES_PER_PEER) queue.shift();
+    this.heldInvites.set(from, queue);
+    while (this.heldInvites.size > MAX_PENDING_GROUPS) {
+      const oldest = this.heldInvites.keys().next().value;
+      if (oldest === undefined) break;
+      this.heldInvites.delete(oldest);
+    }
+  }
+
+  /** 接受某人為聯絡人後（ADR-0317）：重放他被擋下的入群邀請。 */
+  private drainHeldInvites(from: PubkeyHex): void {
+    const queue = this.heldInvites.get(from);
+    if (!queue) return;
+    this.heldInvites.delete(from); // 先刪，避免重放時又被閘門擋回來緩存
+    for (const control of queue) this.applyControl(from, control);
+  }
+
   /** 群組實例化後（ADR-0131）：把早到、緩存的群訊依送出時間重放；先刪緩存避免重放時又 defer 回去。 */
   private drainPendingGroup(groupId: string): void {
     const queue = this.pendingGroupMsgs.get(groupId);
@@ -2065,6 +2621,15 @@ export class RelayChatBackend implements ChatBackend {
       // 快照對白紙裝置＝實例化（ADR-0068 換機自癒），守門同 create。
       if (this.isBlocked(from)) return;
       if (!control.members.includes(this.self.pubkey)) return;
+      // ADR-0317：入群邀請的同意閘門。過去這裡沒有聯絡人檢查——同一個陌生人走 DM 進不來
+      // （ADR-0121 請求區），走群組卻長驅直入。擋下**不是丟掉**：緩存 ＋ 邀請者進請求區，
+      // 使用者接受他時邀請就會生效（見 acceptRequest）。
+      if (!this.isContact(from) && !this.groupInviteFromAnyone()) {
+        this.holdGroupInvite(from, control);
+        this.ensureKnown(from); // 他就是「一個想聯繫你的陌生人」——沿用既有那塊 UI
+        this.handlers?.onGroupInviteHeld?.(from, control.name);
+        return;
+      }
       // 管理者強制為驗證後的寄件人（不信任 payload 的 admin 欄位）；
       // 不自動把其他成員塞進個人聯絡人（避免被強行灌入聯絡人清單）。
       // ADR-0242：實例化群組打時間戳——重新被邀入時 at 較新 → 蓋過舊的離群墓碑（復活）。
@@ -2150,6 +2715,7 @@ export class RelayChatBackend implements ChatBackend {
     this.contacts = this.storage.loadContacts();
     this.resubscribe(); // 現在才訂閱他的上線心跳
     this.recountUnread(pubkey); // 接受後未讀才算數（請求期間刻意不點亮徽章）
+    this.drainHeldInvites(pubkey); // ADR-0317：你接受的人就能拉你進群——重放他被擋下的邀請
     this.emitRequests();
     this.emitContacts();
     this.sendProfileTo(pubkey); // ADR-0061：接受了才把自己的暱稱給他
@@ -2245,6 +2811,17 @@ export class RelayChatBackend implements ChatBackend {
     const prefs = this.storage.loadSyncedPrefs();
     this.storage.saveSyncedPrefs({ ...prefs, [MUTE_PREFIX + convoId]: { v: muted ? "1" : "", at: Date.now() } });
     this.emitMutes();
+  }
+
+  /** 入群邀請閘門（ADR-0317）：`true`（**預設**）＝任何人可把我加進群組；`false`＝只有聯絡人。 */
+  groupInviteFromAnyone(): boolean {
+    return this.storage.loadSyncedPrefs()[GROUP_INVITE_PREF]?.v !== "contacts";
+  }
+
+  /** 設定入群邀請閘門（ADR-0317）：寫進跨裝置同步設定——身分層級的隱私決定，不該只在一台生效。 */
+  setGroupInviteFromAnyone(anyone: boolean): void {
+    const prefs = this.storage.loadSyncedPrefs();
+    this.storage.saveSyncedPrefs({ ...prefs, [GROUP_INVITE_PREF]: { v: anyone ? "" : "contacts", at: Date.now() } });
   }
 
   /** 目前靜音的對話集合（ADR-0242 階段③）。 */
@@ -2690,7 +3267,9 @@ export class RelayChatBackend implements ChatBackend {
   sendReaction(to: PubkeyHex, messageId: string, emoji: string): void {
     const recipients = this.recipientsOf(to);
     if (!recipients) return;
-    const wrapped = wrapReaction(emoji, this.sk, recipients, messageId);
+    // FS（ADR-0315 第 3 步）：逐位收件人 retarget。解不開＝少看到一個 emoji（fail-safe），
+    // 與收回訊息那條 fail-open 不同——這也是它可以做、收回不做的理由。
+    const wrapped = wrapReaction(emoji, this.sk, recipients, messageId, this.fsRetarget());
     // 回應不追蹤送出狀態（無 tick）→ 直接送；含自封副本讓自己的其他裝置也看得到（ADR-0107）。
     for (const evt of wrapped.events) this.publishReliable(evt);
     this.publishReliable(wrapped.selfCopy);
@@ -2711,7 +3290,9 @@ export class RelayChatBackend implements ChatBackend {
       ...(this.myAvatar !== null ? { avatar: this.myAvatar } : {}),
       ...(this.myTitle !== null ? { title: this.myTitle } : {}),
       // ADR-0245：FS 啟用時宣告 capability（IK 簽章、不可偽造）→ 對方 TOFU 釘選、降級偵測。
-      ...(this.fsEnabled() ? { fs: FS_CAPABILITY } : {}),
+      // ADR-0314 三態：啟用＝`ek-v1`／停用過＝`none`（明示退場）／從未啟用＝欄位缺席。
+      // 「從未啟用」是絕大多數使用者——對他們送 `none` 等於向全網宣告一件沒發生過的事。
+      ...(this.fsEnabled() ? { fs: FS_CAPABILITY } : this.fsState.retired ? { fs: FS_RETIRED } : {}),
     };
     // hint 讓「每次開機廣播」同時成為全聯絡人的路由刷新——搬家後自動改道、陳舊自癒。
     this.publishReliable(wrapProfile(profile, this.sk, pubkey, this.homeUrl ? { relayHint: this.homeUrl } : {}));
@@ -2757,17 +3338,31 @@ export class RelayChatBackend implements ChatBackend {
    */
   private receiveSnapshot(event: NostrEvent): void {
     if (event.pubkey !== this.self.pubkey) return; // 只信自己的快照
+    // ADR-0321：快照的 `d` tag ＝ 發佈它的 deviceId（ADR-0071 既有欄位，零協定變更）。
+    // 放在解密之前——**即使內容解不開或無變更，那台裝置存在過這件事仍然成立**。
+    const fromDevice = event.tags.find((t) => t[0] === "d")?.[1] ?? "";
+    this.noteDevice(fromDevice, "snapshot");
     const plain = openSnapshotEvent(event, this.sk);
     if (!plain) return;
     const content = parseSnapshotContent(plain);
     if (!content) return;
+    // ADR-0322 S2（A）：**直接證據**——這台的快照還帶著 EK 私鑰＝它還在走舊路徑。
+    // 記在裝置紀錄上；它之後改帶空清單時會被覆蓋成 false（狀態會自己復原）。
+    this.noteEkCarrier(fromDevice, (content.fs?.keys.length ?? 0) > 0);
     this.handlers?.onCloudSyncMode?.(content.mode); // 模式隨快照傳播（App 端決定是否採用，審查修正 #1）
-    const { changed, convos } = mergeSnapshotContent(this.storage, content);
+    // ADR-0334：已撤銷的裝置不得對 FS 開關投票——它的快照留在中繼上，那台不必還在線上。
+    const revoked = this.storage.loadDevices().some((d) => d.id === fromDevice && d.revoked === true);
+    const fsBefore = this.fsState.enabled;
+    const { changed, convos } = mergeSnapshotContent(this.storage, content, revoked ? { fromRevokedDevice: true } : {});
     if (!changed) return;
     this.contacts = this.storage.loadContacts();
     this.blocked = this.storage.loadBlocked();
     this.groups = this.storage.loadGroups();
     this.fsState = this.storage.loadFsState(); // ADR-0245：快照可能帶來其他裝置共享的 EK（多裝置 FS）
+    // ADR-0334：合併真的把開關翻掉時要告訴 UI。原本沒有這條 ⇒ **設定頁顯示「關」而引擎是「開」**，
+    // 靜默不一致到下次重新登入為止——那正是這個專案一路在防的「假的開關」。
+    if (this.fsState.enabled !== fsBefore) this.handlers?.onFsEnabled?.(this.fsState.enabled);
+    this.retryPendingFs(); // ADR-0325：同上，快照帶回來的 EK 也要觸發重試
     this.resubscribe(); // 新聯絡人的 hint／新群組成員的 presence 分組（含 FS 啟用後的 10040 訂閱）
     this.emitContacts();
     this.emitGroups();
@@ -2831,7 +3426,11 @@ export class RelayChatBackend implements ChatBackend {
   /** 開機/定時檢查：內容有變且未達每日上限才發佈快照（ADR-0071 J2）。 */
   private maybePublishSnapshot(): void {
     if (!this.cloudSync || this.cloudBackupBlocked) return;
-    const content = buildSnapshotContent(this.storage, this.cloudSync.mode);
+    // ADR-0322 S2：撤銷生效（所有觀測到的裝置都在目錄內）後才停止把 EK 私鑰放進快照。
+    // 雙軌期間照舊帶——否則還沒升級的自己的裝置會**靜默收不到新 EK**。
+    const content = buildSnapshotContent(this.storage, this.cloudSync.mode, {
+      ...(this.shouldOmitFsKeys() ? { omitFsKeys: true } : {}),
+    });
     const hash = JSON.stringify({ ...content, at: 0 }); // 比對不含產生時間
     if (!this.snapshotDue(hash)) return;
     this.publishReliable(buildSnapshotEvent(JSON.stringify(content), this.sk, this.cloudSync.deviceId));
@@ -3125,6 +3724,7 @@ export class RelayChatBackend implements ChatBackend {
       now,
       ...this.orgExpiration(now), // ADR-0160
       ...(this.homeUrl ? { relayHint: this.homeUrl } : {}),
+      ...this.fsRetarget(), // ADR-0318：檔名/大小/MIME 是真正敏感的欄位
     });
     const id = wrapped.id;
     this.seenMsg.add(id);
@@ -3177,6 +3777,7 @@ export class RelayChatBackend implements ChatBackend {
       now,
       ...this.orgExpiration(now), // ADR-0160
       ...(this.homeUrl ? { relayHint: this.homeUrl } : {}),
+      ...this.fsRetargetGroup(), // ADR-0320 逐位成員決定；ADR-0326 順帶用 seal 層送出我的 EK
     });
     const id = wrapped.id;
     this.seenMsg.add(id);
@@ -3256,6 +3857,7 @@ export class RelayChatBackend implements ChatBackend {
     try {
       opened = this.openFs(event); // ADR-0245：多鑰解封（我的 EK→IK）＋順帶學對方 EK；FS 未啟用時＝裸解
     } catch {
+      this.noteUndecryptable(event); // ADR-0316 記一筆；ADR-0325 留著等 EK 回來再試
       return;
     }
     const { sender, rumor } = opened;
@@ -3659,6 +4261,7 @@ export class RelayChatBackend implements ChatBackend {
       ...(validMentions.length > 0 ? { mentions: validMentions } : {}),
       ...(replyTo ? { replyTo } : {}),
       ...(replyTo && alsoMain ? { alsoMain: true } : {}),
+      ...this.fsRetargetGroup(), // ADR-0320 逐位成員決定；ADR-0326 順帶用 seal 層送出我的 EK
     });
     this.seenMsg.add(wrapped.id);
     const id = wrapped.id;
@@ -3729,6 +4332,7 @@ export class RelayChatBackend implements ChatBackend {
             action,
             ...(opts.eventId ? { eventId: opts.eventId } : {}),
             ...this.orgExpiration(now),
+            ...this.fsRetarget(), // ADR-0318：加密到各成員的 EK；rumor 不動（id 是 RSVP 的對應鍵）
           });
         })()
       : wrapCalendarEvent(input, this.sk, target.contact, {
@@ -3736,6 +4340,7 @@ export class RelayChatBackend implements ChatBackend {
           action,
           ...(opts.eventId ? { eventId: opts.eventId } : {}),
           ...this.orgExpiration(now),
+          ...this.fsRetarget(), // ADR-0318
         });
     if (!wrapped) return undefined;
 
@@ -3775,6 +4380,7 @@ export class RelayChatBackend implements ChatBackend {
       now,
       ...(event.groupId ? { groupId: event.groupId } : {}),
       ...this.orgExpiration(now),
+      ...this.fsRetarget(), // ADR-0318
     });
     this.storage.setCalendarRsvp(eventId, this.self.pubkey, status, now);
     this.handlers?.onCalendar?.(this.storage.loadCalendar());

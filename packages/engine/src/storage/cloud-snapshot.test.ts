@@ -516,6 +516,85 @@ describe("FS 狀態的快照合併（ADR-0306 D3.3c 的欄位不得掉）", () =
     expect(dst.loadFsState().unsupported).toEqual({ bob: "ratchet-v1" });
   });
 
+  it("🔴 `retired` 不得被合併吃掉（ADR-0314）——掉了就從『明示退場』退回『欄位缺席』＝假警報", () => {
+    // 同 unsupported 的陷阱：merged 逐欄位建構。retired 掉了，個人檔會停止宣告 "none"，
+    // 而缺席在已釘選的對方那裡＝「對方可能正在被攻擊」，永遠解不掉。
+    const dst = new MemoryStorage();
+    dst.saveFsState({ enabled: false, keys: [], contactEks: {}, retired: true });
+    mergeSnapshotContent(dst, withFs({ enabled: false, keys: [], contactEks: {} }));
+    expect(dst.loadFsState().retired).toBe(true);
+  });
+
+  it("🔴 `failures` 是裝置本地觀測（ADR-0316）：不上雲、也不被快照覆蓋", () => {
+    const dst = new MemoryStorage();
+    dst.saveFsState({ enabled: true, keys: [], contactEks: {}, failures: { notFs: 0, maybeEkLoss: 3, lastEkLossAt: 9 } });
+    // 遠端帶來別台裝置的計數 → 不得覆蓋本機（別台可能有那把 EK，它的觀測與我無關）
+    mergeSnapshotContent(
+      dst,
+      withFs({ enabled: true, keys: [], contactEks: {}, failures: { notFs: 99, maybeEkLoss: 99 } }),
+    );
+    expect(dst.loadFsState().failures).toEqual({ notFs: 0, maybeEkLoss: 3, lastEkLossAt: 9 });
+  });
+
+  describe("FS 開關的多裝置合併（ADR-0334）", () => {
+    it("🔴 較新的停用不得被另一台的舊快照撤銷——舊的 OR 正是這樣讓人關不掉的", () => {
+      const dst = new MemoryStorage();
+      dst.saveFsState({ enabled: false, enabledAt: 200, keys: [], contactEks: {}, retired: true });
+      mergeSnapshotContent(dst, withFs({ enabled: true, enabledAt: 100, keys: [], contactEks: {} }));
+      expect(dst.loadFsState().enabled).toBe(false);
+    });
+
+    it("較新的啟用照樣蓋過舊的停用（OR 原本要防的那件事沒有壞掉）", () => {
+      const dst = new MemoryStorage();
+      dst.saveFsState({ enabled: false, enabledAt: 100, keys: [], contactEks: {} });
+      mergeSnapshotContent(dst, withFs({ enabled: true, enabledAt: 200, keys: [], contactEks: {} }));
+      expect(dst.loadFsState().enabled).toBe(true);
+    });
+
+    it("🔴 已撤銷裝置的快照不得對開關投票——那是一台弄丟的手機留下的殭屍快照", () => {
+      const dst = new MemoryStorage();
+      dst.saveFsState({ enabled: false, enabledAt: 100, keys: [], contactEks: {} });
+      // 它的時間戳更新，若讓它投票就會贏
+      mergeSnapshotContent(dst, withFs({ enabled: true, enabledAt: 999, keys: [], contactEks: {} }), {
+        fromRevokedDevice: true,
+      });
+      expect(dst.loadFsState().enabled).toBe(false);
+    });
+
+    it("兩邊都沒有時間戳（升級當下）→ 沿用舊的 OR，不改變任何人的狀態", () => {
+      const dst = new MemoryStorage();
+      dst.saveFsState({ enabled: false, keys: [], contactEks: {} });
+      mergeSnapshotContent(dst, withFs({ enabled: true, keys: [], contactEks: {} }));
+      expect(dst.loadFsState().enabled).toBe(true);
+    });
+  });
+
+  it("🔴 `pending` 不上雲（ADR-0325）——那是**任何人都塞得進來**的原始密文，搬上去只是在傳遞垃圾", () => {
+    const s = new MemoryStorage();
+    s.saveFsState({
+      enabled: true,
+      keys: [],
+      contactEks: {},
+      pending: [{ id: "aa", at: 1, json: '{"content":"垃圾"}' }],
+      failures: { notFs: 1, maybeEkLoss: 1 },
+    });
+    const snap = buildSnapshotContent(s, "basic");
+    expect(snap.fs?.pending).toBeUndefined();
+    expect(snap.fs?.failures).toBeUndefined();
+    expect(JSON.stringify(snap)).not.toContain("垃圾");
+  });
+
+  it("🔴 `pending` 同樣是裝置本地的（ADR-0325）：不被快照覆蓋——漏了它，同步一次就把待補解的密文清光", () => {
+    const dst = new MemoryStorage();
+    const mine = [{ id: "aa", at: 1, json: "{}" }];
+    dst.saveFsState({ enabled: true, keys: [], contactEks: {}, pending: mine });
+    mergeSnapshotContent(
+      dst,
+      withFs({ enabled: true, keys: [], contactEks: {}, pending: [{ id: "zz", at: 2, json: "{}" }] }),
+    );
+    expect(dst.loadFsState().pending).toEqual(mine);
+  });
+
   it("遠端帶來的 `unsupported` 也要學到（本機衝突優先，同 contactEks 的規則）", () => {
     const dst = new MemoryStorage();
     dst.saveFsState({ enabled: true, keys: [], contactEks: {}, pinned: {}, unsupported: { bob: "本機值" } });

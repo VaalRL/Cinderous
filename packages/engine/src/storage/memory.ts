@@ -11,6 +11,8 @@ import {
   type StoredBootstrapList,
   type StoredContact,
   type StoredFsState,
+  type StoredDevice,
+  type StoredDirectoryConflict,
   type StoredGroup,
   type StoredIdentity,
   type StoredMessage,
@@ -507,6 +509,21 @@ export class MemoryStorage implements AppStorage {
   }
   saveSyncedPrefs(prefs: SyncedPrefs): void {
     this.syncedPrefs = prefs;
+  }
+  /** 觀測到的裝置（ADR-0321）：本地觀測，不進雲端快照/配對捆包。 */
+  private devices: StoredDevice[] = [];
+  private dirConflicts: StoredDirectoryConflict[] = [];
+  loadDirectoryConflicts(): StoredDirectoryConflict[] {
+    return this.dirConflicts;
+  }
+  saveDirectoryConflicts(list: StoredDirectoryConflict[]): void {
+    this.dirConflicts = list;
+  }
+  loadDevices(): StoredDevice[] {
+    return this.devices;
+  }
+  saveDevices(list: StoredDevice[]): void {
+    this.devices = list;
   }
   private fsState: StoredFsState = { enabled: false, keys: [], contactEks: {} }; // ADR-0245
   loadFsState(): StoredFsState {

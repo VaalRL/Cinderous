@@ -16,6 +16,8 @@ import type {
   MessageStatus,
   OrSetName,
   StoredFsState,
+  StoredDevice,
+  StoredDirectoryConflict,
   StorageSnapshot,
   StoredBootstrapList,
   StoredContact,
@@ -481,6 +483,20 @@ export class LocalStorage implements AppStorage {
   saveSyncedPrefs(prefs: SyncedPrefs): void {
     this.mem.saveSyncedPrefs(prefs);
     write(this.k("syncedPrefs"), prefs, this.dek); // ADR-0242 階段③：以 dek 加密落地
+  }
+  loadDirectoryConflicts(): StoredDirectoryConflict[] {
+    return this.mem.loadDirectoryConflicts();
+  }
+  saveDirectoryConflicts(list: StoredDirectoryConflict[]): void {
+    this.mem.saveDirectoryConflicts(list);
+    write(this.k("dirConflicts"), list, this.dek); // ADR-0322 S4
+  }
+  loadDevices(): StoredDevice[] {
+    return this.mem.loadDevices();
+  }
+  saveDevices(list: StoredDevice[]): void {
+    this.mem.saveDevices(list);
+    write(this.k("devices"), list, this.dek); // ADR-0321：與其他 per-identity 資料同一把 dek
   }
   loadFsState(): StoredFsState {
     return this.mem.loadFsState();

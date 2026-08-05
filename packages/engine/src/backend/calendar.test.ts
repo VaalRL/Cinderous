@@ -423,3 +423,50 @@ describe("行程提醒（ADR-0266）：本機計時器、零中繼成本", () =>
     b2.stop();
   });
 });
+
+describe("行程走 FS（ADR-0318 批一）", () => {
+  it("🔴 兩端都啟用 FS：行程照常送達，且 id 與非 FS 時同樣穩定", () => {
+    const [a, b] = peers(["Alice", "Bob"]) as [RelayChatBackend, RelayChatBackend];
+    a.start(noop);
+    b.start(noop);
+    a.addContact(b.selfNpub);
+    b.addContact(a.selfNpub); // 互為聯絡人 → 互訂 10040、互學 EK
+    a.enableFs();
+    b.enableFs();
+
+    const id = a.calendarPublish({ contact: b.self.pubkey }, trip);
+    expect(id).toBeTruthy();
+    const got = b.calendarList();
+    expect(got).toHaveLength(1);
+    expect(got[0]).toMatchObject({ id, title: "週六爬山", location: "象山" });
+    a.stop();
+    b.stop();
+  });
+
+  it("只有寄件端啟用（對方無 EK）：退回加密到身分，照常送達——不是錯誤", () => {
+    const [a, b] = peers(["Alice", "Bob"]) as [RelayChatBackend, RelayChatBackend];
+    a.start(noop);
+    b.start(noop);
+    a.addContact(b.selfNpub);
+    a.enableFs(); // 只有 Alice
+    const id = a.calendarPublish({ contact: b.self.pubkey }, trip);
+    expect(b.calendarList()[0]).toMatchObject({ id });
+    a.stop();
+    b.stop();
+  });
+
+  it("RSVP 也走同一條路（兩端有 EK 時照常對回同一個行程）", () => {
+    const [a, b] = peers(["Alice", "Bob"]) as [RelayChatBackend, RelayChatBackend];
+    a.start(noop);
+    b.start(noop);
+    a.addContact(b.selfNpub);
+    b.addContact(a.selfNpub);
+    a.enableFs();
+    b.enableFs();
+    const id = a.calendarPublish({ contact: b.self.pubkey }, trip)!;
+    b.calendarRsvp(id, "accepted");
+    expect(a.calendarList()[0]?.rsvps?.[b.self.pubkey]?.status).toBe("accepted");
+    a.stop();
+    b.stop();
+  });
+});

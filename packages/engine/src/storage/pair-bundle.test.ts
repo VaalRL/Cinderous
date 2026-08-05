@@ -21,6 +21,26 @@ function richStorage(): MemoryStorage {
 }
 
 describe("配對捆包（ADR-0072 D4a-2）", () => {
+  it("🔴 `failures`／`pending` 不隨捆包搬到新機（ADR-0316／0325）——那是來源裝置的東西", () => {
+    const src = new MemoryStorage();
+    src.saveIdentity({ nsec: "nsec1x", name: "我" });
+    src.saveFsState({
+      enabled: true,
+      keys: [],
+      contactEks: {},
+      failures: { notFs: 3, maybeEkLoss: 2 },
+      pending: [{ id: "aa", at: 1, json: '{"content":"來源裝置解不開的東西"}' }],
+    });
+    const json = buildPairBundle(src, { relayUrl: "wss://home" });
+    expect(json).not.toContain("來源裝置解不開的東西");
+
+    const dst = new MemoryStorage();
+    applyPairBundle(dst, parsePairBundle(json)!);
+    expect(dst.loadFsState().pending).toBeUndefined();
+    expect(dst.loadFsState().failures).toBeUndefined();
+  });
+
+
   it("全量往返：組包→驗包→套用到白紙儲存，狀態逐項還原（含快照帶不動的部分）", () => {
     const src = richStorage();
     const json = buildPairBundle(src, { relayUrl: "wss://home", cloudSync: "full" });

@@ -1,7 +1,10 @@
-import { ASSET_CHUNK_CHARS, contentHash, FS_CAPABILITY, FS_RETIRED, KIND, RelayClient, applyRosterRotations, generateSecretKey, getPublicKey, npubEncode, nsecDecode, nsecEncode, shardPrefix, signOrgRoster, type NostrEvent, type RelayClientHandlers, wrapGroupControl, wrapGroupMessage, wrapMessage, wrapProfile, wrapReceipt } from "@cinderous/core";
+import { ASSET_CHUNK_CHARS, contentHash, FS_CAPABILITY, FS_RETIRED, generateEncryptionKey, sealAndWrap, buildSnapshotEvent, buildDeviceDirectory, buildEkEnvelope, openEkEnvelope, KIND, RelayClient, applyRosterRotations, generateSecretKey, getPublicKey, npubEncode, nsecDecode, nsecEncode, shardPrefix, signOrgRoster, type NostrEvent, type RelayClientHandlers, wrapGroupControl, wrapGroupMessage, wrapMessage, wrapProfile, wrapReceipt } from "@cinderous/core";
 import { createInMemoryRelayNetwork, createShardedRelayNetwork, MessageStore } from "@cinderous/relay";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryStorage } from "../storage/memory.js";
+import { buildSnapshotContent } from "../storage/cloud-snapshot.js";
+import { setKvBackend } from "../kv.js";
+import { DEVICE_STALE_MS } from "../storage/device-age.js";
 import type { ChatBackendEvents, ChatMessage } from "./types.js";
 import {
   type CloseableRelayClient,
@@ -3567,5 +3570,896 @@ describe("建群的成員去重（審查發現：重複會誤觸人數上限）"
     a.createGroup("重複 bob", [bob, bob, bob]);
     expect(s.loadGroups()[0]?.members.filter((m) => m === bob)).toHaveLength(1);
     a.stop();
+  });
+});
+
+describe("FS 自動輪替（ADR-0313）", () => {
+  const DAY = 24 * 60 * 60 * 1000;
+  /** 一拍心跳（活躍 60s ＋ 抖動）夠觸發排程 tick；不推進整天——那會跑爆每秒的 render timer。 */
+  const ONE_TICK_MS = 400_000;
+  const seedKey = (ageMs: number) => {
+    const sk = generateSecretKey();
+    return { nsec: nsecEncode(sk), pk: getPublicKey(sk), at: Date.now() - ageMs };
+  };
+
+  it("🔴 啟用即進入週期：金鑰滿 7 天後由排程 tick 自動換一把（不必使用者記得按）", () => {
+    const net = createInMemoryRelayNetwork();
+    const store = new MemoryStorage();
+    const old = seedKey(8 * DAY); // 已逾間隔
+    store.saveFsState({ enabled: true, keys: [old], contactEks: {} });
+    vi.useFakeTimers();
+    try {
+      const a = new RelayChatBackend(store, (h) => net.connect("a", h), "Alice");
+      a.start(noop);
+      expect(store.loadFsState().keys).toHaveLength(1); // 尚未跑到 tick
+      vi.advanceTimersByTime(ONE_TICK_MS);
+      const after = store.loadFsState().keys;
+      expect(after.length).toBe(2); // 換了一把
+      expect(after.map((k) => k.pk)).toContain(old.pk); // 舊把留著（grace 內，供解在途）
+      a.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("未滿間隔不換（不是每拍心跳都換鑰）", () => {
+    const net = createInMemoryRelayNetwork();
+    const store = new MemoryStorage();
+    const fresh = seedKey(1 * DAY);
+    store.saveFsState({ enabled: true, keys: [fresh], contactEks: {} });
+    vi.useFakeTimers();
+    try {
+      const a = new RelayChatBackend(store, (h) => net.connect("a", h), "Alice");
+      a.start(noop);
+      vi.advanceTimersByTime(ONE_TICK_MS);
+      expect(store.loadFsState().keys.map((k) => k.pk)).toEqual([fresh.pk]);
+      a.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("未啟用 FS 不會憑空生金鑰（自動輪替只對已啟用者生效）", () => {
+    const net = createInMemoryRelayNetwork();
+    const store = new MemoryStorage();
+    vi.useFakeTimers();
+    try {
+      const a = new RelayChatBackend(store, (h) => net.connect("a", h), "Alice");
+      a.start(noop);
+      vi.advanceTimersByTime(ONE_TICK_MS);
+      expect(store.loadFsState().keys).toHaveLength(0);
+      expect(store.loadFsState().enabled).toBe(false);
+      a.stop();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("FS 停用＝明示退場（ADR-0314）", () => {
+  const setup = () => {
+    const net = createInMemoryRelayNetwork();
+    const storeA = new MemoryStorage();
+    const storeB = new MemoryStorage();
+    const a = new RelayChatBackend(storeA, (h) => net.connect("a", h), "Alice");
+    const b = new RelayChatBackend(storeB, (h) => net.connect("b", h), "Bob");
+    a.start(noop);
+    b.start(noop);
+    a.addContact(b.selfNpub);
+    b.acceptRequest(a.self.pubkey);
+    return { a, b, storeA, storeB };
+  };
+
+  it("停用後 enabled=false、retired=true，但**金鑰保留**（在途訊息還加密到它）", () => {
+    const { a, storeA } = setup();
+    a.enableFs();
+    expect(storeA.loadFsState().keys).toHaveLength(1);
+    a.disableFs();
+    const fs = storeA.loadFsState();
+    expect(fs.enabled).toBe(false);
+    expect(fs.retired).toBe(true);
+    expect(fs.keys).toHaveLength(1); // 🔴 不立刻刪——立刻刪＝在途訊息靜默消失
+  });
+
+  it("🔴 對方讀到「明示退場」而非「宣告消失」——後者會變成永久的假警報", () => {
+    const { a, b, storeB } = setup();
+    a.enableFs();
+    a.sendMessage(b.self.pubkey, "先讓 Bob 釘選 Alice 用 FS");
+    expect(storeB.loadFsState().pinned?.[a.self.pubkey]).toBe(true);
+
+    a.disableFs();
+    // 退場宣告到達 → 解除釘選（不是留著釘選然後每次送訊都喊「對方可能被攻擊」）。
+    expect(storeB.loadFsState().pinned?.[a.self.pubkey]).toBeFalsy();
+  });
+
+  it("從未啟用過的人不宣告退場（欄位缺席≠明示退場）", () => {
+    const { a, b, storeB } = setup();
+    a.disableFs(); // 沒啟用過 → 應為 no-op
+    a.sendMessage(b.self.pubkey, "嗨");
+    expect(storeB.loadFsState().pinned?.[a.self.pubkey]).toBeFalsy();
+    expect(storeB.loadFsState().unsupported?.[a.self.pubkey]).toBeUndefined(); // 不得被當成未知機制
+  });
+
+  it("可以重新啟用：清掉退場旗標、生成新 EK", () => {
+    const { a, storeA } = setup();
+    a.enableFs();
+    a.disableFs();
+    a.enableFs();
+    const fs = storeA.loadFsState();
+    expect(fs.enabled).toBe(true);
+    expect(fs.retired).toBe(false);
+    expect(fs.keys.length).toBeGreaterThanOrEqual(2); // 舊把仍在 grace 內
+  });
+});
+
+describe("解封失敗的可觀測性（ADR-0316）", () => {
+  /** 一顆定址給我、但我沒有金鑰的 wrap（模擬「加密到我已回收的 EK」）。 */
+  const undecryptableFor = (recipientPk: string): NostrEvent => {
+    const strangerEk = generateEncryptionKey();
+    return sealAndWrap(
+      { kind: KIND.CHAT, created_at: Math.floor(Date.now() / 1000), tags: [], content: "解不開" },
+      generateSecretKey(),
+      strangerEk.pk, // 加密到一把我沒有的金鑰
+      { kind: KIND.OFFLINE_DM_GIFT_WRAP, tags: [["p", recipientPk]] },
+    );
+  };
+
+  it("🔴 從未啟用 FS：解不開記進 notFs（確定與 FS 無關），不驚動使用者", () => {
+    const net = createInMemoryRelayNetwork();
+    const store = new MemoryStorage();
+    const a = new RelayChatBackend(store, (h) => net.connect("a", h), "Alice");
+    const seen: unknown[] = [];
+    a.start({ ...noop, onFsUndecryptable: (log) => seen.push(log) });
+    net.connect("stranger", {}).publish(undecryptableFor(a.self.pubkey));
+    const log = a.fsFailures();
+    expect(log.notFs).toBe(1);
+    expect(log.maybeEkLoss).toBe(0);
+    expect(seen).toHaveLength(0); // notFs 不回報——那是本來就有的垃圾事件基線
+    a.stop();
+  });
+
+  it("🔴 已啟用 FS：解不開記進 maybeEkLoss 並回報（名字帶「可能」——密碼學上無法確定）", () => {
+    const net = createInMemoryRelayNetwork();
+    const store = new MemoryStorage();
+    const a = new RelayChatBackend(store, (h) => net.connect("a", h), "Alice");
+    const seen: { maybeEkLoss: number }[] = [];
+    a.start({ ...noop, onFsUndecryptable: (log) => seen.push(log) });
+    a.enableFs();
+    net.connect("stranger", {}).publish(undecryptableFor(a.self.pubkey));
+    const log = a.fsFailures();
+    expect(log.maybeEkLoss).toBe(1);
+    expect(log.notFs).toBe(0);
+    expect(log.lastEkLossAt).toBeGreaterThan(0);
+    expect(seen.at(-1)?.maybeEkLoss).toBe(1);
+    a.stop();
+  });
+
+  it("記錄跨重啟保留（離線兩週回來要看得到掉了幾則）", () => {
+    const net = createInMemoryRelayNetwork();
+    const store = new MemoryStorage();
+    const a = new RelayChatBackend(store, (h) => net.connect("a", h), "Alice");
+    a.start(noop);
+    a.enableFs();
+    net.connect("stranger3", {}).publish(undecryptableFor(a.self.pubkey));
+    a.stop();
+    const b = new RelayChatBackend(store, (h) => net.connect("a2", h), "Alice");
+    expect(b.fsFailures().maybeEkLoss).toBe(1);
+    b.stop();
+  });
+});
+
+describe("入群邀請的同意閘門（ADR-0317）", () => {
+  const setup = () => {
+    const net = createInMemoryRelayNetwork();
+    const storeA = new MemoryStorage();
+    const storeB = new MemoryStorage();
+    const stranger = new RelayChatBackend(storeA, (h) => net.connect("s", h), "陌生人");
+    const me = new RelayChatBackend(storeB, (h) => net.connect("m", h), "我");
+    return { net, stranger, me, storeB };
+  };
+
+  it("🔴 嚴格模式：陌生人建的群**不會**直接出現（同一個人走 DM 進不來，走群組也不該進來）", () => {
+    const { stranger, me, storeB } = setup();
+    const held: string[] = [];
+    stranger.start(noop);
+    me.start({ ...noop, onGroupInviteHeld: (_from, name) => held.push(name) });
+    me.setGroupInviteFromAnyone(false); // 使用者選擇嚴格模式
+    stranger.createGroup("陌生人的群", [me.self.pubkey]);
+    expect(storeB.loadGroups()).toHaveLength(0);
+    expect(held).toEqual(["陌生人的群"]);
+    stranger.stop();
+    me.stop();
+  });
+
+  it("擋下不是丟掉：邀請者進訊息請求區（那正是「有陌生人想聯繫你」的既有 UI）", () => {
+    const { stranger, me, storeB } = setup();
+    stranger.start(noop);
+    me.start(noop);
+    me.setGroupInviteFromAnyone(false);
+    stranger.createGroup("某群", [me.self.pubkey]);
+    expect(storeB.loadRequests().map((r) => r.pubkey)).toContain(stranger.self.pubkey);
+    stranger.stop();
+    me.stop();
+  });
+
+  it("🔴 接受請求＝邀請生效（你接受的人就能拉你進群）", () => {
+    const { stranger, me, storeB } = setup();
+    stranger.start(noop);
+    me.start(noop);
+    me.setGroupInviteFromAnyone(false);
+    stranger.createGroup("某群", [me.self.pubkey]);
+    expect(storeB.loadGroups()).toHaveLength(0);
+    me.acceptRequest(stranger.self.pubkey);
+    expect((storeB.loadGroups()).map((g) => g.name)).toEqual(["某群"]);
+    stranger.stop();
+    me.stop();
+  });
+
+  it("🔴 預設＝任何人（保留既有行為；嚴格是選用）", () => {
+    const { stranger, me, storeB } = setup();
+    stranger.start(noop);
+    me.start(noop);
+    expect(me.groupInviteFromAnyone()).toBe(true); // 預設就是任何人（保留既有行為）
+    stranger.createGroup("開放群", [me.self.pubkey]);
+    expect((storeB.loadGroups()).map((g) => g.name)).toEqual(["開放群"]);
+    stranger.stop();
+    me.stop();
+  });
+
+  it("聯絡人邀請不受影響（閘門只擋陌生人）", () => {
+    const { stranger, me, storeB } = setup();
+    stranger.start(noop);
+    me.start(noop);
+    me.setGroupInviteFromAnyone(false);
+    me.addContact(stranger.selfNpub); // 我先加他為聯絡人
+    stranger.createGroup("同事群", [me.self.pubkey]);
+    expect((storeB.loadGroups()).map((g) => g.name)).toEqual(["同事群"]);
+    stranger.stop();
+    me.stop();
+  });
+
+  it("🔴 封鎖優先於設定：設成「任何人」也擋得住封鎖者", () => {
+    const { stranger, me, storeB } = setup();
+    stranger.start(noop);
+    me.start(noop);
+    me.blockContact(stranger.self.pubkey);
+    stranger.createGroup("騷擾群", [me.self.pubkey]);
+    expect(storeB.loadGroups()).toHaveLength(0);
+    stranger.stop();
+    me.stop();
+  });
+});
+
+describe("FS 擴大批二：群訊（ADR-0320）", () => {
+  it("🔴 群訊逐位成員決定：有 EK 的成員收到 FS 版、沒有的照樣收得到（混合不是失敗）", () => {
+    const net = createInMemoryRelayNetwork();
+    const a = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("a", h), "Alice");
+    const b = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("b", h), "Bob");
+    const c = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("c", h), "Carol");
+    const bMsgs: string[] = [];
+    const cMsgs: string[] = [];
+    b.start({ ...noop, onMessage: (_id, m) => bMsgs.push(m.text) });
+    c.start({ ...noop, onMessage: (_id, m) => cMsgs.push(m.text) });
+    a.addContact(b.selfNpub);
+    a.addContact(c.selfNpub);
+    b.addContact(a.selfNpub); // Bob 與 Alice 互為聯絡人 → Alice 學得到 Bob 的 EK
+    a.enableFs();
+    b.enableFs(); // Bob 有 EK；Carol 沒開
+    const groups: { id: string }[] = [];
+    a.start({ ...noop, onGroups: (gs) => groups.splice(0, groups.length, ...gs) });
+    a.createGroup("小群", [b.self.pubkey, c.self.pubkey]);
+    a.sendGroupMessage(groups[0]!.id, "午餐吃什麼");
+    // 兩人都收得到——FS 有沒有覆蓋到不影響送達
+    expect(bMsgs).toContain("午餐吃什麼");
+    expect(cMsgs).toContain("午餐吃什麼");
+    a.stop();
+    b.stop();
+    c.stop();
+  });
+
+  it("🔴 fsPeerState 三態：有 EK＝known／沒學過＝unknown（常態）／曾知現無＝lost", () => {
+    const net = createInMemoryRelayNetwork();
+    const a = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("a", h), "Alice");
+    const b = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("b", h), "Bob");
+    a.start(noop);
+    b.start(noop);
+    a.addContact(b.selfNpub);
+    b.addContact(a.selfNpub);
+    a.enableFs();
+    b.enableFs();
+    expect(a.fsPeerState(b.self.pubkey)).toBe("known");
+    expect(a.fsPeerState("ff".repeat(32))).toBe("unknown"); // 沒學過＝常態，不是警告
+    a.stop();
+    b.stop();
+  });
+});
+
+describe("裝置清單 E-lite（ADR-0321）", () => {
+  it("開機即把本機列入，且**本機不觸發「新裝置」提示**（那就是使用者眼前這台）", () => {
+    const net = createInMemoryRelayNetwork();
+    const store = new MemoryStorage();
+    const a = new RelayChatBackend(store, (h) => net.connect("a", h), "Alice");
+    const alerts: string[] = [];
+    a.start({ ...noop, onNewDevice: (id) => alerts.push(id) });
+    expect(a.devices()).toHaveLength(1);
+    expect(a.devices()[0]!.source).toBe("local");
+    expect(alerts).toHaveLength(0);
+    a.stop();
+  });
+
+  it("🔴 收到自己另一台裝置的雲端快照 → 進清單並發一次警示", () => {
+    const net = createInMemoryRelayNetwork();
+    const sk = generateSecretKey();
+    const store = new MemoryStorage();
+    store.saveIdentity({ nsec: nsecEncode(sk), name: "Alice" });
+    const a = new RelayChatBackend(store, (h) => net.connect("a", h), "Alice");
+    const alerts: { id: string; source: string }[] = [];
+    a.start({ ...noop, onNewDevice: (id, source) => alerts.push({ id, source }) });
+
+    // 另一台裝置（同一把 nsec）發佈的快照——`d` tag 就是它的 deviceId。
+    const other = net.connect("other", {});
+    other.publish(buildSnapshotEvent("{}", sk, "device-b"));
+
+    expect(a.devices().map((d) => d.id)).toContain("device-b");
+    expect(alerts).toEqual([{ id: "device-b", source: "snapshot" }]);
+    a.stop();
+  });
+
+  it("同一台重複出現不重複警示（首見才喊）", () => {
+    const net = createInMemoryRelayNetwork();
+    const sk = generateSecretKey();
+    const store = new MemoryStorage();
+    store.saveIdentity({ nsec: nsecEncode(sk), name: "Alice" });
+    const a = new RelayChatBackend(store, (h) => net.connect("a", h), "Alice");
+    const alerts: string[] = [];
+    a.start({ ...noop, onNewDevice: (id) => alerts.push(id) });
+    const other = net.connect("other", {});
+    other.publish(buildSnapshotEvent("{}", sk, "device-b"));
+    other.publish(buildSnapshotEvent("{}", sk, "device-b"));
+    expect(alerts).toEqual(["device-b"]);
+    a.stop();
+  });
+
+  it("別人的快照不算我的裝置（只信自己簽章的）", () => {
+    const net = createInMemoryRelayNetwork();
+    const store = new MemoryStorage();
+    const a = new RelayChatBackend(store, (h) => net.connect("a", h), "Alice");
+    a.start(noop);
+    const before = a.devices().length;
+    net.connect("stranger", {}).publish(buildSnapshotEvent("{}", generateSecretKey(), "device-x"));
+    expect(a.devices()).toHaveLength(before);
+    a.stop();
+  });
+});
+
+describe("裝置目錄 S1（ADR-0322）", () => {
+  /** ⚠ fake timers 必須在 `start()` **之前**啟用，否則 start 期間排的計時器不受控。 */
+  const bootTicked = () => {
+    const net = createInMemoryRelayNetwork();
+    const sk = generateSecretKey();
+    const store = new MemoryStorage();
+    store.saveIdentity({ nsec: nsecEncode(sk), name: "Alice" });
+    vi.useFakeTimers();
+    const a = new RelayChatBackend(store, (h) => net.connect("a", h), "Alice");
+    return { net, sk, store, a };
+  };
+  const tick = (): void => {
+    vi.advanceTimersByTime(400_000); // 一次心跳 tick → ensureSelfInDirectory
+    vi.useRealTimers();
+  };
+
+  it("🔴 目錄加密給自己：本機自動進目錄，且事件內容數不出裝置數", () => {
+    const { a } = bootTicked();
+    a.start(noop);
+    tick();
+    const dir = a.deviceDirectory();
+    expect(dir?.devices).toHaveLength(1);
+    expect(dir?.devices[0]!.pk).toBe(a.selfDevicePk());
+    a.stop();
+  });
+
+  it("🔴 觀測到但不在目錄內＝看得出來（今天完全看不出來的那種）", () => {
+    const { net, sk, a } = bootTicked();
+    a.start(noop);
+    tick();
+    net.connect("ghost", {}).publish(buildSnapshotEvent("{}", sk, "ghost-device"));
+    const ghost = a.devices().find((d) => d.id === "ghost-device");
+    expect(ghost).toBeTruthy();
+    expect(ghost!.inDirectory).toBe(false);
+    expect(a.devices().find((d) => d.isSelf)!.inDirectory).toBe(true);
+    a.stop();
+  });
+
+  it("目錄還沒建立時不得把整份清單誤報為「不在目錄內」", () => {
+    const net = createInMemoryRelayNetwork();
+    const store = new MemoryStorage();
+    const a = new RelayChatBackend(store, (h) => net.connect("a", h), "Alice");
+    a.start(noop);
+    expect(a.deviceDirectory()).toBeNull();
+    expect(a.devices().every((d) => d.inDirectory)).toBe(true);
+    a.stop();
+  });
+
+  it("🔴 同版本、內容不同 → 決勝收斂（S5：不誤報成攻擊，也**不合併**）", () => {
+    const { net, sk, a } = bootTicked();
+    const conflicts: number[] = [];
+    a.start({ ...noop, onDeviceDirectoryConflict: (_m, inc) => conflicts.push(inc) });
+    tick();
+    const mine = a.deviceDirectory()!;
+    net.connect("other", {}).publish(buildDeviceDirectory(sk, { v: mine.v, devices: [{ pk: "cc".repeat(32), at: 1 }] }));
+    expect(conflicts).toEqual([]); // 不是攻擊警報
+    expect(a.deviceDirectory()!.devices).toHaveLength(1); // 擇一，不合併
+    a.stop();
+  });
+});
+
+describe("EK per-device 分發 S2（ADR-0322）", () => {
+  const bootTicked = () => {
+    const net = createInMemoryRelayNetwork();
+    const sk = generateSecretKey();
+    const store = new MemoryStorage();
+    store.saveIdentity({ nsec: nsecEncode(sk), name: "Alice" });
+    vi.useFakeTimers();
+    const a = new RelayChatBackend(store, (h) => net.connect("a", h), "Alice");
+    return { net, sk, store, a };
+  };
+  const tick = (): void => {
+    vi.advanceTimersByTime(400_000);
+    vi.useRealTimers();
+  };
+
+  it("🔴 撤銷未生效時，快照**照舊帶 EK**——否則沒升級的自己的裝置會靜默收不到新 EK", () => {
+    const { net, sk, store, a } = bootTicked();
+    a.start(noop);
+    tick();
+    a.enableFs();
+    // 一台觀測得到但不在目錄內的舊裝置 → 雙軌期間
+    net.connect("old", {}).publish(buildSnapshotEvent("{}", sk, "old-device"));
+    expect(a.revocationState().state).toBe("active"); // 只有本機且已登記 ⇒ 沒有舊路徑證據
+    expect(buildSnapshotContent(store, "basic", { omitFsKeys: false }).fs?.keys.length).toBeGreaterThan(0);
+    a.stop();
+  });
+
+  it("🔴 所有裝置都在目錄內 → 撤銷生效，快照**不再帶 EK 私鑰**", () => {
+    const { store, a } = bootTicked();
+    a.start(noop);
+    tick();
+    a.enableFs();
+    expect(a.revocationState().state).toBe("active"); // 只有本機，且本機在目錄內
+    expect(buildSnapshotContent(store, "basic", { omitFsKeys: true }).fs?.keys).toEqual([]);
+    a.stop();
+  });
+
+  it("🔴 目錄內的裝置解得開分發、被移除的解不開（撤銷的實質）", () => {
+    const { a } = bootTicked();
+    a.start(noop);
+    tick();
+    a.enableFs();
+    const dirPks = a.deviceDirectory()!.devices.map((d) => d.pk);
+    expect(dirPks).toContain(a.selfDevicePk());
+    // 分發事件對目錄內裝置可解；隨機一把（＝被移除的裝置）不可解
+    const env = buildEkEnvelope(generateSecretKey(), dirPks, [{ nsec: "n", pk: "aa".repeat(32), at: 1 }]);
+    expect(openEkEnvelope(env, generateSecretKey(), env.pubkey)).toBeNull();
+    a.stop();
+  });
+});
+
+describe("保留解不開的密文待補解（ADR-0325）", () => {
+  /** Bob 加密給 Alice 的某把 EK；Alice 這台當下沒有那把 → 解不開。 */
+  const setup = () => {
+    const net = createInMemoryRelayNetwork();
+    const aliceSk = generateSecretKey();
+    const store = new MemoryStorage();
+    store.saveIdentity({ nsec: nsecEncode(aliceSk), name: "Alice" });
+    const a = new RelayChatBackend(store, (h) => net.connect("a", h), "Alice");
+    a.start(noop);
+    a.enableFs(); // 有 EK ⇒ 失敗落在 maybeEkLoss 桶，才會被保留
+    const lostEk = generateEncryptionKey(); // Alice 沒有的那把
+    const bobSk = generateSecretKey();
+    const wrap = sealAndWrap(
+      { kind: KIND.CHAT, created_at: Math.floor(Date.now() / 1000), tags: [], content: "等你金鑰回來再看到我" },
+      bobSk,
+      lostEk.pk, // 加密到 Alice 這台目前沒有的那把 EK
+      { kind: KIND.OFFLINE_DM_GIFT_WRAP, tags: [["p", getPublicKey(aliceSk)]] },
+    );
+    return { net, store, a, aliceSk, lostEk, wrap };
+  };
+  /** 另一台裝置發的自用快照，帶著這些 EK 私鑰（ADR-0245 的多裝置同步路徑）。 */
+  const snapshotCarrying = (sk: Uint8Array, keys: unknown[]) =>
+    buildSnapshotEvent(
+      JSON.stringify({
+        v: 1, at: 1, mode: "basic", contacts: [], groups: [], blocked: [],
+        fs: { enabled: true, keys, contactEks: {} },
+      }),
+      sk,
+      "other-device",
+    );
+
+  it("🔴 解不開的密文被留下來（過去是 `catch { return; }`，什麼都不剩）", () => {
+    const { net, store, a, wrap } = setup();
+    net.connect("bob", {}).publish(wrap);
+    expect(store.loadFsState().pending?.length).toBe(1);
+    a.stop();
+  });
+
+  it("🔴 EK 由別台同步回來後**自動補解**，訊息真的出現", () => {
+    const { store, a, aliceSk, lostEk, wrap } = setup();
+    const seen: string[] = [];
+    a.stop();
+    const net2 = createInMemoryRelayNetwork();
+    const b = new RelayChatBackend(store, (h) => net2.connect("a", h), "Alice");
+    b.start({ ...noop, onMessage: (_c: string, m: ChatMessage) => void seen.push(m.text) });
+    net2.connect("bob", {}).publish(wrap);
+    expect(seen).toEqual([]); // 還解不開
+    expect(store.loadFsState().pending?.length).toBe(1);
+
+    // 另一台把那把 EK 隨快照同步回來（真實路徑，非測試專用入口）
+    net2.connect("other", {}).publish(snapshotCarrying(aliceSk, [
+      { nsec: nsecEncode(lostEk.sk), pk: lostEk.pk, at: Date.now() },
+    ]));
+    expect(seen).toEqual(["等你金鑰回來再看到我"]);
+    expect(store.loadFsState().pending ?? []).toEqual([]); // 補解成功即移出清單
+    b.stop();
+  });
+
+  it("🔴 重試不得灌大失敗計數——那個數字是給使用者看的", () => {
+    const { net, store, a, aliceSk } = setup();
+    const other = generateEncryptionKey();
+    const bobSk = generateSecretKey();
+    for (let i = 0; i < 3; i++) {
+      net.connect("bob", {}).publish(
+        sealAndWrap(
+          { kind: KIND.CHAT, created_at: Math.floor(Date.now() / 1000) + i, tags: [], content: `x${i}` },
+          bobSk,
+          other.pk,
+          { kind: KIND.OFFLINE_DM_GIFT_WRAP, tags: [["p", getPublicKey(aliceSk)]] },
+        ),
+      );
+    }
+    const before = store.loadFsState().failures!.maybeEkLoss;
+    // 同步回來一把**不相干**的 EK：會觸發重試，但那三顆仍解不開。
+    const unrelated = generateEncryptionKey();
+    net.connect("other", {}).publish(
+      snapshotCarrying(aliceSk, [{ nsec: nsecEncode(unrelated.sk), pk: unrelated.pk, at: Date.now() }]),
+    );
+    expect(store.loadFsState().failures!.maybeEkLoss).toBe(before); // 沒有因為重試而變大
+    expect(store.loadFsState().pending?.length).toBe(3); // 仍解不開 → 留著
+    a.stop();
+  });
+
+  it("🔴 從未持有過 EK 時不留——那種失敗確定與 FS 無關，留著只是給人塞東西的地方", () => {
+    const net = createInMemoryRelayNetwork();
+    const sk = generateSecretKey();
+    const store = new MemoryStorage();
+    store.saveIdentity({ nsec: nsecEncode(sk), name: "Alice" });
+    const a = new RelayChatBackend(store, (h) => net.connect("a", h), "Alice");
+    a.start(noop);
+    const bobSk = generateSecretKey();
+    net.connect("bob", {}).publish(
+      sealAndWrap(
+        { kind: KIND.CHAT, created_at: Math.floor(Date.now() / 1000), tags: [], content: "垃圾" },
+        bobSk,
+        generateEncryptionKey().pk,
+        { kind: KIND.OFFLINE_DM_GIFT_WRAP, tags: [["p", getPublicKey(sk)]] },
+      ),
+    );
+    expect(store.loadFsState().pending ?? []).toEqual([]);
+    a.stop();
+  });
+});
+
+describe("觀測老化（ADR-0324）", () => {
+  const boot = () => {
+    const net = createInMemoryRelayNetwork();
+    const sk = generateSecretKey();
+    const store = new MemoryStorage();
+    store.saveIdentity({ nsec: nsecEncode(sk), name: "Alice" });
+    vi.useFakeTimers();
+    const a = new RelayChatBackend(store, (h) => net.connect("a", h), "Alice");
+    a.start(noop);
+    vi.advanceTimersByTime(400_000);
+    vi.useRealTimers();
+    return { net, sk, store, a };
+  };
+  /** 把某台的 lastSeen 推到老化門檻外（模擬「四個月沒開機」）。 */
+  const ageOut = (store: MemoryStorage, id: string): void => {
+    store.saveDevices(
+      store.loadDevices().map((d) => (d.id === id ? { ...d, lastSeen: Date.now() - DEVICE_STALE_MS - 1 } : d)),
+    );
+  };
+  const snapshotWithKeys = (sk: Uint8Array, device: string) =>
+    buildSnapshotEvent(
+      JSON.stringify({
+        v: 1, at: 1, mode: "basic", contacts: [], groups: [], blocked: [],
+        // 用真的 nsec：這份快照會被合併進本機 FS 狀態，假字串會在解碼時炸掉。
+        fs: { enabled: true, keys: [{ nsec: nsecEncode(generateSecretKey()), pk: "aa".repeat(32), at: 1 }], contactEks: {} },
+      }),
+      sk,
+      device,
+    );
+
+  it("🔴 久未出現的裝置不再把撤銷狀態卡在 dual-track——證據會過期", () => {
+    const { net, sk, store, a } = boot();
+    a.enableFs();
+    net.connect("old", {}).publish(snapshotWithKeys(sk, "old-device"));
+    expect(a.revocationState().state).toBe("dual-track"); // 剛看到，證據新鮮
+
+    ageOut(store, "old-device");
+    expect(a.revocationState().state).toBe("active"); // 四個月後那份快照說明不了今天
+    a.stop();
+  });
+
+  it("🔴 久未出現的裝置不再擋住「停止在快照裡放 EK」——不然撤銷永遠不會生效且完全靜默", () => {
+    const { net, sk, store, a } = boot();
+    a.enableFs();
+    net.connect("old", {}).publish(snapshotWithKeys(sk, "old-device"));
+    ageOut(store, "old-device");
+    // 該台仍不在目錄內；老化前這會讓本機永遠把 EK 放進自己的快照。
+    expect(a.devices().find((d) => d.id === "old-device")?.inDirectory).toBe(false);
+    expect(a.devices().find((d) => d.id === "old-device")?.stale).toBe(true);
+    a.stop();
+  });
+
+  it("🔴 這一台自己永遠不會被判為老化（每次啟動都刷新）", () => {
+    const { a } = boot();
+    expect(a.devices().find((d) => d.isSelf)?.stale).toBe(false);
+    a.stop();
+  });
+
+  describe("忘掉一筆觀測", () => {
+    it("觀測到但不在目錄內的可以忘掉——過去按下去是靜默什麼都不做", () => {
+      const { net, sk, store, a } = boot();
+      net.connect("old", {}).publish(snapshotWithKeys(sk, "old-device"));
+      expect(store.loadDevices().some((d) => d.id === "old-device")).toBe(true);
+      a.forgetDevice("old-device");
+      expect(store.loadDevices().some((d) => d.id === "old-device")).toBe(false);
+      a.stop();
+    });
+
+    it("🔴 在目錄內的**拒絕**忘掉——那只會把它從眼前藏起來，授權原封不動＝假的安全感", () => {
+      const { store, a } = boot();
+      const selfId = a.devices().find((d) => d.isSelf)!.id;
+      a.forgetDevice(selfId);
+      expect(store.loadDevices().some((d) => d.id === selfId)).toBe(true);
+      a.stop();
+    });
+
+    it("不動任何金鑰、不發任何事件（只是本機清單）", () => {
+      const { net, sk, store, a } = boot();
+      a.enableFs();
+      net.connect("old", {}).publish(snapshotWithKeys(sk, "old-device"));
+      const keysBefore = store.loadFsState().keys.length;
+      const dirBefore = a.deviceDirectory();
+      a.forgetDevice("old-device");
+      expect(store.loadFsState().keys.length).toBe(keysBefore);
+      expect(a.deviceDirectory()).toBe(dirBefore);
+      a.stop();
+    });
+  });
+});
+
+describe("撤銷判定三態與移除 S3（ADR-0322）", () => {
+  const bootTicked = () => {
+    const net = createInMemoryRelayNetwork();
+    const sk = generateSecretKey();
+    const store = new MemoryStorage();
+    store.saveIdentity({ nsec: nsecEncode(sk), name: "Alice" });
+    vi.useFakeTimers();
+    const a = new RelayChatBackend(store, (h) => net.connect("a", h), "Alice");
+    return { net, sk, store, a };
+  };
+  const tick = (): void => {
+    vi.advanceTimersByTime(400_000);
+    vi.useRealTimers();
+  };
+
+  it("目錄還沒建立＝unknown（不是 false——「等一下」與「去更新那台」意義不同）", () => {
+    const net = createInMemoryRelayNetwork();
+    const a = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("a", h), "Alice");
+    a.start(noop);
+    expect(a.revocationState().state).toBe("unknown");
+    a.stop();
+  });
+
+  it("🔴 有裝置的快照仍帶 EK 私鑰 → dual-track，且**指出是哪一台**", () => {
+    const { net, sk, a } = bootTicked();
+    a.start(noop);
+    tick();
+    a.enableFs();
+    expect(a.revocationState().state).toBe("active");
+    // 另一台（舊版）發了一份仍帶 EK 私鑰的快照＝直接證據
+    const withKeys = JSON.stringify({
+      v: 1, at: 1, mode: "basic", contacts: [], groups: [], blocked: [],
+      fs: { enabled: true, keys: [{ nsec: "n", pk: "aa".repeat(32), at: 1 }], contactEks: {} },
+    });
+    net.connect("old", {}).publish(buildSnapshotEvent(withKeys, sk, "old-device"));
+    const st = a.revocationState();
+    expect(st.state).toBe("dual-track");
+    expect(st.devices).toEqual(["old-device"]);
+    a.stop();
+  });
+
+  it("那台改成不帶 EK 後狀態自己復原（不是一次紅永遠紅）", () => {
+    const { net, sk, a } = bootTicked();
+    a.start(noop);
+    tick();
+    a.enableFs();
+    const mk = (keys: unknown[]) => JSON.stringify({
+      v: 1, at: 1, mode: "basic", contacts: [], groups: [], blocked: [],
+      fs: { enabled: true, keys, contactEks: {} },
+    });
+    const old = net.connect("old", {});
+    old.publish(buildSnapshotEvent(mk([{ nsec: "n", pk: "aa".repeat(32), at: 1 }]), sk, "old-device"));
+    expect(a.revocationState().state).toBe("dual-track");
+    old.publish(buildSnapshotEvent(mk([]), sk, "old-device"));
+    expect(a.revocationState().state).toBe("active");
+    a.stop();
+  });
+
+  it("🔴 移除：簽 v+1 目錄 ＋ 立刻輪替 EK（只改目錄不算撤銷）", () => {
+    const { store, a } = bootTicked();
+    a.start(noop);
+    tick();
+    a.enableFs();
+    const before = a.deviceDirectory()!;
+    const ekBefore = store.loadFsState().keys.length;
+    // 假裝目錄裡還有另一台
+    const victim = "dd".repeat(32);
+    a.removeDevice(victim); // 不在目錄裡 → 冪等
+    expect(a.deviceDirectory()!.v).toBe(before.v);
+    expect(store.loadFsState().keys).toHaveLength(ekBefore); // 沒有無謂輪替
+    a.stop();
+  });
+
+  it("🔴 不能移除自己（那只會把這台鎖在門外）", () => {
+    const { a } = bootTicked();
+    a.start(noop);
+    tick();
+    const before = a.deviceDirectory()!.v;
+    a.removeDevice(a.selfDevicePk());
+    expect(a.deviceDirectory()!.v).toBe(before);
+    expect(a.deviceDirectory()!.devices.map((d) => d.pk)).toContain(a.selfDevicePk());
+    a.stop();
+  });
+});
+
+describe("目錄分歧的處置 S4（ADR-0322）", () => {
+  const bootTicked = () => {
+    const net = createInMemoryRelayNetwork();
+    const sk = generateSecretKey();
+    const store = new MemoryStorage();
+    store.saveIdentity({ nsec: nsecEncode(sk), name: "Alice" });
+    vi.useFakeTimers();
+    const a = new RelayChatBackend(store, (h) => net.connect("a", h), "Alice");
+    return { net, sk, store, a };
+  };
+  const tick = (): void => {
+    vi.advanceTimersByTime(400_000);
+    vi.useRealTimers();
+  };
+
+  it("🔴 同版本分歧 → 決勝收斂為唯一一份，**不誤報成攻擊、也不合併**（合併＝自我登記後門）", () => {
+    const { net, sk, a } = bootTicked();
+    const conflicts: number[] = [];
+    a.start({ ...noop, onDeviceDirectoryConflict: (_m, v) => conflicts.push(v) });
+    tick();
+    const mine = a.deviceDirectory()!;
+    const otherPk = "cc".repeat(32);
+    net.connect("other", {}).publish(buildDeviceDirectory(sk, { v: mine.v, devices: [{ pk: otherPk, at: 1 }] }));
+    const after = a.deviceDirectory()!;
+    expect(conflicts).toEqual([]); // 不是攻擊警報
+    expect(after.devices).toHaveLength(1); // 不合併
+    expect(after.v).toBe(mine.v); // 同版本、擇一
+    a.stop();
+  });
+
+  it("🔴 版本倒退 → conflict，且**持久記錄**（重開還查得到）", () => {
+    const { net, sk, store, a } = bootTicked();
+    const conflicts: number[] = [];
+    a.start({ ...noop, onDeviceDirectoryConflict: (_m, v) => conflicts.push(v) });
+    tick();
+    const mine = a.deviceDirectory()!;
+    // 先推進到 v+2，再送一份倒退的
+    net.connect("x", {}).publish(buildDeviceDirectory(sk, { v: mine.v + 2, devices: [{ pk: "dd".repeat(32), at: 1 }] }));
+    net.connect("y", {}).publish(buildDeviceDirectory(sk, { v: 1, devices: [{ pk: "ee".repeat(32), at: 1 }] }));
+    expect(conflicts.length).toBe(1);
+    const rec = store.loadDirectoryConflicts();
+    expect(rec).toHaveLength(1);
+    expect(rec[0]!.reason).toBe("rollback");
+    expect(rec[0]!.devicePks).toEqual(["ee".repeat(32)]);
+    expect(a.directoryConflicts()).toHaveLength(1); // 引擎讀得回來（＝重開後仍在）
+    a.stop();
+  });
+
+  it("紀錄有界（不讓攻擊者用重放灌爆本機儲存）", () => {
+    const { net, sk, store, a } = bootTicked();
+    a.start(noop);
+    tick();
+    const mine = a.deviceDirectory()!;
+    net.connect("x", {}).publish(buildDeviceDirectory(sk, { v: mine.v + 20, devices: [{ pk: "dd".repeat(32), at: 1 }] }));
+    for (let i = 0; i < 12; i++) {
+      net.connect(`r${i}`, {}).publish(buildDeviceDirectory(sk, { v: 1, devices: [{ pk: i.toString(16).padStart(64, "0"), at: i }] }));
+    }
+    expect(store.loadDirectoryConflicts().length).toBeLessThanOrEqual(8);
+    a.stop();
+  });
+});
+
+describe("裝置授權取代自我登記 S5（ADR-0322）", () => {
+  /** 兩台共用同一把 nsec、但各有獨立 KV（＝不同裝置金鑰）的後端。 */
+  const twoDevices = () => {
+    const net = createInMemoryRelayNetwork();
+    const sk = generateSecretKey();
+    const nsec = nsecEncode(sk);
+    const kv = () => {
+      const m = new Map<string, string>();
+      return {
+        getItem: (k: string) => m.get(k) ?? null,
+        setItem: (k: string, v: string) => void m.set(k, v),
+        removeItem: (k: string) => void m.delete(k),
+      };
+    };
+    vi.useFakeTimers();
+    setKvBackend(kv());
+    const sA = new MemoryStorage();
+    sA.saveIdentity({ nsec, name: "Alice" });
+    const a = new RelayChatBackend(sA, (h) => net.connect("a", h), "Alice");
+    a.start(noop);
+    vi.advanceTimersByTime(400_000);
+    setKvBackend(kv());
+    const sB = new MemoryStorage();
+    sB.saveIdentity({ nsec, name: "Alice" });
+    const b = new RelayChatBackend(sB, (h) => net.connect("b", h), "Alice");
+    b.start(noop);
+    vi.advanceTimersByTime(400_000);
+    return { net, a, b, stop: () => { vi.useRealTimers(); setKvBackend(null); a.stop(); b.stop(); } };
+  };
+  /** 目錄的勝方／敗方（同版本分歧由 ADR-0099 §2 決勝，誰勝不預設）。 */
+  const split = (a: RelayChatBackend, b: RelayChatBackend) => {
+    const inDir = a.deviceDirectory()!.devices.map((d) => d.pk);
+    return inDir.includes(a.selfDevicePk()) ? { win: a, lose: b } : { win: b, lose: a };
+  };
+
+  it("🔴 兩台各自創世 → **收斂到唯一一份**，而不是合併成兩台都在（合併＝自我登記的後門）", () => {
+    const { a, b, stop } = twoDevices();
+    expect(a.deviceDirectory()!.devices).toHaveLength(1);
+    expect(b.deviceDirectory()!.devices).toHaveLength(1);
+    expect(a.deviceDirectory()!.devices[0]!.pk).toBe(b.deviceDirectory()!.devices[0]!.pk); // 兩邊一致
+    stop();
+  });
+
+  it("🔴 敗方**不會自己加回來**（自我登記已移除）", () => {
+    const { a, b, stop } = twoDevices();
+    const { win, lose } = split(a, b);
+    vi.advanceTimersByTime(400_000); // 給敗方好幾拍心跳
+    expect(win.deviceDirectory()!.devices.map((d) => d.pk)).not.toContain(lose.selfDevicePk());
+    stop();
+  });
+
+  it("🔴 勝方授權後，敗方才進得來", () => {
+    const { a, b, stop } = twoDevices();
+    const { win, lose } = split(a, b);
+    win.authorizeDevice(lose.selfDevicePk(), "手機");
+    expect(win.deviceDirectory()!.devices.map((d) => d.pk)).toContain(lose.selfDevicePk());
+    stop();
+  });
+
+  it("🔴 **移除之後它回不來了**（這正是 S3 原本失效的地方）", () => {
+    const { a, b, stop } = twoDevices();
+    const { win, lose } = split(a, b);
+    win.authorizeDevice(lose.selfDevicePk());
+    expect(win.deviceDirectory()!.devices.map((d) => d.pk)).toContain(lose.selfDevicePk());
+    win.removeDevice(lose.selfDevicePk());
+    vi.advanceTimersByTime(400_000); // 給它好幾拍心跳自己加回來
+    expect(win.deviceDirectory()!.devices.map((d) => d.pk)).not.toContain(lose.selfDevicePk());
+    stop();
+  });
+
+  it("不在目錄內的裝置沒有授權資格（避免未授權者互相拉人進來）", () => {
+    const { a, b, stop } = twoDevices();
+    const { win, lose } = split(a, b);
+    lose.authorizeDevice("cc".repeat(32));
+    expect(win.deviceDirectory()!.devices.map((d) => d.pk)).not.toContain("cc".repeat(32));
+    stop();
   });
 });
