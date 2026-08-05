@@ -2,7 +2,7 @@
 
 > 本文件是模組邊界、資料流與初始化規劃的**單一真實來源（SSOT）**。產品行為以 [`PRD.md`](./PRD.md) 為準；本文件定義「落在哪一層、如何連接」。
 >
-> 狀態：**M1–M9 核心已完成，中繼已部署生產；企業模式（§8）已於桌面與行動端落地**；本檔已對齊至 ADR-0184（2026-07）。行動端（`apps/mobile`，react-native-web）與桌面**共用 `packages/engine`**，功能高度對齊——含企業成員入職/名冊管理/離職接管（唯「企業主收儲存槽落盤」限桌面＝需原生檔案系統）。隨實作推進，模組邊界、事件契約或資料流如有變更，必須同步更新本檔與相關入口文件。細部決策與反轉（D1→DO、捨棄→支援網頁、SQLite→加密 blob、無推播等）見 `docs/adr/`。
+> 狀態：**M1–M9 核心已完成，中繼已部署生產；企業模式（§8）已於桌面與行動端落地**；本檔已對齊至 ADR-0333（2026-08-05）。行動端（`apps/mobile`，react-native-web）與桌面**共用 `packages/engine`**，功能高度對齊——含企業成員入職/名冊管理/離職接管（唯「企業主收儲存槽落盤」限桌面＝需原生檔案系統）。隨實作推進，模組邊界、事件契約或資料流如有變更，必須同步更新本檔與相關入口文件。細部決策與反轉（D1→DO、捨棄→支援網頁、SQLite→加密 blob、無推播等）見 `docs/adr/`。
 
 ## 1. 設計原則
 
@@ -51,11 +51,11 @@
 
 | 模組 | 目錄 | 職責 |
 | --- | --- | --- |
-| 共用核心 | `packages/core/` | Nostr 事件建構/驗證、簽章（secp256k1 Schnorr, BIP-340）、加密（NIP-44）、Gift Wrap 與群組扇出、儲存型別、事件 Kind 常數（含 `NUDGE`，ADR-0120）、版本比較與更新判定（ADR-0228）、威脅情報比對與 snapshot 解析（ADR-0231，純本地零網路）。跨平台共用，**SSOT 邏輯所在**。零 UI 依賴。 |
+| 共用核心 | `packages/core/` | Nostr 事件建構/驗證、簽章（secp256k1 Schnorr, BIP-340）、加密（NIP-44）、Gift Wrap 與群組扇出、儲存型別、事件 Kind 常數（含 `NUDGE`，ADR-0120）、composer 草稿建議的純比對器（`mention-suggest`、`slash-command`＝斜線指令目錄比對，ADR-0309；命令**行為**留在各端 UI）、版本比較與更新判定（ADR-0228）、威脅情報比對與 snapshot 解析（ADR-0231，純本地零網路）。跨平台共用，**SSOT 邏輯所在**。零 UI 依賴。 |
 | 通訊引擎 | `packages/engine/` | **可用的通訊後端（ADR-0074）**：`ChatBackend`/`ChatBackendEvents` 契約＋UI DTO、`RelayChatBackend`（真實 relay pool）/`BrowserChatBackend`（記憶體 demo）、WebRTC、`AppStorage`/`LocalStorage`、多身分/搬家/快照。與 UI 框架無關，供任意前端重用（desktop 與 mobile 皆消費）。 |
 | 桌面前端 | `apps/desktop/src/` | React/TS UI：好友列表、對話視窗、狀態列、Nudge 動畫。消費 `@cinderous/engine`；平台基質（Tauri 金鑰庫/加密儲存）經 `AppStorage`/keyvault 介面注入。**同一份 `vite build` 亦為瀏覽器版**：`isTauri()=false` 走 web 路徑（金鑰以 Argon2id 本地密碼包裹存 localStorage，ADR-0112/0122），可自架於獨立子網域（ADR-0147，見 `docs/self-hosting-web-app.md`）。 |
 | 桌面原生橋 | `apps/desktop/src-tauri/` | Rust：**為引擎提供原生能力**（非重造通訊，ADR-0105）——`encstore`（AES-256-GCM 加密 blob）、`passlock`（Argon2id 本地密碼＋救援）、`keyvault`（OS 金鑰庫）、`partfile`（部位檔的原子寫入／檔名白名單／毀損隔離，ADR-0119）、IPC。中繼連線/Gift Wrap/WebRTC/狀態機**留在 `packages/engine`（TS）**；原本的 Rust 背景連線與 SQLite（ADR-0019/0020）已於 ADR-0105 退役。 |
-| 行動端 | `apps/mobile/` | react-native-web：接**真實中繼**（ADR-0086），重用 `@cinderous/core`/`@cinderous/i18n`/`@cinderous/engine`/`@cinderous/theme`。儲存走加密 localStorage＋OPFS 封存；「記住我」以 Argon2id 包裹 nsec（ADR-0117）。**不做推播（APNs/FCM）**（ADR-0116）。 |
+| 行動端 | `apps/mobile/` | react-native-web：接**真實中繼**（ADR-0086），重用 `@cinderous/core`/`@cinderous/i18n`/`@cinderous/engine`/`@cinderous/theme`。儲存走加密 localStorage＋OPFS 封存；「記住我」以 Argon2id 包裹 nsec（ADR-0117）。**不做推播（APNs/FCM）**（ADR-0116）。**元件邊界（ADR-0331／0332，2026-08-05）**：`MobileApp.tsx`＝**外殼**，只放比一個 session 活得久的東西（身分登錄、外觀／語言／主色、指向作用中 session 的指標）；`AppSession.tsx`＝**一個身分的全部**（session state、後端生命週期、所有畫面），並由外殼以 `key={pubkey}:{gen}` 掛載 ⇒ **切身分＝元件重掛＝per-identity 狀態結構性歸零**（取代原本手寫的重設清單，ADR-0294 §2 的漏網從此不可能發生）。per-identity 狀態分為 7 個功能簇 hook（`use-*-session.ts`），由 `useIdentitySession()` 聚合。 |
 | 官方網站 | `apps/website/` | 純靜態站（Vite+React；ADR-0090）：開源/永久免費/隱私主張、下載、捐款導流、**簽章式資金透明度**（`funds.json` 前端 `verifyFunds` 對釘死透明度公鑰驗簽＋算 runway，fail-closed）。**與通訊平面硬隔離、零追蹤、無常駐後台**；重用 `@cinderous/core`（驗簽）/`@cinderous/theme`/`@cinderous/i18n`。**每頁真實 URL ＋建置時預渲染**（ADR-0235）：`routes.ts` 定義 (頁面 × 語言) 路由（預設語言走根路徑、英文走 `/en/`），`entry-server.tsx`＋`scripts/prerender.mjs` 於 `vite build` 後把每條路由渲染成實體目錄下的 `index.html`，客戶端 `hydrateRoot` 接手——不執行 JS 的答案引擎也看得到完整內容；`seo.ts` 產出每頁 canonical/hreflang/OG/JSON-LD 與 `robots.txt`/`sitemap.xml`。另發佈 app 查詢用靜態資料檔：`releases.json`（更新偵測，ADR-0228）與 `threat-intel.json`（威脅情報 snapshot，ADR-0231，CI 每日重建；ADR-0235 加絕不封鎖清單與變動量護欄）。 |
 | 中繼站 | `relay/` | Cloudflare Worker + **Durable Object 內建 SQLite**（ADR-0056）：Nostr relay，處理 Ephemeral 轉發與 NIP-40 過期留言；NIP-42 AUTH ＋具名訂閱 ACL（ADR-0057／0123）。`RelayCore` 傳輸無關，可自架於 Node/Deno/Bun/Docker。 |
 | 測試 | `tests/` | 跨層整合測試與共用 fixture。 |
@@ -91,7 +91,10 @@
 | 正在輸入中／敲一下（✅ 封裝） | 20001／20100（**NIP-59 包封**） | 否（Ephemeral） | ADR-0120：改為 `sealAndWrap`——外層一次性臨時金鑰簽名，中繼看不到寄件人（原本以真名廣播指名事件，可靠時間相關反推 Gift Wrap 寄件人）。訂閱只靠 `#p`；只收聯絡人（防騷擾） |
 | 限時訊息（Disappearing，✅ M6） | 1059（rumor 內帶較短 NIP-40） | DO SQLite 至過期 | 送訊即帶較短過期：rumor 內層 `expiration` 供收件端到期隱藏，外層 wrap 同步縮短以利中繼清除；客戶端到期顯示「訊息已到期」（已實作，見 ADR-0013） |
 | 語音訊息／貼圖（規劃 M7） | WebRTC / 1059 | P2P 優先 | 錄音與媒體複用檔案分塊傳輸；貼圖以 `pack/id` 參照客戶端渲染 |
-| 群組聊天（✅ M9） | 1059（內含 kind 14 + `g` tag；控制為 kind 40） | 短期 | Gift-Wrap 成對扇出：群訊對每位成員各發一個 Gift Wrap（`g` tag = groupId）；控制訊息 create/add/remove/leave。對中繼完全不暴露群組/成員；移除即扇出略過、免 rekey（`group.ts`，ADR-0027）。**成員數上限 15（含自己）**，`GROUP_MEMBERS_MAX`／`createGroup` 直接擋（ADR-0303 §9，2026-08-01）——扇出為 O(N×D)、中繼實際負載未量測，故**先緊後放寬**（可逆）而非先寬後收緊（等於拿走使用者已有的東西）；⚠ **只擋新增**，既有超額群組不受影響 |
+| 群組聊天（✅ M9） | 1059（內含 kind 14 + `g` tag；控制為 kind 40） | 短期 | Gift-Wrap 成對扇出：群訊對每位成員各發一個 Gift Wrap（`g` tag = groupId）；控制訊息 create/add/remove/leave。對中繼完全不暴露群組/成員；移除即扇出略過、免 rekey（`group.ts`，ADR-0027）。**成員數上限 15（含自己）**，`GROUP_MEMBERS_MAX`／`createGroup` 直接擋（ADR-0303 §9，2026-08-01）——扇出為 O(N×D)、中繼實際負載未量測，故**先緊後放寬**（可逆）而非先寬後收緊（等於拿走使用者已有的東西）；⚠ **只擋新增**，既有超額群組不受影響 | **FS 發現走 seal 層**（ADR-0326）：群訊的 seal（kind 13）帶一個 `["ek", <寄件人當前 EK>]` tag——**加密在 wrap 內層、只有收件人看得到、不參與 `rumor.id` 雜湊**（rumor 不行是因為 id 要跨成員一致而 EK 每 7 天輪替；wrap tags 不行是因為那是明文）。被邀請者對非聯絡人成員的 FS 覆蓋率原本是**結構性 0**（他們的 kind 10040 不在 `authors:[聯絡人]` 訂閱內），改為**對話式發現**：對方發過一次言即學到。成本 +9.9 位元組/份（5.8% 樣本跳一個 NIP-44 填充級距）。
+| 裝置目錄（✅ ADR-0322 S1） | **10041**（可取代，IK 簽章，加密到自己） | 中繼保留最新一份 | 這個身分**授權過哪些裝置**（裝置公鑰＋隨機 id）。撤銷的根據；分歧偵測走 ADR-0099 §2 決勝規則（`created_at` 新者勝，同時則 event id 字典序小者勝）。🔴 **自我登記已廢除**（S5）：加入既有目錄一律由**已在目錄內的現役裝置**授權，否則被移除的裝置會自己簽 v+2 加回來、與移除互相抵銷 |
+| EK 分發信封（✅ ADR-0322 S2） | **10042**（可取代） | 短期 | 前向保密的加密子鑰**逐台加密**給目錄內裝置的公鑰（取代「EK 隨雲端快照給所有持 nsec 者」）。**槽位補齊到 8 的倍數**——逐台加密會讓密文數＝裝置數、中繼直接數得出，那正是 10041 藏起來的東西 |
+| 裝置金鑰保管（ADR-0323） | —（不上鏈） | 裝置本地 | 撤銷成立的**唯一前提**是「被移除那台的裝置私鑰拿不到」。Tauri＝OS 金鑰庫；Android＝`AndroidKeyStore`（有 TEE 才算 `keystore`，軟體實作只算 `encrypted`，**不得混講**）；瀏覽器＝IndexedDB 內不可匯出的 WebCrypto 金鑰。⚠ **不進雲端快照、不進配對捆包**——一旦跨裝置流動，「移除某台裝置」就失去意義 |
 | 語音/視訊通話（✅ M8） | 21002（NIP-59 包封） | 否（Ephemeral） | 通話控制 invite/accept/reject/hangup/candidate（`call.ts` 狀態機 + `WebRtcCall` 執行期）；媒體全程 P2P WebRTC track（DTLS）。假音源 + 真實 relay/WebRTC E2E 驗證（ADR-0025/0026） |
 | 訊息請求（✅ ADR-0121） | 1059（一般私訊即是） | DO SQLite（NIP-40） | 陌生人的訊息進**訊息請求區**而非聯絡人清單；接受前不通知、不能 nudge、看不到你上線。訊息本身仍會抵達中繼（Nostr 擋不掉），此為客戶端顯示層防禦 |
 | 群組檔案（✅ ADR-0124） | 1059（內含 kind 14 + `g` + `file` tag） | 短期 | metadata 扇給每位成員（共用 rumor 與 tid），位元組各自走 P2P（明文不上中繼） |
@@ -171,7 +174,9 @@
   - 「**文案不得宣稱 FS**」**維持且更嚴格**：不進官網功能表、不進比較表、不進行銷文案；僅得於藍圖頁作事實陳述（`roadmap-fs`）。比較表 `cp_r9a` 由 `Compare.test` 鎖為「開發中」。
 
   **事件契約新增（ADR-0306 D3.3c）**：簽章個人檔的 `fs` 能力欄位由「精確比對 `ek-v1`」改為四態解讀 `fs`／`retired`（`"none"`，明示退場）／`unknown`（宣告了本版不支援的機制）／`absent`。`retired` 是**軟／硬退共用的退場語意**——沒有它，「刻意停用」與「被攻擊剝除 EK」在收件端**看起來一樣**，會永遠觸發降級警告。其不可偽造性來自 ADR-0245 §81（`fs` 在簽章個人檔內）。`unknown` 走 `onFsUnsupported`（「請更新」）而非 `onFsDowngrade`（「對方可能被攻擊」）——把後者顯示成前者即說謊（ADR-0302 §4）。
-  ⚠ **行動端尚無 FS UI**（引擎層與桌面端已具備）；per-message 棘輪延後（其入場費見 **ADR-0303**：per-device **session** 而非 per-device 身分）、完整 PCS/群組走 MLS（不自捲）。
+  **2026-08-03 盤點更正**：~~行動端尚無 FS UI~~ 已不成立——**桌面／瀏覽器／行動端三端皆已具備 FS UI**（行動端 `SettingsScreen` 的 `fs` 區塊，含常駐「未經審計」揭露與換鑰，`FsSettingsUi.test.tsx` 覆蓋）。
+  ⚠ **真正的範圍限制在別處**：`fsSendOpt()` 全庫只有一處呼叫（`relay-backend.ts` 的 1:1 文字送出）⇒ **只有 1:1 文字訊息有 FS**；群組、typing/nudge、已讀回條、檔案、通話、reaction、收回**全部維持靜態**（ADR-0245 §200 的 ⏳）。且不知道對方 EK 時**靜默退回身分金鑰**＝該則沒有 FS（僅對已釘選過的聯絡人才發降級警告）。
+  per-message 棘輪延後（其入場費見 **ADR-0303**：per-device **session** 而非 per-device 身分）、完整 PCS/群組走 MLS（不自捲）。
 - **（方向已定，實作待排）** 多設備可變狀態 CRDT 化：訊息 id 去重、已讀水位 LWW（ADR-0108）、資產 LWW＋墓碑（ADR-0224）已定；聯絡人/群組/封鎖/設定的合併仍是 add-biased（刪除復活、解封不傳、欄位/設定不同步）。**ADR-0242** 定案輕量系統化——OR-Set＋墓碑（聯絡人/群組/封鎖）＋per-field LWW（暱稱/設定），分階段逐坑觸發。
 - ~~群組加密方案？~~（已定案 ADR-0027：Gift-Wrap 成對扇出；MLS 延後。顯示名稱走加密個人檔 kind 已實作，ADR-0061。）
 - **（方向已定，實作待排）** 中繼層元資料可連結性：連線都綁真名 → 中繼可歸屬 presence 訂閱（聯絡人集合）與 Gift Wrap 發布（送出邊）。**ADR-0237** 定案分層——Tier 0 強化 P2P 卸載、Tier 1 opt-in 嚴格 presence 模式、**自架為官方解答**；輪替金鑰 presence 因 IP 關聯與 N× 容量而否決，臨時身分連線與傳輸匿名（Tor）延後、與 DO 分片一起評估。

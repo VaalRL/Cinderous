@@ -229,6 +229,25 @@ At the bottom of Settings there's a **"Danger zone"**. Both actions there are **
 
 ---
 
+## 9b. My devices (what to do when a phone is lost)
+
+Settings has a **My devices** list: the devices this identity has been seen on. If a phone is lost, an old laptop was never wiped, or you handed a work machine back, remove that device **from another device you still hold**.
+
+**What removal buys you**: that device can no longer read **new** messages.
+
+**What it does not buy** (these matter — don't misread it):
+
+- **History it already received is gone for good.** You cannot claw those messages back.
+- **During a grace window of about 7 days** it can still open older in-flight messages. That is deliberate — otherwise every in-flight message would drop with it.
+- **If what leaked was your identity key itself (not just one device), removal does not help.** That situation calls for rotating your identity.
+- The list **cannot see read-only devices**. Someone holding your key who quietly only receives will not appear here. The settings page says so — that is not a disclaimer, it is the truth.
+
+**One more thing to check on that page**: it shows the **protection tier of this device's key**. Desktop and Android with a secure element are the strongest tier; the browser only reaches "encrypted" — **someone who copies the entire browser profile may still bypass removal**. That sentence is printed on screen.
+
+> For a new device to join the list, you must **authorise it from a device already on the list** (or pair the devices — a successful pairing authorises automatically). This is deliberate: if a device could add itself, removal would mean nothing.
+
+---
+
 ## 10. Frequently asked questions (FAQ)
 
 **Q: I just want to chat — why do I need to understand so much?**

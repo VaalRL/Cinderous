@@ -53,12 +53,12 @@ Cinderous 透過「狀態信令」與「巨量資料傳輸」雙軌混合網路�
 
 ## 目前實作狀態
 
-從核心協定到桌面／行動客戶端與**企業模式**皆**已實作並通過測試**（pnpm monorepo、TypeScript strict、全程 TDD）。摘要如下（詳見 [`docs/adr/`](./docs/adr) 逾 180 份決策紀錄）：
+從核心協定到桌面／行動客戶端與**企業模式**皆**已實作並通過測試**（pnpm monorepo、TypeScript strict、全程 TDD）。摘要如下（詳見 [`docs/adr/`](./docs/adr) 逾 330 份決策紀錄）：
 
 **核心通訊**
 - Nostr 中繼：心跳／上線狀態、Ephemeral 扇出、離線留言（NIP-17/44/59 Gift Wrap ＋ NIP-40 過期）
 - WebRTC：真實 P2P（`RTCPeerConnection`／ICE／TURN）語音／視訊通話、資料通道分塊檔案傳輸、雙軌降級與自動改道
-- 多裝置：QR／配對搬家（P2P，AES-256-GCM）、加密雲端備份（opt-in）、備份碼（NIP-49）、多身分並存
+- 多裝置：QR／配對搬家（P2P，AES-256-GCM）、加密雲端備份（opt-in）、備份碼（NIP-49）、多身分並存；**我的裝置清單＋移除裝置**（ADR-0322：簽章裝置目錄、加密子鑰逐台分發）——⚠ 那買到的是**裝置遺失／被偷／舊機沒清**，**不是**身分私鑰外洩的解藥，設定頁如實說明並顯示裝置金鑰的保護等級（ADR-0323）
 
 **即時通體驗（懷舊 MSN 風）**
 - 敲一下（Nudge／震動）、正在輸入、正在聽（音樂狀態）、自訂狀態文字、隱身、上線狀態本機還原
@@ -71,7 +71,7 @@ Cinderous 透過「狀態信令」與「巨量資料傳輸」雙軌混合網路�
 - 公司設定（歡迎詞／上下班時間、下班自動靜音）、訊息保留天數、公司儲存槽（檔案存放）
 - 企業成員鎖公司座；桌面與行動端皆可管理（唯「企業主收儲存槽落盤」限桌面＝需原生檔案系統）
 
-- **測試**：core 327／engine 265／relay 88／theme 14／i18n 8／desktop 406／mobile 197（TS 逾 **1,300**）＋ Rust，含 relay↔client 端到端整合測試。
+- **測試**：core 639／engine 570／desktop 714／mobile 441／relay 197／website 68／theme 37／cli 30／i18n 16／brand 4（TS 共 **2,716**）＋ Rust，含 relay↔client 端到端整合測試與行動端 jsdom 互動測試（ADR-0328）。
 - **可眼見**：桌面客戶端可打包成安裝檔（見上「終端平台」），亦可直接在瀏覽器跑（`/`）；另有端到端 `demo.html`／真實 WebRTC `webrtc.html`。
 - **完整施工計畫**（現況、各平台待辦、M6–M9 進階功能、相依順序）：見 [`docs/ROADMAP.md`](./docs/ROADMAP.md)。
 - **使用者教學**（給一般使用者：身分與鑰匙、加好友、本地密碼、換裝置三條路、搬家、常見問題）：見 [`docs/使用手冊_User-Guide.md`](./docs/使用手冊_User-Guide.md)。

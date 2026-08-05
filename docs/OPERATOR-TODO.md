@@ -65,6 +65,11 @@ export const MAINTAINER_PUBKEY = "你的維護者公鑰 hex（64 字元）";
 | 項目 | 需要 | 對應 | 現況 |
 | --- | --- | --- | --- |
 | 中繼站生產部署 | Cloudflare 帳號、`wrangler deploy`、D1 綁定、NIP-42 AUTH | Phase C（C1–C4） | 程式/測試已備，離線留言待接 D1 |
+| **Android 裝置金鑰外掛真機驗證** | 一台 Android（最好兩台：有 TEE／無 TEE） | ADR-0323 | 外掛（`DeviceKeyStorePlugin.java`）＋JS 橋＋註冊皆已落地，**原始碼紅線測試與橋接測試綠**。要驗三件事：①有 TEE／StrongBox 的機型顯示 `keystore`、軟體實作的顯示 `encrypted`（**不得混講**）②StrongBox 不可用時退回一般 TEE 不當機 ③**由舊版明文升級**時金鑰搬進 Keystore 且**裝置身分不變**（掉了就要重新授權） |
+| **離職接管真機驗證** | 一組企業主＋員工帳號（需真的入職＋託管事件） | ADR-0163／0179／0332 | 程式已完成。jsdom 造不出託管事件（要企業主端真的收到 `onOrgEscrow`）⇒ 這條登入路徑（`overrideRelay`＋`forceInvisible`）**沒有自動覆蓋**，而 ADR-0332 的控制流反轉動到它共用的那條路。要驗：接管後**建構即隱身**（首拍心跳不得廣播離職身分上線） |
+| **配對搬家匯入真機驗證** | 兩台裝置（真 WebRTC） | ADR-0072／0125／0332 | 同上——`bundle` 這條登入路徑無法在 jsdom 驅動。要驗：SAS 兩端一致、捆包完整搬移（聯絡人／歷史／群組／企業精華）、**新機的裝置公鑰回傳讓舊機自動授權**（ADR-0322 S5） |
+| **桌面通知點擊 action** | 打包版（`tauri:build`）＋各 OS | N3 | 程式已完成（`focus_window` IPC＋`onNotificationClick`）。**通知顯示本身不受影響**，待確認的是各 OS 對點擊 action 的支援度 |
+| **瀏覽器裝置金鑰保管庫（IndexedDB）** | 任一瀏覽器 | ADR-0323 | 加解密與失敗方向已以記憶體 `WrapStore` 測到；**`idbWrapStore()` 那層薄接線未自動測試**（Node 無 IndexedDB，**刻意不引入 `fake-indexeddb` 相依**）。要驗：重開瀏覽器後裝置身分不變、清網站資料後乾淨重生 |
 | **中繼分片上線** | `wrangler deploy` 最新 worker（分片路由：`/s/<prefix>`＋`/presence`） | ADR-0241 | 客戶端**預設開分片**（`shardingEnabled` 預設 true）。worker 路由 **backward-compatible**——舊 worker 對 `/s/` 仍回退 global、不壞（只是不真的分片）；deploy 最新版後 `/s/`／`/presence` 才真正路由到分片/presence DO。pre-release 幾乎無使用者 → 直接切換、不需雙讀遷移。kill-switch＝`localStorage nb.sharding=0` |
 | **雲端快照上線** | ~~`wrangler deploy`~~ ✅ **已部署（2026-07-10）** | Phase J（ADR-0071） | 生產已上線並實測：取代語意（同 `d` 只留最新）、purge 零殘留、**隱私閘門**（他人已認證仍讀不到你的快照）皆通過。**企業自架 relay 注意**：若有設 `allowedKinds`（G2 政策），需把快照 kind **30078** 加入名單，否則政策允許備份時 relay 仍會默默拒收 |
 | Tauri 桌面**簽章/自動更新** | Windows 程式碼簽章憑證（Authenticode）；（更新用）updater 金鑰＋更新託管端點 | Phase B ③ | B1 殼/B5 金鑰庫/B6 安裝檔/系統匣背景皆已 **Windows 實機完成**；僅剩**未簽章**（SmartScreen 警告）＋無自動更新，步驟見下方 §B-Tauri |
@@ -72,7 +77,7 @@ export const MAINTAINER_PUBKEY = "你的維護者公鑰 hex（64 字元）";
 | **企業強制 TURN 真機驗證** | 部署 TURN 伺服器、把 `turnServers` 填入 `RelayPoolOptions` | G2（ADR-0048） | `forceTurn`→`iceTransportPolicy:"relay"` 程式已接（`buildRtcConfig`），缺 TURN 才能實測；同時作為通話 NAT 保底 |
 | **公共 TURN 保底上線** | Cloudflare 開 TURN app → `TURN_KEY_ID`（var）＋`wrangler secret put TURN_API_TOKEN`＋Cloudflare 端設用量上限 | ADR-0243 | **客戶端＋Worker `/turn` 接線已落地、TDD 綠、未配 secret 即 no-op（純 STUN）**；設好 secret 即全體一般使用者自動享保底，修對稱 NAT／嚴格防火牆下 ~10–20% 通話接不通。設定範例見 `relay/wrangler.toml` 註解 |
 | 第三方安全稽核 | 外部稽核員 | F4（`docs/SECURITY.md` 已備前置） | 前置威脅模型/加密盤點已備 |
-| **前向保密（FS）外部審計＋上線** | 外部密碼學審計員 | ADR-0245（Phase 3） | **引擎已實作（Phase 0–2、全測綠、opt-in）**。輪替加密子鑰、retarget Gift Wrap、10040 PKI、多裝置 EK 同步、grace 刪除、降級偵測皆完成。**UI 預設對使用者隱藏**（`fsUiEnabled`，App.tsx；設 `localStorage nb.fs=1` 才顯示，供開發/審計驗證手動啟用＋更換金鑰）→ 已符合硬閘「審計前不對使用者露出 FS」。**上線前硬閘：外部密碼學審計通過後，才可改預設顯示/啟用、文案才可宣稱 FS** |
+| **前向保密（FS）外部審計＋上線** | 外部密碼學審計員 | ADR-0245（Phase 3） | **引擎已實作（Phase 0–2、全測綠、opt-in）**。輪替加密子鑰、retarget Gift Wrap、10040 PKI、多裝置 EK 同步、grace 刪除、降級偵測皆完成。🔵 **2026-08-05 校正（本列原本已過期）**：`fsUiEnabled` 隱藏閘門**已於 ADR-0306 移除**（2026-07-31）——該 ADR **明文推翻** ADR-0245「審計通過前不得產線啟用」，改為**實驗性選項、預設關、啟用時明示未經審計**。本列原本寫的「UI 預設對使用者隱藏（設 `localStorage nb.fs=1` 才顯示）」在程式碼裡已經不存在。⚠ **維持不變的硬閘只剩文案**：不進功能表／比較表／行銷文案（ADR-0306 D2.2）。⇒ 外部審計仍是待辦，但它**不再是上線閘門**，而是 `fs-review-deadline.test.ts` 釘住的複查項（2027-01-30 到期弄紅 CI） |
 | 企業 SSO / 元資料稽核 | 外部 IdP（AD/LDAP/OIDC）、自架 relay 記錄連線元資料 | G5 | 需先立 ADR 與環境；未動工 |
 
 ### §B-Tauri：程式碼簽章與自動更新（Phase B ③）
