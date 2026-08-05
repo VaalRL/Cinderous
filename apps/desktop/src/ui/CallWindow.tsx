@@ -14,6 +14,16 @@ export interface CallWindowProps {
   onAccept: () => void;
   onReject: () => void;
   onHangup: () => void;
+  /**
+   * 我／對方各自在送什麼（ADR-0338）。**兩者獨立**——「我送視訊、他只送語音」
+   * 是合法狀態，版面必須照實呈現而不是假裝對稱。
+   */
+  localMedia: CallMedia;
+  remoteMedia: CallMedia;
+  /** 這通能不能改型態（ADR-0338 §4）；false＝不顯示入口（舊版對端）。 */
+  canChangeMedia: boolean;
+  /** 改**我**這一方的型態。不會讓對方開鏡頭。 */
+  onMediaChange: (m: CallMedia) => void;
   /** 目前視訊畫質檔位（ADR-0337）。 */
   quality: VideoQuality;
   /**
@@ -51,6 +61,9 @@ export function CallWindow(props: CallWindowProps): JSX.Element {
   const { t } = useI18n();
   const { state, media, peerName, peerKey } = props;
   const isVideo = media === "video";
+  // ADR-0338：畫質與關鏡頭只在**我**送視訊時才有意義；遠端版面看的是對方那一方。
+  const iSendVideo = props.localMedia === "video";
+  const theySendVideo = props.remoteMedia === "video";
   const remoteVideoRef = useStream<HTMLVideoElement>(props.remoteStream);
   const localVideoRef = useStream<HTMLVideoElement>(props.localStream);
   const remoteAudioRef = useStream<HTMLAudioElement>(props.remoteStream);
@@ -112,14 +125,15 @@ export function CallWindow(props: CallWindowProps): JSX.Element {
         </div>
 
         <div className="callwin__stage">
-          {isVideo && state === "active" ? (
-            <>
-              <video className="callwin__remote" ref={remoteVideoRef} autoPlay playsInline data-testid="call-remote-video" />
-              <video className="callwin__local" ref={localVideoRef} autoPlay playsInline muted />
-            </>
+          {theySendVideo && state === "active" ? (
+            <video className="callwin__remote" ref={remoteVideoRef} autoPlay playsInline data-testid="call-remote-video" />
           ) : (
             <div className="callwin__avatar" style={{ background: avatarColor(peerKey) }}>{initial(peerName)}</div>
           )}
+          {/* ADR-0338：我沒開視訊就不該有自我預覽——否則看起來像我在送畫面。 */}
+          {iSendVideo && state === "active" ? (
+            <video className="callwin__local" ref={localVideoRef} autoPlay playsInline muted />
+          ) : null}
           {/* 語音（或視訊尚未 active）以隱藏 audio 播放遠端聲音 */}
           {!isVideo || state !== "active" ? (
             <audio ref={remoteAudioRef} autoPlay data-testid="call-remote-audio" />
@@ -128,6 +142,12 @@ export function CallWindow(props: CallWindowProps): JSX.Element {
 
         <div className="callwin__info">
           <b>{peerName}</b>
+          {/* ADR-0338：不留一塊沒有解釋的黑畫面——對方只送語音就明說。 */}
+          {state === "active" && isVideo && !theySendVideo ? (
+            <div className="callwin__status" data-testid="call-remote-audio-only">
+              {t("call_remoteAudioOnly")}
+            </div>
+          ) : null}
           <div className="callwin__status" data-testid="call-status">{statusText}</div>
         </div>
 
@@ -148,7 +168,16 @@ export function CallWindow(props: CallWindowProps): JSX.Element {
                   {muted ? t("call_unmute") : t("call_mute")}
                 </button>
               ) : null}
-              {state === "active" && isVideo ? (
+              {state === "active" && props.canChangeMedia ? (
+                <button
+                  className="callbtn"
+                  onClick={() => props.onMediaChange(iSendVideo ? "audio" : "video")}
+                  data-testid="call-media-toggle"
+                >
+                  {iSendVideo ? t("call_toAudio") : t("call_toVideo")}
+                </button>
+              ) : null}
+              {state === "active" && iSendVideo ? (
                 <>
                   <button className="callbtn" onClick={toggleCamera} aria-pressed={cameraOff} data-testid="call-camera">
                     {cameraOff ? t("call_camera_on") : t("call_camera_off")}

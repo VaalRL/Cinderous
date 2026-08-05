@@ -47,6 +47,19 @@ export interface CallHangup {
   type: "call-hangup";
   callId: string;
 }
+/**
+ * 通話中改變**自己這一方**的媒體型態（ADR-0338）。
+ *
+ * 🔴 **不帶 SDP，也不是請求。** 語意是「我從現在開始送 `media`」——因為視訊 transceiver
+ * 在建立通話時就預先協商好了，換軌靠 `replaceTrack`，不需要重新協商（⇒ 沒有 glare）。
+ *
+ * ⚠ 它**不會**讓對端開鏡頭：媒體型態是每方向各自獨立的。
+ */
+export interface CallMediaChange {
+  type: "call-media";
+  callId: string;
+  media: CallMedia;
+}
 export interface CallCandidate {
   type: "call-candidate";
   callId: string;
@@ -60,7 +73,13 @@ export interface CallCandidate {
  * `call-candidate` 為 trickle ICE，由執行期直接套用到通話的 RTCPeerConnection，
  * 狀態機不處理（`onSignal` 對其回傳空動作）。
  */
-export type CallSignal = CallInvite | CallAccept | CallReject | CallHangup | CallCandidate;
+export type CallSignal =
+  | CallInvite
+  | CallAccept
+  | CallReject
+  | CallHangup
+  | CallCandidate
+  | CallMediaChange;
 
 /** 通話狀態（單一通話槽的本端視角）。 */
 export type CallState = "idle" | "outgoing" | "incoming" | "connecting" | "active" | "ended";
@@ -82,7 +101,12 @@ export type CallAction =
 export class CallSession {
   private _state: CallState = "idle";
   private callId: string | null = null;
+  /** invite 當時談定的型態；升降級後仍保留，供 `accept()` 取媒體用。 */
   private media: CallMedia | null = null;
+  /** 我正在送什麼（ADR-0338）。`null`＝沒有通話。 */
+  private _localMedia: CallMedia | null = null;
+  /** 對方正在送什麼（ADR-0338）。與 `_localMedia` **各自獨立**。 */
+  private _remoteMedia: CallMedia | null = null;
   private remoteOffer: string | null = null;
   /** 本端 SDP 產生後要送出的信令類型。 */
   private awaiting: "invite" | "accept" | null = null;
@@ -95,6 +119,25 @@ export class CallSession {
     return this.callId;
   }
 
+  /** 我正在送的媒體型態（ADR-0338）。 */
+  get localMedia(): CallMedia | null {
+    return this._localMedia;
+  }
+
+  /** 對方正在送的媒體型態（ADR-0338）。 */
+  get remoteMedia(): CallMedia | null {
+    return this._remoteMedia;
+  }
+
+  /**
+   * 有效型態：**任一方**為視訊即視訊。UI 用它決定要不要開視訊版面
+   * ——「他送視訊、我只送語音」也必須看得到他。
+   */
+  get effectiveMedia(): CallMedia | null {
+    if (this._localMedia === null && this._remoteMedia === null) return null;
+    return this._localMedia === "video" || this._remoteMedia === "video" ? "video" : "audio";
+  }
+
   private idle(): boolean {
     return this._state === "idle" || this._state === "ended";
   }
@@ -105,6 +148,8 @@ export class CallSession {
     this._state = "outgoing";
     this.callId = callId;
     this.media = media;
+    this._localMedia = media;
+    this._remoteMedia = media; // invite 談定的型態；之後各自可變（ADR-0338）
     this.awaiting = "invite";
     return [{ type: "acquire-media", media }, { type: "create-offer" }];
   }
@@ -171,9 +216,35 @@ export class CallSession {
         return this.onReject(signal);
       case "call-hangup":
         return this.onHangup(signal);
+      case "call-media":
+        return this.onMediaChange(signal);
       case "call-candidate":
         return []; // ICE candidate 由執行期直接處理。
     }
+  }
+
+  /**
+   * 通話中改變**自己這一方**的媒體型態（ADR-0338）。
+   *
+   * 🔴 **不產生任何 SDP 動作**：視訊 transceiver 在建立通話時就預先協商好，
+   * 換軌由執行期以 `replaceTrack` 完成 ⇒ 沒有重新協商，也就沒有 glare。
+   *
+   * ⚠ 只在 `active` 時有效——其餘狀態改型態會與初次協商賽跑，而那幾秒使用者按不到。
+   *
+   * ⚠ **升級時先 `acquire-media` 再 `send`**：取媒體可能失敗（使用者不給相機權限），
+   * 先宣告後失敗會讓對端等一個永遠不會來的畫面（§6-3）。執行期若取媒體失敗，
+   * 應把型態改回去而不是續送。
+   */
+  setLocalMedia(media: CallMedia): CallAction[] {
+    if (this._state !== "active" || !this.callId) return [];
+    if (this._localMedia === media) return []; // 沒變就不送冗餘信令
+    this._localMedia = media;
+    const notify: CallAction = {
+      type: "send",
+      signal: { type: "call-media", callId: this.callId, media },
+    };
+    // 降級不必再取媒體——執行期只要 replaceTrack(null) 並停掉相機。
+    return media === "video" ? [{ type: "acquire-media", media }, notify] : [notify];
   }
 
   /** ICE/DTLS 連通後由執行期呼叫，轉為 active。 */
@@ -191,6 +262,8 @@ export class CallSession {
     this._state = "incoming";
     this.callId = sig.callId;
     this.media = sig.media;
+    this._localMedia = sig.media;
+    this._remoteMedia = sig.media;
     this.remoteOffer = sig.sdp;
     return [];
   }
@@ -199,6 +272,16 @@ export class CallSession {
     if (this._state !== "outgoing" || sig.callId !== this.callId) return [];
     this._state = "connecting";
     return [{ type: "set-remote", sdp: sig.sdp, kind: "answer" }];
+  }
+
+  /**
+   * 對端改了他那一方的型態（ADR-0338）。純通知——他的軌道由 `ontrack` 自己進來，
+   * 執行期無事可做，所以回傳空動作。
+   */
+  private onMediaChange(sig: CallMediaChange): CallAction[] {
+    if (sig.callId !== this.callId || this.idle()) return [];
+    this._remoteMedia = sig.media;
+    return [];
   }
 
   private onReject(sig: CallReject): CallAction[] {
@@ -217,6 +300,8 @@ export class CallSession {
     this._state = "ended";
     this.callId = null;
     this.media = null;
+    this._localMedia = null;
+    this._remoteMedia = null;
     this.remoteOffer = null;
     this.awaiting = null;
   }
@@ -269,6 +354,10 @@ export function parseCallSignal(content: string): CallSignal {
       return { type: "call-reject", callId, reason: s.reason };
     case "call-hangup":
       return { type: "call-hangup", callId };
+    case "call-media":
+      // 只讀 media——即使對端偷渡 sdp 也不會進到這裡（ADR-0338 §3：本信令不觸碰 SDP）。
+      if (s.media !== "audio" && s.media !== "video") throw new Error("call-media media 非法");
+      return { type: "call-media", callId, media: s.media };
     case "call-candidate": {
       if (typeof s.candidate !== "string") throw new Error("call-candidate 缺少 candidate");
       const out: CallCandidate = { type: "call-candidate", callId, candidate: s.candidate };

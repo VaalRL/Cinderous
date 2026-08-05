@@ -12,6 +12,10 @@ const base = {
   onHangup: () => {},
   quality: "medium" as const,
   onQualityChange: () => {},
+  localMedia: "audio" as const,
+  remoteMedia: "audio" as const,
+  canChangeMedia: false,
+  onMediaChange: () => {},
   locale: "zh-Hant" as const,
 };
 
@@ -45,7 +49,9 @@ describe("行動端通話畫面（ADR-0101）", () => {
   });
 
   it("視訊通話：渲染遠端視訊", () => {
-    const html = render({ state: "active", media: "video" });
+    // ADR-0338 起「要不要渲染遠端視訊」看的是**對方那一方**（remoteMedia），
+    // 不是通話的有效型態——他只送語音時就該顯示頭像而非黑畫面。
+    const html = render({ state: "active", media: "video", remoteMedia: "video" });
     expect(html).toContain("<video");
   });
 });

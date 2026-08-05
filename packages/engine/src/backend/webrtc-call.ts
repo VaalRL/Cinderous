@@ -16,6 +16,16 @@ import {
   videoProfile,
 } from "@cinderous/core";
 
+/**
+ * 這個 transceiver 是不是視訊的（ADR-0338）。
+ *
+ * ⚠ 不能只看 `sender.track`——預先協商的視訊 transceiver 在語音通話時 track 是 `null`，
+ * 那正是我們要找的那一個。真實的 `RTCRtpTransceiver` 恆有 `receiver.track`，用它判定。
+ */
+function isVideoTransceiver(t: RTCRtpTransceiver): boolean {
+  return t.receiver?.track?.kind === "video" || t.sender?.track?.kind === "video";
+}
+
 /** 通話執行期對外事件。 */
 export interface CallHandlers {
   /** 送出通話信令事件（kind 21002）到中繼站。 */
@@ -26,6 +36,11 @@ export interface CallHandlers {
   onLocalStream: (stream: MediaStream | null) => void;
   /** 遠端媒體串流（供播放；null 表示已結束）。 */
   onRemoteStream: (stream: MediaStream | null) => void;
+  /**
+   * 通話媒體型態改變（ADR-0338）：`local`＝我在送什麼、`remote`＝對方在送什麼。
+   * **兩者各自獨立**——「我送視訊、他只送語音」是合法狀態，UI 要照實呈現。
+   */
+  onMedia?: (local: CallMedia, remote: CallMedia) => void;
   onError: (reason: string) => void;
   /**
    * 通話**連線失敗**（ADR-0243）：與 `onError`（處理例外）不同——這是 P2P 連不通/斷線，
@@ -180,7 +195,112 @@ export class WebRtcCall {
         void this.run(this.session.hangup());
       }
     };
+    // 🔴 ADR-0338：**一律**預先協商視訊 transceiver，即使這是語音通話。
+    // 之後升級只需 `replaceTrack`（規格保證不必重新協商）⇒ 沒有 SDP 交換、沒有 glare。
+    // ⚠ 這裡不取用相機——`sendrecv` 但 track 為 null，不送任何 RTP、沒有權限提示。
+    try {
+      pc.addTransceiver("video", { direction: "sendrecv" });
+    } catch {
+      /* 舊環境沒有 addTransceiver：退化為不可升降級（canChangeMedia 會回 false） */
+    }
     this.pc = pc;
+  }
+
+  /**
+   * 這通能不能改型態（ADR-0338 §4）：本端有沒有視訊 sender。
+   *
+   * 舊版對端的 offer 沒有視訊 m-line ⇒ 沒有可用的視訊 sender ⇒ 按了不會有效果。
+   * **UI 據此不顯示入口**——寧可少一個按鈕，也不要一個按了沒反應的按鈕。
+   */
+  canChangeMedia(): boolean {
+    return !!this.videoSender();
+  }
+
+  /** 我正在送的型態（ADR-0338）。 */
+  get localMedia(): CallMedia | null {
+    return this.session.localMedia;
+  }
+
+  /** 對方正在送的型態（ADR-0338）。 */
+  get remoteMedia(): CallMedia | null {
+    return this.session.remoteMedia;
+  }
+
+  /** 找出視訊 sender（`addTransceiver` 建立的那個，track 可能為 null）。 */
+  private videoSender(): RTCRtpSender | null {
+    const pc = this.pc;
+    if (!pc) return null;
+    const tr = pc.getTransceivers?.().find(isVideoTransceiver);
+    if (tr) return tr.sender;
+    return pc.getSenders().find((s) => s.track?.kind === "video") ?? null;
+  }
+
+  /**
+   * 通話中改變自己這一方的型態（ADR-0338）。
+   *
+   * 升級：取視訊軌 → `replaceTrack` 到既有 sender → 通知對端。
+   * 降級：`replaceTrack(null)` → **`stop()` 相機**（與 ADR-0337 的關鏡頭不同，那個只送黑畫面）。
+   */
+  setLocalMedia(media: CallMedia): void {
+    void this.changeMedia(media);
+  }
+
+  /**
+   * ⚠ **不能直接 `run(session.setLocalMedia(...))`**：`run` 逐一執行動作、失敗只記錄後續續跑，
+   * 那會在取媒體失敗（使用者不給相機權限）後照樣把 `call-media` 送出去——
+   * 對端於是等一個永遠不會來的畫面（ADR-0338 §6-3）。
+   *
+   * 所以這裡自己排序：**先做完換軌，成功了才通知對端**；失敗則把型態改回去。
+   */
+  private async changeMedia(media: CallMedia): Promise<void> {
+    const prev = this.session.localMedia;
+    const actions = this.session.setLocalMedia(media);
+    if (actions.length === 0) return; // 非 active、或型態沒變
+    try {
+      if (media === "video") await this.attachVideo();
+      else this.detachVideo();
+    } catch (e) {
+      if (prev) this.session.setLocalMedia(prev); // 回滾，且不送任何信令
+      this.handlers.onError(`無法開啟視訊：${String(e)}`);
+      this.emitMedia();
+      return;
+    }
+    for (const a of actions) if (a.type === "send") await this.exec(a);
+    this.emitMedia();
+  }
+
+  /** 升級：取視訊軌並換到既有的視訊 sender 上（不重新協商）。 */
+  private async attachVideo(): Promise<void> {
+    const sender = this.videoSender();
+    if (!sender) throw new Error("這通沒有可用的視訊軌道");
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: videoConstraints(this.videoQuality),
+    });
+    const track = stream.getVideoTracks()[0];
+    if (!track) throw new Error("取不到視訊軌");
+    await sender.replaceTrack(track);
+    // 併進本端串流，讓自我預覽也看得到。
+    this.localStream?.addTrack?.(track);
+    this.applyVideoQuality();
+    if (this.localStream) this.handlers.onLocalStream(this.localStream);
+  }
+
+  /** 降級：卸下視訊軌並**真的停掉相機**（與 ADR-0337 的關鏡頭不同，那個只送黑畫面）。 */
+  private detachVideo(): void {
+    const sender = this.videoSender();
+    const track = sender?.track ?? null;
+    void sender?.replaceTrack(null);
+    if (track) {
+      track.stop();
+      this.localStream?.removeTrack?.(track);
+    }
+    if (this.localStream) this.handlers.onLocalStream(this.localStream);
+  }
+
+  private emitMedia(): void {
+    const local = this.session.localMedia;
+    const remote = this.session.remoteMedia;
+    if (local && remote) this.handlers.onMedia?.(local, remote);
   }
 
   private async run(actions: CallAction[]): Promise<void> {
@@ -217,6 +337,14 @@ export class WebRtcCall {
       case "set-remote": {
         if (!pc) return;
         await pc.setRemoteDescription({ type: a.kind, sdp: a.sdp });
+        // 🔴 ADR-0338 §3：答方在 `setRemoteDescription(offer)` 時，瀏覽器為未匹配的 m-line
+        // 自動建立的 transceiver 預設是 `recvonly`。不改成 `sendrecv` 就**永遠送不出視訊**
+        // ——這是這個設計唯一容易寫錯的地方。
+        if (a.kind === "offer") {
+          for (const t of pc.getTransceivers?.() ?? []) {
+            if (isVideoTransceiver(t) && t.direction === "recvonly") t.direction = "sendrecv";
+          }
+        }
         this.hasRemote = true;
         for (const c of this.pendingCandidates) await pc.addIceCandidate(c);
         this.pendingCandidates = [];
@@ -307,6 +435,8 @@ export class WebRtcCall {
   }
 
   private emitState(): void {
-    this.handlers.onState(this.peer, this.session.state, this.media);
+    // ADR-0338：`media` 改為**有效值**（任一方視訊即視訊）——UI 據此決定要不要開視訊版面。
+    this.handlers.onState(this.peer, this.session.state, this.session.effectiveMedia ?? this.media);
+    this.emitMedia();
   }
 }

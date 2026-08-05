@@ -582,6 +582,10 @@ export function App(): JSX.Element {
   const [callPeer, setCallPeer] = useState<PubkeyHex | null>(null);
   const [callState, setCallState] = useState<CallState>("idle");
   const [callMedia, setCallMedia] = useState<CallMedia | null>(null);
+  // ADR-0338：媒體型態**每方向獨立**——「我送視訊、他只送語音」是合法狀態。
+  // `callMedia` 是有效值（任一方視訊即視訊），這兩個才是各自的真實方向。
+  const [callLocalMedia, setCallLocalMedia] = useState<CallMedia>("audio");
+  const [callRemoteMedia, setCallRemoteMedia] = useState<CallMedia>("audio");
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   /** 來電鈴聲 / 外撥回鈴音（M8）：依通話狀態循環播放，狀態一變即停。 */
@@ -1419,10 +1423,18 @@ export function App(): JSX.Element {
         const msg: ChatMessage = { id: uid("fe"), outgoing: false, text: `⚠️ ${reason}`, at: Date.now() };
         setConvos((prev) => ({ ...prev, [pk]: [...(prev[pk] ?? []), msg] }));
       },
+      // ADR-0338：兩個方向各自回報；升級不會替對方開鏡頭。
+      onCallMedia: (local, remote) => {
+        setCallLocalMedia(local);
+        setCallRemoteMedia(remote);
+      },
       onCallState: (peer, state, media) => {
         setCallState(state);
         setCallMedia(media);
         if (state === "idle" || state === "ended") {
+          // 通話結束時把兩個方向都歸位，否則下一通會沿用上一通的型態。
+          setCallLocalMedia("audio");
+          setCallRemoteMedia("audio");
           setCallPeer(null);
           setLocalStream(null);
           setRemoteStream(null);
@@ -3393,6 +3405,10 @@ export function App(): JSX.Element {
           onHangup={() => activeBackend.hangupCall?.()}
           quality={videoQuality}
           onQualityChange={changeVideoQuality}
+          localMedia={callLocalMedia}
+          remoteMedia={callRemoteMedia}
+          canChangeMedia={activeBackend.canChangeCallMedia?.() ?? false}
+          onMediaChange={(m) => activeBackend.setCallMedia?.(m)}
         />
       ) : null}
     </div>

@@ -1265,6 +1265,10 @@ export function AppSession({
       onHangup={() => backendRef.current?.hangupCall?.()}
       quality={videoQuality}
       onQualityChange={changeVideoQuality}
+      localMedia={call.localMedia}
+      remoteMedia={call.remoteMedia}
+      canChangeMedia={backendRef.current?.canChangeCallMedia?.() ?? false}
+      onMediaChange={(m) => backendRef.current?.setCallMedia?.(m)}
       locale={locale}
       theme={theme}
       accent={accent}

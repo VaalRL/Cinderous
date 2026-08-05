@@ -72,6 +72,10 @@ export function CallScreen({
   onHangup,
   quality,
   onQualityChange,
+  localMedia,
+  remoteMedia,
+  canChangeMedia,
+  onMediaChange,
   locale = "zh-Hant",
   theme = "dark",
   accent = null,
@@ -88,6 +92,16 @@ export function CallScreen({
   quality: VideoQuality;
   /** 改畫質。必須往上回報——`setParameters` 要 `RTCRtpSender`，只有 engine 拿得到。 */
   onQualityChange: (q: VideoQuality) => void;
+  /**
+   * 我／對方各自在送什麼（ADR-0338）。**兩者獨立**——「我送視訊、他只送語音」
+   * 是合法狀態，版面要照實呈現。
+   */
+  localMedia: CallMedia;
+  remoteMedia: CallMedia;
+  /** 這通能不能改型態（ADR-0338 §4）；false＝不顯示入口（舊版對端）。 */
+  canChangeMedia: boolean;
+  /** 改**我**這一方的型態。不會讓對方開鏡頭。 */
+  onMediaChange: (m: CallMedia) => void;
   locale?: Locale;
   theme?: Theme;
   accent?: string | null;
@@ -96,6 +110,9 @@ export function CallScreen({
   const styles = makeStyles(tk);
   const t = (k: MessageKey): string => translate(locale, k);
   const isVideo = media === "video";
+  // ADR-0338：畫質與關鏡頭只在**我**送視訊時有意義；遠端版面看的是對方那一方。
+  const iSendVideo = localMedia === "video";
+  const theySendVideo = remoteMedia === "video";
 
   const [muted, setMuted] = useState(false);
   const [cameraOff, setCameraOff] = useState(false);
@@ -146,7 +163,7 @@ export function CallScreen({
 
   return (
     <View style={styles.root}>
-      {isVideo ? (
+      {theySendVideo ? (
         <View style={styles.remoteWrap}>
           <StreamView stream={remoteStream} />
         </View>
@@ -155,13 +172,13 @@ export function CallScreen({
           <View style={styles.avatar}>
             <Text style={styles.avatarText}>{peerName.slice(0, 1)}</Text>
           </View>
-          {/* 純語音仍需播放槽（不佔版面）。 */}
+          {/* 對方只送語音時仍需播放槽（不佔版面）。 */}
           <StreamView stream={remoteStream} audioOnly />
         </View>
       )}
 
-      {/* 本地預覽：靜音以免回授。 */}
-      {isVideo && localStream ? (
+      {/* ADR-0338：我沒開視訊就不該有自我預覽——否則看起來像我在送畫面。靜音以免回授。 */}
+      {iSendVideo && localStream ? (
         <View style={styles.localWrap}>
           <StreamView stream={localStream} muted mirror />
         </View>
@@ -170,6 +187,12 @@ export function CallScreen({
       <View style={styles.info}>
         <Text style={styles.name}>{peerName}</Text>
         <Text style={styles.state}>{sub}</Text>
+        {/* ADR-0338：不留一塊沒有解釋的黑畫面——對方只送語音就明說。 */}
+        {state === "active" && isVideo && !theySendVideo ? (
+          <Text style={styles.state} testID="call-remote-audio-only">
+            {t("call_remoteAudioOnly")}
+          </Text>
+        ) : null}
       </View>
 
       <View style={styles.bar}>
@@ -203,7 +226,18 @@ export function CallScreen({
             >
               <Text style={styles.btnText}>{muted ? "🔇" : "🎤"}</Text>
             </Pressable>
-            {isVideo ? (
+            {canChangeMedia ? (
+              <Pressable
+                style={[styles.btn, styles.neutral]}
+                accessibilityRole="button"
+                aria-label={t(iSendVideo ? "call_toAudio" : "call_toVideo")}
+                testID="call-media-toggle"
+                onPress={() => onMediaChange(iSendVideo ? "audio" : "video")}
+              >
+                <Text style={styles.btnText}>{iSendVideo ? "🎙️" : "📷"}</Text>
+              </Pressable>
+            ) : null}
+            {iSendVideo ? (
               <>
                 <Pressable
                   style={[styles.btn, styles.neutral]}

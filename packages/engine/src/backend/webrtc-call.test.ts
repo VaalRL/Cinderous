@@ -1,5 +1,5 @@
 import type { CallFailureReason, PubkeyHex } from "@cinderous/core";
-import { generateSecretKey, getPublicKey } from "@cinderous/core";
+import { createCallSignal, generateSecretKey, getPublicKey } from "@cinderous/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebRtcCall } from "./webrtc-call.js";
 
@@ -97,6 +97,9 @@ class FakeTrack {
 class FakeSender {
   params: Record<string, unknown> = { encodings: [{}] };
   constructor(public track: FakeTrack | null) {}
+  async replaceTrack(t: FakeTrack | null): Promise<void> {
+    this.track = t;
+  }
   getParameters(): Record<string, unknown> {
     return this.params;
   }
@@ -211,5 +214,254 @@ describe("視訊畫質三檔（ADR-0337）", () => {
     for (const s of pc.senders) s.setParameters = async () => { throw new Error("boom"); };
     expect(() => call.setVideoQuality("high")).not.toThrow();
     await flush();
+  });
+});
+
+// ── 通話中語音↔視訊升降級（ADR-0338）──────────────────────────────────────
+
+/**
+ * 忠於真實 `RTCRtpTransceiver`：**恆有 `receiver.track`**（即使本端還沒送任何東西），
+ * 而 `sender.track` 在預先協商但未上軌時是 `null`。實作正是靠這個差別找到視訊 transceiver。
+ */
+class Transceiver {
+  direction = "recvonly";
+  receiver: { track: { kind: string } };
+  constructor(
+    public kind: string,
+    public sender: FakeSender,
+  ) {
+    this.receiver = { track: { kind } };
+  }
+}
+
+class NegoPc extends FakePc {
+  transceivers: Transceiver[] = [];
+  senders: FakeSender[] = [];
+  /** 依規格：`addTrack` 會**重用**同 kind、尚未上軌的 transceiver，不是無腦新增。 */
+  override addTrack(track: FakeTrack): FakeSender {
+    const reuse = this.transceivers.find((t) => t.kind === track.kind && t.sender.track === null);
+    if (reuse) {
+      reuse.sender.track = track;
+      return reuse.sender;
+    }
+    const s = new FakeSender(track);
+    this.senders.push(s);
+    this.transceivers.push(new Transceiver(track.kind, s));
+    return s;
+  }
+  addTransceiver(kind: string, init?: { direction?: string }): Transceiver {
+    const s = new FakeSender(null);
+    const t = new Transceiver(kind, s);
+    if (init?.direction) t.direction = init.direction;
+    this.transceivers.push(t);
+    this.senders.push(s);
+    return t;
+  }
+  getTransceivers(): Transceiver[] {
+    return this.transceivers;
+  }
+  override getSenders(): FakeSender[] {
+    return this.senders;
+  }
+}
+
+describe("通話中媒體升降級（ADR-0338）", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  const setup = (media: "audio" | "video", tracks: string[]) => {
+    order = [];
+    const published: unknown[] = [];
+    const errors: string[] = [];
+    let gumFails = false;
+    vi.stubGlobal("RTCPeerConnection", NegoPc);
+    vi.stubGlobal("navigator", {
+      mediaDevices: {
+        getUserMedia: async (c: { video?: unknown }) => {
+          if (gumFails) throw new Error("NotAllowedError");
+          const kinds = c.video ? tracks : tracks.filter((k) => k !== "video");
+          const list = kinds.map((k) => new FakeTrack(k));
+          return {
+            getTracks: () => list,
+            getVideoTracks: () => list.filter((t) => t.kind === "video"),
+            getAudioTracks: () => list.filter((t) => t.kind === "audio"),
+          };
+        },
+      },
+    });
+    lastPc = undefined;
+    const mySk = generateSecretKey();
+    const peerSk = generateSecretKey();
+    const call = new WebRtcCall(mySk, {
+      publishCallSignal: (e) => published.push(e),
+      onState: () => {},
+      onLocalStream: () => {},
+      onRemoteStream: () => {},
+      onError: (r) => errors.push(r),
+      onFailed: () => {},
+    });
+    call.startCall(getPublicKey(peerSk), media);
+    return { call, published, errors, mySk, peerSk, failGum: () => void (gumFails = true) };
+  };
+
+  const flush = async (): Promise<void> => {
+    for (let i = 0; i < 12; i++) await Promise.resolve();
+  };
+
+  /**
+   * 推進到 active（主叫視角）。
+   *
+   * ⚠ 必須先收到對端的 `call-accept`——否則 session 停在 `outgoing`，
+   * `onConnected()` 依設計回傳空動作，狀態機正確地擋掉一切型態變更。
+   */
+  const activate = async (
+    call: WebRtcCall,
+    ctx: { mySk: Uint8Array; peerSk: Uint8Array },
+  ): Promise<void> => {
+    await flush();
+    call.onCallSignalEvent(
+      createCallSignal(
+        { type: "call-accept", callId: callIdOf(call), sdp: "remote-answer" },
+        ctx.peerSk,
+        getPublicKey(ctx.mySk),
+      ),
+    );
+    await flush();
+    lastPc!.connectionState = "connected";
+    lastPc!.onconnectionstatechange!();
+    await flush();
+  };
+
+  /** 取這通的 callId（由執行期產生，測試不預先知道）。 */
+  const callIdOf = (call: WebRtcCall): string =>
+    (call as unknown as { session: { activeCallId: string } }).session.activeCallId;
+
+  it("🔴 語音通話也要預先協商視訊 transceiver——否則之後升不了級", async () => {
+    setup("audio", ["audio", "video"]);
+    await flush();
+    const pc = lastPc as unknown as NegoPc;
+    const video = pc.transceivers.filter((t) => t.kind === "video");
+    expect(video).toHaveLength(1);
+    // sendrecv 而非 recvonly：兩個方向都要能送（ADR-0338 §3）。
+    expect(video[0]!.direction).toBe("sendrecv");
+  });
+
+  it("語音通話**不取用相機**——預先協商不等於開鏡頭", async () => {
+    const c = setup("audio", ["audio", "video"]);
+    const { call } = c;
+    await activate(call, c);
+    const pc = lastPc as unknown as NegoPc;
+    const withTrack = pc.transceivers.filter((t) => t.kind === "video" && t.sender.track !== null);
+    expect(withTrack).toEqual([]);
+  });
+
+  it("🔴 答方套用遠端 offer 後必須把視訊 transceiver 設成 sendrecv（否則永遠送不出視訊）", async () => {
+    // 走真正的被叫路徑：收 invite → accept → exec("set-remote", kind:"offer")。
+    order = [];
+    vi.stubGlobal("RTCPeerConnection", NegoPc);
+    vi.stubGlobal("navigator", {
+      mediaDevices: {
+        getUserMedia: async () => {
+          const list = [new FakeTrack("audio")];
+          return { getTracks: () => list, getVideoTracks: () => [], getAudioTracks: () => list };
+        },
+      },
+    });
+    lastPc = undefined;
+    const mySk = generateSecretKey();
+    const callerSk = generateSecretKey();
+    const call = new WebRtcCall(mySk, {
+      publishCallSignal: () => {},
+      onState: () => {},
+      onLocalStream: () => {},
+      onRemoteStream: () => {},
+      onError: () => {},
+      onFailed: () => {},
+    });
+    call.onCallSignalEvent(
+      createCallSignal(
+        { type: "call-invite", callId: "c1", media: "audio", sdp: "remote-offer" },
+        callerSk,
+        getPublicKey(mySk),
+      ),
+    );
+    await flush();
+    const pc = lastPc as unknown as NegoPc;
+    // 模擬瀏覽器於 setRemoteDescription(offer) 自動建立的 recvonly transceiver。
+    const auto = pc.addTransceiver("video", { direction: "recvonly" });
+    call.accept();
+    await flush();
+    // exec("set-remote", kind:"offer") 之後統一校正方向——不校正就永遠送不出視訊。
+    expect(auto.direction).toBe("sendrecv");
+    expect(pc.transceivers.filter((t) => t.kind === "video").every((t) => t.direction === "sendrecv")).toBe(
+      true,
+    );
+  });
+
+  it("升級：取視訊軌 → replaceTrack 到既有 sender → 通知對端", async () => {
+    const c = setup("audio", ["audio", "video"]);
+    const { call, published, errors } = c;
+    await activate(call, c);
+    published.length = 0;
+    call.setLocalMedia("video");
+    await flush();
+    const pc = lastPc as unknown as NegoPc;
+    const vs = pc.transceivers.find((t) => t.kind === "video")!.sender;
+    expect(errors).toEqual([]);
+    expect(vs.track?.kind).toBe("video"); // 換上去了
+    expect(published).toHaveLength(1); // 通知對端
+    expect(call.localMedia).toBe("video");
+  });
+
+  it("降級：replaceTrack(null) 並**真的停掉相機**（與 ADR-0337 的關鏡頭不同）", async () => {
+    const c = setup("video", ["audio", "video"]);
+    const { call } = c;
+    await activate(call, c);
+    const pc = lastPc as unknown as NegoPc;
+    const before = pc.transceivers.find((t) => t.kind === "video")!.sender.track!;
+    let stopped = false;
+    before.stop = () => void (stopped = true);
+    call.setLocalMedia("audio");
+    await flush();
+    expect(pc.transceivers.find((t) => t.kind === "video")!.sender.track).toBeNull();
+    expect(stopped, "降級要 stop() 相機，不只是送黑畫面").toBe(true);
+  });
+
+  it("🔴 取媒體失敗（不給相機權限）→ 不通知對端，型態退回語音", async () => {
+    const c = setup("audio", ["audio", "video"]);
+    const { call, published, failGum } = c;
+    await activate(call, c);
+    published.length = 0;
+    failGum();
+    call.setLocalMedia("video");
+    await flush();
+    // 先宣告後失敗會讓對端等一個永遠不會來的畫面（ADR-0338 §6-3）。
+    expect(published).toEqual([]);
+    expect(call.localMedia).toBe("audio");
+  });
+
+  it("沒有視訊 sender（舊版對端）→ canChangeMedia 為 false，UI 據此不顯示入口", async () => {
+    const c = setup("audio", ["audio", "video"]);
+    const { call } = c;
+    await activate(call, c);
+    const pc = lastPc as unknown as NegoPc;
+    pc.transceivers = pc.transceivers.filter((t) => t.kind !== "video");
+    pc.senders = pc.senders.filter((s) => s.track?.kind !== "video" && s.track !== null);
+    expect(call.canChangeMedia()).toBe(false);
+  });
+
+  it("有視訊 sender → canChangeMedia 為 true", async () => {
+    const c = setup("audio", ["audio", "video"]);
+    const { call } = c;
+    await activate(call, c);
+    expect(call.canChangeMedia()).toBe(true);
+  });
+
+  it("非 active 時改型態無效（狀態機擋掉，執行期不動軌道）", async () => {
+    const { call, published } = setup("audio", ["audio", "video"]);
+    await flush(); // 尚未 connected ⇒ outgoing
+    published.length = 0;
+    call.setLocalMedia("video");
+    await flush();
+    expect(published).toEqual([]);
   });
 });

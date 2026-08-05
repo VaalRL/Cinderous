@@ -29,8 +29,17 @@ export interface CallSession {
   media: CallMedia | null;
   localStream: MediaStream | null;
   remoteStream: MediaStream | null;
+  /**
+   * 我／對方各自在送什麼（ADR-0338）。**兩者獨立**——`media` 是有效值
+   * （任一方視訊即視訊），這兩個才是各自的真實方向。
+   */
+  localMedia: CallMedia;
+  remoteMedia: CallMedia;
   /** 掛給後端 `start()` 的通話事件（展開即可）。 */
-  handlers: Pick<ChatBackendEvents, "onCallState" | "onCallLocalStream" | "onCallRemoteStream">;
+  handlers: Pick<
+    ChatBackendEvents,
+    "onCallState" | "onCallLocalStream" | "onCallRemoteStream" | "onCallMedia"
+  >;
 }
 
 export function useCallSession(): CallSession {
@@ -39,6 +48,8 @@ export function useCallSession(): CallSession {
   const [media, setMedia] = useState<CallMedia | null>(null);
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
+  const [localMedia, setLocalMedia] = useState<CallMedia>("audio");
+  const [remoteMedia, setRemoteMedia] = useState<CallMedia>("audio");
 
   return {
     active: state !== "idle" && state !== "ended",
@@ -47,6 +58,8 @@ export function useCallSession(): CallSession {
     media,
     localStream,
     remoteStream,
+    localMedia,
+    remoteMedia,
     handlers: {
       // ADR-0101：來電自動開通話畫面；結束時把 peer 與兩條串流一起放掉
       //（只清 state 不清串流 ⇒ 畫面沒了但 MediaStream 還在，麥克風/鏡頭燈不會滅）。
@@ -57,9 +70,17 @@ export function useCallSession(): CallSession {
           setPeer(null);
           setLocalStream(null);
           setRemoteStream(null);
+          // 兩個方向都歸位，否則下一通會沿用上一通的型態（ADR-0338）。
+          setLocalMedia("audio");
+          setRemoteMedia("audio");
         } else {
           setPeer(p);
         }
+      },
+      // ADR-0338：兩個方向各自回報；升級不會替對方開鏡頭。
+      onCallMedia: (local, remote) => {
+        setLocalMedia(local);
+        setRemoteMedia(remote);
       },
       onCallLocalStream: setLocalStream,
       onCallRemoteStream: setRemoteStream,

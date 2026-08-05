@@ -40,6 +40,10 @@ const view = (opts: {
     remoteStream={opts.stream}
     quality={opts.quality ?? "medium"}
     onQualityChange={opts.onQuality ?? (() => {})}
+    localMedia={opts.media}
+    remoteMedia={opts.media}
+    canChangeMedia={false}
+    onMediaChange={() => {}}
     onAccept={() => {}}
     onReject={() => {}}
     onHangup={() => {}}

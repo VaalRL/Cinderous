@@ -31,12 +31,18 @@ const view = (opts: {
   quality?: VideoQuality;
   onQuality?: (q: VideoQuality) => void;
 }): JSX.Element => (
+  // ADR-0338：型態每方向獨立；這一組測的是**對稱**情形（兩方同型態），
+  // 非對稱的行為由 CallWindow.mediaChange.test.tsx 涵蓋。
   <I18nProvider locale="zh-Hant">
     <CallWindow
       peerName="Bob"
       peerKey={"bb".repeat(32)}
       state="active"
       media={opts.media}
+      localMedia={opts.media}
+      remoteMedia={opts.media}
+      canChangeMedia={false}
+      onMediaChange={() => {}}
       localStream={opts.stream}
       remoteStream={opts.stream}
       quality={opts.quality ?? "medium"}

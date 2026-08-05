@@ -272,6 +272,12 @@ export interface ChatBackendEvents {
   onIdentityRotated?(from: PubkeyHex, to: PubkeyHex, name: string): void;
   /** 通話狀態變化（M8；`peer` 為對象、null 表示無通話）。 */
   onCallState?(peer: PubkeyHex | null, state: CallState, media: CallMedia | null): void;
+  /**
+   * 通話媒體型態改變（ADR-0338）：`local`＝我在送什麼、`remote`＝對方在送什麼。
+   * **兩者各自獨立**——「我送視訊、他只送語音」是合法狀態。`onCallState` 的 `media`
+   * 則是**有效值**（任一方視訊即視訊），供只想知道「要不要開視訊版面」的地方使用。
+   */
+  onCallMedia?(local: CallMedia, remote: CallMedia): void;
   /** 本端通話媒體串流（自我預覽；null 表示結束）。 */
   onCallLocalStream?(stream: MediaStream | null): void;
   /** 遠端通話媒體串流（播放；null 表示結束）。 */
@@ -576,6 +582,18 @@ export interface ChatBackend {
    * 與靜音同一條路（ADR-0337 §3）。
    */
   setVideoQuality?(quality: VideoQuality): void;
+  /**
+   * 通話中改變**自己這一方**的媒體型態（ADR-0338）。
+   *
+   * 🔴 它**不會**讓對端開鏡頭——升級的意思是「我開始送我的畫面」。
+   * 只在通話已連通（`active`）時有效。
+   */
+  setCallMedia?(media: CallMedia): void;
+  /**
+   * 這通能不能改型態（ADR-0338 §4）：舊版對端的 offer 沒有視訊 m-line ⇒ 按了不會有效果。
+   * **UI 據此決定要不要顯示入口**——寧可少一個按鈕，也不要一個按了沒反應的按鈕。
+   */
+  canChangeCallMedia?(): boolean;
   /** 以 NIP-19 `npub`（可附 `@wss://…` relay hint，ADR-0034）新增聯絡人（僅真實 relay 後端支援）。 */
   addContact?(npub: string, relayUrl?: string): void;
   /** 移除聯絡人並清除對話。 */

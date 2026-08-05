@@ -875,6 +875,11 @@ export interface Messages {
   /** 停止/恢復傳送視訊（ADR-0337）。文案刻意不說「關閉相機」——軌道仍開著，相機指示燈可能仍亮。 */
   call_camera_off: string;
   call_camera_on: string;
+  /** 通話中升降級（ADR-0338）。文案是「我」的動作——不會替對方開鏡頭。 */
+  call_toVideo: string;
+  call_toAudio: string;
+  /** 對方只送語音時的說明（ADR-0338：媒體型態每方向獨立，UI 要照實說）。 */
+  call_remoteAudioOnly: string;
   /** 視訊畫質檔位（ADR-0337）。 */
   call_quality: string;
   call_quality_low: string;
@@ -1735,6 +1740,9 @@ const zhHant: Messages = {
   call_unmute: "取消靜音",
   call_camera_off: "停止視訊",
   call_camera_on: "恢復視訊",
+  call_toVideo: "開啟我的視訊",
+  call_toAudio: "改為純語音",
+  call_remoteAudioOnly: "對方未開啟視訊",
   call_quality: "畫質",
   call_quality_low: "省流量",
   call_quality_medium: "標準",
@@ -2590,6 +2598,9 @@ const en: Messages = {
   call_unmute: "Unmute",
   call_camera_off: "Stop video",
   call_camera_on: "Resume video",
+  call_toVideo: "Turn on my video",
+  call_toAudio: "Switch to voice only",
+  call_remoteAudioOnly: "They aren't sending video",
   call_quality: "Quality",
   call_quality_low: "Data saver",
   call_quality_medium: "Standard",

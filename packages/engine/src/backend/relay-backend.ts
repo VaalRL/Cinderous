@@ -836,6 +836,7 @@ export class RelayChatBackend implements ChatBackend {
       {
         publishCallSignal: (evt) => this.publishAddressed(evt),
         onState: (peer, state, media) => this.handlers?.onCallState?.(peer, state, media),
+        onMedia: (local, remote) => this.handlers?.onCallMedia?.(local, remote),
         onLocalStream: (stream) => this.handlers?.onCallLocalStream?.(stream),
         onRemoteStream: (stream) => this.handlers?.onCallRemoteStream?.(stream),
         onError: (reason) => this.handlers?.onFileError?.(this.self.pubkey, reason),
@@ -4601,6 +4602,14 @@ export class RelayChatBackend implements ChatBackend {
   /** 視訊畫質檔位（ADR-0337）：通話中即時生效，無通話時記住供下一通。 */
   setVideoQuality(quality: VideoQuality): void {
     this.call.setVideoQuality(quality);
+  }
+  /** 通話中改自己這一方的型態（ADR-0338）；不會讓對端開鏡頭。 */
+  setCallMedia(media: CallMedia): void {
+    this.call.setLocalMedia(media);
+  }
+  /** 這通能不能改型態（ADR-0338 §4）：舊版對端沒有視訊 m-line 就不行。 */
+  canChangeCallMedia(): boolean {
+    return this.call.canChangeMedia();
   }
 
   sendTyping(to: PubkeyHex): void {
