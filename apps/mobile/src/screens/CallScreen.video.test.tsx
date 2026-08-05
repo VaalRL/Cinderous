@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
 //
-// 行動端視訊控制項：關鏡頭與畫質三檔（ADR-0337）。
-// 關鏡頭改的是 MediaTrack 的 `enabled`，SSR 測不到，故於 jsdom 掛載。
+// 行動端視訊畫質三檔（ADR-0337）。
+//
+// ⚠ 原本這裡還有「關鏡頭」（`enabled=false`）的測試，已隨 ADR-0340 廢除該作法一併移除
+// ——關鏡頭現在走降級，由 CallScreen.mediaChange.test.tsx 涵蓋。
 
 import { describe, expect, it } from "vitest";
 import type { VideoQuality } from "@cinderous/core";
@@ -51,41 +53,15 @@ const view = (opts: {
   />
 );
 
-describe("行動端視訊控制項（ADR-0337）", () => {
-  it("語音通話不顯示關鏡頭與畫質", () => {
+describe("行動端視訊畫質（ADR-0337）", () => {
+  it("語音通話不顯示畫質", () => {
     const m = mount(view({ media: "audio", stream: fakeStream(["audio"]) }));
-    expect(maybe(m.container, "call-camera")).toBeNull();
     expect(maybe(m.container, "call-quality")).toBeNull();
   });
 
-  it("視訊通話顯示關鏡頭與畫質", () => {
+  it("視訊通話顯示畫質", () => {
     const m = mount(view({ media: "video", stream: fakeStream(["audio", "video"]) }));
-    expect(maybe(m.container, "call-camera")).not.toBeNull();
     expect(maybe(m.container, "call-quality")).not.toBeNull();
-  });
-
-  it("🔴 按關鏡頭只停視訊軌，音訊軌不受影響", () => {
-    const stream = fakeStream(["audio", "video"]);
-    const m = mount(view({ media: "video", stream }));
-    click(byTestId(m.container, "call-camera"));
-    expect(stream.getVideoTracks().every((t) => t.enabled)).toBe(false);
-    expect(stream.getAudioTracks().every((t) => t.enabled)).toBe(true);
-  });
-
-  it("再按一次恢復視訊", () => {
-    const stream = fakeStream(["audio", "video"]);
-    const m = mount(view({ media: "video", stream }));
-    click(byTestId(m.container, "call-camera"));
-    click(byTestId(m.container, "call-camera"));
-    expect(stream.getVideoTracks().every((t) => t.enabled)).toBe(true);
-  });
-
-  it("靜音與關鏡頭互不干擾", () => {
-    const stream = fakeStream(["audio", "video"]);
-    const m = mount(view({ media: "video", stream }));
-    click(byTestId(m.container, "call-mute"));
-    expect(stream.getAudioTracks().every((t) => t.enabled)).toBe(false);
-    expect(stream.getVideoTracks().every((t) => t.enabled)).toBe(true);
   });
 
   it("🔴 改畫質往上回報，不是自己記著——engine 才拿得到 RTCRtpSender", () => {

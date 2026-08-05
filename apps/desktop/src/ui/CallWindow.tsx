@@ -28,7 +28,7 @@ export interface CallWindowProps {
   quality: VideoQuality;
   /**
    * 改畫質。**必須往上回報**——`setParameters` 需要 `RTCRtpSender`，只有 engine 拿得到；
-   * UI 手上只有 `MediaStream`。（關鏡頭則相反，UI 自己動軌道就夠，見下方 `toggleCamera`。）
+   * UI 手上只有 `MediaStream`。（靜音則相反，UI 自己動音軌就夠。）
    */
   onQualityChange: (q: VideoQuality) => void;
 }
@@ -69,7 +69,6 @@ export function CallWindow(props: CallWindowProps): JSX.Element {
   const remoteAudioRef = useStream<HTMLAudioElement>(props.remoteStream);
 
   const [muted, setMuted] = useState(false);
-  const [cameraOff, setCameraOff] = useState(false);
   const [activeSince, setActiveSince] = useState<number | null>(null);
   const [, forceTick] = useState(0);
 
@@ -89,20 +88,6 @@ export function CallWindow(props: CallWindowProps): JSX.Element {
     const next = !muted;
     for (const track of s.getAudioTracks()) track.enabled = !next;
     setMuted(next);
-  };
-
-  /**
-   * 關鏡頭（ADR-0337 §3）：與靜音完全對稱，只是換成視訊軌——所以走同一條路，不新增後端方法。
-   *
-   * ⚠ `enabled = false` 的語意是**送黑畫面**，不是停止傳送、也不是關閉相機：
-   * 軌道仍開著、相機指示燈可能仍亮。文案因此用「停止視訊」而非「關閉相機」。
-   */
-  const toggleCamera = () => {
-    const s = props.localStream;
-    if (!s) return;
-    const next = !cameraOff;
-    for (const track of s.getVideoTracks()) track.enabled = !next;
-    setCameraOff(next);
   };
 
   const statusText =
@@ -168,7 +153,11 @@ export function CallWindow(props: CallWindowProps): JSX.Element {
                   {muted ? t("call_unmute") : t("call_mute")}
                 </button>
               ) : null}
-              {state === "active" && props.canChangeMedia ? (
+              {/*
+                ADR-0340：關鏡頭與降級合併成這一顆。閘門**只擋「開啟」方向**——
+                🔴 關掉自己的鏡頭永遠不該被擋住，否則會做出「視訊通話中關不掉自己鏡頭」的 UI。
+              */}
+              {state === "active" && (iSendVideo || props.canChangeMedia) ? (
                 <button
                   className="callbtn"
                   onClick={() => props.onMediaChange(iSendVideo ? "audio" : "video")}
@@ -179,9 +168,6 @@ export function CallWindow(props: CallWindowProps): JSX.Element {
               ) : null}
               {state === "active" && iSendVideo ? (
                 <>
-                  <button className="callbtn" onClick={toggleCamera} aria-pressed={cameraOff} data-testid="call-camera">
-                    {cameraOff ? t("call_camera_on") : t("call_camera_off")}
-                  </button>
                   {/* 畫質問題只有通話中才察覺得到——所以選擇器在這裡，不是埋在設定頁（ADR-0337 §2）。 */}
                   <label className="callwin__quality">
                     <span>{t("call_quality")}</span>

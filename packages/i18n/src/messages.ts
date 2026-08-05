@@ -872,10 +872,12 @@ export interface Messages {
   call_hangup: string;
   call_mute: string;
   call_unmute: string;
-  /** 停止/恢復傳送視訊（ADR-0337）。文案刻意不說「關閉相機」——軌道仍開著，相機指示燈可能仍亮。 */
-  call_camera_off: string;
-  call_camera_on: string;
-  /** 通話中升降級（ADR-0338）。文案是「我」的動作——不會替對方開鏡頭。 */
+  /**
+   * 通話中開關自己的視訊（ADR-0338／**ADR-0340 合併後這是唯一的入口**）。
+   *
+   * 文案是「我」的動作——不會替對方開鏡頭。且 ADR-0340 之後**可以說「關閉」**：
+   * 它真的 `stop()` 相機、指示燈會滅，不再是 ADR-0337 §3 那種送黑畫面。
+   */
   call_toVideo: string;
   call_toAudio: string;
   /** 對方只送語音時的說明（ADR-0338：媒體型態每方向獨立，UI 要照實說）。 */
@@ -1738,10 +1740,8 @@ const zhHant: Messages = {
   call_hangup: "掛斷",
   call_mute: "靜音",
   call_unmute: "取消靜音",
-  call_camera_off: "停止視訊",
-  call_camera_on: "恢復視訊",
   call_toVideo: "開啟我的視訊",
-  call_toAudio: "改為純語音",
+  call_toAudio: "關閉我的視訊",
   call_remoteAudioOnly: "對方未開啟視訊",
   call_quality: "畫質",
   call_quality_low: "省流量",
@@ -2596,10 +2596,8 @@ const en: Messages = {
   call_hangup: "Hang up",
   call_mute: "Mute",
   call_unmute: "Unmute",
-  call_camera_off: "Stop video",
-  call_camera_on: "Resume video",
   call_toVideo: "Turn on my video",
-  call_toAudio: "Switch to voice only",
+  call_toAudio: "Turn off my video",
   call_remoteAudioOnly: "They aren't sending video",
   call_quality: "Quality",
   call_quality_low: "Data saver",

@@ -60,9 +60,10 @@ describe("通話中升降級 UI（ADR-0338）", () => {
     expect(btn.textContent).toContain("開啟我的視訊");
   });
 
-  it("我已開視訊：按鈕變成改回純語音", () => {
+  it("我已開視訊：按鈕變成關閉", () => {
     const { container } = mount(view({ local: "video", remote: "video" }));
-    expect(q(container, "call-media-toggle")!.textContent).toContain("改為純語音");
+    // ADR-0340 之後文案**可以說「關閉」**——它真的 stop() 相機、指示燈會滅。
+    expect(q(container, "call-media-toggle")!.textContent).toContain("關閉我的視訊");
   });
 
   it("🔴 按鈕反映的是**我**的方向，不是對方的", () => {
@@ -110,14 +111,27 @@ describe("通話中升降級 UI（ADR-0338）", () => {
     expect(container.querySelector(".callwin__local")).not.toBeNull();
   });
 
-  it("畫質與關鏡頭只在**我**送視訊時才有意義", () => {
+  it("畫質只在**我**送視訊時才有意義", () => {
     const mine = mount(view({ local: "video", remote: "audio" }));
     expect(q(mine.container, "call-quality")).not.toBeNull();
-    expect(q(mine.container, "call-camera")).not.toBeNull();
 
     // 只有對方在送視訊：我沒有畫面可調。
     const theirs = mount(view({ local: "audio", remote: "video" }));
     expect(q(theirs.container, "call-quality")).toBeNull();
-    expect(q(theirs.container, "call-camera")).toBeNull();
+  });
+
+  it("🔴 ADR-0340：關掉自己的鏡頭**永遠**可用——不得被 canChangeMedia 閘門擋住", () => {
+    // 否則會做出「視訊通話中關不掉自己鏡頭」的 UI，比原本的問題嚴重得多。
+    const seen: CallMedia[] = [];
+    const m = mount(view({ local: "video", remote: "video", canChange: false, onChange: (x) => seen.push(x) }));
+    const btn = q(m.container, "call-media-toggle");
+    expect(btn, "我正在送視訊時，關閉入口必須在").not.toBeNull();
+    click(btn);
+    expect(seen).toEqual(["audio"]);
+  });
+
+  it("ADR-0340：關鏡頭與降級合併——不再有獨立的關鏡頭鈕", () => {
+    const m = mount(view({ local: "video", remote: "video" }));
+    expect(q(m.container, "call-camera")).toBeNull();
   });
 });

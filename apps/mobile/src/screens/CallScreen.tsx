@@ -115,7 +115,6 @@ export function CallScreen({
   const theySendVideo = remoteMedia === "video";
 
   const [muted, setMuted] = useState(false);
-  const [cameraOff, setCameraOff] = useState(false);
   const [since, setSince] = useState<number | null>(null);
   const [now, setNow] = useState(() => Date.now());
 
@@ -134,19 +133,6 @@ export function CallScreen({
     const next = !muted;
     for (const track of localStream.getAudioTracks()) track.enabled = !next;
     setMuted(next);
-  };
-
-  /**
-   * 關鏡頭（ADR-0337 §3）：與靜音對稱，只是換成視訊軌 ⇒ 走同一條路，不新增後端方法。
-   *
-   * ⚠ `enabled = false` 的語意是**送黑畫面**，不是關閉相機——軌道仍開著、
-   * 指示燈可能仍亮。文案因此用「停止視訊」。
-   */
-  const toggleCamera = (): void => {
-    if (!localStream) return;
-    const next = !cameraOff;
-    for (const track of localStream.getVideoTracks()) track.enabled = !next;
-    setCameraOff(next);
   };
 
   /**
@@ -226,7 +212,11 @@ export function CallScreen({
             >
               <Text style={styles.btnText}>{muted ? "🔇" : "🎤"}</Text>
             </Pressable>
-            {canChangeMedia ? (
+            {/*
+              ADR-0340：關鏡頭與降級合併成這一顆。閘門**只擋「開啟」方向**——
+              🔴 關掉自己的鏡頭永遠不該被擋住。
+            */}
+            {iSendVideo || canChangeMedia ? (
               <Pressable
                 style={[styles.btn, styles.neutral]}
                 accessibilityRole="button"
@@ -234,20 +224,11 @@ export function CallScreen({
                 testID="call-media-toggle"
                 onPress={() => onMediaChange(iSendVideo ? "audio" : "video")}
               >
-                <Text style={styles.btnText}>{iSendVideo ? "🎙️" : "📷"}</Text>
+                <Text style={styles.btnText}>{iSendVideo ? "📵" : "📷"}</Text>
               </Pressable>
             ) : null}
             {iSendVideo ? (
               <>
-                <Pressable
-                  style={[styles.btn, styles.neutral]}
-                  accessibilityRole="button"
-                  aria-label={t(cameraOff ? "call_camera_on" : "call_camera_off")}
-                  testID="call-camera"
-                  onPress={toggleCamera}
-                >
-                  <Text style={styles.btnText}>{cameraOff ? "🚫" : "📹"}</Text>
-                </Pressable>
                 {/* 畫質問題只有通話中才察覺得到——所以按鈕在這裡，不是埋在設定頁（ADR-0337 §2）。 */}
                 <Pressable
                   style={[styles.btn, styles.neutral]}

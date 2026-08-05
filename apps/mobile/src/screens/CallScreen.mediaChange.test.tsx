@@ -86,14 +86,25 @@ describe("行動端通話中升降級（ADR-0338）", () => {
     expect(maybe(m.container, "call-remote-audio-only")).toBeNull();
   });
 
-  it("🔴 畫質與關鏡頭只在**我**送視訊時出現", () => {
+  it("🔴 畫質只在**我**送視訊時出現", () => {
     const mine = mount(view({ local: "video", remote: "audio" }));
     expect(maybe(mine.container, "call-quality")).not.toBeNull();
-    expect(maybe(mine.container, "call-camera")).not.toBeNull();
 
     // 只有對方在送視訊：我沒有畫面可調。
     const theirs = mount(view({ local: "audio", remote: "video" }));
     expect(maybe(theirs.container, "call-quality")).toBeNull();
-    expect(maybe(theirs.container, "call-camera")).toBeNull();
+  });
+
+  it("🔴 ADR-0340：關掉自己的鏡頭**永遠**可用——不得被 canChangeMedia 閘門擋住", () => {
+    const seen: CallMedia[] = [];
+    const m = mount(view({ local: "video", remote: "video", canChange: false, onChange: (x) => seen.push(x) }));
+    expect(maybe(m.container, "call-media-toggle"), "我正在送視訊時，關閉入口必須在").not.toBeNull();
+    click(byTestId(m.container, "call-media-toggle"));
+    expect(seen).toEqual(["audio"]);
+  });
+
+  it("ADR-0340：關鏡頭與降級合併——不再有獨立的關鏡頭鈕", () => {
+    const m = mount(view({ local: "video", remote: "video" }));
+    expect(maybe(m.container, "call-camera")).toBeNull();
   });
 });

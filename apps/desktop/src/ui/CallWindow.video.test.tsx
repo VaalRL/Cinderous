@@ -1,7 +1,9 @@
 // @vitest-environment jsdom
 //
-// 視訊控制項：關鏡頭與畫質三檔（ADR-0337）。
-// 兩者都要走真實點擊——關鏡頭改的是 MediaTrack 的 `enabled`，SSR 測不到。
+// 視訊畫質三檔（ADR-0337）。
+//
+// ⚠ 原本這裡還有「關鏡頭」（`enabled=false` 送黑畫面）的測試，
+// 已隨 ADR-0340 廢除該作法一併移除——關鏡頭現在走降級，由 mediaChange 測試涵蓋。
 
 import { act } from "react";
 import { describe, expect, it } from "vitest";
@@ -60,55 +62,17 @@ const click = (el: Element | null): void => {
   });
 };
 
-describe("通話視窗視訊控制項（ADR-0337）", () => {
-  it("語音通話不顯示關鏡頭與畫質——那兩個對它沒有意義", () => {
+describe("通話視窗視訊畫質（ADR-0337）", () => {
+  it("語音通話不顯示畫質——它對語音沒有意義", () => {
     const { container } = mount(view({ media: "audio", stream: fakeStream(["audio"]) }));
-    expect(container.querySelector('[data-testid="call-camera"]')).toBeNull();
     expect(container.querySelector('[data-testid="call-quality"]')).toBeNull();
     // 靜音仍在（語音通話本來就有）。
     expect(container.querySelector('[data-testid="call-mute"]')).not.toBeNull();
   });
 
-  it("視訊通話顯示關鏡頭與畫質", () => {
+  it("視訊通話顯示畫質", () => {
     const { container } = mount(view({ media: "video", stream: fakeStream(["audio", "video"]) }));
-    expect(container.querySelector('[data-testid="call-camera"]')).not.toBeNull();
     expect(container.querySelector('[data-testid="call-quality"]')).not.toBeNull();
-  });
-
-  it("🔴 按關鏡頭只停視訊軌，音訊軌不受影響（不是連聲音一起關掉）", () => {
-    const stream = fakeStream(["audio", "video"]);
-    const { container } = mount(view({ media: "video", stream }));
-    click(container.querySelector('[data-testid="call-camera"]'));
-    expect(stream.getVideoTracks().every((t) => t.enabled)).toBe(false);
-    expect(stream.getAudioTracks().every((t) => t.enabled)).toBe(true);
-  });
-
-  it("再按一次恢復視訊", () => {
-    const stream = fakeStream(["audio", "video"]);
-    const { container } = mount(view({ media: "video", stream }));
-    const btn = container.querySelector('[data-testid="call-camera"]');
-    click(btn);
-    click(btn);
-    expect(stream.getVideoTracks().every((t) => t.enabled)).toBe(true);
-  });
-
-  it("關鏡頭以 aria-pressed 表達狀態（螢幕閱讀器要知道現在是關著的）", () => {
-    const { container } = mount(view({ media: "video", stream: fakeStream(["audio", "video"]) }));
-    const btn = container.querySelector('[data-testid="call-camera"]')!;
-    expect(btn.getAttribute("aria-pressed")).toBe("false");
-    click(btn);
-    expect(btn.getAttribute("aria-pressed")).toBe("true");
-  });
-
-  it("靜音與關鏡頭互不干擾（各自只動自己那類軌道）", () => {
-    const stream = fakeStream(["audio", "video"]);
-    const { container } = mount(view({ media: "video", stream }));
-    click(container.querySelector('[data-testid="call-mute"]'));
-    expect(stream.getAudioTracks().every((t) => t.enabled)).toBe(false);
-    expect(stream.getVideoTracks().every((t) => t.enabled)).toBe(true);
-    click(container.querySelector('[data-testid="call-camera"]'));
-    expect(stream.getAudioTracks().every((t) => t.enabled)).toBe(false);
-    expect(stream.getVideoTracks().every((t) => t.enabled)).toBe(false);
   });
 
   it("畫質選擇器列出三檔，且反映目前檔位", () => {
