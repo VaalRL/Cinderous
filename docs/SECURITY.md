@@ -68,6 +68,12 @@
   🔴 **這擋得住想偷金鑰的腳本，擋不住整份設定檔被複製**（包裹金鑰由瀏覽器保管、無使用者祕密參與），
   故「移除裝置」對取得完整設定檔的人**仍可能無效**。
   設定頁如實顯示本機在哪一級（ADR-0297 §6 紅線）。
+- 🔴 **殘餘——Android APK 目前是 debug 簽章且可被偵錯（ADR-0335）**：出貨的 APK 以 Android
+  預設 debug 憑證簽署，`android:debuggable="true"`。⇒ **任何能接上 adb 的人可以附著到 App 的
+  行程並讀取記憶體**，而 session 期間 nsec（儲存層 DEK 由它導出）與 FS 的 EK 私鑰必然在裡面。
+  **請勿在已 root 或長期開啟 USB 偵錯的裝置上，用它處理你真正在意的對話。**
+  修法＝release keystore ＋ `assembleRelease`（見 `OPERATOR-TODO`）；⚠ 自 Android 首發即如此，
+  非新增迴歸，只是先前未被記錄。
 - **殘餘（現況）**：正式桌面版 at-rest ＝私鑰（OS 金鑰庫）＋DB（SQLCipher）。瀏覽器示範/開發模式：
   應用資料以 nsec 導出 DEK 靜態加密（ADR-0112）；nsec 本身以**使用者密碼包裹**後落盤（passlock）
   或**不持久化**（未設密碼時）。**桌面版尚未程式碼簽章**（SmartScreen 警告）為發佈面殘餘、非 at-rest 缺口。

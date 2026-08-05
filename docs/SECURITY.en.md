@@ -48,6 +48,14 @@
 ### Device thieves
 - The private key and DB are encrypted at rest: DB → SQLCipher (ADR-0020), private key → **OS keystore (B5, implemented, ADR-0053)** — the desktop build holds the nsec via `keyring` (Windows Credential Manager / macOS Keychain / Linux Secret Service); any legacy plaintext nsec left in localStorage is **migrated into the keystore and wiped** on startup (`key_set`/`key_get`/`key_delete`).
 - **The device key** (the basis for ADR-0322 revocation — a separate key from the identity private key) goes into the OS keystore on desktop as well (ADR-0323, 2026-08-04; legacy plaintext copies are migrated in and wiped on startup). The Android native shell uses `AndroidKeyStore` (a non-exportable AES-256-GCM key wraps it; only ciphertext lands in SharedPreferences) — ⚠ **only TEE/StrongBox-backed keys count as hardware protection; on models with a software-only Keystore it counts merely as "encrypted"**, and the settings page distinguishes the two. The browser (including the mobile web preview) wraps it with a **non-extractable WebCrypto key held in IndexedDB** — 🔴 **that stops a script trying to steal the key, but not a full copy of the browser profile** (the wrapping key is held by the browser, with no user secret involved), so "remove device" may still be ineffective against someone holding the whole profile. The settings page states which tier this machine is actually on (ADR-0297 §6 red line).
+- 🔴 **Residual — the Android APK is debug-signed and debuggable (ADR-0335)**: the shipped APK is
+  signed with Android's default debug certificate and carries `android:debuggable="true"`.
+  ⇒ **Anyone who can attach adb can hook into the app's process and read its memory**, which during
+  a session necessarily holds the nsec (the storage DEK is derived from it) and the forward-secrecy
+  EK private keys. **Do not use it for conversations you actually care about on a rooted device, or
+  one with USB debugging left on.** Fix = a release keystore + `assembleRelease` (see `OPERATOR-TODO`).
+  ⚠ This has been true since the first Android release; it is not a new regression, merely one that
+  had never been written down.
 - **Residual (current state)**: in the official desktop build, at-rest = private key (OS keystore) + DB (SQLCipher). In browser demo/development mode, app data is encrypted at rest with an nsec-derived DEK (ADR-0112); the nsec itself is either **wrapped with a user password** on disk (passlock) or **not persisted** (when no password is set). The **desktop build is not yet code-signed** (SmartScreen warning) — a distribution-side residual, not an at-rest gap.
 
 ### Forward secrecy / post-compromise security (across adversaries)
