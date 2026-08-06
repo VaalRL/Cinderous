@@ -4,7 +4,7 @@
     "live": 157
   },
   "wss://cinder-relay.cinderous1.workers.dev": {
-    "probes": 256,
-    "live": 256
+    "probes": 257,
+    "live": 257
   }
 }
