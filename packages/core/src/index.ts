@@ -44,6 +44,7 @@ export * from "./deletion.js";
 export * from "./signaling.js";
 export * from "./call.js";
 export * from "./video-quality.js";
+export * from "./http-auth.js";
 export * from "./group.js";
 export * from "./calendar.js";
 export * from "./date-detect.js";

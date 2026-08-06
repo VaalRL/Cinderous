@@ -606,6 +606,13 @@ export interface ChatBackend {
    * 沒在送視訊時只記住選擇，下次開視訊沿用。
    */
   setCamera?(selection: CameraSelection): void;
+  /**
+   * 這台要不要使用公共 TURN 保底（ADR-0336 §4）。預設**開**——關掉的後果是
+   * 限制較嚴的網路下通話接不通，那對多數人是壞掉而不是更安全。
+   *
+   * ⚠ 關掉**不等於匿名**：純 STUN 下 P2P 直連仍向對端揭露 IP。換掉的是「誰看得到」。
+   */
+  setAllowPublicTurn?(on: boolean): void;
   /** 以 NIP-19 `npub`（可附 `@wss://…` relay hint，ADR-0034）新增聯絡人（僅真實 relay 後端支援）。 */
   addContact?(npub: string, relayUrl?: string): void;
   /** 移除聯絡人並清除對話。 */

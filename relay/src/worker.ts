@@ -1,3 +1,4 @@
+import { verifyHttpAuth } from "@cinderous/core";
 import { ABUSE_GUARD, acceptFileEvents, firstHost, storeOptions } from "./host-config.js";
 import { buildRelayInfo, NIP11_HEADERS, wantsRelayInfo } from "./nip11.js";
 import { RelayCore, type ConnSnapshot, type Outbound } from "./relay-core.js";
@@ -26,6 +27,14 @@ export interface Env {
   TURN_API_TOKEN?: string;
   /** 短期 TURN 憑證有效秒數（ADR-0243）；未設/壞值＝預設 86400（1 天）。客戶端於半 TTL 前刷新。 */
   TURN_TTL_SECONDS?: string;
+  /**
+   * 取得速率限制（ADR-0342 §3.1）：以 pubkey 計數，超過即 429。
+   * **未綁定＝不限速**（本地開發與測試無此 binding，不該因此壞掉）。
+   *
+   * ⚠ Cloudflare 明說它 **per-location 計數且最終一致、刻意寬鬆**——
+   * 它是成本乘數，不是閘門。
+   */
+  TURN_LIMIT?: { limit(opts: { key: string }): Promise<{ success: boolean }> };
   // ── NIP-11 Relay Information Document（ADR-0260／0089／0092）─────────────────
   /** 站名／描述／營運者公鑰（hex）／聯絡方式；未設＝該欄不出現在文件裡。 */
   RELAY_NAME?: string;
@@ -55,18 +64,40 @@ function turnTtlSeconds(raw?: string): number {
  * 未配 `TURN_KEY_ID`/`TURN_API_TOKEN` → **204**（客戶端 no-op、退回純 STUN）；Cloudflare 故障
  * 亦回 204（保底抓不到不該讓客戶端報錯）。憑證短期＋Cloudflare 端用量上限＝ADR-0243 的「有上限」。
  */
-export async function mintTurnResponse(env: Env, fetchFn: typeof fetch = fetch): Promise<Response> {
+export async function mintTurnResponse(
+  env: Env,
+  request: Request,
+  fetchFn: typeof fetch = fetch,
+): Promise<Response> {
   const keyId = env.TURN_KEY_ID;
   const token = env.TURN_API_TOKEN;
   if (!keyId || !token) return new Response(null, { status: 204 }); // 未配置＝no-op
+
+  // 🔴 ADR-0342 §3.2：先驗身分。**401 而非 204**——204 的語意是「站方未配置」，
+  // 兩者不可混：客戶端對 204 是安靜退回純 STUN，對 401 才知道是自己沒帶授權。
+  const pubkey = verifyHttpAuth(request.headers.get("Authorization"), request.url, request.method);
+  if (!pubkey) return new Response(null, { status: 401 });
+
+  // ADR-0342 §3.1：以 **pubkey** 計數而非 IP——行動網路大量共用 IP，用 IP 會誤傷。
+  // ⚠ 這是成本乘數不是閘門：Cloudflare 明說它 per-location 計數且最終一致。
+  if (env.TURN_LIMIT) {
+    const { success } = await env.TURN_LIMIT.limit({ key: pubkey });
+    if (!success) return new Response(null, { status: 429 });
+  }
+
+  const ttl = turnTtlSeconds(env.TURN_TTL_SECONDS);
   try {
     const res = await fetchFn(`${CF_TURN_API}/${encodeURIComponent(keyId)}/credentials/generate`, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ ttl: turnTtlSeconds(env.TURN_TTL_SECONDS) }),
+      body: JSON.stringify({ ttl }),
     });
     if (!res.ok) return new Response(null, { status: 204 });
-    return new Response(await res.text(), {
+    // ⓪ ADR-0342 §2：把 **ttl 一起回給客戶端**。
+    // 先前沒有這個欄位，客戶端只好寫死 6 小時刷新——TTL 一縮短，憑證就在客戶端不知情的
+    // 情況下過期，TURN 形同失效。這裡送的就是我們送給 Cloudflare 的那個值（唯一真實來源）。
+    const body = (await res.json()) as Record<string, unknown>;
+    return new Response(JSON.stringify({ ...body, ttl }), {
       status: 200,
       headers: {
         "Content-Type": "application/json",
@@ -113,7 +144,7 @@ export default {
     const url = new URL(request.url);
     if (request.headers.get("Upgrade") !== "websocket") {
       // 公共 TURN 保底端點（ADR-0243）：換發短期憑證；未配 secret 則 204、客戶端退回純 STUN。
-      if (url.pathname === "/turn") return mintTurnResponse(env);
+      if (url.pathname === "/turn") return mintTurnResponse(env, request);
       // NIP-11（ADR-0260）：只有明確要 `application/nostr+json` 的請求拿到 JSON；
       // 其餘維持純文字 200（PaaS／容器健康檢查靠它，ADR-0089 定下的契約）。
       if (wantsRelayInfo(request.headers.get("Accept"))) {

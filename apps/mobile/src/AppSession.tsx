@@ -153,6 +153,16 @@ const NOTIFY_HIDE_KEY = "nb.notifyHidePreview";
 // identities.ts。**絕不明文存 nsec**（ADR-0112 紅線）。
 // 已讀回條（ADR-0058）：opt-in＋互惠——關閉則不送、也不顯示對方的已讀（故 tick 最多到已送達）。
 const READ_RECEIPTS_KEY = "nb.readReceipts";
+// 公共 TURN 保底（ADR-0336 §4）：裝置層——「**這台**的通話要不要經過第三方」。
+// 預設**開**：關掉的後果是限制網路下打不通，那對多數人是壞掉而不是更安全。
+const ALLOW_PUBLIC_TURN_KEY = "nb.allowPublicTurn";
+function readAllowPublicTurn(): boolean {
+  try {
+    return localStorage.getItem(ALLOW_PUBLIC_TURN_KEY) !== "0"; // 只有明確存過 "0" 才算關
+  } catch {
+    return true;
+  }
+}
 function readReadReceipts(): boolean {
   try {
     return localStorage.getItem(READ_RECEIPTS_KEY) === "1";
@@ -268,6 +278,7 @@ export function AppSession({
   const [chatBg, setChatBgState] = useState<ChatBg | null>(null);
   const [retentionCap, setRetentionCapState] = useState<number>(() => readRetentionCap());
   const [readReceipts, setReadReceiptsState] = useState<boolean>(() => readReadReceipts());
+  const [allowPublicTurn, setAllowPublicTurnState] = useState<boolean>(() => readAllowPublicTurn());
   // 通話（ADR-0101）：媒體全程 P2P，不經中繼。
   /**
    * 身分世代（ADR-0329）：`signInWith` 每次 +1。
@@ -299,6 +310,9 @@ export function AppSession({
   // 視訊畫質（ADR-0337）：render 期鏡像，供 `signInWith` 建後端時取當前值（prop 會變，閉包會 stale）。
   const videoQualityRef = useRef(videoQuality);
   videoQualityRef.current = videoQuality;
+  // ADR-0336 §4：render 期鏡像，供 `signInWith` 建後端時取當前值。
+  const allowPublicTurnRef = useRef(allowPublicTurn);
+  allowPublicTurnRef.current = allowPublicTurn;
 
   useEffect(() => () => backendRef.current?.stop(), []);
 
@@ -754,6 +768,7 @@ export function AppSession({
       },
     });
     backend.setReadReceipts?.(readReceipts); // ADR-0058：互惠開關（關＝不送也不顯示對方已讀）
+    backend.setAllowPublicTurn?.(allowPublicTurnRef.current); // ADR-0336 §4
     backend.setVideoQuality?.(videoQualityRef.current); // ADR-0337：沿用這台裝置上次選的畫質
     setTab("chats");
     setScreen(opts.landOn ?? "main");
@@ -1198,6 +1213,16 @@ export function AppSession({
   };
 
   // 已讀回條開關（ADR-0058）：寫入偏好並即時推到後端。
+  const toggleAllowPublicTurn = (v: boolean): void => {
+    setAllowPublicTurnState(v);
+    try {
+      localStorage.setItem(ALLOW_PUBLIC_TURN_KEY, v ? "1" : "0");
+    } catch {
+      /* 忽略 */
+    }
+    backendRef.current?.setAllowPublicTurn?.(v);
+  };
+
   const toggleReadReceipts = (v: boolean): void => {
     setReadReceiptsState(v);
     try {
@@ -1743,6 +1768,9 @@ export function AppSession({
                 onExport: exportAll,
                 readReceipts,
                 onReadReceipts: toggleReadReceipts,
+                // ADR-0336 §4：這台要不要用公共 TURN；文案必須說出取捨。
+                allowPublicTurn,
+                onAllowPublicTurn: toggleAllowPublicTurn,
                 // ADR-0337：預設畫質；通話中另有即時切換（CallScreen）。
                 videoQuality,
                 onVideoQuality: changeVideoQuality,

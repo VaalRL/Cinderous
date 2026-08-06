@@ -11,7 +11,7 @@
 
 import { createRequire } from "node:module";
 import type { DatabaseSync as DatabaseSyncType } from "node:sqlite";
-import { buildAuthEvent, finalizeEvent, generateSecretKey, getPublicKey, type NostrEvent, type SecretKey } from "@cinderous/core";
+import { buildAuthEvent, buildHttpAuthEvent, finalizeEvent, generateSecretKey, getPublicKey, httpAuthHeader, type NostrEvent, type SecretKey } from "@cinderous/core";
 import { beforeAll, describe, expect, it } from "vitest";
 import worker, { mintTurnResponse, RelayRoom, type Env } from "./worker.js";
 
@@ -456,17 +456,29 @@ describe("RelayRoom — 崩潰韌性（ADR-0235 C1 宿主層）", () => {
   });
 });
 
-describe("公共 TURN 端點（/turn，ADR-0243）", () => {
-  const cfBody = JSON.stringify({
-    iceServers: { urls: ["turn:turn.cloudflare.com:3478"], username: "u", credential: "p" },
-  });
+describe("公共 TURN 端點（/turn，ADR-0243／0342）", () => {
+  const cfJson = { iceServers: { urls: ["turn:turn.cloudflare.com:3478"], username: "u", credential: "p" } };
+  const cfBody = JSON.stringify(cfJson);
   const okFetch = (async () =>
-    ({ ok: true, status: 201, text: async () => cfBody }) as unknown as Response) as typeof fetch;
+    ({ ok: true, status: 201, text: async () => cfBody, json: async () => cfJson }) as unknown as Response) as typeof fetch;
   // 本檔的 beforeAll 把全域 Response 換成只存 {body, init} 的替身（見上）；照其形狀斷言。
   const stub = (r: Response) => r as unknown as { body: unknown; init: { status?: number; headers?: Record<string, string> } };
 
+  const TURN_URL = "https://relay.example/turn";
+  const authSk = generateSecretKey();
+  /** 帶合法 NIP-98 授權的請求（ADR-0342 §3.2）。 */
+  const authed = (url = TURN_URL): Request =>
+    ({
+      url,
+      method: "GET",
+      headers: { get: (h: string) => (h === "Authorization" ? httpAuthHeader(buildHttpAuthEvent(url, "GET", authSk)) : null) },
+    }) as unknown as Request;
+  /** 未帶授權。 */
+  const bare = (url = TURN_URL): Request =>
+    ({ url, method: "GET", headers: { get: () => null } }) as unknown as Request;
+
   it("未配 secret → 204（客戶端退回純 STUN，no-op）", async () => {
-    const r = stub(await mintTurnResponse({} as Env, okFetch));
+    const r = stub(await mintTurnResponse({} as Env, authed(), okFetch));
     expect(r.init.status).toBe(204);
     expect(r.body).toBeNull();
   });
@@ -475,13 +487,14 @@ describe("公共 TURN 端點（/turn，ADR-0243）", () => {
     let seen: { url: string; init: RequestInit | undefined } | undefined;
     const spy = (async (url: string, init?: RequestInit) => {
       seen = { url, init };
-      return { ok: true, status: 201, text: async () => cfBody } as unknown as Response;
+      return { ok: true, status: 201, text: async () => cfBody, json: async () => cfJson } as unknown as Response;
     }) as typeof fetch;
     const env = { TURN_KEY_ID: "key123", TURN_API_TOKEN: "tok", TURN_TTL_SECONDS: "3600" } as Env;
-    const r = stub(await mintTurnResponse(env, spy));
+    const r = stub(await mintTurnResponse(env, authed(), spy));
     expect(r.init.status).toBe(200);
     expect(r.init.headers?.["Access-Control-Allow-Origin"]).toBe("*");
-    expect(JSON.parse(r.body as string)).toEqual(JSON.parse(cfBody));
+    // ⓪ ADR-0342 §2：回應要**帶上 ttl**，客戶端才知道何時該刷新。
+    expect(JSON.parse(r.body as string)).toEqual({ ...cfJson, ttl: 3600 });
     // 打對 Cloudflare API、帶 Bearer token 與 ttl。
     expect(seen?.url).toBe("https://rtc.live.cloudflare.com/v1/turn/keys/key123/credentials/generate");
     expect((seen?.init?.headers as Record<string, string>).Authorization).toBe("Bearer tok");
@@ -491,7 +504,7 @@ describe("公共 TURN 端點（/turn，ADR-0243）", () => {
   it("Cloudflare 回非 2xx → 204（保底抓不到不讓客戶端報錯）", async () => {
     const bad = (async () => ({ ok: false, status: 500, text: async () => "" }) as unknown as Response) as typeof fetch;
     const env = { TURN_KEY_ID: "k", TURN_API_TOKEN: "t" } as Env;
-    expect(stub(await mintTurnResponse(env, bad)).init.status).toBe(204);
+    expect(stub(await mintTurnResponse(env, authed(), bad)).init.status).toBe(204);
   });
 
   it("fetch 拋 → 204", async () => {
@@ -499,16 +512,71 @@ describe("公共 TURN 端點（/turn，ADR-0243）", () => {
       throw new Error("network");
     }) as typeof fetch;
     const env = { TURN_KEY_ID: "k", TURN_API_TOKEN: "t" } as Env;
-    expect(stub(await mintTurnResponse(env, boom)).init.status).toBe(204);
+    expect(stub(await mintTurnResponse(env, authed(), boom)).init.status).toBe(204);
+  });
+
+  it("🔴 未帶授權 → 401（**不是 204**——204 的語意是站方未配置，兩者不可混）", async () => {
+    const env = { TURN_KEY_ID: "k", TURN_API_TOKEN: "t" } as Env;
+    expect(stub(await mintTurnResponse(env, bare(), okFetch)).init.status).toBe(401);
+  });
+
+  it("🔴 對別的 URL 簽的授權不能拿來打 /turn", async () => {
+    const env = { TURN_KEY_ID: "k", TURN_API_TOKEN: "t" } as Env;
+    const wrong = {
+      url: TURN_URL,
+      method: "GET",
+      headers: {
+        get: (h: string) =>
+          h === "Authorization" ? httpAuthHeader(buildHttpAuthEvent("https://relay.example/other", "GET", authSk)) : null,
+      },
+    } as unknown as Request;
+    expect(stub(await mintTurnResponse(env, wrong, okFetch)).init.status).toBe(401);
+  });
+
+  it("⚠ 未配 secret 時先回 204，不因缺授權而變 401（站方未配置的語意優先）", async () => {
+    expect(stub(await mintTurnResponse({} as Env, bare(), okFetch)).init.status).toBe(204);
+  });
+
+  it("超過取得速率 → 429，且**不去跟 Cloudflare 換憑證**", async () => {
+    let called = 0;
+    const spy = (async () => {
+      called++;
+      return { ok: true, status: 201, json: async () => cfJson } as unknown as Response;
+    }) as typeof fetch;
+    const env = {
+      TURN_KEY_ID: "k",
+      TURN_API_TOKEN: "t",
+      TURN_LIMIT: { limit: async () => ({ success: false }) },
+    } as unknown as Env;
+    expect(stub(await mintTurnResponse(env, authed(), spy)).init.status).toBe(429);
+    expect(called, "被限速就不該再花一次換發").toBe(0);
+  });
+
+  it("速率限制以 **pubkey** 計數，不是 IP（行動網路大量共用 IP）", async () => {
+    let key: string | undefined;
+    const env = {
+      TURN_KEY_ID: "k",
+      TURN_API_TOKEN: "t",
+      TURN_LIMIT: { limit: async (o: { key: string }) => ((key = o.key), { success: true }) },
+    } as unknown as Env;
+    await mintTurnResponse(env, authed(), okFetch);
+    expect(key).toBe(getPublicKey(authSk));
+  });
+
+  it("未綁定 TURN_LIMIT ⇒ 不限速（本地開發/測試沒有這個 binding，不該因此壞掉）", async () => {
+    const env = { TURN_KEY_ID: "k", TURN_API_TOKEN: "t" } as Env;
+    expect(stub(await mintTurnResponse(env, authed(), okFetch)).init.status).toBe(200);
   });
 
   it("TTL 未設 → 預設 86400", async () => {
     let body: string | undefined;
     const spy = (async (_url: string, init?: RequestInit) => {
       body = init?.body as string;
-      return { ok: true, status: 201, text: async () => cfBody } as unknown as Response;
+      return { ok: true, status: 201, text: async () => cfBody, json: async () => cfJson } as unknown as Response;
     }) as typeof fetch;
-    await mintTurnResponse({ TURN_KEY_ID: "k", TURN_API_TOKEN: "t" } as Env, spy);
+    const r = stub(await mintTurnResponse({ TURN_KEY_ID: "k", TURN_API_TOKEN: "t" } as Env, authed(), spy));
     expect(JSON.parse(body as string)).toEqual({ ttl: 86400 });
+    // 回應帶的 ttl 必須與送給 Cloudflare 的一致（唯一真實來源，ADR-0342 §2）。
+    expect((JSON.parse(r.body as string) as { ttl: number }).ttl).toBe(86400);
   });
 });

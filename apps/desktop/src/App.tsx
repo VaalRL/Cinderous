@@ -214,6 +214,8 @@ const NOTIFY_EVENTS_KEY = "nb.notifyEvents"; // ADR-0217：各事件通知開關
 const READ_RECEIPTS_KEY = "nb.readReceipts";
 // 視訊通話畫質（ADR-0337）：裝置層——這是「這台的相機與網路」，同 readReceipts/retentionCap。
 const VIDEO_QUALITY_KEY = "nb.videoQuality";
+// 公共 TURN 保底（ADR-0336 §4）：裝置層——「這台的通話要不要經過第三方」。預設**開**。
+const ALLOW_PUBLIC_TURN_KEY = "nb.allowPublicTurn";
 // 企業主首次進入自動開名冊管理（ADR-0155）：建立時寫入、開啟一次即清除（跨 Tauri reload）。
 const ROSTER_INTRO_PREFIX = "nb.rosterIntro.";
 const INVISIBLE_KEY = "nb.invisible";
@@ -805,6 +807,21 @@ export function App(): JSX.Element {
       return DEFAULT_VIDEO_QUALITY;
     }
   });
+  const [allowPublicTurn, setAllowPublicTurnState] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(ALLOW_PUBLIC_TURN_KEY) !== "0"; // 只有明確存過 "0" 才算關
+    } catch {
+      return true;
+    }
+  });
+  const changeAllowPublicTurn = (on: boolean): void => {
+    setAllowPublicTurnState(on);
+    try {
+      localStorage.setItem(ALLOW_PUBLIC_TURN_KEY, on ? "1" : "0");
+    } catch {
+      /* 隱私模式等無 localStorage：僅本 session 生效 */
+    }
+  };
   const changeVideoQuality = (q: VideoQuality): void => {
     setVideoQualityState(q);
     try {
@@ -975,6 +992,10 @@ export function App(): JSX.Element {
   useEffect(() => {
     backend?.setVideoQuality?.(videoQuality);
   }, [backend, videoQuality]);
+  // 公共 TURN 開關同步到後端（ADR-0336 §4）；關掉會立刻清掉已快取的憑證。
+  useEffect(() => {
+    backend?.setAllowPublicTurn?.(allowPublicTurn);
+  }, [backend, allowPublicTurn]);
   // 隱身開關同步到後端（ADR-0088）；後端重建或開關變動時皆推送。
   useEffect(() => {
     backend?.setInvisible?.(invisible);
@@ -2733,6 +2754,8 @@ export function App(): JSX.Element {
           onWipeDevice={() => void wipeDevice()}
           {/* 視訊畫質預設（ADR-0337）：通話中可在通話視窗即時改，這裡設下一通的起點。 */
           ...{ videoQuality: { value: videoQuality, onChange: changeVideoQuality } }}
+          {/* 公共 TURN 保底（ADR-0336 §4）：預設開；文案必須說出取捨。 */
+          ...{ publicTurn: { value: allowPublicTurn, onChange: changeAllowPublicTurn } }}
           {...(activeBackend.requestVanish
             ? // NIP-62（ADR-0260）：只有真實 relay 後端有這個能力；示範後端不顯示此區塊。
               { onVanish: () => activeBackend.requestVanish!() }

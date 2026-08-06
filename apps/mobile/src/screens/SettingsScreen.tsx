@@ -117,6 +117,8 @@ export function SettingsScreen({
   onRetention,
   onExport,
   readReceipts,
+  allowPublicTurn,
+  onAllowPublicTurn,
   videoQuality,
   onVideoQuality,
   onReadReceipts,
@@ -199,6 +201,9 @@ export function SettingsScreen({
   onExport?: () => void;
   /** 已讀回條（ADR-0058）：opt-in＋互惠；關閉則不送、也不顯示對方已讀。 */
   readReceipts?: boolean;
+  /** 公共 TURN 保底（ADR-0336 §4）：預設開；關掉＝限制網路下可能打不通。 */
+  allowPublicTurn?: boolean;
+  onAllowPublicTurn?: (on: boolean) => void;
   /** 視訊通話畫質預設（ADR-0337）：通話中可在通話畫面即時改，這裡設下一通的起點。 */
   videoQuality?: VideoQuality;
   onVideoQuality?: (q: VideoQuality) => void;
@@ -1132,6 +1137,32 @@ export function SettingsScreen({
               <Text style={[styles.segText, { color: readReceipts ? "#ffffff" : tk.ink }]}>
                 {t("settings_readReceipts")}
                 {readReceipts ? " ✓" : ""}
+              </Text>
+            </Pressable>
+          </View>
+        ) : null}
+
+        {/* 通話中繼保底（ADR-0336 §4）：預設開；文案必須說出取捨且不得暗示關掉＝匿名 */}
+        {onAllowPublicTurn ? (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>{t("settings_publicTurn")}</Text>
+            <Text style={styles.label}>{t("settings_publicTurnHint")}</Text>
+            <Pressable
+              accessibilityRole="button"
+              testID="allow-public-turn"
+              onPress={() => onAllowPublicTurn(!allowPublicTurn)}
+              style={[
+                styles.seg,
+                {
+                  alignSelf: "flex-start",
+                  borderColor: allowPublicTurn ? tk.accent : tk.border,
+                  backgroundColor: allowPublicTurn ? tk.accent : tk.field,
+                },
+              ]}
+            >
+              <Text style={[styles.segText, { color: allowPublicTurn ? "#ffffff" : tk.ink }]}>
+                {t("settings_publicTurn")}
+                {allowPublicTurn ? " ✓" : ""}
               </Text>
             </Pressable>
           </View>

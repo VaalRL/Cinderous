@@ -893,6 +893,13 @@ export interface Messages {
   call_quality_low: string;
   call_quality_medium: string;
   call_quality_high: string;
+  /**
+   * 公共 TURN 保底開關（ADR-0336 §4）。
+   *
+   * 🔴 文案必須說出取捨，且**不得暗示關掉＝匿名**——純 STUN 下直連仍向對端揭露 IP。
+   */
+  settings_publicTurn: string;
+  settings_publicTurnHint: string;
   /** 設定頁的預設畫質（ADR-0337）：通話中可隨時改，這裡設的是下一通的起點。 */
   settings_videoQuality: string;
   settings_videoQualityHint: string;
@@ -1755,6 +1762,9 @@ const zhHant: Messages = {
   call_quality_low: "省流量",
   call_quality_medium: "標準",
   call_quality_high: "高畫質",
+  settings_publicTurn: "通話中繼保底",
+  settings_publicTurnHint:
+    "在限制較嚴的網路（對稱 NAT／嚴格防火牆）下，通話會改經中繼伺服器才打得通。⚠ 關閉後那些通話可能接不通；文字與檔案不受影響。注意這不是匿名開關——不經中繼時，直連仍會讓對方看到你的 IP，換掉的只是「誰看得到」。",
   settings_videoQuality: "視訊通話畫質",
   settings_videoQualityHint:
     "省流量約 180 MB/小時、標準約 585 MB/小時、高畫質約 1.4 GB/小時。通話中可隨時調整，這裡設的是下一通的起點。",
@@ -2613,6 +2623,9 @@ const en: Messages = {
   call_quality_low: "Data saver",
   call_quality_medium: "Standard",
   call_quality_high: "High",
+  settings_publicTurn: "Call relay fallback",
+  settings_publicTurnHint:
+    "On restrictive networks (symmetric NAT / strict firewalls), calls are routed through a relay server so they can connect at all. ⚠ Turning this off means those calls may not connect; text and files are unaffected. Note this is not an anonymity switch — without the relay, a direct connection still reveals your IP to the other person; it only changes who can see it.",
   settings_videoQuality: "Video call quality",
   settings_videoQualityHint:
     "Data saver uses about 180 MB/hour, Standard about 585 MB/hour, High about 1.4 GB/hour. You can change this during a call; this sets the starting point for the next one.",

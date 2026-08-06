@@ -1,5 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { fetchTurnServers, parseTurnResponse, turnEndpointFromRelay, type TurnFetch } from "./turn-fetch.js";
+import { generateSecretKey, verifyHttpAuth } from "@cinderous/core";
+import {
+  TURN_TTL_FALLBACK_SEC,
+  fetchTurnServers,
+  parseTurnResponse,
+  parseTurnTtl,
+  turnEndpointFromRelay,
+  turnRefreshDelayMs,
+  type TurnFetch,
+} from "./turn-fetch.js";
+
+const SK = generateSecretKey();
+const EP = "https://relay.example/turn";
 
 // Cloudflare `/turn` 回應：iceServers 是**單一物件**（urls 陣列＋短期帳密）。
 const cfBody = {
@@ -57,25 +69,84 @@ describe("parseTurnResponse（正規化 Cloudflare TURN 回應，ADR-0243）", (
 
 describe("fetchTurnServers（抓短期憑證，失敗一律 no-op）", () => {
   it("200＋合法 body → 伺服器清單", async () => {
-    const servers = await fetchTurnServers("https://relay.example/turn", () => res(200, cfBody));
+    const { servers } = await fetchTurnServers(EP, SK, () => res(200, cfBody));
     expect(servers).toHaveLength(1);
     expect(servers[0]?.username).toBe("ephemeral-user");
   });
 
-  it("204（Worker 未配 secret）→ []（退回純 STUN）", async () => {
-    expect(await fetchTurnServers("https://relay.example/turn", () => res(204))).toEqual([]);
+  it("204（Worker 未配 secret）→ 空清單（退回純 STUN）", async () => {
+    expect((await fetchTurnServers(EP, SK, () => res(204))).servers).toEqual([]);
   });
 
-  it("非 2xx → []", async () => {
-    expect(await fetchTurnServers("https://relay.example/turn", () => res(500, {}))).toEqual([]);
+  it("🔴 401（沒帶/帶錯授權）→ 空清單，不報錯（ADR-0342 §3.2）", async () => {
+    // TURN 是保底，拿不到就純 STUN，不該拖垮通話建立。
+    expect((await fetchTurnServers(EP, SK, () => res(401))).servers).toEqual([]);
   });
 
-  it("fetch 拋（離線/DNS 失敗）→ []", async () => {
-    expect(await fetchTurnServers("https://relay.example/turn", () => Promise.reject(new Error("offline")))).toEqual([]);
+  it("非 2xx → 空清單", async () => {
+    expect((await fetchTurnServers(EP, SK, () => res(500, {}))).servers).toEqual([]);
   });
 
-  it("body 非 JSON（json() 拋）→ []", async () => {
-    expect(await fetchTurnServers("https://relay.example/turn", () => res(200))).toEqual([]);
+  it("fetch 拋（離線/DNS 失敗）→ 空清單", async () => {
+    expect((await fetchTurnServers(EP, SK, () => Promise.reject(new Error("offline")))).servers).toEqual([]);
+  });
+
+  it("body 非 JSON（json() 拋）→ 空清單", async () => {
+    expect((await fetchTurnServers(EP, SK, () => res(200))).servers).toEqual([]);
+  });
+
+  it("🔴 帶上可被 relay 驗證的授權標頭，且綁定的是這個端點", async () => {
+    let auth: string | undefined;
+    await fetchTurnServers(EP, SK, (_u, init) => {
+      auth = init?.headers?.Authorization;
+      return res(200, cfBody);
+    });
+    expect(verifyHttpAuth(auth ?? null, EP, "GET")).not.toBeNull();
+    // 對別的端點驗不過——證明簽的是這個 URL 而不是隨便一個。
+    expect(verifyHttpAuth(auth ?? null, "https://other.example/turn", "GET")).toBeNull();
+  });
+
+  it("⓪ 回應帶 ttl → 一併回傳（ADR-0342 §2）", async () => {
+    const r = await fetchTurnServers(EP, SK, () => res(200, { ...cfBody, ttl: 300 }));
+    expect(r.ttlSeconds).toBe(300);
+  });
+
+  it("⓪ 回應沒有 ttl（舊版 Worker）→ undefined，由排程套用退路", async () => {
+    const r = await fetchTurnServers(EP, SK, () => res(200, cfBody));
+    expect(r.ttlSeconds).toBeUndefined();
+  });
+});
+
+describe("⓪ 刷新排程跟著 TTL（ADR-0342 §2）", () => {
+  it("parseTurnTtl 只收正整數，其餘一律 undefined", () => {
+    expect(parseTurnTtl({ ttl: 300 })).toBe(300);
+    expect(parseTurnTtl({ ttl: 300.7 })).toBe(300);
+    for (const bad of [{ ttl: 0 }, { ttl: -1 }, { ttl: "300" }, { ttl: NaN }, {}, null, "x"]) {
+      expect(parseTurnTtl(bad)).toBeUndefined();
+    }
+  });
+
+  it("🔴 半個 TTL——這正是先前寫死 6 小時所缺的", () => {
+    expect(turnRefreshDelayMs(600)).toBe(300_000);
+    expect(turnRefreshDelayMs(7200)).toBe(3600_000);
+  });
+
+  it("🔴 TTL 300（站方現行設定）→ 2.5 分鐘刷新一次，而不是 6 小時", () => {
+    // 舊行為（6h）會讓 5 分鐘就過期的憑證在客戶端不知情下失效，TURN 形同不存在。
+    expect(turnRefreshDelayMs(300)).toBe(150_000);
+  });
+
+  it("下限 60 秒——極短 TTL 不得把客戶端變成打樁機（也會撞速率限制）", () => {
+    expect(turnRefreshDelayMs(10)).toBe(60_000);
+    expect(turnRefreshDelayMs(1)).toBe(60_000);
+  });
+
+  it("上限 6 小時——憑證長效時不必無謂常刷", () => {
+    expect(turnRefreshDelayMs(86400)).toBe(6 * 3600_000);
+  });
+
+  it("ttl 缺席 → 退回預設（對舊版 Worker 的 86400 很安全）", () => {
+    expect(turnRefreshDelayMs(undefined)).toBe((TURN_TTL_FALLBACK_SEC / 2) * 1000);
   });
 });
 

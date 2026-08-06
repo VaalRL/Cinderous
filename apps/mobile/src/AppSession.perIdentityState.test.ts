@@ -58,6 +58,8 @@ const DEVICE_OR_SHELL = new Set([
   // 🔵 `cloudSync` 原本也在這裡，**已於 ADR-0327 移到 per-identity**——它和這兩個不同類：
   // 決定的是「這個身分的資料要不要離開裝置」，而桌面一向就是身分層。
   "retentionCap", "readReceipts",
+  // ADR-0336 §4：「**這台**的通話要不要經過第三方」——與身分無關，同 readReceipts 那一類。
+  "allowPublicTurn",
   // ADR-0339：這台**硬體上**有幾個鏡頭。與身分完全無關（換人不會長出第二個鏡頭）。
   // 之所以住在 AppSession 而非外殼，是因為 `enumerateDevices` 只在通話中（相機權限已給）
   // 才給得出有意義的資料 ⇒ 依附通話生命週期查詢，重掛後重查一次即可，無殘留風險。

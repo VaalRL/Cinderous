@@ -163,7 +163,7 @@ import {
 } from "@cinderous/core";
 import { loadRelayCheck, recordAuthObservation } from "./relay-check.js"; // ADR-0275：A 層健檢
 import { buildRtcConfig } from "./rtc-config.js";
-import { fetchTurnServers, turnEndpointFromRelay } from "./turn-fetch.js";
+import { fetchTurnServers, turnEndpointFromRelay, turnRefreshDelayMs } from "./turn-fetch.js";
 import { WebRtcCall } from "./webrtc-call.js";
 import { WebRtcTransfer } from "./webrtc.js";
 import { buildSnapshotContent, mergeSnapshotContent, parseSnapshotContent } from "../storage/cloud-snapshot.js";
@@ -563,7 +563,9 @@ export class RelayChatBackend implements ChatBackend {
   /** 公共 TURN 保底（ADR-0243）：由 `/turn` 抓來的短期 TURN 憑證，開機取得、到期前刷新。 */
   private publicTurnServers: RTCIceServer[] | undefined;
   private readonly turnEndpoint: string | undefined;
-  private turnTimer: ReturnType<typeof setInterval> | undefined;
+  private turnTimer: ReturnType<typeof setTimeout> | undefined;
+  /** 這台要不要用公共 TURN（ADR-0336 §4）；預設開——關掉會讓限制網路下打不通。 */
+  private allowPublicTurn = true;
   private readonly onHomeSwitched: ((url: string) => void) | undefined;
   private lastList: RelayListDoc | null;
   /** 外部 relay 連線（正規化 URL → client），惰性建立（ADR-0034）。 */
@@ -879,10 +881,7 @@ export class RelayChatBackend implements ChatBackend {
     this.pumpTimer = setInterval(() => this.outbox.pump(), 200);
     // 公共 TURN 保底（ADR-0243）：開機抓一次短期憑證，並於 6h 前刷新（Cloudflare 預設 TTL 1 天）。
     // 抓不到/未配 secret 皆 no-op（退回純 STUN），不阻塞其餘啟動流程。
-    if (this.turnEndpoint) {
-      void this.refreshPublicTurn();
-      this.turnTimer = setInterval(() => void this.refreshPublicTurn(), 6 * 3600_000);
-    }
+    if (this.turnEndpoint) void this.refreshPublicTurn(); // 抓完會自己依 TTL 重排（ADR-0342 §2）
     this.emitContacts();
     this.emitMutes(); // ADR-0242 階段③：把同步來的每對話靜音交給 UI 初始化
     // 回放本機持久化的歷史訊息：每對話一次批次交付（避免逐則 O(n²) 狀態更新與全開視窗）。
@@ -1801,11 +1800,46 @@ export class RelayChatBackend implements ChatBackend {
     this.storage.saveCrdtTombstones(set, [...this.storage.loadCrdtTombstones(set), { key, at: Date.now() }]);
   }
 
-  /** 抓公共 TURN 短期憑證（ADR-0243）。抓到才覆蓋，抓不到保留舊值/純 STUN——保底不拖垮通話。 */
+  /**
+   * 抓公共 TURN 短期憑證（ADR-0243）。抓到才覆蓋，抓不到保留舊值/純 STUN——保底不拖垮通話。
+   *
+   * ⓪ **排程跟著 Worker 回報的 TTL 走**（ADR-0342 §2）：先前是寫死 6 小時，站方把 TTL
+   * 縮短之後憑證會在客戶端不知情的情況下過期，TURN 形同失效。改用一次性計時器**每次重排**。
+   *
+   * ④ `allowPublicTurn` 關掉時直接不抓（ADR-0336 §4）——那正是「寧可打不通，也不要讓
+   * 通話經過第三方」的意思。
+   */
   private async refreshPublicTurn(): Promise<void> {
-    if (!this.turnEndpoint) return;
-    const servers = await fetchTurnServers(this.turnEndpoint);
+    if (!this.turnEndpoint || !this.allowPublicTurn) return;
+    const { servers, ttlSeconds } = await fetchTurnServers(this.turnEndpoint, this.sk);
     if (servers.length > 0) this.publicTurnServers = servers;
+    // 抓失敗時 `ttlSeconds` 為 undefined ⇒ 退回預設節奏重試，不會就此停擺。
+    this.scheduleTurnRefresh(turnRefreshDelayMs(ttlSeconds));
+  }
+
+  /** 重排下一次 TURN 刷新（一次性計時器；每次抓完依當次 TTL 重排）。 */
+  private scheduleTurnRefresh(delayMs: number): void {
+    if (this.turnTimer !== undefined) clearTimeout(this.turnTimer);
+    this.turnTimer = setTimeout(() => void this.refreshPublicTurn(), delayMs);
+  }
+
+  /**
+   * 這台要不要使用公共 TURN（ADR-0336 §4）。裝置層偏好，預設開。
+   *
+   * ⚠ 關掉**不等於匿名**：純 STUN 下 P2P 直連仍向對端揭露 IP。換掉的是「誰看得到」
+   * ——Cloudflare 或聯絡人——不是「沒人看得到」。
+   */
+  setAllowPublicTurn(on: boolean): void {
+    if (this.allowPublicTurn === on) return;
+    this.allowPublicTurn = on;
+    if (on) {
+      void this.refreshPublicTurn();
+      return;
+    }
+    // 關掉要**立刻生效**：清掉已快取的憑證，後續新建的連線就只剩 STUN。
+    if (this.turnTimer !== undefined) clearTimeout(this.turnTimer);
+    this.turnTimer = undefined;
+    this.publicTurnServers = undefined;
   }
 
   /**
@@ -4640,7 +4674,7 @@ export class RelayChatBackend implements ChatBackend {
     if (this.pumpTimer) clearInterval(this.pumpTimer);
     if (this.snapTimer) clearInterval(this.snapTimer);
     if (this.remindTimer) clearInterval(this.remindTimer);
-    if (this.turnTimer) clearInterval(this.turnTimer);
+    if (this.turnTimer) clearTimeout(this.turnTimer);
     if (this.retireTimer !== undefined) clearTimeout(this.retireTimer);
     this.outbox.clear();
     this.transfer.close();

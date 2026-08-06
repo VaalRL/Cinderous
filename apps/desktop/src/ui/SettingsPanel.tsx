@@ -140,6 +140,11 @@ export interface SettingsPanelProps {
    * 這裡設的是**下一通的起點**——通話中可在通話視窗即時改。
    */
   videoQuality?: { value: VideoQuality; onChange: (q: VideoQuality) => void };
+  /**
+   * 公共 TURN 保底（ADR-0336 §4）；未提供則不顯示。預設開——關掉的後果是
+   * 限制較嚴的網路下通話接不通。⚠ 文案不得暗示關掉＝匿名。
+   */
+  publicTurn?: { value: boolean; onChange: (on: boolean) => void };
   /** 隱身（ADR-0088）：停止一切在線廣播（relay＋P2P）；未提供則不顯示該區塊。 */
   invisible?: boolean;
   onToggleInvisible?: () => void;
@@ -1885,6 +1890,20 @@ export function SettingsPanel(props: SettingsPanelProps): JSX.Element {
                   onChange={props.onToggleReadReceipts}
                 />
                 <span>{t("settings_readReceiptsHint")}</span>
+              </label>
+            </section>
+          ) : null}
+          {tab === "privacy" && props.publicTurn ? (
+            <section className="settings__sec">
+              <h4>{t("settings_publicTurn")}</h4>
+              <label className="settings__toggle">
+                <input
+                  type="checkbox"
+                  checked={props.publicTurn.value}
+                  onChange={(e) => props.publicTurn!.onChange(e.target.checked)}
+                  data-testid="settings-public-turn"
+                />
+                <span>{t("settings_publicTurnHint")}</span>
               </label>
             </section>
           ) : null}
