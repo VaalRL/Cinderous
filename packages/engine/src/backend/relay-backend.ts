@@ -1812,6 +1812,10 @@ export class RelayChatBackend implements ChatBackend {
   private async refreshPublicTurn(): Promise<void> {
     if (!this.turnEndpoint || !this.allowPublicTurn) return;
     const { servers, ttlSeconds } = await fetchTurnServers(this.turnEndpoint, this.sk);
+    // 🔴 `await` 之後要**重新檢查旗標**（審查發現 #4）。
+    // 使用者可能在請求在途時關掉開關——`setAllowPublicTurn(false)` 清了憑證也清了計時器，
+    // 若這裡不重查，在途的結果會把憑證寫回去、還把計時器重新排上，開關看起來沒作用。
+    if (!this.allowPublicTurn) return;
     if (servers.length > 0) this.publicTurnServers = servers;
     // 抓失敗時 `ttlSeconds` 為 undefined ⇒ 退回預設節奏重試，不會就此停擺。
     this.scheduleTurnRefresh(turnRefreshDelayMs(ttlSeconds));

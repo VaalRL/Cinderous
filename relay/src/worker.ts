@@ -50,6 +50,24 @@ export interface Env {
   NODE_ATTESTATION?: string;
 }
 
+/**
+ * `/turn` 的 CORS 標頭（審查發現 #1）。
+ *
+ * ⚠ **每一種回應都要帶**（含 401／429／204）——只有 200 帶的話，瀏覽器讀不到錯誤狀態，
+ * `fetch` 會直接 reject，客戶端就分不出「被擋」與「站方未配置」。
+ */
+const TURN_CORS: Record<string, string> = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, OPTIONS",
+  "Access-Control-Allow-Headers": "Authorization",
+  "Access-Control-Max-Age": "86400",
+};
+
+/** CORS 預檢回應。 */
+export function turnPreflightResponse(): Response {
+  return new Response(null, { status: 204, headers: TURN_CORS });
+}
+
 /** Cloudflare TURN 憑證換發 API（POST，Bearer token）。 */
 const CF_TURN_API = "https://rtc.live.cloudflare.com/v1/turn/keys";
 
@@ -71,18 +89,23 @@ export async function mintTurnResponse(
 ): Promise<Response> {
   const keyId = env.TURN_KEY_ID;
   const token = env.TURN_API_TOKEN;
-  if (!keyId || !token) return new Response(null, { status: 204 }); // 未配置＝no-op
+  if (!keyId || !token) return new Response(null, { status: 204, headers: TURN_CORS }); // 未配置＝no-op
 
   // 🔴 ADR-0342 §3.2：先驗身分。**401 而非 204**——204 的語意是「站方未配置」，
   // 兩者不可混：客戶端對 204 是安靜退回純 STUN，對 401 才知道是自己沒帶授權。
   const pubkey = verifyHttpAuth(request.headers.get("Authorization"), request.url, request.method);
-  if (!pubkey) return new Response(null, { status: 401 });
+  if (!pubkey) return new Response(null, { status: 401, headers: TURN_CORS });
 
-  // ADR-0342 §3.1：以 **pubkey** 計數而非 IP——行動網路大量共用 IP，用 IP 會誤傷。
-  // ⚠ 這是成本乘數不是閘門：Cloudflare 明說它 per-location 計數且最終一致。
+  // ADR-0342 §3.1（審查修正）：**以 IP 計數，不是 pubkey**。
+  //
+  // 🔴 原本用 pubkey——但 pubkey 由請求方自選、換一把是微秒級的事，
+  // 以它計數等於完全沒有限制。要限速就得綁**比較貴的東西**：換 IP 要花錢。
+  // ⚠ 代價是行動網路共用 IP 會被一起計數（額度給得寬即可容納）。
+  // ⚠ 這仍是速度緩衝而非頻寬上限：Cloudflare 明說它 per-location 計數且最終一致。
   if (env.TURN_LIMIT) {
-    const { success } = await env.TURN_LIMIT.limit({ key: pubkey });
-    if (!success) return new Response(null, { status: 429 });
+    const key = request.headers.get("CF-Connecting-IP") ?? pubkey; // 缺標頭（本地/測試）才退回 pubkey
+    const { success } = await env.TURN_LIMIT.limit({ key });
+    if (!success) return new Response(null, { status: 429, headers: TURN_CORS });
   }
 
   const ttl = turnTtlSeconds(env.TURN_TTL_SECONDS);
@@ -92,7 +115,7 @@ export async function mintTurnResponse(
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
       body: JSON.stringify({ ttl }),
     });
-    if (!res.ok) return new Response(null, { status: 204 });
+    if (!res.ok) return new Response(null, { status: 204, headers: TURN_CORS });
     // ⓪ ADR-0342 §2：把 **ttl 一起回給客戶端**。
     // 先前沒有這個欄位，客戶端只好寫死 6 小時刷新——TTL 一縮短，憑證就在客戶端不知情的
     // 情況下過期，TURN 形同失效。這裡送的就是我們送給 Cloudflare 的那個值（唯一真實來源）。
@@ -100,13 +123,13 @@ export async function mintTurnResponse(
     return new Response(JSON.stringify({ ...body, ttl }), {
       status: 200,
       headers: {
+        ...TURN_CORS,
         "Content-Type": "application/json",
         "Cache-Control": "no-store", // 短期憑證，勿快取
-        "Access-Control-Allow-Origin": "*", // 客戶端（Tauri/瀏覽器）跨源抓取
       },
     });
   } catch {
-    return new Response(null, { status: 204 });
+    return new Response(null, { status: 204, headers: TURN_CORS });
   }
 }
 
@@ -144,7 +167,14 @@ export default {
     const url = new URL(request.url);
     if (request.headers.get("Upgrade") !== "websocket") {
       // 公共 TURN 保底端點（ADR-0243）：換發短期憑證；未配 secret 則 204、客戶端退回純 STUN。
-      if (url.pathname === "/turn") return mintTurnResponse(env, request);
+      if (url.pathname === "/turn") {
+        // 🔴 CORS 預檢必須在授權檢查**之前**（審查發現 #1）。
+        // `Authorization` 不是 CORS 安全列表標頭 ⇒ 瀏覽器（含 Tauri／Capacitor 的 webview）
+        // 會先送 OPTIONS。若讓它走進換發流程，會因為預檢不帶授權而回 401、且無 CORS 標頭
+        // ⇒ **瀏覽器直接擋掉整個請求**，客戶端靜默退回純 STUN。
+        if (request.method === "OPTIONS") return turnPreflightResponse();
+        return mintTurnResponse(env, request);
+      }
       // NIP-11（ADR-0260）：只有明確要 `application/nostr+json` 的請求拿到 JSON；
       // 其餘維持純文字 200（PaaS／容器健康檢查靠它，ADR-0089 定下的契約）。
       if (wantsRelayInfo(request.headers.get("Accept"))) {

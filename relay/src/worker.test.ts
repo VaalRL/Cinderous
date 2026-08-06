@@ -13,7 +13,7 @@ import { createRequire } from "node:module";
 import type { DatabaseSync as DatabaseSyncType } from "node:sqlite";
 import { buildAuthEvent, buildHttpAuthEvent, finalizeEvent, generateSecretKey, getPublicKey, httpAuthHeader, type NostrEvent, type SecretKey } from "@cinderous/core";
 import { beforeAll, describe, expect, it } from "vitest";
-import worker, { mintTurnResponse, RelayRoom, type Env } from "./worker.js";
+import worker, { mintTurnResponse, turnPreflightResponse, RelayRoom, type Env } from "./worker.js";
 
 const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as {
   DatabaseSync: typeof DatabaseSyncType;
@@ -552,7 +552,64 @@ describe("公共 TURN 端點（/turn，ADR-0243／0342）", () => {
     expect(called, "被限速就不該再花一次換發").toBe(0);
   });
 
-  it("速率限制以 **pubkey** 計數，不是 IP（行動網路大量共用 IP）", async () => {
+  it("未綁定 TURN_LIMIT ⇒ 不限速（本地開發/測試沒有這個 binding，不該因此壞掉）", async () => {
+    const env = { TURN_KEY_ID: "k", TURN_API_TOKEN: "t" } as Env;
+    expect(stub(await mintTurnResponse(env, authed(), okFetch)).init.status).toBe(200);
+  });
+
+  it("🔴 審查 #1：CORS 預檢必須在授權檢查之前放行，且帶 Allow-Headers: Authorization", () => {
+    // `Authorization` 不是 CORS 安全列表標頭 ⇒ 瀏覽器（含 Tauri／Capacitor webview）會先送
+    // OPTIONS。若讓它走進換發流程會回 401 且無 CORS 標頭 ⇒ 瀏覽器擋掉整個請求、TURN 靜默失效。
+    const r = stub(turnPreflightResponse());
+    expect(r.init.status).toBe(204);
+    expect(r.init.headers?.["Access-Control-Allow-Headers"]).toContain("Authorization");
+    expect(r.init.headers?.["Access-Control-Allow-Methods"]).toContain("GET");
+    expect(r.init.headers?.["Access-Control-Allow-Origin"]).toBe("*");
+  });
+
+  it("🔴 審查 #1：**每一種**回應都要帶 CORS（否則瀏覽器讀不到狀態、分不出被擋或未配置）", async () => {
+    const envOff = {} as Env;
+    const envOn = { TURN_KEY_ID: "k", TURN_API_TOKEN: "t" } as Env;
+    const limited = {
+      TURN_KEY_ID: "k",
+      TURN_API_TOKEN: "t",
+      TURN_LIMIT: { limit: async () => ({ success: false }) },
+    } as unknown as Env;
+    for (const [label, r] of [
+      ["204 未配置", stub(await mintTurnResponse(envOff, bare(), okFetch))],
+      ["401 未授權", stub(await mintTurnResponse(envOn, bare(), okFetch))],
+      ["429 限速", stub(await mintTurnResponse(limited, authed(), okFetch))],
+      ["200 正常", stub(await mintTurnResponse(envOn, authed(), okFetch))],
+    ] as const) {
+      expect(r.init.headers?.["Access-Control-Allow-Origin"], label).toBe("*");
+    }
+  });
+
+  it("🔴 審查 #2：速率限制以 **IP** 計數——pubkey 由請求方自選、換一把不用錢", async () => {
+    let key: string | undefined;
+    const env = {
+      TURN_KEY_ID: "k",
+      TURN_API_TOKEN: "t",
+      TURN_LIMIT: { limit: async (o: { key: string }) => ((key = o.key), { success: true }) },
+    } as unknown as Env;
+    const withIp = {
+      url: TURN_URL,
+      method: "GET",
+      headers: {
+        get: (h: string) =>
+          h === "Authorization"
+            ? httpAuthHeader(buildHttpAuthEvent(TURN_URL, "GET", authSk))
+            : h === "CF-Connecting-IP"
+              ? "203.0.113.7"
+              : null,
+      },
+    } as unknown as Request;
+    await mintTurnResponse(env, withIp, okFetch);
+    expect(key, "以 pubkey 計數等於沒有限制").toBe("203.0.113.7");
+    expect(key).not.toBe(getPublicKey(authSk));
+  });
+
+  it("沒有 CF-Connecting-IP（本地/測試）→ 退回 pubkey，不因此壞掉", async () => {
     let key: string | undefined;
     const env = {
       TURN_KEY_ID: "k",
@@ -561,11 +618,6 @@ describe("公共 TURN 端點（/turn，ADR-0243／0342）", () => {
     } as unknown as Env;
     await mintTurnResponse(env, authed(), okFetch);
     expect(key).toBe(getPublicKey(authSk));
-  });
-
-  it("未綁定 TURN_LIMIT ⇒ 不限速（本地開發/測試沒有這個 binding，不該因此壞掉）", async () => {
-    const env = { TURN_KEY_ID: "k", TURN_API_TOKEN: "t" } as Env;
-    expect(stub(await mintTurnResponse(env, authed(), okFetch)).init.status).toBe(200);
   });
 
   it("TTL 未設 → 預設 86400", async () => {

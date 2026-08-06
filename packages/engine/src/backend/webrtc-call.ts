@@ -289,9 +289,16 @@ export class WebRtcCall {
     });
     const track = stream.getVideoTracks()[0];
     if (!track) throw new Error("取不到視訊軌");
-    await sender.replaceTrack(track);
-    // 併進本端串流，讓自我預覽也看得到。
-    this.localStream?.addTrack?.(track);
+    // 🔴 取到之後的任何失敗都必須把它停掉（審查發現 #3）。
+    // 不停就是**相機留著亮**，而 ADR-0340 的整個主張就是「指示燈要誠實」。
+    // （`swapCamera` 一直有做這件事，這裡先前漏了——兩處不一致。）
+    try {
+      await sender.replaceTrack(track);
+      this.localStream?.addTrack?.(track);
+    } catch (e) {
+      track.stop();
+      throw e;
+    }
     this.applyVideoQuality();
     if (this.localStream) this.handlers.onLocalStream(this.localStream);
     this.emitCamera();

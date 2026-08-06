@@ -102,3 +102,22 @@ describe("HTTP 請求簽章（ADR-0342 §3.2 / NIP-98）", () => {
     expect(ev.content).toBe("");
   });
 });
+
+describe("非 ASCII 端點（審查發現 #5）", () => {
+  const sk = generateSecretKey();
+  const pk = getPublicKey(sk);
+  const now = 1_000_000;
+
+  it("🔴 IDN 主機名／非 ASCII 路徑不得讓編碼丟例外", () => {
+    // `btoa` 只吃 Latin-1，碼位 > U+00FF 會丟 InvalidCharacterError。
+    for (const url of ["https://中繼.example/turn", "https://relay.example/轉發", "https://ex.example/ü"]) {
+      expect(() => httpAuthHeader(buildHttpAuthEvent(url, "GET", sk, now))).not.toThrow();
+      expect(verifyHttpAuth(httpAuthHeader(buildHttpAuthEvent(url, "GET", sk, now)), url, "GET", now)).toBe(pk);
+    }
+  });
+
+  it("非 ASCII 的 URL 一樣要綁定（不能因為編碼路徑不同就鬆掉）", () => {
+    const h = httpAuthHeader(buildHttpAuthEvent("https://中繼.example/turn", "GET", sk, now));
+    expect(verifyHttpAuth(h, "https://別的.example/turn", "GET", now)).toBeNull();
+  });
+});

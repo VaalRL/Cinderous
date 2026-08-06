@@ -46,11 +46,27 @@ this.turnTimer = setInterval(() => void this.refreshPublicTurn(), 6 * 3600_000);
 
 ### 3.1 為什麼速率限制排在簽章前面
 
-**它是三者中 CP 值最高的**：只改 `wrangler.toml` 加幾行 Worker 程式碼，**客戶端零改動**，而且與短 TTL 相乘後直接轉成頻寬上限——濫用者要維持流量就得持續取新憑證。
-
+**它是三者中最省力的**：只改 `wrangler.toml` 加幾行 Worker 程式碼，**客戶端零改動**。
 正常使用者每半個 TTL 才取一次（TTL 300 ⇒ 2.5 分鐘一張），`20/60s` 的額度綽綽有餘。
 
-⚠ 兩個限制必須寫下來：Cloudflare 明說這個 API 是 **per-location 計數**（分散式攻擊者拿到 limit × colo 數）且**最終一致、刻意寬鬆**（「not to be used as an accurate accounting system」）。**它是成本乘數，不是閘門。**
+### 🔴 2026-08-06 審查更正：兩處我原本寫錯了
+
+**一、key 不能用 pubkey。** 本節原本寫「以 pubkey 計數，避開行動網路共用 IP 的誤傷」，
+並據此實作。**那等於沒有限制**——pubkey 由請求方自選，換一把是微秒級的事，
+濫用者每次請求換一把新金鑰就完全繞過。⇒ 已改為 **`CF-Connecting-IP`**：換 IP 要花錢，
+換金鑰不用。代價是共用 IP 會被一起計數，靠寬鬆額度容納。
+
+**二、原本寫「與短 TTL 相乘後直接轉成頻寬上限」——那個說法不成立。**
+TTL 300 秒下，維持一條中繼串流只需 **12 張憑證/小時**；`20/60s` ＝ 1200/小時，
+足以養上百條。**限制取得速率並不等於限制頻寬**，因為一張憑證解鎖的頻寬（每 allocation
+可達 100 Mbps）遠大於取得它的成本。
+
+⇒ 正確的說法：**它是速度緩衝，不是頻寬上限。** 加上 Cloudflare 明說這個 API 是
+**per-location 計數**（分散式來源拿到 limit × colo 數）且**最終一致、刻意寬鬆**
+（「not to be used as an accurate accounting system」），它能買到的比我原本寫的少。
+
+⚠ 這也連帶下修了本 ADR §3 對三層整體的評估：真正把上限釘死的只有**帳單警示**與
+（未做的）§3.3 執法把手。
 
 ### 3.2 NIP-98 簽章（kind 27235）
 
@@ -58,7 +74,7 @@ this.turnTimer = setInterval(() => void this.refreshPublicTurn(), 6 * 3600_000);
 
 🔴 **驗章前必須先驗結構**：直接重用 ADR-0235 C1 的 `isValidEventShape`（改為匯出，**不另寫一份**）。該 ADR 的教訓是 `verifyEvent` 只保證雜湊與簽章相符，**完全不檢查欄位型別**——攻擊者可以對 `{tags:{}}` 這種形狀自簽並通過驗章，後續 `tags.find(...)` 拋 `TypeError`。
 
-簽章讓速率限制的 key 可以從 IP 換成 **pubkey**，避開行動網路共用 IP 的誤傷。
+⚠ 簽章買到的是**可歸責性**，**不是**速率限制的 key——見 §3.1 的更正。
 
 ### 3.3 不做 DO 活性檢查（§3.2 原案）
 
@@ -69,6 +85,22 @@ this.turnTimer = setInterval(() => void this.refreshPublicTurn(), 6 * 3600_000);
 ⚠ **在沒有濫用跡象時，那是一份空的保險。** 而且 **NIP-98 是它的前綴不是分岔**——它同樣需要簽章，所以 §3.2 的工不會白做。
 
 ⇒ 觸發條件：**實際觀察到濫用**（帳單警示觸發、或用量與通話量明顯脫節）。
+
+## 3.4 CORS 預檢（2026-08-06 審查補）
+
+🔴 加上 `Authorization` 之後，`/turn` **不再是 CORS 的「簡單請求」**——瀏覽器
+（含 Tauri 與 Capacitor 的 webview）會先送 `OPTIONS` 預檢。原本的路由讓預檢直接走進
+換發流程，於是回 **401 且不帶 CORS 標頭** ⇒ **瀏覽器擋掉整個請求**，`fetchTurnServers`
+的 catch 吞掉它、靜默退回純 STUN。
+
+⇒ **等於加了簽章就把全部三端的 TURN 弄壞了**，而且失敗是無聲的。
+
+修法：`OPTIONS /turn` 在授權檢查**之前**回 204 ＋ `Access-Control-Allow-Headers: Authorization`；
+且**每一種回應（204／401／429／200）都要帶 CORS 標頭**，否則瀏覽器讀不到狀態、
+客戶端分不出「被擋」與「站方未配置」。
+
+⚠ 這是「加了一道防護，順手把功能關掉」的典型形狀。線上驗證（`OPTIONS` 回 204、
+`GET` 無授權回 401、帶簽章回 200）現在是 §B-Turn 驗收的一部分。
 
 ## 4. 買不到什麼
 

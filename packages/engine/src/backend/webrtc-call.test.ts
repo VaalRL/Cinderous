@@ -88,7 +88,11 @@ class FakeTrack {
     this.kind = kind;
   }
   enabled = true;
-  stop(): void {}
+  /** 供審查 #3 的迴歸測試斷言「相機真的被停掉」。 */
+  stopped = false;
+  stop(): void {
+    this.stopped = true;
+  }
   async applyConstraints(c: unknown): Promise<void> {
     order.push(`constraints:${JSON.stringify(c)}`);
   }
@@ -424,6 +428,41 @@ describe("通話中媒體升降級（ADR-0338）", () => {
     await flush();
     expect(pc.transceivers.find((t) => t.kind === "video")!.sender.track).toBeNull();
     expect(stopped, "降級要 stop() 相機，不只是送黑畫面").toBe(true);
+  });
+
+  it("🔴 審查 #3：換軌失敗必須停掉已取得的相機軌（否則指示燈留著亮）", async () => {
+    const c = setup("audio", ["audio", "video"]);
+    const { call, published } = c;
+    await activate(call, c);
+    const pc = lastPc as unknown as NegoPc;
+    const sender = pc.transceivers.find((t) => t.kind === "video")!.sender;
+    sender.replaceTrack = async () => {
+      throw new Error("replaceTrack failed");
+    };
+    // 換上自己的取媒體樁，好抓住「發出去的那條軌」有沒有被停掉。
+    const handed: FakeTrack[] = [];
+    vi.stubGlobal("navigator", {
+      mediaDevices: {
+        getUserMedia: async () => {
+          const t = new FakeTrack("video");
+          handed.push(t);
+          return {
+            getTracks: () => [t],
+            getVideoTracks: () => [t],
+            getAudioTracks: () => [],
+            addTrack: () => {},
+            removeTrack: () => {},
+          };
+        },
+      },
+    });
+    published.length = 0;
+    call.setLocalMedia("video");
+    await flush();
+    // ADR-0340 的整個主張就是「指示燈要誠實」——取到相機後任何失敗都得把它停掉。
+    expect(handed.length, "應該有取過相機").toBeGreaterThan(0);
+    expect(handed.filter((t) => !t.stopped), "失敗後不得留著沒停的相機軌").toEqual([]);
+    expect(published, "失敗就不該通知對端").toEqual([]);
   });
 
   it("🔴 取媒體失敗（不給相機權限）→ 不通知對端，型態退回語音", async () => {

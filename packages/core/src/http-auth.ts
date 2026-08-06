@@ -10,8 +10,12 @@
 // ✅ 「持有 `pubkey` 私鑰的人，在 `created_at` 前後的時間窗內，對**這個 URL＋method** 發了請求。」
 //
 // 🔴 **它不證明「你是這座 relay 的使用者」**，也擋不住有心人——產一把金鑰是微秒級的事。
-// 買到的是**成本**與**可歸責性**（請求綁得上一個 pubkey，速率限制因此能以 pubkey 計數
-// 而非 IP，避開行動網路共用 IP 的誤傷）。真正的執法把手見 ADR-0342 §3.3。
+// 買到的是**可歸責性**（請求綁得上一個 pubkey）。
+//
+// ⚠ **不要拿 pubkey 當速率限制的 key**：它由請求方自選、換一把不用錢，
+// 以它計數等於沒有限制。速率限制要用比較貴的東西（IP）——見 ADR-0342 §3.1。
+//
+// 真正的執法把手見 ADR-0342 §3.3。
 //
 // ## 綁定的三件事，缺一不可
 //
@@ -56,9 +60,32 @@ export function buildHttpAuthEvent(
   );
 }
 
+/**
+ * UTF-8 安全的 base64。
+ *
+ * ⚠ **不能直接 `btoa(JSON.stringify(...))`**：`btoa` 只吃 Latin-1，遇到任何
+ * 碼位 > U+00FF 就丟 `InvalidCharacterError`。目前事件內容全是 ASCII（hex、URL、
+ * `"GET"`、空 content），但**端點若換成 IDN 主機名或含非 ASCII 路徑就會炸**——
+ * 那是埋著的地雷，不是現在的 bug。先在編碼層擋掉。
+ */
+function toBase64(text: string): string {
+  const bytes = new TextEncoder().encode(text);
+  let bin = "";
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin);
+}
+
+/** 對應的解碼。 */
+function fromBase64(b64: string): string {
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new TextDecoder().decode(bytes);
+}
+
 /** 包成 `Authorization` 標頭的值。 */
 export function httpAuthHeader(event: NostrEvent): string {
-  return `Nostr ${btoa(JSON.stringify(event))}`;
+  return `Nostr ${toBase64(JSON.stringify(event))}`;
 }
 
 /**
@@ -105,7 +132,7 @@ export function verifyHttpAuth(
 
   let parsed: unknown;
   try {
-    parsed = JSON.parse(atob(m[1]!));
+    parsed = JSON.parse(fromBase64(m[1]!));
   } catch {
     return null;
   }
