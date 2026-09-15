@@ -58,9 +58,29 @@ jobs:
       - name: 開發工具鏈（僅報告）
         continue-on-error: true
         run: pnpm audit --audit-level high
+      # 釘版本＋釘 sha256 的預編 binary（ADR-0351）。
+      #
+      # 原本是 `cargo install cargo-audit --locked`，有兩個問題：
+      #   1. **每次都從原始碼重編**（數分鐘）——這是整條 CI 最貴的單一步驟。
+      #   2. **版本沒釘**：上游發佈什麼就裝什麼。而這個工具的職責正是供應鏈安全，
+      #      卻是整個 CI 裡唯一不受 ADR-0235 C5「一律釘死」約束的東西。
+      #
+      # musl 靜態連結，在任何 runner 上都跑得起來。升級＝改下面兩行（版本與雜湊必須同時改，
+      # 雜湊對不上即中止——這正是釘死的意義）。
       - name: cargo audit（Rust 出貨密碼學相依）
+        env:
+          CARGO_AUDIT_VERSION: "0.22.2"
+          CARGO_AUDIT_SHA256: "7fb9497f8594b389e5fce5ef9b92db08432996895b2e0c5a0167a69ed445c428"
         run: |
-          cargo install cargo-audit --locked
+          set -euo pipefail
+          asset="cargo-audit-x86_64-unknown-linux-musl-v${CARGO_AUDIT_VERSION}"
+          # 標籤是 `cargo-audit/v<版本>`，路徑中的 `/` 必須編碼成 %2F。
+          curl -fsSL -o /tmp/cargo-audit.tgz \
+            "https://github.com/rustsec/rustsec/releases/download/cargo-audit%2Fv${CARGO_AUDIT_VERSION}/${asset}.tgz"
+          echo "${CARGO_AUDIT_SHA256}  /tmp/cargo-audit.tgz" | sha256sum -c -
+          tar xzf /tmp/cargo-audit.tgz -C /tmp
+          # 放進 cargo 的 bin 目錄＝`cargo audit` 找得到它，與原本 `cargo install` 的落點一致。
+          install -m 0755 "/tmp/${asset}/cargo-audit" "$HOME/.cargo/bin/cargo-audit"
           cargo audit
         working-directory: apps/desktop/src-tauri
 
