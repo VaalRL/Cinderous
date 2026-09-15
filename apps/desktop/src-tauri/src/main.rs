@@ -19,6 +19,7 @@ use tauri::{
 /// 顯示並聚焦主視窗（系統匣點擊/選單用）。
 // 檔案安全原語（ADR-0119）：檔名白名單、原子寫入、毀損隔離。**住在 lib**，因為這個 bin
 // target 需要 `tauri-app` feature，`cargo test` 永遠編不到它——安全關鍵的東西不能沒測試。
+use cinder_desktop::inbox; // ADR-0349：收檔串流落盤（邏輯在 lib，此處只留薄殼）
 use cinder_desktop::partfile::{atomic_write, quarantine, sanitize_filename, valid_part};
 
 fn show_main(app: &tauri::AppHandle) {
@@ -897,6 +898,57 @@ fn save_file(app: tauri::AppHandle, name: String, bytes: Vec<u8>) -> Result<Opti
     }
 }
 
+// ── 收檔串流落盤（ADR-0349）─────────────────────────────────────────────────────
+//
+// 這四個 command 是**薄殼**：路徑解析、檔名白名單、寫入、移動、清理全部住在
+// `cinder_desktop::inbox`（lib，有測試）。ADR-0348 讓 CI 開始編譯 `main.rs`，但仍然
+// 測不到它——所以邏輯不該放這裡（比照 ADR-0119 對 `partfile` 的處理）。
+
+/// 暫存區基底：`<app_data>`（`inbox` 子目錄由 lib 負責建立）。
+fn inbox_base(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+    app.path().app_data_dir().map_err(|e| e.to_string())
+}
+
+/// 開始接收一份檔案：建立（並截斷）暫存檔。
+#[tauri::command]
+fn inbox_begin(app: tauri::AppHandle, handle: String) -> Result<(), String> {
+    inbox::begin(&inbox_base(&app)?, &handle).map(|_| ())
+}
+
+/// 寫入一塊。**位元組逐塊過 IPC**（16 KiB 一塊），不是整份——那正是本 ADR 要修的事。
+#[tauri::command]
+fn inbox_write(app: tauri::AppHandle, handle: String, offset: u64, bytes: Vec<u8>) -> Result<(), String> {
+    inbox::write_at(&inbox_base(&app)?, &handle, offset, &bytes)
+}
+
+/// 放棄一份暫存檔（傳輸中止／使用者取消另存）。
+#[tauri::command]
+fn inbox_discard(app: tauri::AppHandle, handle: String) -> Result<(), String> {
+    inbox::discard(&inbox_base(&app)?, &handle)
+}
+
+/// 另存：開原生對話框 → **原生移動**暫存檔到選定位置（零位元組過 IPC）→ 授權讀回。
+/// 使用者取消回 `None`，暫存檔**保留**（他可能想再存一次）。
+#[tauri::command]
+fn save_from_inbox(app: tauri::AppHandle, name: String, handle: String) -> Result<Option<String>, String> {
+    // ADR-0128：`name` 來自對方傳來的 metadata（遠端可控）→ 消毒成乾淨 basename 再預填。
+    match rfd::FileDialog::new().set_file_name(sanitize_filename(&name)).save_file() {
+        Some(path) => {
+            inbox::finish_into(&inbox_base(&app)?, &handle, &path)?;
+            let s = path.to_string_lossy().into_owned();
+            authorize_path(&app, &s); // 使用者選定 → 授權讀回（ADR-0128）
+            Ok(Some(s))
+        }
+        None => Ok(None),
+    }
+}
+
+/// 開機清理：刪掉超過一天的暫存檔（使用者在另存前關掉 app 就會留下）。回傳刪除數。
+#[tauri::command]
+fn inbox_sweep(app: tauri::AppHandle) -> Result<usize, String> {
+    Ok(inbox::sweep(&inbox_base(&app)?, 24 * 3600))
+}
+
 // ── 開啟原檔 / 重新指定位置（ADR-0102）──────────────────────────────────────────
 //
 // 縮圖跨 session 存活，但**原檔位元組不由 App 保存**（ADR-0093）——原檔就在使用者當初
@@ -1163,6 +1215,11 @@ fn main() {
             ai_set_key,
             ai_has_key,
             save_file,
+            inbox_begin,
+            inbox_write,
+            inbox_discard,
+            save_from_inbox,
+            inbox_sweep,
             read_saved_file,
             pick_existing_file,
             pick_folder,

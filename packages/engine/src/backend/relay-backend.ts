@@ -388,14 +388,16 @@ export interface RelayPoolOptions {
   /** 自己的 home relay URL（用於與聯絡人 hint 比對去重、組分享字串）。 */
   relayUrl?: string;
   /**
-   * 收檔大檔要不要串流落盤（ADR-0347）。預設走 OPFS（有的話）。
-   *
-   * **平台可以關掉**：`false` ⇒ 一律走記憶體（既有行為）。Tauri 桌面目前就傳 `false`
-   * ——它的「另存新檔」走 Rust command、需要整份位元組，而那條路徑要改得動 `main.rs`，
-   * 那個 bin target **`cargo test` 與 CI 都不編譯**（見 `partfile.rs` 檔頭），
-   * 在那裡加程式碼＝加一段沒有任何地方驗證得到的程式。見 ADR-0347 §後續行動。
+   * 收檔大檔要不要串流落盤（ADR-0347）。預設走 OPFS（有的話）；`false` ⇒ 一律走記憶體。
    */
   streamLargeFiles?: boolean;
+  /**
+   * 自備落盤實作（ADR-0349）。有的話**取代** OPFS 預設。
+   *
+   * Tauri 桌面就用這個：OPFS 的檔案 Rust 看不到，而桌面的另存要由原生對話框＋原生移動
+   * 完成（`tauriFileSink`）。平台縫留在平台層，引擎不認識 Tauri。
+   */
+  fileSink?: OpenFileSink;
   /** 依 URL 建立外部 relay 連線的工廠。 */
   connectorFor?: (url: string) => RelayConnector;
   /**
@@ -851,7 +853,7 @@ export class RelayChatBackend implements ChatBackend {
       // ADR-0347：收檔大檔串流落盤（OPFS）。
       // ⚠ 帶 `origin` 的儲存槽檔案（ADR-0161）回 `null` ⇒ 走記憶體——企業主端要拿整份
       // 位元組才落得了盤。無 OPFS 的環境 `opfsFileSink()` 回 undefined ⇒ 整個不掛。
-      this.fileSink(pool?.streamLargeFiles),
+      this.buildFileSink(pool?.streamLargeFiles, pool?.fileSink),
     );
     this.call = new WebRtcCall(
       this.sk,
@@ -4702,9 +4704,9 @@ export class RelayChatBackend implements ChatBackend {
    * 收檔落盤工廠（ADR-0347）。平台傳 `false` 即關閉；無 OPFS 亦回 undefined。
    * 儲存槽檔案（帶 `origin`，ADR-0161）永遠走記憶體——企業主端要整份位元組才落得了盤。
    */
-  private fileSink(enabled: boolean | undefined): OpenFileSink | undefined {
+  private buildFileSink(enabled: boolean | undefined, custom: OpenFileSink | undefined): OpenFileSink | undefined {
     if (enabled === false) return undefined;
-    const factory = opfsFileSink();
+    const factory = custom ?? opfsFileSink();
     if (!factory) return undefined;
     return (meta) => (meta.origin !== undefined ? null : factory(meta));
   }

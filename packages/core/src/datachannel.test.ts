@@ -562,3 +562,82 @@ describe("Data Channel — 收檔端串流落盤（ADR-0347）", () => {
     expect(onFile.mock.calls[0]![0].size).toBe(100);
   });
 });
+
+// ── ADR-0349：兩個上限——落盤的與不落盤的 ────────────────────────────────────
+//
+// 天花板從 100 MiB 調到 1 GiB，但**只有真的會落盤的檔案吃得到它**。退回記憶體的路徑
+// 仍守著舊天花板，否則調高上限只是把 OOM 從「擋下來」變成「等它發生」。
+
+describe("Data Channel — 落盤與不落盤各有上限（ADR-0349）", () => {
+  const MB = 1024 * 1024;
+  const begin = (id: string, size: number) =>
+    JSON.stringify({ t: "file-begin", id, name: "n", mime: "m", size, chunks: 1, chunkSize: size });
+
+  it("預設天花板是 1 GiB（串流落盤之後才拆得掉）", () => {
+    const errors: string[] = [];
+    const rx = new DataChannelReceiver({ onError: (e) => errors.push(e) }, {}, () => ({
+      write: () => {},
+      close: () => ({ handle: "h" }),
+      abort: () => {},
+    }));
+    rx.receive(begin("big", 900 * MB)); // < 1 GiB ⇒ 收
+    expect(errors).toEqual([]);
+  });
+
+  it("超過天花板仍然拒絕", () => {
+    const errors: string[] = [];
+    const rx = new DataChannelReceiver({ onError: (e) => errors.push(e) }, {}, () => ({
+      write: () => {},
+      close: () => ({ handle: "h" }),
+      abort: () => {},
+    }));
+    rx.receive(begin("huge", 2 * 1024 * MB));
+    expect(errors.some((e) => e.includes("超出上限"))).toBe(true);
+  });
+
+  it("🔴 沒掛 sink 時，大檔在 file-begin 就被拒絕（不是等到 OOM）", () => {
+    const errors: string[] = [];
+    const onFile = vi.fn();
+    const rx = new DataChannelReceiver({ onError: (e) => errors.push(e), onFile }); // 無 sink
+    rx.receive(begin("nosink", 500 * MB)); // < maxFileSize，但 > maxMemoryFileSize
+    expect(errors.some((e) => e.includes("無法落盤"))).toBe(true);
+    expect(onFile).not.toHaveBeenCalled();
+  });
+
+  it("沒掛 sink 但檔案在記憶體上限內 → 照收（舊行為不變）", () => {
+    const errors: string[] = [];
+    const rx = new DataChannelReceiver({ onError: (e) => errors.push(e) });
+    rx.receive(begin("small", 50 * MB));
+    expect(errors).toEqual([]);
+  });
+
+  it("🔴 開 sink 失敗而退回記憶體時也要守住——那是執行期才知道的（私密模式/配額）", async () => {
+    const errors: string[] = [];
+    const onFile = vi.fn();
+    const rx = new DataChannelReceiver(
+      { onError: (e) => errors.push(e), onFile },
+      {},
+      () => null, // 有掛 sink，但開不起來
+    );
+    rx.receive(begin("fallback", 500 * MB));
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    expect(errors.some((e) => e.includes("無法落盤"))).toBe(true);
+    expect(onFile).not.toHaveBeenCalled();
+  });
+
+  it("開 sink 失敗但檔案不大 → 安靜退回記憶體（退路仍然是退路）", async () => {
+    const payload = new Uint8Array(32).map((_, i) => i);
+    const errors: string[] = [];
+    const files: ReceivedFile[] = [];
+    const rx = new DataChannelReceiver(
+      { onError: (e) => errors.push(e), onFile: (f) => files.push(f) },
+      { sinkMinBytes: 1 },
+      () => null,
+    );
+    for (const m of await frames({ name: "a", mime: "x", bytes: payload }, "tiny", 8)) rx.receive(m);
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    expect(errors).toEqual([]);
+    expect(files).toHaveLength(1);
+    expect(eq(files[0]!.bytes!, payload)).toBe(true);
+  });
+});

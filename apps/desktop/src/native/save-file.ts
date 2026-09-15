@@ -36,10 +36,14 @@ export async function saveIncomingFile(name: string, mime: string, bytes: Uint8A
  * 🔴 **不把它讀成位元組**：`URL.createObjectURL(file)` 對 OPFS 取回的 `File` 是**零複製**，
  * 下載直接從磁碟串流。`await file.arrayBuffer()` 會把剛剛省下的記憶體全部吃回去。
  *
- * ⚠ Tauri 不會走到這裡——它的另存是 Rust `save_file`，需要整份位元組過 IPC，所以桌面端
- * 直接以 `streamLargeFiles: false` 關閉串流（見 App 建構後端處與 ADR-0347 §後續行動）。
+ * ADR-0349：Tauri 走另一條——`save_from_inbox` 由 Rust 原生移動暫存檔，同樣零位元組過 IPC。
  */
 export async function saveStreamedFile(name: string, handle: string): Promise<SaveResult> {
+  if (isTauri()) {
+    // ADR-0349：原生另存——對話框選位置後由 Rust **移動**暫存檔，零位元組過 IPC。
+    const savedPath = await invoke<string | null>("save_from_inbox", { name, handle });
+    return savedPath ? { savedPath } : {};
+  }
   const file = await readInboxFile(handle);
   if (!file) return {};
   const url = URL.createObjectURL(file);
