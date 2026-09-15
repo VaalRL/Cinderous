@@ -17,6 +17,7 @@ import {
   videoConstraints,
   videoProfile,
 } from "@cinderous/core";
+import { IcePathTracker, type IcePath } from "./ice-path.js";
 
 /**
  * 這個 transceiver 是不是視訊的（ADR-0338）。
@@ -56,6 +57,13 @@ export interface CallHandlers {
    * UI 據 `reason` 給可行動提示（`unreachable`＝限制網路可改網路重試；`lost`＝可再撥）。
    */
   onFailed: (peer: PubkeyHex, reason: CallFailureReason) => void;
+  /**
+   * 這通通話的媒體實際走哪條路（ADR-0344）：`direct`（兩端直連、延遲最低、站方零成本）／
+   * `relay`（經 TURN 中繼——**按流量計費**，且視訊 ≈ 150 MB／10 分鐘）／`unknown`（尚未測出）。
+   *
+   * 只在**判定改變**時發（tracker 自己去重），通話結束不發——UI 於 `onState` 結束時自行歸位。
+   */
+  onIcePath?: (peer: PubkeyHex, path: IcePath) => void;
 }
 
 /**
@@ -78,6 +86,8 @@ export class WebRtcCall {
   private videoQuality: VideoQuality = DEFAULT_VIDEO_QUALITY;
   /** 目前選定的鏡頭（ADR-0339）；沿用到下次開視訊，升級時不必再選一次。 */
   private camera: CameraSelection = {};
+  /** ICE 路徑追蹤（ADR-0344）：連線 connected 時 start、teardown 時 reset。 */
+  private readonly pathTracker: IcePathTracker;
 
   constructor(
     private readonly ownSk: SecretKey,
@@ -86,7 +96,31 @@ export class WebRtcCall {
     private readonly rtcConfig?: RTCConfiguration | (() => RTCConfiguration | undefined),
     /** 判斷某公鑰是否已被封鎖（封鎖者的通話信令一律忽略）。 */
     private readonly isBlocked: (pubkey: PubkeyHex) => boolean = () => false,
-  ) {}
+  ) {
+    // ADR-0344：路徑判定。在建構子內指派而非欄位初始值——回呼要讀 `this.handlers`，
+    // 而參數屬性的指派時機不該被拿來賭。
+    this.pathTracker = new IcePathTracker((path) => {
+      const peer = this.peer;
+      // 通話已結束（peer 歸零）就別再上報：那是上一通的判定。
+      if (peer) this.handlers.onIcePath?.(peer, path);
+    });
+  }
+
+  /**
+   * 這通通話的 ICE 路徑（ADR-0344）。通話正是 ADR-0243 成本論證的主體——
+   * 「少數通話 × 小頻寬」成立的前提是它真的走 TURN 的那幾通才計費，而在此之前
+   * 程式從來不知道是哪幾通。
+   */
+  icePath(): IcePath {
+    return this.pc ? this.pathTracker.path : "unknown";
+  }
+
+  /** 立刻重測這通通話的 ICE 路徑（供品質提示／用量觀測在意時取準值）。 */
+  async refreshIcePath(): Promise<IcePath> {
+    if (!this.pc) return "unknown";
+    await this.pathTracker.refresh(this.pc);
+    return this.icePath();
+  }
 
   private busy(): boolean {
     return this.session.state !== "idle" && this.session.state !== "ended";
@@ -194,12 +228,16 @@ export class WebRtcCall {
     pc.onconnectionstatechange = () => {
       if (pc.connectionState === "connected") {
         this.everConnected = true; // 記錄「曾連通」，供失敗時分辨 unreachable / lost（ADR-0243）
+        this.pathTracker.start(pc); // ADR-0344：這通是直連還是經 TURN？連上了才問得出來
         void this.run(this.session.onConnected());
       } else if (pc.connectionState === "failed") {
         // ADR-0243：P2P 連不通/斷線。給可行動的失敗提示（非靜默、非只顯示「連不上」），並乾淨結束通話：
         // 從未打通＝多為限制網路無 TURN 退路（unreachable，可改網路重試）；連上後斷＝網路不穩（lost，可再撥）。
         const peer = this.peer;
         const reason: CallFailureReason = this.everConnected ? "lost" : "unreachable";
+        // ADR-0344：連線已死，快取的判定立刻作廢。**不能等 teardown**——收尾走的是非同步的
+        // hangup 路徑，在它跑完之前 `icePath()` 會繼續回報上一刻的 relay/direct。
+        this.pathTracker.reset();
         if (peer) this.handlers.onFailed(peer, reason);
         // 走正常掛斷路徑：session→ended、送 hangup 給對端（經中繼、與失敗的 P2P 不同路，能讓對端也乾淨結束）、
         // close→teardown → UI 收到 onState(ended) 而關閉通話視窗。
@@ -494,6 +532,7 @@ export class WebRtcCall {
   }
 
   private teardown(): void {
+    this.pathTracker.reset(); // ADR-0344：作廢在途探測，別讓這通的判定蓋到下一通
     if (this.localStream) for (const t of this.localStream.getTracks()) t.stop();
     try {
       this.pc?.close();

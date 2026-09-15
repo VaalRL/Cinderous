@@ -165,3 +165,74 @@ export async function probeIcePath(pc: IceStatsSource | null | undefined): Promi
     return "unknown";
   }
 }
+
+/**
+ * ICE 路徑探測排程（毫秒）。
+ *
+ * 為什麼不是只測一次：ICE 會**先用能通的配對，之後才換到更好的**（典型是先 relay、打洞成功後
+ * 升級為直連）。只在連線建立當下測一次，會把那條連線永久標成「經中繼」。
+ *
+ * 為什麼不是常駐輪詢：`getStats()` 不是免費的，而每位在線聯絡人都有一條連線。**有界**的幾次
+ * 補測涵蓋提名塵埃落定的視窗；之後才變動的（罕見：ICE restart／網路切換）由呼叫端在真正
+ * 在意時以 `refresh()` 重測——送大檔前的把關正是那個時機。
+ */
+export const PATH_PROBE_DELAYS_MS = [0, 1_000, 4_000, 15_000] as const;
+
+/**
+ * 一條連線的 ICE 路徑追蹤器：管好「何時探測、何時作廢、變了才通知」這三件事。
+ *
+ * 檔案傳輸（每聯絡人一條）與通話（單一通話槽）都需要同一套行為，差別只在誰持有連線
+ * ——所以行為住在這裡，持有者只負責在連線建立時 `start()`、結束時 `reset()`。
+ *
+ * **世代（generation）是關鍵**：探測是非同步的，回來時連線可能已經斷了、甚至已經換成
+ * 下一通通話。`reset()` 會把世代推進一格，讓所有在途的探測回來時自我作廢——否則上一條
+ * 連線的判定會蓋到下一條身上。
+ */
+export class IcePathTracker {
+  private current: IcePath = "unknown";
+  private timers: ReturnType<typeof setTimeout>[] = [];
+  private generation = 0;
+
+  /** @param onChange 只在**判定改變**時呼叫（同值不重發，避免 UI 被洗版）。 */
+  constructor(private readonly onChange: (path: IcePath) => void) {}
+
+  /** 最近一次探測結果（同步、零成本）。 */
+  get path(): IcePath {
+    return this.current;
+  }
+
+  /** 連線建立：歸零並排定有界探測。重複呼叫安全（會先作廢前一輪）。 */
+  start(source: IceStatsSource | null | undefined): void {
+    this.reset();
+    const gen = this.generation;
+    for (const delay of PATH_PROBE_DELAYS_MS) {
+      const timer = setTimeout(() => void this.probe(source, gen), delay);
+      // Node（測試／CLI）下別讓這些計時器把行程吊著；瀏覽器沒有 unref，故為可選呼叫。
+      (timer as unknown as { unref?: () => void }).unref?.();
+      this.timers.push(timer);
+    }
+  }
+
+  /** 立刻重測並回傳（供「正要做一件很貴的事」時確認自己在哪條路上）。 */
+  async refresh(source: IceStatsSource | null | undefined): Promise<IcePath> {
+    await this.probe(source, this.generation);
+    return this.current;
+  }
+
+  /** 連線結束：清計時器、作廢在途探測、路徑歸零。 */
+  reset(): void {
+    for (const timer of this.timers) clearTimeout(timer);
+    this.timers = [];
+    this.generation += 1;
+    this.current = "unknown";
+  }
+
+  private async probe(source: IceStatsSource | null | undefined, gen: number): Promise<void> {
+    if (gen !== this.generation) return;
+    const path = await probeIcePath(source);
+    if (gen !== this.generation) return; // 探測期間被 reset（斷線／換了下一條連線）
+    if (path === this.current) return;
+    this.current = path;
+    this.onChange(path);
+  }
+}

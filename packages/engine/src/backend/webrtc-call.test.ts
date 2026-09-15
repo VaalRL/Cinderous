@@ -702,3 +702,147 @@ describe("切換鏡頭（ADR-0339）", () => {
     expect(c.asked[0]?.video?.facingMode).toEqual({ ideal: "environment" });
   });
 });
+
+// ── ADR-0344：通話的 ICE 路徑判定 ──────────────────────────────────────────
+//
+// 通話正是 ADR-0243 成本論證的主體——「少數通話 × 小頻寬 = 很小」成立的前提，是它真的
+// 只有走 TURN 的那幾通才計費；而在此之前程式從來不知道是哪幾通。
+
+const CALL_RELAY_STATS = [
+  { id: "T1", type: "transport", selectedCandidatePairId: "P1" },
+  { id: "P1", type: "candidate-pair", state: "succeeded", localCandidateId: "L1", remoteCandidateId: "R1" },
+  { id: "L1", type: "local-candidate", candidateType: "relay" },
+  { id: "R1", type: "remote-candidate", candidateType: "srflx" },
+];
+
+const CALL_DIRECT_STATS = [
+  { id: "T1", type: "transport", selectedCandidatePairId: "P1" },
+  { id: "P1", type: "candidate-pair", state: "succeeded", localCandidateId: "L1", remoteCandidateId: "R1" },
+  { id: "L1", type: "local-candidate", candidateType: "srflx" },
+  { id: "R1", type: "remote-candidate", candidateType: "srflx" },
+];
+
+class CallStatsPc extends FakePc {
+  static stats: unknown[] = CALL_DIRECT_STATS;
+  getStats(): Promise<unknown[]> {
+    return Promise.resolve(CallStatsPc.stats);
+  }
+}
+
+describe("WebRtcCall ICE 路徑判定（ADR-0344）", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  const setup = () => {
+    vi.stubGlobal("RTCPeerConnection", CallStatsPc);
+    vi.stubGlobal("navigator", { mediaDevices: { getUserMedia: async () => ({ getTracks: () => [] }) } });
+    lastPc = undefined;
+    const paths: Array<[PubkeyHex, string]> = [];
+    const sk = generateSecretKey();
+    const peer = getPublicKey(generateSecretKey());
+    const call = new WebRtcCall(sk, {
+      publishCallSignal: () => {},
+      onState: () => {},
+      onLocalStream: () => {},
+      onRemoteStream: () => {},
+      onError: () => {},
+      onFailed: () => {},
+      onIcePath: (p, path) => paths.push([p, path]),
+    });
+    call.startCall(peer, "audio");
+    return { call, peer, paths };
+  };
+
+  /** 讓 pc 進入 connected（同 ADR-0243 既有測試的手法）。 */
+  const connect = () => {
+    lastPc!.connectionState = "connected";
+    lastPc!.onconnectionstatechange!();
+  };
+
+  it("尚未連上 → icePath 為 unknown", () => {
+    CallStatsPc.stats = CALL_RELAY_STATS;
+    const { call } = setup();
+    expect(call.icePath()).toBe("unknown");
+  });
+
+  it("連上且走 TURN → onIcePath(peer, 'relay')，icePath() 查得到", async () => {
+    CallStatsPc.stats = CALL_RELAY_STATS;
+    const { call, peer, paths } = setup();
+    connect();
+    expect(await call.refreshIcePath()).toBe("relay");
+    expect(call.icePath()).toBe("relay");
+    expect(paths).toEqual([[peer, "relay"]]);
+  });
+
+  it("連上且為直連 → onIcePath(peer, 'direct')", async () => {
+    CallStatsPc.stats = CALL_DIRECT_STATS;
+    const { call, peer, paths } = setup();
+    connect();
+    expect(await call.refreshIcePath()).toBe("direct");
+    expect(paths).toEqual([[peer, "direct"]]);
+  });
+
+  it("結果沒變不重複回報", async () => {
+    CallStatsPc.stats = CALL_RELAY_STATS;
+    const { call, paths } = setup();
+    connect();
+    await call.refreshIcePath();
+    await call.refreshIcePath();
+    expect(paths).toHaveLength(1);
+  });
+
+  it("連上後自動探測（排程），不必手動 refresh", async () => {
+    vi.useFakeTimers();
+    try {
+      CallStatsPc.stats = CALL_RELAY_STATS;
+      const { peer, paths } = setup();
+      connect();
+      await vi.advanceTimersByTimeAsync(50);
+      expect(paths).toEqual([[peer, "relay"]]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("掛斷後路徑歸零，且排程中的探測不再回報（不得把這通的判定帶到下一通）", async () => {
+    vi.useFakeTimers();
+    try {
+      CallStatsPc.stats = CALL_RELAY_STATS;
+      const { call, paths } = setup();
+      connect();
+      call.hangup();
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(paths).toEqual([]);
+      expect(call.icePath()).toBe("unknown");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("連線失敗（走既有的掛斷收尾路徑）同樣歸零", async () => {
+    CallStatsPc.stats = CALL_RELAY_STATS;
+    const { call } = setup();
+    connect();
+    await call.refreshIcePath();
+    lastPc!.connectionState = "failed";
+    lastPc!.onconnectionstatechange!();
+    expect(call.icePath()).toBe("unknown");
+  });
+
+  it("沒有 getStats 的舊 webview → unknown，不當機", async () => {
+    vi.stubGlobal("RTCPeerConnection", FakePc); // 無 getStats
+    vi.stubGlobal("navigator", { mediaDevices: { getUserMedia: async () => ({ getTracks: () => [] }) } });
+    const sk = generateSecretKey();
+    const call = new WebRtcCall(sk, {
+      publishCallSignal: () => {},
+      onState: () => {},
+      onLocalStream: () => {},
+      onRemoteStream: () => {},
+      onError: () => {},
+      onFailed: () => {},
+    });
+    call.startCall(getPublicKey(generateSecretKey()), "audio");
+    lastPc!.connectionState = "connected";
+    lastPc!.onconnectionstatechange!();
+    expect(await call.refreshIcePath()).toBe("unknown");
+  });
+});

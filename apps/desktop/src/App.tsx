@@ -546,6 +546,8 @@ export function App(): JSX.Element {
    * 只在 `p2pConnected` 含該聯絡人時有意義；斷線會一併移除。
    */
   const [p2pPath, setP2pPath] = useState<Record<string, IcePath>>({});
+  /** 目前這通通話走哪條路（ADR-0344）；每通結束時歸位，不得沿用上一通。 */
+  const [callPath, setCallPath] = useState<IcePath>("unknown");
   const [nudge, setNudge] = useState<Record<string, number>>({});
   const [reactions, setReactions] = useState<Record<string, string[]>>({});
   const [unsent, setUnsent] = useState<Set<string>>(new Set());
@@ -1475,6 +1477,7 @@ export function App(): JSX.Element {
           // 通話結束時把兩個方向都歸位，否則下一通會沿用上一通的型態。
           setCallLocalMedia("audio");
           setCallRemoteMedia("audio");
+          setCallPath("unknown"); // ADR-0344：路徑同理——上一通走 TURN 不代表下一通也是
           setCallPeer(null);
           setLocalStream(null);
           setRemoteStream(null);
@@ -1499,6 +1502,8 @@ export function App(): JSX.Element {
           }
         }
       },
+      // ADR-0344：這通是直連還是經 TURN（engine 只在判定改變時發）。
+      onCallIcePath: (_peer, path) => setCallPath(path),
       onCallLocalStream: setLocalStream,
       onCallRemoteStream: setRemoteStream,
       // ADR-0243：通話連線失敗 → 在該對話留下可行動提示（非靜默失敗）。與 onCallState('ended') 一起發生。
@@ -3441,6 +3446,7 @@ export function App(): JSX.Element {
           peerKey={callPeer ?? ""}
           state={callState}
           media={callMedia}
+          icePath={callPath}
           localStream={localStream}
           remoteStream={remoteStream}
           onAccept={() => activeBackend.acceptCall?.()}

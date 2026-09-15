@@ -3,6 +3,8 @@ import { VIDEO_QUALITIES } from "@cinderous/core";
 import { useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n.js";
 import { avatarColor, initial } from "./util.js";
+import { p2pChipSpec } from "./p2p-chip.js"; // ADR-0344：連線路徑晶片
+import type { IcePath } from "@cinderous/engine";
 
 export interface CallWindowProps {
   peerName: string;
@@ -36,6 +38,11 @@ export interface CallWindowProps {
    * 沒有前後可言。硬做成翻面會做出一個「轉了不知道轉到哪」的按鈕。
    */
   onCameraChange: (sel: CameraSelection) => void;
+  /**
+   * 這通通話的媒體走哪條路（ADR-0344）：`direct`／`relay`（經 TURN——延遲較高、也耗中繼流量）／
+   * `unknown`（尚未測出）。只在通話中（`state === "active"`）顯示；接通前談路徑沒有意義。
+   */
+  icePath?: IcePath;
 }
 
 /**
@@ -120,6 +127,9 @@ export function CallWindow(props: CallWindowProps): JSX.Element {
     setMuted(next);
   };
 
+  // ADR-0344：通話中一律「已連線」的某一態（direct／relay／unknown），不會是「未建立」。
+  const pathChip = p2pChipSpec(true, props.icePath, "call");
+
   const statusText =
     state === "incoming"
       ? t("call_incoming")
@@ -137,6 +147,18 @@ export function CallWindow(props: CallWindowProps): JSX.Element {
         <div className="win__title">
           <span>{isVideo ? t("call_video") : t("call_audio")}</span>
           <span className="spacer" />
+          {/* ADR-0344：這通走直連還是 TURN 中繼。只在通話中顯示——接通前談路徑沒有意義，
+              而經中繼正是「延遲偏高」與「耗中繼流量」的解釋。 */}
+          {state === "active" ? (
+            <span
+              className={`chip chip--p2p${pathChip.mod}`}
+              data-testid="call-path-chip"
+              data-p2p-path={props.icePath ?? "unknown"}
+              title={t(pathChip.hint)}
+            >
+              {`${pathChip.icon} ${t(pathChip.label)}`}
+            </span>
+          ) : null}
         </div>
 
         <div className="callwin__stage">
