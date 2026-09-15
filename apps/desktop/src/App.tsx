@@ -38,6 +38,7 @@ import { normalizeRelayUrl, RelayChatBackend, shouldMuteOrgNotification, webSock
 import { DEFAULT_NOTIFY_PREFS, type NotifyPrefs, shouldNotify } from "@cinderous/engine";
 import { fetchRelayInfo, type RelayInfo } from "@cinderous/engine";
 import type { CalendarEventInput, RsvpStatus, StoredCalendarEvent } from "@cinderous/engine";
+import type { IcePath } from "@cinderous/engine"; // ADR-0344：直連 vs 經 TURN 中繼
 import { browserStore } from "./native/browser-store.js";
 import { safeNsecDecode } from "./nsec.js";
 import { getKeyVault, tauriKeyVault } from "./native/keyvault.js";
@@ -540,6 +541,11 @@ export function App(): JSX.Element {
   const [typingAt, setTypingAt] = useState<Record<string, number>>({});
   /** P2P 直連已建立的聯絡人（ADR-0213）：對話標題列據此顯示連線品質晶片。 */
   const [p2pConnected, setP2pConnected] = useState<Set<string>>(new Set());
+  /**
+   * 各聯絡人的 ICE 路徑（ADR-0344）：`direct`／`relay`（經 TURN、按流量計費）／`unknown`。
+   * 只在 `p2pConnected` 含該聯絡人時有意義；斷線會一併移除。
+   */
+  const [p2pPath, setP2pPath] = useState<Record<string, IcePath>>({});
   const [nudge, setNudge] = useState<Record<string, number>>({});
   const [reactions, setReactions] = useState<Record<string, string[]>>({});
   const [unsent, setUnsent] = useState<Set<string>>(new Set());
@@ -1157,6 +1163,7 @@ export function App(): JSX.Element {
     if (!backend) return;
     setOrgInfo(null); // ADR-0157：換身分/後端時重置，避免沿用上一個身分的組織資訊
     setP2pConnected(new Set()); // ADR-0213：換身分/後端時清空 P2P 直連狀態，避免沿用上一個身分
+    setP2pPath({}); // ADR-0344：路徑判定同樣不得跨身分沿用
     // ADR-0242 階段③：把本機既有的每對話靜音種進引擎同步設定（僅在該鍵不存在時，不蓋遠端解除靜音），
     // 於 start() 之前——讓 start 的首發 onMutes 直接帶正確集合，避免「先清空再種回」的閃動。
     backend.seedMutesIfAbsent?.(
@@ -1234,14 +1241,26 @@ export function App(): JSX.Element {
       },
       onTyping: (pk) => setTypingAt((prev) => ({ ...prev, [pk]: Date.now() })),
       // ADR-0213：P2P 直連狀態 → 對話標題列晶片。connected 加入集合、斷線移除。
-      onPeerConnection: (pk, connected) =>
+      // ADR-0344：同一條連線會先來 unknown、測出來再補一則——兩個 state 各自去重，不互相牽動重繪。
+      onPeerConnection: (pk, connected, path) => {
         setP2pConnected((prev) => {
           if (prev.has(pk) === connected) return prev; // 無變化不重繪
           const next = new Set(prev);
           if (connected) next.add(pk);
           else next.delete(pk);
           return next;
-        }),
+        });
+        setP2pPath((prev) => {
+          const next = connected ? (path ?? "unknown") : undefined;
+          if (prev[pk] === next) return prev; // 無變化不重繪
+          if (next === undefined) {
+            if (!(pk in prev)) return prev;
+            const { [pk]: _drop, ...rest } = prev;
+            return rest;
+          }
+          return { ...prev, [pk]: next };
+        });
+      },
       onNudge: (pk) => {
         setOpen((prev) => (prev.includes(pk) ? prev : [...prev, pk]));
         setNudge((prev) => ({ ...prev, [pk]: (prev[pk] ?? 0) + 1 }));
@@ -3353,6 +3372,7 @@ export function App(): JSX.Element {
               blobsNonce={blobsNonce}
             contact={contact}
             p2pConnected={p2pConnected.has(pk)}
+            p2pPath={p2pPath[pk] ?? "unknown"}
             // ADR-0244 過渡：檔案現在能否送達＝有 P2P 直連 ∨ 站方有 relay 檔案後備（企業政策 relayFilesMaxMb）。
             // 皆無時停用 📎/🎤，避免公共站無直連又無後備時靜默送不出。
             canSendFile={p2pConnected.has(pk) || !!policy.relayFilesMaxMb}

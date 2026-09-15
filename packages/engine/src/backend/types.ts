@@ -1,3 +1,4 @@
+import type { IcePath } from "./ice-path.js";
 import type {
   CallFailureReason,
   CallMedia,
@@ -218,8 +219,13 @@ export interface ChatBackendEvents {
   /**
    * 與某聯絡人的 P2P 直連狀態改變（ADR-0213）：`connected`＝資料通道開啟（直連可用）。
    * 對話標題列據此顯示連線品質晶片；P2P 失敗不影響文字訊息（走 relay）。
+   *
+   * `path`（ADR-0344）＝這條連線的位元組實際走哪：`direct`（兩端直連、站方零成本）／
+   * `relay`（經 TURN 中繼、**按流量計費**）／`unknown`（尚未測出；**不等於沒連上**）。
+   * 通道一開先發 `unknown`，測出來且與前次不同才再發一次——**同一條連線會收到多次
+   * `connected=true`**，UI 必須能吃重複。`connected=false` 時此欄無意義。
    */
-  onPeerConnection?(contact: PubkeyHex, connected: boolean): void;
+  onPeerConnection?(contact: PubkeyHex, connected: boolean, path?: IcePath): void;
   /** Relay pool（home + 外部座）各自的連線狀態；`stale`＝連續離線過久，hint 可能過期（ADR-0034/0036）。 */
   onRelayPool?(relays: { url: string; state: ConnectionState; home: boolean; stale: boolean }[]): void;
   /** P2P 送檔進度（`id` 對應 sendFile 回傳值；`sent`/`total` 為位元組）。 */
@@ -555,6 +561,14 @@ export interface ChatBackend {
   setFileSavedPath?(contact: PubkeyHex, messageId: string, savedPath: string): void;
   /** 開啟對話時主動建立 P2P 通道（F5：讓輸入中等狀態卸載中繼）。 */
   connectPeer?(to: PubkeyHex): void;
+  /**
+   * 重測與某聯絡人的 ICE 路徑（ADR-0344）：`direct`／`relay`（經 TURN、按流量計費）／`unknown`。
+   *
+   * 平時看 `onPeerConnection` 推來的 `path` 就好；**這個方法是給「正要做一件很貴的事」用的**
+   * ——例如送大檔前確認自己不是在 TURN 上。`unknown` 代表判不出來，**把關情境應當成 relay 辦**
+   * （保守），不要當成直連。
+   */
+  refreshIcePath?(to: PubkeyHex): Promise<IcePath>;
   /** 建立群組（M9）：`memberPubkeys` 為其他成員的公鑰（既有聯絡人）。 */
   createGroup?(name: string, memberPubkeys: PubkeyHex[]): void;
   /** 對群組送出訊息（扇出給所有成員）；`mentions` 為 @提及公鑰（ADR-0050）；`replyTo` 為對話串根 id（ADR-0051）；`alsoMain` 同 sendMessage（ADR-0232）。 */

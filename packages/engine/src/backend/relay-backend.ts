@@ -163,6 +163,7 @@ import {
 } from "@cinderous/core";
 import { loadRelayCheck, recordAuthObservation } from "./relay-check.js"; // ADR-0275：A 層健檢
 import { buildRtcConfig } from "./rtc-config.js";
+import type { IcePath } from "./ice-path.js"; // ADR-0344
 import { fetchTurnServers, turnEndpointFromRelay, turnRefreshDelayMs } from "./turn-fetch.js";
 import { WebRtcCall } from "./webrtc-call.js";
 import { WebRtcTransfer } from "./webrtc.js";
@@ -829,7 +830,8 @@ export class RelayChatBackend implements ChatBackend {
         }
       },
       onError: (peer, reason) => this.handlers?.onFileError?.(peer, reason),
-      onConnectionState: (peer, connected) => this.handlers?.onPeerConnection?.(peer, connected), // ADR-0213
+      // ADR-0213 直連狀態 ＋ ADR-0344 路徑（direct/relay/unknown）一併轉發給前端。
+      onConnectionState: (peer, connected, path) => this.handlers?.onPeerConnection?.(peer, connected, path),
       },
       () => this.rtcConfig(),
     );
@@ -4665,6 +4667,11 @@ export class RelayChatBackend implements ChatBackend {
   connectPeer(to: PubkeyHex): void {
     if (this.isBlocked(to)) return;
     this.transfer.connect(to);
+  }
+
+  /** 重測與某聯絡人的 ICE 路徑（ADR-0344）：直連／經 TURN 中繼／判不出來。 */
+  refreshIcePath(to: PubkeyHex): Promise<IcePath> {
+    return this.transfer.refreshIcePath(to);
   }
 
   sendNudge(to: PubkeyHex): void {
