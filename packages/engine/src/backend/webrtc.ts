@@ -14,6 +14,7 @@ import {
   type SecretKey,
   type Signal,
 } from "@cinderous/core";
+import { probeIcePath, type IcePath } from "./ice-path.js";
 
 /** ICE candidate 批次的去抖動視窗（毫秒）：把一陣爆發的候選合併成一則信令。 */
 const CANDIDATE_BATCH_MS = 60;
@@ -38,8 +39,12 @@ export interface TransferHandlers {
   /**
    * P2P 直連狀態改變（ADR-0213）：`connected`＝資料通道開啟（直連可用，檔案/通話/輸入中可走 P2P），
    * `false`＝通道關閉或連線失敗（降級走 relay）。供對話標題列顯示連線品質晶片。
+   *
+   * `path`＝這條連線的位元組實際走哪（ADR-0344）：`direct`（零成本）／`relay`（經 TURN、**按流量
+   * 計費**）／`unknown`（尚未測出）。`connected=false` 時無意義。通道一開會先以 `unknown` 發一次，
+   * 探測有結果且**與前次不同**才再發——所以同一條連線會收到多次 `true`，UI 要能吃重複。
    */
-  onConnectionState?: (peer: PubkeyHex, connected: boolean) => void;
+  onConnectionState?: (peer: PubkeyHex, connected: boolean, path?: IcePath) => void;
 }
 
 /** 進行中的送檔工作（供進度回報）。 */
@@ -60,10 +65,26 @@ interface PeerConn {
   started: boolean;
   candBatch: CandidateBatch;
   candTimer: ReturnType<typeof setTimeout> | undefined;
+  /** 最近一次 ICE 路徑探測結果（ADR-0344）；通道關閉即歸零為 unknown。 */
+  path: IcePath;
+  /** 尚未觸發的路徑探測計時器（通道關閉/連線關閉時要清掉，否則洩漏）。 */
+  pathTimers: ReturnType<typeof setTimeout>[];
 }
 
 const HIGH_WATER = 1 << 20; // 1 MiB：超過就暫緩送出，避免撐爆緩衝
 const CHUNK_SIZE = 16_384;
+
+/**
+ * ICE 路徑探測排程（毫秒，ADR-0344）。
+ *
+ * 為什麼不是只測一次：ICE 會**先用能通的配對，之後才換到更好的**（典型是先 relay、打洞成功後
+ * 升級為直連）。只在 `onopen` 測一次會把那條連線永久標成「經中繼」。
+ *
+ * 為什麼不是常駐輪詢：`getStats()` 不是免費的，而每位在線聯絡人都有一條連線。**有界**的幾次
+ * 補測涵蓋提名塵埃落定的視窗；之後才變動的（罕見：ICE restart／網路切換）由呼叫端在真正
+ * 在意時以 `refreshIcePath()` 重測——送大檔前的把關正是那個時機。
+ */
+const PATH_PROBE_DELAYS_MS = [0, 1_000, 4_000, 15_000] as const;
 
 /**
  * 每個聯絡人一條 WebRTC P2P 連線，複用 core 的 signaling / datachannel：
@@ -120,6 +141,30 @@ export class WebRtcTransfer {
     return !!(peer?.dc && peer.dc.readyState === "open");
   }
 
+  /**
+   * 與對方目前的 ICE 路徑（ADR-0344）：**最近一次探測的快取值**，同步、零成本。
+   *
+   * 通道未開一律 `"unknown"`——沒連上就沒有「路徑」可言，不要拿它當「直連」的反義詞用。
+   */
+  icePath(peerPk: PubkeyHex): IcePath {
+    const peer = this.peers.get(peerPk);
+    if (!peer?.dc || peer.dc.readyState !== "open") return "unknown";
+    return peer.path;
+  }
+
+  /**
+   * 立刻重測與對方的 ICE 路徑並回傳（ADR-0344）。會更新快取，變化時一併回報 `onConnectionState`。
+   *
+   * **送大檔前該叫這個，而不是 `icePath()`**：快取只在通道開啟後的前 15 秒內補測過，之後
+   * 的切換（ICE restart、Wi-Fi 換 4G）不會反映。真正在意成本的時刻就重測一次，很便宜。
+   */
+  async refreshIcePath(peerPk: PubkeyHex): Promise<IcePath> {
+    const peer = this.peers.get(peerPk);
+    if (!peer) return "unknown";
+    await this.probePath(peerPk, peer);
+    return this.icePath(peerPk);
+  }
+
   /** 傳送一個檔案給對方，回傳此傳輸的 id（供 UI 追蹤進度）。 */
   /** 產生一個傳輸 id。群組傳檔（ADR-0124）先產一個，再讓每位成員**共用**它。 */
   newTransferId(): string {
@@ -173,6 +218,7 @@ export class WebRtcTransfer {
   close(): void {
     for (const peer of this.peers.values()) {
       if (peer.candTimer !== undefined) clearTimeout(peer.candTimer);
+      this.clearPathTimers(peer);
       try {
         peer.pc.close();
       } catch {
@@ -200,6 +246,8 @@ export class WebRtcTransfer {
       started: false,
       candBatch: new CandidateBatch(),
       candTimer: undefined,
+      path: "unknown",
+      pathTimers: [],
     };
     pc.onicecandidate = (ev) => {
       const c = ev.candidate;
@@ -223,6 +271,7 @@ export class WebRtcTransfer {
       // 跨網路／對稱型 NAT 連不起來屬預期，故**不對使用者報錯**、只記錄降級（ADR-0210）。
       if (pc.connectionState === "failed") {
         console.debug("[webrtc] P2P failed → degraded to relay", peerPk);
+        this.resetPath(conn); // ADR-0344：連線沒了，排程中的探測沒有意義，清掉免得洩漏計時器
         this.handlers.onConnectionState?.(peerPk, false); // ADR-0213：標題列晶片轉「直連未建立」
       }
     };
@@ -250,11 +299,18 @@ export class WebRtcTransfer {
     dc.binaryType = "arraybuffer"; // 檔案分塊以二進位框架送達（省 base64 膨脹）
     dc.onmessage = (m) => peer.rx.receive(m.data as string | ArrayBuffer);
     const onOpen = () => {
-      this.handlers.onConnectionState?.(peerPk, true); // ADR-0213：直連可用 → 標題列晶片轉「直連」
+      // ADR-0213：通道可用 → 標題列晶片亮起。ADR-0344：此刻還不知道走哪條路，先誠實報 unknown，
+      // 探測有結果再補一則（UI 因此會看到同一條連線的多次 true——這是預期，不是抖動）。
+      peer.path = "unknown";
+      this.handlers.onConnectionState?.(peerPk, true, "unknown");
+      this.schedulePathProbes(peerPk, peer);
       this.flush(peerPk, peer);
     };
     dc.onopen = onOpen;
-    dc.onclose = () => this.handlers.onConnectionState?.(peerPk, false); // ADR-0213：直連中斷
+    dc.onclose = () => {
+      this.resetPath(peer);
+      this.handlers.onConnectionState?.(peerPk, false); // ADR-0213：直連中斷
+    };
     dc.onerror = () => this.handlers.onError(peerPk, "資料通道錯誤");
     if (dc.readyState === "open") onOpen();
   }
@@ -292,6 +348,41 @@ export class WebRtcTransfer {
     } catch (e) {
       this.handlers.onError(peerPk, `信令處理失敗：${String(e)}`);
     }
+  }
+
+  /** 清掉尚未觸發的路徑探測計時器。 */
+  private clearPathTimers(peer: PeerConn): void {
+    for (const timer of peer.pathTimers) clearTimeout(timer);
+    peer.pathTimers = [];
+  }
+
+  /** 通道斷掉：路徑歸零並停掉探測。 */
+  private resetPath(peer: PeerConn): void {
+    this.clearPathTimers(peer);
+    peer.path = "unknown";
+  }
+
+  /** 排定有界的幾次路徑探測（見 `PATH_PROBE_DELAYS_MS` 的理由）。 */
+  private schedulePathProbes(peerPk: PubkeyHex, peer: PeerConn): void {
+    this.clearPathTimers(peer);
+    for (const delay of PATH_PROBE_DELAYS_MS) {
+      const timer = setTimeout(() => void this.probePath(peerPk, peer), delay);
+      // Node（測試／CLI）下別讓這些計時器把行程吊著；瀏覽器沒有 unref，故為可選呼叫。
+      (timer as unknown as { unref?: () => void }).unref?.();
+      peer.pathTimers.push(timer);
+    }
+  }
+
+  /** 探測一次；只有**結果有變**才回報，避免 UI 被同值訊息洗版。 */
+  private async probePath(peerPk: PubkeyHex, peer: PeerConn): Promise<void> {
+    if (!peer.dc || peer.dc.readyState !== "open") return;
+    const path = await probeIcePath(peer.pc);
+    // 探測是非同步的——回來時通道可能已關，或這個 peer 已被 close() 丟棄。別覆寫已歸零的狀態。
+    if (this.peers.get(peerPk) !== peer) return;
+    if (!peer.dc || peer.dc.readyState !== "open") return;
+    if (path === peer.path) return;
+    peer.path = path;
+    this.handlers.onConnectionState?.(peerPk, true, path);
   }
 
   /** 依序送出 outbox 內的檔案（含背壓與進度）。 */

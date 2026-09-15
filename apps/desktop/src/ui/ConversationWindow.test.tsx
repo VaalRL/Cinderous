@@ -2,8 +2,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { I18nProvider } from "../i18n.js";
 import { ThemeProvider } from "../theme.js";
-import type { ChatMessage, Contact, MessageStatus, Self } from "@cinderous/engine";
-import { ConversationWindow } from "./ConversationWindow.js";
+import type { ChatMessage, Contact, IcePath, MessageStatus, Self } from "@cinderous/engine";
+import { ConversationWindow, p2pChipSpec } from "./ConversationWindow.js";
 import { CHIME_PRESETS } from "./ringtone.js";
 
 const self: Self = { pubkey: "aa", name: "我", status: "online", statusMessage: "" };
@@ -266,8 +266,8 @@ describe("ConversationWindow 訊息列視窗化（P0-3）", () => {
   });
 });
 
-describe("P2P 直連品質晶片（ADR-0213）", () => {
-  const renderP2p = (p2pConnected: boolean | undefined, over: Partial<Contact> = {}) =>
+describe("P2P 連線品質晶片（ADR-0213 ＋ ADR-0344 路徑）", () => {
+  const renderP2p = (p2pConnected: boolean | undefined, p2pPath?: IcePath, over: Partial<Contact> = {}) =>
     renderToStaticMarkup(
       <I18nProvider locale="zh-Hant">
         <ThemeProvider>
@@ -278,6 +278,7 @@ describe("P2P 直連品質晶片（ADR-0213）", () => {
             typing={false}
             nudgeSignal={0}
             {...(p2pConnected !== undefined ? { p2pConnected } : {})}
+            {...(p2pPath !== undefined ? { p2pPath } : {})}
             onSend={() => {}}
             onTyping={() => {}}
             onNudge={() => {}}
@@ -287,18 +288,52 @@ describe("P2P 直連品質晶片（ADR-0213）", () => {
       </I18nProvider>,
     );
 
-  it("已建立直連 → ⚡直連（綠 chip--p2p on）", () => {
-    const html = renderP2p(true);
+  it("已連線且判定為直連 → ⚡直連（綠 chip--p2p on）", () => {
+    const html = renderP2p(true, "direct");
     expect(html).toContain('data-testid="convo-p2p-chip"');
     expect(html).toContain("chip--p2p on");
+    expect(html).toContain('data-p2p-path="direct"');
     expect(html).not.toContain("直連未建立");
   });
 
-  it("未建立直連 → ⚪直連未建立（低調 chip，無 on）", () => {
+  it("已連線但走 TURN → 🔁經中繼（琥珀 chip--p2p relay），且提示點出「大檔請斟酌」", () => {
+    const html = renderP2p(true, "relay");
+    expect(html).toContain("chip--p2p relay");
+    expect(html).toContain('data-p2p-path="relay"');
+    expect(html).toContain("經中繼");
+    // 這是 ADR-0344 的重點：使用者要看得出自己在計費/較慢的那條路上。
+    expect(html).toContain("大檔");
+    expect(html).not.toContain("chip--p2p on");
+  });
+
+  it("已連線但路徑尚未測出 → 🔗已連線（中性），不假裝是直連", () => {
+    const html = renderP2p(true, "unknown");
+    expect(html).toContain("chip--p2p up");
+    expect(html).toContain('data-p2p-path="unknown"');
+    expect(html).not.toContain("chip--p2p on");
+    expect(html).not.toContain("chip--p2p relay");
+  });
+
+  it("已連線但完全沒給 path（舊呼叫端）→ 退回中性的「已連線」，而非樂觀當成直連", () => {
+    const html = renderP2p(true);
+    expect(html).toContain("chip--p2p up");
+    expect(html).not.toContain("chip--p2p on");
+  });
+
+  it("未建立直連 → ⚪直連未建立（低調 chip，無 on/relay/up）", () => {
     const html = renderP2p(false);
     expect(html).toContain('data-testid="convo-p2p-chip"');
     expect(html).toContain("直連未建立");
+    expect(html).toContain('data-p2p-path="none"');
     expect(html).not.toContain("chip--p2p on");
+    expect(html).not.toContain("chip--p2p relay");
+  });
+
+  it("未連線時即使帶了 path 也忽略（沒連上就沒有路徑可言）", () => {
+    const html = renderP2p(false, "relay");
+    expect(html).toContain("直連未建立");
+    expect(html).toContain('data-p2p-path="none"');
+    expect(html).not.toContain("chip--p2p relay");
   });
 
   it("未提供 p2pConnected（群組/示範）→ 不顯示晶片", () => {
@@ -306,7 +341,28 @@ describe("P2P 直連品質晶片（ADR-0213）", () => {
   });
 
   it("對方離線 → 不顯示晶片（避免與離線提示重複、無意義）", () => {
-    expect(renderP2p(false, { status: "offline" })).not.toContain('data-testid="convo-p2p-chip"');
+    expect(renderP2p(false, undefined, { status: "offline" })).not.toContain('data-testid="convo-p2p-chip"');
+  });
+});
+
+describe("p2pChipSpec — 晶片四態對照（ADR-0344，純函式）", () => {
+  it("未連線一律「直連未建立」，path 不影響", () => {
+    for (const path of [undefined, "direct", "relay", "unknown"] as const) {
+      expect(p2pChipSpec(false, path)).toMatchObject({ mod: "", label: "convo_p2pNone" });
+    }
+  });
+
+  it("relay 優先於其他判定（那是使用者最需要知道的一態）", () => {
+    expect(p2pChipSpec(true, "relay")).toMatchObject({ mod: " relay", label: "convo_p2pRelay" });
+  });
+
+  it("direct → 綠燈", () => {
+    expect(p2pChipSpec(true, "direct")).toMatchObject({ mod: " on", label: "convo_p2pDirect" });
+  });
+
+  it("unknown／未帶 → 中性，不樂觀升級為直連", () => {
+    expect(p2pChipSpec(true, "unknown")).toMatchObject({ mod: " up", label: "convo_p2pUnknown" });
+    expect(p2pChipSpec(true)).toMatchObject({ mod: " up", label: "convo_p2pUnknown" });
   });
 });
 

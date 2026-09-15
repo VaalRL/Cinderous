@@ -17,7 +17,7 @@ import type { FloatingWindow } from "./useFloatingWindow.js";
 import type { CallMedia, MentionCandidate, MentionSuggest, SlashCommand } from "@cinderous/core";
 import { getKv, mainMessages, replyCounts, rootIdOf, threadMessages } from "@cinderous/engine";
 import type { MessageKey } from "@cinderous/i18n";
-import type { ChatMessage, Contact, MessageStatus, Self } from "@cinderous/engine";
+import type { ChatMessage, Contact, IcePath, MessageStatus, Self } from "@cinderous/engine";
 import { contactLabel } from "@cinderous/engine";
 import {
   formatCustomSticker,
@@ -314,6 +314,12 @@ export interface ConversationProps {
    */
   p2pConnected?: boolean;
   /**
+   * 已連上時，位元組實際走哪條路（ADR-0344）：`direct`＝兩端直連；`relay`＝經 TURN 中繼
+   * （較慢、且**是站方要付流量費的那條**）；`unknown`＝還沒測出來。`p2pConnected` 為 false
+   * 時忽略此欄（沒連上就沒有路徑可言）。
+   */
+  p2pPath?: IcePath;
+  /**
    * 檔案**現在**能否送達（ADR-0244 過渡：至少讓 UI 反映現實）：`false` 時停用 📎/🎤 並改提示，
    * 避免公共站無 P2P、又無 relay 檔案後備時「按了卻靜默送不出」。判定＝有 P2P 直連 ∨ 站方提供
    * relay 檔案後備。`undefined`＝不判定（沿用啟用；群組/示範不 gate）。
@@ -464,8 +470,28 @@ function renderRichText(
   );
 }
 
+/**
+ * 標題列連線晶片的呈現規格（ADR-0213 的兩態 → ADR-0344 的四態）。
+ *
+ * 抽成純函式是為了可測：「什麼連線狀態該顯示什麼」是產品判斷，不該埋在 JSX 裡才驗得到。
+ *
+ * ⚠ 已連線但 `path` 未知時**不會**沿用「⚡直連」——那是在沒測之前替使用者假設最好的情況。
+ * 寧可先顯示中性的「🔗已連線」，等探測回來再轉正（ADR-0344 §後果：短暫轉場是刻意的）。
+ */
+export function p2pChipSpec(
+  connected: boolean,
+  path?: IcePath,
+): { mod: string; icon: string; label: MessageKey; hint: MessageKey } {
+  if (!connected) return { mod: "", icon: "⚪", label: "convo_p2pNone", hint: "convo_p2pNoneHint" };
+  if (path === "relay") return { mod: " relay", icon: "🔁", label: "convo_p2pRelay", hint: "convo_p2pRelayHint" };
+  if (path === "direct") return { mod: " on", icon: "⚡", label: "convo_p2pDirect", hint: "convo_p2pDirectHint" };
+  return { mod: " up", icon: "🔗", label: "convo_p2pUnknown", hint: "convo_p2pUnknownHint" };
+}
+
 export function ConversationWindow(props: ConversationProps): JSX.Element {
   const { t } = useI18n();
+  // ADR-0344：連線晶片四態（未建立／經中繼／直連／已連線但路徑未知）。
+  const p2pChip = p2pChipSpec(!!props.p2pConnected, props.p2pPath);
   // ADR-0271：名字色依主題/對比模式選安全亮度（唯讀取用，缺 Provider 時回預設不炸）。
   const theme = useThemeMode();
   const contrast = useContrastMode();
@@ -1507,15 +1533,18 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
           </span>
         ) : null}
         <span className="spacer" />
-        {/* ADR-0213：P2P 直連品質晶片（僅 1:1 且對方非離線）。⚡直連＝檔案/通話/輸入中走 P2P；
-            ⚪未建立＝降級走 relay（文字不受影響）。放通話鈕左側，語意相關。 */}
+        {/* ADR-0213 ＋ ADR-0344：P2P 連線品質晶片（僅 1:1 且對方非離線）。四種呈現——
+            ⚡直連（綠）＝位元組兩端直走；🔁經中繼（琥珀）＝走 TURN，較慢且是計費路徑；
+            🔗已連線（中性）＝連上了但還沒測出路徑；⚪未建立＝降級走 relay（文字不受影響）。
+            放通話鈕左側，語意相關。 */}
         {props.p2pConnected !== undefined && contact.status !== "offline" ? (
           <span
-            className={`chip chip--p2p${props.p2pConnected ? " on" : ""}`}
+            className={`chip chip--p2p${p2pChip.mod}`}
             data-testid="convo-p2p-chip"
-            title={t(props.p2pConnected ? "convo_p2pDirectHint" : "convo_p2pNoneHint")}
+            data-p2p-path={props.p2pConnected ? (props.p2pPath ?? "unknown") : "none"}
+            title={t(p2pChip.hint)}
           >
-            {props.p2pConnected ? `⚡ ${t("convo_p2pDirect")}` : `⚪ ${t("convo_p2pNone")}`}
+            {`${p2pChip.icon} ${t(p2pChip.label)}`}
           </span>
         ) : null}
         {props.onStartCall ? (

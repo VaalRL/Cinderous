@@ -431,6 +431,12 @@ export interface Messages {
   convo_p2pNone: string;
   convo_p2pDirectHint: string;
   convo_p2pNoneHint: string;
+  /** ADR-0344：已連上但位元組經 TURN 中繼轉送（按流量計費、較慢）。 */
+  convo_p2pRelay: string;
+  convo_p2pRelayHint: string;
+  /** ADR-0344：已連上、但尚未測出走哪條路（通道剛開的短暫視窗）。 */
+  convo_p2pUnknown: string;
+  convo_p2pUnknownHint: string;
   convo_typing: string;
   /** 本地暱稱（ADR-0148）：私下給聯絡人取的顯示名，點標頭可切換對方廣播名。 */
   alias_set: string;
@@ -1343,6 +1349,10 @@ const zhHant: Messages = {
   convo_p2pNone: "直連未建立",
   convo_p2pDirectHint: "已與對方建立點對點直連——檔案、通話、輸入中走 P2P（更快、不經中繼）。",
   convo_p2pNoneHint: "尚未建立直連；文字訊息照常送達，但檔案與通話可能無法使用。",
+  convo_p2pRelay: "經中繼",
+  convo_p2pRelayHint: "直連打不穿，目前經 TURN 中繼轉送。內容仍是端到端加密（中繼只看得到密文），但速度較慢——傳大檔請斟酌。",
+  convo_p2pUnknown: "已連線",
+  convo_p2pUnknownHint: "已連上對方，但尚未測出是直連或經中繼。檔案與通話可用。",
   convo_typing: "{name} 正在輸入訊息…",
   alias_set: "設定暱稱",
   alias_edit: "編輯暱稱",
@@ -2203,6 +2213,10 @@ const en: Messages = {
   convo_p2pNone: "No direct link",
   convo_p2pDirectHint: "Direct peer-to-peer link established — files, calls and typing go P2P (faster, no relay).",
   convo_p2pNoneHint: "No direct link yet; text messages arrive normally, but files and calls may be unavailable.",
+  convo_p2pRelay: "Relayed",
+  convo_p2pRelayHint: "Direct connection failed, so traffic is going through a TURN relay. Content stays end-to-end encrypted (the relay only sees ciphertext), but it is slower — think twice before sending large files.",
+  convo_p2pUnknown: "Connected",
+  convo_p2pUnknownHint: "Connected to this contact, but the path (direct or relayed) has not been determined yet. Files and calls work.",
   convo_typing: "{name} is typing…",
   alias_set: "Set nickname",
   alias_edit: "Edit nickname",
