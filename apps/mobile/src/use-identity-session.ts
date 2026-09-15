@@ -21,6 +21,7 @@ import { useCalendarSession, type CalendarSession } from "./use-calendar-session
 import { useCallSession, type CallSession } from "./use-call-session.js";
 import { useIdentitySettings, type IdentitySettings } from "./use-identity-settings.js";
 import { useOrgSession, type OrgSession } from "./use-org-session.js";
+import { usePeerLinkSession, type PeerLinkSession } from "./use-peer-link-session.js";
 import { useRosterSession, type RosterSession } from "./use-roster-session.js";
 import { useSelfSession, type SelfSession } from "./use-self-session.js";
 import { useThreadSession, type ThreadSession } from "./use-thread-session.js";
@@ -41,6 +42,8 @@ export interface IdentitySession {
   settings: IdentitySettings;
   /** 通話。 */
   call: CallSession;
+  /** 與各聯絡人的 P2P 直連：連上了嗎、走哪條路（ADR-0344）。 */
+  link: PeerLinkSession;
 }
 
 export function useIdentitySession(): IdentitySession {
@@ -52,5 +55,6 @@ export function useIdentitySession(): IdentitySession {
     org: useOrgSession(),
     settings: useIdentitySettings(),
     call: useCallSession(),
+    link: usePeerLinkSession(),
   };
 }

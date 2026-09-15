@@ -6,7 +6,8 @@ import { useEffect, useState } from "react";
 import type { CallMedia, CallState, CameraFacing, VideoQuality } from "@cinderous/core";
 import { VIDEO_QUALITIES, flipFacing, shouldMirror } from "@cinderous/core";
 import { type Locale, type MessageKey, translate } from "@cinderous/i18n";
-import { resolveTheme, type Theme, type ThemeTokens } from "@cinderous/theme";
+import { p2pPathChip, P2P_PATH_COLORS, resolveTheme, type Theme, type ThemeTokens } from "@cinderous/theme";
+import type { IcePath } from "@cinderous/engine";
 import { Pressable, StyleSheet, Text, View } from "react-native-web";
 import { StreamView } from "../native/call-media.js";
 
@@ -35,6 +36,9 @@ function makeStyles(tk: ThemeTokens) {
     info: { position: "absolute", top: 24, left: 0, right: 0, alignItems: "center", gap: 4 },
     name: { fontSize: 20, fontWeight: "700", color: "#ffffff" },
     state: { fontSize: 13, color: "#ffffffb0" },
+    // ADR-0344：連線路徑晶片（描邊，色票來自 @cinderous/theme，與對話標頭同一套）。
+    pathChip: { marginTop: 6, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 9, borderWidth: 1 },
+    pathChipText: { fontSize: 11, fontWeight: "700" },
     bar: {
       position: "absolute",
       bottom: 36,
@@ -79,6 +83,7 @@ export function CallScreen({
   facing,
   canFlipCamera,
   onFlipCamera,
+  icePath = "unknown",
   locale = "zh-Hant",
   theme = "dark",
   accent = null,
@@ -114,6 +119,11 @@ export function CallScreen({
   canFlipCamera: boolean;
   /** 翻面。**手機是翻面，桌面是選裝置**——刻意是兩個不同的東西。 */
   onFlipCamera: (next: CameraFacing) => void;
+  /**
+   * 這通通話的媒體走哪條路（ADR-0344）：`direct`／`relay`（經 TURN——延遲較高、也耗中繼
+   * 流量）／`unknown`（尚未測出）。只在通話中顯示；接通前談路徑沒有意義。
+   */
+  icePath?: IcePath;
   locale?: Locale;
   theme?: Theme;
   accent?: string | null;
@@ -125,6 +135,10 @@ export function CallScreen({
   // ADR-0338：畫質與關鏡頭只在**我**送視訊時有意義；遠端版面看的是對方那一方。
   const iSendVideo = localMedia === "video";
   const theySendVideo = remoteMedia === "video";
+
+  // ADR-0344：通話中一律「已連線」的某一態（direct／relay／unknown），不會是「未建立」。
+  const pathChip = p2pPathChip(true, icePath, "call");
+  const pathChipColor = pathChip.tone === "none" ? tk.muted : P2P_PATH_COLORS[pathChip.tone];
 
   const [muted, setMuted] = useState(false);
   const [since, setSince] = useState<number | null>(null);
@@ -190,6 +204,15 @@ export function CallScreen({
       <View style={styles.info}>
         <Text style={styles.name}>{peerName}</Text>
         <Text style={styles.state}>{sub}</Text>
+        {/* ADR-0344：這通走直連還是 TURN 中繼。只在通話中顯示——接通前談路徑沒有意義，
+            而經中繼正是「延遲偏高」與「耗中繼流量」的解釋。 */}
+        {state === "active" ? (
+          <View style={[styles.pathChip, { borderColor: pathChipColor }]} testID="call-path-chip">
+            <Text style={[styles.pathChipText, { color: pathChipColor }]}>
+              {`${pathChip.icon} ${t(pathChip.label)}`}
+            </Text>
+          </View>
+        ) : null}
         {/* ADR-0338：不留一塊沒有解釋的黑畫面——對方只送語音就明說。 */}
         {state === "active" && isVideo && !theySendVideo ? (
           <Text style={styles.state} testID="call-remote-audio-only">

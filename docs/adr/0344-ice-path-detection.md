@@ -61,7 +61,7 @@ ADR-0213 的標題列晶片只有兩態：資料通道開了（`connected=true`�
 - **檔案傳輸**：`TransferHandlers.onConnectionState(peer, connected, path?)` ／ `ChatBackendEvents.onPeerConnection(contact, connected, path?)` 加上第三個參數。通道一開先發 `unknown`，測出來且**與前次不同**才再發一次 ⇒ **同一條連線會收到多次 `connected=true`**，UI 必須能吃重複（`App.tsx` 兩個 state 各自去重）。
 - **通話**：`CallHandlers.onIcePath(peer, path)` ／ `ChatBackendEvents.onCallIcePath(peer, path)`。只在判定改變時發，**通話結束不發 `unknown` 收尾**——UI 於 `onCallState` 結束時自行歸位（與媒體型態同一套作法，避免「上一通走 TURN」殘留到下一通）。
 - `ChatBackend.refreshIcePath?(to)` 供未來的把關呼叫；通話端為 `WebRtcCall.refreshIcePath()`。
-- 晶片由兩態擴為四態（`p2pChipSpec` 抽為獨立模組的純函式，對話與通話共用，可單測）：
+- 晶片由兩態擴為四態。判定→呈現的規格住在 **`@cinderous/theme` 的 `p2pPathChip`**（純函式，可單測），與 `icons.ts` 同一個理由：桌面與行動端都要顯示，不放在共用處就會各做一個然後漂移。theme 只給**語義角色與色票**，不含渲染——桌面把 `tone` 翻成 CSS class、行動端翻成 StyleSheet 的 `borderColor`/`color`。⚠ theme 是設計 token 層、**不依賴 engine**，故它重述一次 `IcePath` 的字串聯集（`P2pPathValue`）；兩者若不一致，呼叫端傳值時會型別紅。
 
 | 狀態 | 呈現 | 語意 |
 | --- | --- | --- |
@@ -70,7 +70,11 @@ ADR-0213 的標題列晶片只有兩態：資料通道開了（`connected=true`�
 | `relay` | `🔁 經中繼`（琥珀 `.relay`） | 走 TURN：仍端到端加密，但較慢、且是計費路徑 |
 | `unknown` | `🔗 已連線`（中性 `.up`） | 連上了，路徑尚未測出 |
 
-通話視窗（`CallWindow`）用同一組短標籤與配色，**但 tooltip 換句話**（`p2pChipSpec` 的 `context` 參數）：對話講「傳大檔請斟酌」，通話講「延遲較高、也較耗中繼流量」。晶片只在 `state === "active"` 顯示——接通前談路徑沒有意義，而通話中不存在「未建立」一態（斷了就沒有視窗了）。
+通話視窗用同一組短標籤與配色，**但 tooltip 換句話**（`p2pPathChip` 的 `context` 參數）：對話講「傳大檔請斟酌」，通話講「延遲較高、也較耗中繼流量」。晶片只在 `state === "active"` 顯示——接通前談路徑沒有意義，而通話中不存在「未建立」一態（斷了就沒有視窗了）。
+
+**四個顯示點**：桌面 `ConversationWindow`／`CallWindow`、行動端 `ConversationScreen`／`CallScreen`。行動端的對話晶片一併補上了 ADR-0213 當初列為「另案對齊」的部分——它從來沒有顯示過直連狀態。行動端以描邊而非實心呈現：實心是企業頭銜（身分），這是狀態，兩者在標頭相鄰，靠填滿與否一眼分得開。
+
+**行動端的 state 歸屬**：新增 `use-peer-link-session.ts`（ADR-0331 的功能簇，登記於 `IDENTITY_CLUSTERS`）。**刻意不塞進名冊簇**——名冊是「後端推送的『誰』」，而直連狀態是**傳輸層**的事實，隨網路來去、與這個人是不是我的聯絡人無關；塞進去會讓「誰」這一簇同時背負連線生命週期，正是 ADR-0331 §1 想避免的「什麼都懂的物件」。它與通話簇同型：小、只由後端事件驅動、只餵一個畫面元素。依 ADR-0332 2c **不提供 `reset()`**——`AppSession` 已掛 `key={身分+世代}`，重掛即歸零，多一個沒人呼叫的 `reset()` 只是死程式碼。
 
 ## 理由
 
@@ -86,8 +90,9 @@ ADR-0213 的標題列晶片只有兩態：資料通道開了（`connected=true`�
   - **四態晶片的短暫轉場**：通道開啟到首次探測回來之間會顯示「🔗已連線」再轉為「⚡直連」。這是刻意的（見上），但比 ADR-0213 的兩態多一次視覺變化。
   - **15 秒後的路徑切換不會自動反映**在晶片上（ICE restart、網路切換）。呼叫端要正確值時以 `refreshIcePath()` 重測；常駐輪詢的成本被判定不值得。
   - **判定有 `unknown` 的實際發生率未量測**：多組 succeeded 配對且無 `transport`/`selected` 線索時會落到 `unknown`。實務上 ①② 兩條路徑涵蓋主流瀏覽器，但沒有真實環境數據佐證。
-  - **行動端未對齊**：晶片仍僅桌面/瀏覽器 `ConversationWindow`／`CallWindow`（沿用 ADR-0213 的殘餘）。
-  - **判定本身沒有被拿來做任何事**：目前只餵給晶片。大檔閘門與 TURN 用量觀測都還沒建立在它之上——在那之前，這個 ADR 買到的是「看得見」，不是「擋得住」。
+  - **判定本身沒有被拿來做任何事**：四個顯示點都只是顯示。大檔閘門與 TURN 用量觀測都還沒建立在它之上——在那之前，這個 ADR 買到的是「看得見」，不是「擋得住」。
+  - **行動端沒有 `refreshIcePath` 的呼叫點**：`ChatBackend` 上有這個方法，但行動端目前只消費推送的事件。等大檔閘門落地時兩端都要接。
+  - **色票對齊靠測試而非機制**：`msn.css` 的三個色值與 `P2P_PATH_COLORS` 是各自寫死、由 `p2p-path.test.ts` 斷言比對（沿用 `tokens.test.ts` 的作法）。改一邊沒改另一邊會紅，但仍不是「不可能寫錯」。
 - 後續行動／待辦：
   1. **大檔 TURN 閘門**（本 ADR 的目的）：送檔前 `refreshIcePath()`，`relay`（與保守處理的 `unknown`）超過門檻時提示改用公司儲存槽或等直連。門檻值與 UX 為獨立產品決策。
   2. 待 1 落地後，才動 `DEFAULT_MAX_FILE_SIZE` 與串流化（發送端惰性分塊、接收端串流落盤）。

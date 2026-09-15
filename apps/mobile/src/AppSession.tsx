@@ -251,7 +251,7 @@ export function AppSession({
    * 階段 2c 會把它掛上 `key={pubkey}` ——屆時要重掛的就是這一個呼叫。
    */
   const session = useIdentitySession();
-  const { self, roster, threads, cal, org, settings, call } = session;
+  const { self, roster, threads, cal, org, settings, call, link } = session;
   // 解構讀取端：欄位擁有權在 hook，但**讀取點超過一百處**，改名只會製造無意義的 diff。
   // 寫入一律經 hook（守衛會檢查簇內 setter 不得殘留在本檔）。
   const { contacts, groups, blocked, requests } = roster;
@@ -725,6 +725,7 @@ export function AppSession({
         }
       },
       ...call.handlers, // 通話狀態與串流（ADR-0101／0331）
+      ...link.handlers, // 與各聯絡人的 P2P 直連與路徑（ADR-0213／0344）
       // 對方正在輸入（ADR-0120；行動端於 ADR-0169 補齊）：記下來源，對話副標顯示「正在輸入…」。
       onTyping: (pk) => threads.markTyping(pk), // ADR-0120／0331：計時器與逾時都在對話簇內
       // 與中繼站連線狀態（ADR-0034；行動端於 ADR-0169 補齊）：非 online 時頂端顯示細條。
@@ -1316,6 +1317,7 @@ export function AppSession({
       canChangeMedia={backendRef.current?.canChangeCallMedia?.() ?? false}
       onMediaChange={(m) => backendRef.current?.setCallMedia?.(m)}
       facing={call.facing}
+      icePath={call.path}
       canFlipCamera={cameraCount > 1}
       onFlipCamera={(next) => backendRef.current?.setCamera?.({ facingMode: next })}
       locale={locale}
@@ -1592,6 +1594,11 @@ export function AppSession({
           {...(!group && contact?.title ? { title: contact.title } : {})}
           {...(subtitle ? { subtitle } : {})}
           {...(relayUrl && !group ? { onNudge: nudge, onTyping: sendTyping } : {})}
+          // ADR-0213／0344：直連品質晶片。僅 1:1（群組為多對端、無單一直連概念）；
+          // 離線時不傳＝不顯示（直連本就不可能，且已有離線提示）。
+          {...(!group && contact && contact.status !== "offline"
+            ? { p2pConnected: link.connected.has(activeId), p2pPath: link.paths[activeId] ?? "unknown" }
+            : {})}
           {...((archived[activeId] ?? 0) > 0 ? { onHistory: () => setScreen("history") } : {})}
           chatBg={chatBg}
           onSetChatBg={applyChatBg}

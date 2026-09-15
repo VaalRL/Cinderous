@@ -23,9 +23,9 @@ import {
 } from "@cinderous/core";
 import type { CallMedia, MentionCandidate } from "@cinderous/core";
 import { replyCounts } from "@cinderous/engine";
-import type { CalendarEventInput, ChatMessage, MessageStatus, RsvpStatus, StoredCalendarEvent } from "@cinderous/engine";
+import type { CalendarEventInput, ChatMessage, IcePath, MessageStatus, RsvpStatus, StoredCalendarEvent } from "@cinderous/engine";
 import { type Locale, type MessageKey, translate } from "@cinderous/i18n";
-import { BG_PRESETS, type ChatBg, chatBgStyle, resolveTheme, type Theme, type ThemeTokens } from "@cinderous/theme";
+import { BG_PRESETS, type ChatBg, chatBgStyle, p2pPathChip, P2P_PATH_COLORS, resolveTheme, type Theme, type ThemeTokens } from "@cinderous/theme";
 import { Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native-web";
 import { CalendarPanel } from "./CalendarPanel.js";
 import { MsgStatusIcon } from "./MsgStatusIcon.js";
@@ -65,6 +65,15 @@ function makeStyles(tk: ThemeTokens) {
     // 企業頭銜 chip（ADR-0170）：實心主色底、白字，與私有標籤（outline）色彩區隔。
     roleChip: { backgroundColor: tk.accent, borderRadius: 999, paddingHorizontal: 8, paddingVertical: 1 },
     roleChipText: { fontSize: 10, fontWeight: "700", color: "#fff" },
+    // ADR-0213／0344：連線路徑晶片。刻意**描邊**而非實心——實心是頭銜（身分），
+    // 這是狀態；兩者相鄰，靠填滿與否一眼分得開。色票來自 @cinderous/theme。
+    pathChip: {
+      paddingHorizontal: 6,
+      paddingVertical: 1,
+      borderRadius: 8,
+      borderWidth: 1,
+    },
+    pathChipText: { fontSize: 10, fontWeight: "700" },
     list: { flex: 1 },
     listInner: { padding: 12, gap: 8 },
     rowMine: { alignItems: "flex-end" },
@@ -338,6 +347,8 @@ export function ConversationScreen({
   addMemberCandidates,
   isGroupAdmin,
   title,
+  p2pConnected,
+  p2pPath,
   selfPubkey,
   onBack,
   locale = "zh-Hant",
@@ -408,6 +419,16 @@ export function ConversationScreen({
   isGroupAdmin?: boolean;
   /** 對方的企業自報頭銜（ADR-0158／0170，1:1）：標頭旁以 chip 顯示。未提供＝不顯示。 */
   title?: string;
+  /**
+   * 與此聯絡人的 P2P 直連是否已建立（ADR-0213）：標頭顯示連線品質晶片。
+   * 僅 1:1 且對方非離線時提供；`undefined`＝不顯示晶片。
+   */
+  p2pConnected?: boolean;
+  /**
+   * 已連上時位元組走哪條路（ADR-0344）：`direct`／`relay`（經 TURN——較慢，且是站方要付
+   * 流量費的那條）／`unknown`（尚未測出）。`p2pConnected` 為 false 時忽略。
+   */
+  p2pPath?: IcePath;
   /** 自己的 pubkey（成員清單中不對自己顯示「移除」）。 */
   selfPubkey?: string;
   /**
@@ -474,6 +495,10 @@ export function ConversationScreen({
   const [aliasEditing, setAliasEditing] = useState(false);
   const [aliasDraft, setAliasDraft] = useState(alias ?? "");
   const headerName = hasAlias && !showBroadcast ? name : (broadcastName ?? name);
+  // ADR-0213／0344：連線路徑晶片。規格（圖示／文案鍵／語義色角色）來自 @cinderous/theme，
+  // 與桌面共吃同一份——包含「未測出時不樂觀當成直連」那條。
+  const pathChip = p2pPathChip(!!p2pConnected, p2pPath);
+  const pathChipColor = pathChip.tone === "none" ? tk.muted : P2P_PATH_COLORS[pathChip.tone];
   const applyAlias = (): void => {
     onSetAlias?.(aliasDraft.trim() || undefined); // 空＝清除
     setAliasEditing(false);
@@ -671,6 +696,19 @@ export function ConversationScreen({
             {title?.trim() && !groupMembers ? (
               <View style={styles.roleChip} testID="convo-title-chip">
                 <Text style={styles.roleChipText}>{title}</Text>
+              </View>
+            ) : null}
+            {/* ADR-0213／0344：直連品質晶片。⚡直連／🔁經中繼（較慢且計費）／🔗已連線
+                （尚未測出）／⚪未建立。呼叫端只在 1:1 且對方非離線時提供。 */}
+            {p2pConnected !== undefined ? (
+              <View
+                style={[styles.pathChip, { borderColor: pathChipColor }]}
+                testID="convo-p2p-chip"
+                aria-label={t(pathChip.hint)}
+              >
+                <Text style={[styles.pathChipText, { color: pathChipColor }]}>
+                  {`${pathChip.icon} ${t(pathChip.label)}`}
+                </Text>
               </View>
             ) : null}
           </View>
