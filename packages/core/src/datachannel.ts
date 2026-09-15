@@ -13,7 +13,21 @@ export type DataMessage =
    * 「在線但閒置」的人誤判為離線。相容舊版：缺此欄位則退回預設容忍窗。
    */
   | { t: "presence"; s: string; m: string; np: string; hb?: number }
-  | { t: "file-begin"; id: string; name: string; mime: string; size: number; chunks: number; origin?: string };
+  /**
+   * `chunkSize`（ADR-0345）＝送出端的分塊大小。**收端據此把每塊直接寫進最終緩衝區的
+   * `seq * chunkSize` 位移**，不必先把每塊留在 Map 裡再拼一次（省掉一整份檔案的複製）。
+   * 舊版對端沒有這個欄位 ⇒ 收端退回「依到達順序循序寫入」（見 `receiveChunk`）。
+   */
+  | {
+      t: "file-begin";
+      id: string;
+      name: string;
+      mime: string;
+      size: number;
+      chunks: number;
+      chunkSize?: number;
+      origin?: string;
+    };
 
 /** 資料通道可能收到的原始資料（控制為字串、檔案分塊為二進位）。 */
 export type RawData = string | ArrayBuffer | Uint8Array;
@@ -103,31 +117,35 @@ export function encodeDcPresence(s: string, m: string, np: string, cadenceMs?: n
 /**
  * 將檔案編碼為一連串資料通道訊息：一則 `file-begin` 後接 N 則 `file-chunk`。
  * 不受中繼站 JSON 大小限制，速度僅受雙方頻寬影響。
+ *
+ * 🔴 **這是 generator，不是陣列**（ADR-0345）。原本它一次把**所有**分塊框架都配置出來
+ * 再回傳——一個 100 MiB 的檔就是額外一整份 100 MiB（6,400 個框架物件）躺在記憶體裡，
+ * 而它們唯一的用途是等著被逐一送出。改成惰性產生後，同一時間只有**一塊**存在。
+ *
+ * 呼叫端照樣 `for...of`；需要陣列的地方（測試）自行 `[...encodeFile(...)]`。
  */
-export function encodeFile(
+export function* encodeFile(
   file: OutgoingFile,
   id: string,
   chunkSize = DEFAULT_CHUNK_SIZE,
   /** 儲存槽存放來源標註（ADR-0161／審查修正）：隨 file-begin 傳，一般檔案省略。 */
   origin?: string,
-): (string | Uint8Array)[] {
+): Generator<string | Uint8Array, void, void> {
   const total = Math.ceil(file.bytes.length / chunkSize);
-  const messages: (string | Uint8Array)[] = [
-    JSON.stringify({
-      t: "file-begin",
-      id,
-      name: file.name,
-      mime: file.mime,
-      size: file.bytes.length,
-      chunks: total,
-      ...(origin !== undefined ? { origin } : {}),
-    } satisfies DataMessage),
-  ];
+  yield JSON.stringify({
+    t: "file-begin",
+    id,
+    name: file.name,
+    mime: file.mime,
+    size: file.bytes.length,
+    chunks: total,
+    chunkSize,
+    ...(origin !== undefined ? { origin } : {}),
+  } satisfies DataMessage);
   for (let seq = 0; seq < total; seq++) {
-    const slice = file.bytes.subarray(seq * chunkSize, (seq + 1) * chunkSize);
-    messages.push(encodeFileChunk(id, seq, slice));
+    // subarray 不複製；框架本身才是那一份複製，而它在送出後即可回收。
+    yield encodeFileChunk(id, seq, file.bytes.subarray(seq * chunkSize, (seq + 1) * chunkSize));
   }
-  return messages;
 }
 
 export interface DataChannelHandlers {
@@ -154,9 +172,19 @@ const DEFAULT_MAX_CHUNKS = 1_000_000;
 const DEFAULT_MAX_CONCURRENT = 16;
 
 interface Partial {
-  meta: { name: string; mime: string; size: number; chunks: number; origin?: string };
-  received: Map<number, Uint8Array>;
-  receivedBytes: number;
+  meta: { name: string; mime: string; size: number; chunks: number; chunkSize?: number; origin?: string };
+  /**
+   * 最終緩衝區——每塊**直接寫進去**，不再逐塊留存後重拼（ADR-0345：省掉一整份複製）。
+   *
+   * 🔴 **延後到第一塊才配置。** 在 `file-begin` 就配置很誘人（程式更短），但那等於讓
+   * 對方**一個位元組都不用送**就吃掉 `size` 的記憶體——`maxConcurrentFiles` 16 × 100 MiB
+   * ＝ 1.6 GB，免費。延後配置把成本拉回「他得真的送資料」，與改動前一致。
+   */
+  buf: Uint8Array | null;
+  /** 已收到的分塊序號：去重與完成判定用。存的是**數字**，不是位元組。 */
+  seen: Set<number>;
+  /** 無 `chunkSize`（舊版對端）時的循序寫入游標。 */
+  offset: number;
 }
 
 /** 接收資料通道訊息，處理 Nudge 與檔案分塊重組。 */
@@ -221,10 +249,15 @@ export class DataChannelReceiver {
             mime: msg.mime,
             size: msg.size,
             chunks: msg.chunks,
+            // chunkSize 同樣遠端可控 → 只接受正整數；不合理即當作沒給（退回循序寫入）。
+            ...(typeof msg.chunkSize === "number" && Number.isInteger(msg.chunkSize) && msg.chunkSize > 0
+              ? { chunkSize: msg.chunkSize }
+              : {}),
             ...(typeof msg.origin === "string" ? { origin: msg.origin.slice(0, 200) } : {}),
           },
-          received: new Map(),
-          receivedBytes: 0,
+          buf: null,
+          seen: new Set(),
+          offset: 0,
         });
         if (msg.chunks === 0) this.complete(msg.id);
         return;
@@ -233,7 +266,7 @@ export class DataChannelReceiver {
     }
   }
 
-  /** 處理二進位檔案分塊框架。 */
+  /** 處理二進位檔案分塊框架：算出位移後**直接寫進最終緩衝區**（ADR-0345）。 */
   private receiveChunk(data: ArrayBuffer | Uint8Array): void {
     const chunk = decodeFileChunk(data);
     if (!chunk) {
@@ -245,37 +278,53 @@ export class DataChannelReceiver {
       this.handlers.onError?.(`未知檔案分塊 id：${chunk.id}`);
       return;
     }
-    if (!partial.received.has(chunk.seq)) partial.receivedBytes += chunk.bytes.length;
-    if (partial.receivedBytes > partial.meta.size) {
+    // 序號必須落在宣告的範圍內。這條讓「收滿 chunks 塊」等價於「每一塊都到齊」——
+    // 舊版是收滿後再逐一檢查有沒有洞，現在是不可能有洞。
+    if (chunk.seq >= partial.meta.chunks) {
+      this.partials.delete(chunk.id);
+      this.handlers.onError?.(`檔案 ${chunk.id} 分塊序號 ${chunk.seq} 超出宣告範圍，已中止`);
+      return;
+    }
+    if (partial.seen.has(chunk.seq)) return; // 重複塊：忽略（原本也不重複計數）
+
+    const cs = partial.meta.chunkSize;
+    let at: number;
+    if (cs !== undefined) {
+      at = chunk.seq * cs; // 有 chunkSize ⇒ 位移可直接算，亂序送達照樣寫對地方
+    } else {
+      // 舊版對端沒給 chunkSize ⇒ 只能靠到達順序推算位移。資料通道是**可靠且有序**的，
+      // 所以正常情況下這條路徑等價；真的跳號時寧可中止也不要靜默寫錯位置。
+      if (chunk.seq !== partial.seen.size) {
+        this.partials.delete(chunk.id);
+        this.handlers.onError?.(`檔案 ${chunk.id} 分塊亂序且對端未提供 chunkSize，已中止`);
+        return;
+      }
+      at = partial.offset;
+    }
+    if (at + chunk.bytes.length > partial.meta.size) {
       this.partials.delete(chunk.id);
       this.handlers.onError?.(`檔案 ${chunk.id} 實際資料超出宣告大小，已中止`);
       return;
     }
-    partial.received.set(chunk.seq, chunk.bytes);
-    if (partial.received.size === partial.meta.chunks) this.complete(chunk.id);
+
+    // 延後配置（見 `Partial.buf`）：到這裡才確定對方真的在送資料。
+    partial.buf ??= new Uint8Array(partial.meta.size);
+    partial.buf.set(chunk.bytes, at);
+    partial.seen.add(chunk.seq);
+    partial.offset = Math.max(partial.offset, at + chunk.bytes.length);
+    if (partial.seen.size === partial.meta.chunks) this.complete(chunk.id);
   }
 
   private complete(id: string): void {
     const partial = this.partials.get(id);
     if (!partial) return;
     this.partials.delete(id);
-
-    const bytes = new Uint8Array(partial.meta.size);
-    let offset = 0;
-    for (let seq = 0; seq < partial.meta.chunks; seq++) {
-      const chunk = partial.received.get(seq);
-      if (!chunk) {
-        this.handlers.onError?.(`檔案 ${id} 缺少分塊 ${seq}`);
-        return;
-      }
-      bytes.set(chunk, offset);
-      offset += chunk.length;
-    }
     this.handlers.onFile?.({
       id,
       name: partial.meta.name,
       mime: partial.meta.mime,
-      bytes,
+      // 空檔（chunks === 0）從未配置過緩衝區。
+      bytes: partial.buf ?? new Uint8Array(partial.meta.size),
       ...(partial.meta.origin !== undefined ? { origin: partial.meta.origin } : {}),
     });
   }

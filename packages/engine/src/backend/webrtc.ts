@@ -73,6 +73,14 @@ const HIGH_WATER = 1 << 20; // 1 MiB：超過就暫緩送出，避免撐爆緩�
 const CHUNK_SIZE = 16_384;
 
 /**
+ * 背壓排空的保險計時器（毫秒，ADR-0345）。
+ *
+ * 正常路徑是 `bufferedamountlow` 事件。這個計時器只在「事件因競態而錯過」時救場——
+ * 見 `flush()` 裡的說明。**不是輪詢**：事件一到就清掉，正常傳輸中它一次都不會觸發。
+ */
+const DRAIN_FALLBACK_MS = 250;
+
+/**
  * 每個聯絡人一條 WebRTC P2P 連線，複用 core 的 signaling / datachannel：
  * SDP/ICE 經注入的 `publishSignal` 走中繼交換，連上後以資料通道傳檔（分塊 + 進度）。
  * 檔案內容不經中繼，僅走 P2P（DTLS 加密）。
@@ -285,6 +293,9 @@ export class WebRtcTransfer {
   private attachChannel(peerPk: PubkeyHex, peer: PeerConn, dc: RTCDataChannel): void {
     peer.dc = dc;
     dc.binaryType = "arraybuffer"; // 檔案分塊以二進位框架送達（省 base64 膨脹）
+    // ADR-0345：背壓改事件驅動。門檻設在高水位的一半——等它**全空**才續傳會讓管線
+    // 一鬆一緊、吞吐掉一截；留一半在路上，續傳時網卡不會有空窗。
+    dc.bufferedAmountLowThreshold = HIGH_WATER / 2;
     dc.onmessage = (m) => peer.rx.receive(m.data as string | ArrayBuffer);
     const onOpen = () => {
       // ADR-0213：通道可用 → 標題列晶片亮起。ADR-0344：此刻還不知道走哪條路，先誠實報 unknown，
@@ -337,33 +348,65 @@ export class WebRtcTransfer {
     }
   }
 
-  /** 依序送出 outbox 內的檔案（含背壓與進度）。 */
+  /**
+   * 依序送出 outbox 內的檔案（含背壓與進度）。
+   *
+   * ## 兩件事和以前不一樣（ADR-0345）
+   *
+   * 1. **分塊惰性產生**：`encodeFile` 現在是 generator，同一時間只有一塊框架存在。
+   *    原本是先把整份檔案的框架都配置出來（100 MiB 的檔＝額外一整份 100 MiB）。
+   * 2. **背壓改事件驅動**：滿了就等 `bufferedamountlow`，不再每 50ms 醒來問一次。
+   */
   private flush(peerPk: PubkeyHex, peer: PeerConn): void {
     const dc = peer.dc;
     if (!dc || dc.readyState !== "open") return;
     const job = peer.outbox.shift();
     if (!job) return;
-    const messages = encodeFile(job.file, job.id, CHUNK_SIZE, job.origin);
+    const chunks = encodeFile(job.file, job.id, CHUNK_SIZE, job.origin)[Symbol.iterator]();
     const size = job.file.bytes.length;
-    let i = 0;
-    const pump = () => {
+    let sentChunks = 0;
+    let waiting: ReturnType<typeof setTimeout> | undefined;
+
+    const stopWaiting = (): void => {
+      dc.removeEventListener("bufferedamountlow", onDrain);
+      if (waiting !== undefined) clearTimeout(waiting);
+      waiting = undefined;
+    };
+    const onDrain = (): void => {
+      stopWaiting();
+      pump();
+    };
+
+    const pump = (): void => {
       if (dc.readyState !== "open") {
+        stopWaiting();
         this.handlers.onError(peerPk, "傳輸中斷");
         return;
       }
-      while (i < messages.length) {
+      for (;;) {
         if (dc.bufferedAmount > HIGH_WATER) {
-          setTimeout(pump, 50);
+          // 掛上排空事件等它降到門檻（`bufferedAmountLowThreshold`＝HIGH_WATER/2，見 attachChannel）。
+          //
+          // ⚠ 另外掛一個保險計時器：事件只在 `bufferedAmount` **下降穿越**門檻時觸發，若它
+          // 恰好在我們檢查與掛上監聽之間就降下去了，那一次觸發就錯過了——而錯過的後果是
+          // 傳輸**永久卡住且不報錯**，是檔案傳輸最糟的失敗型態。保險計時器把「可能永久卡住」
+          // 換成「最壞多等 250ms」。正常情況下事件先到，計時器會被清掉。
+          dc.addEventListener("bufferedamountlow", onDrain);
+          waiting = setTimeout(onDrain, DRAIN_FALLBACK_MS);
+          (waiting as unknown as { unref?: () => void }).unref?.();
           return;
         }
-        const m = messages[i]!;
+        const next = chunks.next();
+        if (next.done === true) break;
+        const m = next.value;
         // 分塊框架為整段 buffer（offset 0），送底層 ArrayBuffer（零拷貝、無 base64 膨脹）。
-        if (typeof m === "string") dc.send(m);
-        else dc.send(m.buffer as ArrayBuffer);
-        i += 1;
-        // i=1 為 file-begin；之後每則為一個 chunk
-        const sent = Math.min(size, (i - 1) * CHUNK_SIZE);
-        this.handlers.onOutgoingProgress(peerPk, job.id, sent, size);
+        if (typeof m === "string") {
+          dc.send(m); // file-begin
+        } else {
+          dc.send(m.buffer as ArrayBuffer);
+          sentChunks += 1;
+          this.handlers.onOutgoingProgress(peerPk, job.id, Math.min(size, sentChunks * CHUNK_SIZE), size);
+        }
       }
       // 本檔送完，繼續下一個
       this.flush(peerPk, peer);

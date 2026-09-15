@@ -262,3 +262,175 @@ describe("WebRtcTransfer ICE 路徑判定（ADR-0344）", () => {
     expect(await t.refreshIcePath(peer)).toBe("unknown");
   });
 });
+
+// ── ADR-0345：送檔管線——惰性分塊 ＋ 事件驅動背壓 ─────────────────────────
+//
+// 原本是「先把整份檔案的分塊框架都配置出來，再每 50ms 醒來看緩衝空了沒」。
+// 兩個問題：一份多餘的整檔複製，以及一個永遠在轉的計時器。
+
+/** 會記帳的資料通道樁：可控 `bufferedAmount`、支援 addEventListener。 */
+class BufferedDc {
+  readyState = "open";
+  binaryType = "";
+  bufferedAmount = 0;
+  bufferedAmountLowThreshold = 0;
+  onmessage: ((e: unknown) => void) | null = null;
+  onopen: (() => void) | null = null;
+  onclose: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  readonly sent: (string | ArrayBuffer)[] = [];
+  private readonly listeners = new Map<string, Set<() => void>>();
+  constructor() {
+    lastDc = this as unknown as FakeDc;
+  }
+  send(m: string | ArrayBuffer): void {
+    this.sent.push(m);
+  }
+  close(): void {}
+  addEventListener(type: string, fn: () => void): void {
+    if (!this.listeners.has(type)) this.listeners.set(type, new Set());
+    this.listeners.get(type)!.add(fn);
+  }
+  removeEventListener(type: string, fn: () => void): void {
+    this.listeners.get(type)?.delete(fn);
+  }
+  /** 觸發排空事件（模擬網卡送完）。 */
+  drain(): void {
+    this.bufferedAmount = 0;
+    for (const fn of [...(this.listeners.get("bufferedamountlow") ?? [])]) fn();
+  }
+  /** 目前掛著幾個排空監聽（用來驗證沒有洩漏）。 */
+  get waiters(): number {
+    return this.listeners.get("bufferedamountlow")?.size ?? 0;
+  }
+  /** 送出的二進位分塊數（不含 file-begin 字串）。 */
+  get chunkCount(): number {
+    return this.sent.filter((m) => typeof m !== "string").length;
+  }
+}
+
+class BufferedPc extends FakePc {
+  override createDataChannel(): FakeDc {
+    return new BufferedDc() as unknown as FakeDc;
+  }
+}
+
+describe("WebRtcTransfer 送檔管線（ADR-0345）", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  const setup = () => {
+    vi.stubGlobal("RTCPeerConnection", BufferedPc);
+    lastDc = undefined;
+    const progress: Array<[string, number, number]> = [];
+    const errors: string[] = [];
+    const sk = generateSecretKey();
+    const peer = getPublicKey(generateSecretKey());
+    const t = new WebRtcTransfer(sk, {
+      publishSignal: () => {},
+      onOutgoingProgress: (_pk, id, sent, size) => progress.push([id, sent, size]),
+      onIncoming: () => {},
+      onError: (_pk, reason) => errors.push(reason),
+    });
+    t.connect(peer);
+    const dc = lastDc as unknown as BufferedDc;
+    dc.readyState = "open";
+    lastDc!.onopen!();
+    return { t, peer, dc, progress, errors };
+  };
+
+  const file = (n: number) => ({ name: "big.bin", mime: "x", bytes: new Uint8Array(n) });
+
+  it("設定 bufferedAmountLowThreshold（沒設的話事件只在全空時才觸發）", () => {
+    const { dc } = setup();
+    expect(dc.bufferedAmountLowThreshold).toBe((1 << 20) / 2);
+  });
+
+  it("緩衝不滿時一路送完：file-begin ＋ 每塊各一則", () => {
+    const { t, peer, dc } = setup();
+    t.sendFile(peer, file(16_384 * 3));
+    expect(typeof dc.sent[0]).toBe("string"); // file-begin
+    expect(dc.chunkCount).toBe(3);
+    expect(dc.waiters).toBe(0); // 沒有卡住 ⇒ 不該留下監聽
+  });
+
+  it("進度逐塊回報，最後一筆等於檔案大小", () => {
+    const size = 16_384 * 3;
+    const { t, peer, progress } = setup();
+    t.sendFile(peer, file(size));
+    expect(progress).toHaveLength(3);
+    expect(progress.at(-1)).toEqual([progress[0]![0], size, size]);
+  });
+
+  it("不足一塊的尾段不會讓進度超過檔案大小", () => {
+    const size = 16_384 + 100;
+    const { t, peer, progress } = setup();
+    t.sendFile(peer, file(size));
+    expect(progress.at(-1)![1]).toBe(size);
+  });
+
+  it("🔴 緩衝超過高水位即停手，並掛上排空監聽（不是每 50ms 輪詢）", () => {
+    const { t, peer, dc } = setup();
+    dc.bufferedAmount = 2 << 20; // 高於高水位
+    t.sendFile(peer, file(16_384 * 5));
+    expect(dc.sent).toHaveLength(0); // 一則都沒送
+    expect(dc.waiters).toBe(1);
+  });
+
+  it("🔴 排空事件一到就續傳，並解除監聽（不得累積）", () => {
+    const { t, peer, dc } = setup();
+    dc.bufferedAmount = 2 << 20;
+    t.sendFile(peer, file(16_384 * 4));
+    expect(dc.waiters).toBe(1);
+    dc.drain();
+    expect(dc.chunkCount).toBe(4);
+    expect(dc.waiters).toBe(0);
+  });
+
+  it("送到一半塞住 → 續傳接得回去，不重送也不漏塊", () => {
+    const { t, peer, dc } = setup();
+    let count = 0;
+    const realSend = dc.send.bind(dc);
+    dc.send = (m: string | ArrayBuffer): void => {
+      realSend(m);
+      if (++count === 3) dc.bufferedAmount = 2 << 20; // 第三則之後塞住
+    };
+    t.sendFile(peer, file(16_384 * 5));
+    expect(dc.chunkCount).toBe(2); // begin + 2 塊
+    dc.drain();
+    expect(dc.chunkCount).toBe(5);
+  });
+
+  it("🔴 保險計時器：排空事件沒來也不會永久卡住（卡住且不報錯是最糟的失敗）", async () => {
+    vi.useFakeTimers();
+    try {
+      const { t, peer, dc } = setup();
+      dc.bufferedAmount = 2 << 20;
+      t.sendFile(peer, file(16_384 * 2));
+      expect(dc.sent).toHaveLength(0);
+      dc.bufferedAmount = 0; // 真的空了，但事件（模擬競態）從未觸發
+      await vi.advanceTimersByTimeAsync(300);
+      expect(dc.chunkCount).toBe(2);
+      expect(dc.waiters).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("等待期間通道關閉 → 回報中斷而非靜默停住", () => {
+    const { t, peer, dc, errors } = setup();
+    dc.bufferedAmount = 2 << 20;
+    t.sendFile(peer, file(16_384 * 3));
+    dc.readyState = "closed";
+    dc.drain();
+    expect(errors).toContain("傳輸中斷");
+    expect(dc.waiters).toBe(0); // 收尾要清乾淨
+  });
+
+  it("佇列中的多個檔案依序送出", () => {
+    const { t, peer, dc } = setup();
+    t.sendFile(peer, file(16_384));
+    t.sendFile(peer, file(16_384 * 2));
+    expect(dc.chunkCount).toBe(3);
+    expect(dc.sent.filter((m) => typeof m === "string")).toHaveLength(2); // 兩個 file-begin
+  });
+});
