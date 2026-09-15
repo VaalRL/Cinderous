@@ -18,5 +18,12 @@
     "release:check": "node scripts/release-notes.mjs --check",
     "threat:snapshot": "node scripts/threat-snapshot.mjs",
     "threat:check": "node scripts/threat-snapshot.mjs --check"
+  },
+  "pnpm": {
+    "peerDependencyRules": {
+      "ignoreMissing": [
+        "react-native"
+      ]
+    }
   }
 }
