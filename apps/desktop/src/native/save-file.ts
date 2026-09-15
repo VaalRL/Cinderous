@@ -5,6 +5,7 @@
 // - 瀏覽器/web preview：無任意檔案系統存取，退回瀏覽器下載（最終路徑不可知），回傳可再下載的 URL。
 
 import { invoke, isTauri } from "@tauri-apps/api/core";
+import { readInboxFile, removeInboxFile } from "@cinderous/engine"; // ADR-0347
 
 /** 另存結果：`savedPath`＝Tauri 選定路徑；`url`＝瀏覽器下載用物件 URL；皆無＝使用者取消。 */
 export interface SaveResult {
@@ -27,6 +28,27 @@ export async function saveIncomingFile(name: string, mime: string, bytes: Uint8A
   }
   // 瀏覽器後備：以 <a download> 觸發瀏覽器下載（路徑由瀏覽器決定、不可知）。
   return browserDownload(name, mime, bytes);
+}
+
+/**
+ * 串流落盤的檔案另存（ADR-0347，瀏覽器版）。
+ *
+ * 🔴 **不把它讀成位元組**：`URL.createObjectURL(file)` 對 OPFS 取回的 `File` 是**零複製**，
+ * 下載直接從磁碟串流。`await file.arrayBuffer()` 會把剛剛省下的記憶體全部吃回去。
+ *
+ * ⚠ Tauri 不會走到這裡——它的另存是 Rust `save_file`，需要整份位元組過 IPC，所以桌面端
+ * 直接以 `streamLargeFiles: false` 關閉串流（見 App 建構後端處與 ADR-0347 §後續行動）。
+ */
+export async function saveStreamedFile(name: string, handle: string): Promise<SaveResult> {
+  const file = await readInboxFile(handle);
+  if (!file) return {};
+  const url = URL.createObjectURL(file);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  a.click();
+  void removeInboxFile(handle); // 使用者已拿到檔案 ⇒ 暫存區不必再留
+  return { url };
 }
 
 /** 導出文字紀錄另存（ADR-0094）：Tauri 跳原生另存、瀏覽器下載。回傳路徑（Tauri）或 url（瀏覽器）。 */

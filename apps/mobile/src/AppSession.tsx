@@ -47,7 +47,7 @@ import {
 import { notifier, onNotifyClick } from "./native/notify.js";
 import type { BlockedContact, CalendarEventInput, ContactRequest, RsvpStatus, StoredCalendarEvent } from "@cinderous/engine";
 import type { CallMedia, CallState, VideoQuality } from "@cinderous/core";
-import { makeThumbnail, pickFile, pickFileBytes, saveFile, takePhoto } from "./native/files.js";
+import { makeThumbnail, pickFile, pickFileBytes, saveFile, saveStreamedFile, takePhoto } from "./native/files.js";
 import {
   foregroundEnabled,
   foregroundSupported,
@@ -649,23 +649,29 @@ export function AppSession({
         }),
       // 收到檔案位元組（ADR-0093）：另存到裝置，App 不保管本體；訊息本身由 backend 建好。
       onFileBytes: (pk, messageId, file) => {
+        const patch = (url: string | null): void =>
+          threads.setConvos((c) => {
+            const cur = c[pk];
+            if (!cur) return c;
+            return {
+              ...c,
+              [pk]: cur.map((m) =>
+                m.id === messageId && m.file
+                  ? { ...m, file: { ...m.file, sent: file.size, ...(url ? { url } : {}) } }
+                  : m,
+              ),
+            };
+          });
+        // ADR-0347：大檔已串流落盤 ⇒ 沒有位元組（也就沒有縮圖——縮圖只對小圖有意義）。
+        if (file.sink) {
+          void saveStreamedFile(file.name, file.sink.handle).then(patch);
+          return;
+        }
         // 圖片縮圖（ADR-0102）：跨 session 存活，重載後圖片仍是圖片。
-        void makeThumbnail(file.bytes, file.mime).then((thumb) => {
+        void makeThumbnail(file.bytes!, file.mime).then((thumb) => {
           if (thumb) backend.setFileThumb?.(pk, messageId, thumb);
         });
-        const url = saveFile(file.name, file.mime, file.bytes);
-        threads.setConvos((c) => {
-          const cur = c[pk];
-          if (!cur) return c;
-          return {
-            ...c,
-            [pk]: cur.map((m) =>
-              m.id === messageId && m.file
-                ? { ...m, file: { ...m.file, sent: file.bytes.length, ...(url ? { url } : {}) } }
-                : m,
-            ),
-          };
-        });
+        patch(saveFile(file.name, file.mime, file.bytes!));
       },
       // 縮圖產生完成（ADR-0102）：即時打進 UI。
       onFileThumb: (pk, messageId, thumb) =>

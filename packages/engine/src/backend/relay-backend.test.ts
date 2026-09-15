@@ -1519,8 +1519,9 @@ describe("檔案投遞與另存（ADR-0093）", () => {
     });
     b2.start({
       ...noop,
+      // ADR-0347：relay 暫存路徑（ADR-0162，上限 ≤ 16 MB）永遠走記憶體 ⇒ 恆有位元組。
       onFileBytes: (_pk, _id, f) =>
-        gotBytes.push({ name: f.name, size: f.bytes.length, first: f.bytes[0]!, last: f.bytes[f.bytes.length - 1]! }),
+        gotBytes.push({ name: f.name, size: f.size, first: f.bytes![0]!, last: f.bytes![f.size - 1]! }),
     });
     expect(gotBytes.length).toBe(1);
     expect(gotBytes[0]).toEqual({ name: "簡報.pdf", size: 100_000, first: 0, last: (100_000 - 1) % 251 });
