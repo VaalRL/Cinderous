@@ -40,6 +40,7 @@ import { fetchRelayInfo, type RelayInfo } from "@cinderous/engine";
 import type { CalendarEventInput, RsvpStatus, StoredCalendarEvent } from "@cinderous/engine";
 import type { IcePath } from "@cinderous/engine"; // ADR-0344：直連 vs 經 TURN 中繼
 import { formatBytes } from "@cinderous/engine"; // ADR-0344：提示文案與檔案泡泡共用同一個格式
+import { blobStream } from "@cinderous/core"; // ADR-0346：大檔逐塊讀，整檔不進 RAM
 import { browserStore } from "./native/browser-store.js";
 import { safeNsecDecode } from "./nsec.js";
 import { getKeyVault, tauriKeyVault } from "./native/keyvault.js";
@@ -48,7 +49,7 @@ import { getNotifier, onNotificationClick } from "./native/notify.js";
 import { pickFileToSend, readFileAtPath, saveIncomingFile, saveTextFile } from "./native/save-file.js";
 import { onNativeFileDrop } from "./native/file-drop.js";
 import { makeThumbnail } from "./ui/thumbnail.js";
-import { sanitizedFileName, sanitizeImage } from "@cinderous/engine"; // ADR-0273：送圖去 EXIF
+import { needsBytesToSend, sanitizedFileName, sanitizeImage } from "@cinderous/engine"; // ADR-0273：送圖去 EXIF；ADR-0346：其餘走惰性串流
 import { useI18n } from "./i18n.js";
 import { type Layout, useLayout } from "./layout.js";
 import {
@@ -2383,20 +2384,41 @@ export function App(): JSX.Element {
     forget(pk);
   };
 
+  /**
+   * ADR-0344：大檔走 TURN 中繼前先問一聲。**提示而非封鎖**——檔案真的送得出去，只是慢且耗
+   * 中繼流量；擋下來就是替使用者決定他的檔案不重要。判不出來時也問，但話說得不一樣。
+   * 回 `true`＝可以送。位元組路徑與惰性串流路徑共用。
+   */
+  const passesFileGate = async (pk: string, sizeBytes: number): Promise<boolean> => {
+    const warn = await activeBackend.checkFileSend?.(pk, sizeBytes);
+    if (!warn) return true;
+    return await confirm({
+      message: t(warn.path === "relay" ? "fileGate_relayWarn" : "fileGate_unknownWarn", {
+        size: formatBytes(warn.sizeBytes),
+      }),
+    });
+  };
+
+  /**
+   * 惰性送出（ADR-0346）：**整檔不進 RAM**。用於大檔與非圖片——沒有縮圖、沒有 EXIF 清除
+   * （前者只對圖片有意義，後者只對圖片適用），所以不需要位元組。
+   *
+   * blob URL 直接由 `File` 產生：`createObjectURL` 對 File 是**零複製**（它本來就只是磁碟
+   * 上那份檔案的把手），不像 `new Blob([bytes])` 會再存一份。
+   */
+  const sendFileStreamed = async (pk: string, f: File) => {
+    if (!activeBackend.sendFile) return;
+    const mime = f.type || "application/octet-stream";
+    if (!(await passesFileGate(pk, f.size))) return;
+    const tid = activeBackend.sendFile(pk, blobStream(f.name, mime, f));
+    setConvos((prev) => patchFileByTid(prev, pk, tid, { url: URL.createObjectURL(f) }));
+    setOpen((prev) => (prev.includes(pk) ? prev : [...prev, pk]));
+  };
+
   /** 送出一個檔案。`savedPath` 只有原生選檔拿得到（ADR-0103）；瀏覽器 <input> 沒有。 */
   const sendFileBytes = async (pk: string, name: string, mime: string, bytes: Uint8Array, savedPath?: string) => {
     if (!activeBackend.sendFile) return;
-    // ADR-0344：大檔走 TURN 中繼前先問一聲。**提示而非封鎖**——檔案真的送得出去，只是慢
-    // 且耗中繼流量；擋下來就是替使用者決定他的檔案不重要。判不出來時也問，但話說得不一樣。
-    const warn = await activeBackend.checkFileSend?.(pk, bytes.length);
-    if (warn) {
-      const ok = await confirm({
-        message: t(warn.path === "relay" ? "fileGate_relayWarn" : "fileGate_unknownWarn", {
-          size: formatBytes(warn.sizeBytes),
-        }),
-      });
-      if (!ok) return;
-    }
+    if (!(await passesFileGate(pk, bytes.length))) return;
     // 圖片縮圖（ADR-0102）：只存本機、不進 metadata 訊息、不上中繼。非圖片回 null。
     const thumb = await makeThumbnail(bytes, mime);
     // backend 擁有檔案訊息（ADR-0093）：sendFile 會同步 emit onMessage（file.id＝傳輸 id）。
@@ -2412,11 +2434,22 @@ export function App(): JSX.Element {
     setOpen((prev) => (prev.includes(pk) ? prev : [...prev, pk]));
   };
 
-  /** 瀏覽器 <input type=file> / 拖放路徑：拿不到完整路徑（瀏覽器安全限制）。 */
+  /**
+   * 瀏覽器 <input type=file> / 拖放路徑：拿不到完整路徑（瀏覽器安全限制）。
+   *
+   * ADR-0346：**只有需要位元組的檔案才把它讀進來**。需要位元組＝要做縮圖（ADR-0102）或
+   * EXIF 清除（ADR-0273），兩者都只對圖片有意義；其餘一律走惰性串流。這一行 `arrayBuffer()`
+   * 原本是無條件的——一個 2 GB 的檔在這裡就 OOM 了，連一個位元組都還沒上網。
+   */
   const sendFile = async (pk: string, f: File) => {
+    const mime = f.type || "application/octet-stream";
+    if (!needsBytesToSend(mime, f.size)) {
+      await sendFileStreamed(pk, f);
+      return;
+    }
     const raw = new Uint8Array(await f.arrayBuffer());
     // ADR-0273：圖片送出前清除 EXIF/GPS 等中繼資料（canvas 重編碼）；不適用或失敗即原樣。
-    const s = await sanitizeImage(raw, f.type || "application/octet-stream");
+    const s = await sanitizeImage(raw, mime);
     await sendFileBytes(pk, sanitizedFileName(f.name, s.changed), s.mime, s.bytes);
   };
 

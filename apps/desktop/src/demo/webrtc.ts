@@ -1,7 +1,7 @@
 import {
   createSignal,
   DataChannelReceiver,
-  encodeFile,
+  streamFile,
   encodeNudge,
   generateSecretKey,
   getPublicKey,
@@ -174,10 +174,17 @@ export async function runWebRtcScenario(): Promise<WebRtcResult> {
       connected = true;
       say("資料通道開啟（真實 WebRTC P2P）");
       dc.send(encodeNudge());
-      for (const msg of encodeFile({ name: fileName, mime: "application/octet-stream", bytes: payload }, "f1", 8_192)) {
-        if (typeof msg === "string") dc.send(msg);
-        else dc.send(msg.buffer as ArrayBuffer);
-      }
+      // ADR-0345/0346：分塊惰性產生、逐塊才讀 ⇒ async iteration。
+      void (async () => {
+        for await (const msg of streamFile(
+          { name: fileName, mime: "application/octet-stream", bytes: payload },
+          "f1",
+          8_192,
+        )) {
+          if (typeof msg === "string") dc.send(msg);
+          else dc.send(msg.buffer as ArrayBuffer);
+        }
+      })();
     };
 
     // A 發起 offer
