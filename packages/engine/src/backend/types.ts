@@ -1,4 +1,5 @@
 import type { IcePath } from "./ice-path.js";
+import type { RelayFileWarning } from "./file-gate.js";
 import type {
   CallFailureReason,
   CallMedia,
@@ -576,6 +577,17 @@ export interface ChatBackend {
    * （保守），不要當成直連。
    */
   refreshIcePath?(to: PubkeyHex): Promise<IcePath>;
+  /**
+   * 送檔前的把關（ADR-0344 §後續行動 1）：這個檔案會不會經 TURN 中繼送出，大到值得提示？
+   *
+   * `to` 可以是聯絡人或**群組 id**（群組逐一扇出，任一成員在中繼上就是一份完整流量）。
+   * 回 `null`＝不必打擾使用者；回警告＝UI 應**提示並讓使用者決定**，不是擋下來
+   * （見 `file-gate.ts` 檔頭：這不是錯誤，只是慢且耗中繼流量）。
+   *
+   * ⚠ 會重測路徑（`refreshIcePath`），故為非同步。`path: "unknown"` 代表判不出來而非
+   * 「確定在中繼上」——文案必須據此換句話，否則就是假警報。
+   */
+  checkFileSend?(to: PubkeyHex, sizeBytes: number): Promise<RelayFileWarning | null>;
   /** 建立群組（M9）：`memberPubkeys` 為其他成員的公鑰（既有聯絡人）。 */
   createGroup?(name: string, memberPubkeys: PubkeyHex[]): void;
   /** 對群組送出訊息（扇出給所有成員）；`mentions` 為 @提及公鑰（ADR-0050）；`replyTo` 為對話串根 id（ADR-0051）；`alsoMain` 同 sendMessage（ADR-0232）。 */

@@ -913,6 +913,12 @@ export interface Messages {
   call_failed_unreachable: string;
   /** 通話已連上後中途斷線；ADR-0243。 */
   call_failed_lost: string;
+  /**
+   * 送大檔前的中繼提示（ADR-0344）。**兩句刻意不同**：`Relay` 是「確定在中繼上」、
+   * `Unknown` 是「無法確認」——把後者說成前者就是假警報（ADR-0210 的教訓）。
+   */
+  fileGate_relayWarn: string;
+  fileGate_unknownWarn: string;
   /** 通話走哪條路的 tooltip（ADR-0344）；短標籤沿用 `convo_p2p*`（與情境無關）。 */
   call_pathDirectHint: string;
   call_pathRelayHint: string;
@@ -1784,6 +1790,10 @@ const zhHant: Messages = {
     "省流量約 180 MB/小時、標準約 585 MB/小時、高畫質約 1.4 GB/小時。通話中可隨時調整，這裡設的是下一通的起點。",
   call_failed_unreachable: "通話接不通——限制網路（對稱 NAT／嚴格防火牆）下無法建立直連。可改用 Wi-Fi 或其他網路再撥；文字與檔案不受影響。",
   call_failed_lost: "通話中斷——連線中途斷開（可能網路不穩）。可再撥一次。",
+  fileGate_relayWarn:
+    "這個檔案有 {size}，而目前**直連沒有建立、位元組會經中繼轉送**——會比直連慢很多，也會耗用中繼流量。\n\n仍要傳送嗎？",
+  fileGate_unknownWarn:
+    "這個檔案有 {size}，但目前**無法確認**是直連還是經中繼轉送。若是經中繼，會比直連慢很多，也會耗用中繼流量。\n\n仍要傳送嗎？",
   call_pathDirectHint: "與對方直連——延遲最低，媒體不經任何伺服器。",
   call_pathRelayHint: "直連打不穿，媒體正經 TURN 中繼轉送。內容仍是端到端加密（中繼只看得到密文），但延遲較高、也較耗中繼流量。",
   call_pathUnknownHint: "通話進行中，但尚未測出是直連或經中繼。",
@@ -2653,6 +2663,10 @@ const en: Messages = {
   call_failed_unreachable:
     "Call couldn't connect — a restricted network (symmetric NAT / strict firewall) blocked a direct link. Try Wi-Fi or another network; text and files are unaffected.",
   call_failed_lost: "Call dropped — the connection was lost mid-call (network may be unstable). You can call again.",
+  fileGate_relayWarn:
+    "This file is {size}, and there is **no direct link — the bytes will go through a relay**. That is much slower than a direct transfer and uses relay bandwidth.\n\nSend it anyway?",
+  fileGate_unknownWarn:
+    "This file is {size}, but we **cannot confirm** whether the link is direct or relayed. If it is relayed, the transfer will be much slower and will use relay bandwidth.\n\nSend it anyway?",
   call_pathDirectHint: "Direct link to this contact — lowest latency, media goes through no server.",
   call_pathRelayHint:
     "No direct link, so media is going through a TURN relay. It stays end-to-end encrypted (the relay only sees ciphertext), but latency is higher and it uses relay bandwidth.",

@@ -14,6 +14,7 @@ export * from "./backend/relay-info.js";
 export * from "./backend/relay-check.js";
 export * from "./backend/rtc-config.js";
 export * from "./backend/ice-path.js"; // ADR-0344：直連 vs 經 TURN 中繼的判定
+export * from "./backend/file-gate.js"; // ADR-0344：大檔走 TURN 的把關
 export * from "./backend/webrtc.js";
 export * from "./backend/webrtc-call.js";
 // ── 換機/配對（D4a）──

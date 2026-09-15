@@ -36,6 +36,7 @@ import { deriveStorageKey, generateSecretKey, GROUP_MEMBERS_MAX, groupSizeExceed
 import {
   contactLabel,
   createPairingOffer,
+  formatBytes,
   notificationFor,
   runPairSource,
   runPairTarget,
@@ -846,9 +847,9 @@ export function AppSession({
     if (activeId && !isGroup(activeId)) backendRef.current?.sendTyping(activeId);
   };
   /** 破壞性/重要操作的二次確認：無 window.confirm（如 SSR）時照做，有則需使用者確認。回 true＝可繼續。 */
-  const confirmAction = (key: MessageKey): boolean => {
+  const confirmAction = (key: MessageKey, params?: Record<string, string | number>): boolean => {
     if (typeof window === "undefined" || typeof window.confirm !== "function") return true;
-    return window.confirm(translate(locale, key));
+    return window.confirm(translate(locale, key, params));
   };
   /**
    * 同上，但**取不到 confirm 就不做**（fail-closed）。
@@ -1157,6 +1158,21 @@ export function AppSession({
     backendRef.current?.setInvisible?.(v);
   };
   // 送出檔案（ADR-0093/0100）：選檔 → P2P 位元組＋中繼 metadata；訊息由 backend 建立。
+  /**
+   * 送大檔前的中繼把關（ADR-0344）。**提示而非封鎖**——檔案真的送得出去，只是慢且耗中繼
+   * 流量；擋下來就是替使用者決定他的檔案不重要。判不出來時也問，但文案說「無法確認」
+   * 而非「正在中繼上」（假警報會讓提示失去意義，ADR-0210 的教訓）。
+   *
+   * 回 `true`＝可以送。選檔與拍照兩條路徑共用。
+   */
+  const passesFileGate = async (b: ChatBackend, pk: string, sizeBytes: number): Promise<boolean> => {
+    const warn = await b.checkFileSend?.(pk, sizeBytes);
+    if (!warn) return true;
+    return confirmAction(warn.path === "relay" ? "fileGate_relayWarn" : "fileGate_unknownWarn", {
+      size: formatBytes(warn.sizeBytes),
+    });
+  };
+
   const sendFileFromPicker = (): void => {
     const b = backendRef.current;
     const pk = activeIdRef.current;
@@ -1164,6 +1180,8 @@ export function AppSession({
     const still = epochRef.current.mark(); // ADR-0329：挑檔/拍照期間切了身分 ⇒ 不要用舊後端送出
     void pickFile().then(async (f) => {
       if (!f || !still()) return;
+      // ADR-0344：大檔走中繼前先問一聲；問完要再驗一次 epoch（問的期間可能切了身分）。
+      if (!(await passesFileGate(b, pk, f.bytes.length)) || !still()) return;
       const thumb = await makeThumbnail(f.bytes, f.mime); // ADR-0102：只存本機、不外送
       // 行動端目前用 DOM <input>（無完整路徑）→ 不帶 savedPath；真 RN 的 document picker 會給 URI（ADR-0103）。
       b.sendFile?.(pk, f, thumb ? { thumb } : {});
@@ -1177,6 +1195,7 @@ export function AppSession({
     const still = epochRef.current.mark(); // ADR-0329：挑檔/拍照期間切了身分 ⇒ 不要用舊後端送出
     void takePhoto().then(async (f) => {
       if (!f || !still()) return;
+      if (!(await passesFileGate(b, pk, f.bytes.length)) || !still()) return; // ADR-0344
       const thumb = await makeThumbnail(f.bytes, f.mime); // ADR-0102：只存本機、不外送
       b.sendFile?.(pk, f, thumb ? { thumb } : {});
     });

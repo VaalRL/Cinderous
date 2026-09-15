@@ -39,6 +39,7 @@ import { DEFAULT_NOTIFY_PREFS, type NotifyPrefs, shouldNotify } from "@cinderous
 import { fetchRelayInfo, type RelayInfo } from "@cinderous/engine";
 import type { CalendarEventInput, RsvpStatus, StoredCalendarEvent } from "@cinderous/engine";
 import type { IcePath } from "@cinderous/engine"; // ADR-0344：直連 vs 經 TURN 中繼
+import { formatBytes } from "@cinderous/engine"; // ADR-0344：提示文案與檔案泡泡共用同一個格式
 import { browserStore } from "./native/browser-store.js";
 import { safeNsecDecode } from "./nsec.js";
 import { getKeyVault, tauriKeyVault } from "./native/keyvault.js";
@@ -2385,6 +2386,17 @@ export function App(): JSX.Element {
   /** 送出一個檔案。`savedPath` 只有原生選檔拿得到（ADR-0103）；瀏覽器 <input> 沒有。 */
   const sendFileBytes = async (pk: string, name: string, mime: string, bytes: Uint8Array, savedPath?: string) => {
     if (!activeBackend.sendFile) return;
+    // ADR-0344：大檔走 TURN 中繼前先問一聲。**提示而非封鎖**——檔案真的送得出去，只是慢
+    // 且耗中繼流量；擋下來就是替使用者決定他的檔案不重要。判不出來時也問，但話說得不一樣。
+    const warn = await activeBackend.checkFileSend?.(pk, bytes.length);
+    if (warn) {
+      const ok = await confirm({
+        message: t(warn.path === "relay" ? "fileGate_relayWarn" : "fileGate_unknownWarn", {
+          size: formatBytes(warn.sizeBytes),
+        }),
+      });
+      if (!ok) return;
+    }
     // 圖片縮圖（ADR-0102）：只存本機、不進 metadata 訊息、不上中繼。非圖片回 null。
     const thumb = await makeThumbnail(bytes, mime);
     // backend 擁有檔案訊息（ADR-0093）：sendFile 會同步 emit onMessage（file.id＝傳輸 id）。
