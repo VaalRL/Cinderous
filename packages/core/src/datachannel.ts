@@ -272,8 +272,23 @@ export interface DataChannelHandlers {
 
 /** 接收端的資源上限（防 OOM 與未完成檔案佔用記憶體）。 */
 export interface DataChannelLimits {
-  /** 單一檔案最大位元組數。預設 100 MiB。 */
+  /**
+   * 單一檔案最大位元組數。預設 1 GiB（ADR-0349）。
+   *
+   * 這個上限在串流落盤之前是 100 MiB，而**那個數字是記憶體逼出來的，不是產品決策**
+   * （ADR-0345）。三個平台都能串流之後才調高——但**只有真的會落盤的檔案吃得到它**，
+   * 見 `maxMemoryFileSize`。
+   */
   maxFileSize?: number;
+  /**
+   * **不落盤時**的單一檔案上限（ADR-0349）。預設 100 MiB——就是串流之前的舊天花板。
+   *
+   * 🔴 為什麼要分兩個上限：`openSink` 可能不存在（沒掛）、也可能在執行期回 `null`
+   * （私密模式、配額拒絕、小檔）。那些情況會**退回記憶體**——而退回記憶體的路徑若沒有
+   * 自己的上限，把 `maxFileSize` 調到 1 GiB 就等於把 OOM 從「擋下來」變成「等它發生」。
+   * 拒絕比 OOM 誠實：使用者至少知道發生了什麼。
+   */
+  maxMemoryFileSize?: number;
   /** 單一檔案最大分塊數。預設 1,000,000。 */
   maxChunks?: number;
   /** 同時進行中的檔案數上限。預設 16。 */
@@ -296,7 +311,8 @@ export interface DataChannelLimits {
   sinkMinBytes?: number;
 }
 
-const DEFAULT_MAX_FILE_SIZE = 100 * 1024 * 1024;
+const DEFAULT_MAX_FILE_SIZE = 1024 * 1024 * 1024; // 1 GiB（ADR-0349：串流落盤之後才拆得掉）
+const DEFAULT_MAX_MEMORY_FILE_SIZE = 100 * 1024 * 1024; // 串流之前的舊天花板，退回記憶體時仍適用
 const DEFAULT_MAX_CHUNKS = 1_000_000;
 const DEFAULT_MAX_CONCURRENT = 16;
 const DEFAULT_MAX_QUEUED_BYTES = 8 * 1024 * 1024;
@@ -341,6 +357,7 @@ interface Partial {
 export class DataChannelReceiver {
   private readonly partials = new Map<string, Partial>();
   private readonly maxFileSize: number;
+  private readonly maxMemoryFileSize: number;
   private readonly maxChunks: number;
   private readonly maxConcurrent: number;
   private readonly maxQueuedBytes: number;
@@ -363,6 +380,7 @@ export class DataChannelReceiver {
     private readonly openSink?: OpenFileSink,
   ) {
     this.maxFileSize = limits.maxFileSize ?? DEFAULT_MAX_FILE_SIZE;
+    this.maxMemoryFileSize = limits.maxMemoryFileSize ?? DEFAULT_MAX_MEMORY_FILE_SIZE;
     this.maxChunks = limits.maxChunks ?? DEFAULT_MAX_CHUNKS;
     this.maxConcurrent = limits.maxConcurrentFiles ?? DEFAULT_MAX_CONCURRENT;
     this.maxQueuedBytes = limits.maxQueuedBytes ?? DEFAULT_MAX_QUEUED_BYTES;
@@ -453,6 +471,11 @@ export class DataChannelReceiver {
         if (this.openSink && msg.size >= this.sinkMinBytes && msg.chunks > 0) {
           partial.mode = "opening";
           void this.beginSink(msg.id, partial);
+        } else if (msg.size > this.maxMemoryFileSize) {
+          // ADR-0349：這個檔不會落盤（沒掛 sink、或小於落盤門檻卻又超過記憶體上限——
+          // 後者只可能是門檻被設得比記憶體上限還大的設定錯誤），而它大到不該進記憶體。
+          this.fail(msg.id, partial, `檔案 ${msg.id} 過大且無法落盤（${msg.size} 位元組）`);
+          return;
         }
         if (msg.chunks === 0) this.complete(msg.id);
         return;
@@ -548,6 +571,12 @@ export class DataChannelReceiver {
       return;
     }
     if (!sink) {
+      // ADR-0349：退回記憶體之前先問一句「它進得了記憶體嗎」。開 sink 失敗（私密模式、
+      // 配額拒絕）是執行期才知道的，所以這個守衛不能只做在 file-begin。
+      if (partial.meta.size > this.maxMemoryFileSize) {
+        this.fail(id, partial, `檔案 ${id} 無法落盤且過大，已中止（${partial.meta.size} 位元組）`);
+        return;
+      }
       // 退回記憶體：把等在佇列裡的分塊倒進緩衝區。
       partial.mode = "memory";
       partial.buf ??= new Uint8Array(partial.meta.size);

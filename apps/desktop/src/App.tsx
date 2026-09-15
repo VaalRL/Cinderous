@@ -47,6 +47,7 @@ import { getKeyVault, tauriKeyVault } from "./native/keyvault.js";
 import { wipeDeviceLocal, wipeIdentityLocal } from "./native/wipe.js";
 import { getNotifier, onNotificationClick } from "./native/notify.js";
 import { pickFileToSend, readFileAtPath, saveIncomingFile, saveStreamedFile, saveTextFile, type SaveResult } from "./native/save-file.js";
+import { sweepInbox, tauriFileSink } from "./native/inbox-sink.js"; // ADR-0349：Tauri 原生落盤
 import { onNativeFileDrop } from "./native/file-drop.js";
 import { makeThumbnail } from "./ui/thumbnail.js";
 import { needsBytesToSend, sanitizedFileName, sanitizeImage } from "@cinderous/engine"; // ADR-0273：送圖去 EXIF；ADR-0346：其餘走惰性串流
@@ -378,6 +379,14 @@ function shardingEnabled(): boolean {
 // 🔴 只在 Tauri 裝——瀏覽器的 `browserKeyVault` 只收 Argon2id 密碼包裹的 blob（見該模組），
 // 沒有密碼就沒有比 localStorage 更好的地方放。硬塞進去只會讓 `deviceKeyTier()` 說謊，
 // 而那個函式存在的唯一理由就是不說謊（ADR-0297 §6 紅線）。瀏覽器維持 `plaintext` 並如實顯示。
+/**
+ * Tauri 原生收檔落盤（ADR-0349）；非 Tauri 為 undefined ⇒ 引擎落回 OPFS 預設。
+ * 模組層取一次即可——它只看平台，不看身分。
+ */
+const tauriSink = tauriFileSink();
+// 開機清一次暫存區：使用者在另存前關掉 app 就會留下 `.part`（ADR-0347 §後果的殘餘）。
+void sweepInbox();
+
 if (isTauri()) {
   setDeviceKeyVault({
     load: () => tauriKeyVault.getKey(DEVICE_KEY_SLOT),
@@ -462,11 +471,10 @@ async function buildBackend(p: Profile, nsecOverride?: string, storage?: AppStor
   // 🔴 ADR-0122：**告訴引擎「這應該是誰」**。拿不到金鑰時它會大聲失敗（IDENTITY_UNAVAILABLE），
   // 而不是靜默產生一把新的把使用者換掉。首次登入的設定檔還沒有 pubkey → 不傳（此時本來就沒有期待值）。
   const guard = p.pubkey ? { expectPubkey: p.pubkey } : {};
-  // ADR-0347：收檔大檔串流落盤——**瀏覽器版才開**。
-  // Tauri 的「另存新檔」走 Rust `save_file`，需要整份位元組過 IPC；要讓它接受 OPFS 暫存檔
-  // 得改 `main.rs`，而那個 bin target **`cargo test` 與 CI 都不編譯**（見 `partfile.rs` 檔頭）
-  // ⇒ 在那裡加程式碼等於加一段沒有任何地方驗證得到的程式。留待另案（ADR-0347 §後續行動）。
-  const stream = { streamLargeFiles: !isTauri() };
+  // ADR-0347／0349：收檔大檔串流落盤，**兩種平台各有去處**。
+  // Tauri 走原生暫存區（Rust 看得到、另存時原生移動，零位元組過 IPC）；
+  // 瀏覽器版走 OPFS（引擎預設）。`tauriFileSink()` 在非 Tauri 回 undefined ⇒ 自然落到預設。
+  const stream = { streamLargeFiles: true, ...(tauriSink ? { fileSink: tauriSink } : {}) };
   return new RelayChatBackend(
     store,
     webSocketConnector(p.relayUrl),

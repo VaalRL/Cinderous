@@ -1,6 +1,6 @@
 # 0347. 收檔端串流落盤：大檔不再整份進 RAM（瀏覽器／行動端）
 
-- 狀態：已接受（Tauri 原生路徑未含，見 §後果）
+- 狀態：已接受（Tauri 原生路徑已於 **ADR-0349** 補上）
 - 日期：2026-09-15
 - 相關文件：ADR-0345（送檔管線串流化第一階段）、ADR-0346（送出端惰性來源）、ADR-0093（收檔另存）、ADR-0111（OPFS 封存）、ADR-0102（縮圖）、ADR-0161/0177（公司儲存槽）、ADR-0162（relay 暫存）、ADR-0119（`partfile.rs` 檔頭：`main.rs` 不被 CI 編譯）
 
@@ -73,7 +73,7 @@ type OpenFileSink = (meta) => Promise<FileSink | null> | FileSink | null;
   - 🔴 **Tauri 桌面沒有串流**（`streamLargeFiles: false`）——那是「第一優先平台」。而它的另存路徑 `invoke("save_file", { bytes: Array.from(bytes) })` **本身就是個記憶體災難**：`Array.from` 把 `Uint8Array` 變成 JS number 陣列（每個元素約 8 bytes）再 JSON 序列化過 IPC ⇒ 100 MiB 的檔約 800 MB。這是本 ADR **發現但沒有修**的既有問題，修它必須動 `main.rs`。
   - **`DEFAULT_MAX_FILE_SIZE` 仍是 100 MiB**。三個平台裡有一個收不下大檔，就不能調高這個全域上限。
   - **大檔沒有縮圖**（> `sinkMinBytes`）——沒有位元組可畫。與 ADR-0346 的「大圖不清 EXIF」是同一類取捨。
-  - **OPFS 暫存區沒有開機清理**：使用者若在另存前關掉 app，`cinder-inbox/` 會留下 `.part` 檔。單檔上限 100 MiB、OPFS 配額很大，所以不會立刻出事，但它會累積。
+  - ~~**OPFS 暫存區沒有開機清理**~~ ⇒ Tauri 端已於 ADR-0349 補上 `inbox_sweep`；**OPFS（瀏覽器/行動端）那一份仍未清理**。
   - **`maxQueuedBytes` 觸發時整個檔案作廢**，不是暫停後重試——資料通道沒有收端流量控制，沒有「暫停」這個選項。
   - **沒有真實 OPFS 的自動化測試**：sink 機制、退路、佇列上限、端到端往返都有測（用替身 sink），但 `opfsFileSink()` 本身跑在 node 測試環境外。
 - 後續行動／待辦：
