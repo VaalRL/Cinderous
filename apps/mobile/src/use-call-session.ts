@@ -19,7 +19,7 @@
 
 import { useState } from "react";
 import type { CallMedia, CallState, CameraFacing } from "@cinderous/core";
-import type { ChatBackendEvents } from "@cinderous/engine";
+import type { ChatBackendEvents, IcePath } from "@cinderous/engine";
 
 export interface CallSession {
   /** 通話中（來電／撥號／通話中皆算；`idle`／`ended` 不算）。 */
@@ -37,10 +37,16 @@ export interface CallSession {
   remoteMedia: CallMedia;
   /** 目前鏡頭的**實際**朝向（ADR-0339）；`null`＝裝置不回報 ⇒ UI 當作前鏡頭。 */
   facing: CameraFacing | null;
+  /**
+   * 這通通話的媒體走哪條路（ADR-0344）：`direct`／`relay`（經 TURN——延遲較高、也耗中繼流量）／
+   * `unknown`（尚未測出）。與 `localMedia`／`remoteMedia` 同理，**每通結束要歸位**：
+   * 上一通走 TURN 不代表下一通也是。
+   */
+  path: IcePath;
   /** 掛給後端 `start()` 的通話事件（展開即可）。 */
   handlers: Pick<
     ChatBackendEvents,
-    "onCallState" | "onCallLocalStream" | "onCallRemoteStream" | "onCallMedia" | "onCallCamera"
+    "onCallState" | "onCallLocalStream" | "onCallRemoteStream" | "onCallMedia" | "onCallCamera" | "onCallIcePath"
   >;
 }
 
@@ -53,6 +59,7 @@ export function useCallSession(): CallSession {
   const [localMedia, setLocalMedia] = useState<CallMedia>("audio");
   const [remoteMedia, setRemoteMedia] = useState<CallMedia>("audio");
   const [facing, setFacing] = useState<CameraFacing | null>(null);
+  const [path, setPath] = useState<IcePath>("unknown");
 
   return {
     active: state !== "idle" && state !== "ended",
@@ -64,6 +71,7 @@ export function useCallSession(): CallSession {
     localMedia,
     remoteMedia,
     facing,
+    path,
     handlers: {
       // ADR-0101：來電自動開通話畫面；結束時把 peer 與兩條串流一起放掉
       //（只清 state 不清串流 ⇒ 畫面沒了但 MediaStream 還在，麥克風/鏡頭燈不會滅）。
@@ -78,6 +86,7 @@ export function useCallSession(): CallSession {
           setLocalMedia("audio");
           setRemoteMedia("audio");
           setFacing(null);
+          setPath("unknown"); // ADR-0344：路徑同理，不得沿用上一通
         } else {
           setPeer(p);
         }
@@ -89,6 +98,8 @@ export function useCallSession(): CallSession {
       },
       // ADR-0339：實際朝向（不是我們要求的）；UI 的鏡像跟著它走。
       onCallCamera: setFacing,
+      // ADR-0344：這通是直連還是經 TURN（engine 只在判定改變時發）。
+      onCallIcePath: (_peer, p) => setPath(p),
       onCallLocalStream: setLocalStream,
       onCallRemoteStream: setRemoteStream,
     },

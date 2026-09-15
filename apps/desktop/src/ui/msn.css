@@ -795,7 +795,9 @@ button:disabled { opacity: .5; cursor: default; filter: none; }
 .chip--p2p { gap: 3px; }
 .chip--p2p.on { background: rgba(54, 196, 107, 0.15); color: #36c46b; border-color: rgba(54, 196, 107, 0.5); }
 /* ADR-0344：經 TURN 中繼——琥珀色。不是錯誤（連線是好的、內容仍端到端加密），
-   但它是較慢且計費的那條路，值得與「直連綠」區分開來。 */
+   但它是較慢且計費的那條路，值得與「直連綠」區分開來。
+   ⚠ 這三個色值的 SSOT 是 @cinderous/theme 的 `P2P_PATH_COLORS`（行動端共吃同一份）；
+   改這裡要一起改那邊，否則 theme 的 p2p-path.test.ts 會紅。 */
 .chip--p2p.relay { background: rgba(230, 162, 60, 0.15); color: #e6a23c; border-color: rgba(230, 162, 60, 0.5); }
 /* ADR-0344：已連線但路徑尚未測出——中性色，不暗示好壞。 */
 .chip--p2p.up { background: rgba(140, 160, 180, 0.15); color: #8ca0b4; border-color: rgba(140, 160, 180, 0.45); }

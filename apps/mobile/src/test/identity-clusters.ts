@@ -27,4 +27,5 @@ export const IDENTITY_CLUSTERS: IdentityCluster[] = [
   { file: "use-self-session.ts", holder: "self" },
   { file: "use-roster-session.ts", holder: "roster" },
   { file: "use-thread-session.ts", holder: "threads" },
+  { file: "use-peer-link-session.ts", holder: "link" }, // ADR-0344：與各聯絡人的 P2P 直連
 ];
