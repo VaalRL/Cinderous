@@ -15,7 +15,7 @@ import { useThemeMode } from "../theme.js";
 import { useContrastMode } from "../contrast.js";
 import type { FloatingWindow } from "./useFloatingWindow.js";
 import type { CallMedia, MentionCandidate, MentionSuggest, SlashCommand } from "@cinderous/core";
-import { getKv, mainMessages, replyCounts, rootIdOf, threadMessages } from "@cinderous/engine";
+import { formatBytes, getKv, mainMessages, replyCounts, rootIdOf, threadMessages } from "@cinderous/engine";
 import type { MessageKey } from "@cinderous/i18n";
 import type { ChatMessage, Contact, IcePath, MessageStatus, Self } from "@cinderous/engine";
 import { contactLabel } from "@cinderous/engine";
@@ -3078,12 +3078,6 @@ function MessageLine({
       ) : null}
     </div>
   );
-}
-
-function formatBytes(n: number): string {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function FileLine({

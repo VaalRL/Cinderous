@@ -22,7 +22,7 @@ import {
   validateStickerSvg,
 } from "@cinderous/core";
 import type { CallMedia, MentionCandidate } from "@cinderous/core";
-import { replyCounts } from "@cinderous/engine";
+import { formatBytes, replyCounts } from "@cinderous/engine";
 import type { CalendarEventInput, ChatMessage, IcePath, MessageStatus, RsvpStatus, StoredCalendarEvent } from "@cinderous/engine";
 import { type Locale, type MessageKey, translate } from "@cinderous/i18n";
 import { BG_PRESETS, type ChatBg, chatBgStyle, p2pPathChip, P2P_PATH_COLORS, resolveTheme, type Theme, type ThemeTokens } from "@cinderous/theme";
@@ -577,7 +577,7 @@ export function ConversationScreen({
   const fileNote = (m: ChatMessage): string => {
     const f = m.file;
     if (!f) return "";
-    const size = f.size < 1024 ? `${f.size} B` : f.size < 1048576 ? `${(f.size / 1024).toFixed(1)} KB` : `${(f.size / 1048576).toFixed(1)} MB`;
+    const size = formatBytes(f.size); // ADR-0344：與桌面／中繼提示共用同一個格式（原為就地複製）
     if (f.savedPath) return `${t("file_saved")}：${f.savedPath}`;
     if (!m.outgoing && !f.url && f.sent < f.size) return `📍 ${t("file_onOtherDevice")}`;
     return size;

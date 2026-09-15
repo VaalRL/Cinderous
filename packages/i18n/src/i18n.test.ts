@@ -74,6 +74,39 @@ describe("FS 文案紅線（ADR-0302 §4／ADR-0306 D1）", () => {
 });
 
 // ADR-0305 §6.1：這句文案在「還原範圍」上說得比實際多。與入口整併**脫鉤**、必改。
+describe("中繼大檔提示的文案紅線（ADR-0344）", () => {
+  it("🔴「確定在中繼上」與「無法確認」必須是不同的兩句話", () => {
+    // 判定層刻意保留 `unknown` 而不猜（ADR-0344 §決策二）；若兩句文案相同，那個誠實
+    // 就在最後一哩被抹掉——使用者看到的仍是「你正在中繼上」這個沒有根據的斷言。
+    for (const locale of LOCALES) {
+      expect(translate(locale, "fileGate_relayWarn")).not.toBe(translate(locale, "fileGate_unknownWarn"));
+    }
+  });
+
+  it("🔴「無法確認」不得寫成斷言——那是假警報，ADR-0210 拿掉全域 P2P 錯誤正是為此", () => {
+    expect(translate("zh-Hant", "fileGate_unknownWarn")).toContain("無法確認");
+    expect(translate("en", "fileGate_unknownWarn").toLowerCase()).toContain("cannot confirm");
+    // 確定的那句反而不該說「無法確認」。
+    expect(translate("zh-Hant", "fileGate_relayWarn")).not.toContain("無法確認");
+    expect(translate("en", "fileGate_relayWarn").toLowerCase()).not.toContain("cannot confirm");
+  });
+
+  it("🔴 是提示不是封鎖——兩句都要問「仍要傳送嗎」，而不是宣告不能送", () => {
+    for (const key of ["fileGate_relayWarn", "fileGate_unknownWarn"] as const) {
+      expect(translate("zh-Hant", key)).toContain("仍要傳送嗎");
+      expect(translate("en", key).toLowerCase()).toContain("anyway?");
+    }
+  });
+
+  it("兩句都要插得進檔案大小（少了 {size} 使用者無從判斷值不值得）", () => {
+    for (const key of ["fileGate_relayWarn", "fileGate_unknownWarn"] as const) {
+      for (const locale of LOCALES) {
+        expect(translate(locale, key, { size: "60.0 MB" })).toContain("60.0 MB");
+      }
+    }
+  });
+});
+
 describe("nsec 登入的還原範圍要誠實（ADR-0305 §6.1）", () => {
   it("🔴 不得無條件宣稱「訊息會一起回來」——貼 nsec 拿不回本機歷史，也拿不回 EK", () => {
     // 事實：`fsState` 來自 `storage.loadFsState()`（本機），而備份碼刻意身分-only（0245 §2）

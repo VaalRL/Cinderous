@@ -164,6 +164,7 @@ import {
 import { loadRelayCheck, recordAuthObservation } from "./relay-check.js"; // ADR-0275：A 層健檢
 import { buildRtcConfig } from "./rtc-config.js";
 import type { IcePath } from "./ice-path.js"; // ADR-0344
+import { relayFileWarningFor, type RelayFileWarning } from "./file-gate.js"; // ADR-0344
 import { fetchTurnServers, turnEndpointFromRelay, turnRefreshDelayMs } from "./turn-fetch.js";
 import { WebRtcCall } from "./webrtc-call.js";
 import { WebRtcTransfer } from "./webrtc.js";
@@ -4673,6 +4674,20 @@ export class RelayChatBackend implements ChatBackend {
   /** 重測與某聯絡人的 ICE 路徑（ADR-0344）：直連／經 TURN 中繼／判不出來。 */
   refreshIcePath(to: PubkeyHex): Promise<IcePath> {
     return this.transfer.refreshIcePath(to);
+  }
+
+  /**
+   * 送檔前的把關（ADR-0344 §後續行動 1）：大檔會不會經 TURN 中繼送出？
+   *
+   * ⚠ **不涵蓋走 relay 暫存的企業檔案**（ADR-0162）——那條路徑根本不碰 TURN，而且上限
+   * `relayFilesMaxMb` ≤ 16 MB，遠低於本門檻，故不可能同時成立，無需特別排除。
+   */
+  async checkFileSend(to: PubkeyHex, sizeBytes: number): Promise<RelayFileWarning | null> {
+    // 群組（ADR-0124）：`to` 是 groupId，位元組逐一扇出給每位成員（自己除外）。
+    const group = this.groups.find((g) => g.id === to);
+    const targets = group ? group.members.filter((m) => m !== this.self.pubkey) : [to];
+    const paths = await Promise.all(targets.map((pk) => this.transfer.refreshIcePath(pk)));
+    return relayFileWarningFor(sizeBytes, paths);
   }
 
   sendNudge(to: PubkeyHex): void {
