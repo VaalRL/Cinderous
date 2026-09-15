@@ -3,7 +3,8 @@ import { describe, expect, it } from "vitest";
 import { I18nProvider } from "../i18n.js";
 import { ThemeProvider } from "../theme.js";
 import type { ChatMessage, Contact, IcePath, MessageStatus, Self } from "@cinderous/engine";
-import { ConversationWindow, p2pChipSpec } from "./ConversationWindow.js";
+import { ConversationWindow } from "./ConversationWindow.js";
+import { p2pChipSpec } from "./p2p-chip.js";
 import { CHIME_PRESETS } from "./ringtone.js";
 
 const self: Self = { pubkey: "aa", name: "我", status: "online", statusMessage: "" };

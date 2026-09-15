@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { classifyIcePath, probeIcePath, type IceStatsEntry } from "./ice-path.js";
+import { describe, expect, it, vi } from "vitest";
+import { classifyIcePath, IcePathTracker, probeIcePath, type IcePath, type IceStatsEntry } from "./ice-path.js";
 
 /** 組一張最小 stats 圖：一組 transport→candidate-pair→兩端候選。 */
 function graph(localType: string, remoteType: string, extra: Partial<IceStatsEntry> = {}): IceStatsEntry[] {
@@ -175,5 +175,111 @@ describe("probeIcePath — 從 RTCPeerConnection 取 stats", () => {
 
   it("getStats 回傳 rejected promise → unknown", async () => {
     expect(await probeIcePath({ getStats: () => Promise.reject(new Error("nope")) })).toBe("unknown");
+  });
+});
+
+describe("IcePathTracker — 何時探測、何時作廢、變了才通知", () => {
+  const source = (stats: IceStatsEntry[]) => ({ getStats: () => Promise.resolve(stats) });
+  const DIRECT = graph("host", "host");
+  const RELAY = graph("relay", "host");
+
+  it("初始為 unknown", () => {
+    expect(new IcePathTracker(() => {}).path).toBe("unknown");
+  });
+
+  it("refresh 測出結果並通知一次", async () => {
+    const seen: IcePath[] = [];
+    const tracker = new IcePathTracker((p) => seen.push(p));
+    expect(await tracker.refresh(source(RELAY))).toBe("relay");
+    expect(tracker.path).toBe("relay");
+    expect(seen).toEqual(["relay"]);
+  });
+
+  it("同值不重複通知", async () => {
+    const seen: IcePath[] = [];
+    const tracker = new IcePathTracker((p) => seen.push(p));
+    await tracker.refresh(source(RELAY));
+    await tracker.refresh(source(RELAY));
+    await tracker.refresh(source(RELAY));
+    expect(seen).toEqual(["relay"]);
+  });
+
+  it("判定改變才再通知（relay → 升級為直連）", async () => {
+    const seen: IcePath[] = [];
+    const tracker = new IcePathTracker((p) => seen.push(p));
+    await tracker.refresh(source(RELAY));
+    await tracker.refresh(source(DIRECT));
+    expect(seen).toEqual(["relay", "direct"]);
+  });
+
+  it("start 排定有界探測，時間到自動測出", async () => {
+    vi.useFakeTimers();
+    try {
+      const seen: IcePath[] = [];
+      const tracker = new IcePathTracker((p) => seen.push(p));
+      tracker.start(source(RELAY));
+      await vi.advanceTimersByTimeAsync(50);
+      expect(seen).toEqual(["relay"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("start 之後路徑變了，後續排程會補抓到（不會永久標成經中繼）", async () => {
+    vi.useFakeTimers();
+    try {
+      const seen: IcePath[] = [];
+      const tracker = new IcePathTracker((p) => seen.push(p));
+      let stats = RELAY;
+      tracker.start({ getStats: () => Promise.resolve(stats) });
+      await vi.advanceTimersByTimeAsync(50);
+      stats = DIRECT; // ICE 換到更好的配對
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(seen).toEqual(["relay", "direct"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("reset 之後排程中的探測不再回報，路徑歸零", async () => {
+    vi.useFakeTimers();
+    try {
+      const seen: IcePath[] = [];
+      const tracker = new IcePathTracker((p) => seen.push(p));
+      tracker.start(source(RELAY));
+      tracker.reset();
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(seen).toEqual([]);
+      expect(tracker.path).toBe("unknown");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("在途探測遇上 reset 會自我作廢（上一條連線的判定不得蓋到下一條）", async () => {
+    const seen: IcePath[] = [];
+    const tracker = new IcePathTracker((p) => seen.push(p));
+    let release: (v: IceStatsEntry[]) => void = () => {};
+    const pending = new Promise<IceStatsEntry[]>((r) => (release = r));
+    const inflight = tracker.refresh({ getStats: () => pending });
+    tracker.reset(); // 通話掛斷／通道關閉
+    release(RELAY); // 探測這才回來
+    await inflight;
+    expect(seen).toEqual([]);
+    expect(tracker.path).toBe("unknown");
+  });
+
+  it("重複 start 會先作廢前一輪（不累積計時器、不重複回報）", async () => {
+    vi.useFakeTimers();
+    try {
+      const seen: IcePath[] = [];
+      const tracker = new IcePathTracker((p) => seen.push(p));
+      tracker.start(source(RELAY));
+      tracker.start(source(RELAY));
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(seen).toEqual(["relay"]);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

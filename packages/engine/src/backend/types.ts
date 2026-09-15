@@ -302,6 +302,13 @@ export interface ChatBackendEvents {
    */
   onCallFailed?(peer: PubkeyHex, reason: CallFailureReason): void;
   /**
+   * 這通通話的媒體走哪條路（ADR-0344）：`direct`（兩端直連、延遲最低）／`relay`（經 TURN 中繼
+   * ——延遲較高，且**按流量計費**：視訊 ≈ 150 MB／10 分鐘）／`unknown`（尚未測出）。
+   *
+   * 只在**判定改變**時發，且通話結束時不發 `unknown` 收尾——UI 應於 `onCallState` 結束時自行歸位。
+   */
+  onCallIcePath?(peer: PubkeyHex, path: IcePath): void;
+  /**
    * 前向保密降級警告（ADR-0245）：對**已釘選 FS**（見過其簽章能力宣告）的聯絡人送訊，卻**找不到其 EK**
    * → 該則會退回靜態（無 FS）。UI 應提示使用者（非靜默）——可能是對方 EK 尚未同步（稍後重試），或疑似降級。
    */

@@ -115,6 +115,7 @@ import { detectDateAtEnd, detectDates } from "@cinderous/core";
 import { ComposerRewrite } from "./ComposerRewrite.js";
 import { applyEmoticons } from "./emoticons.js";
 import { avatarColor, EMOTICONS, initial } from "./util.js";
+import { p2pChipSpec } from "./p2p-chip.js"; // ADR-0213/0344：連線路徑晶片
 import { EditableAvatar, usePersonalizeTick } from "./Avatar.js";
 import { ChatBgPicker } from "./ChatBgPicker.js";
 import { CHIME_PRESETS, playChime } from "./ringtone.js";
@@ -468,24 +469,6 @@ function renderRichText(
       <img key={i} className="emoji" src={assetSrc(seg.svg, seg.format)} alt={`:${seg.shortcode}:`} title={`:${seg.shortcode}:`} />
     ),
   );
-}
-
-/**
- * 標題列連線晶片的呈現規格（ADR-0213 的兩態 → ADR-0344 的四態）。
- *
- * 抽成純函式是為了可測：「什麼連線狀態該顯示什麼」是產品判斷，不該埋在 JSX 裡才驗得到。
- *
- * ⚠ 已連線但 `path` 未知時**不會**沿用「⚡直連」——那是在沒測之前替使用者假設最好的情況。
- * 寧可先顯示中性的「🔗已連線」，等探測回來再轉正（ADR-0344 §後果：短暫轉場是刻意的）。
- */
-export function p2pChipSpec(
-  connected: boolean,
-  path?: IcePath,
-): { mod: string; icon: string; label: MessageKey; hint: MessageKey } {
-  if (!connected) return { mod: "", icon: "⚪", label: "convo_p2pNone", hint: "convo_p2pNoneHint" };
-  if (path === "relay") return { mod: " relay", icon: "🔁", label: "convo_p2pRelay", hint: "convo_p2pRelayHint" };
-  if (path === "direct") return { mod: " on", icon: "⚡", label: "convo_p2pDirect", hint: "convo_p2pDirectHint" };
-  return { mod: " up", icon: "🔗", label: "convo_p2pUnknown", hint: "convo_p2pUnknownHint" };
 }
 
 export function ConversationWindow(props: ConversationProps): JSX.Element {

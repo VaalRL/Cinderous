@@ -913,6 +913,10 @@ export interface Messages {
   call_failed_unreachable: string;
   /** 通話已連上後中途斷線；ADR-0243。 */
   call_failed_lost: string;
+  /** 通話走哪條路的 tooltip（ADR-0344）；短標籤沿用 `convo_p2p*`（與情境無關）。 */
+  call_pathDirectHint: string;
+  call_pathRelayHint: string;
+  call_pathUnknownHint: string;
   group_create: string;
   group_name: string;
   group_members: string;
@@ -1780,6 +1784,9 @@ const zhHant: Messages = {
     "省流量約 180 MB/小時、標準約 585 MB/小時、高畫質約 1.4 GB/小時。通話中可隨時調整，這裡設的是下一通的起點。",
   call_failed_unreachable: "通話接不通——限制網路（對稱 NAT／嚴格防火牆）下無法建立直連。可改用 Wi-Fi 或其他網路再撥；文字與檔案不受影響。",
   call_failed_lost: "通話中斷——連線中途斷開（可能網路不穩）。可再撥一次。",
+  call_pathDirectHint: "與對方直連——延遲最低，媒體不經任何伺服器。",
+  call_pathRelayHint: "直連打不穿，媒體正經 TURN 中繼轉送。內容仍是端到端加密（中繼只看得到密文），但延遲較高、也較耗中繼流量。",
+  call_pathUnknownHint: "通話進行中，但尚未測出是直連或經中繼。",
   group_create: "建立群組",
   group_name: "群組名稱",
   group_members: "選擇成員",
@@ -2646,6 +2653,10 @@ const en: Messages = {
   call_failed_unreachable:
     "Call couldn't connect — a restricted network (symmetric NAT / strict firewall) blocked a direct link. Try Wi-Fi or another network; text and files are unaffected.",
   call_failed_lost: "Call dropped — the connection was lost mid-call (network may be unstable). You can call again.",
+  call_pathDirectHint: "Direct link to this contact — lowest latency, media goes through no server.",
+  call_pathRelayHint:
+    "No direct link, so media is going through a TURN relay. It stays end-to-end encrypted (the relay only sees ciphertext), but latency is higher and it uses relay bandwidth.",
+  call_pathUnknownHint: "Call in progress, but the path (direct or relayed) has not been determined yet.",
   group_create: "New group",
   group_name: "Group name",
   group_members: "Select members",

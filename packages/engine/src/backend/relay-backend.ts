@@ -846,6 +846,7 @@ export class RelayChatBackend implements ChatBackend {
         onRemoteStream: (stream) => this.handlers?.onCallRemoteStream?.(stream),
         onError: (reason) => this.handlers?.onFileError?.(this.self.pubkey, reason),
         onFailed: (peer, reason) => this.handlers?.onCallFailed?.(peer, reason), // ADR-0243：通話失敗提示
+        onIcePath: (peer, path) => this.handlers?.onCallIcePath?.(peer, path), // ADR-0344：直連 vs 經 TURN
       },
       () => this.rtcConfig(),
       (pubkey) => this.isBlocked(pubkey),

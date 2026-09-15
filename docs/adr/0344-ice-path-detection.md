@@ -2,7 +2,7 @@
 
 - 狀態：已接受
 - 日期：2026-09-15
-- 相關文件：ADR-0213（對話標題列 P2P 直連品質晶片）、ADR-0243（WebRTC TURN 保底與成本評估）、ADR-0342（TURN 閘門三層）、ADR-0210（一般模式加預設 STUN）、ADR-0017/0029（P2P 檔案傳輸與二進位分塊）、`packages/engine/src/backend/ice-path.ts`
+- 相關文件：ADR-0213（對話標題列 P2P 直連品質晶片）、ADR-0026（通話執行期與 UI）、ADR-0243（WebRTC TURN 保底與成本評估）、ADR-0342（TURN 閘門三層）、ADR-0210（一般模式加預設 STUN）、ADR-0017/0029（P2P 檔案傳輸與二進位分塊）、`packages/engine/src/backend/ice-path.ts`
 
 ## 背景與問題
 
@@ -43,20 +43,25 @@ ADR-0213 的標題列晶片只有兩態：資料通道開了（`connected=true`�
 
 判不出來就回 `"unknown"`，**不猜**。把「判定」與「政策」切開是刻意的：這個模組只回報看到什麼；至於「判不出來時該不該當成中繼辦」，那是呼叫端的決定——**把關情境應當成 `relay` 辦（保守），顯示情境則應顯示中性文案（不假設最好的情況）**。同一個 `unknown` 在兩處有不同的正確處置，正是它不該在判定層被消去的理由。
 
-**三、探測時機（`WebRtcTransfer`）**
+**三、探測時機（`IcePathTracker`，檔案傳輸與通話共用）**
 
-- 資料通道 `onopen` 時排定**有界**的幾次探測：0 / 1s / 4s / 15s。
+行為住在 `IcePathTracker`，持有者只負責在連線建立時 `start()`、結束時 `reset()`——`WebRtcTransfer`（每聯絡人一條）與 `WebRtcCall`（單一通話槽）需要的是同一套行為，差別只在誰持有連線。
+
+- 連線建立時排定**有界**的幾次探測：0 / 1s / 4s / 15s。
+  - 檔案傳輸的觸發點是資料通道 `onopen`；通話是 `pc.connectionState === "connected"`。
   - 為什麼不只測一次：ICE 會**先用能通的配對、之後才換到更好的**（典型是先 relay，打洞成功後升級為直連）。只在 `onopen` 測一次會把那條連線永久標成「經中繼」。
   - 為什麼不常駐輪詢：`getStats()` 不是免費的，而每位在線聯絡人都有一條連線。有界的補測涵蓋提名塵埃落定的視窗即足夠。
-- `icePath(peer)`：同步讀快取，零成本。
-- `refreshIcePath(peer)`：立即重測。**送大檔前該叫的是這個**——快取只在通道開啟後前 15 秒內補測過，之後的切換（ICE restart、Wi-Fi 換 4G）不會反映。真正在意成本的時刻重測一次，很便宜。
-- 通道關閉／`connectionState==="failed"`：清掉排程中的計時器並把路徑歸零，不留下過期判定。計時器一律 `unref()`（Node 下不吊住行程；瀏覽器無此方法，故為可選呼叫）。
+- `icePath()`：同步讀快取，零成本。
+- `refreshIcePath()`：立即重測。**送大檔前該叫的是這個**——快取只在連線建立後前 15 秒內補測過，之後的切換（ICE restart、Wi-Fi 換 4G）不會反映。真正在意成本的時刻重測一次，很便宜。
+- 連線結束（通道關閉／`connectionState==="failed"`／通話 teardown）：清掉排程中的計時器並把路徑歸零，不留下過期判定。計時器一律 `unref()`（Node 下不吊住行程；瀏覽器無此方法，故為可選呼叫）。
+- **世代（generation）**：探測是非同步的，回來時連線可能已斷、甚至已換成下一通通話。`reset()` 推進世代，讓在途探測回來時自我作廢——否則上一條連線的判定會蓋到下一條身上。⚠ 通話的 `failed` 分支特別需要**當場** `reset()`：它的收尾走的是**非同步**的 hangup 路徑，等 teardown 才歸零的話，中間 `icePath()` 會繼續回報上一刻的判定（這是寫測試時才發現的）。
 
 **四、回報與呈現**
 
-- `TransferHandlers.onConnectionState(peer, connected, path?)` ／ `ChatBackendEvents.onPeerConnection(contact, connected, path?)` 加上第三個參數。通道一開先發 `unknown`，測出來且**與前次不同**才再發一次 ⇒ **同一條連線會收到多次 `connected=true`**，UI 必須能吃重複（`App.tsx` 兩個 state 各自去重）。
-- `ChatBackend.refreshIcePath?(to)` 供未來的把關呼叫。
-- 晶片由兩態擴為四態（`p2pChipSpec` 抽為純函式，可單測）：
+- **檔案傳輸**：`TransferHandlers.onConnectionState(peer, connected, path?)` ／ `ChatBackendEvents.onPeerConnection(contact, connected, path?)` 加上第三個參數。通道一開先發 `unknown`，測出來且**與前次不同**才再發一次 ⇒ **同一條連線會收到多次 `connected=true`**，UI 必須能吃重複（`App.tsx` 兩個 state 各自去重）。
+- **通話**：`CallHandlers.onIcePath(peer, path)` ／ `ChatBackendEvents.onCallIcePath(peer, path)`。只在判定改變時發，**通話結束不發 `unknown` 收尾**——UI 於 `onCallState` 結束時自行歸位（與媒體型態同一套作法，避免「上一通走 TURN」殘留到下一通）。
+- `ChatBackend.refreshIcePath?(to)` 供未來的把關呼叫；通話端為 `WebRtcCall.refreshIcePath()`。
+- 晶片由兩態擴為四態（`p2pChipSpec` 抽為獨立模組的純函式，對話與通話共用，可單測）：
 
 | 狀態 | 呈現 | 語意 |
 | --- | --- | --- |
@@ -64,6 +69,8 @@ ADR-0213 的標題列晶片只有兩態：資料通道開了（`connected=true`�
 | `direct` | `⚡ 直連`（綠 `.on`） | 位元組兩端直走 |
 | `relay` | `🔁 經中繼`（琥珀 `.relay`） | 走 TURN：仍端到端加密，但較慢、且是計費路徑 |
 | `unknown` | `🔗 已連線`（中性 `.up`） | 連上了，路徑尚未測出 |
+
+通話視窗（`CallWindow`）用同一組短標籤與配色，**但 tooltip 換句話**（`p2pChipSpec` 的 `context` 參數）：對話講「傳大檔請斟酌」，通話講「延遲較高、也較耗中繼流量」。晶片只在 `state === "active"` 顯示——接通前談路徑沒有意義，而通話中不存在「未建立」一態（斷了就沒有視窗了）。
 
 ## 理由
 
@@ -79,10 +86,9 @@ ADR-0213 的標題列晶片只有兩態：資料通道開了（`connected=true`�
   - **四態晶片的短暫轉場**：通道開啟到首次探測回來之間會顯示「🔗已連線」再轉為「⚡直連」。這是刻意的（見上），但比 ADR-0213 的兩態多一次視覺變化。
   - **15 秒後的路徑切換不會自動反映**在晶片上（ICE restart、網路切換）。呼叫端要正確值時以 `refreshIcePath()` 重測；常駐輪詢的成本被判定不值得。
   - **判定有 `unknown` 的實際發生率未量測**：多組 succeeded 配對且無 `transport`/`selected` 線索時會落到 `unknown`。實務上 ①② 兩條路徑涵蓋主流瀏覽器，但沒有真實環境數據佐證。
-  - **只接上了檔案傳輸的連線**（`WebRtcTransfer`）。`WebRtcCall` 的連線同樣有路徑之分（且通話正是 ADR-0243 成本論證的主體），尚未接上——判定模組是共用的，接上只是接線工作。
-  - **行動端未對齊**：晶片仍僅桌面/瀏覽器 `ConversationWindow`（沿用 ADR-0213 的殘餘）。
+  - **行動端未對齊**：晶片仍僅桌面/瀏覽器 `ConversationWindow`／`CallWindow`（沿用 ADR-0213 的殘餘）。
+  - **判定本身沒有被拿來做任何事**：目前只餵給晶片。大檔閘門與 TURN 用量觀測都還沒建立在它之上——在那之前，這個 ADR 買到的是「看得見」，不是「擋得住」。
 - 後續行動／待辦：
   1. **大檔 TURN 閘門**（本 ADR 的目的）：送檔前 `refreshIcePath()`，`relay`（與保守處理的 `unknown`）超過門檻時提示改用公司儲存槽或等直連。門檻值與 UX 為獨立產品決策。
-  2. 把判定接上 `WebRtcCall`。
-  3. 待 1 落地後，才動 `DEFAULT_MAX_FILE_SIZE` 與串流化（發送端惰性分塊、接收端串流落盤）。
-  4. `selectTransport()`／`Reachability`／`FILE_TRANSPORT_ORDER`（`packages/core/src/connection.ts`）目前是**死碼**——只有測試引用，實際路徑由 ICE 透明決定。本 ADR 讓「實際走哪條」首次可觀測；那組抽象該接上真實判定或刪除，另案處理。
+  2. 待 1 落地後，才動 `DEFAULT_MAX_FILE_SIZE` 與串流化（發送端惰性分塊、接收端串流落盤）。
+  3. `selectTransport()`／`Reachability`／`FILE_TRANSPORT_ORDER`（`packages/core/src/connection.ts`）目前是**死碼**——只有測試引用，實際路徑由 ICE 透明決定。本 ADR 讓「實際走哪條」首次可觀測；那組抽象該接上真實判定或刪除，另案處理。
