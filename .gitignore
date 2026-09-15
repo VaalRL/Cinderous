@@ -45,6 +45,9 @@ android/local.properties
 # === Cloudflare Workers (relay) ===
 .wrangler/
 relay/dist/
+# 滾動 uptime 計數是**執行期狀態**，住在 relay-health-state 分支（ADR-0350）。
+# 本機跑 bootstrap:run 會產生它——曾經因為它每跑必變而佔掉 main 歷史的 87%，別再讓它回來。
+relay/bootstrap/health-history.json
 
 # === Local data / secrets (NEVER commit keys or local DB) ===
 # Cinderous stores private keys and SQLite locally — keep them out of git.

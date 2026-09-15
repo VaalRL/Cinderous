@@ -5,10 +5,13 @@
 // 保留原清單、不覆寫）；若提供維護者金鑰（MAINTAINER_NSEC）則產生簽章的 kind
 // RELAY_LIST 事件供發佈。
 //
-// ⚠ `health-history.json`（滾動 uptime 計數）**不再提交到 main**（ADR-0350）——它是
-// 執行期狀態，不是原始碼，而每跑一次就必然改變 ⇒ 曾經佔掉 main 歷史的 87%。
-// 現在它住在 `relay-health-state` 分支；main 裡那一份是**遷移用的種子**，不再更新。
-// 本機執行會改動它，`git checkout relay/bootstrap/health-history.json` 即可還原。
+// ⚠ `health-history.json`（滾動 uptime 計數）**不在 main**（ADR-0350）——它是執行期狀態，
+// 不是原始碼，而每跑一次就必然改變 ⇒ 曾經佔掉 main 歷史的 87%。它住在 `relay-health-state`
+// 分支，並已從 main 移除（遷移完成，見 ADR-0350 §後續行動）。本機要跑完整探測前先取回：
+//   git fetch origin relay-health-state
+//   git show FETCH_HEAD:health-history.json > relay/bootstrap/health-history.json
+// 檔案不在就會**直接失敗**而不是當成空歷史——空歷史會把正式收錄的 relay 降級成試用
+// 並寫回 relays.json（帶金鑰時還會簽章發佈）。見 `uptime.ts` 的 `historyOrThrow`。
 //
 // 執行：pnpm --filter @cinderous/relay bootstrap:run
 // 信任根＝維護者金鑰；此腳本與 GitHub 僅為發佈通道，無法偽造簽章清單。
@@ -20,7 +23,7 @@ import { evaluateAdmission, generateSecretKey, listEntries, nsecDecode, signRela
 import { autoAuth, parse, runConformance, withWs } from "./conformance.js";
 // 滾動窗的數學抽到 `uptime.ts`（ADR-0350）：窗口長度由探測頻率推導，並有測試把
 // 它與 workflow 的 cron 綁在一起——原本那個 `720 // ≈30 天/時` 是會過期的註解。
-import { recordProbe, uptimePct, type UptimeRec } from "./uptime.js";
+import { historyOrThrow, recordProbe, uptimePct, type UptimeRec } from "./uptime.js";
 
 // 打包後執行檔位於 relay/dist/；清單常駐 relay/bootstrap/。
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -29,11 +32,14 @@ const LIST_PATH = join(BOOTSTRAP_DIR, "relays.json");
 const EVENT_PATH = join(BOOTSTRAP_DIR, "relay-list-event.json");
 const HISTORY_PATH = join(BOOTSTRAP_DIR, "health-history.json");
 function readHistory(): Record<string, UptimeRec> {
+  let raw: string | undefined;
   try {
-    return JSON.parse(readFileSync(HISTORY_PATH, "utf8")) as Record<string, UptimeRec>;
-  } catch {
-    return {};
+    raw = readFileSync(HISTORY_PATH, "utf8");
+  } catch (err) {
+    // 只有「檔案不存在」交給 historyOrThrow 判斷；權限等其他錯誤直接往上拋。
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
   }
+  return historyOrThrow(raw, process.env.RELAY_HEALTH_COLD_START === "1");
 }
 function writeHistory(h: Record<string, UptimeRec>): void {
   writeFileSync(HISTORY_PATH, `${JSON.stringify(h, null, 2)}\n`);

@@ -1,6 +1,7 @@
 import { readFileSync } from "node:fs";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
+  historyOrThrow,
   PROBES_PER_DAY,
   recordProbe,
   UPTIME_CAP,
@@ -74,5 +75,65 @@ describe("uptimePct", () => {
   it("🔴 undefined 與 0% 是不同的事——前者是「不知道」，後者是「確定全掛」", () => {
     expect(uptimePct({ probes: 2, live: 0 })).toBeUndefined();
     expect(uptimePct({ probes: 100, live: 0 })).toBe(0);
+  });
+});
+
+describe("historyOrThrow：檔案不存在 ≠ 空歷史（ADR-0350 遷移後）", () => {
+  it("🔴 檔案不存在就拋——空歷史會把正式收錄的 relay 降級成試用", () => {
+    // 這條測試守的不是「讀檔」，是那條因果鏈：{} ⇒ uptimePct undefined ⇒
+    // evaluateAdmission 回 accepting:false ⇒ 降級後的 relays.json 被寫回（甚至簽章發佈）。
+    expect(() => historyOrThrow(undefined)).toThrow(/health-history\.json/);
+  });
+
+  it("錯誤訊息要講得出怎麼把狀態取回來，否則遇到的人只會把守衛拆掉", () => {
+    let message = "";
+    try {
+      historyOrThrow(undefined);
+    } catch (err) {
+      message = (err as Error).message;
+    }
+    expect(message).toContain("relay-health-state");
+    expect(message).toContain("git show FETCH_HEAD:health-history.json");
+    expect(message).toContain("RELAY_HEALTH_COLD_START=1");
+  });
+
+  it("明示冷啟動才放行，且要留下警告", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      expect(historyOrThrow(undefined, true)).toEqual({});
+      expect(warn).toHaveBeenCalledTimes(1);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("🔴 壞掉的 JSON 也要拋，不能退化成空歷史——後果與檔案不在完全相同", () => {
+    expect(() => historyOrThrow("{ 這不是 JSON")).toThrow();
+    // 冷啟動旗標只赦免「檔案不存在」，不赦免「內容壞掉」：後者代表狀態分支有問題，
+    // 靜默當成空的等於把 bug 變成 relay 降級。
+    expect(() => historyOrThrow("{ 這不是 JSON", true)).toThrow();
+  });
+
+  it("正常內容照常解析", () => {
+    const raw = JSON.stringify({ "wss://a.example": { probes: 120, live: 119 } });
+    expect(historyOrThrow(raw)).toEqual({ "wss://a.example": { probes: 120, live: 119 } });
+  });
+});
+
+describe("workflow 不再有「分支不存在就用種子」那條退路（遷移已完成）", () => {
+  it("🔴 取回狀態那一步必須是無條件的——有退路就等於允許安靜降級", () => {
+    const wf = readFileSync(new URL("../../.github/workflows/relay-health.yml", import.meta.url), "utf8");
+    const step = wf.slice(wf.indexOf("name: 取回 uptime 狀態"), wf.indexOf("name: 探測"));
+    expect(step).toContain("git fetch --depth=1 origin");
+    // 首次遷移用的 fallback（`if git fetch … else ::warning:: …`）必須已經拿掉。
+    expect(step).not.toContain("::warning::");
+    expect(step).not.toMatch(/\bif git fetch\b/);
+  });
+
+  it("🔴 種子檔必須被 .gitignore——否則本機跑一次 bootstrap:run 就會把它請回 main", () => {
+    // 故意不斷言「檔案不存在」：維護者本機取回狀態來跑完整探測是正常操作，
+    // 那不該讓測試變紅。真正要守的是**它不會再被追蹤**。
+    const ignore = readFileSync(new URL("../../.gitignore", import.meta.url), "utf8");
+    expect(ignore).toContain("relay/bootstrap/health-history.json");
   });
 });

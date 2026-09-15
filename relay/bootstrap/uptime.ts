@@ -67,3 +67,43 @@ export function recordProbe(rec: UptimeRec, live: boolean, cap = UPTIME_CAP): Up
 export function uptimePct(rec: UptimeRec, minSamples = UPTIME_MIN_SAMPLES): number | undefined {
   return rec.probes >= minSamples ? (rec.live / rec.probes) * 100 : undefined;
 }
+
+/**
+ * 把讀到的歷史檔內容轉成計數表——**檔案不存在不等於空歷史**。
+ *
+ * 🔴 空歷史的後果不是「少一點資訊」，是**降級並發佈**：`uptimePct` 樣本不足回
+ * `undefined` ⇒ `evaluateAdmission` 把**正式收錄**的 relay 判成試用（`accepting: false`）
+ * ⇒ `health-check.ts` 把降級後的清單寫回 `relays.json`；維護者若帶著 `MAINTAINER_NSEC`
+ * 在本機跑，還會順手**簽章並發佈**出去。
+ *
+ * ADR-0350 已對 CI 立下規則：「狀態分支存在就必須讀成功，否則整個 job 失敗」。
+ * 本機這條路徑的後果一模一樣（而且多了簽章那一步），所以套用同一條規則——
+ * 遷移完成後 main 裡不再有種子檔，這個守衛就是唯一攔在「檔案不在」與
+ * 「安靜地把全體 relay 降級」之間的東西。
+ *
+ * @param raw 檔案內容；`undefined` 代表**檔案不存在**（其他讀取錯誤請讓它往上拋）。
+ * @param coldStart 明示允許從零開始（`RELAY_HEALTH_COLD_START=1`）。
+ */
+export function historyOrThrow(raw: string | undefined, coldStart = false): Record<string, UptimeRec> {
+  if (raw === undefined) {
+    if (!coldStart) {
+      throw new Error(
+        [
+          "找不到 relay/bootstrap/health-history.json。",
+          "",
+          "滾動 uptime 狀態住在 `relay-health-state` 分支（ADR-0350），不在 main。先取回：",
+          "  git fetch origin relay-health-state",
+          "  git show FETCH_HEAD:health-history.json > relay/bootstrap/health-history.json",
+          "",
+          "空歷史會讓正式收錄的 relay 被判成試用、寫回 relays.json（帶金鑰時還會簽章發佈），",
+          "所以這裡不把「檔案不在」默默當成「沒有紀錄」。",
+          "真的要從零開始（狀態分支本身還不存在）請設 RELAY_HEALTH_COLD_START=1。",
+        ].join("\n"),
+      );
+    }
+    console.warn("⚠ RELAY_HEALTH_COLD_START：沒有 uptime 歷史，所有 relay 這一輪都會被判為試用。");
+    return {};
+  }
+  // 解析失敗照樣往上拋：壞掉的狀態和不存在的狀態後果相同，不該靜默吞掉。
+  return JSON.parse(raw) as Record<string, UptimeRec>;
+}

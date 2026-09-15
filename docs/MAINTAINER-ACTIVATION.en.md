@@ -94,9 +94,11 @@ Graded admission (ADR-0092):
 
 ## ⑥ Verify it is live
 
-- Actions → "Relay Health Check" → **Run workflow** (or wait for the top-of-hour cron).
+- Actions → "Relay Health Check" → **Run workflow** (or wait for the cron — :17 every 6 hours, ADR-0350).
 - The log should show: `✅ <url>`, `signed relay list event (kind 10037)`, `📡 published to <url>`.
-- The bot will commit the updated `relays.json` (with `accepting`/`weight`) and `health-history.json`.
+- The bot commits to main only when `relays.json` actually changes; `health-history.json`
+  (the rolling uptime counters) is runtime state, kept on the `relay-health-state` branch
+  and **never on main** (ADR-0350).
 - Use a **rebuilt** client to confirm that automatic slot selection at login is pre-filled from the signed relay list.
 
 ---
@@ -105,7 +107,15 @@ Graded admission (ADR-0092):
 
 - **Humans manage joins/retirements**: add a URL to `relays.json` (the machine probes and grades it automatically); to retire, set the entry's `status`
   to `draining` → `retired`, and existing users migrate away automatically.
-- **The machine manages quality**: uptime/consistency update hourly (`health-history.json` rolling window ≈30 days).
+- **The machine manages quality**: uptime/consistency update every 6 hours (30-day rolling
+  window = 4 probes/day × 30, derived from `PROBES_PER_DAY` in `relay/bootstrap/uptime.ts`).
+  ⚠ To run a full probe locally you must fetch the state first, or it fails outright (that is
+  deliberate — an empty history downgrades admitted relays to probation, and with the key
+  present it would sign and publish that):
+  ```
+  git fetch origin relay-health-state
+  git show FETCH_HEAD:health-history.json > relay/bootstrap/health-history.json
+  ```
 - **Third-party applications** (see `docs/NODE-SUBMISSION.md`) = submit a URL via issue/PR; once you add the URL to `relays.json` it enters the probe pipeline.
 
 ## Key rotation
