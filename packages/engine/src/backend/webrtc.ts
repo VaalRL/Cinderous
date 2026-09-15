@@ -3,12 +3,15 @@ import {
   createSignal,
   DataChannelReceiver,
   encodeDcPresence,
-  encodeFile,
+  asFileStream,
+  fileSizeOf,
+  streamFile,
   encodeTyping,
   readSignal,
   type IceCandidateData,
   type NostrEvent,
   type OutgoingFile,
+  type OutgoingFileStream,
   type PubkeyHex,
   type ReceivedFile,
   type SecretKey,
@@ -50,7 +53,8 @@ export interface TransferHandlers {
 /** 進行中的送檔工作（供進度回報）。 */
 interface OutJob {
   id: string;
-  file: OutgoingFile;
+  /** 已正規化為惰性來源（ADR-0346）：位元組檔與 Blob 檔共用同一條送出管線。 */
+  file: OutgoingFileStream;
   /** 儲存槽存放來源標註（ADR-0161／審查修正）：隨 file-begin 傳，讓收端無需 relay metadata。 */
   origin?: string;
 }
@@ -171,10 +175,12 @@ export class WebRtcTransfer {
    * **群組的每位成員必須共用同一個 tid**：metadata 只有一個（rumor 跨成員共用），
    * 若每條 P2P 各自產 id，收件端就對不回同一則訊息——位元組到了，卻不知道它屬於哪一則。
    */
-  sendFile(peerPk: PubkeyHex, file: OutgoingFile, tid?: string, origin?: string): string {
+  sendFile(peerPk: PubkeyHex, file: OutgoingFile | OutgoingFileStream, tid?: string, origin?: string): string {
     const id = tid ?? this.newTransferId();
     const peer = this.ensurePeer(peerPk);
-    peer.outbox.push({ id, file, ...(origin !== undefined ? { origin } : {}) });
+    // 進 outbox 就正規化為惰性來源（ADR-0346）：位元組檔包一層 subarray（零複製），
+    // Blob 檔原樣帶入 ⇒ 底下的送出管線只需要認得一種東西。
+    peer.outbox.push({ id, file: asFileStream(file), ...(origin !== undefined ? { origin } : {}) });
     if (peer.dc && peer.dc.readyState === "open") {
       this.flush(peerPk, peer);
     } else if (!peer.started) {
@@ -351,21 +357,26 @@ export class WebRtcTransfer {
   /**
    * 依序送出 outbox 內的檔案（含背壓與進度）。
    *
-   * ## 兩件事和以前不一樣（ADR-0345）
+   * ## 三件事和最初不一樣
    *
-   * 1. **分塊惰性產生**：`encodeFile` 現在是 generator，同一時間只有一塊框架存在。
-   *    原本是先把整份檔案的框架都配置出來（100 MiB 的檔＝額外一整份 100 MiB）。
-   * 2. **背壓改事件驅動**：滿了就等 `bufferedamountlow`，不再每 50ms 醒來問一次。
+   * 1. **分塊惰性產生**（ADR-0345）：同一時間只有一塊框架存在。原本是先把整份檔案的
+   *    框架都配置出來（100 MiB 的檔＝額外一整份 100 MiB）。
+   * 2. **背壓改事件驅動**（ADR-0345）：滿了就等 `bufferedamountlow`，不再每 50ms 醒來問。
+   * 3. **來源惰性讀取**（ADR-0346）：分塊是逐塊向來源要的。來源若是 `Blob`/`File`，
+   *    整檔從頭到尾不進 RAM——這是 pump 變成非同步的唯一理由。
    */
   private flush(peerPk: PubkeyHex, peer: PeerConn): void {
     const dc = peer.dc;
     if (!dc || dc.readyState !== "open") return;
     const job = peer.outbox.shift();
     if (!job) return;
-    const chunks = encodeFile(job.file, job.id, CHUNK_SIZE, job.origin)[Symbol.iterator]();
-    const size = job.file.bytes.length;
+    const chunks = streamFile(job.file, job.id, CHUNK_SIZE, job.origin)[Symbol.asyncIterator]();
+    const size = fileSizeOf(job.file);
     let sentChunks = 0;
     let waiting: ReturnType<typeof setTimeout> | undefined;
+    // 讀分塊是非同步的（ADR-0346），所以 pump 可能在 await 中途被排空事件再次喚醒。
+    // 這個旗標讓第二次呼叫直接返回——正在跑的那一輪自己會繼續。
+    let running = false;
 
     const stopWaiting = (): void => {
       dc.removeEventListener("bufferedamountlow", onDrain);
@@ -374,16 +385,27 @@ export class WebRtcTransfer {
     };
     const onDrain = (): void => {
       stopWaiting();
-      pump();
+      void pump();
     };
 
-    const pump = (): void => {
-      if (dc.readyState !== "open") {
-        stopWaiting();
-        this.handlers.onError(peerPk, "傳輸中斷");
-        return;
+    const pump = async (): Promise<void> => {
+      if (running) return;
+      running = true;
+      try {
+        await pumpLoop();
+      } finally {
+        running = false;
       }
+    };
+
+    const pumpLoop = async (): Promise<void> => {
       for (;;) {
+        // 每一圈都重驗：讀分塊是非同步的，await 回來時通道可能已經關了。
+        if (dc.readyState !== "open") {
+          stopWaiting();
+          this.handlers.onError(peerPk, "傳輸中斷");
+          return;
+        }
         if (dc.bufferedAmount > HIGH_WATER) {
           // 掛上排空事件等它降到門檻（`bufferedAmountLowThreshold`＝HIGH_WATER/2，見 attachChannel）。
           //
@@ -396,7 +418,7 @@ export class WebRtcTransfer {
           (waiting as unknown as { unref?: () => void }).unref?.();
           return;
         }
-        const next = chunks.next();
+        const next = await chunks.next();
         if (next.done === true) break;
         const m = next.value;
         // 分塊框架為整段 buffer（offset 0），送底層 ArrayBuffer（零拷貝、無 base64 膨脹）。
@@ -411,6 +433,6 @@ export class WebRtcTransfer {
       // 本檔送完，繼續下一個
       this.flush(peerPk, peer);
     };
-    pump();
+    void pump();
   }
 }

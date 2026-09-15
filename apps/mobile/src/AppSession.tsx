@@ -32,6 +32,7 @@ import {
   type PairBundle,
   shouldMuteOrgNotification,
 } from "@cinderous/engine";
+import { fileSizeOf } from "@cinderous/core"; // ADR-0346
 import { deriveStorageKey, generateSecretKey, GROUP_MEMBERS_MAX, groupSizeExceeded, makeBackupCode, newInviteToken, nsecDecode, nsecEncode, type OrgInvite } from "@cinderous/core";
 import {
   contactLabel,
@@ -46,7 +47,7 @@ import {
 import { notifier, onNotifyClick } from "./native/notify.js";
 import type { BlockedContact, CalendarEventInput, ContactRequest, RsvpStatus, StoredCalendarEvent } from "@cinderous/engine";
 import type { CallMedia, CallState, VideoQuality } from "@cinderous/core";
-import { makeThumbnail, pickFile, saveFile, takePhoto } from "./native/files.js";
+import { makeThumbnail, pickFile, pickFileBytes, saveFile, takePhoto } from "./native/files.js";
 import {
   foregroundEnabled,
   foregroundSupported,
@@ -1181,8 +1182,9 @@ export function AppSession({
     void pickFile().then(async (f) => {
       if (!f || !still()) return;
       // ADR-0344：大檔走中繼前先問一聲；問完要再驗一次 epoch（問的期間可能切了身分）。
-      if (!(await passesFileGate(b, pk, f.bytes.length)) || !still()) return;
-      const thumb = await makeThumbnail(f.bytes, f.mime); // ADR-0102：只存本機、不外送
+      if (!(await passesFileGate(b, pk, fileSizeOf(f))) || !still()) return;
+      // ADR-0346：惰性來源沒有位元組可做縮圖——而那正是它存在的理由（非圖片或大圖）。
+      const thumb = "bytes" in f ? await makeThumbnail(f.bytes, f.mime) : null; // ADR-0102：只存本機、不外送
       // 行動端目前用 DOM <input>（無完整路徑）→ 不帶 savedPath；真 RN 的 document picker 會給 URI（ADR-0103）。
       b.sendFile?.(pk, f, thumb ? { thumb } : {});
     });
@@ -1207,7 +1209,8 @@ export function AppSession({
    */
   const depositToSlot = (origin: string): void => {
     const still = epochRef.current.mark(); // ADR-0329：挑檔期間切了身分 ⇒ 這個檔不屬於新身分
-    void pickFile().then((f) => {
+    // ADR-0346：儲存槽佇列持有位元組 ⇒ 這條路徑要的是整份位元組，不是惰性來源。
+    void pickFileBytes().then((f) => {
       if (!f || !still()) return;
       org.updateSlots((q) =>
         enqueueSlot(q, { name: f.name, size: f.bytes.length, mime: f.mime, origin, bytes: f.bytes, queuedAt: Date.now() }),

@@ -114,7 +114,9 @@ import {
   type OrgPolicy,
   type OrgRosterDoc,
   type OrgWorkHours,
+  fileSizeOf,
   type OutgoingFile,
+  type OutgoingFileStream,
   type PresencePayload,
   type ReceiptType,
   type PresenceState,
@@ -3748,7 +3750,11 @@ export class RelayChatBackend implements ChatBackend {
     mark();
   }
 
-  sendFile(to: PubkeyHex, file: OutgoingFile, opts: { thumb?: string; savedPath?: string } = {}): string {
+  sendFile(
+    to: PubkeyHex,
+    file: OutgoingFile | OutgoingFileStream,
+    opts: { thumb?: string; savedPath?: string } = {},
+  ): string {
     // 🔴 群組（ADR-0124）：`to` 是 groupId（32 字元），不是 pubkey（64 字元）。
     // 直接往下走會把它丟進 NIP-44 → `second arg must be public key`，**當場爆炸**。
     // 而 UI 從來沒擋過群組裡的 📎，所以這是使用者點得到的路徑。
@@ -3757,13 +3763,17 @@ export class RelayChatBackend implements ChatBackend {
 
     // 位元組預設走 P2P；組織政策 relayFilesMaxMb（ADR-0162）啟用且對象為名冊在世成員、
     // 檔案 ≤ 上限時改走 relay 加密分塊（離線也送得到）。metadata 訊息兩種路徑皆照發。
+    // ⚠ relay 暫存需要**整份位元組**（要加密成分塊），所以惰性來源（ADR-0346）不走這條。
+    // 不是限制：上限 relayFilesMaxMb ≤ 16 MB，而惰性來源存在的理由就是檔案大到不該進 RAM。
+    const size = fileSizeOf(file);
     const relayMb = this.lastRoster?.policy?.relayFilesMaxMb;
     const viaRelay =
+      "bytes" in file &&
       !!relayMb &&
-      file.bytes.length <= relayMb * 1024 * 1024 &&
+      size <= relayMb * 1024 * 1024 &&
       !!this.lastRoster?.members.some((m) => m.pubkey === to && !m.supersededBy);
     const tid = viaRelay ? this.transfer.newTransferId() : this.transfer.sendFile(to, file);
-    const meta = { tid, name: file.name, size: file.bytes.length, mime: file.mime };
+    const meta = { tid, name: file.name, size, mime: file.mime };
     const now = nowSec(); // 同一個送出時間寫進 rumor 也當本機 `at`（ADR-0108）
     const wrapped = wrapFileMessage(this.sk, to, meta, {
       now,
@@ -3805,7 +3815,7 @@ export class RelayChatBackend implements ChatBackend {
    */
   private sendGroupFile(
     group: Group,
-    file: OutgoingFile,
+    file: OutgoingFile | OutgoingFileStream,
     opts: { thumb?: string; savedPath?: string } = {},
   ): string {
     if (!canPostToGroup(group, this.self.pubkey)) return ""; // 公告群僅管理者可發（ADR-0049）
@@ -3816,7 +3826,7 @@ export class RelayChatBackend implements ChatBackend {
     const tid = this.transfer.newTransferId();
     for (const m of members) this.transfer.sendFile(m, file, tid);
 
-    const meta = { tid, name: file.name, size: file.bytes.length, mime: file.mime };
+    const meta = { tid, name: file.name, size: fileSizeOf(file), mime: file.mime };
     const now = nowSec();
     const wrapped = wrapGroupFile(meta, this.sk, this.self.pubkey, group, {
       now,

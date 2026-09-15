@@ -93,3 +93,29 @@ export function sanitizedFileName(name: string, changed: boolean): string {
   const base = dot > 0 ? name.slice(0, dot) : name;
   return `${base}.jpg`;
 }
+
+/**
+ * 送出這個檔案時，**需不需要先把整份位元組讀進記憶體**（ADR-0346）。
+ *
+ * 需要位元組的理由只有兩個，而且都只對圖片成立：
+ *   1. **縮圖**（ADR-0102）——只對圖片有意義。
+ *   2. **EXIF/GPS 清除**（ADR-0273）——`sanitizeImage` 對非圖片原樣返回。
+ *
+ * 其餘一律走惰性串流（`blobStream`），整檔不進 RAM。
+ *
+ * ⚠ **圖片也設上限**：`sanitizeImage` 走 canvas 重編碼，需要**解碼後**的點陣（一張 100 MP
+ * 的 PNG 解開來是數百 MB，遠大於檔案本身）。所以超過上限的圖片寧可**不清 EXIF、不做縮圖**
+ * 也要走串流——否則「保護隱私」的那一步會先把 app 打掛，使用者連檔都送不出去。
+ * 這與 `sanitizeImage` 檔頭「失敗即原樣送出，可用性優先」是同一個取捨。
+ */
+export function needsBytesToSend(mime: string, sizeBytes: number, limit = IMAGE_BYTES_LIMIT): boolean {
+  return mime.startsWith("image/") && sizeBytes <= limit;
+}
+
+/**
+ * 仍願意整份讀進 RAM 處理的圖片上限。
+ *
+ * 32 MiB：日常手機照片（1–10 MB）與螢幕截圖全部落在裡面；再大的多半是掃描檔或
+ * 專業影像，它們本來就不該被 canvas 重編碼壓過一遍。
+ */
+export const IMAGE_BYTES_LIMIT = 32 * 1024 * 1024;

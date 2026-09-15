@@ -7,9 +7,10 @@
 //   - saveFile  → expo-file-system + Sharing
 // 介面與呼叫端皆不變（比照桌面的 native/save-file.ts）。
 
-import type { OutgoingFile } from "@cinderous/core";
+import { blobStream, type OutgoingFile, type OutgoingFileStream } from "@cinderous/core";
 import {
   isThumbnailable,
+  needsBytesToSend,
   sanitizedFileName,
   sanitizeImage,
   THUMB_MAX_BYTES,
@@ -17,10 +18,16 @@ import {
   THUMB_QUALITY,
 } from "@cinderous/engine";
 
-/** 讓使用者選一個檔案；取消回 null。 */
-export async function pickFile(): Promise<OutgoingFile | null> {
+/**
+ * 讓使用者選一個檔案；取消回 null。
+ *
+ * ADR-0346：回傳**兩種可能**——需要位元組的（圖片，要清 EXIF／做縮圖）給 `OutgoingFile`，
+ * 其餘給惰性來源 `OutgoingFileStream`（整檔不進 RAM）。那一行無條件的 `arrayBuffer()`
+ * 原本是行動端最容易 OOM 的地方：WebView 的記憶體額度比桌面瀏覽器緊得多。
+ */
+export async function pickFile(): Promise<OutgoingFile | OutgoingFileStream | null> {
   if (typeof document === "undefined") return null;
-  return await new Promise<OutgoingFile | null>((resolve) => {
+  return await new Promise<OutgoingFile | OutgoingFileStream | null>((resolve) => {
     const input = document.createElement("input");
     input.type = "file";
     input.style.display = "none";
@@ -31,10 +38,15 @@ export async function pickFile(): Promise<OutgoingFile | null> {
         resolve(null);
         return;
       }
+      const mime = f.type || "application/octet-stream";
+      // ADR-0346：只有需要位元組的檔案才讀進來（見 `needsBytesToSend`）。
+      if (!needsBytesToSend(mime, f.size)) {
+        resolve(blobStream(f.name, mime, f));
+        return;
+      }
       // ADR-0273：圖片在轉成 OutgoingFile 前清除 EXIF/GPS（canvas 重編碼）；
       // 不適用（GIF/SVG/非圖片）或失敗即原樣——不因為清不掉就讓使用者送不出檔案。
       void f.arrayBuffer().then(async (buf) => {
-        const mime = f.type || "application/octet-stream";
         const s = await sanitizeImage(new Uint8Array(buf), mime);
         resolve({ name: sanitizedFileName(f.name, s.changed), mime: s.mime, bytes: s.bytes });
       });
@@ -47,6 +59,21 @@ export async function pickFile(): Promise<OutgoingFile | null> {
     document.body.appendChild(input);
     input.click();
   });
+}
+
+/**
+ * 同 `pickFile`，但**一定**回傳位元組（ADR-0346）。
+ *
+ * 公司儲存槽（ADR-0161／0177）的佇列本身就持有位元組（v1 是 session 內記憶體佇列），
+ * 給它惰性來源沒有意義——那只是把「整檔進 RAM」從這裡挪到佇列裡。⚠ 因此**儲存槽路徑
+ * 的大檔仍會整份進 RAM**，與改動前一致；要治本得先讓佇列 durable（ADR-0177 的 v2 待辦）。
+ */
+export async function pickFileBytes(): Promise<OutgoingFile | null> {
+  const picked = await pickFile();
+  if (!picked) return null;
+  if ("bytes" in picked) return picked;
+  const bytes = await picked.slice(0, picked.size);
+  return { name: picked.name, mime: picked.mime, bytes };
 }
 
 /**

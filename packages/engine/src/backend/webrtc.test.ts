@@ -315,7 +315,17 @@ class BufferedPc extends FakePc {
   }
 }
 
-describe("WebRtcTransfer 送檔管線（ADR-0345）", () => {
+/**
+ * 沖刷微任務佇列。
+ *
+ * ADR-0346 之後分塊是**逐塊向來源要**的（`await src.slice(...)`），所以送出不再是同步完成
+ * ——每一塊之間至少隔一個微任務。給足輪數讓小檔跑完。
+ */
+async function settle(rounds = 200): Promise<void> {
+  for (let i = 0; i < rounds; i++) await Promise.resolve();
+}
+
+describe("WebRtcTransfer 送檔管線（ADR-0345／0346）", () => {
   afterEach(() => vi.unstubAllGlobals());
 
   const setup = () => {
@@ -345,48 +355,54 @@ describe("WebRtcTransfer 送檔管線（ADR-0345）", () => {
     expect(dc.bufferedAmountLowThreshold).toBe((1 << 20) / 2);
   });
 
-  it("緩衝不滿時一路送完：file-begin ＋ 每塊各一則", () => {
+  it("緩衝不滿時一路送完：file-begin ＋ 每塊各一則", async () => {
     const { t, peer, dc } = setup();
     t.sendFile(peer, file(16_384 * 3));
+    await settle();
     expect(typeof dc.sent[0]).toBe("string"); // file-begin
     expect(dc.chunkCount).toBe(3);
     expect(dc.waiters).toBe(0); // 沒有卡住 ⇒ 不該留下監聽
   });
 
-  it("進度逐塊回報，最後一筆等於檔案大小", () => {
+  it("進度逐塊回報，最後一筆等於檔案大小", async () => {
     const size = 16_384 * 3;
     const { t, peer, progress } = setup();
     t.sendFile(peer, file(size));
+    await settle();
     expect(progress).toHaveLength(3);
     expect(progress.at(-1)).toEqual([progress[0]![0], size, size]);
   });
 
-  it("不足一塊的尾段不會讓進度超過檔案大小", () => {
+  it("不足一塊的尾段不會讓進度超過檔案大小", async () => {
     const size = 16_384 + 100;
     const { t, peer, progress } = setup();
     t.sendFile(peer, file(size));
+    await settle();
     expect(progress.at(-1)![1]).toBe(size);
   });
 
-  it("🔴 緩衝超過高水位即停手，並掛上排空監聽（不是每 50ms 輪詢）", () => {
+  it("🔴 緩衝超過高水位即停手，並掛上排空監聽（不是每 50ms 輪詢）", async () => {
     const { t, peer, dc } = setup();
     dc.bufferedAmount = 2 << 20; // 高於高水位
     t.sendFile(peer, file(16_384 * 5));
+    await settle();
     expect(dc.sent).toHaveLength(0); // 一則都沒送
     expect(dc.waiters).toBe(1);
   });
 
-  it("🔴 排空事件一到就續傳，並解除監聽（不得累積）", () => {
+  it("🔴 排空事件一到就續傳，並解除監聽（不得累積）", async () => {
     const { t, peer, dc } = setup();
     dc.bufferedAmount = 2 << 20;
     t.sendFile(peer, file(16_384 * 4));
+    await settle();
     expect(dc.waiters).toBe(1);
     dc.drain();
+    await settle();
     expect(dc.chunkCount).toBe(4);
     expect(dc.waiters).toBe(0);
   });
 
-  it("送到一半塞住 → 續傳接得回去，不重送也不漏塊", () => {
+  it("送到一半塞住 → 續傳接得回去，不重送也不漏塊", async () => {
     const { t, peer, dc } = setup();
     let count = 0;
     const realSend = dc.send.bind(dc);
@@ -395,8 +411,10 @@ describe("WebRtcTransfer 送檔管線（ADR-0345）", () => {
       if (++count === 3) dc.bufferedAmount = 2 << 20; // 第三則之後塞住
     };
     t.sendFile(peer, file(16_384 * 5));
+    await settle();
     expect(dc.chunkCount).toBe(2); // begin + 2 塊
     dc.drain();
+    await settle();
     expect(dc.chunkCount).toBe(5);
   });
 
@@ -406,6 +424,7 @@ describe("WebRtcTransfer 送檔管線（ADR-0345）", () => {
       const { t, peer, dc } = setup();
       dc.bufferedAmount = 2 << 20;
       t.sendFile(peer, file(16_384 * 2));
+      await vi.advanceTimersByTimeAsync(0);
       expect(dc.sent).toHaveLength(0);
       dc.bufferedAmount = 0; // 真的空了，但事件（模擬競態）從未觸發
       await vi.advanceTimersByTimeAsync(300);
@@ -416,21 +435,135 @@ describe("WebRtcTransfer 送檔管線（ADR-0345）", () => {
     }
   });
 
-  it("等待期間通道關閉 → 回報中斷而非靜默停住", () => {
+  it("等待期間通道關閉 → 回報中斷而非靜默停住", async () => {
     const { t, peer, dc, errors } = setup();
     dc.bufferedAmount = 2 << 20;
     t.sendFile(peer, file(16_384 * 3));
+    await settle();
     dc.readyState = "closed";
     dc.drain();
+    await settle();
     expect(errors).toContain("傳輸中斷");
     expect(dc.waiters).toBe(0); // 收尾要清乾淨
   });
 
-  it("佇列中的多個檔案依序送出", () => {
+  it("佇列中的多個檔案依序送出", async () => {
     const { t, peer, dc } = setup();
     t.sendFile(peer, file(16_384));
     t.sendFile(peer, file(16_384 * 2));
+    await settle();
     expect(dc.chunkCount).toBe(3);
     expect(dc.sent.filter((m) => typeof m === "string")).toHaveLength(2); // 兩個 file-begin
+  });
+});
+
+describe("WebRtcTransfer 惰性來源送檔（ADR-0346）", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  const setup = () => {
+    vi.stubGlobal("RTCPeerConnection", BufferedPc);
+    lastDc = undefined;
+    const progress: Array<[number, number]> = [];
+    const sk = generateSecretKey();
+    const peer = getPublicKey(generateSecretKey());
+    const t = new WebRtcTransfer(sk, {
+      publishSignal: () => {},
+      onOutgoingProgress: (_pk, _id, sent, size) => progress.push([sent, size]),
+      onIncoming: () => {},
+      onError: () => {},
+    });
+    t.connect(peer);
+    const dc = lastDc as unknown as BufferedDc;
+    dc.readyState = "open";
+    lastDc!.onopen!();
+    return { t, peer, dc, progress };
+  };
+
+  /** 記帳型惰性來源：記下每次被讀的區段。 */
+  const countingSource = (size: number) => {
+    const reads: Array<[number, number]> = [];
+    return {
+      reads,
+      src: {
+        name: "huge.bin",
+        mime: "application/octet-stream",
+        size,
+        slice: (offset: number, length: number): Promise<Uint8Array> => {
+          reads.push([offset, length]);
+          return Promise.resolve(new Uint8Array(length));
+        },
+      },
+    };
+  };
+
+  it("🔴 整檔從未一次被讀出來——逐塊、每塊 CHUNK_SIZE", async () => {
+    const { t, peer } = setup();
+    const { reads, src } = countingSource(16_384 * 4);
+    t.sendFile(peer, src);
+    await settle();
+    expect(reads).toEqual([
+      [0, 16_384],
+      [16_384, 16_384],
+      [32_768, 16_384],
+      [49_152, 16_384],
+    ]);
+    // 沒有任何一次讀取涵蓋整檔。
+    expect(reads.every(([, len]) => len === 16_384)).toBe(true);
+  });
+
+  it("file-begin 的 size 來自來源，不是位元組長度", async () => {
+    const { t, peer, dc } = setup();
+    const { src } = countingSource(16_384 * 2);
+    t.sendFile(peer, src);
+    await settle();
+    expect(JSON.parse(dc.sent[0] as string).size).toBe(16_384 * 2);
+  });
+
+  it("進度以來源宣告的大小為分母", async () => {
+    const size = 16_384 * 3;
+    const { t, peer, progress } = setup();
+    t.sendFile(peer, countingSource(size).src);
+    await settle();
+    expect(progress.at(-1)).toEqual([size, size]);
+  });
+
+  it("🔴 背壓仍然有效——塞住時來源也跟著停讀（否則記憶體就從這裡漏回來）", async () => {
+    const { t, peer, dc } = setup();
+    const { reads, src } = countingSource(16_384 * 10);
+    let count = 0;
+    const realSend = dc.send.bind(dc);
+    dc.send = (m: string | ArrayBuffer): void => {
+      realSend(m);
+      if (++count === 3) dc.bufferedAmount = 2 << 20;
+    };
+    t.sendFile(peer, src);
+    await settle();
+    expect(reads).toHaveLength(2); // 停手了就不再向來源要
+    dc.drain();
+    await settle();
+    expect(reads).toHaveLength(10);
+  });
+
+  it("位元組檔與惰性來源走同一條管線（送出的框架一模一樣）", async () => {
+    const payload = new Uint8Array(16_384 * 2 + 7).map((_, i) => i % 251);
+    const a = setup();
+    a.t.sendFile(a.peer, { name: "x.bin", mime: "application/octet-stream", bytes: payload });
+    await settle();
+    vi.unstubAllGlobals();
+    const b = setup();
+    b.t.sendFile(b.peer, {
+      name: "x.bin",
+      mime: "application/octet-stream",
+      size: payload.length,
+      slice: (offset: number, length: number) => Promise.resolve(payload.subarray(offset, offset + length)),
+    });
+    await settle();
+    // file-begin 除了傳輸 id（時間戳）以外必須一模一樣。
+    const withoutId = (m: string | ArrayBuffer): unknown => {
+      const { id: _id, ...rest } = JSON.parse(m as string) as Record<string, unknown>;
+      return rest;
+    };
+    expect(withoutId(b.dc.sent[0]!)).toEqual(withoutId(a.dc.sent[0]!));
+    expect(b.dc.chunkCount).toBe(a.dc.chunkCount);
   });
 });

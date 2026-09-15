@@ -75,6 +75,76 @@ export interface OutgoingFile {
   bytes: Uint8Array;
 }
 
+/**
+ * 惰性檔案來源（ADR-0346）：**知道多大、讀得出某一段**，但不保證整份在記憶體裡。
+ *
+ * 這是送大檔時 `OutgoingFile` 的替代品。`OutgoingFile.bytes` 意味著整檔已經在 RAM ——
+ * 一個 2 GB 的檔案光是「準備送出」就先 OOM 了，連一個位元組都還沒上網。
+ *
+ * ⚠ **不取代 `OutgoingFile`**：需要整份位元組的路徑（ADR-0162 relay 暫存的加密分塊、
+ * ADR-0161 儲存槽落盤、縮圖、EXIF 清除）仍吃 `OutgoingFile`，那些本來就只處理小檔。
+ */
+export interface OutgoingFileStream {
+  name: string;
+  mime: string;
+  /** 位元組總數。**這才是權威**——惰性來源沒有 `bytes` 可量。 */
+  size: number;
+  /**
+   * 讀取 `[offset, offset + length)`。回傳長度可小於 `length`（尾段），
+   * 但**不得多於**——多了代表來源說謊，收端會判超出宣告大小而中止。
+   */
+  slice(offset: number, length: number): Promise<Uint8Array>;
+}
+
+/** `Blob`/`File` 的最小形狀（不綁 lib.dom，Node 18+ 的 Blob 也吃得下）。 */
+export interface BlobLike {
+  readonly size: number;
+  slice(start: number, end: number): { arrayBuffer(): Promise<ArrayBuffer> };
+}
+
+/**
+ * 把已在記憶體的 `OutgoingFile` 包成惰性來源。
+ *
+ * `slice` 走 `subarray`＝**不複製**，所以這層包裝對既有的位元組路徑是零成本的——
+ * 它存在只是為了讓送檔管線**只有一條**，不必為「有 bytes」和「沒 bytes」各寫一遍。
+ */
+export function bytesStream(file: OutgoingFile): OutgoingFileStream {
+  return {
+    name: file.name,
+    mime: file.mime,
+    size: file.bytes.length,
+    slice: (offset, length) => Promise.resolve(file.bytes.subarray(offset, offset + length)),
+  };
+}
+
+/**
+ * 把 `Blob`/`File` 包成惰性來源：**逐塊才讀，整檔不進 RAM**。
+ *
+ * 這是 ADR-0346 的重點——瀏覽器的 `File` 本來就只是磁碟上那份檔案的把手，
+ * 是 `await f.arrayBuffer()` 那一行把它整份拉進了記憶體。
+ */
+export function blobStream(name: string, mime: string, blob: BlobLike): OutgoingFileStream {
+  return {
+    name,
+    mime,
+    size: blob.size,
+    slice: async (offset, length) => {
+      const end = Math.min(offset + length, blob.size);
+      return new Uint8Array(await blob.slice(offset, end).arrayBuffer());
+    },
+  };
+}
+
+/** 兩種型態統一成惰性來源（送檔管線只認這個）。 */
+export function asFileStream(file: OutgoingFile | OutgoingFileStream): OutgoingFileStream {
+  return "bytes" in file ? bytesStream(file) : file;
+}
+
+/** 位元組總數，不管拿到的是哪一種型態。 */
+export function fileSizeOf(file: OutgoingFile | OutgoingFileStream): number {
+  return "bytes" in file ? file.bytes.length : file.size;
+}
+
 export interface ReceivedFile {
   /** 傳輸 id（= 送出端 file-begin 的 id）；供關聯中繼 metadata 訊息與此 P2P 位元組（ADR-0093）。 */
   id: string;
@@ -118,33 +188,33 @@ export function encodeDcPresence(s: string, m: string, np: string, cadenceMs?: n
  * 將檔案編碼為一連串資料通道訊息：一則 `file-begin` 後接 N 則 `file-chunk`。
  * 不受中繼站 JSON 大小限制，速度僅受雙方頻寬影響。
  *
- * 🔴 **這是 generator，不是陣列**（ADR-0345）。原本它一次把**所有**分塊框架都配置出來
- * 再回傳——一個 100 MiB 的檔就是額外一整份 100 MiB（6,400 個框架物件）躺在記憶體裡，
- * 而它們唯一的用途是等著被逐一送出。改成惰性產生後，同一時間只有**一塊**存在。
+ * 🔴 **async generator**——同一時間只有**一塊**存在（ADR-0345），而且分塊是
+ * **逐塊才從來源讀**（ADR-0346）：來源若是 `Blob`/`File`，整檔從頭到尾不進 RAM。
  *
- * 呼叫端照樣 `for...of`；需要陣列的地方（測試）自行 `[...encodeFile(...)]`。
+ * 呼叫端 `for await`；需要陣列的地方（測試）自行收集。
  */
-export function* encodeFile(
-  file: OutgoingFile,
+export async function* streamFile(
+  file: OutgoingFile | OutgoingFileStream,
   id: string,
   chunkSize = DEFAULT_CHUNK_SIZE,
   /** 儲存槽存放來源標註（ADR-0161／審查修正）：隨 file-begin 傳，一般檔案省略。 */
   origin?: string,
-): Generator<string | Uint8Array, void, void> {
-  const total = Math.ceil(file.bytes.length / chunkSize);
+): AsyncGenerator<string | Uint8Array, void, void> {
+  const src = asFileStream(file);
+  const total = Math.ceil(src.size / chunkSize);
   yield JSON.stringify({
     t: "file-begin",
     id,
-    name: file.name,
-    mime: file.mime,
-    size: file.bytes.length,
+    name: src.name,
+    mime: src.mime,
+    size: src.size,
     chunks: total,
     chunkSize,
     ...(origin !== undefined ? { origin } : {}),
   } satisfies DataMessage);
   for (let seq = 0; seq < total; seq++) {
-    // subarray 不複製；框架本身才是那一份複製，而它在送出後即可回收。
-    yield encodeFileChunk(id, seq, file.bytes.subarray(seq * chunkSize, (seq + 1) * chunkSize));
+    const offset = seq * chunkSize;
+    yield encodeFileChunk(id, seq, await src.slice(offset, Math.min(chunkSize, src.size - offset)));
   }
 }
 

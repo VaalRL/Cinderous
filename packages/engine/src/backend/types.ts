@@ -15,6 +15,7 @@ import type {
   OrgRosterDoc,
   OrgWorkHours,
   OutgoingFile,
+  OutgoingFileStream,
   PubkeyHex,
   ReceivedFile,
   CalendarAction,
@@ -550,7 +551,15 @@ export interface ChatBackend {
    * `opts.savedPath`（ADR-0103）：**送出端原檔的本機路徑**。只有原生選檔對話框拿得到
    * （瀏覽器 `<input type=file>` 基於安全不給完整路徑）；有了它，自己送出的圖片重載後也能看原圖。
    */
-  sendFile?(to: PubkeyHex, file: OutgoingFile, opts?: { thumb?: string; savedPath?: string }): string;
+  sendFile?(
+    to: PubkeyHex,
+    /**
+     * 位元組（小檔）或**惰性來源**（大檔，ADR-0346：`blobStream(file)` ⇒ 整檔不進 RAM）。
+     * ⚠ 惰性來源不走 ADR-0162 的 relay 暫存（那條需要整份位元組來加密分塊，且上限 ≤ 16 MB）。
+     */
+    file: OutgoingFile | OutgoingFileStream,
+    opts?: { thumb?: string; savedPath?: string },
+  ): string;
   /**
    * 向 `to` 索取自訂 emoji blob（ADR-0223 backfill）：收端見訊息的 `ref` 但快取無此 hash 時呼叫。
    * 對端查得後以加密分塊回傳；收齊、驗整合性、入快取後觸發 `onAssetCached`。
