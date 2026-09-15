@@ -77,6 +77,6 @@ type OpenFileSink = (meta) => Promise<FileSink | null> | FileSink | null;
   - **`maxQueuedBytes` 觸發時整個檔案作廢**，不是暫停後重試——資料通道沒有收端流量控制，沒有「暫停」這個選項。
   - **沒有真實 OPFS 的自動化測試**：sink 機制、退路、佇列上限、端到端往返都有測（用替身 sink），但 `opfsFileSink()` 本身跑在 node 測試環境外。
 - 後續行動／待辦：
-  1. **Tauri 原生落盤**：新增串流寫入的 command（暫存檔 → 另存時**原生移動**，零位元組過 IPC），順帶修掉 `Array.from` 那個災難。⚠ 前置條件是讓 CI 真的編譯 `main.rs`（加一個 `cargo check --features tauri-app` 的 job），否則只是把賭注換個地方下。
+  1. **Tauri 原生落盤**：新增串流寫入的 command（暫存檔 → 另存時**原生移動**，零位元組過 IPC），順帶修掉 `Array.from` 那個災難。~~⚠ 前置條件是讓 CI 真的編譯 `main.rs`~~ ⇒ **前置條件已完成（ADR-0348）**：CI 的 `tauri-app` job 現在會 check＋clippy `main.rs`。⚠ 但**仍然沒有測試**——`cargo test --features tauri-app` 會因 keyring 測試需要真實 OS 金鑰庫而失敗，所以新 command 的可測邏輯應該住在 lib（比照 `partfile.rs`）。
   2. `cinder-inbox/` 的開機清理（超過 N 天的 `.part` 一律刪）。
   3. **三個平台都能串流之後**，才調高 `DEFAULT_MAX_FILE_SIZE`，並依 ADR-0344 重新檢視 50 MB 的中繼門檻。
