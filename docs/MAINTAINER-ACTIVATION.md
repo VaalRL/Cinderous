@@ -94,9 +94,10 @@ export const MAINTAINER_PUBKEY = "<你的 64 字元 hex 公鑰>";
 
 ## ⑥ 驗證上線
 
-- Actions → 「Relay 健康檢查」→ **Run workflow**（或等整點 cron）。
+- Actions → 「Relay 健康檢查」→ **Run workflow**（或等 cron——每 6 小時的 :17，ADR-0350）。
 - Log 應出現：`✅ <url>`、`已簽章 relay 清單事件（kind 10037）`、`📡 發佈至 <url>`。
-- bot 會提交更新後的 `relays.json`（帶 `accepting`/`weight`）與 `health-history.json`。
+- bot 只在 `relays.json` 真的變動時提交到 main；`health-history.json`（滾動 uptime 計數）
+  是執行期狀態，存在 `relay-health-state` 分支、**不進 main**（ADR-0350）。
 - 用**重建後**的客戶端確認登入自動選座已從簽章清單預填。
 
 ---
@@ -105,7 +106,14 @@ export const MAINTAINER_PUBKEY = "<你的 64 字元 hex 公鑰>";
 
 - **人管加入/退役**：加 URL 進 `relays.json`（機器自動探測分級）；退役＝把 entry 的 `status`
   設 `draining`→`retired`，既有用戶自動搬離。
-- **機器管品質**：每小時 uptime／一致性自動更新（`health-history.json` 滾動窗 ≈30 天）。
+- **機器管品質**：每 6 小時 uptime／一致性自動更新（滾動窗 30 天＝4 次/天 × 30，由
+  `relay/bootstrap/uptime.ts` 的 `PROBES_PER_DAY` 推導）。
+  ⚠ 要在本機跑完整探測，得先把狀態取回來，否則會直接失敗（那是刻意的——空歷史會把
+  正式收錄的 relay 降級成試用，帶金鑰時還會簽章發佈）：
+  ```
+  git fetch origin relay-health-state
+  git show FETCH_HEAD:health-history.json > relay/bootstrap/health-history.json
+  ```
 - **第三方申請**（見 `docs/NODE-SUBMISSION.md`）＝ issue/PR 交 URL，你把 URL 加進 `relays.json` 即進探測流程。
 
 ## 金鑰輪替

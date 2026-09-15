@@ -64,13 +64,15 @@ export const UPTIME_MIN_SAMPLES = PROBES_PER_DAY * 2;             // 兩天
 
 - 正面：main 的自動提交從約 7 次/天降到**只在清單真的變動時**（實務上數週一次）。窗口長度不再會因為改頻率而悄悄失真。
 - 負面／已知殘餘風險：
-  - 🔴 **workflow 本身沒有在 GitHub 上跑過。** git plumbing 那一串（`hash-object` → `mktree` → `commit-tree` → `push --force`）我在本機 dry-run 過、確認產出單一檔案且無父提交；但**整個 job 在真實 runner 上的行為（權限、`fetch --depth=1` 對不存在分支的退出碼、first-run 遷移路徑）只能靠實際執行驗證**。這是本次最薄的一塊。
-  - **首次執行會落到 `::warning::` 那條路**（狀態分支還不存在）並使用 main 內的種子——這是預期的遷移行為，但也意味著**那一次的失敗會很安靜**。第一次排程觸發後應該人工確認 `relay-health-state` 分支確實被建立。
-  - **main 裡的 `health-history.json` 變成一份不再更新的種子**。留著它是為了遷移，但它會逐漸與真實狀態脫節而令人困惑；本機執行 `bootstrap:run` 也會弄髒它（`git checkout` 可還原）。遷移確認無誤後應刪除。
+  - ~~🔴 **workflow 本身沒有在 GitHub 上跑過。**~~ **已解除（2026-09-15，run 34969809280）。** 實跑結果：`fetch --depth=1` 對不存在分支的非零退出碼被 `if` 正確接住（沒有被 `set -e` 打死）、`::warning::` 如實印出、狀態分支以**無父提交**建立（`77bcc3a`，tree 只有 `health-history.json` 一個 blob）、main 沒有收到 `health-history.json` 的提交。迴圈折半也在實跑中驗證：`cinderous1` 從種子的 **448 → 113**（448→224→112，+1），一次收斂——單次折半會停在 225（仍高於 120 的上限），那正是改成迴圈的理由。
+  - ~~**首次執行會落到 `::warning::` 那條路**~~ **遷移已完成**，該退路已從 workflow 移除：取回狀態那一步改成無條件 `git fetch`，讀不到就整個 job 紅。留著一條「讀不到就用種子」的退路，等於在種子刪除後允許安靜降級。
+  - ~~**main 裡的 `health-history.json` 變成一份不再更新的種子**~~ **種子已刪除**，並加進 `.gitignore`（本機 `bootstrap:run` 會產生它，不擋著就會被請回 main）。
+  - 🔴 **刪掉種子會把「空歷史」這個陷阱從 CI 搬到維護者的筆電上。** `readHistory()` 原本 `catch { return {} }` ——檔案不在就當成沒有紀錄。這在種子還在時無害；種子刪掉之後，本機 `bootstrap:run` 會拿到 `{}` ⇒ `uptimePct` 回 `undefined` ⇒ `evaluateAdmission` 把**正式收錄**的 relay 判成試用（`accepting: false`，見 `node-attestation.test.ts`「一致性過但 uptime 未知/不足 → 試用」）⇒ 降級後的清單被寫回 `relays.json`，而維護者本機**帶著 `MAINTAINER_NSEC`**，所以還會多一步 CI 沒有的**簽章並發佈**。本 ADR 對 CI 立的規則（「必須讀成功，否則失敗」）因此一併套到本機：`uptime.ts` 的 `historyOrThrow` 在檔案不存在或內容壞掉時直接拋，訊息裡寫明怎麼取回狀態；真正的冷啟動用 `RELAY_HEALTH_COLD_START=1` 明示放行。
   - **偵測 relay 死亡的延遲從「宣稱 1 小時／實際 3.4 小時」變成「最多 6 小時」**。名目上變慢，實際上差別不大，但仍是一個退步。
   - 頻率改變不會回溯修正既有計數的**語意**：現存的 448 筆樣本是按舊節奏取的，折半進窗後它們仍被當成新節奏的樣本。影響是暫時的（幾十次探測後就被新樣本稀釋）。
 - 後續行動／待辦：
-  1. 首次排程執行後確認 `relay-health-state` 分支建立、main 沒有收到 `health-history.json` 的提交。
-  2. 確認無誤後從 main 刪除 `health-history.json` 種子。
+  1. ~~首次排程執行後確認 `relay-health-state` 分支建立、main 沒有收到 `health-history.json` 的提交。~~ **已確認**（見上）。
+  2. ~~確認無誤後從 main 刪除 `health-history.json` 種子。~~ **已刪除**，並補上 `historyOrThrow` 守衛與 `.gitignore`。
   3. `threat-intel.yml` 每日一筆提交是合理的（內容真的變），不在本 ADR 範圍。
-  4. （獨立）CI 的 `audit` job 每次都 `cargo install cargo-audit --locked`（從原始碼重編，數分鐘）——目前 CI 最貴的單一步驟，值得換成釘版預編 binary 或加快取。
+  4. ~~（獨立）CI 的 `audit` job 每次都 `cargo install cargo-audit --locked`⋯⋯~~ **已處理（ADR-0351）**：改用釘版＋釘 sha256 的預編 binary，實測 **217s → 8s**（同一個 job 在 main 上的前後對照）。
+  5. 🔴 **cron 的準時性仍未驗證。** 合併後第一個排程時段（2026-09-15 12:17Z）**沒有觸發**——上面那次實跑是手動 `workflow_dispatch` 的。整個窗口長度的正確性建立在「4 次/天」上，而 `uptime.test.ts` 只能驗證常數與 cron **字面一致**，驗不到 GitHub 實際跑幾次。若實際觸發率明顯低於 4 次/天，那條測試就只是自洽而非正確，`PROBES_PER_DAY` 得按實測值再調一次。要判斷這件事，看 `relay-health-state` 分支的 `probes` 增長速度最準。

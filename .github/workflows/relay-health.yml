@@ -57,18 +57,19 @@ jobs:
 
       # 🔴 狀態遺失＝relay 被誤降級。`evaluateAdmission` 在 uptime 未知時回
       # 「試用（accepting:false）」——所以如果這一步靜默地拿到空歷史，下面的探測就會把
-      # **正式收錄的 relay 寫成試用**並提交出去。故：分支存在就**必須**讀成功，否則整個 job 失敗。
+      # **正式收錄的 relay 寫成試用**並提交出去。故：**必須**讀成功，否則整個 job 失敗。
+      #
+      # 遷移已完成（2026-09-15，run 34969809280）：狀態分支已建立、main 裡的種子已刪除，
+      # 所以這裡不再有「分支不存在就改用種子」那條退路——沒有分支就是異常，該紅。
+      # `health-check.ts` 那端也擋著同一件事（見 `uptime.ts` 的 `historyOrThrow`）：
+      # 即使這一步的某個環節沒把檔案放好，探測也會失敗而不是默默降級。
       - name: 取回 uptime 狀態
         run: |
           set -euo pipefail
-          if git fetch --depth=1 origin "$STATE_BRANCH" 2>/dev/null; then
-            git show "FETCH_HEAD:health-history.json" > /tmp/history.json
-            mv /tmp/history.json "$HISTORY"
-            echo "已取回 uptime 狀態（$STATE_BRANCH）。"
-          else
-            # 只有**首次遷移**該走到這裡：改用 main 內那份種子，本次執行後狀態分支即建立。
-            echo "::warning::狀態分支 $STATE_BRANCH 不存在——改用 main 內的種子（僅首次遷移時應發生）。"
-          fi
+          git fetch --depth=1 origin "$STATE_BRANCH"
+          git show "FETCH_HEAD:health-history.json" > /tmp/history.json
+          mv /tmp/history.json "$HISTORY"
+          echo "已取回 uptime 狀態（$STATE_BRANCH）。"
 
       - name: 探測 + 更新明文清單（不簽章——信任根金鑰不進 CI，ADR-0239）
         # 不注入 MAINTAINER_NSEC：health-check 未見金鑰時只更新明文清單、略過簽章與發佈。
