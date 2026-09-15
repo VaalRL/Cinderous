@@ -4,6 +4,12 @@
 //! bin target——**`cargo test` 永遠不會編譯它**，所以它們一行測試都沒有。其中
 //! `valid_part()` 是路徑穿越的**唯一**守衛。
 //!
+//! 🔵 2026-09-15 更新（ADR-0348）：CI 現在多了一個 `tauri-app` job 跑
+//! `cargo check --features tauri-app` ＋ `cargo clippy --all-targets --features tauri-app`，
+//! 所以 `main.rs` **至少會被編譯與 lint 到**了。但上面那句仍然成立：`cargo test` 依舊
+//! 編不到它（`tauri-app` 會把 `keyring` 一起開進來，而其測試需要真實 OS 金鑰庫，
+//! CI 容器裡必定失敗）⇒ **住在 `main.rs` 裡的邏輯依然沒有測試**。要測就還是得搬進 lib。
+//!
 //! 搬進 lib（比照 `encstore` / `passlock`：純函式、不依賴 Tauri）之後，CI 的 `cargo test`
 //! 才真的在測會出貨的東西。
 
