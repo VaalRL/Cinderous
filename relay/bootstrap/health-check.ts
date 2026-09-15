@@ -1,8 +1,14 @@
 // 引導 relay 清單健康檢查 + 簽章發佈（ADR-0039）。
 //
-// GitHub Actions 每小時執行：以 REQ→EOSE 往返探測每座 relay（順帶驗證對端確為
-// relay），剔除逾時者；never-empty 守門（全滅則保留原清單、不覆寫）；若提供
-// 維護者金鑰（MAINTAINER_NSEC）則產生簽章的 kind RELAY_LIST 事件供發佈。
+// GitHub Actions 每 6 小時執行（ADR-0350；原為每小時，見該 ADR §背景）：以 REQ→EOSE
+// 往返探測每座 relay（順帶驗證對端確為 relay），剔除逾時者；never-empty 守門（全滅則
+// 保留原清單、不覆寫）；若提供維護者金鑰（MAINTAINER_NSEC）則產生簽章的 kind
+// RELAY_LIST 事件供發佈。
+//
+// ⚠ `health-history.json`（滾動 uptime 計數）**不再提交到 main**（ADR-0350）——它是
+// 執行期狀態，不是原始碼，而每跑一次就必然改變 ⇒ 曾經佔掉 main 歷史的 87%。
+// 現在它住在 `relay-health-state` 分支；main 裡那一份是**遷移用的種子**，不再更新。
+// 本機執行會改動它，`git checkout relay/bootstrap/health-history.json` 即可還原。
 //
 // 執行：pnpm --filter @cinderous/relay bootstrap:run
 // 信任根＝維護者金鑰；此腳本與 GitHub 僅為發佈通道，無法偽造簽章清單。
@@ -12,6 +18,9 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { evaluateAdmission, generateSecretKey, listEntries, nsecDecode, signRelayList, type RelayEntry, type RelayListDoc } from "@cinderous/core";
 import { autoAuth, parse, runConformance, withWs } from "./conformance.js";
+// 滾動窗的數學抽到 `uptime.ts`（ADR-0350）：窗口長度由探測頻率推導，並有測試把
+// 它與 workflow 的 cron 綁在一起——原本那個 `720 // ≈30 天/時` 是會過期的註解。
+import { recordProbe, uptimePct, type UptimeRec } from "./uptime.js";
 
 // 打包後執行檔位於 relay/dist/；清單常駐 relay/bootstrap/。
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -19,14 +28,6 @@ const BOOTSTRAP_DIR = join(HERE, "..", "bootstrap");
 const LIST_PATH = join(BOOTSTRAP_DIR, "relays.json");
 const EVENT_PATH = join(BOOTSTRAP_DIR, "relay-list-event.json");
 const HISTORY_PATH = join(BOOTSTRAP_DIR, "health-history.json");
-const UPTIME_MIN_SAMPLES = 12; // 少於此探測次數＝uptime 資料不足（維持試用）
-const UPTIME_CAP = 720; // 滾動窗上限（≈30 天/時）；到頂折半保留比例
-
-/** 每座 relay 的滾動 uptime 計數（維護者工具狀態；非伺服器狀態）。 */
-interface UptimeRec {
-  probes: number;
-  live: number;
-}
 function readHistory(): Record<string, UptimeRec> {
   try {
     return JSON.parse(readFileSync(HISTORY_PATH, "utf8")) as Record<string, UptimeRec>;
@@ -88,15 +89,8 @@ async function main(): Promise<void> {
   const results = await Promise.all(
     active.map(async (e) => {
       const h = history[e.url] ?? { probes: 0, live: 0 };
-      const uptimePct = h.probes >= UPTIME_MIN_SAMPLES ? (h.live / h.probes) * 100 : undefined;
-      const conf = await runConformance(e.url, uptimePct);
-      let probes = h.probes + 1;
-      let live = h.live + (conf.live ? 1 : 0);
-      if (probes > UPTIME_CAP) {
-        probes = Math.round(probes / 2);
-        live = Math.round(live / 2);
-      }
-      history[e.url] = { probes, live };
+      const conf = await runConformance(e.url, uptimePct(h));
+      history[e.url] = recordProbe(h, conf.live);
       return { e, conf };
     }),
   );

@@ -1,27 +1,45 @@
 name: Relay 健康檢查（ADR-0039）
 
-# 每小時探測引導 relay 清單、剔除逾時節點、更新**明文**清單。
+# 每 6 小時探測引導 relay 清單、剔除逾時節點、更新**明文**清單。
+#
+# ## 為什麼是 6 小時而不是每小時（ADR-0350）
+#
+# 原本是 `0 * * * *`。但**那個「每小時」從來不是真的**：實測連續兩次自動提交的間隔是
+# 2～5 小時不等、分鐘數完全隨機（從不是 :00），實際約 7 次/天。GitHub 對公開 repo 的
+# 排程工作會延遲甚至丟棄，而整點是最壅塞的時段。宣稱 24 次、實際 7 次，而 uptime 的
+# 滾動窗長度是按「每小時」算的 ⇒ 設計與現實差了三倍。
+#
+# 改成每 6 小時、並錯開到 :17：頻率誠實，且不撞最擁擠的整點。代價是偵測到一座 relay
+# 死掉最久要 6 小時——可接受，因為客戶端本來就有自己的健檢（ADR-0275），這份清單是
+# **引導**用的，不是即時可用性的唯一來源。
+#
+# ## 為什麼 uptime 狀態不進 main（ADR-0350）
+#
+# `health-history.json` 每跑一次就必然改變（計數器 +1）⇒ 原本那句「有變更才提交」對它
+# **結構性無效**，於是每次執行都推一筆。它一度佔掉 main 歷史的 87%。
+# 它是**執行期狀態，不是原始碼**，所以改存到 `relay-health-state` 分支（單一提交、每次
+# 強制覆寫，不會長大）。main 只在 `relays.json` 真的變動時才收到提交——那才是值得看的歷史。
 #
 # ✅ 信任根金鑰已移出 CI（ADR-0239）。本 workflow **不再持有 `MAINTAINER_NSEC`**、
-# 不再簽章、不再帶內發佈——只探測與更新明文 `relays.json`／`health-history.json`。
+# 不再簽章、不再帶內發佈——只探測與更新明文清單。
 # 簽章清單事件（kind 10037，客戶端釘死維護者公鑰驗證）由**維護者本機離線簽發**：
 #   pnpm --filter @cinderous/relay bootstrap:sign   （需 MAINTAINER_NSEC 在本機環境）
-# 於 relay 集合實際變動時執行即可（錨點稀少、變動罕見）。
-#
-# 這消除了 ADR-0235 C5 的殘餘：信任根不再暴露於「在 runner 上執行整棵相依樹」的環境。
-# 明文清單即使被竄改也無法冒充簽章事件（客戶端只採信釘死公鑰簽章的 10037）。
 on:
   schedule:
-    - cron: "0 * * * *"
+    - cron: "17 */6 * * *"
   workflow_dispatch:
 
-# 只需寫回 relays.json；不觸碰其他分支。
+# 需要寫回 relays.json（main）與 uptime 狀態（relay-health-state）。
 permissions:
   contents: write
 
 concurrency:
   group: relay-health
   cancel-in-progress: true
+
+env:
+  STATE_BRANCH: relay-health-state
+  HISTORY: relay/bootstrap/health-history.json
 
 jobs:
   health:
@@ -37,19 +55,48 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile --ignore-scripts
 
+      # 🔴 狀態遺失＝relay 被誤降級。`evaluateAdmission` 在 uptime 未知時回
+      # 「試用（accepting:false）」——所以如果這一步靜默地拿到空歷史，下面的探測就會把
+      # **正式收錄的 relay 寫成試用**並提交出去。故：分支存在就**必須**讀成功，否則整個 job 失敗。
+      - name: 取回 uptime 狀態
+        run: |
+          set -euo pipefail
+          if git fetch --depth=1 origin "$STATE_BRANCH" 2>/dev/null; then
+            git show "FETCH_HEAD:health-history.json" > /tmp/history.json
+            mv /tmp/history.json "$HISTORY"
+            echo "已取回 uptime 狀態（$STATE_BRANCH）。"
+          else
+            # 只有**首次遷移**該走到這裡：改用 main 內那份種子，本次執行後狀態分支即建立。
+            echo "::warning::狀態分支 $STATE_BRANCH 不存在——改用 main 內的種子（僅首次遷移時應發生）。"
+          fi
+
       - name: 探測 + 更新明文清單（不簽章——信任根金鑰不進 CI，ADR-0239）
         # 不注入 MAINTAINER_NSEC：health-check 未見金鑰時只更新明文清單、略過簽章與發佈。
         run: pnpm --filter @cinderous/relay bootstrap:run
 
-      - name: 提交清單與一致性/uptime 記錄變更（若有）
+      # 以 plumbing 建一個**只含這個檔案、沒有父提交**的提交再強制推送：分支永遠是單一提交、
+      # 不會長大，也不需要另建 repo 或處理額外的認證（沿用 checkout 設好的 remote）。
+      - name: 保存 uptime 狀態（不進 main）
         run: |
-          # relays.json＝簽章清單來源；health-history.json＝跨執行的滾動 uptime（ADR-0092 分級收錄依據）。
-          if [ -n "$(git status --porcelain relay/bootstrap/relays.json relay/bootstrap/health-history.json)" ]; then
+          set -euo pipefail
+          git config user.name "relay-health-bot"
+          git config user.email "bot@users.noreply.github.com"
+          blob=$(git hash-object -w "$HISTORY")
+          tree=$(printf '100644 blob %s\thealth-history.json\n' "$blob" | git mktree)
+          commit=$(git commit-tree "$tree" -m "chore(relay): uptime 滾動計數快照（非原始碼，見 ADR-0350）")
+          git push --force origin "$commit:refs/heads/$STATE_BRANCH"
+
+      - name: 提交清單變更（若有）
+        run: |
+          set -euo pipefail
+          # ⚠ 只看 relays.json。`health-history.json` **刻意不在這裡**——它每次都變，
+          # 把它加進來就等於無條件提交（那正是 ADR-0350 要修掉的事）。
+          if [ -n "$(git status --porcelain relay/bootstrap/relays.json)" ]; then
             git config user.name "relay-health-bot"
             git config user.email "bot@users.noreply.github.com"
-            git add relay/bootstrap/relays.json relay/bootstrap/health-history.json
-            git commit -m "chore(relay): 自動更新引導 relay 清單健康狀態與 uptime 記錄"
+            git add relay/bootstrap/relays.json
+            git commit -m "chore(relay): 自動更新引導 relay 清單（分級收錄，ADR-0092）"
             git push
           else
-            echo "清單與記錄無變化，略過提交。"
+            echo "清單無變化，略過提交。"
           fi
