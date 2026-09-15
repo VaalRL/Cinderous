@@ -159,8 +159,9 @@ export async function runWebRtcScenario(): Promise<WebRtcResult> {
           say("B 收到 Nudge");
         },
         onFile: (file: ReceivedFile) => {
-          const fileOk = file.name === fileName && bytesEqual(file.bytes, payload);
-          say(`B 收到檔案 ${file.name}（${file.bytes.length} bytes），完整=${fileOk}`);
+          // demo 沒有掛 sink（ADR-0347）⇒ 恆走記憶體路徑，位元組必在。
+          const fileOk = file.name === fileName && !!file.bytes && bytesEqual(file.bytes, payload);
+          say(`B 收到檔案 ${file.name}（${file.size} bytes），完整=${fileOk}`);
           resolve({ connected, nudge, fileOk, fileName: file.name, log });
         },
       });

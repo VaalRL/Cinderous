@@ -46,7 +46,7 @@ import { safeNsecDecode } from "./nsec.js";
 import { getKeyVault, tauriKeyVault } from "./native/keyvault.js";
 import { wipeDeviceLocal, wipeIdentityLocal } from "./native/wipe.js";
 import { getNotifier, onNotificationClick } from "./native/notify.js";
-import { pickFileToSend, readFileAtPath, saveIncomingFile, saveTextFile } from "./native/save-file.js";
+import { pickFileToSend, readFileAtPath, saveIncomingFile, saveStreamedFile, saveTextFile, type SaveResult } from "./native/save-file.js";
 import { onNativeFileDrop } from "./native/file-drop.js";
 import { makeThumbnail } from "./ui/thumbnail.js";
 import { needsBytesToSend, sanitizedFileName, sanitizeImage } from "@cinderous/engine"; // ADR-0273：送圖去 EXIF；ADR-0346：其餘走惰性串流
@@ -462,11 +462,16 @@ async function buildBackend(p: Profile, nsecOverride?: string, storage?: AppStor
   // 🔴 ADR-0122：**告訴引擎「這應該是誰」**。拿不到金鑰時它會大聲失敗（IDENTITY_UNAVAILABLE），
   // 而不是靜默產生一把新的把使用者換掉。首次登入的設定檔還沒有 pubkey → 不傳（此時本來就沒有期待值）。
   const guard = p.pubkey ? { expectPubkey: p.pubkey } : {};
+  // ADR-0347：收檔大檔串流落盤——**瀏覽器版才開**。
+  // Tauri 的「另存新檔」走 Rust `save_file`，需要整份位元組過 IPC；要讓它接受 OPFS 暫存檔
+  // 得改 `main.rs`，而那個 bin target **`cargo test` 與 CI 都不編譯**（見 `partfile.rs` 檔頭）
+  // ⇒ 在那裡加程式碼等於加一段沒有任何地方驗證得到的程式。留待另案（ADR-0347 §後續行動）。
+  const stream = { streamLargeFiles: !isTauri() };
   return new RelayChatBackend(
     store,
     webSocketConnector(p.relayUrl),
     p.name,
-    nsecOverride ? { ...opts, ...guard, nsecOverride } : { ...opts, ...guard },
+    nsecOverride ? { ...opts, ...guard, ...stream, nsecOverride } : { ...opts, ...guard, ...stream },
   );
 }
 
@@ -1440,22 +1445,29 @@ export function App(): JSX.Element {
           return changed ? { ...prev, [pk]: next } : prev;
         }),
       onFileBytes: (pk, messageId, file) => {
-        // 圖片縮圖（ADR-0102）：由位元組產生，持久化供跨 session 顯示（原檔位元組仍不保存）。
-        void makeThumbnail(file.bytes, file.mime).then((thumb) => {
-          if (thumb) backend.setFileThumb?.(pk, messageId, thumb);
-        });
-        // 收到位元組（ADR-0093）：跳「另存新檔」讓使用者選位置。App 不保管檔案本體，只回填路徑；
-        // 訊息本身（metadata）已由 backend 經 onMessage/onHistory 建好，這裡只更新該則的檔案欄位。
-        void saveIncomingFile(file.name, file.mime, file.bytes).then((res) => {
+        const applied = (res: SaveResult): void => {
           setConvos((prev) =>
             patchFileByMsgId(prev, pk, messageId, {
-              sent: file.bytes.length,
+              sent: file.size,
               ...(res.savedPath ? { savedPath: res.savedPath } : {}),
               ...(res.url ? { url: res.url } : {}),
             }),
           );
           if (res.savedPath) backend.setFileSavedPath?.(pk, messageId, res.savedPath);
+        };
+        // ADR-0347：大檔已串流落盤（瀏覽器版）⇒ 沒有位元組，也就沒有縮圖。
+        if (file.sink) {
+          void saveStreamedFile(file.name, file.sink.handle).then(applied);
+          setOpen((prev) => (prev.includes(pk) ? prev : [...prev, pk]));
+          return;
+        }
+        // 圖片縮圖（ADR-0102）：由位元組產生，持久化供跨 session 顯示（原檔位元組仍不保存）。
+        void makeThumbnail(file.bytes!, file.mime).then((thumb) => {
+          if (thumb) backend.setFileThumb?.(pk, messageId, thumb);
         });
+        // 收到位元組（ADR-0093）：跳「另存新檔」讓使用者選位置。App 不保管檔案本體，只回填路徑；
+        // 訊息本身（metadata）已由 backend 經 onMessage/onHistory 建好，這裡只更新該則的檔案欄位。
+        void saveIncomingFile(file.name, file.mime, file.bytes!).then(applied);
         setOpen((prev) => (prev.includes(pk) ? prev : [...prev, pk]));
       },
       // 縮圖產生完成（ADR-0102）：不等重載就顯示。

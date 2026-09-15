@@ -11,6 +11,8 @@ import { blobStream, type OutgoingFile, type OutgoingFileStream } from "@cindero
 import {
   isThumbnailable,
   needsBytesToSend,
+  readInboxFile,
+  removeInboxFile,
   sanitizedFileName,
   sanitizeImage,
   THUMB_MAX_BYTES,
@@ -59,6 +61,28 @@ export async function pickFile(): Promise<OutgoingFile | OutgoingFileStream | nu
     document.body.appendChild(input);
     input.click();
   });
+}
+
+/**
+ * 串流落盤的檔案另存（ADR-0347）。
+ *
+ * 🔴 **不把它讀成位元組**：`URL.createObjectURL(file)` 對 OPFS 取回的 `File` 是**零複製**，
+ * 瀏覽器下載時直接從磁碟串流。`await file.arrayBuffer()` 會把剛剛省下來的記憶體全部吃回去
+ * ——那樣整個 ADR-0347 就白做了。
+ *
+ * 回傳可下載的 URL；OPFS 取不到檔時回 null。
+ */
+export async function saveStreamedFile(name: string, handle: string): Promise<string | null> {
+  const file = await readInboxFile(handle);
+  if (!file || typeof document === "undefined") return null;
+  const url = URL.createObjectURL(file);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = name;
+  a.click();
+  // 使用者已拿到檔案 ⇒ 暫存區不必再留（失敗不拋）。
+  void removeInboxFile(handle);
+  return url;
 }
 
 /**

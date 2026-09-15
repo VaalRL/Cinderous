@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { generateSecretKey, getPublicKey } from "@cinderous/core";
 import { WebRtcTransfer } from "./webrtc.js";
+import type { OpenFileSink, ReceivedFile } from "@cinderous/core";
 
 // 最小 RTCPeerConnection 樁：捕捉最後建立的 pc/dc，供測試手動觸發開/關/失敗（node 無真實 WebRTC）。
 let lastDc: FakeDc | undefined;
@@ -565,5 +566,112 @@ describe("WebRtcTransfer 惰性來源送檔（ADR-0346）", () => {
     };
     expect(withoutId(b.dc.sent[0]!)).toEqual(withoutId(a.dc.sent[0]!));
     expect(b.dc.chunkCount).toBe(a.dc.chunkCount);
+  });
+});
+
+describe("WebRtcTransfer 收檔串流落盤接線（ADR-0347）", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  /** 把 A 送出的框架直接餵給 B 的資料通道（同一台機器上的兩端）。 */
+  const wire = (openSink?: OpenFileSink) => {
+    vi.stubGlobal("RTCPeerConnection", BufferedPc);
+    lastDc = undefined;
+    const received: ReceivedFile[] = [];
+    const errors: string[] = [];
+    const sk = generateSecretKey();
+    const peer = getPublicKey(generateSecretKey());
+    const rx = new WebRtcTransfer(
+      sk,
+      {
+        publishSignal: () => {},
+        onOutgoingProgress: () => {},
+        onIncoming: (_pk, f) => received.push(f),
+        onError: (_pk, r) => errors.push(r),
+      },
+      undefined,
+      openSink,
+    );
+    rx.connect(peer);
+    const dc = lastDc as unknown as BufferedDc;
+    dc.readyState = "open";
+    lastDc!.onopen!();
+    // 送出即回灌給自己的收端（框架格式兩端相同）。
+    dc.send = (m: string | ArrayBuffer): void => {
+      lastDc!.onmessage!({ data: m });
+    };
+    return { rx, peer, received, errors };
+  };
+
+  /**
+   * 9 MiB：**刻意超過 `sinkMinBytes` 的預設 8 MiB**（ADR-0347）。
+   * 用真實門檻測，才會發現「門檻沒設對就悄悄退回記憶體」這種問題——小檔測不出來。
+   */
+  const payload = new Uint8Array(9 * 1024 * 1024).map((_, i) => i % 251);
+
+  /** 沖刷到收檔完成（576 塊，每塊至少一個微任務）。 */
+  const settleUntil = async (done: () => boolean): Promise<void> => {
+    for (let i = 0; i < 20_000 && !done(); i++) await Promise.resolve();
+  };
+
+  it("未提供 sink → 走記憶體，收到位元組（既有行為）", async () => {
+    const { rx, peer, received } = wire();
+    rx.sendFile(peer, { name: "a.bin", mime: "x", bytes: payload });
+    await settleUntil(() => received.length > 0);
+    expect(received).toHaveLength(1);
+    expect(received[0]!.bytes).toBeDefined();
+    expect(received[0]!.size).toBe(payload.length);
+  });
+
+  it("🔴 提供 sink → 大檔落盤，收到的是落腳處而非位元組", async () => {
+    const writes: Array<[number, number]> = [];
+    const { rx, peer, received } = wire(() => ({
+      write: (offset, chunk) => void writes.push([offset, chunk.length]),
+      close: () => ({ handle: "inbox.part" }),
+      abort: () => {},
+    }));
+    rx.sendFile(peer, { name: "big.bin", mime: "x", bytes: payload });
+    await settleUntil(() => received.length > 0);
+    expect(received).toHaveLength(1);
+    expect(received[0]!.bytes).toBeUndefined();
+    expect(received[0]!.sink).toEqual({ handle: "inbox.part" });
+    // 逐塊寫入，不是最後一次寫完。
+    expect(writes.length).toBe(Math.ceil(payload.length / 16_384));
+  });
+
+  it("🔴 落盤內容與送出的位元組完全一致（端到端）", async () => {
+    const assembled = new Uint8Array(payload.length);
+    const { rx, peer, received } = wire(() => ({
+      write: (offset, chunk) => void assembled.set(chunk, offset),
+      close: () => ({ handle: "h" }),
+      abort: () => {},
+    }));
+    rx.sendFile(peer, { name: "big.bin", mime: "x", bytes: payload });
+    await settleUntil(() => received.length > 0);
+    expect(received).toHaveLength(1);
+    expect(Buffer.from(assembled).equals(Buffer.from(payload))).toBe(true);
+  });
+
+  it("惰性來源送出 ＋ 串流落盤：整條路徑兩端都不持有整檔（ADR-0346＋0347）", async () => {
+    const assembled = new Uint8Array(payload.length);
+    const reads: number[] = [];
+    const { rx, peer, received } = wire(() => ({
+      write: (offset, chunk) => void assembled.set(chunk, offset),
+      close: () => ({ handle: "h" }),
+      abort: () => {},
+    }));
+    rx.sendFile(peer, {
+      name: "big.bin",
+      mime: "x",
+      size: payload.length,
+      slice: (offset: number, length: number) => {
+        reads.push(length);
+        return Promise.resolve(payload.subarray(offset, offset + length));
+      },
+    });
+    await settleUntil(() => received.length > 0);
+    expect(received[0]!.bytes).toBeUndefined();
+    expect(received[0]!.sink).toBeDefined();
+    expect(reads.every((n) => n <= 16_384)).toBe(true); // 沒有任何一次讀整檔
+    expect(Buffer.from(assembled).equals(Buffer.from(payload))).toBe(true);
   });
 });

@@ -11,6 +11,9 @@ import {
   bytesStream,
   asFileStream,
   fileSizeOf,
+  type DataChannelLimits,
+  type OpenFileSink,
+  type ReceivedFile,
 } from "./datachannel.js";
 
 /** 收集 async generator 的全部訊息（測試要陣列時用）。 */
@@ -380,5 +383,182 @@ describe("Data Channel — 接收端單一緩衝區（ADR-0345）", () => {
     const partials = (rx as unknown as { partials: Map<string, { buf: Uint8Array | null }> }).partials;
     expect(partials.size).toBe(16);
     expect([...partials.values()].every((p) => p.buf === null)).toBe(true);
+  });
+});
+
+// ── ADR-0347：收檔端串流落盤 ─────────────────────────────────────────────────
+//
+// 上面所有既有測試都沒有給 `openSink` ⇒ 一律走記憶體路徑，**一個位元組都沒變**。
+// 這一組測的是給了 sink 之後的新行為。
+
+/** 記帳型 sink：把寫入記在陣列裡，並可注入延遲/失敗。 */
+function fakeSink(opts: { delay?: boolean; failOn?: number } = {}) {
+  const writes: Array<[number, number[]]> = [];
+  let closed = false;
+  let aborted = false;
+  let n = 0;
+  const sink = {
+    write(offset: number, chunk: Uint8Array): Promise<void> | void {
+      n += 1;
+      if (opts.failOn === n) return Promise.reject(new Error("磁碟壞了"));
+      writes.push([offset, [...chunk]]);
+      return opts.delay ? Promise.resolve() : undefined;
+    },
+    close(): { handle: string } {
+      closed = true;
+      return { handle: "/tmp/x" };
+    },
+    abort(): void {
+      aborted = true;
+    },
+  };
+  return {
+    sink,
+    writes,
+    get closed() {
+      return closed;
+    },
+    get aborted() {
+      return aborted;
+    },
+    /** 依寫入順序拼回完整位元組（驗證落盤內容正確）。 */
+    assembled(size: number): Uint8Array {
+      const out = new Uint8Array(size);
+      for (const [at, b] of writes) out.set(new Uint8Array(b), at);
+      return out;
+    },
+  };
+}
+
+/** 送一個 payload 給裝了 sink 的收端；回傳 sink 記帳與收到的檔案。 */
+async function receiveWithSink(
+  payload: Uint8Array,
+  chunkSize: number,
+  opts: { limits?: DataChannelLimits; sinkOpts?: Parameters<typeof fakeSink>[0]; openSink?: OpenFileSink } = {},
+) {
+  const rec = fakeSink(opts.sinkOpts);
+  const files: ReceivedFile[] = [];
+  const errors: string[] = [];
+  const rx = new DataChannelReceiver(
+    { onFile: (f) => files.push(f), onError: (e) => errors.push(e) },
+    { sinkMinBytes: 1, ...opts.limits },
+    opts.openSink ?? (() => rec.sink),
+  );
+  for (const m of await frames({ name: "big.bin", mime: "application/octet-stream", bytes: payload }, "s1", chunkSize)) {
+    rx.receive(m);
+  }
+  for (let i = 0; i < 50; i++) await Promise.resolve(); // 沖刷落盤佇列
+  return { rec, files, errors, rx };
+}
+
+describe("Data Channel — 收檔端串流落盤（ADR-0347）", () => {
+  const payload = new Uint8Array(100).map((_, i) => i % 251);
+
+  it("🔴 落盤後不帶 bytes，改帶 sink 落腳處與權威 size", async () => {
+    const { rec, files } = await receiveWithSink(payload, 16);
+    expect(files).toHaveLength(1);
+    expect(files[0]!.bytes).toBeUndefined();
+    expect(files[0]!.sink).toEqual({ handle: "/tmp/x" });
+    expect(files[0]!.size).toBe(100);
+    expect(rec.closed).toBe(true);
+  });
+
+  it("🔴 落盤內容與原始位元組完全一致", async () => {
+    const { rec } = await receiveWithSink(payload, 16);
+    expect(eq(rec.assembled(100), payload)).toBe(true);
+  });
+
+  it("每塊各寫一次，位移正確（不是最後才一次寫出）", async () => {
+    const { rec } = await receiveWithSink(payload, 16);
+    expect(rec.writes.map(([at]) => at)).toEqual([0, 16, 32, 48, 64, 80, 96]);
+  });
+
+  it("非同步 sink（真磁碟）也照樣收齊", async () => {
+    const { rec, files } = await receiveWithSink(payload, 16, { sinkOpts: { delay: true } });
+    expect(files).toHaveLength(1);
+    expect(eq(rec.assembled(100), payload)).toBe(true);
+  });
+
+  it("🔴 小檔不落盤——縮圖/儲存槽/預覽需要位元組", async () => {
+    const { rec, files } = await receiveWithSink(payload, 16, { limits: { sinkMinBytes: 1000 } });
+    expect(rec.writes).toHaveLength(0);
+    expect(files[0]!.bytes).toBeDefined();
+    expect(files[0]!.sink).toBeUndefined();
+  });
+
+  it("🔴 openSink 回 null → 退回記憶體，檔案照樣收得到（磁碟問題不該讓收檔整個失敗）", async () => {
+    const { files } = await receiveWithSink(payload, 16, { openSink: () => null });
+    expect(files).toHaveLength(1);
+    expect(eq(files[0]!.bytes!, payload)).toBe(true);
+    expect(files[0]!.sink).toBeUndefined();
+  });
+
+  it("openSink 拋例外 → 同樣退回記憶體", async () => {
+    const { files } = await receiveWithSink(payload, 16, {
+      openSink: () => {
+        throw new Error("no fs");
+      },
+    });
+    expect(files).toHaveLength(1);
+    expect(eq(files[0]!.bytes!, payload)).toBe(true);
+  });
+
+  it("🔴 開 sink 期間到達的分塊不會掉——退回記憶體時要倒回緩衝區", async () => {
+    // openSink 回傳一個「晚一點才 resolve」的 promise：分塊會先塞進佇列。
+    let release: (v: null) => void = () => {};
+    const pending = new Promise<null>((r) => (release = r));
+    const files: ReceivedFile[] = [];
+    const rx = new DataChannelReceiver({ onFile: (f) => files.push(f) }, { sinkMinBytes: 1 }, () => pending);
+    for (const m of await frames({ name: "a", mime: "x", bytes: payload }, "late", 16)) rx.receive(m);
+    expect(files).toHaveLength(0); // 還在等 sink
+    release(null); // 沒有 sink ⇒ 退回記憶體
+    for (let i = 0; i < 50; i++) await Promise.resolve();
+    expect(files).toHaveLength(1);
+    expect(eq(files[0]!.bytes!, payload)).toBe(true);
+  });
+
+  it("🔴 落盤跟不上接收速度 → 中止並報錯，不靜默吃光記憶體", async () => {
+    const { errors, files } = await receiveWithSink(payload, 16, {
+      limits: { maxQueuedBytes: 8 }, // 一塊就爆
+      sinkOpts: { delay: true },
+    });
+    expect(errors.some((e) => e.includes("跟不上"))).toBe(true);
+    expect(files).toHaveLength(0);
+  });
+
+  it("🔴 寫入失敗 → 中止、報錯、清掉半成品", async () => {
+    const { rec, errors, files } = await receiveWithSink(payload, 16, { sinkOpts: { failOn: 2, delay: true } });
+    expect(errors.some((e) => e.includes("落盤失敗"))).toBe(true);
+    expect(rec.aborted).toBe(true);
+    expect(files).toHaveLength(0);
+  });
+
+  it("中止後續到的分塊被丟棄，且不重複報錯", async () => {
+    const rec = fakeSink();
+    const errors: string[] = [];
+    const rx = new DataChannelReceiver({ onError: (e) => errors.push(e) }, { sinkMinBytes: 1 }, () => rec.sink);
+    rx.receive(JSON.stringify({ t: "file-begin", id: "z", name: "n", mime: "m", size: 6, chunks: 3, chunkSize: 2 }));
+    rx.receive(encodeFileChunk("z", 9, bytes(1, 2))); // 超出範圍 → 中止
+    rx.receive(encodeFileChunk("z", 0, bytes(1, 2)));
+    rx.receive(encodeFileChunk("z", 1, bytes(3, 4)));
+    expect(errors).toHaveLength(1);
+  });
+
+  it("abort() 會關掉串流中的 sink（逾時清理不留半成品）", async () => {
+    const rec = fakeSink();
+    const rx = new DataChannelReceiver({}, { sinkMinBytes: 1 }, () => rec.sink);
+    rx.receive(JSON.stringify({ t: "file-begin", id: "z", name: "n", mime: "m", size: 64, chunks: 4, chunkSize: 16 }));
+    await Promise.resolve();
+    rx.receive(encodeFileChunk("z", 0, new Uint8Array(16)));
+    for (let i = 0; i < 10; i++) await Promise.resolve();
+    rx.abort("z");
+    expect(rec.aborted).toBe(true);
+  });
+
+  it("記憶體路徑也帶 size（兩條路徑的 ReceivedFile 形狀一致）", async () => {
+    const onFile = vi.fn();
+    const rx = new DataChannelReceiver({ onFile });
+    for (const m of await frames({ name: "a", mime: "x", bytes: payload }, "sz", 16)) rx.receive(m);
+    expect(onFile.mock.calls[0]![0].size).toBe(100);
   });
 });

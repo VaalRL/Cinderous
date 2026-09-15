@@ -117,6 +117,7 @@ import {
   fileSizeOf,
   type OutgoingFile,
   type OutgoingFileStream,
+  type OpenFileSink,
   type PresencePayload,
   type ReceiptType,
   type PresenceState,
@@ -165,6 +166,7 @@ import {
 } from "@cinderous/core";
 import { loadRelayCheck, recordAuthObservation } from "./relay-check.js"; // ADR-0275：A 層健檢
 import { buildRtcConfig } from "./rtc-config.js";
+import { opfsFileSink } from "../storage/opfs-file-sink.js"; // ADR-0347：收檔串流落盤
 import type { IcePath } from "./ice-path.js"; // ADR-0344
 import { relayFileWarningFor, type RelayFileWarning } from "./file-gate.js"; // ADR-0344
 import { fetchTurnServers, turnEndpointFromRelay, turnRefreshDelayMs } from "./turn-fetch.js";
@@ -385,6 +387,15 @@ export function webSocketConnector(url: string): RelayConnector {
 export interface RelayPoolOptions {
   /** 自己的 home relay URL（用於與聯絡人 hint 比對去重、組分享字串）。 */
   relayUrl?: string;
+  /**
+   * 收檔大檔要不要串流落盤（ADR-0347）。預設走 OPFS（有的話）。
+   *
+   * **平台可以關掉**：`false` ⇒ 一律走記憶體（既有行為）。Tauri 桌面目前就傳 `false`
+   * ——它的「另存新檔」走 Rust command、需要整份位元組，而那條路徑要改得動 `main.rs`，
+   * 那個 bin target **`cargo test` 與 CI 都不編譯**（見 `partfile.rs` 檔頭），
+   * 在那裡加程式碼＝加一段沒有任何地方驗證得到的程式。見 ADR-0347 §後續行動。
+   */
+  streamLargeFiles?: boolean;
   /** 依 URL 建立外部 relay 連線的工廠。 */
   connectorFor?: (url: string) => RelayConnector;
   /**
@@ -837,6 +848,10 @@ export class RelayChatBackend implements ChatBackend {
       onConnectionState: (peer, connected, path) => this.handlers?.onPeerConnection?.(peer, connected, path),
       },
       () => this.rtcConfig(),
+      // ADR-0347：收檔大檔串流落盤（OPFS）。
+      // ⚠ 帶 `origin` 的儲存槽檔案（ADR-0161）回 `null` ⇒ 走記憶體——企業主端要拿整份
+      // 位元組才落得了盤。無 OPFS 的環境 `opfsFileSink()` 回 undefined ⇒ 整個不掛。
+      this.fileSink(pool?.streamLargeFiles),
     );
     this.call = new WebRtcCall(
       this.sk,
@@ -3950,7 +3965,8 @@ export class RelayChatBackend implements ChatBackend {
       bytes.set(part, off);
       off += part.length;
     }
-    this.onFileBytes(sender, { id: chunk.tid, name: asm.name, mime: asm.mime, bytes });
+    // ADR-0347：relay 暫存路徑自己把位元組組好（上限 ≤ 16 MB），永遠走記憶體。
+    this.onFileBytes(sender, { id: chunk.tid, name: asm.name, mime: asm.mime, size: bytes.length, bytes });
   }
 
   // ── emoji blob backfill（ADR-0223 Model B P2a-3b）──────────────────────────
@@ -4074,6 +4090,13 @@ export class RelayChatBackend implements ChatBackend {
     // 儲存槽存放（ADR-0161／審查修正）：`origin` 隨 P2P 幀本身到達 → 直接判定為存放，
     // 不進聊天訊息流、無競態。只收**名冊在世成員**（企業主端）；其餘忽略（不塞垃圾）。
     if (file.origin !== undefined) {
+      // ADR-0347：儲存槽落盤需要整份位元組。工廠對帶 `origin` 的檔案回 `null`
+      //（見 `RelayChatBackend` 建構 sink 之處）⇒ 這裡恆有位元組；防禦性檢查避免
+      // 日後改動時靜默丟掉企業主的檔案。
+      if (!file.bytes) {
+        this.handlers?.onFileError?.(peer, `儲存槽檔案 ${file.id} 缺少位元組，未落盤`);
+        return;
+      }
       if (this.orgOwnerFlag && this.lastRoster?.members.some((m) => m.pubkey === peer && !m.supersededBy)) {
         this.handlers?.onSlotDeposit?.(peer, {
           tid: file.id,
@@ -4099,8 +4122,8 @@ export class RelayChatBackend implements ChatBackend {
       // 位元組先到：以位元組自帶的 metadata 先建一則（sent=size＝位元組已在本機）。
       this.ensureFileMessage(
         peer,
-        { tid: file.id, name: file.name, size: file.bytes.length, mime: file.mime },
-        { msgId, outgoing: false, sent: file.bytes.length },
+        { tid: file.id, name: file.name, size: file.size, mime: file.mime },
+        { msgId, outgoing: false, sent: file.size },
       );
     }
     // 交 App：跳「另存新檔」對話框、寫入使用者選定路徑後以 setFileSavedPath 回填（App 不保管位元組）。
@@ -4673,6 +4696,17 @@ export class RelayChatBackend implements ChatBackend {
     // F5 卸載：P2P 通道已開時走 Data Channel，否則退回中繼。
     if (this.transfer.sendTyping(to)) return;
     this.publishAddressed(createTyping(this.sk, to));
+  }
+
+  /**
+   * 收檔落盤工廠（ADR-0347）。平台傳 `false` 即關閉；無 OPFS 亦回 undefined。
+   * 儲存槽檔案（帶 `origin`，ADR-0161）永遠走記憶體——企業主端要整份位元組才落得了盤。
+   */
+  private fileSink(enabled: boolean | undefined): OpenFileSink | undefined {
+    if (enabled === false) return undefined;
+    const factory = opfsFileSink();
+    if (!factory) return undefined;
+    return (meta) => (meta.origin !== undefined ? null : factory(meta));
   }
 
   /** 開啟對話時主動建立 P2P 通道（讓後續輸入中等狀態可卸載中繼）。 */

@@ -145,12 +145,55 @@ export function fileSizeOf(file: OutgoingFile | OutgoingFileStream): number {
   return "bytes" in file ? file.bytes.length : file.size;
 }
 
+/**
+ * 收檔落盤的去處（ADR-0347）：**來一塊寫一塊**，整檔不進 RAM。
+ *
+ * 由呼叫端（引擎）提供實作——core 不知道檔案系統長什麼樣，只知道「寫某個位移」與「收工」。
+ */
+export interface FileSink {
+  /** 寫入 `[offset, offset + chunk.length)`。 */
+  write(offset: number, chunk: Uint8Array): Promise<void> | void;
+  /** 收齊：收尾並回報落腳處。 */
+  close(): Promise<FileSinkResult> | FileSinkResult;
+  /** 放棄：清掉半成品（逾時、超量、寫入失敗）。**不得拋例外**。 */
+  abort(): void;
+}
+
+/** 落腳處的識別（OPFS 檔名／原生路徑）。UI 之後據此把檔案交給使用者。 */
+export interface FileSinkResult {
+  handle: string;
+}
+
+/**
+ * 決定某個進來的檔案要不要串流落盤（ADR-0347）。
+ *
+ * 回 `null`＝**這個檔案走記憶體**。這是刻意保留的退路：小檔留在記憶體才能做縮圖與預覽，
+ * 沒有檔案系統的環境（SSR、舊 webview）也得照常收得到檔案。
+ */
+export type OpenFileSink = (meta: {
+  id: string;
+  name: string;
+  mime: string;
+  size: number;
+  origin?: string;
+}) => Promise<FileSink | null> | FileSink | null;
+
 export interface ReceivedFile {
   /** 傳輸 id（= 送出端 file-begin 的 id）；供關聯中繼 metadata 訊息與此 P2P 位元組（ADR-0093）。 */
   id: string;
   name: string;
   mime: string;
-  bytes: Uint8Array;
+  /** 位元組總數。**這才是權威**——串流落盤時沒有 `bytes` 可量（ADR-0347）。 */
+  size: number;
+  /**
+   * 整份位元組。**串流落盤時為 `undefined`**，改看 `sink`（ADR-0347）。
+   *
+   * 需要位元組的消費點（縮圖、儲存槽、relay 分塊重組）都只處理小檔，而小檔本來就走
+   * 記憶體路徑；真正的大檔它們本來也吃不下。
+   */
+  bytes?: Uint8Array;
+  /** 串流落盤的落腳處（ADR-0347）；記憶體路徑無此欄。 */
+  sink?: FileSinkResult;
   /**
    * 公司儲存槽存放來源標註（ADR-0161／審查修正）：**隨 file-begin 幀本身傳**——收端據此
    * 直接判定為存放、不需等 relay metadata，消除位元組/metadata 兩傳輸的競態。一般檔案無此欄。
@@ -235,11 +278,31 @@ export interface DataChannelLimits {
   maxChunks?: number;
   /** 同時進行中的檔案數上限。預設 16。 */
   maxConcurrentFiles?: number;
+  /**
+   * 串流落盤時，**等著被寫入**的分塊最多能累積多少位元組（ADR-0347）。預設 8 MiB。
+   *
+   * 🔴 為什麼需要這個上限：資料通道**沒有收端流量控制**——瀏覽器會照收不誤，我們無法
+   * 叫對方慢一點。落盤若比網路慢，佇列就會無限長大，記憶體問題原封不動地搬到佇列裡。
+   * 超過上限即中止該檔並報錯——比靜默吃光記憶體誠實。實務上磁碟遠快於 P2P 頻寬，
+   * 正常傳輸永遠碰不到它。
+   */
+  maxQueuedBytes?: number;
+  /**
+   * 小於這個大小的檔案**不落盤**（ADR-0347）。預設 8 MiB。
+   *
+   * 小檔留在記憶體，縮圖（ADR-0102）、公司儲存槽（ADR-0161）、預覽才有位元組可用；
+   * 為了幾百 KB 的圖去開檔案、寫入、再讀回來也不划算。
+   */
+  sinkMinBytes?: number;
 }
 
 const DEFAULT_MAX_FILE_SIZE = 100 * 1024 * 1024;
 const DEFAULT_MAX_CHUNKS = 1_000_000;
 const DEFAULT_MAX_CONCURRENT = 16;
+const DEFAULT_MAX_QUEUED_BYTES = 8 * 1024 * 1024;
+const DEFAULT_SINK_MIN_BYTES = 8 * 1024 * 1024;
+/** 抑制名單長度：只需要撐過「中止後還在路上的那些分塊」，不必記得久。 */
+const SUPPRESS_MAX = 64;
 
 interface Partial {
   meta: { name: string; mime: string; size: number; chunks: number; chunkSize?: number; origin?: string };
@@ -255,6 +318,23 @@ interface Partial {
   seen: Set<number>;
   /** 無 `chunkSize`（舊版對端）時的循序寫入游標。 */
   offset: number;
+
+  // ── 串流落盤模式（ADR-0347）。以上的 `buf` 在這個模式下恆為 null。 ──
+  /**
+   * `"memory"`＝走 `buf`；`"opening"`＝正在開 sink，分塊先進 `queue`；
+   * `"sink"`＝已開好，`queue` 由 drain 迴圈寫出。
+   */
+  mode: "memory" | "opening" | "sink";
+  sink: FileSink | null;
+  /** 等著被寫入的分塊（`maxQueuedBytes` 設上限）。 */
+  queue: { at: number; bytes: Uint8Array }[];
+  queued: number;
+  /** drain 迴圈是否正在跑（避免並行寫入同一個 sink）。 */
+  draining: boolean;
+  /** 分塊已全部收到，只差寫完＋收尾。 */
+  allReceived: boolean;
+  /** 已中止（錯誤或超量）：後續分塊一律丟棄，不重複報錯。 */
+  failed: boolean;
 }
 
 /** 接收資料通道訊息，處理 Nudge 與檔案分塊重組。 */
@@ -263,19 +343,49 @@ export class DataChannelReceiver {
   private readonly maxFileSize: number;
   private readonly maxChunks: number;
   private readonly maxConcurrent: number;
+  private readonly maxQueuedBytes: number;
+  private readonly sinkMinBytes: number;
+  /**
+   * 已中止／已放棄的傳輸 id（ADR-0347）。
+   *
+   * 🔴 為什麼需要：中止後剩下的分塊**還在路上**，而它們會一一撞上「未知檔案分塊 id」
+   * 再各報一次錯。一個中止的 1 GB 傳輸＝數萬則錯誤回呼。這裡把它們靜靜丟掉——
+   * 中止的理由已經報過一次了。有界（`SUPPRESS_MAX`），不會無限長大。
+   */
+  private readonly suppressed = new Set<string>();
 
   constructor(
     private readonly handlers: DataChannelHandlers = {},
     limits: DataChannelLimits = {},
+    /**
+     * 串流落盤的去處（ADR-0347）。未提供＝一律走記憶體（既有行為，一個位元組都不變）。
+     */
+    private readonly openSink?: OpenFileSink,
   ) {
     this.maxFileSize = limits.maxFileSize ?? DEFAULT_MAX_FILE_SIZE;
     this.maxChunks = limits.maxChunks ?? DEFAULT_MAX_CHUNKS;
     this.maxConcurrent = limits.maxConcurrentFiles ?? DEFAULT_MAX_CONCURRENT;
+    this.maxQueuedBytes = limits.maxQueuedBytes ?? DEFAULT_MAX_QUEUED_BYTES;
+    this.sinkMinBytes = limits.sinkMinBytes ?? DEFAULT_SINK_MIN_BYTES;
   }
 
-  /** 放棄一個進行中的檔案（如逾時）。 */
+  /** 放棄一個進行中的檔案（如逾時）。串流中的半成品一併清掉。 */
   abort(id: string): void {
+    const partial = this.partials.get(id);
+    if (!partial) return;
+    partial.failed = true;
+    partial.sink?.abort();
     this.partials.delete(id);
+    this.suppress(id);
+  }
+
+  /** 記下一個不該再為它報錯的傳輸 id（有界）。 */
+  private suppress(id: string): void {
+    this.suppressed.add(id);
+    if (this.suppressed.size > SUPPRESS_MAX) {
+      const oldest = this.suppressed.values().next().value;
+      if (oldest !== undefined) this.suppressed.delete(oldest);
+    }
   }
 
   receive(raw: RawData): void {
@@ -312,7 +422,8 @@ export class DataChannelReceiver {
           this.handlers.onError?.("同時進行中的檔案數已達上限");
           return;
         }
-        this.partials.set(msg.id, {
+        {
+        const partial: Partial = {
           // origin 來自對方（遠端可控）→ 限型別與長度（審查修正）。
           meta: {
             name: msg.name,
@@ -328,9 +439,24 @@ export class DataChannelReceiver {
           buf: null,
           seen: new Set(),
           offset: 0,
-        });
+          mode: "memory",
+          sink: null,
+          queue: [],
+          queued: 0,
+          draining: false,
+          allReceived: false,
+          failed: false,
+        };
+        this.partials.set(msg.id, partial);
+        // ADR-0347：夠大才落盤。小檔留記憶體——縮圖/儲存槽/預覽需要位元組，
+        // 而為了幾百 KB 去開檔、寫入、再讀回來也不划算。
+        if (this.openSink && msg.size >= this.sinkMinBytes && msg.chunks > 0) {
+          partial.mode = "opening";
+          void this.beginSink(msg.id, partial);
+        }
         if (msg.chunks === 0) this.complete(msg.id);
         return;
+        }
       default:
         this.handlers.onError?.("未知資料通道訊息類型");
     }
@@ -345,14 +471,15 @@ export class DataChannelReceiver {
     }
     const partial = this.partials.get(chunk.id);
     if (!partial) {
-      this.handlers.onError?.(`未知檔案分塊 id：${chunk.id}`);
+      // 已中止的傳輸剩下的分塊還在路上——靜靜丟掉，理由已經報過一次了。
+      if (!this.suppressed.has(chunk.id)) this.handlers.onError?.(`未知檔案分塊 id：${chunk.id}`);
       return;
     }
     // 序號必須落在宣告的範圍內。這條讓「收滿 chunks 塊」等價於「每一塊都到齊」——
     // 舊版是收滿後再逐一檢查有沒有洞，現在是不可能有洞。
+    if (partial.failed) return; // 已中止：後續分塊一律丟棄
     if (chunk.seq >= partial.meta.chunks) {
-      this.partials.delete(chunk.id);
-      this.handlers.onError?.(`檔案 ${chunk.id} 分塊序號 ${chunk.seq} 超出宣告範圍，已中止`);
+      this.fail(chunk.id, partial, `檔案 ${chunk.id} 分塊序號 ${chunk.seq} 超出宣告範圍，已中止`);
       return;
     }
     if (partial.seen.has(chunk.seq)) return; // 重複塊：忽略（原本也不重複計數）
@@ -365,34 +492,134 @@ export class DataChannelReceiver {
       // 舊版對端沒給 chunkSize ⇒ 只能靠到達順序推算位移。資料通道是**可靠且有序**的，
       // 所以正常情況下這條路徑等價；真的跳號時寧可中止也不要靜默寫錯位置。
       if (chunk.seq !== partial.seen.size) {
-        this.partials.delete(chunk.id);
-        this.handlers.onError?.(`檔案 ${chunk.id} 分塊亂序且對端未提供 chunkSize，已中止`);
+        this.fail(chunk.id, partial, `檔案 ${chunk.id} 分塊亂序且對端未提供 chunkSize，已中止`);
         return;
       }
       at = partial.offset;
     }
     if (at + chunk.bytes.length > partial.meta.size) {
-      this.partials.delete(chunk.id);
-      this.handlers.onError?.(`檔案 ${chunk.id} 實際資料超出宣告大小，已中止`);
+      this.fail(chunk.id, partial, `檔案 ${chunk.id} 實際資料超出宣告大小，已中止`);
       return;
     }
 
-    // 延後配置（見 `Partial.buf`）：到這裡才確定對方真的在送資料。
-    partial.buf ??= new Uint8Array(partial.meta.size);
-    partial.buf.set(chunk.bytes, at);
     partial.seen.add(chunk.seq);
     partial.offset = Math.max(partial.offset, at + chunk.bytes.length);
-    if (partial.seen.size === partial.meta.chunks) this.complete(chunk.id);
+    const last = partial.seen.size === partial.meta.chunks;
+
+    if (partial.mode === "memory") {
+      // 延後配置（見 `Partial.buf`）：到這裡才確定對方真的在送資料。
+      partial.buf ??= new Uint8Array(partial.meta.size);
+      partial.buf.set(chunk.bytes, at);
+      if (last) this.complete(chunk.id);
+      return;
+    }
+
+    // ── 串流落盤（ADR-0347）──
+    // ⚠ `chunk.bytes` 是 `decodeFileChunk` 切出來的副本，但它與整個框架共用底層 buffer。
+    // 排進佇列＝要一直留到寫出去為止，所以**這裡必須真的複製**，否則整個框架（含表頭）
+    // 都被這一小段釘住不放。
+    partial.queue.push({ at, bytes: new Uint8Array(chunk.bytes) });
+    partial.queued += chunk.bytes.length;
+    if (last) partial.allReceived = true;
+    if (partial.queued > this.maxQueuedBytes) {
+      // 資料通道沒有收端流量控制——叫不動對方慢一點。佇列爆掉就中止，別靜默吃光記憶體。
+      this.fail(chunk.id, partial, `檔案 ${chunk.id} 落盤速度跟不上接收速度，已中止`);
+      return;
+    }
+    void this.drain(chunk.id, partial);
   }
 
+  /** 開啟 sink；失敗或回 `null` 一律退回記憶體模式（收檔不能因為磁碟問題而整個失敗）。 */
+  private async beginSink(id: string, partial: Partial): Promise<void> {
+    let sink: FileSink | null = null;
+    try {
+      sink = await this.openSink!({
+        id,
+        name: partial.meta.name,
+        mime: partial.meta.mime,
+        size: partial.meta.size,
+        ...(partial.meta.origin !== undefined ? { origin: partial.meta.origin } : {}),
+      });
+    } catch {
+      sink = null;
+    }
+    if (this.partials.get(id) !== partial || partial.failed) {
+      sink?.abort(); // 開 sink 期間這個檔已被中止／取代
+      return;
+    }
+    if (!sink) {
+      // 退回記憶體：把等在佇列裡的分塊倒進緩衝區。
+      partial.mode = "memory";
+      partial.buf ??= new Uint8Array(partial.meta.size);
+      for (const q of partial.queue) partial.buf.set(q.bytes, q.at);
+      const done = partial.allReceived;
+      partial.queue = [];
+      partial.queued = 0;
+      if (done) this.complete(id);
+      return;
+    }
+    partial.sink = sink;
+    partial.mode = "sink";
+    void this.drain(id, partial);
+  }
+
+  /** 把佇列寫出去；收齊且寫完即收尾。同一個檔案同時只會有一輪在跑。 */
+  private async drain(id: string, partial: Partial): Promise<void> {
+    if (partial.draining || partial.mode !== "sink" || !partial.sink) return;
+    partial.draining = true;
+    try {
+      while (partial.queue.length > 0) {
+        const next = partial.queue.shift()!;
+        partial.queued -= next.bytes.length;
+        await partial.sink.write(next.at, next.bytes);
+        // 寫入期間可能被中止（超量、逾時、通道關閉）。
+        if (partial.failed || this.partials.get(id) !== partial) return;
+      }
+      if (!partial.allReceived) return;
+      const result = await partial.sink.close();
+      if (this.partials.get(id) !== partial) return;
+      this.partials.delete(id);
+      this.handlers.onFile?.({
+        id,
+        name: partial.meta.name,
+        mime: partial.meta.mime,
+        size: partial.meta.size,
+        sink: result,
+        ...(partial.meta.origin !== undefined ? { origin: partial.meta.origin } : {}),
+      });
+    } catch (e) {
+      this.fail(id, partial, `檔案 ${id} 落盤失敗：${String(e)}`);
+    } finally {
+      partial.draining = false;
+    }
+  }
+
+  /** 中止一個進行中的檔案並報錯（只報一次）。 */
+  private fail(id: string, partial: Partial, reason: string): void {
+    if (partial.failed) return;
+    partial.failed = true;
+    partial.queue = [];
+    partial.queued = 0;
+    try {
+      partial.sink?.abort();
+    } catch {
+      /* abort 不得拋，但別因為它壞掉而吞掉原本的錯誤 */
+    }
+    this.partials.delete(id);
+    this.suppress(id);
+    this.handlers.onError?.(reason);
+  }
+
+  /** 記憶體模式的收尾（串流模式走 `drain`）。 */
   private complete(id: string): void {
     const partial = this.partials.get(id);
-    if (!partial) return;
+    if (!partial || partial.failed) return;
     this.partials.delete(id);
     this.handlers.onFile?.({
       id,
       name: partial.meta.name,
       mime: partial.meta.mime,
+      size: partial.meta.size,
       // 空檔（chunks === 0）從未配置過緩衝區。
       bytes: partial.buf ?? new Uint8Array(partial.meta.size),
       ...(partial.meta.origin !== undefined ? { origin: partial.meta.origin } : {}),

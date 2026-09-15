@@ -12,6 +12,7 @@ import {
   type NostrEvent,
   type OutgoingFile,
   type OutgoingFileStream,
+  type OpenFileSink,
   type PubkeyHex,
   type ReceivedFile,
   type SecretKey,
@@ -98,6 +99,8 @@ export class WebRtcTransfer {
     private readonly handlers: TransferHandlers,
     /** ICE 設定；可為函式以於每次建連時取當前值（企業強制 TURN 動態生效）。 */
     private readonly rtcConfig?: RTCConfiguration | (() => RTCConfiguration | undefined),
+    /** 收檔串流落盤的去處（ADR-0347）；未提供＝一律走記憶體。 */
+    private readonly openSink?: OpenFileSink,
   ) {}
 
   /** 主動建立與對方的 P2P 通道（開啟對話時呼叫，讓後續狀態/輸入中可走 P2P）。 */
@@ -234,12 +237,16 @@ export class WebRtcTransfer {
     const pc = new RTCPeerConnection(typeof this.rtcConfig === "function" ? this.rtcConfig() : this.rtcConfig);
     const conn: PeerConn = {
       pc,
-      rx: new DataChannelReceiver({
-        onFile: (file) => this.handlers.onIncoming(peerPk, file),
-        onTyping: () => this.handlers.onTyping?.(peerPk),
-        onPresence: (p) => this.handlers.onPresence?.(peerPk, p),
-        onError: (reason) => this.handlers.onError(peerPk, reason),
-      }),
+      rx: new DataChannelReceiver(
+        {
+          onFile: (file) => this.handlers.onIncoming(peerPk, file),
+          onTyping: () => this.handlers.onTyping?.(peerPk),
+          onPresence: (p) => this.handlers.onPresence?.(peerPk, p),
+          onError: (reason) => this.handlers.onError(peerPk, reason),
+        },
+        {},
+        this.openSink, // ADR-0347：大檔串流落盤；未提供＝一律走記憶體（既有行為）
+      ),
       hasRemote: false,
       pendingCandidates: [],
       outbox: [],
