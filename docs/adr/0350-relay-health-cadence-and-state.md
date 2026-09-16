@@ -67,6 +67,11 @@ export const UPTIME_MIN_SAMPLES = PROBES_PER_DAY * 2;             // 兩天
   - ~~🔴 **workflow 本身沒有在 GitHub 上跑過。**~~ **已解除（2026-09-15，run 34969809280）。** 實跑結果：`fetch --depth=1` 對不存在分支的非零退出碼被 `if` 正確接住（沒有被 `set -e` 打死）、`::warning::` 如實印出、狀態分支以**無父提交**建立（`77bcc3a`，tree 只有 `health-history.json` 一個 blob）、main 沒有收到 `health-history.json` 的提交。迴圈折半也在實跑中驗證：`cinderous1` 從種子的 **448 → 113**（448→224→112，+1），一次收斂——單次折半會停在 225（仍高於 120 的上限），那正是改成迴圈的理由。
   - ~~**首次執行會落到 `::warning::` 那條路**~~ **遷移已完成**，該退路已從 workflow 移除：取回狀態那一步改成無條件 `git fetch`，讀不到就整個 job 紅。留著一條「讀不到就用種子」的退路，等於在種子刪除後允許安靜降級。
   - ~~**main 裡的 `health-history.json` 變成一份不再更新的種子**~~ **種子已刪除**，並加進 `.gitignore`（本機 `bootstrap:run` 會產生它，不擋著就會被請回 main）。
+  - 🔴 **狀態分支的每一次推送都燒掉一次 Cloudflare 建置——而且必定失敗。**（2026-09-16 發現）
+    ADR-0212 為了省 CF 免費層的建置額度（它自己算的是「≈720/月 > 免費層 500」），在 CF 儀表板設了 Build watch paths「Exclude: `relay/bootstrap/*`」。本 ADR 把 `health-history.json` 搬到狀態分支時放在**分支根目錄** ⇒ **那道排除規則就對不上了** ⇒ 每次 force-push 都觸發一個 Workers Build，而該分支只有一個檔案、沒有 `apps/desktop`（CF 設定的 Root directory）⇒ CF 回 `root directory not found`。實測 4 次推送 4 次失敗（`77bcc3a` / `00a6e61` / `b9d3cc0` / `04650d3`，例如 build `e661d2e4-c3e8-4a5f-96b9-2490adde1491`）。以每天 4 次算約 120 次/月，按 ADR-0212 引的 500/月 計約佔 24% 的額度，全部花在不可能成功的建置上。
+    **兩個 ADR 互踩而雙方都沒察覺**：ADR-0212 的保護還在，只是保護的位置上已經沒有東西了。
+    ⇒ 修法：把狀態分支上的檔案放回 **`relay/bootstrap/health-history.json`**（與 main 同一路徑），讓既有的排除規則重新生效。plumbing 改建巢狀 tree（`relay/` → `bootstrap/` → 檔案），讀取端改用 `git show "FETCH_HEAD:$HISTORY"`，兩端都由 `uptime.test.ts` 的測試綁住（實測舊寫法下兩條皆紅）。
+    ⚠ **這層保護在儀表板上，repo 裡看不到也測不到**；而且 CF 對「無父提交的 force-push」如何計算變更檔案清單，我無法從 repo 這側驗證。真正確定的修法是讓 CF 只建 production 分支（見後續行動 ⑥）——本次的路徑修正是不依賴儀表板的第二層。
   - 🔴 **刪掉種子會把「空歷史」這個陷阱從 CI 搬到維護者的筆電上。** `readHistory()` 原本 `catch { return {} }` ——檔案不在就當成沒有紀錄。這在種子還在時無害；種子刪掉之後，本機 `bootstrap:run` 會拿到 `{}` ⇒ `uptimePct` 回 `undefined` ⇒ `evaluateAdmission` 把**正式收錄**的 relay 判成試用（`accepting: false`，見 `node-attestation.test.ts`「一致性過但 uptime 未知/不足 → 試用」）⇒ 降級後的清單被寫回 `relays.json`，而維護者本機**帶著 `MAINTAINER_NSEC`**，所以還會多一步 CI 沒有的**簽章並發佈**。本 ADR 對 CI 立的規則（「必須讀成功，否則失敗」）因此一併套到本機：`uptime.ts` 的 `historyOrThrow` 在檔案不存在或內容壞掉時直接拋，訊息裡寫明怎麼取回狀態；真正的冷啟動用 `RELAY_HEALTH_COLD_START=1` 明示放行。
   - **偵測 relay 死亡的延遲從「宣稱 1 小時／實際 3.4 小時」變成「最多 6 小時」**。名目上變慢，實際上差別不大，但仍是一個退步。
   - 頻率改變不會回溯修正既有計數的**語意**：現存的 448 筆樣本是按舊節奏取的，折半進窗後它們仍被當成新節奏的樣本。影響是暫時的（幾十次探測後就被新樣本稀釋）。
@@ -76,3 +81,4 @@ export const UPTIME_MIN_SAMPLES = PROBES_PER_DAY * 2;             // 兩天
   3. `threat-intel.yml` 每日一筆提交是合理的（內容真的變），不在本 ADR 範圍。
   4. ~~（獨立）CI 的 `audit` job 每次都 `cargo install cargo-audit --locked`⋯⋯~~ **已處理（ADR-0351）**：改用釘版＋釘 sha256 的預編 binary，實測 **217s → 8s**（同一個 job 在 main 上的前後對照）。
   5. 🔴 **cron 的準時性仍未驗證。** 合併後第一個排程時段（2026-09-15 12:17Z）**沒有觸發**——上面那次實跑是手動 `workflow_dispatch` 的。整個窗口長度的正確性建立在「4 次/天」上，而 `uptime.test.ts` 只能驗證常數與 cron **字面一致**，驗不到 GitHub 實際跑幾次。若實際觸發率明顯低於 4 次/天，那條測試就只是自洽而非正確，`PROBES_PER_DAY` 得按實測值再調一次。要判斷這件事，看 `relay-health-state` 分支的 `probes` 增長速度最準。
+  6. 🔴 **CF 儀表板：把 Workers Builds 限制為只建 production 分支（`main`）。** 這個 repo 沒有 preview 部署的需求，而非 production 分支的建置對 `relay-health-state` 是**必定失敗**的（見上）。儀表板設定進不了 repo，故記在此（同 ADR-0212 的處理方式）。路徑修正生效後，驗證方式是看下一次狀態分支推送**有沒有產生 check run**——沒有就是排除規則生效了。
