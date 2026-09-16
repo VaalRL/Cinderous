@@ -137,3 +137,38 @@ describe("workflow 不再有「分支不存在就用種子」那條退路（遷�
     expect(ignore).toContain("relay/bootstrap/health-history.json");
   });
 });
+
+describe("狀態分支上的檔案路徑必須讓 ADR-0212 的 CF 排除規則對得上", () => {
+  const wf = () => readFileSync(new URL("../../.github/workflows/relay-health.yml", import.meta.url), "utf8");
+
+  it("🔴 狀態分支上的路徑必須等於 $HISTORY，而且每一層目錄都真的建了 tree", () => {
+    // ADR-0212 在 CF 儀表板設了 Build watch paths「Exclude: relay/bootstrap/*」。
+    // ADR-0350 把這個檔案搬到狀態分支時，一度放在**分支根目錄** ⇒ 排除規則對不上 ⇒
+    // 每次 force-push 都觸發一個必定失敗的 Workers Build（該分支沒有 apps/desktop，
+    // CF 報 `root directory not found`）。實測 4 次推送 4 次失敗。
+    //
+    // ⚠ 注意 `HISTORY` 這個 env 指的是**工作目錄裡**的路徑，它從頭到尾都是對的——
+    // 出問題的是 plumbing 建出來的 **tree 結構**。所以這裡要驗的是兩者一致，
+    // 只斷言 env 本身等於白費工夫（舊寫法下它照樣會過）。
+    const text = wf();
+    const history = /HISTORY:\s*(\S+)/.exec(text)?.[1];
+    expect(history, "workflow 裡找不到 HISTORY env").toBeDefined();
+    expect(history!.startsWith("relay/bootstrap/"), `HISTORY=${history} 不在排除規則涵蓋範圍內`).toBe(true);
+
+    const saveStep = text.slice(text.indexOf("name: 保存 uptime 狀態"), text.indexOf("name: 提交清單變更"));
+    const segments = history!.split("/");
+    const file = segments.pop()!;
+    expect(saveStep).toContain(String.raw`100644 blob %s\t${file}\n`);
+    for (const dir of segments) {
+      expect(saveStep, `${dir}/ 這一層沒有建 tree ⇒ 檔案不會落在 ${history}`).toContain(
+        String.raw`040000 tree %s\t${dir}\n`,
+      );
+    }
+  });
+
+  it("🔴 讀取端要用同一個 $HISTORY，不要另外寫死檔名——寫死就會與寫入端各自漂移", () => {
+    const text = wf();
+    const fetchStep = text.slice(text.indexOf("name: 取回 uptime 狀態"), text.indexOf("name: 探測"));
+    expect(fetchStep).toContain('git show "FETCH_HEAD:$HISTORY"');
+  });
+});

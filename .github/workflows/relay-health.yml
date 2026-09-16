@@ -67,9 +67,9 @@ jobs:
         run: |
           set -euo pipefail
           git fetch --depth=1 origin "$STATE_BRANCH"
-          git show "FETCH_HEAD:health-history.json" > /tmp/history.json
+          git show "FETCH_HEAD:$HISTORY" > /tmp/history.json
           mv /tmp/history.json "$HISTORY"
-          echo "已取回 uptime 狀態（$STATE_BRANCH）。"
+          echo "已取回 uptime 狀態（$STATE_BRANCH:$HISTORY）。"
 
       - name: 探測 + 更新明文清單（不簽章——信任根金鑰不進 CI，ADR-0239）
         # 不注入 MAINTAINER_NSEC：health-check 未見金鑰時只更新明文清單、略過簽章與發佈。
@@ -77,13 +77,25 @@ jobs:
 
       # 以 plumbing 建一個**只含這個檔案、沒有父提交**的提交再強制推送：分支永遠是單一提交、
       # 不會長大，也不需要另建 repo 或處理額外的認證（沿用 checkout 設好的 remote）。
+      #
+      # 🔴 檔案放在 `relay/bootstrap/health-history.json`——**與 main 上的同一個路徑**，
+      # 而不是分支根目錄。這不是美觀問題（ADR-0353 §後果）：ADR-0212 為了省 Cloudflare
+      # 的建置額度，在 CF 儀表板設了 Build watch paths「Exclude: relay/bootstrap/*」。
+      # 檔案一旦放在分支根目錄，那道排除規則就對不上 ⇒ **每次強制推送都觸發一個必定失敗的
+      # Workers Build**（該分支沒有 `apps/desktop`，CF 報 `root directory not found`）。
+      # 實測 4 次推送 4 次失敗。放回同一個路徑，既有的排除規則才重新生效。
+      # ⚠ 這層保護在儀表板上，repo 裡看不到也測不到——真正確定的修法是 CF 只建 production
+      # 分支（見 ADR-0350 §後續行動 ⑥）；這裡是不依賴儀表板的第二層。
       - name: 保存 uptime 狀態（不進 main）
         run: |
           set -euo pipefail
           git config user.name "relay-health-bot"
           git config user.email "bot@users.noreply.github.com"
           blob=$(git hash-object -w "$HISTORY")
-          tree=$(printf '100644 blob %s\thealth-history.json\n' "$blob" | git mktree)
+          # 巢狀 tree：relay/ → bootstrap/ → health-history.json
+          t_bootstrap=$(printf '100644 blob %s\thealth-history.json\n' "$blob" | git mktree)
+          t_relay=$(printf '040000 tree %s\tbootstrap\n' "$t_bootstrap" | git mktree)
+          tree=$(printf '040000 tree %s\trelay\n' "$t_relay" | git mktree)
           commit=$(git commit-tree "$tree" -m "chore(relay): uptime 滾動計數快照（非原始碼，見 ADR-0350）")
           git push --force origin "$commit:refs/heads/$STATE_BRANCH"
 
