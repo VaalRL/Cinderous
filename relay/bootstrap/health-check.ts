@@ -19,10 +19,11 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
-import { evaluateAdmission, generateSecretKey, listEntries, nsecDecode, signRelayList, type RelayEntry, type RelayListDoc } from "@cinderous/core";
+import { generateSecretKey, listEntries, nsecDecode, signRelayList, type RelayListDoc } from "@cinderous/core";
 import { autoAuth, parse, runConformance, withWs } from "./conformance.js";
 // 滾動窗的數學抽到 `uptime.ts`（ADR-0350）：窗口長度由探測頻率推導，並有測試把
 // 它與 workflow 的 cron 綁在一起——原本那個 `720 // ≈30 天/時` 是會過期的註解。
+import { decideList } from "./relay-list.js";
 import { historyOrThrow, recordProbe, uptimePct, type UptimeRec } from "./uptime.js";
 
 // 打包後執行檔位於 relay/dist/；清單常駐 relay/bootstrap/。
@@ -93,44 +94,30 @@ async function main(): Promise<void> {
   console.log(`一致性探測 ${active.length} 座 relay…（retired ${entries.length - active.length} 座跳過）`);
 
   const results = await Promise.all(
-    active.map(async (e) => {
-      const h = history[e.url] ?? { probes: 0, live: 0 };
-      const conf = await runConformance(e.url, uptimePct(h));
-      history[e.url] = recordProbe(h, conf.live);
-      return { e, conf };
+    active.map(async (entry) => {
+      const h = history[entry.url] ?? { probes: 0, live: 0 };
+      const conf = await runConformance(entry.url, uptimePct(h));
+      history[entry.url] = recordProbe(h, conf.live);
+      return { entry, conf };
     }),
   );
   writeHistory(history);
-  for (const { e, conf } of results) {
+  for (const { entry, conf } of results) {
     const mark = !conf.live ? "❌" : conf.ephemeral && conf.rejectsExpired ? "✅" : "⚠一致性";
-    console.log(`  ${mark} ${e.url}${e.status !== "ok" ? `（${e.status}）` : ""}`);
+    console.log(`  ${mark} ${entry.url}${entry.status !== "ok" ? `（${entry.status}）` : ""}`);
   }
 
-  const liveOnes = results.filter((r) => r.conf.live);
+  // 分級收錄（ADR-0092）＋「探測失敗不刪除」（ADR-0353）；判斷本身是純函式，住在
+  // `relay-list.ts` 並有測試——那段邏輯的後果最重，不該只存在於一支測不到的腳本裡。
+  const decision = decideList(entries, results);
   // never-empty 守門：全滅則保留原清單、不覆寫（避免把全體客戶端變孤島）。
-  if (liveOnes.length === 0) {
+  if (decision === null) {
     console.warn("⚠ 無任何存活 relay：保留原清單、不更新。");
     return;
   }
+  for (const { url, reasons } of decision.reasons) console.log(`    ↳ ${url}: ${reasons.join("；")}`);
 
-  // 分級收錄（ADR-0092）：機器依 evaluateAdmission 定 accepting/weight（status:ok）；
-  // draining 手動退役中保留、retired 原樣。人管「加入/退役＋簽章」，機器管品質。
-  const decided = liveOnes.map(({ e, conf }) => {
-    if (e.status === "draining") return e;
-    const d = evaluateAdmission(conf);
-    console.log(`    ↳ ${e.url}: ${d.reasons.join("；")}`);
-    return { ...e, accepting: d.accepting, weight: d.weight, status: "ok" as const };
-  });
-
-  // entries＝健康座（保留營運欄位）＋ retired 座；relays（舊欄位）＝健康且未退役的 URL。
-  const compact = (e: (typeof entries)[number]): RelayEntry => ({
-    url: e.url,
-    ...(e.accepting ? {} : { accepting: false }),
-    ...(e.weight !== 1 ? { weight: e.weight } : {}),
-    ...(e.status !== "ok" ? { status: e.status } : {}),
-  });
-  const nextEntries = [...decided, ...entries.filter((e) => e.status === "retired")].map(compact);
-  const relays = decided.map((e) => e.url);
+  const { relays, entries: nextEntries } = decision;
   const changed =
     JSON.stringify({ r: relays, e: nextEntries }) !==
     JSON.stringify({ r: current.relays, e: current.entries ?? null });
@@ -140,7 +127,9 @@ async function main(): Promise<void> {
 
   if (changed) {
     writeFileSync(LIST_PATH, `${JSON.stringify(next, null, 2)}\n`);
-    console.log(`更新清單：${relays.length} 座健康、${nextEntries.length - relays.length} 座已退役。`);
+    // 「保留」含本輪探測失敗的座——它們留在 entries 裡繼續被探測（ADR-0353），
+    // 不再像以前那樣被整筆刪掉。
+    console.log(`更新清單：${relays.length} 座健康、${nextEntries.length - relays.length} 座保留（探測失敗或已退役）。`);
   } else {
     console.log("清單無變化。");
   }
