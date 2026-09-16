@@ -9,9 +9,8 @@
       "weight": 2
     },
     {
-      "url": "wss://cinder-relay.jt0856.workers.dev",
-      "weight": 2
+      "url": "wss://cinder-relay.jt0856.workers.dev"
     }
   ],
-  "updatedAt": 1789523456
+  "updatedAt": 1789533977
 }
