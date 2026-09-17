@@ -8,6 +8,7 @@ import { Enterprise } from "./pages/Enterprise.js";
 import { Faq } from "./pages/Faq.js";
 import { Home } from "./pages/Home.js";
 import { Node } from "./pages/Node.js";
+import { SelfHost } from "./pages/SelfHost.js"; // ADR-0357：自架完整教學
 import { Roadmap } from "./pages/Roadmap.js";
 import { parseRoute, routeHref, type Route, type View } from "./routes.js";
 import { Tech } from "./pages/Tech.js";
@@ -112,6 +113,7 @@ export function App({ route: initialRoute }: { route: Route }): JSX.Element {
           <NavLink route={{ view: "tech", locale }} current={view} label={c.nav_tech} onNavigate={navigate} />
           <NavLink route={{ view: "compare", locale }} current={view} label={c.nav_compare} onNavigate={navigate} />
           <NavLink route={{ view: "node", locale }} current={view} label={c.nav_node} onNavigate={navigate} />
+          <NavLink route={{ view: "selfhost", locale }} current={view} label={c.nav_selfhost} onNavigate={navigate} />
           <NavLink route={{ view: "enterprise", locale }} current={view} label={c.nav_enterprise} onNavigate={navigate} />
           <NavLink route={{ view: "roadmap", locale }} current={view} label={c.nav_roadmap} onNavigate={navigate} />
           <NavLink route={{ view: "faq", locale }} current={view} label={c.nav_faq} onNavigate={navigate} />
@@ -138,6 +140,8 @@ export function App({ route: initialRoute }: { route: Route }): JSX.Element {
         <Tech c={c} />
       ) : view === "compare" ? (
         <Compare c={c} locale={locale} />
+      ) : view === "selfhost" ? (
+        <SelfHost c={c} locale={locale} />
       ) : view === "enterprise" ? (
         <Enterprise c={c} locale={locale} />
       ) : view === "roadmap" ? (
@@ -145,7 +149,7 @@ export function App({ route: initialRoute }: { route: Route }): JSX.Element {
       ) : view === "faq" ? (
         <Faq c={c} />
       ) : (
-        <Node c={c} />
+        <Node c={c} onGuide={() => navigate({ view: "selfhost", locale })} />
       )}
 
       <footer className="footer">

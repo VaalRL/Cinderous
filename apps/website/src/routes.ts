@@ -15,9 +15,20 @@
 import type { Locale } from "@cinderous/i18n";
 
 /** 官網的頁面。 */
-export type View = "home" | "tech" | "compare" | "node" | "enterprise" | "roadmap" | "faq";
+export type View = "home" | "tech" | "compare" | "node" | "selfhost" | "enterprise" | "roadmap" | "faq";
 
-export const VIEWS: readonly View[] = ["home", "tech", "compare", "node", "enterprise", "roadmap", "faq"] as const;
+export const VIEWS: readonly View[] = [
+  "home",
+  "tech",
+  "compare",
+  "node",
+  // ADR-0357：自架的**完整教學**。`node` 頁談「為什麼」，這頁談「怎麼做」——
+  // 決定要不要做的人與已經決定要做的人是兩種受眾，同一頁服務兩種人會兩種人都讀到一半就走。
+  "selfhost",
+  "enterprise",
+  "roadmap",
+  "faq",
+] as const;
 
 /** 官網支援的語言；`en` 為預設（根路徑），其餘走 `/<locale>/` 前綴。 */
 export const LOCALES: readonly Locale[] = ["zh-Hant", "en"] as const;

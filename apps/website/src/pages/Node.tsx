@@ -1,7 +1,11 @@
 import type { Copy } from "../copy.js";
 import { GITHUB_URL } from "../App.js";
 
-export function Node({ c }: { c: Copy }): JSX.Element {
+/**
+ * 「為什麼要自架」。**怎麼做**在 `selfhost`（ADR-0357）——決定要不要做的人與已經決定要做
+ * 的人是兩種受眾，同一頁服務兩種人會兩種人都讀到一半就走。
+ */
+export function Node({ c, onGuide }: { c: Copy; onGuide?: () => void }): JSX.Element {
   const steps = [
     { t: c.node_step1_t, b: c.node_step1_b },
     { t: c.node_step2_t, b: c.node_step2_b },
@@ -41,7 +45,12 @@ export function Node({ c }: { c: Copy }): JSX.Element {
         </div>
 
         <div className="cta" style={{ justifyContent: "flex-start", marginTop: 26 }}>
-          <a className="btn btn--primary" href={`${GITHUB_URL}/blob/main/docs/SELF-HOSTING.md`} target="_blank" rel="noreferrer">
+          {onGuide ? (
+            <button type="button" className="btn btn--primary" data-testid="node-guide" onClick={onGuide}>
+              {c.nav_selfhost}
+            </button>
+          ) : null}
+          <a className="btn" href={`${GITHUB_URL}/blob/main/docs/SELF-HOSTING.md`} target="_blank" rel="noreferrer">
             {c.node_docs}
           </a>
         </div>

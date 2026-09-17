@@ -8,6 +8,66 @@ export interface Copy {
   nav_tech: string;
   nav_compare: string;
   nav_node: string;
+  nav_selfhost: string;
+  /**
+   * 自架完整教學（ADR-0357）。
+   *
+   * 🔴 這一頁**只教學、不動作**：不收 token、沒有會回傳的表單、不碰 npub、零分析。
+   * ADR-0090 的硬隔離鐵則要求官網永不接觸通訊平面——所以這裡也無法告訴使用者
+   * 「你部署成功了」（那需要回呼，而回呼就是狀態），只能教他自己怎麼確認。
+   */
+  sh_title: string;
+  sh_lead: string;
+  sh_getTitle: string;
+  sh_getBody: string;
+  sh_pickTitle: string;
+  sh_col_route: string;
+  sh_col_level: string;
+  sh_col_time: string;
+  sh_col_who: string;
+  sh_r1: string;
+  sh_r1_level: string;
+  sh_r1_time: string;
+  sh_r1_who: string;
+  sh_r2: string;
+  sh_r2_level: string;
+  sh_r2_time: string;
+  sh_r2_who: string;
+  sh_r3: string;
+  sh_r3_level: string;
+  sh_r3_time: string;
+  sh_r3_who: string;
+  sh_a_title: string;
+  sh_a_s1: string;
+  sh_a_s2: string;
+  sh_a_s3: string;
+  sh_a_s4: string;
+  sh_a_s5: string;
+  sh_b_title: string;
+  sh_b_body: string;
+  sh_b_warn: string;
+  sh_c_title: string;
+  sh_c_body: string;
+  sh_c_unified: string;
+  sh_cost_title: string;
+  sh_cost_body: string;
+  sh_cost_link: string;
+  sh_after_title: string;
+  sh_after_body: string;
+  sh_err_title: string;
+  sh_err1_t: string;
+  sh_err1_b: string;
+  sh_err2_t: string;
+  sh_err2_b: string;
+  sh_err3_t: string;
+  sh_err3_b: string;
+  sh_err4_t: string;
+  sh_err4_b: string;
+  sh_limits_title: string;
+  sh_limit1: string;
+  sh_limit2: string;
+  sh_limit3: string;
+  sh_docs: string;
   nav_enterprise: string;
   nav_roadmap: string;
   nav_faq: string;
@@ -281,6 +341,59 @@ const zhHant: Copy = {
   nav_tech: "技術原理",
   nav_compare: "比較",
   nav_node: "建立節點",
+  sh_title: "架一座自己的中繼站",
+  sh_lead: "中繼站只轉發密文——它看不到你的訊息內容，也看不出誰在跟誰說話。自己架一座，那些密文就落在你自己的帳號上。這一頁把三條路從頭到尾寫完。",
+  sh_getTitle: "你會得到什麼",
+  sh_getBody: "一個 wss:// 開頭的網址，跑在你自己的 Cloudflare 帳號上。你在 Cinderous 裡把它設成主要中繼站，你的離線留言就存在那裡。我們碰不到它，也管不到它——包括我們想關掉它也辦不到。",
+  sh_pickTitle: "三條路，選一條",
+  sh_col_route: "路線",
+  sh_col_level: "難度",
+  sh_col_time: "大約",
+  sh_col_who: "適合",
+  sh_r1: "桌面版一鍵部署",
+  sh_r1_level: "★☆☆",
+  sh_r1_time: "3 分鐘",
+  sh_r1_who: "大多數人",
+  sh_r2: "官網 Deploy 按鈕（即將提供）",
+  sh_r2_level: "★★☆",
+  sh_r2_time: "10 分鐘",
+  sh_r2_who: "有 GitHub 帳號、不用桌面版",
+  sh_r3: "自己跑 wrangler",
+  sh_r3_level: "★★★",
+  sh_r3_time: "15 分鐘",
+  sh_r3_who: "想改設定或綁自訂網域",
+  sh_a_title: "路線一：桌面版一鍵部署",
+  sh_a_s1: "打開 Cinderous 桌面版，進「設定 → 連線與備份」，按「建立我的節點」。",
+  sh_a_s2: "按「開啟 Cloudflare 建立 token」。權限已經幫你勾好了，只有「上傳 Worker」與「讀取帳號」兩項。建立完把那串字複製回來貼上。",
+  sh_a_s3: "選一個 Cloudflare 帳號。第一次用 Workers 的話，會要你替網址取個名字——這個名字之後改不了，想清楚再打。",
+  sh_a_s4: "等它跑完。它會上傳中繼站程式，然後真的連上去確認活著才算成功。",
+  sh_a_s5: "完成畫面上有一個預設勾好的「設為我的主要中繼站」。按完成就切過去；不想切也可以拿掉勾，網址會留在設定裡，之後隨時能換。",
+  sh_b_title: "路線二：官網 Deploy 按鈕（即將提供）",
+  sh_b_body: "按下去會把 Cinderous 的中繼站程式複製一份到你的 GitHub，再由 Cloudflare 部署。適合不想裝桌面版的人。",
+  sh_b_warn: "兩件要先知道的事：它會在你的 GitHub 建一個新的程式庫；而且部署完成之後，網址不會自己回到 App——你要自己從 Cloudflare 的畫面複製那個網址，再貼進 Cinderous 的設定裡。",
+  sh_c_title: "路線三：自己跑 wrangler",
+  sh_c_body: "適合想改設定、綁自訂網域，或想先在本機跑起來看看的人。指令在下面。",
+  sh_c_unified: "如果你想要「一個網址，朋友用瀏覽器打開就能聊」，改用 deploy:unified。它會把網頁版跟中繼站部署成同一座 Worker。要注意：那台伺服器同時送出客戶端程式，它被入侵就等於能換掉程式碼——純中繼站沒有這條路徑，所以官方的節點不用這個模式。",
+  sh_cost_title: "要花錢嗎",
+  sh_cost_body: "跑在你自己的 Cloudflare 帳號上，費用也由它承擔。一個人或一小群朋友用的量，遠低於免費額度。但免費額度的條件變過不只一次，所以我們不在這裡宣稱「免費」——請直接看 Cloudflare 的計價說明。",
+  sh_cost_link: "查看 Cloudflare 計價",
+  sh_after_title: "部署完之後",
+  sh_after_body: "想確認它活著，開瀏覽器連到你的網址加上 /healthz，看到 ok 就對了。（不要用首頁判斷——統一模式下首頁本來就會回網頁版。）如果你願意讓別人也用你的節點，可以申請加入官方清單，那是一套只驗行為、不看你是誰的流程。",
+  sh_err_title: "卡住了？",
+  sh_err1_t: "說 token 權限不夠",
+  sh_err1_b: "重建一把 token，確認有勾到「Workers Scripts 編輯」。用我們給的連結建立就會自動勾好。",
+  sh_err2_t: "說你的帳號還沒有 workers.dev 名稱",
+  sh_err2_b: "第一次用 Workers 的帳號都會這樣。取一個名字就好——但它會永久出現在你的網址裡，改不了。",
+  sh_err3_t: "網址打得開，但 Cinderous 連不上",
+  sh_err3_b: "統一模式下少了 run_worker_first 就是這個症狀：首頁正常回網頁版，但 WebSocket 握不到手。Cloudflare 的資產是「命中就直接回傳、不執行程式」，而中繼站的入口正好是首頁。我們的設定檔已經設好了，自己改過的話檢查這一行。",
+  sh_err4_t: "說 Durable Object migration 撞名",
+  sh_err4_b: "同一個帳號下已經有同名的 Worker 用了不同的 migration 標籤。換一個 Worker 名字重部署，或先把舊的刪掉。",
+  sh_limits_title: "誠實說在前面",
+  sh_limit1: "workers.dev 的網址裡含有你的 Cloudflare 帳號名。你把分享 ID 給別人時，對方會看到那個名字。介意的話改綁自訂網域。",
+  sh_limit2: "你的節點下線時，已經寄到它上面、你還沒收的留言要等它回來才拿得到。新訊息會自動改走別的中繼站，但已經躺在那裡的不會搬家。",
+  sh_limit3: "統一模式下，那台伺服器同時送出客戶端程式。它被入侵就等於能換掉程式碼、竊取金鑰。純中繼站沒有這條路徑。",
+  sh_docs: "完整自架文件",
+  nav_selfhost: "自架教學",
   nav_enterprise: "企業版",
   nav_roadmap: "藍圖",
   nav_faq: "常見問題",
@@ -609,6 +722,59 @@ const en: Copy = {
   nav_tech: "How it works",
   nav_compare: "Compare",
   nav_node: "Run a node",
+  sh_title: "Run a relay of your own",
+  sh_lead: "A relay only forwards ciphertext — it cannot see what you write, nor who talks to whom. Run your own and that ciphertext lands in your account. This page walks all three routes end to end.",
+  sh_getTitle: "What you get",
+  sh_getBody: "A wss:// address running on your own Cloudflare account. Set it as your main relay in Cinderous and your offline messages live there. We cannot reach it or manage it — including if we wanted to shut it down.",
+  sh_pickTitle: "Three routes, pick one",
+  sh_col_route: "Route",
+  sh_col_level: "Difficulty",
+  sh_col_time: "About",
+  sh_col_who: "Best for",
+  sh_r1: "One-click from the desktop app",
+  sh_r1_level: "*",
+  sh_r1_time: "3 min",
+  sh_r1_who: "Most people",
+  sh_r2: "The Deploy button here (coming soon)",
+  sh_r2_level: "**",
+  sh_r2_time: "10 min",
+  sh_r2_who: "Have GitHub, no desktop app",
+  sh_r3: "Run wrangler yourself",
+  sh_r3_level: "***",
+  sh_r3_time: "15 min",
+  sh_r3_who: "Want to change config or use your own domain",
+  sh_a_title: "Route 1: one-click from the desktop app",
+  sh_a_s1: "Open the Cinderous desktop app, go to Settings, Connection and backup, and press Run my own node.",
+  sh_a_s2: "Press the button that opens Cloudflare. The permissions are pre-selected for you: upload a Worker, and read account. Create the token and paste it back.",
+  sh_a_s3: "Pick a Cloudflare account. If this is your first Worker, you will be asked to name your address. That name cannot be changed later, so think before you type.",
+  sh_a_s4: "Wait. It uploads the relay, then actually connects to it and only reports success once the node answers.",
+  sh_a_s5: "The last screen has Make this my main relay, already ticked. Press Done and it switches. Untick it if you would rather not — the address stays in your settings and you can switch whenever you like.",
+  sh_b_title: "Route 2: the Deploy button (coming soon)",
+  sh_b_body: "It copies the Cinderous relay into your own GitHub account and has Cloudflare deploy it. Good if you do not want to install the desktop app.",
+  sh_b_warn: "Two things to know first. It creates a new repository in your GitHub account. And when the deploy finishes, the address does not come back to the app by itself — you copy it from the Cloudflare page and paste it into Cinderous settings yourself.",
+  sh_c_title: "Route 3: run wrangler yourself",
+  sh_c_body: "For changing config, using your own domain, or just running it locally first. Commands below.",
+  sh_c_unified: "If you want one address that friends can simply open in a browser, use deploy:unified instead. It deploys the web client and the relay as a single Worker. Know the trade: that server also serves the client code, so compromising it means being able to replace that code. A plain relay has no such path, which is why the official nodes do not use this mode.",
+  sh_cost_title: "Does it cost anything",
+  sh_cost_body: "It runs on your Cloudflare account, so that account pays. One person or a small group stays well under the free allowance. But the terms of that allowance have changed more than once, so we do not claim it is free here — read Cloudflare pricing instead.",
+  sh_cost_link: "See Cloudflare pricing",
+  sh_after_title: "After it is deployed",
+  sh_after_body: "To check it is alive, open your address with /healthz on the end; ok means yes. (Do not judge by the home page — in unified mode the home page serves the web client by design.) If you are happy for others to use your node, you can apply to the public list; that process checks behaviour, not who you are.",
+  sh_err_title: "Stuck?",
+  sh_err1_t: "It says the token lacks permissions",
+  sh_err1_b: "Create a new token and make sure Workers Scripts: Edit is selected. Using the link we give you selects it automatically.",
+  sh_err2_t: "It says your account has no workers.dev name",
+  sh_err2_b: "Every account gets this on its first Worker. Just pick a name — but it becomes a permanent part of your address.",
+  sh_err3_t: "The address opens in a browser, but Cinderous cannot connect",
+  sh_err3_b: "In unified mode this is what a missing run_worker_first looks like: the home page serves the web client fine, but the WebSocket never completes. Cloudflare serves a matching asset straight from storage without running your code, and the relay entry point is exactly the home page. Our config already sets it; check that line if you changed it.",
+  sh_err4_t: "It says a Durable Object migration conflicts",
+  sh_err4_b: "An existing Worker of the same name in that account used a different migration tag. Deploy under a different Worker name, or delete the old one first.",
+  sh_limits_title: "The honest limits",
+  sh_limit1: "A workers.dev address contains your Cloudflare account name. Anyone you give your share ID to will see that name. Use your own domain if that bothers you.",
+  sh_limit2: "While your node is down, messages already delivered to it that you have not collected wait until it returns. New messages route elsewhere automatically, but the ones already sitting there do not move.",
+  sh_limit3: "In unified mode that server also serves the client code. Compromising it means being able to replace that code and steal keys. A plain relay has no such path.",
+  sh_docs: "Full self-hosting docs",
+  nav_selfhost: "Self-host guide",
   nav_enterprise: "Enterprise",
   nav_roadmap: "Roadmap",
   nav_faq: "FAQ",

@@ -83,6 +83,12 @@ export function pageMeta(route: Route, c: Copy): PageMeta {
         ? "自架 Cinderous 中繼站：Cloudflare Workers、Docker 或樹莓派皆可執行同一套 RelayCore。企業可用 allowlist 建立封閉節點，資料完全留在自己的基礎設施。"
         : "Self-host a Cinderous relay: the same RelayCore runs on Cloudflare Workers, Docker, or a Raspberry Pi. Enterprises can run a closed node via allowlist and keep data on their own infrastructure.",
     },
+    selfhost: {
+      title: zh ? `自架教學：三分鐘建立你自己的中繼站｜${BRAND}` : `Self-hosting guide: run your own relay in 3 minutes｜${BRAND}`,
+      description: zh
+        ? "一步一步教你把 Cinderous 中繼站架在自己的 Cloudflare 帳號上：桌面版一鍵部署、官網 Deploy 按鈕、或自己跑 wrangler。含費用說明、常見錯誤與誠實的限制。"
+        : "A step-by-step guide to running your own Cinderous relay on your own Cloudflare account: one-click deploy from the desktop app, the Deploy button, or wrangler by hand. Includes costs, common errors and the honest limits.",
+    },
     enterprise: {
       title: zh ? `企業版：自架封閉節點與組織名冊｜${BRAND}` : `Enterprise: self-hosted closed relay & org roster｜${BRAND}`,
       description: zh
