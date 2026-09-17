@@ -919,6 +919,87 @@ export interface Messages {
    */
   fileGate_relayWarn: string;
   fileGate_unknownWarn: string;
+  /**
+   * 折疊成合集前的隱私提示（ADR-0355）。合集內的檔案是**原封不動**傳送的，所以
+   * ADR-0273 的 EXIF／GPS 清除在合集裡不生效——同一個動作（拖一批相片）折疊之後
+   * 隱私行為就變了，這是使用者看不見的改變，必須先問過他。
+   */
+  bundle_exifWarn: string;
+  /** 合集卡片上的動作與說明（ADR-0355）。 */
+  bundle_list: string;
+  bundle_listEmpty: string;
+  bundle_listFailed: string;
+  bundle_more: string;
+  bundle_extract: string;
+  bundle_extracting: string;
+  bundle_extractDone: string;
+  /** 瀏覽器版沒有路徑可報（資料夾把手不給路徑）——所以另寫一句，不硬塞一個空的 {dest}。 */
+  bundle_extractDoneHere: string;
+  bundle_extractSkipped: string;
+  /**
+   * 瀏覽器不支援解包時的提示。**不是「做不到」而是「這個瀏覽器做不到」**——
+   * 寫成前者會讓 Chrome 使用者以為功能不存在，寫成後者他才知道換個瀏覽器就有。
+   */
+  bundle_extractUnsupported: string;
+  /** 磁碟餘量不足（ADR-0355）。 */
+  bundle_needSpace: string;
+  /**
+   * 一鍵部署自有 relay 的精靈（ADR-0356）。
+   *
+   * 錯誤鍵由 Rust 的 `DeployError::message_key()` 決定——**那一側改了名字，這裡就必須跟著改**，
+   * 否則使用者看到的會是空白。分型的意義是說得出「你該做什麼」，所以每一則都要有動作。
+   */
+  deploy_entry: string;
+  deploy_entryHint: string;
+  deploy_introTitle: string;
+  deploy_introBody: string;
+  deploy_introCost: string;
+  deploy_start: string;
+  deploy_tokenTitle: string;
+  deploy_tokenBody: string;
+  deploy_tokenOpen: string;
+  deploy_tokenPlaceholder: string;
+  deploy_tokenKeep: string;
+  deploy_tokenKeepHint: string;
+  deploy_accountTitle: string;
+  deploy_subdomainTitle: string;
+  deploy_subdomainBody: string;
+  deploy_subdomainPlaceholder: string;
+  deploy_working: string;
+  deploy_stepUpload: string;
+  deploy_stepVerify: string;
+  deploy_doneTitle: string;
+  deploy_doneBody: string;
+  deploy_setHome: string;
+  deploy_setHomeHint: string;
+  deploy_submitNode: string;
+  deploy_finish: string;
+  deploy_retry: string;
+  deploy_cancel: string;
+  deploy_next: string;
+  /** 精靈記下的自部署節點（取消勾選「設為主要」時的回頭路，ADR-0356 §5）。 */
+  deploy_useMine: string;
+  /**
+   * 統一模式（ADR-0354）：同一座 Worker 既是中繼站也是網頁版。
+   *
+   * 🔴 警語要**原樣講出信任降級**，不能只講「一個網址就能用」的好處：那台伺服器同時送出
+   * 客戶端程式，被入侵就等於能換掉程式碼竊取金鑰。純中繼站沒有這條路徑。預設不勾。
+   */
+  deploy_unified: string;
+  deploy_unifiedWarn: string;
+  deploy_errNoToken: string;
+  deploy_errUnauthorized: string;
+  deploy_errForbidden: string;
+  deploy_errNoAccount: string;
+  deploy_errNoSubdomain: string;
+  deploy_errRateLimited: string;
+  deploy_errApi: string;
+  deploy_errNetwork: string;
+  deploy_errMalformed: string;
+  deploy_errBundle: string;
+  deploy_errVerify: string;
+  /** 打包失敗（資料夾太大／太深／檔案太多）。`reason` 由 Rust 端給出具體上限。 */
+  bundle_failed: string;
   /** 通話走哪條路的 tooltip（ADR-0344）；短標籤沿用 `convo_p2p*`（與情境無關）。 */
   call_pathDirectHint: string;
   call_pathRelayHint: string;
@@ -1794,6 +1875,64 @@ const zhHant: Messages = {
     "這個檔案有 {size}，而目前**直連沒有建立、位元組會經中繼轉送**——會比直連慢很多，也會耗用中繼流量。\n\n仍要傳送嗎？",
   fileGate_unknownWarn:
     "這個檔案有 {size}，但目前**無法確認**是直連還是經中繼轉送。若是經中繼，會比直連慢很多，也會耗用中繼流量。\n\n仍要傳送嗎？",
+  bundle_exifWarn:
+    "這批共 {count} 個檔案會打包成一個合集再傳送。合集裡的檔案**原封不動**，所以其中的相片**不會**像單獨傳送時那樣清除位置與拍攝資訊。\n\n仍要打包傳送嗎？",
+  bundle_failed: "這批檔案無法打包：{reason}",
+  bundle_list: "列出內容",
+  bundle_listEmpty: "這個合集裡沒有檔案。",
+  bundle_listFailed: "讀不到合集內容：{reason}",
+  bundle_more: "還有 {count} 個檔案",
+  bundle_extract: "解開到資料夾",
+  bundle_extracting: "解開中…",
+  bundle_extractDone: "已解開 {files} 個檔案到 {dest}",
+  bundle_extractDoneHere: "已解開 {files} 個檔案到你選的資料夾。",
+  bundle_extractSkipped: "有 {count} 個項目因路徑不安全被跳過。",
+  bundle_extractUnsupported:
+    "這個瀏覽器不能把檔案解開到資料夾。請用系統的解壓縮工具打開這個 .tar，或改用桌面版／Chrome、Edge 這類支援檔案系統存取的瀏覽器。",
+  bundle_needSpace: "解開需要約 {need}，但這個位置只剩 {free}。請清出空間或換一個位置。",
+  deploy_entry: "建立我的節點",
+  deploy_entryHint: "把一座中繼站部署到你自己的 Cloudflare 帳號。它跑在你的帳號與額度上，我們碰不到它。",
+  deploy_introTitle: "建立你自己的中繼站",
+  deploy_introBody: "接下來會把 Cinderous 的中繼站部署到**你自己的 Cloudflare 帳號**。整個過程在這台電腦上完成，我們沒有任何中間伺服器。你需要一個 Cloudflare 帳號，還有大約三分鐘。",
+  deploy_introCost: "費用由你的 Cloudflare 帳號承擔。一般個人使用的量遠低於免費額度，但條件會變——請以 Cloudflare 官方的計價說明為準。",
+  deploy_start: "開始",
+  deploy_tokenTitle: "取得授權",
+  deploy_tokenBody: "按下面的按鈕會開啟 Cloudflare，權限已經幫你勾好了（只有「上傳 Worker」與「讀取帳號」兩項）。建立完成後把那串 token 複製回來貼在這裡。",
+  deploy_tokenOpen: "開啟 Cloudflare 建立 token",
+  deploy_tokenPlaceholder: "貼上 token",
+  deploy_tokenKeep: "記住這把 token",
+  deploy_tokenKeepHint: "記住它以後就能一鍵更新你的節點。它存在這台電腦的系統金鑰庫，不會離開裝置；你隨時可以在 Cloudflare 後台撤銷。",
+  deploy_accountTitle: "選一個帳號",
+  deploy_subdomainTitle: "替你的網址取個名字",
+  deploy_subdomainBody: "你的 Cloudflare 帳號還沒有 workers.dev 名稱。這個名字會出現在你節點的網址裡，**之後改不了**。",
+  deploy_subdomainPlaceholder: "例如 my-name",
+  deploy_working: "部署中…",
+  deploy_stepUpload: "上傳中繼站程式",
+  deploy_stepVerify: "確認它真的活著",
+  deploy_doneTitle: "你的節點上線了",
+  deploy_doneBody: "這是你的中繼站網址。它跑在你自己的 Cloudflare 帳號上。",
+  deploy_setHome: "設為我的主要中繼站",
+  deploy_setHomeHint: "換過去之後，你的分享 ID 會變成這個網址，聯絡人下次連線時會自動改道。舊的中繼站上還沒收的留言會在接下來七天內繼續收得到。不換也沒關係，這個網址會留在設定裡。",
+  deploy_submitNode: "申請加入官方節點清單",
+  deploy_finish: "完成",
+  deploy_retry: "再試一次",
+  deploy_cancel: "取消",
+  deploy_next: "下一步",
+  deploy_useMine: "改用我自己的節點",
+  deploy_unified: "順便部署網頁版（同一個網址）",
+  deploy_unifiedWarn:
+    "勾了之後，朋友用瀏覽器打開這個網址就能聊，不必安裝。代價是**那台伺服器會同時送出客戶端程式**——它被入侵就等於能換掉程式碼、竊取金鑰。純中繼站沒有這條路徑，官方的節點也不用這個模式。",
+  deploy_errNoToken: "還沒有授權。請先回上一步貼上 token。",
+  deploy_errUnauthorized: "這把 token 不能用——可能貼錯了，或已經在 Cloudflare 後台被撤銷。請重新建立一把。",
+  deploy_errForbidden: "token 的權限不夠。重建時請確認有勾到「Workers Scripts 編輯」。",
+  deploy_errNoAccount: "這把 token 看不到任何 Cloudflare 帳號。重建時請確認帳號範圍選的是「所有帳號」。",
+  deploy_errNoSubdomain: "你的帳號還沒有 workers.dev 名稱，請先取一個。",
+  deploy_errRateLimited: "Cloudflare 暫時擋下了請求。等一分鐘再試。",
+  deploy_errApi: "Cloudflare 回報了一個錯誤。",
+  deploy_errNetwork: "連不上 Cloudflare。檢查一下網路再試。",
+  deploy_errMalformed: "Cloudflare 的回應看不懂——可能是它的介面改了。請回報這個問題。",
+  deploy_errBundle: "找不到要部署的中繼站程式。這是安裝檔的問題，請重新安裝。",
+  deploy_errVerify: "程式上傳成功了，但連不上那座節點。可能還在啟動，等一下再試一次；一直這樣的話請回報。",
   call_pathDirectHint: "與對方直連——延遲最低，媒體不經任何伺服器。",
   call_pathRelayHint: "直連打不穿，媒體正經 TURN 中繼轉送。內容仍是端到端加密（中繼只看得到密文），但延遲較高、也較耗中繼流量。",
   call_pathUnknownHint: "通話進行中，但尚未測出是直連或經中繼。",
@@ -2667,6 +2806,64 @@ const en: Messages = {
     "This file is {size}, and there is **no direct link — the bytes will go through a relay**. That is much slower than a direct transfer and uses relay bandwidth.\n\nSend it anyway?",
   fileGate_unknownWarn:
     "This file is {size}, but we **cannot confirm** whether the link is direct or relayed. If it is relayed, the transfer will be much slower and will use relay bandwidth.\n\nSend it anyway?",
+  bundle_exifWarn:
+    "These {count} files will be packed into a single bundle before sending. Files inside a bundle are sent **untouched**, so photos in it will **not** have their location and camera metadata stripped the way they would be if sent individually.\n\nPack and send anyway?",
+  bundle_failed: "These files could not be packed: {reason}",
+  bundle_list: "List contents",
+  bundle_listEmpty: "This bundle contains no files.",
+  bundle_listFailed: "Could not read the bundle contents: {reason}",
+  bundle_more: "{count} more files",
+  bundle_extract: "Extract to a folder",
+  bundle_extracting: "Extracting…",
+  bundle_extractDone: "Extracted {files} files to {dest}",
+  bundle_extractDoneHere: "Extracted {files} files to the folder you chose.",
+  bundle_extractSkipped: "{count} entries were skipped because their paths were unsafe.",
+  bundle_extractUnsupported:
+    "This browser cannot extract files to a folder. Open the .tar with your system archive tool, or use the desktop app or a browser with File System Access support such as Chrome or Edge.",
+  bundle_needSpace: "Extracting needs about {need}, but only {free} is free at that location. Free up space or pick another location.",
+  deploy_entry: "Run my own node",
+  deploy_entryHint: "Deploy a relay to your own Cloudflare account. It runs on your account and your quota, and we cannot touch it.",
+  deploy_introTitle: "Run your own relay",
+  deploy_introBody: "This will deploy the Cinderous relay to **your own Cloudflare account**. Everything happens on this computer; we have no server in between. You need a Cloudflare account and about three minutes.",
+  deploy_introCost: "Your Cloudflare account pays for it. Normal personal use stays well under the free allowance, but the terms change — check Cloudflare pricing for what applies today.",
+  deploy_start: "Start",
+  deploy_tokenTitle: "Authorize",
+  deploy_tokenBody: "The button below opens Cloudflare with the permissions already selected (just \"upload a Worker\" and \"read account\"). Create the token, then copy it back here.",
+  deploy_tokenOpen: "Open Cloudflare to create a token",
+  deploy_tokenPlaceholder: "Paste the token",
+  deploy_tokenKeep: "Remember this token",
+  deploy_tokenKeepHint: "Keeping it lets you update your node with one click later. It is stored in this computer\u2019s system keychain and never leaves the device; you can revoke it from the Cloudflare dashboard at any time.",
+  deploy_accountTitle: "Pick an account",
+  deploy_subdomainTitle: "Name your address",
+  deploy_subdomainBody: "Your Cloudflare account has no workers.dev name yet. This name becomes part of your node address and **cannot be changed later**.",
+  deploy_subdomainPlaceholder: "e.g. my-name",
+  deploy_working: "Deploying...",
+  deploy_stepUpload: "Uploading the relay",
+  deploy_stepVerify: "Checking that it is really up",
+  deploy_doneTitle: "Your node is live",
+  deploy_doneBody: "This is your relay address. It runs on your own Cloudflare account.",
+  deploy_setHome: "Make this my main relay",
+  deploy_setHomeHint: "Switching makes this address part of your share ID, and contacts will follow it the next time they connect. Messages still waiting on your old relay keep arriving for the next seven days. You can skip this — the address stays in your settings either way.",
+  deploy_submitNode: "Apply to join the public node list",
+  deploy_finish: "Done",
+  deploy_retry: "Try again",
+  deploy_cancel: "Cancel",
+  deploy_next: "Next",
+  deploy_useMine: "Switch to my own node",
+  deploy_unified: "Also deploy the web client (same address)",
+  deploy_unifiedWarn:
+    "With this on, friends can just open the address in a browser — no install. The cost is that **the server also serves the client code**, so compromising it means being able to replace that code and steal keys. A plain relay has no such path, and the official nodes do not use this mode.",
+  deploy_errNoToken: "Not authorized yet. Go back a step and paste your token.",
+  deploy_errUnauthorized: "That token does not work — it may be mistyped, or already revoked in the Cloudflare dashboard. Create a new one.",
+  deploy_errForbidden: "The token lacks permissions. When you recreate it, make sure \"Workers Scripts: Edit\" is selected.",
+  deploy_errNoAccount: "That token cannot see any Cloudflare account. When you recreate it, set the account scope to all accounts.",
+  deploy_errNoSubdomain: "Your account has no workers.dev name yet. Pick one first.",
+  deploy_errRateLimited: "Cloudflare is rate limiting the request. Wait a minute and try again.",
+  deploy_errApi: "Cloudflare reported an error.",
+  deploy_errNetwork: "Cannot reach Cloudflare. Check your connection and try again.",
+  deploy_errMalformed: "Cloudflare returned something unexpected — its API may have changed. Please report this.",
+  deploy_errBundle: "The relay program to deploy is missing. That is an install problem; please reinstall.",
+  deploy_errVerify: "The upload succeeded but the node is not reachable. It may still be starting up, so try again in a moment; if it keeps failing, please report it.",
   call_pathDirectHint: "Direct link to this contact — lowest latency, media goes through no server.",
   call_pathRelayHint:
     "No direct link, so media is going through a TURN relay. It stays end-to-end encrypted (the relay only sees ciphertext), but latency is higher and it uses relay bandwidth.",

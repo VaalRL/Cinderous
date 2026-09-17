@@ -62,6 +62,23 @@ Sending messages, stickers, emoji, read receipts, groups, voice and video calls,
 - Every message and every call is **end-to-end encrypted**. The relay and any third party see nothing but gibberish.
 - Messages are **stored on your own device first**. That's great for privacy, but it also means "your data won't automatically appear on a new phone when you switch devices" — which is exactly what §5 is here to solve.
 
+### Sending a whole folder, or a lot of files at once
+
+Drag the folder into the conversation window. When you drop more than 8 files, or drop a folder,
+Cinderous packs them into **a single file** before sending, because what makes a thousand small files
+slow is not the bytes, it is doing everything a thousand times.
+
+Whoever receives the pack can:
+
+- **List its contents**: no unpacking, no network, just the names and sizes of what is inside.
+- **Extract it to a folder**: the desktop app always can. In a browser it depends on the browser
+  (Chrome and Edge can, Firefox and Safari cannot; there you get a note suggesting your system's
+  archive tool instead).
+
+⚠ **Packing skips one thing.** When you send a photo on its own, Cinderous strips the location and
+camera details out of it first. **Files inside a pack are sent untouched**, so those details travel with
+them. You get a confirmation prompt when there are photos in the batch. That prompt is not a formality.
+
 ---
 
 ## 4. Local password: extra protection on a shared computer (optional)

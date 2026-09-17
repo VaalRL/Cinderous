@@ -1,4 +1,5 @@
 export * from "./backup.js";
+export * from "./archive.js";
 export * from "./qr.js";
 export * from "./contact-input.js";
 export * from "./constants.js";

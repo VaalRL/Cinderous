@@ -29,6 +29,7 @@ import { BG_PRESETS, type ChatBg, chatBgStyle, p2pPathChip, P2P_PATH_COLORS, res
 import { Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native-web";
 import { CalendarPanel } from "./CalendarPanel.js";
 import { MsgStatusIcon } from "./MsgStatusIcon.js";
+import { BundleRow, isBundleMessage } from "./BundleRow.js"; // ADR-0355：合集列出與解開
 import { downloadImageFromUrl, shareImageFromUrl } from "../native/share.js";
 
 /** 送出狀態的 i18n 標籤（ADR-0058／0095）；與桌面同鍵。 */
@@ -1125,6 +1126,8 @@ export function ConversationScreen({
                     {fileNote(m)}
                   </Text>
                 ) : null}
+                {/* 合集（ADR-0355）：收到 .tar 時列出內容；支援的瀏覽器還能直接解開。 */}
+                {!gone && isBundleMessage(m) ? <BundleRow url={m.file!.url!} tk={tk} locale={locale} /> : null}
               </View>
             </Pressable>
             {/* 收到的 emoji 回應（NIP-25）。 */}

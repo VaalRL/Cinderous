@@ -1,4 +1,5 @@
-import { utf8ToBytes } from "@noble/hashes/utils";
+import { sha256 } from "@noble/hashes/sha2.js";
+import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils";
 
 /**
  * P2P 資料通道上的**控制**訊息（JSON 字串）。檔案分塊改走二進位框架
@@ -27,7 +28,32 @@ export type DataMessage =
       chunks: number;
       chunkSize?: number;
       origin?: string;
-    };
+      /**
+       * 資料通道協定版本（ADR-0355 續傳）。**唯一用途是讓收端知道「可以回話」**：
+       * 只有 `v >= 2` 的送出端聽得懂 `file-resume`／`file-end`，對更舊的送出端多送一則
+       * 它不認得的控制訊息，只會讓對方跳出「未知資料通道訊息類型」。缺此欄＝舊版，收端一律安靜。
+       */
+      v?: number;
+    }
+  /**
+   * 續傳協商（ADR-0355，**收端 → 送出端**）：我這邊已經有 `have` 個位元組了，從那裡接著送。
+   * `have` 必定落在分塊邊界上——半塊接不回去。
+   *
+   * 它同時是**能力回執**：`v` 讓送出端知道對方聽得懂新訊息，因而敢送 `file-end`。
+   * 所以即使 `have` 為 0 也照樣回——那一則的用途是報到，不是續傳。
+   */
+  | { t: "file-resume"; id: string; have: number; v?: number }
+  /**
+   * 傳輸結尾（ADR-0355，**送出端 → 收端**）：整檔的 SHA-256（hex）。
+   * **只送給回過 `file-resume` 的對端**——那代表它是新版、看得懂這則訊息。
+   */
+  | { t: "file-end"; id: string; sha: string };
+
+/**
+ * 資料通道協定版本。2 ＝ 支援續傳協商（`file-resume`）與整檔校驗（`file-end`）。
+ * 只增不改：舊版看到多出來的 `v` 欄位會直接忽略（JSON），不會壞。
+ */
+export const DC_PROTOCOL_VERSION = 2;
 
 /** 資料通道可能收到的原始資料（控制為字串、檔案分塊為二進位）。 */
 export type RawData = string | ArrayBuffer | Uint8Array;
@@ -157,6 +183,13 @@ export interface FileSink {
   close(): Promise<FileSinkResult> | FileSinkResult;
   /** 放棄：清掉半成品（逾時、超量、寫入失敗）。**不得拋例外**。 */
   abort(): void;
+  /**
+   * 已寫入內容的 SHA-256（hex），供整檔校驗（ADR-0355）。未實作＝不做校驗。
+   *
+   * 由 sink 而不是收端核心計算，是因為**續傳**：斷點之前的位元組是上一次連線寫的，
+   * 核心手上沒有它們，只有持有檔案的 sink 才算得出整檔雜湊。
+   */
+  digest?(): string | Promise<string>;
 }
 
 /** 落腳處的識別（OPFS 檔名／原生路徑）。UI 之後據此把檔案交給使用者。 */
@@ -176,6 +209,11 @@ export type OpenFileSink = (meta: {
   mime: string;
   size: number;
   origin?: string;
+  /**
+   * 續傳起點（ADR-0355）：這個檔本機已經有幾個位元組了。**大於 0 就必須以附加模式開啟**
+   * ——若照常截斷，我們才剛回報給對方的斷點就成了謊話，檔案會缺一整段。
+   */
+  resumeFrom?: number;
 }) => Promise<FileSink | null> | FileSink | null;
 
 export interface ReceivedFile {
@@ -242,23 +280,102 @@ export async function* streamFile(
   chunkSize = DEFAULT_CHUNK_SIZE,
   /** 儲存槽存放來源標註（ADR-0161／審查修正）：隨 file-begin 傳，一般檔案省略。 */
   origin?: string,
+  /**
+   * 續傳起點（ADR-0355）：從這個位元組接著送，必須落在分塊邊界上。
+   * 送出端仍宣告**整檔**大小——收端據此判斷收齊沒有，不是這次補送多少。
+   */
+  fromByte = 0,
+  /**
+   * 整檔 SHA-256 的接收處（ADR-0355）。給了它就會**從第 0 個位元組開始讀**：
+   * 續傳時仍要讀過已送出的那一段才算得出整檔雜湊。多的是一次本機讀取，
+   * 省下的是重傳整個檔案的網路成本。
+   */
+  onDigest?: (sha: string) => void,
 ): AsyncGenerator<string | Uint8Array, void, void> {
+  yield fileBeginMessage(file, id, chunkSize, origin);
+  yield* streamFileChunks(file, id, chunkSize, fromByte, onDigest);
+}
+
+/** `file-begin` 控制訊息（宣告的恆為**整檔**大小，與續傳起點無關）。 */
+export function fileBeginMessage(
+  file: OutgoingFile | OutgoingFileStream,
+  id: string,
+  chunkSize = DEFAULT_CHUNK_SIZE,
+  origin?: string,
+): string {
   const src = asFileStream(file);
-  const total = Math.ceil(src.size / chunkSize);
-  yield JSON.stringify({
+  return JSON.stringify({
     t: "file-begin",
     id,
     name: src.name,
     mime: src.mime,
     size: src.size,
-    chunks: total,
+    chunks: Math.ceil(src.size / chunkSize),
     chunkSize,
+    v: DC_PROTOCOL_VERSION,
     ...(origin !== undefined ? { origin } : {}),
   } satisfies DataMessage);
+}
+
+/**
+ * 只產出分塊（不含 `file-begin`）。
+ *
+ * 續傳時送出端需要「先送 begin → 等對方回報斷點 → 才開始送分塊」這三個分開的步驟，
+ * 所以把兩段拆開；{@link streamFile} 是兩者的組合。
+ */
+export async function* streamFileChunks(
+  file: OutgoingFile | OutgoingFileStream,
+  id: string,
+  chunkSize = DEFAULT_CHUNK_SIZE,
+  fromByte = 0,
+  onDigest?: (sha: string) => void,
+): AsyncGenerator<Uint8Array, void, void> {
+  const src = asFileStream(file);
+  if (fromByte % chunkSize !== 0) throw new Error(`續傳起點 ${fromByte} 不在分塊邊界上（每塊 ${chunkSize}）`);
+  if (fromByte > src.size) throw new Error(`續傳起點 ${fromByte} 超過檔案大小 ${src.size}`);
+  const total = Math.ceil(src.size / chunkSize);
+  const hasher = onDigest ? createSha256() : undefined;
+  const firstSeq = fromByte / chunkSize;
   for (let seq = 0; seq < total; seq++) {
     const offset = seq * chunkSize;
-    yield encodeFileChunk(id, seq, await src.slice(offset, Math.min(chunkSize, src.size - offset)));
+    // 要算雜湊就得讀過每一塊；續傳時斷點之前的只餵雜湊、**不送出**。
+    if (seq < firstSeq && !hasher) continue;
+    const piece = await src.slice(offset, Math.min(chunkSize, src.size - offset));
+    hasher?.update(piece);
+    if (seq >= firstSeq) yield encodeFileChunk(id, seq, piece);
   }
+  if (hasher && onDigest) onDigest(hasher.hex());
+}
+
+/** 傳輸結尾訊息（整檔 SHA-256，ADR-0355）。 */
+export function fileEndMessage(id: string, sha: string): string {
+  return JSON.stringify({ t: "file-end", id, sha } satisfies DataMessage);
+}
+
+/** 逐段餵入的 SHA-256。 */
+export interface IncrementalSha256 {
+  update(bytes: Uint8Array): void;
+  /** 取出結果（hex）；取過就不要再 update。 */
+  hex(): string;
+}
+
+/**
+ * 建立一個可逐段餵入的 SHA-256。
+ *
+ * 大檔的整檔校驗**不能**先把檔案讀進記憶體再算——那正是整條管線花力氣消滅的東西。
+ * 落地端（OPFS／原生收件匣）以固定大小的切片餵進來，記憶體佔用與檔案大小無關。
+ */
+export function createSha256(): IncrementalSha256 {
+  const h = sha256.create();
+  return {
+    update: (bytes) => void h.update(bytes),
+    hex: () => bytesToHex(h.digest()),
+  };
+}
+
+/** 位元組的 SHA-256（hex）——與整檔校驗同一種雜湊，避免兩端各挑一個。 */
+export function sha256Hex(bytes: Uint8Array): string {
+  return bytesToHex(sha256(bytes));
 }
 
 export interface DataChannelHandlers {
@@ -268,7 +385,25 @@ export interface DataChannelHandlers {
   onPresence?: (p: { s: string; m: string; np: string; hb?: number }) => void;
   onFile?: (file: ReceivedFile) => void;
   onError?: (reason: string) => void;
+  /**
+   * 送出控制訊息給對方（ADR-0355）。收端用它回 `file-resume`；**未提供＝完全不協商**，
+   * 行為與過去相同。
+   */
+  reply?: (message: string) => void;
+  /**
+   * 續傳起點查詢（ADR-0355）：這個檔本機已經有幾個位元組了？回 0／未提供＝從頭來。
+   * 回傳值會被**向下對齊到分塊邊界**再回報——半塊接不回去。
+   */
+  resumeOffset?: (meta: { id: string; name: string; mime: string; size: number }) => number | Promise<number>;
+  /**
+   * 收到對方的續傳回執（ADR-0355，**送出端**用）：id 這個檔對方已有 `have` 個位元組。
+   * `peerVersion` 同時證明對端聽得懂新訊息，送出端據此才敢送 `file-end`。
+   */
+  onResumeRequest?: (id: string, have: number, peerVersion: number) => void;
 }
+
+/** 等 `file-end` 的寬限時間：有序通道上它緊跟在最後一塊之後，實測是次毫秒級。 */
+const DIGEST_GRACE_MS = 300;
 
 /** 接收端的資源上限（防 OOM 與未完成檔案佔用記憶體）。 */
 export interface DataChannelLimits {
@@ -351,6 +486,14 @@ interface Partial {
   allReceived: boolean;
   /** 已中止（錯誤或超量）：後續分塊一律丟棄，不重複報錯。 */
   failed: boolean;
+
+  // ── 續傳與整檔校驗（ADR-0355）──────────────────────────────────────────────
+  /** 對端是新版（回過能力回執的對象）⇒ 收齊後值得等一下 `file-end`。 */
+  expectDigest?: boolean;
+  /** 已收到的整檔雜湊（`file-end`）。 */
+  sha?: string | undefined;
+  /** 收齊時若雜湊還沒到，這裡放「雜湊一到就叫醒我」的函式。 */
+  waitDigest?: ((sha: string) => void) | undefined;
 }
 
 /** 接收資料通道訊息，處理 Nudge 與檔案分塊重組。 */
@@ -431,6 +574,14 @@ export class DataChannelReceiver {
       case "presence":
         this.handlers.onPresence?.({ s: msg.s, m: msg.m, np: msg.np, ...(msg.hb !== undefined ? { hb: msg.hb } : {}) });
         return;
+      case "file-resume":
+        // 對方（收端）告訴我它已經有多少位元組了（ADR-0355）。收到就代表對端是新版。
+        this.handlers.onResumeRequest?.(msg.id, msg.have, msg.v ?? DC_PROTOCOL_VERSION);
+        return;
+      case "file-end":
+        // 整檔雜湊：交給正在等的那一筆，由它完成校驗後才收尾。
+        this.deliverDigest(msg.id, msg.sha);
+        return;
       case "file-begin":
         if (msg.size < 0 || msg.chunks < 0 || msg.size > this.maxFileSize || msg.chunks > this.maxChunks) {
           this.handlers.onError?.(`檔案 ${msg.id} 超出上限（size=${msg.size}, chunks=${msg.chunks}）`);
@@ -470,7 +621,7 @@ export class DataChannelReceiver {
         // 而為了幾百 KB 去開檔、寫入、再讀回來也不划算。
         if (this.openSink && msg.size >= this.sinkMinBytes && msg.chunks > 0) {
           partial.mode = "opening";
-          void this.beginSink(msg.id, partial);
+          void this.beginSink(msg.id, partial, msg.v ?? 0);
         } else if (msg.size > this.maxMemoryFileSize) {
           // ADR-0349：這個檔不會落盤（沒掛 sink、或小於落盤門檻卻又超過記憶體上限——
           // 後者只可能是門檻被設得比記憶體上限還大的設定錯誤），而它大到不該進記憶體。
@@ -553,7 +704,40 @@ export class DataChannelReceiver {
   }
 
   /** 開啟 sink；失敗或回 `null` 一律退回記憶體模式（收檔不能因為磁碟問題而整個失敗）。 */
-  private async beginSink(id: string, partial: Partial): Promise<void> {
+  private async beginSink(id: string, partial: Partial, peerVersion = 0): Promise<void> {
+    // 續傳協商＋能力回執（ADR-0355）。🔴 只對**聽得懂的送出端**開口：`v` 缺席＝舊版，
+    // 回一則它不認得的控制訊息只會讓它跳「未知資料通道訊息類型」。
+    //
+    // ⚠ `have` 為 0 也照回：這一則同時是「我是新版」的報到，送出端據此才敢送 `file-end`。
+    // 省掉它會讓整檔校驗永遠用不上——省一次往返，換掉一個正確性保證，不划算。
+    let resumeFrom = 0;
+    if (this.handlers.reply && peerVersion >= 2) {
+      const cs = partial.meta.chunkSize ?? 0;
+      let raw = 0;
+      try {
+        raw = (await this.handlers.resumeOffset?.({
+          id,
+          name: partial.meta.name,
+          mime: partial.meta.mime,
+          size: partial.meta.size,
+        })) ?? 0;
+      } catch {
+        raw = 0; // 查不到就從頭來，不要因此讓整筆傳輸失敗
+      }
+      // 向下對齊到分塊邊界：本機可能只寫了半塊（斷電／中止），半塊接不回去。
+      resumeFrom = cs > 0 ? Math.floor(Math.min(raw, partial.meta.size) / cs) * cs : 0;
+      if (this.partials.get(id) !== partial || partial.failed) return;
+      if (resumeFrom > 0) {
+        // 預先記下已有的分塊：`seen.size === chunks` 是完成判定，少了這步永遠收不齊。
+        for (let seq = 0; seq < resumeFrom / cs; seq++) partial.seen.add(seq);
+        if (partial.seen.size >= partial.meta.chunks) partial.allReceived = true;
+      }
+      partial.expectDigest = true;
+      this.handlers.reply(
+        JSON.stringify({ t: "file-resume", id, have: resumeFrom, v: DC_PROTOCOL_VERSION } satisfies DataMessage),
+      );
+    }
+
     let sink: FileSink | null = null;
     try {
       sink = await this.openSink!({
@@ -561,6 +745,7 @@ export class DataChannelReceiver {
         name: partial.meta.name,
         mime: partial.meta.mime,
         size: partial.meta.size,
+        ...(resumeFrom > 0 ? { resumeFrom } : {}),
         ...(partial.meta.origin !== undefined ? { origin: partial.meta.origin } : {}),
       });
     } catch {
@@ -605,6 +790,9 @@ export class DataChannelReceiver {
         if (partial.failed || this.partials.get(id) !== partial) return;
       }
       if (!partial.allReceived) return;
+      // 整檔校驗要在 `close()` **之前**——close 之後 sink 可能已經把檔案交出去了。
+      if (!(await this.verifyDigest(id, partial, partial.sink))) return;
+      if (this.partials.get(id) !== partial || partial.failed) return;
       const result = await partial.sink.close();
       if (this.partials.get(id) !== partial) return;
       this.partials.delete(id);
@@ -621,6 +809,48 @@ export class DataChannelReceiver {
     } finally {
       partial.draining = false;
     }
+  }
+
+  /** `file-end` 送達：叫醒正在等雜湊的那一筆（或先存著，等收齊時直接用）。 */
+  private deliverDigest(id: string, sha: string): void {
+    const partial = this.partials.get(id);
+    if (!partial || partial.failed) return;
+    partial.sha = sha;
+    const waiter = partial.waitDigest;
+    if (waiter) {
+      partial.waitDigest = undefined;
+      waiter(sha);
+    }
+  }
+
+  /**
+   * 收齊後的整檔校驗（ADR-0355）。回 true＝可以收尾；false＝已中止。
+   *
+   * 有序通道上 `file-end` 緊跟在最後一塊之後，故只等一小段；逾時＝對方沒送
+   * （例如小檔在能力回執抵達前就送完了）⇒ 不校驗，但也不卡住。
+   */
+  private async verifyDigest(id: string, partial: Partial, sink: FileSink): Promise<boolean> {
+    if (!sink.digest || !partial.expectDigest) return true;
+    if (partial.sha === undefined) {
+      partial.sha = await new Promise<string | undefined>((resolve) => {
+        const timer = setTimeout(() => {
+          partial.waitDigest = undefined;
+          resolve(undefined);
+        }, DIGEST_GRACE_MS);
+        partial.waitDigest = (v) => {
+          clearTimeout(timer);
+          resolve(v);
+        };
+      });
+      if (partial.failed || this.partials.get(id) !== partial) return false;
+    }
+    if (partial.sha === undefined) return true; // 對方沒送，不校驗
+    const actual = await sink.digest();
+    if (actual.toLowerCase() === partial.sha.toLowerCase()) return true;
+    // 🔴 對不上就是壞檔——**不能交付**。續傳把「上次寫到一半的暫存檔」接回來，
+    // 這是唯一能抓到接錯／檔案在送出端被改掉的地方。
+    this.fail(id, partial, `檔案 ${partial.meta.name} 完整性校驗失敗，已捨棄`);
+    return false;
   }
 
   /** 中止一個進行中的檔案並報錯（只報一次）。 */

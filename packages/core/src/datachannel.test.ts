@@ -2,9 +2,12 @@ import { describe, expect, it, vi } from "vitest";
 import {
   blobStream,
   DataChannelReceiver,
+  DC_PROTOCOL_VERSION,
   decodeFileChunk,
   encodeDcPresence,
   encodeFileChunk,
+  fileEndMessage,
+  sha256Hex,
   encodeNudge,
   encodeTyping,
   streamFile,
@@ -639,5 +642,204 @@ describe("Data Channel — 落盤與不落盤各有上限（ADR-0349）", () => 
     expect(errors).toEqual([]);
     expect(files).toHaveLength(1);
     expect(eq(files[0]!.bytes!, payload)).toBe(true);
+  });
+});
+
+// ── ADR-0355：斷點續傳與整檔校驗 ─────────────────────────────────────────────
+
+/** 蒐集 async generator 的全部產出。 */
+async function collectMsgs(it: AsyncIterable<string | Uint8Array>): Promise<(string | Uint8Array)[]> {
+  const out: (string | Uint8Array)[] = [];
+  for await (const v of it) out.push(v);
+  return out;
+}
+
+/** 會自己算雜湊的記憶體 sink（真實 sink 由持有檔案的宿主計算）。 */
+function hashSink(seed: Uint8Array = new Uint8Array(0)) {
+  const state = {
+    bytes: new Uint8Array(seed),
+    closed: false,
+    aborted: false,
+    write(offset: number, chunk: Uint8Array) {
+      const end = Math.max(state.bytes.length, offset + chunk.length);
+      const next = new Uint8Array(end);
+      next.set(state.bytes);
+      next.set(chunk, offset);
+      state.bytes = next;
+    },
+    close() {
+      state.closed = true;
+      return { handle: "h" };
+    },
+    abort() {
+      state.aborted = true;
+    },
+    digest() {
+      return sha256Hex(state.bytes);
+    },
+  };
+  return state;
+}
+
+const settle = (ms = 30) => new Promise((r) => setTimeout(r, ms));
+
+describe("ADR-0355 續傳協商", () => {
+  const CS = 4; // 小 chunkSize 讓測試看得懂
+
+  /** 用 streamFile 產生訊息，並可指定續傳起點。 */
+  const msgsFor = async (bytes: Uint8Array, id: string, from = 0) =>
+    collectMsgs(streamFile({ name: "a.bin", mime: "x", bytes }, id, CS, undefined, from));
+
+  it("🔴 收端有斷點 → 回 file-resume 告知已收位元組數（且帶版本＝能力回執）", async () => {
+    const replies: string[] = [];
+    const rx = new DataChannelReceiver(
+      { reply: (m) => replies.push(m), resumeOffset: () => 8 },
+      { sinkMinBytes: 0 },
+      () => hashSink(),
+    );
+    const msgs = await msgsFor(new Uint8Array(16), "r1");
+    rx.receive(msgs[0]!);
+    await settle();
+    expect(JSON.parse(replies[0]!)).toEqual({ t: "file-resume", id: "r1", have: 8, v: DC_PROTOCOL_VERSION });
+  });
+
+  it("🔴 對方是舊版（file-begin 無 v）→ 絕不回話（否則舊客戶端會跳未知訊息）", async () => {
+    const replies: string[] = [];
+    const rx = new DataChannelReceiver(
+      { reply: (m) => replies.push(m), resumeOffset: () => 8 },
+      { sinkMinBytes: 0 },
+      () => hashSink(),
+    );
+    const legacy = { t: "file-begin", id: "r2", name: "a", mime: "x", size: 16, chunks: 4, chunkSize: CS };
+    rx.receive(JSON.stringify(legacy));
+    await settle();
+    expect(replies).toEqual([]);
+  });
+
+  it("🔴 沒有斷點（have=0）也照回——那一則是能力報到，不是續傳", async () => {
+    const replies: string[] = [];
+    const rx = new DataChannelReceiver({ reply: (m) => replies.push(m) }, { sinkMinBytes: 0 }, () => hashSink());
+    const msgs = await msgsFor(new Uint8Array(8), "r3");
+    rx.receive(msgs[0]!);
+    await settle();
+    expect(JSON.parse(replies[0]!)).toMatchObject({ t: "file-resume", have: 0, v: DC_PROTOCOL_VERSION });
+  });
+
+  it("🔴 斷點向下對齊到分塊邊界（半塊接不回去）", async () => {
+    const replies: string[] = [];
+    const rx = new DataChannelReceiver(
+      { reply: (m) => replies.push(m), resumeOffset: () => 9 }, // 9 不是 4 的倍數
+      { sinkMinBytes: 0 },
+      () => hashSink(),
+    );
+    const msgs = await msgsFor(new Uint8Array(16), "r4");
+    rx.receive(msgs[0]!);
+    await settle();
+    expect(JSON.parse(replies[0]!).have).toBe(8);
+  });
+
+  it("🔴 續傳完整往返：只補送缺的那一段，檔案內容仍然正確", async () => {
+    const payload = new Uint8Array(16).map((_, i) => i + 1);
+    const sink = hashSink(payload.subarray(0, 8)); // 上一次已寫了前 8 個位元組
+    let seenMeta: { resumeFrom?: number } | undefined;
+    const onFile = vi.fn();
+    const rx = new DataChannelReceiver(
+      { onFile, reply: () => {}, resumeOffset: () => 8 },
+      { sinkMinBytes: 0 },
+      // ⚠ 斷言**不能**寫在這個回呼裡：`beginSink` 用 try/catch 包住 openSink，
+      // 斷言拋出會被吞掉並靜默退回記憶體路徑，測試就變成在測別的東西。
+      (meta) => {
+        seenMeta = meta;
+        return sink;
+      },
+    );
+    const msgs = await msgsFor(payload, "r5", 8);
+    for (const m of msgs) rx.receive(m);
+    // 真實的新版送出端收到回執後會補上整檔雜湊——續傳與校驗是一起發生的，
+    // 而且雜湊涵蓋的是**整檔**（含上一次連線寫的前半）。
+    rx.receive(fileEndMessage("r5", sha256Hex(payload)));
+    await settle(80);
+    expect(seenMeta?.resumeFrom).toBe(8); // sink 必須被告知要附加，不能截斷
+    expect(Buffer.from(sink.bytes).equals(Buffer.from(payload))).toBe(true);
+    expect(sink.closed).toBe(true);
+    expect(onFile).toHaveBeenCalledTimes(1);
+  });
+
+  it("🔴 送出端從斷點起算：只產出缺的分塊，且 seq 正確", async () => {
+    const payload = new Uint8Array(16).map((_, i) => i + 1);
+    const msgs = await msgsFor(payload, "r6", 8);
+    const frames = msgs.slice(1).map((m) => decodeFileChunk(m as Uint8Array)!);
+    expect(frames.map((f) => f.seq)).toEqual([2, 3]);
+    expect(Buffer.from(frames[0]!.bytes).equals(Buffer.from(payload.subarray(8, 12)))).toBe(true);
+  });
+
+  it("續傳起點不在分塊邊界 → 拋錯（送出端不可送出接不回去的資料）", async () => {
+    await expect(msgsFor(new Uint8Array(16), "r7", 5)).rejects.toThrow(/邊界/);
+  });
+});
+
+describe("ADR-0355 整檔雜湊校驗", () => {
+  const CS = 4;
+
+  it("streamFile 算出的雜湊＝整檔 SHA-256，且續傳時仍涵蓋整檔", async () => {
+    const payload = new Uint8Array(16).map((_, i) => i + 1);
+    for (const from of [0, 8]) {
+      let sha = "";
+      await collectMsgs(
+        streamFile({ name: "a", mime: "x", bytes: payload }, "h0", CS, undefined, from, (v) => (sha = v)),
+      );
+      expect(sha, `from=${from}`).toBe(sha256Hex(payload));
+    }
+  });
+
+  it("雜湊相符 → 正常收尾", async () => {
+    const payload = new Uint8Array(12).map((_, i) => i);
+    const sink = hashSink();
+    const onFile = vi.fn();
+    const rx = new DataChannelReceiver({ onFile, reply: () => {} }, { sinkMinBytes: 0 }, () => sink);
+    for (const m of await collectMsgs(streamFile({ name: "a", mime: "x", bytes: payload }, "h1", CS))) rx.receive(m);
+    rx.receive(fileEndMessage("h1", sha256Hex(payload)));
+    await settle(80);
+    expect(sink.closed).toBe(true);
+    expect(onFile).toHaveBeenCalledTimes(1);
+  });
+
+  it("🔴 雜湊不符 → 捨棄、不交付（續傳接錯或檔案被改掉的唯一攔截點）", async () => {
+    const payload = new Uint8Array(12).map((_, i) => i);
+    const sink = hashSink();
+    const onFile = vi.fn();
+    const onError = vi.fn();
+    const rx = new DataChannelReceiver({ onFile, onError, reply: () => {} }, { sinkMinBytes: 0 }, () => sink);
+    for (const m of await collectMsgs(streamFile({ name: "bad.bin", mime: "x", bytes: payload }, "h2", CS))) {
+      rx.receive(m);
+    }
+    rx.receive(fileEndMessage("h2", "00".repeat(32)));
+    await settle(80);
+    expect(onFile).not.toHaveBeenCalled();
+    expect(sink.closed).toBe(false);
+    expect(sink.aborted).toBe(true);
+    expect(onError).toHaveBeenCalledWith(expect.stringContaining("完整性"));
+  });
+
+  it("對方沒送 file-end → 逾時後照常收尾，不卡住", async () => {
+    const payload = new Uint8Array(8);
+    const sink = hashSink();
+    const onFile = vi.fn();
+    const rx = new DataChannelReceiver({ onFile, reply: () => {} }, { sinkMinBytes: 0 }, () => sink);
+    for (const m of await collectMsgs(streamFile({ name: "a", mime: "x", bytes: payload }, "h3", CS))) rx.receive(m);
+    await settle(420); // 超過寬限
+    expect(onFile).toHaveBeenCalledTimes(1);
+    expect(sink.closed).toBe(true);
+  });
+
+  it("sink 不會算雜湊（未實作 digest）→ 跳過校驗，行為與過去相同", async () => {
+    const payload = new Uint8Array(8);
+    const plain = { write() {}, close: () => ({ handle: "h" }), abort() {} };
+    const onFile = vi.fn();
+    const rx = new DataChannelReceiver({ onFile, reply: () => {} }, { sinkMinBytes: 0 }, () => plain);
+    for (const m of await collectMsgs(streamFile({ name: "a", mime: "x", bytes: payload }, "h4", CS))) rx.receive(m);
+    rx.receive(fileEndMessage("h4", "00".repeat(32))); // 錯的雜湊也不擋
+    await settle(80);
+    expect(onFile).toHaveBeenCalledTimes(1);
   });
 });

@@ -31,6 +31,7 @@ export * from "./storage/memory.js";
 export * from "./storage/archive.js";
 export * from "./storage/opfs-archive.js";
 export * from "./storage/opfs-file-sink.js"; // ADR-0347：收檔串流落盤
+export * from "./storage/extract-fsa.js"; // ADR-0355：瀏覽器端解開合集
 // ── 多身分登錄／搬家／快照／裝置 id ──
 export * from "./storage/profiles.js";
 export * from "./storage/cloud-snapshot.js";

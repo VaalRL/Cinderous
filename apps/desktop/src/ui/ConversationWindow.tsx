@@ -14,7 +14,7 @@ import { nameColor } from "@cinderous/theme";
 import { useThemeMode } from "../theme.js";
 import { useContrastMode } from "../contrast.js";
 import type { FloatingWindow } from "./useFloatingWindow.js";
-import type { CallMedia, MentionCandidate, MentionSuggest, SlashCommand } from "@cinderous/core";
+import type { CallMedia, MentionCandidate, MentionSuggest, SlashCommand, TarListEntry } from "@cinderous/core";
 import { formatBytes, getKv, mainMessages, replyCounts, rootIdOf, threadMessages } from "@cinderous/engine";
 import type { MessageKey } from "@cinderous/i18n";
 import type { ChatMessage, Contact, IcePath, MessageStatus, Self } from "@cinderous/engine";
@@ -265,6 +265,19 @@ const MSG_STATUS_KEY: Record<MessageStatus, MessageKey> = {
   read: "msgStatus_read",
 };
 
+/**
+ * 合集卡片能做的事（ADR-0355）。
+ *
+ * `extract` 是 optional 的，而且**缺席有意義**：代表這個平台解不開（Firefox／Safari 沒有
+ * File System Access API），卡片會改成顯示「請用系統工具解開」而不是一顆按了沒反應的鈕。
+ */
+export interface BundleActions {
+  /** 只讀標頭列出內容（不解開、不連網）。 */
+  list: () => Promise<TarListEntry[]>;
+  /** 解開到使用者選定的資料夾；此平台做不到時不提供。 */
+  extract?: (() => Promise<void>) | undefined;
+}
+
 export interface ConversationProps {
   /**
    * 對話中偵測到日期時的可點提示（ADR-0263 §1.6／ADR-0264 階段四）：點了才開行程並預填。
@@ -350,6 +363,13 @@ export interface ConversationProps {
   nowMinutes?: number;
   /** 存入公司儲存槽（ADR-0161）：企業成員提供；檔案訊息（有 savedPath）顯示存放鈕。 */
   onDepositFile?: (message: ChatMessage) => void;
+  /**
+   * 合集動作（ADR-0355）：收到 `.tar` 時由 App 提供列出／解開的實作；不是合集回 null。
+   *
+   * 由 App 而非本元件判斷「這是不是合集」與「這個平台解不解得開」——前者要看落地路徑，
+   * 後者是平台能力，兩件事都不該讓一個渲染元件去碰。
+   */
+  onBundle?: (message: ChatMessage) => BundleActions | null;
   /** 此聯絡人的私有標籤（ADR-0158：經典佈局入口）；與 onAddLabel 一起提供才顯示標籤列。 */
   labels?: string[];
   /** 新增私有標籤（ADR-0040 資料層；App 負責正規化/去重/持久化）。 */
@@ -1736,6 +1756,7 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
               onExpand={() => openDetail(m.id)}
               groupRead={groupReadOf(m)}
               onDeposit={props.onDepositFile}
+              {...(props.onBundle ? { onBundle: props.onBundle } : {})}
               {...(whoColorOf(m) ? { whoColor: whoColorOf(m) } : {})}
             />
           ))}
@@ -2830,6 +2851,7 @@ function MessageLine({
   expanded = false,
   groupRead,
   onDeposit,
+  onBundle,
   onPickDate,
   whoColor,
 }: {
@@ -2866,6 +2888,8 @@ function MessageLine({
   groupRead?: GroupRead | undefined;
   /** 存入公司儲存槽（ADR-0161）：企業成員限定；App 依 savedPath 排隊背景傳給企業主。 */
   onDeposit?: ((message: ChatMessage) => void) | undefined;
+  /** 合集動作（ADR-0355）；不是合集回 null。 */
+  onBundle?: ((message: ChatMessage) => BundleActions | null) | undefined;
   /** 發言者名字色（ADR-0271）：群組限定的每人專屬色；未提供＝沿用 CSS 的 `--in-name`。 */
   whoColor?: string | undefined;
 }): JSX.Element {
@@ -2917,12 +2941,15 @@ function MessageLine({
   }
 
   if (message.file) {
+    // 是不是合集由 App 判斷（要看落地路徑與平台能力）；不是就回 null，卡片照舊。
+    const bundleOf = onBundle?.(message) ?? undefined;
     return (
       <FileLine
         message={message}
         who={who}
         onView={onView}
         {...(onDeposit && message.file.savedPath ? { onDeposit: () => onDeposit(message) } : {})}
+        {...(bundleOf ? { bundle: bundleOf } : {})}
       />
     );
   }
@@ -3080,17 +3107,91 @@ function MessageLine({
   );
 }
 
+/** 合集卡片一次最多列出幾個檔名（再多就只報總數——列表不是檔案總管）。 */
+const BUNDLE_LIST_MAX = 50;
+
+/**
+ * 合集的內容列表與解包（ADR-0355）。
+ *
+ * 列表**只讀標頭**：tar 的每個項目是「512 標頭 ＋ 內容補到 512 倍數」，所以讀完一個標頭
+ * 就能跳過整段內容直接到下一個。列一千個檔只要讀一千個 512 位元組的區塊，與合集多大無關，
+ * 而且全在本機——收件人在決定要不要解開之前就看得到裡面有什麼。
+ */
+function BundleCard({ bundle }: { bundle: BundleActions }): JSX.Element {
+  const { t } = useI18n();
+  const [entries, setEntries] = useState<TarListEntry[] | null>(null);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const list = (): void => {
+    setBusy(true);
+    setError("");
+    void bundle
+      .list()
+      .then(setEntries)
+      .catch((e: unknown) => setError(t("bundle_listFailed", { reason: e instanceof Error ? e.message : String(e) })))
+      .finally(() => setBusy(false));
+  };
+
+  const extract = (): void => {
+    if (!bundle.extract) return;
+    setBusy(true);
+    void bundle.extract().finally(() => setBusy(false));
+  };
+
+  return (
+    <div className="filecard__bundle" data-testid="bundle">
+      <div className="filecard__bundleacts">
+        <button type="button" data-testid="bundle-list" onClick={list} disabled={busy}>
+          🗂 {t("bundle_list")}
+        </button>
+        {bundle.extract ? (
+          <button type="button" data-testid="bundle-extract" onClick={extract} disabled={busy}>
+            📂 {busy ? t("bundle_extracting") : t("bundle_extract")}
+          </button>
+        ) : (
+          // 做不到的是**這個瀏覽器**，不是這個功能——說清楚他才知道換個瀏覽器就有。
+          <span className="filecard__note" data-testid="bundle-unsupported">
+            {t("bundle_extractUnsupported")}
+          </span>
+        )}
+      </div>
+      {error ? <div className="filecard__note" data-testid="bundle-error">{error}</div> : null}
+      {entries ? (
+        entries.length === 0 ? (
+          <div className="filecard__note">{t("bundle_listEmpty")}</div>
+        ) : (
+          <ul className="filecard__bundlelist" data-testid="bundle-entries">
+            {entries.slice(0, BUNDLE_LIST_MAX).map((e) => (
+              <li key={e.path}>
+                <span className="filecard__bundlepath">{e.path}</span>
+                <span className="filecard__bundlesize">{formatBytes(e.size)}</span>
+              </li>
+            ))}
+            {entries.length > BUNDLE_LIST_MAX ? (
+              <li className="filecard__note">{t("bundle_more", { count: entries.length - BUNDLE_LIST_MAX })}</li>
+            ) : null}
+          </ul>
+        )
+      ) : null}
+    </div>
+  );
+}
+
 function FileLine({
   message,
   who,
   onView,
   onDeposit,
+  bundle,
 }: {
   message: ChatMessage;
   who: string;
   onView?: ((item: LightboxItem) => void) | undefined;
   /** 存入公司儲存槽（ADR-0161）；僅企業成員且檔案有本機路徑時提供。 */
   onDeposit?: (() => void) | undefined;
+  /** 合集動作（ADR-0355）；非合集不提供。 */
+  bundle?: BundleActions | undefined;
 }): JSX.Element {
   const { t } = useI18n();
   const file = message.file!;
@@ -3139,6 +3240,7 @@ function FileLine({
                 🗃 {t("slot_deposit")}
               </button>
             ) : null}
+            {bundle ? <BundleCard bundle={bundle} /> : null}
           </div>
         </div>
       )}

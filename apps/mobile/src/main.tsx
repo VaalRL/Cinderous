@@ -11,7 +11,7 @@
 //  - `preview.html` → `preview.tsx`：開發預覽台保留，但只在 `vite dev` 服務得到，
 //    **不列入 build 輸入**，故不會進 `dist/`、也就不會被打進 APK。
 import { createRoot } from "react-dom/client";
-import { openDeviceKey, setDeviceKeyVault, webDeviceKeyVault } from "@cinderous/engine";
+import { openDeviceKey, setDeviceKeyVault, sweepInboxFiles, webDeviceKeyVault } from "@cinderous/engine";
 import { DEFAULT_RELAY } from "./backend.js";
 import { MobileApp } from "./MobileApp.js";
 import { androidDeviceKeyVault } from "./native/device-keystore.js";
@@ -30,6 +30,9 @@ if (el) {
   // 而 `createBackend` 是同步的。桌面選擇在 buildBackend 內 await 是因為 Linux 的 gnome-keyring
   // 可能彈解鎖框；Android 這把金鑰刻意沒設 `setUserAuthenticationRequired`，不會有提示，
   // 所以擋在這裡不會讓使用者看到空白畫面。
+  // ADR-0355：開機清掉沒收完／沒另存的收檔暫存檔。**不 await**——它是背景整理，
+  // 讓它擋住第一幀就是為了一件使用者不在乎的事延後整個 App。
+  void sweepInboxFiles();
   void openDeviceKey().finally(() => {
     createRoot(el).render(<MobileApp initialTheme="light" relayUrl={DEFAULT_RELAY} />);
   });

@@ -436,7 +436,9 @@ describe("WebRtcTransfer 送檔管線（ADR-0345／0346）", () => {
     }
   });
 
-  it("等待期間通道關閉 → 回報中斷而非靜默停住", async () => {
+  // ADR-0355 改變了「中斷」的語意：不再當場報錯，而是**排回佇列**等通道再開才續傳。
+  // 報錯留給「重試用盡」——在那之前報錯等於騙使用者說失敗了，其實還會自己接回去。
+  it("🔴 等待期間通道關閉 → 不靜默停住：排回佇列等重連，且收尾清乾淨", async () => {
     const { t, peer, dc, errors } = setup();
     dc.bufferedAmount = 2 << 20;
     t.sendFile(peer, file(16_384 * 3));
@@ -444,8 +446,31 @@ describe("WebRtcTransfer 送檔管線（ADR-0345／0346）", () => {
     dc.readyState = "closed";
     dc.drain();
     await settle();
-    expect(errors).toContain("傳輸中斷");
+    expect(errors).toEqual([]); // 可續傳的中斷不是失敗
     expect(dc.waiters).toBe(0); // 收尾要清乾淨
+
+    // 通道再開 → 自己接回去送完（對方沒回斷點，逾時後從頭送）。
+    dc.readyState = "open";
+    dc.bufferedAmount = 0;
+    const before = dc.chunkCount; // chunkCount／sent 都是唯讀衍生值，改用差額比較
+    (dc.onopen as (() => void) | null)?.(); // 通道再開 → 由 onopen 觸發重新 flush
+    await new Promise((r) => setTimeout(r, 600)); // 含續傳協商逾時
+    expect(dc.chunkCount - before).toBe(3);
+  });
+
+  it("重試用盡後才真的報錯（不會無限排隊）", async () => {
+    const { t, peer, dc, errors } = setup();
+    t.sendFile(peer, file(16_384 * 3));
+    for (let i = 0; i < 5; i++) {
+      dc.readyState = "open";
+      dc.bufferedAmount = 2 << 20;
+      (dc.onopen as (() => void) | null)?.();
+      await settle();
+      dc.readyState = "closed";
+      dc.drain();
+      await new Promise((r) => setTimeout(r, 550));
+    }
+    expect(errors).toContain("傳輸中斷");
   });
 
   it("佇列中的多個檔案依序送出", async () => {

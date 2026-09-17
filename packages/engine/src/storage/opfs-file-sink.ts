@@ -50,6 +50,41 @@ export async function readInboxFile(handle: string): Promise<File | null> {
   }
 }
 
+/**
+ * 開機清理：刪掉超過 `maxAgeMs` 的暫存檔，回傳刪除數。
+ *
+ * 為什麼需要它：收檔是**先落盤再另存**，使用者在另存前關掉分頁，那份 `.part` 就留下了。
+ * 單檔有上限，但它會累積——而 OPFS 的配額是整個來源共用的，撐爆了連封存（ADR-0111）
+ * 都寫不進去。桌面那側早就有對應的 `inbox_sweep`（ADR-0349），這是瀏覽器這側的同一件事。
+ *
+ * 只認 `.part` 後綴、只看修改時間，且**任何一步失敗都不拋**——清理失敗不該擋住開機。
+ */
+export async function sweepInboxFiles(maxAgeMs = 24 * 3600 * 1000, now = Date.now()): Promise<number> {
+  if (!hasOpfs()) return 0;
+  let removed = 0;
+  try {
+    const dir = await inboxDir();
+    // OPFS 的目錄列舉是非同步迭代器；型別未必包含它，故取到再用。
+    const entries = (dir as unknown as { keys?: () => AsyncIterable<string> }).keys?.();
+    if (!entries) return 0;
+    const names: string[] = [];
+    for await (const name of entries) if (name.endsWith(".part")) names.push(name);
+    for (const name of names) {
+      try {
+        const file = await (await dir.getFileHandle(name)).getFile();
+        if (now - file.lastModified < maxAgeMs) continue;
+        await dir.removeEntry(name);
+        removed += 1;
+      } catch {
+        /* 這一個清不掉就算了，別讓它擋住其他的 */
+      }
+    }
+  } catch {
+    /* 沒有暫存區、或配額拒絕：忽略 */
+  }
+  return removed;
+}
+
 /** 刪掉暫存檔（使用者已另存、或放棄）。失敗不拋——清理失敗不該影響流程。 */
 export async function removeInboxFile(handle: string): Promise<void> {
   if (!hasOpfs()) return;

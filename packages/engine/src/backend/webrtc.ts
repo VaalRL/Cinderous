@@ -5,7 +5,9 @@ import {
   encodeDcPresence,
   asFileStream,
   fileSizeOf,
-  streamFile,
+  fileBeginMessage,
+  fileEndMessage,
+  streamFileChunks,
   encodeTyping,
   readSignal,
   type IceCandidateData,
@@ -31,6 +33,14 @@ export interface TransferHandlers {
   onOutgoingProgress: (peer: PubkeyHex, id: string, sent: number, size: number) => void;
   /** 收到完整檔案。 */
   onIncoming: (peer: PubkeyHex, file: ReceivedFile) => void;
+  /**
+   * 續傳斷點查詢（ADR-0355）：這個檔本機的暫存檔已經有幾個位元組？
+   * 未提供＝不協商續傳（中斷後從頭重送）。
+   */
+  resumeOffset?: (
+    peer: PubkeyHex,
+    meta: { id: string; name: string; mime: string; size: number },
+  ) => number | Promise<number>;
   /** 經 P2P 通道收到「正在輸入中」（F5 卸載）。 */
   onTyping?: (peer: PubkeyHex) => void;
   /**
@@ -58,6 +68,13 @@ interface OutJob {
   file: OutgoingFileStream;
   /** 儲存槽存放來源標註（ADR-0161／審查修正）：隨 file-begin 傳，讓收端無需 relay metadata。 */
   origin?: string;
+  /**
+   * 這是中斷後的重試（ADR-0355）：送出 `file-begin` 後**等一下**對方的 `file-resume`，
+   * 拿到斷點才開始送分塊。第一次送不等——那會給每個檔案加上一次無謂的往返。
+   */
+  mayResume?: boolean;
+  /** 已重試次數（有上限，避免對端一直斷線時無限重排）。 */
+  attempts?: number;
 }
 
 interface PeerConn {
@@ -72,7 +89,23 @@ interface PeerConn {
   candTimer: ReturnType<typeof setTimeout> | undefined;
   /** ICE 路徑追蹤（ADR-0344）：通道開啟時 start、關閉時 reset。 */
   pathTracker: IcePathTracker;
+  /** 等待中的續傳協商：傳輸 id → 收到 `file-resume` 時要呼叫的解析函式（ADR-0355）。 */
+  resumeWaiters: Map<string, (have: number) => void>;
+  /**
+   * 對端是否回過能力回執（`file-resume`）＝它聽得懂新訊息（ADR-0355）。
+   *
+   * 🔴 沒有這個旗標就不能送 `file-end`：舊版收端遇到不認得的控制訊息會呼叫 `onError`，
+   * 那條路一路走到 App 會在對話裡跳一行 ⚠ 警告——為了加校驗而讓對方看到假錯誤，不可接受。
+   */
+  peerUnderstandsV2: boolean;
+  /** 是否已有一個檔案正在送（非同步管線需要防重入才不會兩檔交錯）。 */
+  sending: boolean;
 }
+
+/** 續傳協商的等待上限：超過就當對方沒有斷點，從頭送。 */
+const RESUME_WAIT_MS = 400;
+/** 單一檔案的重試次數上限。 */
+const MAX_RESEND_ATTEMPTS = 3;
 
 const HIGH_WATER = 1 << 20; // 1 MiB：超過就暫緩送出，避免撐爆緩衝
 const CHUNK_SIZE = 16_384;
@@ -243,6 +276,23 @@ export class WebRtcTransfer {
           onTyping: () => this.handlers.onTyping?.(peerPk),
           onPresence: (p) => this.handlers.onPresence?.(peerPk, p),
           onError: (reason) => this.handlers.onError(peerPk, reason),
+          // 續傳協商（ADR-0355）。`reply` 恆接：它同時承載能力回執，沒有宿主的
+          // `resumeOffset` 也要回（have=0），否則整檔校驗永遠用不上。
+          reply: (m: string) => {
+            if (conn.dc?.readyState === "open") conn.dc.send(m);
+          },
+          onResumeRequest: (id, have, peerVersion) => {
+            // 收到回執＝對端是新版。這是送 `file-end` 的唯一依據。
+            if (peerVersion >= 2) conn.peerUnderstandsV2 = true;
+            const waiter = conn.resumeWaiters.get(id);
+            if (waiter) {
+              conn.resumeWaiters.delete(id);
+              waiter(have);
+            }
+          },
+          ...(this.handlers.resumeOffset
+            ? { resumeOffset: (meta) => this.handlers.resumeOffset!(peerPk, meta) }
+            : {}),
         },
         {},
         this.openSink, // ADR-0347：大檔串流落盤；未提供＝一律走記憶體（既有行為）
@@ -251,6 +301,9 @@ export class WebRtcTransfer {
       pendingCandidates: [],
       outbox: [],
       started: false,
+      resumeWaiters: new Map(),
+      peerUnderstandsV2: false,
+      sending: false,
       candBatch: new CandidateBatch(),
       candTimer: undefined,
       // 判定有變才會進來（tracker 自己去重）；只在通道仍開著時上報，避免斷線後的殘響。
@@ -361,6 +414,21 @@ export class WebRtcTransfer {
     }
   }
 
+  /** 等對方回報續傳斷點；逾時（或對方是舊版、沒有斷點）就回 0＝從頭送。 */
+  private awaitResume(peer: PeerConn, id: string): Promise<number> {
+    return new Promise<number>((resolve) => {
+      const timer = setTimeout(() => {
+        peer.resumeWaiters.delete(id);
+        resolve(0);
+      }, RESUME_WAIT_MS);
+      (timer as unknown as { unref?: () => void }).unref?.();
+      peer.resumeWaiters.set(id, (have) => {
+        clearTimeout(timer);
+        resolve(have);
+      });
+    });
+  }
+
   /**
    * 依序送出 outbox 內的檔案（含背壓與進度）。
    *
@@ -375,10 +443,16 @@ export class WebRtcTransfer {
   private flush(peerPk: PubkeyHex, peer: PeerConn): void {
     const dc = peer.dc;
     if (!dc || dc.readyState !== "open") return;
+    if (peer.sending) return; // 非同步管線：防重入才不會兩檔交錯
     const job = peer.outbox.shift();
     if (!job) return;
-    const chunks = streamFile(job.file, job.id, CHUNK_SIZE, job.origin)[Symbol.asyncIterator]();
+    peer.sending = true;
     const size = fileSizeOf(job.file);
+    // 整檔雜湊只在對端回過能力回執時才算：不算就不必為了雜湊從第 0 位元組重讀一遍
+    // （續傳時那是白花的本機 I/O），也不會送出對方不認得的訊息。
+    let sha: string | undefined;
+    const wantDigest = peer.peerUnderstandsV2;
+    let chunks: AsyncIterator<Uint8Array> | undefined;
     let sentChunks = 0;
     let waiting: ReturnType<typeof setTimeout> | undefined;
     // 讀分塊是非同步的（ADR-0346），所以 pump 可能在 await 中途被排空事件再次喚醒。
@@ -410,6 +484,13 @@ export class WebRtcTransfer {
         // 每一圈都重驗：讀分塊是非同步的，await 回來時通道可能已經關了。
         if (dc.readyState !== "open") {
           stopWaiting();
+          peer.sending = false;
+          // 中斷 → 排回 outbox 等通道再開（ADR-0355）。沒有這一步，「續傳」就只是個協定
+          // 欄位——沒有人會再送第二次，收端的半截暫存檔也永遠等不到剩下的位元組。
+          if ((job.attempts ?? 0) < MAX_RESEND_ATTEMPTS) {
+            peer.outbox.unshift({ ...job, mayResume: true, attempts: (job.attempts ?? 0) + 1 });
+            return; // 不報錯：這是一次可續傳的中斷，不是失敗
+          }
           this.handlers.onError(peerPk, "傳輸中斷");
           return;
         }
@@ -425,18 +506,35 @@ export class WebRtcTransfer {
           (waiting as unknown as { unref?: () => void }).unref?.();
           return;
         }
+        if (!chunks) {
+          // `file-begin` 也走背壓（上面那兩道檢查已經過了才會到這裡）——收端要看到它
+          // 才會回報斷點，所以它必須是第一件送出的事（ADR-0355）。
+          dc.send(fileBeginMessage(job.file, job.id, CHUNK_SIZE, job.origin));
+          // 續傳協商只在**重試**時等：第一次送就等一輪，等於給每個檔案加上一次無謂的往返。
+          const fromByte = job.mayResume ? await this.awaitResume(peer, job.id) : 0;
+          if (fromByte > 0) {
+            sentChunks = Math.floor(fromByte / CHUNK_SIZE);
+            this.handlers.onOutgoingProgress(peerPk, job.id, Math.min(size, fromByte), size);
+          }
+          chunks = streamFileChunks(
+            job.file,
+            job.id,
+            CHUNK_SIZE,
+            fromByte,
+            wantDigest ? (v) => (sha = v) : undefined,
+          )[Symbol.asyncIterator]();
+          continue; // 回迴圈頂端重驗：協商期間通道可能已經關了
+        }
         const next = await chunks.next();
         if (next.done === true) break;
-        const m = next.value;
         // 分塊框架為整段 buffer（offset 0），送底層 ArrayBuffer（零拷貝、無 base64 膨脹）。
-        if (typeof m === "string") {
-          dc.send(m); // file-begin
-        } else {
-          dc.send(m.buffer as ArrayBuffer);
-          sentChunks += 1;
-          this.handlers.onOutgoingProgress(peerPk, job.id, Math.min(size, sentChunks * CHUNK_SIZE), size);
-        }
+        dc.send(next.value.buffer as ArrayBuffer);
+        sentChunks += 1;
+        this.handlers.onOutgoingProgress(peerPk, job.id, Math.min(size, sentChunks * CHUNK_SIZE), size);
       }
+      // 結尾的整檔雜湊，緊跟最後一塊之後送出（有序通道 ⇒ 收端收齊後立刻拿到）。
+      if (sha && dc.readyState === "open") dc.send(fileEndMessage(job.id, sha));
+      peer.sending = false;
       // 本檔送完，繼續下一個
       this.flush(peerPk, peer);
     };
