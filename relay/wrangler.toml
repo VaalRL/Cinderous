@@ -22,6 +22,16 @@ new_sqlite_classes = ["RelayRoom"]
 TURN_KEY_ID = "99042103a647961e049a2783b8e87d3b"
 TURN_TTL_SECONDS = "300"   # 短期憑證秒數，未設＝1 天；客戶端於 6h 前刷新
 
+# 營運者自報的贊助管道（ADR-0089）：進 NIP-11 的 `cinder_donations`，客戶端的贊助卡據此顯示。
+# 純外部連結，無站內托管／錢包／抽成（PRD §12）。
+#
+# 🔴 **沒有的管道就整行不要寫**。空字串會被濾掉、四個全空則整個欄位不出現——那是刻意的：
+# 一份宣稱有贊助入口、點下去卻是空的文件，比沒有入口更糟。
+#
+# 與官網 `apps/website/src/donations.ts` 同一組真實帳號；那邊也只開了 Buy Me a Coffee，
+# 其餘待正式上線再補（佔位連結會 404）。
+DONATE_BUY_ME_A_COFFEE = "https://buymeacoffee.com/whoami885"
+
 # 取得速率限制（ADR-0342 §3.1）：客戶端每半個 TTL 才取一次（TTL 300 ⇒ 2.5 分鐘一張），
 # 20/60s 對正常使用綽綽有餘；配合短 TTL，濫用者要維持流量就得持續取新憑證。
 # ⚠ per-location 計數且最終一致（Cloudflare 明說不是精確計費系統）——成本乘數，不是閘門。
@@ -70,9 +80,13 @@ class_name = "RelayRoom"
 tag = "v1"
 new_sqlite_classes = ["RelayRoom"]
 
+# ⚠ 這一份與頂層的 `[vars]` **必須手動同步**——wrangler 的具名環境不繼承。
+# 漏掉哪一個，統一模式部署出來的站就少哪一個（贊助欄位會整個消失、TURN 會退純 STUN），
+# 而且 wrangler 不會警告。`wrangler_vars_stay_in_sync` 測試盯著這件事。
 [env.unified.vars]
 TURN_KEY_ID = "99042103a647961e049a2783b8e87d3b"
 TURN_TTL_SECONDS = "300"
+DONATE_BUY_ME_A_COFFEE = "https://buymeacoffee.com/whoami885"
 
 [[env.unified.ratelimits]]
 name = "TURN_LIMIT"
