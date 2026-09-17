@@ -32,3 +32,52 @@ namespace_id = "1001"
 [ratelimits.simple]
 limit = 20
 period = 60
+
+# ── 統一節點模式（ADR-0354，選配）───────────────────────────────────────────────
+# 預設（上面那份設定）＝**純 relay**：只轉發密文，不送任何程式碼給瀏覽器——攻擊面最小，
+# 官方錨點站恆用此模式。下面的 `unified` 環境則讓**同一座 Worker 同時是網頁版**：
+# 一個網址，朋友用瀏覽器打開就能聊，自己在 App／Obsidian 填它當中繼站。
+#
+#   純 relay：      pnpm --filter @cinderous/relay deploy
+#   relay＋網頁版： pnpm --filter @cinderous/relay deploy:unified
+#
+# 兩者 `name` 相同＝同一座 Worker 就地覆蓋，切換模式只是重跑另一條指令（無需改檔）。
+#
+# ⚠ 取捨（ADR-0147 信任模型）：統一模式下這台伺服器**同時送出客戶端 JS**，它被入侵就等於
+#   能換掉程式碼竊取金鑰；純 relay 模式沒有這條路徑。自架者自負此信任，官方站不採用。
+#
+# ⚠ wrangler 的 `[env.*]` **不繼承**上層綁定，故 DO／migrations／vars 需在此重新宣告。
+[env.unified]
+name = "cinder-relay"
+
+# 🔴 `run_worker_first` 必設：Static Assets 預設「資產優先」——命中資產就直接回傳、
+#    **根本不執行 Worker**。而 `/` 有 `index.html`、又正是 ADR-0241 舊客戶端的 WebSocket
+#    回退路徑 ⇒ 少了這行，`wss://<你的站>/` 會拿到 HTML，relay 被靜默關掉（回 200，不是錯誤）。
+[env.unified.assets]
+# 🔴 **不是 `dist`**。`dist` 是桌面版 `tauri build` 吃的那一份（`__SELF_RELAY__` 為 false）。
+# 共用同一個資料夾的話，跑過 `deploy:unified` 之後那裡會留著統一模式的建置產物，
+# 而一次 stale-dist 的桌面建置就會出貨一個預設中繼站指向 `wss://tauri.localhost` 的 App。
+directory = "../apps/desktop/dist-unified"
+binding = "ASSETS"
+not_found_handling = "single-page-application"   # 深層路由（/chat/npub1…）回退 index.html
+run_worker_first = true
+
+[[env.unified.durable_objects.bindings]]
+name = "RELAY_ROOM"
+class_name = "RelayRoom"
+
+[[env.unified.migrations]]
+tag = "v1"
+new_sqlite_classes = ["RelayRoom"]
+
+[env.unified.vars]
+TURN_KEY_ID = "99042103a647961e049a2783b8e87d3b"
+TURN_TTL_SECONDS = "300"
+
+[[env.unified.ratelimits]]
+name = "TURN_LIMIT"
+namespace_id = "1001"
+
+[env.unified.ratelimits.simple]
+limit = 20
+period = 60

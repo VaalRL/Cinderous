@@ -2,6 +2,9 @@
 
 # 自架 Cinderous（單一入口）
 
+> 📖 **一步一步的圖文教學在官網**：<https://vaalrl.github.io/Cinderous/zh-Hant/selfhost/>（含桌面版一鍵部署、常見錯誤與費用說明）。
+> 本文件是**指令速查**，適合已經知道自己要做什麼的人。
+
 這是自架的**總覽入口**——一頁看懂「有哪些部署方式、各自差在哪、該選哪個」，再點進對應的詳細文件。
 
 自架分兩類：
@@ -24,7 +27,14 @@
 
 ### 各方式怎麼做
 
-- **Cloudflare Worker**（`relay/` 的 Worker）：`pnpm dlx wrangler login` → `wrangler deploy`，取得 `wss://<worker>.<你的子網域>.workers.dev`。詳見 [README 的「在 Cloudflare Workers 架設中繼站」](../README.md#-在-cloudflare-workers-架設中繼站nostr--webrtc-信令-relay) 與 [`relay/wrangler.toml`](../relay/wrangler.toml)。多座錨點的部署與收錄見 [`MAINTAINER-ACTIVATION.md`](./MAINTAINER-ACTIVATION.md)。
+- **Cloudflare Worker**（`relay/` 的 Worker）：`npx --yes wrangler@4 login` → `pnpm run deploy`，取得 `wss://<worker>.<你的子網域>.workers.dev`。詳見 [README 的「在 Cloudflare Workers 架設中繼站」](../README.md#-在-cloudflare-workers-架設中繼站nostr--webrtc-信令-relay) 與 [`relay/wrangler.toml`](../relay/wrangler.toml)。多座錨點的部署與收錄見 [`MAINTAINER-ACTIVATION.md`](./MAINTAINER-ACTIVATION.md)。
+
+  > **選配：中繼站與網頁前端合體成同一個 Worker（ADR-0354）。** 在 `relay/` 下執行
+  > `pnpm run deploy:unified`，會把網頁前端與中繼站部署成同一個 Worker（一個網域、一次部署）。
+  > 🔴 這個模式**必須** `run_worker_first = true`（`[env.unified.assets]` 已設好）——Cloudflare
+  > Static Assets 預設資產優先，`/` 會直接命中 `index.html` 而**不執行 Worker**，中繼站於是變成
+  > 一頁 HTML，而客戶端看不到任何錯誤。合體部署後請改用 `GET /healthz`（純文字 `ok`）判斷死活。
+
 - **Zeabur（PaaS）**：平台在邊緣終結 HTTPS/WSS，容器只跑純 `ws://` 的 `node-relay`。詳見 [`self-hosting-zeabur.md`](./self-hosting-zeabur.md)。
 - **Docker / VPS**：`relay/Dockerfile` 已備好（`node-relay`＋內建 SQLite，`DB_PATH=/data/…`）；自行掛 volume 與反向代理（Caddy/Nginx）上 TLS。可參照 [`self-hosting-zeabur.md`](./self-hosting-zeabur.md)（同一容器）與 [`self-hosting-raspberry-pi.md`](./self-hosting-raspberry-pi.md)（systemd/環境變數）。
 - **樹莓派 / 家用機**：任何 Node 22+ 機器即可（`node-relay` 用內建 `node:sqlite`）。詳見 [`self-hosting-raspberry-pi.md`](./self-hosting-raspberry-pi.md)。

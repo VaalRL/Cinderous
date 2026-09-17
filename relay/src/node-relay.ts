@@ -74,6 +74,14 @@ const httpServer = createServer((req, res) => {
     res.end(JSON.stringify(relayInfo));
     return;
   }
+  // `/healthz`（ADR-0354）：**純文字 `ok`，與兩座宿主一致**，自架文件才教得出同一句話。
+  // 刻意與 `/` 的回應不同——Worker 在統一模式下 `/` 會回網頁版，「首頁回不回 HTML」
+  // 已經不能拿來判斷中繼站死活。
+  if ((req.url ?? "").split("?")[0] === "/healthz") {
+    res.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
+    res.end("ok");
+    return;
+  }
   res.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
   res.end("Cinderous relay");
 });

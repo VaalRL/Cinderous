@@ -136,20 +136,47 @@ The relay (`relay/`) is a self-built minimal Nostr relay running on Cloudflare W
 git clone <your-fork-url> cinder && cd cinder
 pnpm install
 
-# 2. 登入 Cloudflare（會開瀏覽器授權）
+# 2. Log in to Cloudflare (opens a browser to authorize)
 cd relay
-pnpm dlx wrangler login
+npx --yes wrangler@4 login
 
-# 3. 本地開發：在 ws://127.0.0.1:8787 起一個本機 relay
-pnpm dlx wrangler dev
+# 3. Local development: start a relay on ws://127.0.0.1:8787
+npx --yes wrangler@4 dev
 
-# 4. 部署到 Cloudflare，取得 wss://cinder-relay.<你的帳號>.workers.dev
-pnpm dlx wrangler deploy
+# 4. Deploy to Cloudflare; you get wss://cinder-relay.<your-account>.workers.dev
+pnpm run deploy
 ```
+
+> ⚠ Use `npx`, not `pnpm dlx`: pnpm 10 requires explicit consent for build scripts, so
+> `pnpm dlx wrangler` aborts with `ERR_PNPM_IGNORED_BUILDS` (and `--allow-build` has no effect under dlx).
 
 The deployment configuration is in [`relay/wrangler.toml`](./relay/wrangler.toml): the Worker name, the entry point `src/worker.ts`,
 and the Durable Object binding (`RELAY_ROOM` → the `RelayRoom` class and migration). wrangler bundles the
 TypeScript directly, with no extra build step required. You can edit `name` in `wrangler.toml` to change it to your own Worker name.
+
+### Optional: ship the relay and the web client as one Worker (ADR-0354)
+
+If you want one domain and one deploy, there is a second command:
+
+```bash
+pnpm run deploy:unified   # from the relay/ directory
+```
+
+It builds the web client (`apps/desktop`, `mode=unified`) and deploys it together with the relay.
+
+| Command | Result | Who it is for |
+| --- | --- | --- |
+| `pnpm run deploy` | Relay only (the default) | Running a public anchor |
+| `pnpm run deploy:unified` | Relay + web client | Self-hosting for yourself and friends |
+
+🔴 **The unified deploy requires `run_worker_first = true`**, which `[env.unified.assets]` already sets.
+Cloudflare Static Assets are **asset-first by default**: a request is matched against the asset manifest
+and served straight from it, so your Worker code never runs. The relay's entry point is `/`, which matches
+`index.html` exactly. Without that one line, `/` returns 200 and a page of HTML. Clients see **no error** at
+all, only a WebSocket upgrade that never completes.
+
+For the same reason, check `GET /healthz` (plain text `ok`) to tell whether a unified relay is alive.
+Do not check `/`.
 
 ### Connection Test
 

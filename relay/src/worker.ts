@@ -1,12 +1,23 @@
 import { verifyHttpAuth } from "@cinderous/core";
 import { ABUSE_GUARD, acceptFileEvents, firstHost, storeOptions } from "./host-config.js";
 import { buildRelayInfo, NIP11_HEADERS, wantsRelayInfo } from "./nip11.js";
+import { RELAY_WORKER_VERSION } from "./version.js";
 import { RelayCore, type ConnSnapshot, type Outbound } from "./relay-core.js";
 import { shardNameForPath } from "./shard.js";
 import { SqlMessageStore } from "./sql-message-store.js";
 
 export interface Env {
   RELAY_ROOM: DurableObjectNamespace;
+  /**
+   * 統一節點（ADR-0354，**選配**）：Workers Static Assets 綁定。設定了就代表這座 Worker
+   * 同時是 relay 與網頁版（同一個網址、`wss://` 與 `https://` 分流）；**未綁定＝純 relay、
+   * 行為與過去完全相同**（官方錨點站即為此模式）。以 `wrangler --env unified` 部署時才有。
+   *
+   * 🔴 wrangler 端**必須**同時設 `run_worker_first = true`：Static Assets 預設「資產優先」——
+   * 命中資產就直接回傳、**根本不執行本 Worker**，而 `/` 有 `index.html`、又正是 ADR-0241
+   * 舊客戶端的 WebSocket 回退路徑 ⇒ 不設就等於把 relay 靜默關掉（回 HTML 200，不是錯誤）。
+   */
+  ASSETS?: { fetch: (request: Request) => Response | Promise<Response> };
   /**
    * 離線留言 TTL 上限（天，ADR-0160）：企業自架站以 wrangler var 放寬（例 "90"）。
    * 未設/壞值＝預設 7 天。發送端蓋超過此上限的過期章會被截斷——站方上限恆為權威。
@@ -148,6 +159,9 @@ export function relayInfoFrom(env: Env): Record<string, unknown> {
     maxTtlDays: env.MAX_TTL_DAYS,
     acceptsFiles: acceptFileEvents(env.MAX_FILE_MB),
     authRequired: true,
+    // ADR-0356：出貨版號。讓任何人（與 App 的「一鍵更新節點」）看得出這座跑的是哪一版，
+    // 也讓 ADR-0241 的跟版義務從「口頭提醒」變成「查得到的事實」。
+    version: RELAY_WORKER_VERSION,
     donations: {
       github_sponsors: env.DONATE_GITHUB_SPONSORS,
       buy_me_a_coffee: env.DONATE_BUY_ME_A_COFFEE,
@@ -180,6 +194,15 @@ export default {
       if (wantsRelayInfo(request.headers.get("Accept"))) {
         return new Response(JSON.stringify(relayInfoFrom(env)), { status: 200, headers: NIP11_HEADERS });
       }
+      // 健康檢查落點（ADR-0354）：**兩種模式都回純文字**。統一節點模式下 `/` 會變成網頁版首頁，
+      // 而 `docs/SELF-HOSTING*.md` 與 PaaS 健康檢查靠的是 ADR-0089 的純文字契約——搬到這裡而非廢除，
+      // 兩座宿主（本檔與 `node-relay.ts`）一致。
+      // ADR-0354：純文字 `ok`。**刻意與 `/` 的回應不同**——合體部署後 `/` 會回網頁版，
+      // 「首頁回不回 HTML」已經不能拿來判斷中繼站死活，這個端點才是。
+      if (url.pathname === "/healthz") return new Response("ok", { status: 200 });
+      // 統一節點（ADR-0354，選配）：有 ASSETS 綁定＝這座 Worker 同時是網頁版 ⇒ 其餘 HTTP 交給資產
+      // （SPA 深層路由由 `not_found_handling` 回退 index.html）。未綁定＝純 relay，維持純文字。
+      if (env.ASSETS) return env.ASSETS.fetch(request);
       return new Response("Cinderous relay", { status: 200 });
     }
     // 分片路由（ADR-0241）：依 URL 路徑選 DO——`/s/<prefix>` 訊息片、`/presence` 獨立層、

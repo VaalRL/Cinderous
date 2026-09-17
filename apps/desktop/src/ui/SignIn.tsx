@@ -9,10 +9,21 @@ import { TitleControls } from "./TitleControls.js";
 /** 上次使用 relay 的本地記憶鍵（登入時由 App 寫入，此處讀回作為預設值）。 */
 export const RELAY_URL_KEY = "nb.relayUrl";
 
-/** relay 欄位預設值：`?relay=` 參數優先，其次上次使用的網址（純函式可測）。 */
-export function initialRelayUrl(search: string, lastUsed: string | null): string {
+/**
+ * relay 欄位預設值（純函式可測）。順位：
+ *   1. `?relay=` 參數（使用者／官網連結的明示指定，ADR-0147 §4）
+ *   2. 上次使用的網址（本地記憶）
+ *   3. `selfHost`＝**統一節點自指**（ADR-0354）：本頁若由「relay＋網頁版同站」的 Worker 送出，
+ *      預設就連同源那座 relay——朋友打開網址即可用，不必再填任何東西。
+ *   4. 空字串 → 呼叫端照舊退回 `ANCHOR_RELAYS`（自動選座，ADR-0069）
+ *
+ * ⚠ 自指**排在明示選擇之後**：使用者填過的站優先，否則統一節點會把人綁死在自己這座。
+ * ⚠ `selfHost` 只在建置期確認為統一節點時才由呼叫端傳入——Cloudflare Pages 與 `vite dev`
+ *   同樣是瀏覽器卻不是 relay，若以「凡是瀏覽器就自指」推論會連向一個不存在的 `wss://`。
+ */
+export function initialRelayUrl(search: string, lastUsed: string | null, selfHost?: string): string {
   const param = new URLSearchParams(search).get("relay");
-  return param ?? lastUsed ?? "";
+  return param ?? lastUsed ?? (selfHost ? `wss://${selfHost}` : "");
 }
 
 /**
@@ -58,9 +69,26 @@ function probeRelay(url: string, timeoutMs: number): Promise<boolean> {
   });
 }
 
+/**
+ * 統一節點的自指主機（ADR-0354）：只有「以 `--mode unified` 建置、與 relay 同站部署」的
+ * 網頁版才有值。`__SELF_RELAY__` 是 build-time 常數（vite `define`，見 `vite.config.ts`）。
+ *
+ * 為什麼用建置模式而不是執行期偵測：Tauri 桌面端（`tauri:build` 走一般 `build`）、Cloudflare
+ * Pages 與 `vite dev` 同樣有 `location.host`，卻都不是中繼站——以「凡是瀏覽器就自指」推論，
+ * 會讓它們連向一個不存在的同源 `wss://`。只有 `build:unified` 的產物會被部署到統一 Worker。
+ */
+function selfRelayHost(): string | undefined {
+  try {
+    if (!__SELF_RELAY__) return undefined;
+    return window.location.host || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function initialRelay(): string {
   try {
-    return initialRelayUrl(window.location.search, localStorage.getItem(RELAY_URL_KEY));
+    return initialRelayUrl(window.location.search, localStorage.getItem(RELAY_URL_KEY), selfRelayHost());
   } catch {
     return "";
   }

@@ -2,6 +2,9 @@
 
 # Self-Hosting Cinderous (Single Entry Point)
 
+> 📖 **The step-by-step guide lives on the site**: <https://vaalrl.github.io/Cinderous/selfhost/> (one-click deploy from the desktop app, common errors, costs).
+> This document is the **command reference**, for people who already know what they want.
+
 This is the **overview entry point** for self-hosting — one page to understand "which deployment methods exist, how they differ, and which one to pick," then click through to the corresponding detailed docs.
 
 Self-hosting falls into two categories:
@@ -24,7 +27,15 @@ The same `RelayCore`, four shells to choose from; **a relay always only forwards
 
 ### How to do each method
 
-- **Cloudflare Worker** (the Worker in `relay/`): `pnpm dlx wrangler login` → `wrangler deploy`, obtaining `wss://<worker>.<your-subdomain>.workers.dev`. See [the README's "Setting up a relay on Cloudflare Workers"](../README.en.md) and [`relay/wrangler.toml`](../relay/wrangler.toml). For deploying and registering multiple anchors, see [`MAINTAINER-ACTIVATION.md`](./MAINTAINER-ACTIVATION.en.md).
+- **Cloudflare Worker** (the Worker in `relay/`): `npx --yes wrangler@4 login` → `pnpm run deploy`, obtaining `wss://<worker>.<your-subdomain>.workers.dev`. See [the README's "Setting up a relay on Cloudflare Workers"](../README.en.md) and [`relay/wrangler.toml`](../relay/wrangler.toml). For deploying and registering multiple anchors, see [`MAINTAINER-ACTIVATION.md`](./MAINTAINER-ACTIVATION.en.md).
+
+  > **Optional: the relay and the web client as one Worker (ADR-0354).** Run `pnpm run deploy:unified`
+  > from `relay/` to deploy both as a single Worker (one domain, one deploy).
+  > 🔴 That mode **requires** `run_worker_first = true`, already set in `[env.unified.assets]`. Cloudflare
+  > Static Assets are asset-first by default, so `/` matches `index.html` and the Worker never runs: the relay
+  > becomes a page of HTML and clients see no error at all. After a unified deploy, check `GET /healthz`
+  > (plain text `ok`) instead of `/`.
+
 - **Zeabur (PaaS)**: the platform terminates HTTPS/WSS at the edge, and the container only runs the plain `ws://` `node-relay`. See [`self-hosting-zeabur.md`](./self-hosting-zeabur.en.md).
 - **Docker / VPS**: `relay/Dockerfile` is ready (`node-relay` + built-in SQLite, `DB_PATH=/data/…`); mount your own volume and put TLS in front with a reverse proxy (Caddy/Nginx). Refer to [`self-hosting-zeabur.md`](./self-hosting-zeabur.en.md) (same container) and [`self-hosting-raspberry-pi.md`](./self-hosting-raspberry-pi.en.md) (systemd / environment variables).
 - **Raspberry Pi / home machine**: any Node 22+ machine works (`node-relay` uses the built-in `node:sqlite`). See [`self-hosting-raspberry-pi.md`](./self-hosting-raspberry-pi.en.md).

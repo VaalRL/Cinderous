@@ -26,6 +26,22 @@ describe("relay 欄位預設值（記住上次使用的網址）", () => {
   it("兩者皆無時為空字串", () => {
     expect(initialRelayUrl("", null)).toBe("");
   });
+
+  // 統一節點自指連線（ADR-0346）：網頁版由「relay＋網頁版同站」的 Worker 送出時，
+  // 預設就連同源那座 relay——朋友打開網址即可用，不必再填任何東西。
+  it("統一節點：無參數也無記憶時，自指同源 relay", () => {
+    expect(initialRelayUrl("", null, "cinder-relay.me.workers.dev")).toBe("wss://cinder-relay.me.workers.dev");
+  });
+
+  it("🔴 自指**不得**蓋過 ?relay= 與本地記憶（使用者的明示選擇優先）", () => {
+    expect(initialRelayUrl("?relay=wss://a.example", null, "self.example")).toBe("wss://a.example");
+    expect(initialRelayUrl("", "wss://b.example", "self.example")).toBe("wss://b.example");
+  });
+
+  it("🔴 非統一節點（Pages／vite dev／Tauri）不自指——呼叫端不傳 selfHost，行為與過去相同", () => {
+    expect(initialRelayUrl("", null, undefined)).toBe("");
+    expect(initialRelayUrl("", null, "")).toBe("");
+  });
 });
 
 describe("hostOf（relay 主機名顯示）", () => {

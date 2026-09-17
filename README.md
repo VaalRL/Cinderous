@@ -137,18 +137,43 @@ pnpm install
 
 # 2. 登入 Cloudflare（會開瀏覽器授權）
 cd relay
-pnpm dlx wrangler login
+npx --yes wrangler@4 login
 
 # 3. 本地開發：在 ws://127.0.0.1:8787 起一個本機 relay
-pnpm dlx wrangler dev
+npx --yes wrangler@4 dev
 
 # 4. 部署到 Cloudflare，取得 wss://cinder-relay.<你的帳號>.workers.dev
-pnpm dlx wrangler deploy
+pnpm run deploy
 ```
+
+> ⚠ 用 `npx` 而不是 `pnpm dlx`：pnpm 10 的建置腳本需明示同意，`pnpm dlx wrangler` 會以
+> `ERR_PNPM_IGNORED_BUILDS` 中止（`--allow-build` 在 dlx 下無效）。
 
 部署設定在 [`relay/wrangler.toml`](./relay/wrangler.toml)：Worker 名稱、進入點 `src/worker.ts`、
 以及 Durable Object 綁定（`RELAY_ROOM` → `RelayRoom` 類別與 migration）。wrangler 會直接打包
 TypeScript，無需額外建置步驟。可在 `wrangler.toml` 修改 `name` 換成你自己的 Worker 名稱。
+
+### 選配：中繼站與網頁前端合體成同一個 Worker（ADR-0354）
+
+想要「一個網域、一次部署」的話，多打一個指令就好：
+
+```bash
+pnpm run deploy:unified   # 在 relay/ 目錄下
+```
+
+它會先建置網頁前端（`apps/desktop`，`mode=unified`）再連同中繼站一起部署。兩者的差別：
+
+| 指令 | 結果 | 適合誰 |
+| --- | --- | --- |
+| `pnpm run deploy` | 只有中繼站（預設） | 想跑一座公共錨點的人 |
+| `pnpm run deploy:unified` | 中繼站 ＋ 網頁前端 | 自架給自己和朋友用的人 |
+
+🔴 **合體部署必須設 `run_worker_first = true`**（`[env.unified.assets]` 裡已經設好了）。
+Cloudflare Static Assets 預設是**資產優先**：請求先比對資產清單，命中就直接回檔案，
+Worker 的程式碼根本不會執行——而中繼站的入口 `/` 正好命中 `index.html`。少了這一行，
+`/` 會回 200 與一段 HTML，客戶端**不會看到錯誤**，只會看到握不了手的 WebSocket。
+
+同樣的理由，合體部署後請用 `GET /healthz`（純文字 `ok`）判斷中繼站死活，不要再看 `/`。
 
 ### 連線測試
 

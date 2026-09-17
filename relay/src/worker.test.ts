@@ -632,3 +632,96 @@ describe("公共 TURN 端點（/turn，ADR-0243／0342）", () => {
     expect((JSON.parse(r.body as string) as { ttl: number }).ttl).toBe(86400);
   });
 });
+
+describe("統一節點：選配靜態資產（ADR-0354）", () => {
+  /**
+   * 假的 `ASSETS` 綁定（Workers Static Assets 的 Fetcher）。
+   * 記下它收到的 URL，並回一個可辨識的 body——用來斷言「這個請求真的被交給資產了」。
+   */
+  const fakeAssets = (): { binding: NonNullable<Env["ASSETS"]>; seen: string[] } => {
+    const seen: string[] = [];
+    const binding = {
+      fetch: (req: Request) => {
+        seen.push(new URL(req.url).pathname);
+        return new Response("<!doctype html>index", { status: 200 });
+      },
+    } as unknown as NonNullable<Env["ASSETS"]>;
+    return { binding, seen };
+  };
+
+  const get = async (
+    path: string,
+    env: Partial<Env>,
+    headers: Record<string, string> = {},
+  ): Promise<{ body: string; status: number | undefined }> => {
+    const r = (await worker.fetch(new Request(`https://${HOST}${path}`, { headers }), env as Env)) as unknown as {
+      body: string;
+      init: { status?: number };
+    };
+    return { body: r.body, status: r.init?.status };
+  };
+
+  it("未綁定 ASSETS（純 relay，預設模式）→ `/` 維持純文字（現況不變）", async () => {
+    const r = await get("/", {});
+    expect(r.status).toBe(200);
+    expect(r.body).toBe("Cinderous relay");
+  });
+
+  it("🔴 `/healthz` 回的是 `ok`——文件、官網與 App 的探測都照這個字串判斷", async () => {
+    // 先前它回 `Cinderous relay`，而 ADR-0356、自架文件、官網中英文案與 `cf_verify_healthz`
+    // 全都寫 `ok`。每個照著教學做的自架者都會得出「我的節點壞了」的結論。
+    expect((await get("/healthz", {})).body).toBe("ok");
+  });
+
+  it("綁定 ASSETS → `/` 交給資產（SPA 首頁；回退由 not_found_handling 處理）", async () => {
+    const { binding, seen } = fakeAssets();
+    const r = await get("/", { ASSETS: binding });
+    expect(r.body).toContain("index");
+    expect(seen).toEqual(["/"]);
+  });
+
+  it("綁定 ASSETS → 深層路徑也交給資產（`/chat/npub1…` 由 SPA 回退接手）", async () => {
+    const { binding, seen } = fakeAssets();
+    await get("/chat/npub1abc", { ASSETS: binding });
+    expect(seen).toEqual(["/chat/npub1abc"]);
+  });
+
+  it("🔴 綁定 ASSETS → `/healthz` **不得**被資產吃掉（自架文件與 PaaS 健康檢查靠它，ADR-0089）", async () => {
+    const { binding, seen } = fakeAssets();
+    const r = await get("/healthz", { ASSETS: binding });
+    expect(r.body).toBe("ok");
+    expect(seen).toEqual([]);
+  });
+
+  it("🔴 綁定 ASSETS → NIP-11 仍優先於資產（社群探測不能拿到 HTML）", async () => {
+    const { binding, seen } = fakeAssets();
+    const r = await get("/", { ASSETS: binding }, { Accept: "application/nostr+json" });
+    expect((JSON.parse(r.body) as { name: string }).name).toBe("Cinderous relay");
+    expect(seen).toEqual([]);
+  });
+
+  it("🔴 綁定 ASSETS → `/turn` 仍優先於資產（通話保底不能變成 HTML）", async () => {
+    const { binding, seen } = fakeAssets();
+    const r = await get("/turn", { ASSETS: binding });
+    expect(r.status).toBe(204); // 未配 secret＝no-op，但確實走到 TURN 分支
+    expect(seen).toEqual([]);
+  });
+
+  it("🔴 綁定 ASSETS → 帶 Upgrade 的 `/` 仍到 DO（wrangler 需配 run_worker_first；程式碼側先擋住）", async () => {
+    const { binding, seen } = fakeAssets();
+    let routed = "";
+    const env = {
+      ASSETS: binding,
+      RELAY_ROOM: {
+        idFromName: (n: string) => {
+          routed = n;
+          return {} as never;
+        },
+        get: () => ({ fetch: () => new Response(null, { status: 101 }) }),
+      },
+    } as unknown as Env;
+    await worker.fetch(new Request(`https://${HOST}/`, { headers: { Upgrade: "websocket" } }), env);
+    expect(routed).toBe("global"); // ADR-0241 舊客戶端回退路徑
+    expect(seen).toEqual([]); // 資產沒碰到這個請求
+  });
+});
