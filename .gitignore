@@ -87,3 +87,11 @@ docs/PENDING-ADR-WORK.md
 
 # 發版成品與 release note 暫存（本機建置產物，不進版控）
 dist-release/
+
+# Relay worker 的出貨 bundle（ADR-0356）：由 `pnpm --filter @cinderous/relay build:worker`
+# 從 relay/src/worker.ts 產生，是建置產物不是原始碼。桌面建置前置步驟會自己生它。
+apps/desktop/src-tauri/resources/relay-worker.js
+# 統一模式要帶的網頁版資產（ADR-0356 §5）：同樣是建置產物。
+apps/desktop/src-tauri/resources/web/
+# 統一模式的網頁建置（ADR-0354）：與桌面的 dist 分開，避免 stale-dist 出貨。
+apps/desktop/dist-unified/

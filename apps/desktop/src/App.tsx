@@ -40,7 +40,7 @@ import { fetchRelayInfo, type RelayInfo } from "@cinderous/engine";
 import type { CalendarEventInput, RsvpStatus, StoredCalendarEvent } from "@cinderous/engine";
 import type { IcePath } from "@cinderous/engine"; // ADR-0344：直連 vs 經 TURN 中繼
 import { formatBytes } from "@cinderous/engine"; // ADR-0344：提示文案與檔案泡泡共用同一個格式
-import { blobStream } from "@cinderous/core"; // ADR-0346：大檔逐塊讀，整檔不進 RAM
+import { blobStream, bundleHasSanitizableImage } from "@cinderous/core"; // ADR-0346：大檔逐塊讀；ADR-0355：合集隱私提示
 import { browserStore } from "./native/browser-store.js";
 import { safeNsecDecode } from "./nsec.js";
 import { getKeyVault, tauriKeyVault } from "./native/keyvault.js";
@@ -49,6 +49,18 @@ import { getNotifier, onNotificationClick } from "./native/notify.js";
 import { pickFileToSend, readFileAtPath, saveIncomingFile, saveStreamedFile, saveTextFile, type SaveResult } from "./native/save-file.js";
 import { sweepInbox, tauriFileSink } from "./native/inbox-sink.js"; // ADR-0349：Tauri 原生落盤
 import { onNativeFileDrop } from "./native/file-drop.js";
+import { buildBundle, tauriBundleIo, type Bundle } from "./native/bundle.js"; // ADR-0355：整批折疊成合集
+import type { BundleActions } from "./ui/ConversationWindow.js";
+import type { TarListEntry } from "@cinderous/core";
+import {
+  canExtractHere,
+  extractWithTauri,
+  freeSpaceAt,
+  isBundleFile,
+  listBundle,
+  pickExtractDest,
+  tauriReader,
+} from "./native/extract.js"; // ADR-0355：列出與解開合集
 import { makeThumbnail } from "./ui/thumbnail.js";
 import { needsBytesToSend, sanitizedFileName, sanitizeImage } from "@cinderous/engine"; // ADR-0273：送圖去 EXIF；ADR-0346：其餘走惰性串流
 import { useI18n } from "./i18n.js";
@@ -191,9 +203,29 @@ import { useRegisterIdentityControls, useRegisterSettingsOpener } from "./titleb
 import { dialog, useDialog } from "./ui/Dialog.js";
 import { ExportModal, type ExportConvoItem } from "./ui/ExportModal.js";
 import { RELAY_URL_KEY, SignIn } from "./ui/SignIn.js";
+import { DeployWizard } from "./ui/DeployWizard.js"; // ADR-0356：建立我的節點
+import { canDeployHere } from "./native/cf-deploy.js";
+
 import { RESCUE_RESET_OK, UnlockScreen } from "./ui/UnlockScreen.js";
 import { SummaryModal } from "./ui/SummaryModal.js";
 import "./ui/msn.css";
+
+/**
+ * 這個身分部署過的自有節點網址（ADR-0356 §5 的回頭路）。
+ *
+ * **依身分分開存**：§5 把這個功能限定在「當下作用中的身分」，用單一全域鍵的話，
+ * 切到身分 B 時會看到身分 A 的節點被當成「改用我自己的節點」提供出來。
+ */
+const myNodeKey = (pubkey: string): string => `cinder.myNode.${pubkey}`;
+
+/** 讀回這個身分部署過的節點網址；沒有或讀不到回空字串。 */
+function readMyNode(pubkey: string): string {
+  try {
+    return localStorage.getItem(myNodeKey(pubkey)) ?? "";
+  } catch {
+    return ""; // 無痕模式
+  }
+}
 
 // 一次性遷移（ADR-0191 更名）：舊 localStorage 的 relay 子網域 whoami885 已失效 → cinderous1。
 try {
@@ -666,6 +698,20 @@ export function App(): JSX.Element {
   const dropSendRef = useRef<((pk: string, paths: string[]) => void) | null>(null);
   // 明文紀錄導出（ADR-0094）：null＝關；[]＝全部；[keys]＝預選某對話。
   const [exportPreselect, setExportPreselect] = useState<string[] | null>(null);
+  // 建立我的節點（ADR-0356）。`myNodeUrl` 在部署成功時寫入 localStorage——**不論使用者
+  // 要不要當場切 home**，否則取消勾選就等於白部署（§5 的回頭路）。
+  const [deployOpen, setDeployOpen] = useState(false);
+  const [myNodeUrl, setMyNodeUrl] = useState<string>("");
+  const rememberMyNode = (url: string): void => {
+    const p = activeProfile(profilesState);
+    if (!p) return;
+    setMyNodeUrl(url);
+    try {
+      localStorage.setItem(myNodeKey(p.pubkey), url);
+    } catch {
+      /* 無痕模式：這一版記不住，不影響部署本身 */
+    }
+  };
   const setExportOpen = (open: boolean) => setExportPreselect(open ? [] : null);
   const [addIdOpen, setAddIdOpen] = useState(false);
   const [rosterOpen, setRosterOpen] = useState(false);
@@ -2488,10 +2534,73 @@ export function App(): JSX.Element {
     );
   };
 
+  /**
+   * 拖進來的一批路徑：檔案夠多或含資料夾時折疊成**單一合集**（ADR-0355）。
+   *
+   * 折疊掉的是**逐檔的固定成本**——每個檔一則 `file-begin`、一次開檔、一次另存互動、一則
+   * 聊天訊息。三千個小檔的痛點從來不是位元組數，是那三千遍。
+   *
+   * 回 `true` 代表已經當成合集送出；`false` 代表照舊逐檔送。
+   */
+  const trySendBundle = async (pk: string, paths: string[]): Promise<boolean> => {
+    if (!activeBackend.sendFile) return false;
+    let bundle: Bundle | null = null;
+    try {
+      bundle = await buildBundle(paths, tauriBundleIo);
+    } catch (e) {
+      // 走訪失敗（檔案太多／太深／太大）：說得出原因，而不是靜默什麼都沒發生。
+      await alert(t("bundle_failed", { reason: e instanceof Error ? e.message : String(e) }));
+      return true; // 使用者選的就是這一批；不要再退回逐檔把同一批塞爆
+    }
+    if (!bundle) return false;
+    // ADR-0273 在合集內不生效（內容原封不動）→ 有可清理的圖片就先問過。
+    if (bundleHasSanitizableImage(bundle.names)) {
+      if (!(await confirm({ message: t("bundle_exifWarn", { count: bundle.fileCount }) }))) return true;
+    }
+    if (!(await passesFileGate(pk, bundle.stream.size))) return true;
+    activeBackend.sendFile(pk, bundle.stream);
+    setOpen((prev) => (prev.includes(pk) ? prev : [...prev, pk]));
+    return true;
+  };
+
+  /**
+   * 合集動作（ADR-0355）：收到的 `.tar` 才有；其餘檔案回 null，卡片維持原樣。
+   *
+   * **列出內容不需要任何權限也不連網**——tar 的標頭就在本機那份檔案裡。解包才要選目的地。
+   */
+  const bundleActionsFor = (m: ChatMessage): BundleActions | null => {
+    const f = m.file;
+    if (!f || !f.incoming || !isBundleFile(f.name, f.mime) || !f.savedPath) return null;
+    const path = f.savedPath;
+    const read = tauriReader(path);
+    const list = (): Promise<TarListEntry[]> => listBundle(read, f.size);
+    if (!canExtractHere()) return { list };
+    return {
+      list,
+      extract: async (): Promise<void> => {
+        const dest = await pickExtractDest();
+        if (!dest) return; // 使用者取消
+        const entries = await list();
+        // 解包會把合集**再寫一份**到磁碟上；事前問一次比寫到一半才發現便宜得多。
+        const need = entries.reduce((n, e) => n + e.size, 0);
+        const free = await freeSpaceAt(dest);
+        if (free !== null && free < need) {
+          await alert(t("bundle_needSpace", { need: formatBytes(need), free: formatBytes(free) }));
+          return;
+        }
+        const res = await extractWithTauri(path, dest, entries);
+        const lines = [t("bundle_extractDone", { files: res.files, dest })];
+        if (res.skipped.length > 0) lines.push(t("bundle_extractSkipped", { count: res.skipped.length }));
+        await alert(lines.join("\n\n"));
+      },
+    };
+  };
+
   // 原生拖放的送檔實作（ADR-0104）：監聽只註冊一次，故經 ref 取用**當前**這份（避免閉包陳舊）。
   dropSendRef.current = (pk, paths) => {
     if (!activeBackend.sendFile || policy.disableFiles) return; // 企業政策停用檔案時不放行
     void (async () => {
+      if (await trySendBundle(pk, paths)) return; // ADR-0355：整批折疊成一個合集
       for (const path of paths) {
         const f = await readFileAtPath(path); // 資料夾/讀不到 → null，略過
         if (f) await sendFileBytes(pk, f.name, f.mime, f.bytes, f.path);
@@ -2982,6 +3091,19 @@ export function App(): JSX.Element {
             return p.enterprise ? { relayLocked: true } : { onRelayChange: changeRelay };
           })()}
           {...(() => {
+            // 建立我的節點（ADR-0356）：僅桌面（瀏覽器打不了 api.cloudflare.com——沒有 CORS）、
+            // 僅個人身分（工作身分鎖單座，ADR-0045）。
+            const p = activeProfile(profilesState);
+            if (!p || p.enterprise || !canDeployHere()) return {};
+            // 直接讀**這個身分**那一把鍵：切身分時自然跟著換，不必額外同步 state。
+            // `myNodeUrl` state 只是部署成功後的重繪觸發器。
+            const saved = readMyNode(p.pubkey) || myNodeUrl;
+            return {
+              onDeployNode: () => setDeployOpen(true),
+              ...(saved ? { myNodeUrl: saved } : {}),
+            };
+          })()}
+          {...(() => {
             // 配對新裝置（ADR-0072 D4a）：個人身分＋真實 relay 才提供（企業 v1 排除）。
             const p = activeProfile(profilesState);
             return p && p.relayUrl && !p.enterprise && storageRef.current
@@ -3239,6 +3361,15 @@ export function App(): JSX.Element {
           onClose={() => setHistoryOf(null)}
         />
       ) : null}
+      {/* 建立我的節點（ADR-0356）。`onDeployed` 一律記下網址；`onAdopt` 才真的切 home
+          ——那個核取方塊預設勾選但可取消，取消時網址仍留在設定裡（§5）。 */}
+      {deployOpen ? (
+        <DeployWizard
+          onClose={() => setDeployOpen(false)}
+          onDeployed={rememberMyNode}
+          onAdopt={(url) => changeRelay(url)}
+        />
+      ) : null}
       {exportPreselect !== null ? (
         <ExportModal
           conversations={Object.keys(convos)
@@ -3351,6 +3482,7 @@ export function App(): JSX.Element {
               {...(orgInfo?.workHours && group.org ? { orgWorkHours: orgInfo.workHours } : {})}
               // 公司儲存槽（ADR-0161）：群組檔案同樣可存放。
               {...(slotEnabled ? { onDepositFile: (m: ChatMessage) => queueSlotDeposit(m, group.name) } : {})}
+              onBundle={bundleActionsFor}
               senderName={senderName}
               mentionCandidates={group.members
                 .filter((m) => m !== self.pubkey)
@@ -3459,6 +3591,7 @@ export function App(): JSX.Element {
             {...(orgInfo?.workHours && orgInfo.members.includes(pk) ? { orgWorkHours: orgInfo.workHours } : {})}
             // 公司儲存槽（ADR-0161）：檔案訊息（有本機路徑）可存入。
             {...(slotEnabled ? { onDepositFile: (m: ChatMessage) => queueSlotDeposit(m, contact.alias || contact.name) } : {})}
+            onBundle={bundleActionsFor}
             // 私有標籤（ADR-0158 經典佈局入口）：資料同三欄側欄（ADR-0040，id 通用）。
             labels={labelsOf(groupPrefs, pk)}
             onAddLabel={(label: string) => updatePrefs(withLabel(groupPrefs, pk, label))}

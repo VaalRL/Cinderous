@@ -7,12 +7,14 @@
   "license": "AGPL-3.0-only",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -p tsconfig.json && vite build",
+    "build": "pnpm --filter @cinderous/relay build:worker && tsc -p tsconfig.json && vite build && pnpm run build:embed",
+    "build:embed": "vite build --mode unified --outDir src-tauri/resources/web --emptyOutDir",
+    "build:unified": "pnpm --filter @cinderous/relay build:worker && tsc -p tsconfig.json && vite build --mode unified --outDir dist-unified --emptyOutDir",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "tauri": "tauri",
-    "tauri:dev": "tauri dev -f tauri-app",
+    "tauri:dev": "pnpm --filter @cinderous/relay build:worker && pnpm run build:embed && tauri dev -f tauri-app",
     "tauri:build": "tauri build -f tauri-app"
   },
   "dependencies": {

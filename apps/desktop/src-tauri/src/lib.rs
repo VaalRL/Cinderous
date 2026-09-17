@@ -14,11 +14,18 @@
 
 #[cfg(feature = "encstore")]
 pub mod encstore;
+// 金鑰庫帳號的信任邊界（ADR-0128／0356）：**不掛 feature**——守衛必須在 `cargo test`
+// 的預設設定下就被編譯與測試，而 `keyvault` 本身掛在 `keyring` 底下（CI 跑不動）。
+pub mod keyaccount;
 #[cfg(feature = "keyring")]
 pub mod keyvault;
 #[cfg(feature = "passlock")]
 pub mod passlock;
 // 部位檔的檔案安全原語（ADR-0119）：**無 feature 閘門**——只用 std，且是資料安全的關鍵。
+// Cloudflare 一鍵部署（ADR-0356）：純 std＋serde_json，HTTP 以 trait 抽開故測得到。
+pub mod cfdeploy;
+// 送檔端的走訪與定位讀取（ADR-0355 合集）：同樣無 feature 閘門，純 std。
+pub mod filestream;
 pub mod partfile;
 // 收檔暫存區的檔案安全原語（ADR-0349）：同上——路徑穿越守衛不該住在測不到的 `main.rs`。
 pub mod inbox;

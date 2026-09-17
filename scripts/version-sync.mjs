@@ -30,6 +30,9 @@ const targets = [
   ["apps/mobile/android/app/build.gradle", /(versionName\s+")([^"]+)(")/],
   ["apps/cli/package.json", /("version":\s*")([^"]+)(")/],
   ["apps/website/package.json", /("version":\s*")([^"]+)(")/],
+  // Relay worker 的出貨版號（ADR-0356）：寫進 NIP-11 的 `version`，讓「這座跑的是哪一版」
+  // 查得到。它在 Worker runtime 裡讀不到 package.json，所以必須是一個被同步的常數。
+  ["relay/src/version.ts", /(RELAY_WORKER_VERSION = ")([^"]+)(")/],
 ];
 
 /**

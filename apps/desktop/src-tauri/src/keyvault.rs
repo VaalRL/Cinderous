@@ -51,6 +51,7 @@ pub fn delete_key(pubkey: &str) -> Result<(), VaultError> {
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
 
     // 專用測試帳號，避免與真實身分/其他測試衝突；測前後皆清除。

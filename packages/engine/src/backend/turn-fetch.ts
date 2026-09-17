@@ -130,3 +130,73 @@ export function turnEndpointFromRelay(relayUrl: string | undefined): string | un
     return undefined;
   }
 }
+
+/**
+ * TURN 端點的候選序列（ADR-0356 §6）。
+ *
+ * ## 🔴 為什麼需要「後備」而不是單一端點
+ *
+ * `/turn` 端點原本**只從 home 推導**。ADR-0356 讓使用者能一鍵部署自己的 relay，而自架的
+ * 節點**不帶 TURN 設定**（那是官方站的 key，不該跟著別人的節點跑）⇒ 它的 `/turn` 恆回 204
+ * ⇒ 客戶端退回純 STUN ⇒ **部署自有節點會順手把通話保底關掉**。
+ *
+ * 使用者不會把這兩件事連起來。他只會發現「自從我建了自己的節點，某些人就打不通了」。
+ * 這是 ADR-0342 §3.4「加一個功能、順手弄壞另一個」的同款形狀，所以修在同一份 ADR 裡。
+ *
+ * ## 順序的意思
+ *
+ * home 先試——那是他自己的站，用它最不需要解釋。home 給不出來才依序問錨點。
+ *
+ * ⚠ `explicit`（企業 `turnEndpoint`）存在時**只用它、不後備**：那是站方明確指定的端點，
+ * 自作主張去問錨點等於把企業流量送給第三方。
+ */
+export function turnEndpointCandidates(
+  homeUrl: string | undefined,
+  anchors: readonly string[] = [],
+  explicit?: string,
+  opts: { enterprise?: boolean } = {},
+): string[] {
+  if (explicit) return [explicit];
+  // 🔴 企業身分**不後備到公共錨點**。自架封閉節點的意義就是流量不出自己的基礎設施；
+  // 為了通話保底去問公共錨點要憑證，等於把「這台裝置在講話」告訴第三方。
+  //
+  // 今天這條在實務上不會被踩到，因為兩個 app 都只在非企業分支傳 `anchors`
+  // （`App.tsx` 與 `apps/mobile/src/backend.ts`）。但那是**兩個檔案剛好沒傳**，
+  // 不是做決定的這一層在擋——哪天有人為了開機韌性替企業分支補上 anchors，
+  // 企業客戶端就會靜默開始跟公共錨點講話，而且不會有任何測試變紅。
+  if (opts.enterprise) {
+    const own = turnEndpointFromRelay(homeUrl);
+    return own ? [own] : [];
+  }
+  const out: string[] = [];
+  for (const url of [homeUrl, ...anchors]) {
+    const ep = turnEndpointFromRelay(url);
+    if (ep && !out.includes(ep)) out.push(ep);
+  }
+  return out;
+}
+
+/** 後備抓取的結果：多帶一個「是誰給的」供診斷。 */
+export interface TurnFallbackResult extends TurnResult {
+  /** 真正給出憑證的端點；全部沒給就是 undefined。 */
+  endpoint?: string;
+}
+
+/**
+ * 依序問每個候選端點，**第一個給得出伺服器的就用它**。
+ *
+ * 全部都給不出來時回空清單——與過去單一端點抓不到時的行為相同（退回純 STUN），
+ * 所以這個改動對「home 本來就有 TURN」的使用者是零變化。
+ */
+export async function fetchTurnWithFallback(
+  endpoints: readonly string[],
+  sk: SecretKey,
+  fetchFn: TurnFetch = defaultFetch,
+): Promise<TurnFallbackResult> {
+  for (const endpoint of endpoints) {
+    // eslint-disable-next-line no-await-in-loop -- 刻意序列：第一個成功就停，不對每個錨點都發請求
+    const got = await fetchTurnServers(endpoint, sk, fetchFn);
+    if (got.servers.length > 0) return { ...got, endpoint };
+  }
+  return { servers: [] };
+}

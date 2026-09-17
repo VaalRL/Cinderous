@@ -5,8 +5,10 @@ import {
   fetchTurnServers,
   parseTurnResponse,
   parseTurnTtl,
+  turnEndpointCandidates,
   turnEndpointFromRelay,
   turnRefreshDelayMs,
+  fetchTurnWithFallback,
   type TurnFetch,
 } from "./turn-fetch.js";
 
@@ -166,5 +168,147 @@ describe("turnEndpointFromRelay（由 relay URL 推導 /turn 端點）", () => {
     expect(turnEndpointFromRelay(undefined)).toBeUndefined();
     expect(turnEndpointFromRelay("http://not-ws")).toBeUndefined();
     expect(turnEndpointFromRelay("")).toBeUndefined();
+  });
+});
+
+// ── TURN 錨點後備（ADR-0356 §6）────────────────────────────────────────────────
+
+describe("turnEndpointCandidates", () => {
+  const ANCHORS = ["wss://a.example", "wss://b.example"];
+
+  it("home 排在錨點前面——那是使用者自己的站", () => {
+    expect(turnEndpointCandidates("wss://mine.workers.dev", ANCHORS)).toEqual([
+      "https://mine.workers.dev/turn",
+      "https://a.example/turn",
+      "https://b.example/turn",
+    ]);
+  });
+
+  it("home 本來就是錨點之一時不重複問", () => {
+    expect(turnEndpointCandidates("wss://a.example", ANCHORS)).toEqual([
+      "https://a.example/turn",
+      "https://b.example/turn",
+    ]);
+  });
+
+  it("🔴 企業明指端點時只用它、不後備——自作主張問錨點等於把企業流量送給第三方", () => {
+    expect(turnEndpointCandidates("wss://mine", ANCHORS, "https://corp.example/turn")).toEqual([
+      "https://corp.example/turn",
+    ]);
+  });
+
+  it("沒有 home（示範模式）也還有錨點可問", () => {
+    expect(turnEndpointCandidates(undefined, ANCHORS)).toEqual([
+      "https://a.example/turn",
+      "https://b.example/turn",
+    ]);
+  });
+
+  it("非 ws(s) 的項目被略過而不是變成壞端點", () => {
+    expect(turnEndpointCandidates("http://nope", ["wss://a.example", "not-a-url"])).toEqual([
+      "https://a.example/turn",
+    ]);
+  });
+
+  it("什麼都沒有就是空陣列（呼叫端據此完全不打）", () => {
+    expect(turnEndpointCandidates(undefined, [])).toEqual([]);
+  });
+});
+
+describe("fetchTurnWithFallback", () => {
+  const sk = new Uint8Array(32).fill(7) as unknown as Parameters<typeof fetchTurnWithFallback>[1];
+  const okBody = { iceServers: [{ urls: ["turn:t.example:3478"], username: "u", credential: "c" }], ttl: 300 };
+
+  /** 依端點決定回什麼；記下問過誰。 */
+  function fakeFetch(by: Record<string, { status: number; body?: unknown }>) {
+    const asked: string[] = [];
+    const fn = (async (url: string) => {
+      asked.push(url);
+      const r = by[url] ?? { status: 500 };
+      return {
+        ok: r.status >= 200 && r.status < 300,
+        status: r.status,
+        json: async () => r.body ?? {},
+      };
+    }) as unknown as Parameters<typeof fetchTurnWithFallback>[2];
+    return { fn, asked };
+  }
+
+  it("home 給得出憑證 → 就用它，錨點連問都不問", async () => {
+    const f = fakeFetch({ "https://mine/turn": { status: 200, body: okBody } });
+    const got = await fetchTurnWithFallback(["https://mine/turn", "https://a/turn"], sk, f.fn);
+    expect(got.servers).toHaveLength(1);
+    expect(got.endpoint).toBe("https://mine/turn");
+    expect(f.asked).toEqual(["https://mine/turn"]);
+  });
+
+  it("🔴 home 回 204（自架站沒配 TURN）→ 改問錨點，通話保底還在", async () => {
+    const f = fakeFetch({
+      "https://mine/turn": { status: 204 },
+      "https://a/turn": { status: 200, body: okBody },
+    });
+    const got = await fetchTurnWithFallback(["https://mine/turn", "https://a/turn"], sk, f.fn);
+    expect(got.endpoint).toBe("https://a/turn");
+    expect(got.ttlSeconds).toBe(300);
+    expect(f.asked).toEqual(["https://mine/turn", "https://a/turn"]);
+  });
+
+  it("前面幾座都掛了就繼續往下問", async () => {
+    const f = fakeFetch({
+      "https://mine/turn": { status: 500 },
+      "https://a/turn": { status: 401 },
+      "https://b/turn": { status: 200, body: okBody },
+    });
+    const got = await fetchTurnWithFallback(
+      ["https://mine/turn", "https://a/turn", "https://b/turn"],
+      sk,
+      f.fn,
+    );
+    expect(got.endpoint).toBe("https://b/turn");
+    expect(f.asked).toHaveLength(3);
+  });
+
+  it("全部都給不出來 → 空清單（退回純 STUN，與過去行為相同）", async () => {
+    const f = fakeFetch({ "https://mine/turn": { status: 204 }, "https://a/turn": { status: 204 } });
+    const got = await fetchTurnWithFallback(["https://mine/turn", "https://a/turn"], sk, f.fn);
+    expect(got.servers).toEqual([]);
+    expect(got.endpoint).toBeUndefined();
+  });
+
+  it("沒有候選端點時一個請求都不發", async () => {
+    const f = fakeFetch({});
+    const got = await fetchTurnWithFallback([], sk, f.fn);
+    expect(got.servers).toEqual([]);
+    expect(f.asked).toEqual([]);
+  });
+
+  it("回應有 iceServers 但全是畸形 URL → 當成沒給，繼續後備", async () => {
+    const f = fakeFetch({
+      "https://mine/turn": { status: 200, body: { iceServers: [{ urls: ["javascript:alert(1)"] }] } },
+      "https://a/turn": { status: 200, body: okBody },
+    });
+    const got = await fetchTurnWithFallback(["https://mine/turn", "https://a/turn"], sk, f.fn);
+    expect(got.endpoint).toBe("https://a/turn");
+  });
+});
+
+describe("企業身分不後備到公共錨點（2026-09-17 審查）", () => {
+  const ANCHORS = ["wss://a.example", "wss://b.example"];
+
+  it("🔴 企業自架站的 /turn 給不出憑證時，不得改問公共錨點", () => {
+    // 自架封閉節點的意義就是流量不出自己的基礎設施。為了通話保底去問公共錨點，
+    // 等於把「這台裝置在講話」告訴第三方。
+    expect(turnEndpointCandidates("wss://corp.internal", ANCHORS, undefined, { enterprise: true })).toEqual([
+      "https://corp.internal/turn",
+    ]);
+  });
+
+  it("企業身分沒有 home 時就是完全不打", () => {
+    expect(turnEndpointCandidates(undefined, ANCHORS, undefined, { enterprise: true })).toEqual([]);
+  });
+
+  it("個人身分維持後備（這才是 ADR-0356 §6 要修的那件事）", () => {
+    expect(turnEndpointCandidates("wss://mine", ANCHORS, undefined, { enterprise: false })).toHaveLength(3);
+    expect(turnEndpointCandidates("wss://mine", ANCHORS)).toHaveLength(3); // 未指定＝個人
   });
 });

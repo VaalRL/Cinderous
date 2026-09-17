@@ -896,3 +896,35 @@ describe("金鑰保護等級的誠實揭露（ADR-0297 §6 紅線）", () => {
     expect(html).not.toContain("key-tier-was-plain");
   });
 });
+
+/** 這幾項都住在「連線與備份」分頁。 */
+const relayTab = (extra: Partial<SettingsPanelProps> = {}): Partial<SettingsPanelProps> => ({
+  initialTab: "relay" as const,
+  ...extra,
+});
+
+describe("建立我的節點的入口（ADR-0356）", () => {
+  it("提供 onDeployNode 才顯示按鈕——瀏覽器與工作身分都拿不到它", () => {
+    expect(render(relayTab())).not.toContain('data-testid="deploy-node"');
+    expect(render(relayTab({ onDeployNode: () => {} }))).toContain('data-testid="deploy-node"');
+  });
+
+  it("🔴 部署過但沒設為主要時，出現「改用我自己的節點」——否則取消勾選就等於白部署", () => {
+    const out = render(relayTab({ onRelayChange: () => {}, myNodeUrl: "wss://mine.workers.dev" }));
+    expect(out).toContain('data-testid="use-my-node"');
+  });
+
+  it("自有節點已經是 home 了就不顯示那顆按鈕（按了也沒事發生的鈕不該存在）", () => {
+    const out = render(relayTab({ onRelayChange: () => {}, myNodeUrl: "wss://x", relayUrl: "wss://x" }));
+    expect(out).not.toContain('data-testid="use-my-node"');
+  });
+
+  it("沒有換 relay 的權限（工作身分）時不顯示——它會是一顆按了被拒的鈕", () => {
+    const out = render(relayTab({ myNodeUrl: "wss://mine.workers.dev", relayLocked: true }));
+    expect(out).not.toContain('data-testid="use-my-node"');
+  });
+
+  it("從沒部署過就沒有那顆按鈕", () => {
+    expect(render(relayTab({ onRelayChange: () => {} }))).not.toContain('data-testid="use-my-node"');
+  });
+});

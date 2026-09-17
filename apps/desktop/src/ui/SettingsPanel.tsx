@@ -197,6 +197,18 @@ export interface SettingsPanelProps {
   onRelayKeep?: (url: string) => void;
   /** 更換 home relay（ADR-0066 H2）；未提供且非 relayLocked 則唯讀（示範模式）。 */
   onRelayChange?: (url: string) => void;
+  /**
+   * 開啟「建立我的節點」精靈（ADR-0356）。僅桌面（Tauri）提供——瀏覽器打不了
+   * `api.cloudflare.com`（沒有 CORS）。企業／工作身分不提供（ADR-0045 鎖單座）。
+   */
+  onDeployNode?: () => void;
+  /**
+   * 這台曾經部署過、但**目前不是 home** 的自有節點（ADR-0356 §5）。
+   *
+   * 🔴 它存在的理由：部署完成時使用者可以取消「設為主要中繼站」。少了這個回頭路，
+   * 取消勾選就等於白部署——他得自己把網址抄下來再貼回去。
+   */
+  myNodeUrl?: string;
   /** 工作身分鎖定漫遊（ADR-0044/0048）：顯示鎖定說明而非更換鈕。 */
   relayLocked?: boolean;
   /** 配對新裝置（ADR-0072 D4a）；未提供則不顯示（示範模式/企業身分）。 */
@@ -1553,6 +1565,26 @@ export function SettingsPanel(props: SettingsPanelProps): JSX.Element {
             {props.relayUrl ? <RelayHealthBadge url={props.relayUrl} /> : null}
             {props.onRelayChange ? (
               <RelayChange current={props.relayUrl} onApply={props.onRelayChange} />
+            ) : null}
+            {/* ADR-0356 §5 的回頭路：部署過但沒設為主要時，這裡一鍵換過去。 */}
+            {props.myNodeUrl && props.onRelayChange && props.myNodeUrl !== props.relayUrl ? (
+              <button
+                type="button"
+                className="settings__usemine"
+                data-testid="use-my-node"
+                onClick={() => props.onRelayChange?.(props.myNodeUrl!)}
+              >
+                {t("deploy_useMine")}
+              </button>
+            ) : null}
+            {/* 建立我的節點（ADR-0356）：把「擁有自己的節點」從一份文件變成一顆按鈕。 */}
+            {props.onDeployNode ? (
+              <div className="settings__deploy">
+                <button type="button" data-testid="deploy-node" onClick={props.onDeployNode}>
+                  {t("deploy_entry")}
+                </button>
+                <p className="hint">{t("deploy_entryHint")}</p>
+              </div>
             ) : null}
             {props.relayLocked ? (
               <p className="hint" data-testid="relay-locked">

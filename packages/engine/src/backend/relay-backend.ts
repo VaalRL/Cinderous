@@ -169,7 +169,7 @@ import { buildRtcConfig } from "./rtc-config.js";
 import { opfsFileSink } from "../storage/opfs-file-sink.js"; // ADR-0347：收檔串流落盤
 import type { IcePath } from "./ice-path.js"; // ADR-0344
 import { relayFileWarningFor, type RelayFileWarning } from "./file-gate.js"; // ADR-0344
-import { fetchTurnServers, turnEndpointFromRelay, turnRefreshDelayMs } from "./turn-fetch.js";
+import { fetchTurnWithFallback, turnEndpointCandidates, turnRefreshDelayMs } from "./turn-fetch.js";
 import { WebRtcCall } from "./webrtc-call.js";
 import { WebRtcTransfer } from "./webrtc.js";
 import { buildSnapshotContent, mergeSnapshotContent, parseSnapshotContent } from "../storage/cloud-snapshot.js";
@@ -579,7 +579,13 @@ export class RelayChatBackend implements ChatBackend {
   private forceTurn = false;
   /** 公共 TURN 保底（ADR-0243）：由 `/turn` 抓來的短期 TURN 憑證，開機取得、到期前刷新。 */
   private publicTurnServers: RTCIceServer[] | undefined;
-  private readonly turnEndpoint: string | undefined;
+  /**
+   * `/turn` 的候選端點序列（ADR-0356 §6）：home 先試，給不出來才依序問錨點。
+   *
+   * 🔴 從單一端點改成序列，是因為一鍵部署出來的自有站**不帶 TURN 設定**——
+   * 只問 home 的話，部署自有節點會順手把通話保底關掉。空陣列＝完全不抓。
+   */
+  private readonly turnEndpoints: readonly string[];
   private turnTimer: ReturnType<typeof setTimeout> | undefined;
   /** 這台要不要用公共 TURN（ADR-0336 §4）；預設開——關掉會讓限制網路下打不通。 */
   private allowPublicTurn = true;
@@ -734,10 +740,14 @@ export class RelayChatBackend implements ChatBackend {
     // 公共 TURN 保底（ADR-0243）：企業已配**非空**靜態 turnServers 時**不抓**（避免多一個第三方
     // 元資料方）；否則由 home relay 推導 `/turn` 端點（或呼叫端明指）。停用旗標＝完全不打。
     const hasStaticTurn = (pool?.turnServers?.length ?? 0) > 0;
-    this.turnEndpoint =
+    this.turnEndpoints =
       pool?.disablePublicTurn || hasStaticTurn
-        ? undefined
-        : (pool?.turnEndpoint ?? turnEndpointFromRelay(this.homeUrl));
+        ? []
+        : turnEndpointCandidates(this.homeUrl, pool?.anchors ?? [], pool?.turnEndpoint, {
+            // 企業身分（有組織管理者或自己是企業主）不後備到公共錨點——把判斷寫在這裡，
+            // 而不是依賴呼叫端「剛好沒傳 anchors」。
+            enterprise: pool?.orgAdminPubkey !== undefined || pool?.orgOwner === true,
+          });
     this.onHomeSwitched = pool?.onHomeSwitched;
     for (const a of pool?.anchors ?? []) {
       const norm = normalizeRelay(a);
@@ -904,7 +914,7 @@ export class RelayChatBackend implements ChatBackend {
     this.pumpTimer = setInterval(() => this.outbox.pump(), 200);
     // 公共 TURN 保底（ADR-0243）：開機抓一次短期憑證，並於 6h 前刷新（Cloudflare 預設 TTL 1 天）。
     // 抓不到/未配 secret 皆 no-op（退回純 STUN），不阻塞其餘啟動流程。
-    if (this.turnEndpoint) void this.refreshPublicTurn(); // 抓完會自己依 TTL 重排（ADR-0342 §2）
+    if (this.turnEndpoints.length > 0) void this.refreshPublicTurn(); // 抓完會自己依 TTL 重排（ADR-0342 §2）
     this.emitContacts();
     this.emitMutes(); // ADR-0242 階段③：把同步來的每對話靜音交給 UI 初始化
     // 回放本機持久化的歷史訊息：每對話一次批次交付（避免逐則 O(n²) 狀態更新與全開視窗）。
@@ -1833,8 +1843,9 @@ export class RelayChatBackend implements ChatBackend {
    * 通話經過第三方」的意思。
    */
   private async refreshPublicTurn(): Promise<void> {
-    if (!this.turnEndpoint || !this.allowPublicTurn) return;
-    const { servers, ttlSeconds } = await fetchTurnServers(this.turnEndpoint, this.sk);
+    if (this.turnEndpoints.length === 0 || !this.allowPublicTurn) return;
+    // ADR-0356 §6：home 給不出來就依序問錨點——自架的 home 沒配 TURN 是常態，不是故障。
+    const { servers, ttlSeconds } = await fetchTurnWithFallback(this.turnEndpoints, this.sk);
     // 🔴 `await` 之後要**重新檢查旗標**（審查發現 #4）。
     // 使用者可能在請求在途時關掉開關——`setAllowPublicTurn(false)` 清了憑證也清了計時器，
     // 若這裡不重查，在途的結果會把憑證寫回去、還把計時器重新排上，開關看起來沒作用。

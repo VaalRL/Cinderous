@@ -19,6 +19,7 @@ use tauri::{
 /// 顯示並聚焦主視窗（系統匣點擊/選單用）。
 // 檔案安全原語（ADR-0119）：檔名白名單、原子寫入、毀損隔離。**住在 lib**，因為這個 bin
 // target 需要 `tauri-app` feature，`cargo test` 永遠編不到它——安全關鍵的東西不能沒測試。
+use cinder_desktop::filestream; // ADR-0355：合集送出的走訪與定位讀取
 use cinder_desktop::inbox; // ADR-0349：收檔串流落盤（邏輯在 lib，此處只留薄殼）
 use cinder_desktop::partfile::{atomic_write, quarantine, sanitize_filename, valid_part};
 
@@ -66,20 +67,35 @@ fn focus_window(app: tauri::AppHandle) {
 // ── B5 金鑰庫 IPC（ADR-0053）：私鑰託管於 OS 安全儲存，前端經 invoke 存取 ──────
 
 /// 存入某身分（pubkey）的 nsec 到 OS 金鑰庫。
+/// 擋下前端指名 Rust 專用的金鑰庫帳號（ADR-0128／0356）。
+///
+/// 🔴 少了這一行，`invoke('key_get', { pubkey: 'cf:deploy' })` 就能讓任何 XSS 拿到使用者
+/// 整個 Cloudflare 帳號的控制權。判斷住在 `cinder_desktop::keyaccount`（lib，有測試）。
+fn guard_frontend_account(account: &str) -> Result<(), String> {
+    if cinder_desktop::keyaccount::is_frontend_account(account) {
+        Ok(())
+    } else {
+        Err("非法的金鑰庫帳號".into())
+    }
+}
+
 #[tauri::command]
 fn key_set(pubkey: String, nsec: String) -> Result<(), String> {
+    guard_frontend_account(&pubkey)?;
     cinder_desktop::keyvault::set_key(&pubkey, &nsec).map_err(|e| e.to_string())
 }
 
 /// 取出某身分的 nsec；不存在回 `None`。
 #[tauri::command]
 fn key_get(pubkey: String) -> Result<Option<String>, String> {
+    guard_frontend_account(&pubkey)?;
     cinder_desktop::keyvault::get_key(&pubkey).map_err(|e| e.to_string())
 }
 
 /// 刪除某身分的 nsec（登出/移除身分）。
 #[tauri::command]
 fn key_delete(pubkey: String) -> Result<(), String> {
+    guard_frontend_account(&pubkey)?;
     cinder_desktop::keyvault::delete_key(&pubkey).map_err(|e| e.to_string())
 }
 
@@ -882,6 +898,71 @@ fn is_authorized(app: &tauri::AppHandle, path: &str) -> bool {
     authorized_paths().lock().map(|s| s.contains(&path_hash(path))).unwrap_or(false)
 }
 
+// ── 寫入白名單（與讀取白名單分家）─────────────────────────────────────────────
+//
+// 🔴 為什麼要分兩份：在 ADR-0355／0356 之前，`authorized_paths` 只被**讀取**類指令用
+// （`read_saved_file`）。合集解包讓它同時變成寫入授權，於是使用者為了「傳一個資料夾給
+// 朋友」而拖進來的目錄、以及歷史上每一個另存過的路徑，全部**永久**成為 `extract_copy`
+// 的合法寫入目的地。
+//
+// 他選那個資料夾的語意是「讀這個給對方」，不是「歡迎往裡面寫檔」。拖放給讀、
+// 主動挑資料夾才給寫。
+
+/// 可寫入的路徑（雜湊集合）。與讀取那份各自持久化，互不影響。
+fn write_paths() -> &'static std::sync::Mutex<std::collections::HashSet<String>> {
+    static SET: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> = std::sync::OnceLock::new();
+    SET.get_or_init(|| std::sync::Mutex::new(std::collections::HashSet::new()))
+}
+
+fn write_authz_file(app: &tauri::AppHandle) -> Result<std::path::PathBuf, String> {
+    let dir = app.path().app_data_dir().map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    Ok(dir.join("file-authz-write"))
+}
+
+fn load_write_authz_once(app: &tauri::AppHandle) {
+    static LOADED: std::sync::OnceLock<()> = std::sync::OnceLock::new();
+    LOADED.get_or_init(|| {
+        if let Ok(file) = write_authz_file(app) {
+            if let Ok(contents) = std::fs::read_to_string(&file) {
+                if let Ok(mut set) = write_paths().lock() {
+                    for line in contents.lines() {
+                        let h = line.trim();
+                        if !h.is_empty() {
+                            set.insert(h.to_string());
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
+/// 授權一個路徑**可寫入**（使用者主動挑了一個資料夾當目的地）。
+///
+/// 一併給讀取權：既然他願意讓我們往裡面寫，讀回自己寫的東西不是額外的權限擴張，
+/// 而解包的驗證流程需要讀得回來。
+fn authorize_write_path(app: &tauri::AppHandle, path: &str) {
+    load_write_authz_once(app);
+    let h = path_hash(path);
+    let inserted = write_paths().lock().map(|mut s| s.insert(h.clone())).unwrap_or(false);
+    if inserted {
+        if let Ok(file) = write_authz_file(app) {
+            use std::io::Write;
+            if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&file) {
+                let _ = writeln!(f, "{h}");
+            }
+        }
+    }
+    authorize_path(app, path);
+}
+
+/// 這個路徑可不可以**寫入**。
+fn is_write_authorized(app: &tauri::AppHandle, path: &str) -> bool {
+    load_write_authz_once(app);
+    write_paths().lock().map(|s| s.contains(&path_hash(path))).unwrap_or(false)
+}
+
 /// 收檔另存：開原生「另存新檔」對話框讓使用者選位置並寫入位元組；取消回 `None`。
 /// 回傳使用者選定的路徑供 UI 顯示。位元組由前端經 IPC 傳入（收自 P2P，不落 App 儲存）。
 #[tauri::command]
@@ -968,6 +1049,521 @@ fn read_saved_file(app: tauri::AppHandle, path: String) -> Result<Option<Vec<u8>
     std::fs::read(p).map(Some).map_err(|e| e.to_string())
 }
 
+// ── 合集送出：資料夾走訪與定位讀取（ADR-0355）────────────────────────────────────
+//
+// 這四個 command 是薄殼，邏輯住在 `cinder_desktop::filestream`（lib，有測試）。
+// **全部經 ADR-0128 白名單**：只有使用者親自以原生對話框選定、或親手拖進視窗的路徑
+// 才讀得到。拖放的授權在 `WindowEvent::DragDrop` 那裡做（見 `run()`），因為路徑來自
+// 作業系統；若改成讓前端呼叫授權 command，等於把白名單的鑰匙交給 webview。
+
+/// 一個路徑的基本資訊（前端據此決定要不要打包成合集）。
+#[derive(serde::Serialize)]
+struct FsStat {
+    is_dir: bool,
+    size: u64,
+    mtime: u64,
+    mode: u32,
+}
+
+/// 看一個路徑是什麼。未授權或不存在皆回 `None`——與 `read_saved_file` 同樣不給 XSS 訊號。
+#[tauri::command]
+fn fs_stat(app: tauri::AppHandle, path: String) -> Option<FsStat> {
+    if !is_authorized(&app, &path) {
+        return None;
+    }
+    let meta = std::fs::metadata(&path).ok()?;
+    Some(FsStat {
+        is_dir: meta.is_dir(),
+        size: if meta.is_dir() { 0 } else { meta.len() },
+        mtime: filestream::mtime_of(&meta),
+        mode: filestream::mode_of(&meta),
+    })
+}
+
+/// 攤平一個資料夾。超過上限（一萬檔／10 GiB／32 層）回 `Err`，讓前端能說明為什麼送不出去
+/// ——這跟「未授權」不同，使用者確實選了它，只是太大。
+#[tauri::command]
+fn fs_list_dir(app: tauri::AppHandle, path: String) -> Result<Vec<serde_json::Value>, String> {
+    if !is_authorized(&app, &path) {
+        return Err("路徑未經授權".into());
+    }
+    let entries = filestream::walk_dir(std::path::Path::new(&path), filestream::WalkLimits::default())?;
+    Ok(entries
+        .into_iter()
+        .map(|e| serde_json::json!({ "rel": e.rel, "size": e.size, "mtime": e.mtime, "mode": e.mode }))
+        .collect())
+}
+
+/// 讀一個**已授權檔案**的某一段。
+///
+/// 回 `tauri::ipc::Response`＝**原始位元組通道**，不是 JSON 數字陣列。差別很實際：
+/// 64 KiB 的分塊變成 JSON 大約要 40 萬個字元，逐塊序列化／解析的成本會直接吃掉送檔速度。
+#[tauri::command]
+fn fs_read_range(
+    app: tauri::AppHandle,
+    path: String,
+    offset: u64,
+    length: u32,
+) -> Result<tauri::ipc::Response, String> {
+    if !is_authorized(&app, &path) {
+        return Err("路徑未經授權".into());
+    }
+    filestream::read_range(std::path::Path::new(&path), offset, length as usize).map(tauri::ipc::Response::new)
+}
+
+/// 讀一個**已授權資料夾底下**某個相對路徑的某一段。
+///
+/// 為什麼要分開這一個：走訪出來的子檔案沒有各自進白名單（一個資料夾可能有上萬個檔），
+/// 授權的是那個資料夾。`rel` 由前端傳回來，所以這裡**必須自己驗**——逐段拒收 `..`、
+/// 絕對路徑與磁碟代號，再以 `canonicalize` 確認結果仍在基底之下（防符號連結繞出去）。
+#[tauri::command]
+fn fs_read_range_in(
+    app: tauri::AppHandle,
+    base: String,
+    rel: String,
+    offset: u64,
+    length: u32,
+) -> Result<tauri::ipc::Response, String> {
+    if !is_authorized(&app, &base) {
+        return Err("路徑未經授權".into());
+    }
+    let root = std::path::Path::new(&base);
+    let target = filestream::safe_join(root, &rel)?;
+    // 逐段守衛擋不掉符號連結指向外面 → 再以實際路徑比對基底。
+    let real_root = root.canonicalize().map_err(|e| e.to_string())?;
+    let real_target = target.canonicalize().map_err(|e| e.to_string())?;
+    if !real_target.starts_with(&real_root) {
+        return Err("合集內路徑逸出基底".into());
+    }
+    filestream::read_range(&real_target, offset, length as usize).map(tauri::ipc::Response::new)
+}
+
+// ── 合集解包（ADR-0355）────────────────────────────────────────────────────────
+//
+// tar 的解析在 TS（`@cinderous/core` 的 `readTar`，瀏覽器端也用同一份），這裡只做它
+// 做不到的事：安全接路徑、依位移寫入、還原時間與權限。守衛住在 `filestream`（有測試）。
+
+/// 把合集裡的一個檔案解出來：從合集的第 `at` 個位元組複製 `len` 個位元組成為 `<dest>/<rel>`。
+///
+/// 🔴 **內容一個位元組都不經過 IPC**。tar 的標頭讀在 TS（`listTar` 只讀那些 512 位元組的
+/// 區塊，很便宜，而且瀏覽器共用同一份解析），但內容是純複製——讓它跑一趟 webview 等於
+/// 把每個位元組轉成 JSON 數字再轉回來，一個 1 GB 的合集會變成 4～5 GB 的字串。
+///
+/// 回傳實際複製量：少於 `len` 代表合集被截斷，由前端決定怎麼說。
+#[tauri::command]
+fn extract_copy(
+    app: tauri::AppHandle,
+    path: String,
+    dest: String,
+    rel: String,
+    at: u64,
+    len: u64,
+) -> Result<u64, String> {
+    // 兩端各自要對的那一種授權：來源只需讀（他另存過的合集），目的地需**寫**。
+    if !is_write_authorized(&app, &dest) {
+        return Err("解包目的地未經授權".into());
+    }
+    if !is_authorized(&app, &path) {
+        return Err("合集來源未經授權".into());
+    }
+    filestream::copy_range(std::path::Path::new(&path), at, len, std::path::Path::new(&dest), &rel)
+}
+
+/// 收尾一個解開的檔案：還原修改時間與權限。
+#[tauri::command]
+fn extract_finalize(app: tauri::AppHandle, dest: String, rel: String, mtime: u64, mode: u32) -> Result<(), String> {
+    if !is_write_authorized(&app, &dest) {
+        return Err("解包目的地未經授權".into());
+    }
+    filestream::finalize_into(std::path::Path::new(&dest), &rel, mtime, mode)
+}
+
+/// 目的磁碟的可用空間（位元組）；問不到回 `None`。
+///
+/// 為什麼要它：解包會把合集**再寫一份**到磁碟上，一個 8 GB 的合集需要 8 GB 的餘裕。
+/// 寫到一半才發現磁碟滿了，留下的是一堆半截檔案——事前問一次便宜得多。
+#[tauri::command]
+fn fs_free_space(app: tauri::AppHandle, path: String) -> Option<u64> {
+    if !is_write_authorized(&app, &path) {
+        return None;
+    }
+    free_space_of(std::path::Path::new(&path))
+}
+
+/// 目的磁碟的可用空間（位元組）。
+///
+/// **只有 Windows 問得到**（走既有的 `windows` crate，不新增相依）；其他平台回 `None`，
+/// 前端就不擋。這不是敷衍：磁碟滿了作業系統本來就會在寫入時報錯，事前檢查的價值是
+/// 「不要先寫了 4 GB 才發現」，少了它仍然不會寫壞東西，只是白做一段工。為了補上
+/// macOS／Linux 而引進 `libc` 或 `sysinfo`，代價（相依圖、ADR）高於這點收益。
+#[cfg(windows)]
+fn free_space_of(path: &std::path::Path) -> Option<u64> {
+    use windows::core::HSTRING;
+    use windows::Win32::Storage::FileSystem::GetDiskFreeSpaceExW;
+    let wide = HSTRING::from(path.as_os_str());
+    let mut free: u64 = 0;
+    // 第一個參數要的是「呼叫者可用」的量（有配額時與整體可用量不同）。
+    unsafe { GetDiskFreeSpaceExW(&wide, Some(&mut free), None, None) }.ok()?;
+    Some(free)
+}
+
+#[cfg(not(windows))]
+fn free_space_of(_path: &std::path::Path) -> Option<u64> {
+    None
+}
+
+// ── 一鍵部署自有 relay（ADR-0356）─────────────────────────────────────────────
+//
+// 這幾個 command 是薄殼；流程、錯誤分型與 metadata 產生全部住在 `cinder_desktop::cfdeploy`
+// （lib，有測試）。這裡只做三件 lib 做不到的事：發真的 HTTP、碰 OS 金鑰庫、讀出貨資源。
+//
+// 🔴 **沒有任何一個 command 會把 token 回傳給前端**。使用者貼上之後它就進金鑰庫，
+// 之後由 Rust 取用。webview 被 XSS 時，攻擊者最多能觸發一次部署，偷不走 token。
+
+use cinder_desktop::cfdeploy::{self, Account, CfApi, CfAuth, CfResponse, DeployError, Deployed};
+
+/// token 在 OS 金鑰庫裡的 account 名。
+const CF_TOKEN_ACCOUNT: &str = "cf:deploy";
+
+/// 部署相關呼叫的逾時。比 AI 生成短得多——這些是控制平面呼叫，慢到這個地步就是有問題了。
+const CF_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// 資產上傳的逾時。比控制平面長——這一步真的在搬位元組（統一模式約 1.4 MB）。
+const ASSET_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
+
+/// 傳給前端的失敗形狀：一個 i18n 鍵 ＋ 可選細節。
+///
+/// **不是把錯誤 `to_string()` 丟過去**——那樣前端只能原樣顯示英文，而使用者需要的是
+/// 「你該做什麼」。鍵由 lib 的分型決定，句子在 i18n 裡翻譯。
+#[derive(serde::Serialize)]
+struct DeployFail {
+    key: String,
+    detail: String,
+}
+
+impl From<DeployError> for DeployFail {
+    fn from(e: DeployError) -> Self {
+        DeployFail { key: e.message_key().to_string(), detail: e.detail() }
+    }
+}
+
+/// 帳號的可序列化形狀（lib 的 `Account` 不綁 serde，維持 lib 的零相依）。
+#[derive(serde::Serialize)]
+struct CfAccount {
+    id: String,
+    name: String,
+}
+
+/// 部署結果（可序列化）。
+#[derive(serde::Serialize)]
+struct CfDeployed {
+    relay_url: String,
+    account_id: String,
+    subdomain: String,
+}
+
+/// 產線 HTTP：`reqwest`。
+struct ReqwestApi;
+
+impl ReqwestApi {
+    /// 把 reqwest 的回應收成 lib 要的形狀。**不在這裡判成敗**——那是 lib 的事。
+    async fn finish(resp: reqwest::Response) -> Result<CfResponse, DeployError> {
+        let status = resp.status().as_u16();
+        let body = resp.text().await.map_err(|e| DeployError::Network(e.to_string()))?;
+        Ok(CfResponse { status, body })
+    }
+    fn url(path: &str) -> String {
+        format!("{}{path}", cfdeploy::API_BASE)
+    }
+}
+
+impl CfApi for ReqwestApi {
+    async fn get(&self, path: &str, auth: &CfAuth) -> Result<CfResponse, DeployError> {
+        let resp = http()
+            .get(Self::url(path))
+            .timeout(CF_TIMEOUT)
+            .bearer_auth(auth.bearer())
+            .send()
+            .await
+            .map_err(|e| DeployError::Network(e.to_string()))?;
+        Self::finish(resp).await
+    }
+
+    async fn put_json(&self, path: &str, auth: &CfAuth, body: String) -> Result<CfResponse, DeployError> {
+        let resp = http()
+            .put(Self::url(path))
+            .timeout(CF_TIMEOUT)
+            .bearer_auth(auth.bearer())
+            .header("content-type", "application/json")
+            .body(body)
+            .send()
+            .await
+            .map_err(|e| DeployError::Network(e.to_string()))?;
+        Self::finish(resp).await
+    }
+
+    async fn post_json(&self, path: &str, auth: &CfAuth, body: String) -> Result<CfResponse, DeployError> {
+        let resp = http()
+            .post(Self::url(path))
+            .timeout(CF_TIMEOUT)
+            .bearer_auth(auth.bearer())
+            .header("content-type", "application/json")
+            .body(body)
+            .send()
+            .await
+            .map_err(|e| DeployError::Network(e.to_string()))?;
+        Self::finish(resp).await
+    }
+
+    async fn delete(&self, path: &str, auth: &CfAuth) -> Result<CfResponse, DeployError> {
+        let resp = http()
+            .delete(Self::url(path))
+            .timeout(CF_TIMEOUT)
+            .bearer_auth(auth.bearer())
+            .send()
+            .await
+            .map_err(|e| DeployError::Network(e.to_string()))?;
+        Self::finish(resp).await
+    }
+
+    async fn post_assets(
+        &self,
+        path: &str,
+        jwt: &str,
+        files: Vec<(String, String)>,
+    ) -> Result<CfResponse, DeployError> {
+        // 每個檔案一個 `body` 欄位，欄位名＝雜湊、值＝base64 內容（`?base64=true`）。
+        let mut form = reqwest::multipart::Form::new();
+        for (hash, b64) in files {
+            let part = reqwest::multipart::Part::text(b64)
+                .file_name(hash.clone())
+                .mime_str("application/null")
+                .map_err(|e| DeployError::Malformed(e.to_string()))?;
+            form = form.part(hash, part);
+        }
+        let resp = http()
+            .post(Self::url(path))
+            .timeout(ASSET_TIMEOUT)
+            .bearer_auth(jwt) // 🔴 工作階段的 jwt，不是帳號 token
+            .multipart(form)
+            .send()
+            .await
+            .map_err(|e| DeployError::Network(e.to_string()))?;
+        Self::finish(resp).await
+    }
+
+    async fn put_script(
+        &self,
+        path: &str,
+        auth: &CfAuth,
+        metadata: String,
+        module: Vec<u8>,
+    ) -> Result<CfResponse, DeployError> {
+        // multipart：一個 `metadata` JSON 欄位 ＋ 一個模組檔欄位。欄位名必須等於 metadata
+        // 裡的 `main_module`，否則 Cloudflare 找不到進入點。
+        let part = reqwest::multipart::Part::bytes(module)
+            .file_name(cfdeploy::MODULE_PART.to_string())
+            .mime_str("application/javascript+module")
+            .map_err(|e| DeployError::Malformed(e.to_string()))?;
+        let form = reqwest::multipart::Form::new()
+            .text("metadata", metadata)
+            .part(cfdeploy::MODULE_PART, part);
+        let resp = http()
+            .put(Self::url(path))
+            .timeout(CF_TIMEOUT)
+            .bearer_auth(auth.bearer())
+            .multipart(form)
+            .send()
+            .await
+            .map_err(|e| DeployError::Network(e.to_string()))?;
+        Self::finish(resp).await
+    }
+}
+
+/// 從金鑰庫取出授權憑證；沒有就是「還沒貼 token」。
+fn cf_auth() -> Result<CfAuth, DeployFail> {
+    match cinder_desktop::keyvault::get_key(CF_TOKEN_ACCOUNT) {
+        Ok(Some(t)) if !t.is_empty() => Ok(CfAuth::Token(t)),
+        _ => Err(DeployFail { key: "deploy_errNoToken".into(), detail: String::new() }),
+    }
+}
+
+/// 讀出貨的 worker bundle。
+///
+/// 它是 `tauri.conf.json` 的 `resources` 之一，由 `pnpm --filter @cinderous/relay build:worker`
+/// 產生並進安裝檔。**刻意不讓前端提供這段程式碼**：那樣一個 XSS 就能把後門 worker
+/// 部署到使用者自己的 Cloudflare 帳號上。
+fn worker_module(app: &tauri::AppHandle) -> Result<Vec<u8>, DeployFail> {
+    let fail = |e: String| DeployFail { key: "deploy_errBundle".into(), detail: e };
+    let path = app
+        .path()
+        .resolve("resources/relay-worker.js", tauri::path::BaseDirectory::Resource)
+        .map_err(|e| fail(e.to_string()))?;
+    std::fs::read(&path).map_err(|e| fail(e.to_string()))
+}
+
+/// 讀出貨的網頁版資產（統一模式用，ADR-0354 ＋ 0356 §5）。
+///
+/// 它們是 `resources/web/**`，由 `pnpm --filter @cinderous/desktop build:embed` 以
+/// **unified 模式**建置——那個模式會把網頁版的預設中繼站指向「它自己這個來源」，
+/// 所以部署出來的站台一打開就連自己，不必再叫使用者填網址。
+///
+/// 路徑一律相對於 `resources/web`、一律正斜線：那是 manifest 的鍵格式。
+fn web_assets(app: &tauri::AppHandle) -> Result<Vec<cfdeploy::Asset>, DeployFail> {
+    let fail = |e: String| DeployFail { key: "deploy_errBundle".into(), detail: e };
+    let root = app
+        .path()
+        .resolve("resources/web", tauri::path::BaseDirectory::Resource)
+        .map_err(|e| fail(e.to_string()))?;
+    let mut out = Vec::new();
+    collect_web(&root, &root, &mut out).map_err(fail)?;
+    if out.is_empty() {
+        return Err(fail("網頁版資產是空的".into()));
+    }
+    Ok(out)
+}
+
+fn collect_web(
+    root: &std::path::Path,
+    dir: &std::path::Path,
+    out: &mut Vec<cfdeploy::Asset>,
+) -> Result<(), String> {
+    for entry in std::fs::read_dir(dir).map_err(|e| e.to_string())? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let path = entry.path();
+        let meta = std::fs::symlink_metadata(&path).map_err(|e| e.to_string())?;
+        if meta.file_type().is_symlink() {
+            continue; // 出貨資產裡不該有連結；有的話也不跟隨
+        }
+        if meta.is_dir() {
+            collect_web(root, &path, out)?;
+            continue;
+        }
+        let rel = path
+            .strip_prefix(root)
+            .map_err(|_| "資產路徑不在根目錄之下".to_string())?
+            .to_string_lossy()
+            .replace('\\', "/");
+        out.push(cfdeploy::Asset {
+            path: rel,
+            bytes: std::fs::read(&path).map_err(|e| e.to_string())?,
+        });
+    }
+    Ok(())
+}
+
+/// 建立 API token 的預填連結（最小權限）。
+#[tauri::command]
+fn cf_token_url() -> String {
+    cfdeploy::token_template_url()
+}
+
+/// 收下使用者貼上的 token：**直接進 OS 金鑰庫**，不回傳、不留在前端。
+#[tauri::command]
+fn cf_set_token(token: String) -> Result<(), String> {
+    let t = token.trim();
+    if t.is_empty() {
+        return Err("token 是空的".into());
+    }
+    cinder_desktop::keyvault::set_key(CF_TOKEN_ACCOUNT, t).map_err(|e| e.to_string())
+}
+
+/// 有沒有存著 token。**只回布林**——比照 `ai_has_key`，值本身永遠不出金鑰庫。
+#[tauri::command]
+fn cf_has_token() -> bool {
+    matches!(cinder_desktop::keyvault::get_key(CF_TOKEN_ACCOUNT), Ok(Some(t)) if !t.is_empty())
+}
+
+/// 忘掉 token（使用者選了「用完即丟」，或想換一把）。刪不掉不算錯——它可能本來就不在。
+#[tauri::command]
+fn cf_forget_token() -> Result<(), String> {
+    let _ = cinder_desktop::keyvault::delete_key(CF_TOKEN_ACCOUNT);
+    Ok(())
+}
+
+/// 列出這把 token 看得到的 Cloudflare 帳號（多帳號時讓使用者挑）。
+#[tauri::command]
+async fn cf_list_accounts() -> Result<Vec<CfAccount>, DeployFail> {
+    let auth = cf_auth()?;
+    let accounts: Vec<Account> = cfdeploy::list_accounts(&ReqwestApi, &auth).await?;
+    Ok(accounts.into_iter().map(|a| CfAccount { id: a.id, name: a.name }).collect())
+}
+
+/// 部署一座 relay 到使用者的帳號。
+///
+/// ⚠ **這裡回傳成功不代表 relay 活著**（ADR-0356 §4）。前端拿到網址後要真的連上去、
+/// 收到 NIP-42 的 AUTH 挑戰才算數——驗證住前端是因為它本來就有 relay 客戶端。
+#[tauri::command]
+async fn cf_deploy(
+    app: tauri::AppHandle,
+    account_id: String,
+    subdomain: Option<String>,
+    unified: Option<bool>,
+) -> Result<CfDeployed, DeployFail> {
+    let auth = cf_auth()?;
+    let module = worker_module(&app)?;
+    // 🔴 統一模式必須用 `unified_spec()`——它帶著 `run_worker_first`。用 `relay_spec()`
+    // 會部署出一座「網頁打得開、中繼站靜默死掉」的 Worker（ADR-0354 整份在防的事）。
+    let unified_mode = unified == Some(true);
+    let spec = if unified_mode { cfdeploy::unified_spec() } else { cfdeploy::relay_spec() };
+    // 統一模式（ADR-0354）：網頁資產走三步上傳，完成憑證交給腳本上傳。
+    // ⚠ 這會讓那座 Worker **同時送出客戶端程式**——被入侵就等於能換掉程式碼竊取金鑰。
+    // 純 relay 沒有這條路徑，所以 UI 上這個選項預設不勾。
+    let assets_jwt = if unified_mode {
+        let assets = web_assets(&app)?;
+        Some(cfdeploy::upload_assets(&ReqwestApi, &auth, &account_id, &spec.name, &assets).await?)
+    } else {
+        None
+    };
+    let out: Deployed = cfdeploy::deploy_with_assets(
+        &ReqwestApi,
+        &auth,
+        &account_id,
+        &spec,
+        module,
+        subdomain.as_deref(),
+        assets_jwt.as_deref(),
+    )
+    .await?;
+    Ok(CfDeployed { relay_url: out.relay_url, account_id: out.account_id, subdomain: out.subdomain })
+}
+
+/// 拆除自己部署的那座 relay（ADR-0356 §4）。
+///
+/// 使用者在精靈中途放棄、或部署失敗時呼叫。**不接受任意腳本名**——只拆我們自己會建的
+/// 那一個，否則這會變成「用使用者的 token 刪掉他任何 Worker」的指令。
+#[tauri::command]
+async fn cf_teardown() -> Result<(), DeployFail> {
+    let auth = cf_auth()?;
+    let accounts = cfdeploy::list_accounts(&ReqwestApi, &auth).await?;
+    // 冪等：每個看得到的帳號都試一次，已經不在的回 404＝完成。
+    for a in accounts {
+        cfdeploy::teardown(&ReqwestApi, &auth, &a.id, cfdeploy::WORKER_NAME).await?;
+    }
+    Ok(())
+}
+
+/// 統一模式的健康檢查：`GET <站>/healthz` 要回純文字 `ok`（ADR-0354）。
+///
+/// 🔴 **在 Rust 這側發**，不是前端。前端 fetch 那個網址需要放寬 `connect-src`，
+/// 而 ADR-0356 §1 的「CSP 一個字都不用動」就會不成立。reqwest 不受 CSP 管。
+///
+/// 合體部署之後「`/` 回不回 HTML」已經不能拿來判斷中繼站死活——那正是這個端點存在的理由。
+#[tauri::command]
+async fn cf_verify_healthz(relay_url: String) -> bool {
+    let Some(rest) = relay_url.strip_prefix("wss://") else {
+        return false;
+    };
+    let url = format!("https://{}/healthz", rest.trim_end_matches('/'));
+    let Ok(resp) = http().get(url).timeout(CF_TIMEOUT).send().await else {
+        return false;
+    };
+    if !resp.status().is_success() {
+        return false;
+    }
+    resp.text().await.map(|t| t.trim() == "ok").unwrap_or(false)
+}
+
 // ── 公司儲存槽（ADR-0161）：企業主端靜默落盤 ─────────────────────────────────────
 //
 // 寫入**只允許**在槽基底目錄之下：基底＝使用者以原生對話框親選（授權）或未設時的
@@ -979,7 +1575,8 @@ fn read_saved_file(app: tauri::AppHandle, path: String) -> Result<Option<Vec<u8>
 fn pick_folder(app: tauri::AppHandle) -> Option<String> {
     let picked = rfd::FileDialog::new().pick_folder().map(|p| p.to_string_lossy().into_owned());
     if let Some(ref s) = picked {
-        authorize_path(&app, s);
+        // 主動挑一個資料夾＝願意讓我們往裡面寫（儲存槽落盤、合集解包）。拖放不給這個。
+        authorize_write_path(&app, s);
     }
     picked
 }
@@ -992,7 +1589,7 @@ fn slot_base(app: &tauri::AppHandle, base: &str) -> Result<std::path::PathBuf, S
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
         return Ok(dir);
     }
-    if !is_authorized(app, base) {
+    if !is_write_authorized(app, base) {
         return Err("儲存槽目錄未經授權".into());
     }
     Ok(std::path::PathBuf::from(base))
@@ -1148,6 +1745,20 @@ fn main() {
                 api.prevent_close();
                 let _ = window.emit("app://close-requested", ());
             }
+            // 🔴 原生拖放的路徑要授權（修 ADR-0128 的漏網）。
+            //
+            // ADR-0128 的讀檔白名單只在**原生對話框**選檔時授權（`save_file`/`pick_existing_file`），
+            // 其〈相關文件〉列了 0093/0102/0103 卻**漏掉 0104 的拖放**——於是拖檔進來送出時，
+            // `read_saved_file` 一律回 None，**桌面版拖放傳檔實際上是死的**。
+            //
+            // 授權必須在 **Rust 端**做：這裡的 paths 來自作業系統的拖放事件，是貨真價實的
+            // 使用者意圖。若改成讓前端 invoke 一個「授權這個路徑」的命令，等於把白名單的
+            // 鑰匙交給 webview——那正是 ADR-0128 要防的 XSS 路徑。
+            if let WindowEvent::DragDrop(tauri::DragDropEvent::Drop { paths, .. }) = event {
+                for p in paths {
+                    authorize_path(window.app_handle(), &p.to_string_lossy());
+                }
+            }
         })
         .setup(|app| {
             // 標題列顯示版本——一眼確認執行中的 build 版本（診斷用；亦為透明）。
@@ -1221,6 +1832,21 @@ fn main() {
             save_from_inbox,
             inbox_sweep,
             read_saved_file,
+            fs_stat,
+            fs_list_dir,
+            fs_read_range,
+            fs_read_range_in,
+            extract_copy,
+            extract_finalize,
+            fs_free_space,
+            cf_token_url,
+            cf_set_token,
+            cf_has_token,
+            cf_forget_token,
+            cf_list_accounts,
+            cf_deploy,
+            cf_teardown,
+            cf_verify_healthz,
             pick_existing_file,
             pick_folder,
             write_slot_file,
