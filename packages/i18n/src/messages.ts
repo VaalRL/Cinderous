@@ -934,6 +934,12 @@ export interface Messages {
    * 隱私行為就變了，這是使用者看不見的改變，必須先問過他。
    */
   bundle_exifWarn: string;
+  /**
+   * 大到不能清 EXIF 的圖片（ADR-0359）。ADR-0273 承諾送出的相片不含位置資訊，但超過
+   * `IMAGE_BYTES_LIMIT` 的圖片走串流路徑、不進 canvas——同一種檔案只因為大了一點，
+   * 隱私行為就悄悄反轉。那個取捨是對的，沒有聲音才是問題。
+   */
+  image_unstrippedWarn: string;
   /** 合集卡片上的動作與說明（ADR-0355）。 */
   bundle_list: string;
   bundle_listEmpty: string;
@@ -1889,6 +1895,8 @@ const zhHant: Messages = {
     "這個檔案有 {size}，但目前**無法確認**是直連還是經中繼轉送。若是經中繼，會比直連慢很多，也會耗用中繼流量。\n\n仍要傳送嗎？",
   bundle_exifWarn:
     "這批共 {count} 個檔案會打包成一個合集再傳送。合集裡的檔案**原封不動**，所以其中的相片**不會**像單獨傳送時那樣清除位置與拍攝資訊。\n\n仍要打包傳送嗎？",
+  image_unstrippedWarn:
+    "這張圖片有 {size}，大到無法在不影響 app 運作的情況下重新編碼，所以它的**位置與拍攝資訊不會被清除**——會照原檔送出去。\n\n仍要傳送嗎？",
   bundle_failed: "這批檔案無法打包：{reason}",
   bundle_list: "列出內容",
   bundle_listEmpty: "這個合集裡沒有檔案。",
@@ -2823,6 +2831,8 @@ const en: Messages = {
     "This file is {size}, but we **cannot confirm** whether the link is direct or relayed. If it is relayed, the transfer will be much slower and will use relay bandwidth.\n\nSend it anyway?",
   bundle_exifWarn:
     "These {count} files will be packed into a single bundle before sending. Files inside a bundle are sent **untouched**, so photos in it will **not** have their location and camera metadata stripped the way they would be if sent individually.\n\nPack and send anyway?",
+  image_unstrippedWarn:
+    "This image is {size} — too large to re-encode without destabilising the app, so its **location and camera metadata will not be stripped**. It will be sent exactly as it is on disk.\n\nSend it anyway?",
   bundle_failed: "These files could not be packed: {reason}",
   bundle_list: "List contents",
   bundle_listEmpty: "This bundle contains no files.",

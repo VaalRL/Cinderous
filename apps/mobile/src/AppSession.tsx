@@ -33,6 +33,7 @@ import {
   shouldMuteOrgNotification,
 } from "@cinderous/engine";
 import { fileSizeOf } from "@cinderous/core"; // ADR-0346
+import { sendsUnstrippedImage } from "@cinderous/engine"; // ADR-0359：大到不能清 EXIF 的圖片先問過
 import { deriveStorageKey, generateSecretKey, GROUP_MEMBERS_MAX, groupSizeExceeded, makeBackupCode, newInviteToken, nsecDecode, nsecEncode, type OrgInvite } from "@cinderous/core";
 import {
   contactLabel,
@@ -1187,8 +1188,15 @@ export function AppSession({
     const still = epochRef.current.mark(); // ADR-0329：挑檔/拍照期間切了身分 ⇒ 不要用舊後端送出
     void pickFile().then(async (f) => {
       if (!f || !still()) return;
+      const size = fileSizeOf(f);
+      // ADR-0359：超過上限的圖片不進 canvas，EXIF/GPS 原封不動地送出去。那個取捨是對的
+      // （行動端 WebView 的記憶體額度更緊），但它在此之前**沒有聲音**——同一次出遊的照片，
+      // 大的那張把座標帶出去了，小的沒有，而畫面上兩者長得一模一樣。
+      if (sendsUnstrippedImage(f.mime, size) && !confirmAction("image_unstrippedWarn", { size: formatBytes(size) })) {
+        return;
+      }
       // ADR-0344：大檔走中繼前先問一聲；問完要再驗一次 epoch（問的期間可能切了身分）。
-      if (!(await passesFileGate(b, pk, fileSizeOf(f))) || !still()) return;
+      if (!(await passesFileGate(b, pk, size)) || !still()) return;
       // ADR-0346：惰性來源沒有位元組可做縮圖——而那正是它存在的理由（非圖片或大圖）。
       const thumb = "bytes" in f ? await makeThumbnail(f.bytes, f.mime) : null; // ADR-0102：只存本機、不外送
       // 行動端目前用 DOM <input>（無完整路徑）→ 不帶 savedPath；真 RN 的 document picker 會給 URI（ADR-0103）。

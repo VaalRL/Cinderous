@@ -119,3 +119,21 @@ export function needsBytesToSend(mime: string, sizeBytes: number, limit = IMAGE_
  * 專業影像，它們本來就不該被 canvas 重編碼壓過一遍。
  */
 export const IMAGE_BYTES_LIMIT = 32 * 1024 * 1024;
+
+/**
+ * 這個檔案送出時，**本來該清 EXIF／GPS 卻不會被清**嗎（ADR-0359）。
+ *
+ * ADR-0273 對使用者的承諾是「送出的相片不含位置與拍攝資訊」，而它有**一個刻意的例外**：
+ * 超過 `IMAGE_BYTES_LIMIT` 的圖片走串流路徑，不進 canvas，因此中繼資料原封不動地送出去。
+ * 那個取捨本身是對的（解碼一張 100 MP 的 PNG 會先把 app 打掛），錯的是它**沒有聲音**——
+ * 同一個動作、同一種檔案，只因為大了一點，隱私行為就悄悄反轉。
+ *
+ * 這個判斷式存在的唯一理由，是讓兩個 app 用**同一條規則**決定要不要先問過使用者，
+ * 而不是各自寫一份然後慢慢長歪。與 ADR-0355 的合集提示是同一個模式。
+ *
+ * 排除 GIF／SVG 是刻意的：`isSanitizable` 本來就不處理它們（ADR-0273 §3），
+ * 所以它們沒有「本來該清卻沒清」這回事，提示了只會變成狼來了。
+ */
+export function sendsUnstrippedImage(mime: string, sizeBytes: number, limit = IMAGE_BYTES_LIMIT): boolean {
+  return isSanitizable(mime) && sizeBytes > limit;
+}

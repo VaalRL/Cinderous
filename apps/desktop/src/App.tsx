@@ -40,6 +40,7 @@ import { fetchRelayInfo, type RelayInfo } from "@cinderous/engine";
 import type { CalendarEventInput, RsvpStatus, StoredCalendarEvent } from "@cinderous/engine";
 import type { IcePath } from "@cinderous/engine"; // ADR-0344：直連 vs 經 TURN 中繼
 import { formatBytes } from "@cinderous/engine"; // ADR-0344：提示文案與檔案泡泡共用同一個格式
+import { sendsUnstrippedImage } from "@cinderous/engine"; // ADR-0359：大到不能清 EXIF 的圖片先問過
 import { blobStream, bundleHasSanitizableImage } from "@cinderous/core"; // ADR-0346：大檔逐塊讀；ADR-0355：合集隱私提示
 import { browserStore } from "./native/browser-store.js";
 import { safeNsecDecode } from "./nsec.js";
@@ -53,6 +54,7 @@ import {
   saveIncomingFile,
   saveStreamedFile,
   saveTextFile,
+  type PickedSource,
   type SaveResult,
 } from "./native/save-file.js";
 import { sweepInbox, tauriFileSink } from "./native/inbox-sink.js"; // ADR-0349：Tauri 原生落盤
@@ -2480,9 +2482,23 @@ export function App(): JSX.Element {
    * blob URL 直接由 `File` 產生：`createObjectURL` 對 File 是**零複製**（它本來就只是磁碟
    * 上那份檔案的把手），不像 `new Blob([bytes])` 會再存一份。
    */
+  /**
+   * 大到不能清 EXIF 的圖片，送出前問一次（ADR-0359）。
+   *
+   * ADR-0273 對使用者的承諾是「送出的相片不含位置資訊」，而超過 `IMAGE_BYTES_LIMIT` 的
+   * 圖片走串流路徑、不進 canvas，於是原封不動地送出去。那個取捨本身是對的——解一張
+   * 100 MP 的 PNG 會先把 app 打掛——錯的是它**沒有聲音**：同一台相機、同一次出遊，
+   * 檔案大一點的那張就把座標帶出去了，而畫面上兩者長得一模一樣。
+   */
+  const passesImagePrivacyGate = async (mime: string, size: number): Promise<boolean> => {
+    if (!sendsUnstrippedImage(mime, size)) return true;
+    return await confirm({ message: t("image_unstrippedWarn", { size: formatBytes(size) }) });
+  };
+
   const sendFileStreamed = async (pk: string, f: File) => {
     if (!activeBackend.sendFile) return;
     const mime = f.type || "application/octet-stream";
+    if (!(await passesImagePrivacyGate(mime, f.size))) return; // ADR-0359
     if (!(await passesFileGate(pk, f.size))) return;
     const tid = activeBackend.sendFile(pk, blobStream(f.name, mime, f));
     setConvos((prev) => patchFileByTid(prev, pk, tid, { url: URL.createObjectURL(f) }));
@@ -2498,6 +2514,7 @@ export function App(): JSX.Element {
    */
   const sendFileStreamedAt = async (pk: string, src: { path: string; stream: OutgoingFileStream }) => {
     if (!activeBackend.sendFile) return;
+    if (!(await passesImagePrivacyGate(src.stream.mime, src.stream.size))) return; // ADR-0359
     if (!(await passesFileGate(pk, src.stream.size))) return;
     const tid = activeBackend.sendFile(pk, src.stream, { savedPath: src.path });
     setConvos((prev) => patchFileByTid(prev, pk, tid, { savedPath: src.path }));
@@ -2542,10 +2559,17 @@ export function App(): JSX.Element {
     await sendFileBytes(pk, sanitizedFileName(f.name, s.changed), s.mime, s.bytes);
   };
 
-  /** Tauri 原生選檔（ADR-0103）：**拿得到完整路徑** → 自己送出的圖片重載後也能看原圖。 */
-  const attachFile = async (pk: string) => {
-    const src = await pickFileToSend();
-    if (!src) return; // 取消，或非 Tauri（呼叫端會退回 <input>）
+  /**
+   * 送出一個**原生來源**：迴紋針（ADR-0103）與原生拖放（ADR-0104）共用這一條。
+   *
+   * 🔴 共用不是為了少寫幾行。ADR-0273 §6 列的送檔入口只有 `sendFile` 與 `attachFile`
+   * 兩個，於是**第三個入口從頭到尾沒有清過 EXIF**：把照片拖進對話窗，GPS 就跟著出去；
+   * 同一張照片按迴紋針送卻會被清掉。同一個動作、兩種隱私結果，而畫面上看不出任何差別。
+   *
+   * 兩條路徑各寫一份是那個洞的成因，所以這裡把它們收成一條——下次再加第四個入口，
+   * 它會自動拿到正確行為。
+   */
+  const sendPickedSource = async (pk: string, src: PickedSource) => {
     if (src.kind === "stream") {
       await sendFileStreamedAt(pk, src); // 大檔／非圖片：逐塊讀，不整份進 RAM
       return;
@@ -2560,6 +2584,13 @@ export function App(): JSX.Element {
       s.bytes,
       s.changed ? undefined : picked.path,
     );
+  };
+
+  /** Tauri 原生選檔（ADR-0103）：**拿得到完整路徑** → 自己送出的圖片重載後也能看原圖。 */
+  const attachFile = async (pk: string) => {
+    const src = await pickFileToSend();
+    if (!src) return; // 取消，或非 Tauri（呼叫端會退回 <input>）
+    await sendPickedSource(pk, src);
   };
 
   /**
@@ -2630,13 +2661,10 @@ export function App(): JSX.Element {
     void (async () => {
       if (await trySendBundle(pk, paths)) return; // ADR-0355：整批折疊成一個合集
       for (const path of paths) {
-        // eslint-disable-next-line no-await-in-loop -- 逐檔序列化送出（檔案閘門會逐一詢問）
+        // eslint-disable-next-line no-await-in-loop -- 逐檔序列化送出（閘門會逐一詢問）
         const src = await openFileAtPath(path); // 資料夾/讀不到 → null，略過
-        if (!src) continue;
         // eslint-disable-next-line no-await-in-loop -- 同上
-        if (src.kind === "stream") await sendFileStreamedAt(pk, src);
-        // eslint-disable-next-line no-await-in-loop -- 同上
-        else await sendFileBytes(pk, src.file.name, src.file.mime, src.file.bytes, src.file.path);
+        if (src) await sendPickedSource(pk, src); // ADR-0273 的清除在這條路上也要生效
       }
     })();
   };

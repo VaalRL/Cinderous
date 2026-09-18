@@ -5,7 +5,7 @@
 // 實際去除 EXIF 的效果由瀏覽器 canvas 保證（只寫入像素），並列於實機驗收。
 import { describe, expect, it } from "vitest";
 import { isSanitizable, SEND_MAX_EDGE, SEND_QUALITY } from "./storage/types.js";
-import { sanitizedFileName, sanitizeImage } from "./image-sanitize.js";
+import { needsBytesToSend, sanitizedFileName, sanitizeImage, sendsUnstrippedImage } from "./image-sanitize.js";
 
 const bytes = new Uint8Array([1, 2, 3, 4]);
 
@@ -54,5 +54,47 @@ describe("sanitizedFileName", () => {
   it("未重編碼則原樣（GIF／PDF 等保留原名）", () => {
     expect(sanitizedFileName("anim.gif", false)).toBe("anim.gif");
     expect(sanitizedFileName("doc.pdf", false)).toBe("doc.pdf");
+  });
+});
+
+// ── ADR-0359：「本來該清卻沒清」要說得出口 ────────────────────────────────────
+
+describe("sendsUnstrippedImage（ADR-0359）", () => {
+  const M = 1024 * 1024;
+
+  it("🔴 超過上限的相片＝承諾靜默失效的那一刻", () => {
+    // ADR-0273 承諾送出的相片不含位置資訊；ADR-0346 為了不打掛 app 讓大圖走串流，
+    // 於是這一格的照片原封不動地送出去，而使用者完全不知情。
+    expect(sendsUnstrippedImage("image/jpeg", 33 * M)).toBe(true);
+    expect(sendsUnstrippedImage("image/png", 500 * M)).toBe(true);
+  });
+
+  it("上限之內不提示——它們真的會被清掉", () => {
+    expect(sendsUnstrippedImage("image/jpeg", 8 * M)).toBe(false);
+    expect(sendsUnstrippedImage("image/jpeg", 32 * M)).toBe(false); // 邊界：等於上限仍會清
+    expect(sendsUnstrippedImage("image/jpeg", 32 * M + 1)).toBe(true);
+  });
+
+  it("GIF 與 SVG 不提示——ADR-0273 本來就不處理它們，提示了只會變成狼來了", () => {
+    expect(sendsUnstrippedImage("image/gif", 200 * M)).toBe(false);
+    expect(sendsUnstrippedImage("image/svg+xml", 200 * M)).toBe(false);
+  });
+
+  it("非圖片不提示", () => {
+    expect(sendsUnstrippedImage("application/zip", 900 * M)).toBe(false);
+    expect(sendsUnstrippedImage("video/mp4", 900 * M)).toBe(false);
+    expect(sendsUnstrippedImage("application/pdf", 900 * M)).toBe(false);
+  });
+
+  it("與 needsBytesToSend 是同一條線的兩側（不會出現兩邊都說不用管的縫）", () => {
+    for (const size of [1, 32 * M - 1, 32 * M, 32 * M + 1, 900 * M]) {
+      const streamed = !needsBytesToSend("image/jpeg", size); // 走串流＝不清
+      expect(sendsUnstrippedImage("image/jpeg", size)).toBe(streamed);
+    }
+  });
+
+  it("limit 可覆寫（測試與未來調參共用同一個出入口）", () => {
+    expect(sendsUnstrippedImage("image/jpeg", 2 * M, 1 * M)).toBe(true);
+    expect(sendsUnstrippedImage("image/jpeg", 2 * M, 4 * M)).toBe(false);
   });
 });
