@@ -148,3 +148,32 @@ jobs:
       # 全都會被 clippy 看過。
       - run: cargo clippy --all-targets --features tauri-app -- -D warnings
         working-directory: apps/desktop/src-tauri
+
+  tauri-app-windows:
+    name: Rust（Windows — 編譯 #[cfg(windows)] 那一半）
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          components: clippy
+      # 與 Linux 那個 job 同樣的理由：`tauri-build` 在 build script 階段就驗資源路徑存在。
+      - name: 產生出貨資源的佔位檔（僅為通過路徑檢查）
+        shell: bash
+        run: |
+          mkdir -p apps/desktop/src-tauri/resources/web
+          : > apps/desktop/src-tauri/resources/relay-worker.js
+          : > apps/desktop/src-tauri/resources/web/.keep
+      # 🔴 這個 job 存在的理由：`main.rs` 裡有兩塊**只在 Windows 編譯**的程式碼——
+      # `free_space_of`（`GetDiskFreeSpaceExW`，解包前問磁碟餘量，ADR-0355）與
+      # `gsmtc_now_playing`（GSMTC 正在播放，ADR-0146）。它們依賴 `windows` crate，
+      # 而 `Cargo.toml` 把那個相依放在 `[target.'cfg(windows)'.dependencies]`。
+      #
+      # 在此之前整個 CI 都跑 `ubuntu-latest`，於是那兩塊從來沒有被編譯過一次。改壞了
+      # 不會有任何紅燈，要到**本機做發版建置**時才炸——而發版建置是手動的、在最趕的時候跑的。
+      #
+      # 不需要裝系統相依：WebView2 與 MSVC 工具鏈在 windows-latest runner 上本來就有。
+      # ⏱ Windows runner 的計費分鐘是 Linux 的兩倍，所以這裡只跑 clippy 一次
+      # （clippy 本身就含編譯，不必再單跑一次 `cargo check`）。
+      - run: cargo clippy --all-targets --features tauri-app -- -D warnings
+        working-directory: apps/desktop/src-tauri
