@@ -837,7 +837,7 @@ async fn ai_models(provider: String, endpoint: String) -> Result<Vec<String>, St
 // ── 讀檔路徑白名單（ADR-0128）──────────────────────────────────────────────────
 //
 // `read_saved_file` 對整個 webview 開放。一旦有 XSS，惡意 JS 就能讀走行程能讀的**任何檔案**。
-// 縱深防禦：只讀**使用者透過原生對話框親自授權過**的路徑。授權事件（save_file/pick_existing_file）
+// 縱深防禦：只讀**使用者透過原生對話框親自授權過**的路徑。授權事件（save_from_inbox/pick_existing_file）
 // 把路徑加入白名單；`read_saved_file` 只讀白名單內的。持久化 → ADR-0102 的跨 session 讀原檔照常。
 // 存的是路徑的 **SHA-256 雜湊**，不是路徑本身——這道防禦不該自己變成明文檔名清單的洩漏。
 
@@ -961,22 +961,6 @@ fn authorize_write_path(app: &tauri::AppHandle, path: &str) {
 fn is_write_authorized(app: &tauri::AppHandle, path: &str) -> bool {
     load_write_authz_once(app);
     write_paths().lock().map(|s| s.contains(&path_hash(path))).unwrap_or(false)
-}
-
-/// 收檔另存：開原生「另存新檔」對話框讓使用者選位置並寫入位元組；取消回 `None`。
-/// 回傳使用者選定的路徑供 UI 顯示。位元組由前端經 IPC 傳入（收自 P2P，不落 App 儲存）。
-#[tauri::command]
-fn save_file(app: tauri::AppHandle, name: String, bytes: Vec<u8>) -> Result<Option<String>, String> {
-    // ADR-0128：`name` 來自對方傳來的 metadata（遠端可控）→ 消毒成乾淨 basename 再預填。
-    match rfd::FileDialog::new().set_file_name(sanitize_filename(&name)).save_file() {
-        Some(path) => {
-            std::fs::write(&path, &bytes).map_err(|e| e.to_string())?;
-            let s = path.to_string_lossy().into_owned();
-            authorize_path(&app, &s); // 使用者選定 → 授權讀回（ADR-0128）
-            Ok(Some(s))
-        }
-        None => Ok(None),
-    }
 }
 
 // ── 收檔串流落盤（ADR-0349）─────────────────────────────────────────────────────
@@ -1747,7 +1731,7 @@ fn main() {
             }
             // 🔴 原生拖放的路徑要授權（修 ADR-0128 的漏網）。
             //
-            // ADR-0128 的讀檔白名單只在**原生對話框**選檔時授權（`save_file`/`pick_existing_file`），
+            // ADR-0128 的讀檔白名單只在**原生對話框**選檔時授權（`save_from_inbox`/`pick_existing_file`），
             // 其〈相關文件〉列了 0093/0102/0103 卻**漏掉 0104 的拖放**——於是拖檔進來送出時，
             // `read_saved_file` 一律回 None，**桌面版拖放傳檔實際上是死的**。
             //
@@ -1825,7 +1809,6 @@ fn main() {
             ai_models,
             ai_set_key,
             ai_has_key,
-            save_file,
             inbox_begin,
             inbox_write,
             inbox_discard,

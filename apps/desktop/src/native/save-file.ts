@@ -1,7 +1,8 @@
 // 收檔另存（ADR-0093）：收到 P2P 檔案位元組後，讓使用者選擇儲存位置。
 // App **不保管檔案本體**——位元組交給 OS 檔案系統，只把使用者選定的路徑回填顯示。
 //
-// - Tauri 桌面：跳原生「另存新檔」對話框（Rust `save_file` command），寫入選定路徑、回傳路徑。
+// - Tauri 桌面：位元組逐塊寫進暫存區，再由原生「另存新檔」對話框選位置並**移動**過去
+//   （ADR-0349／0362），回傳選定路徑。
 // - 瀏覽器/web preview：無任意檔案系統存取，退回瀏覽器下載（最終路徑不可知），回傳可再下載的 URL。
 
 import { invoke, isTauri } from "@tauri-apps/api/core";
@@ -16,18 +17,59 @@ export interface SaveResult {
 }
 
 /**
+ * IPC 一次載運的上限。
+ *
+ * Tauri 的 `invoke` 把 `Vec<u8>` 參數當成 **JSON 數字陣列**序列化——一個位元組在
+ * 傳輸途中是「`255,`」這樣的四個字元，加上 JS 端那個每格 8 bytes 的陣列。1 MiB 一塊
+ * 的峰值約十餘 MB，可以接受；整份檔案則沒有上限可言（見 `saveViaInbox`）。
+ */
+const IPC_CHUNK_BYTES = 1024 * 1024;
+
+/**
+ * 經暫存區另存（ADR-0362）：**位元組逐塊過 IPC，整份不做一次性序列化**。
+ *
+ * ## 為什麼不直接 `invoke("save_file", { bytes })`
+ *
+ * 那條路要先 `Array.from(bytes)` 造出一個**每格一個 JS number** 的陣列，再由 Tauri
+ * 整份序列化成 JSON。收檔那一側還算有界（超過 8 MiB 就走 sink 落盤，ADR-0347），
+ * 但**匯出紀錄那條路完全沒有上限**：`exportRecords` 產出的文字要多大有多大，
+ * 用了幾年的人匯出 JSON 輕易就是上百 MB——`Array.from` 到那個尺寸是必掛的。
+ *
+ * ## 為什麼是暫存區而不是新的 raw IPC command
+ *
+ * ADR-0349 已經為收檔做好了整條機制（`inbox_begin`／`inbox_write`／`save_from_inbox`），
+ * 而且 `save_from_inbox` 是**原生移動**暫存檔，零位元組過 IPC。再發明一條平行路徑
+ * 沒有任何好處，只會多一個要維護的守衛（`valid_handle` 是路徑穿越的唯一防線）。
+ *
+ * 使用者取消即丟棄暫存檔——收檔那側刻意保留（「他可能想再存一次」），但這裡的暫存檔
+ * 是我們剛剛才造出來的，取消就是放棄，沒有什麼好留的。
+ */
+async function saveViaInbox(name: string, bytes: Uint8Array): Promise<SaveResult> {
+  // `valid_handle`（Rust）只收 `[A-Za-z0-9._-]` 且必須以 `.part` 結尾、長度 ≤128。
+  const handle = `save-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}.part`;
+  await invoke("inbox_begin", { handle });
+  try {
+    for (let off = 0; off < bytes.length; off += IPC_CHUNK_BYTES) {
+      const chunk = bytes.subarray(off, Math.min(off + IPC_CHUNK_BYTES, bytes.length));
+      // eslint-disable-next-line no-await-in-loop -- 逐塊寫入必須依序（offset 有意義）
+      await invoke("inbox_write", { handle, offset: off, bytes: Array.from(chunk) });
+    }
+    const savedPath = await invoke<string | null>("save_from_inbox", { name, handle });
+    if (savedPath) return { savedPath };
+  } catch (e) {
+    await invoke("inbox_discard", { handle }).catch(() => {});
+    throw e;
+  }
+  await invoke("inbox_discard", { handle }).catch(() => {}); // 取消 → 不留垃圾
+  return {};
+}
+
+/**
  * 收檔另存：跳「另存新檔」讓使用者選位置並寫入。
  * @returns Tauri：`{ savedPath }`（取消回 `{}`）；瀏覽器：`{ url }`（已觸發下載）。
  */
 export async function saveIncomingFile(name: string, mime: string, bytes: Uint8Array): Promise<SaveResult> {
-  if (isTauri()) {
-    // Rust 端開原生對話框並寫檔；使用者取消回 null。位元組以一般陣列過 IPC。
-    const savedPath = await invoke<string | null>("save_file", {
-      name,
-      bytes: Array.from(bytes),
-    });
-    return savedPath ? { savedPath } : {};
-  }
+  if (isTauri()) return await saveViaInbox(name, bytes); // ADR-0362：逐塊過 IPC
   // 瀏覽器後備：以 <a download> 觸發瀏覽器下載（路徑由瀏覽器決定、不可知）。
   return browserDownload(name, mime, bytes);
 }
@@ -60,10 +102,9 @@ export async function saveStreamedFile(name: string, handle: string): Promise<Sa
 /** 導出文字紀錄另存（ADR-0094）：Tauri 跳原生另存、瀏覽器下載。回傳路徑（Tauri）或 url（瀏覽器）。 */
 export async function saveTextFile(name: string, mime: string, text: string): Promise<SaveResult> {
   const bytes = new TextEncoder().encode(text);
-  if (isTauri()) {
-    const savedPath = await invoke<string | null>("save_file", { name, bytes: Array.from(bytes) });
-    return savedPath ? { savedPath } : {};
-  }
+  // ADR-0362：匯出的文字**沒有上限**（用了幾年的人匯出 JSON 輕易上百 MB），
+  // 一次性序列化是這個檔案裡最確定會炸的一條路。
+  if (isTauri()) return await saveViaInbox(name, bytes);
   return browserDownload(name, mime, bytes);
 }
 
