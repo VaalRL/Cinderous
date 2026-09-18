@@ -154,6 +154,70 @@ The deployment configuration is in [`relay/wrangler.toml`](./relay/wrangler.toml
 and the Durable Object binding (`RELAY_ROOM` → the `RelayRoom` class and migration). wrangler bundles the
 TypeScript directly, with no extra build step required. You can edit `name` in `wrangler.toml` to change it to your own Worker name.
 
+### Deploying is a local action, not CI
+
+🔴 **Pushing to GitHub does not deploy the relay.** This project has no automated deploy:
+there is no wrangler and no Cloudflare credential anywhere in `.github/workflows/`. The relay
+is always pushed by a person running `pnpm run deploy` on their own machine.
+
+Two consequences worth knowing if you self-host:
+
+- **Uncommitted local changes deploy just fine.** Nothing ties what is deployed to what is in
+  git, so check your working tree is what you intend (`git status`) before you deploy.
+- **Nothing records which commit is live.** To find out what a relay is running, read its
+  NIP-11 `version` field (see "Checking it worked" below).
+
+### Two things that will fail your deploy
+
+**1. With more than one Cloudflare account, wrangler picks the wrong one**
+
+It may target your other account and return something that looks like a broken credential:
+
+```
+Authentication error [code: 10000]
+```
+
+The credential is fine; the account is wrong. Name it explicitly (you can find the ID on the
+Cloudflare dashboard home page or in its URL):
+
+```bash
+CLOUDFLARE_ACCOUNT_ID=<your account id> pnpm run deploy
+```
+
+**2. An API token needs two permissions, not one**
+
+If you would rather not open a browser each time (or you are scripting it), use an API token:
+
+```bash
+CLOUDFLARE_API_TOKEN=<token> CLOUDFLARE_ACCOUNT_ID=<account id> pnpm run deploy
+```
+
+The token needs **both** of these. Missing the second one gives you the exact same `10000`
+error as above:
+
+| Permission | Why |
+| --- | --- |
+| **Workers Scripts: Edit** | Upload the Worker |
+| **User → Memberships: Read** | wrangler reads your role in that account |
+
+### Checking it worked
+
+A successful deploy command does **not** mean the relay is up. Check two things for real:
+
+```bash
+curl https://cinder-relay.<your-subdomain>.workers.dev/healthz
+# expected: ok
+
+curl -H "Accept: application/nostr+json" https://cinder-relay.<your-subdomain>.workers.dev
+# expected: JSON whose "version" is the version you just deployed
+```
+
+`/healthz` returns the plain text `ok`. **Do not judge by the home page** — in unified mode the
+home page serves the web client by design, so whether it returns HTML tells you nothing about
+the relay.
+
+The NIP-11 `version` field is the only way to confirm that what is live is what you just pushed.
+
 ### Optional: ship the relay and the web client as one Worker (ADR-0354)
 
 If you want one domain and one deploy, there is a second command:

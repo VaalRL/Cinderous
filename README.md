@@ -153,6 +153,67 @@ pnpm run deploy
 以及 Durable Object 綁定（`RELAY_ROOM` → `RelayRoom` 類別與 migration）。wrangler 會直接打包
 TypeScript，無需額外建置步驟。可在 `wrangler.toml` 修改 `name` 換成你自己的 Worker 名稱。
 
+### 部署是本機動作，不經 CI
+
+🔴 **推上 GitHub 不會部署中繼站。** 這個專案沒有任何自動部署流程——`.github/workflows/`
+裡沒有 wrangler、也沒有 Cloudflare 憑證。中繼站永遠是由人在自己的機器上跑 `pnpm run deploy`
+推上去的。
+
+這表示兩件事，自架者要知道：
+
+- **未提交的本機改動一樣推得上去。** 部署內容與 git 歷史之間沒有強制連結，部署前請確認
+  工作樹是你想要的狀態（`git status`）。
+- **沒有紀錄說「線上這一版對應哪個 commit」。** 想知道線上跑的是哪一版，查它的 NIP-11
+  `version` 欄位（見下方「部署完怎麼確認」）。
+
+### 兩個會讓部署失敗的坑
+
+**① 有多個 Cloudflare 帳號時，wrangler 會挑錯**
+
+它可能打向你另一個帳號，回一個看起來像憑證壞掉的錯誤：
+
+```
+Authentication error [code: 10000]
+```
+
+憑證沒壞，是帳號選錯了。明示帳號 ID 就好（在 Cloudflare 後台首頁右側或網址列看得到）：
+
+```bash
+CLOUDFLARE_ACCOUNT_ID=<你的帳號 ID> pnpm run deploy
+```
+
+**② 用 API token 部署時，權限要兩項不是一項**
+
+不想每次都開瀏覽器登入（或要放進自己的自動化）的話，用 API token：
+
+```bash
+CLOUDFLARE_API_TOKEN=<token> CLOUDFLARE_ACCOUNT_ID=<帳號 ID> pnpm run deploy
+```
+
+token 的權限要勾**兩項**，缺第二項會得到和上面一模一樣的 `10000` 錯誤：
+
+| 權限 | 為什麼需要 |
+| --- | --- |
+| **Workers Scripts: Edit** | 上傳 Worker |
+| **User → Memberships: Read** | wrangler 會查你在該帳號的角色 |
+
+### 部署完怎麼確認
+
+部署指令回報成功**不等於**站真的活著。實測兩件事：
+
+```bash
+curl https://cinder-relay.<你的子網域>.workers.dev/healthz
+# 預期：ok
+
+curl -H "Accept: application/nostr+json" https://cinder-relay.<你的子網域>.workers.dev
+# 預期：一份 JSON，其中 "version" 是你剛部署的版號
+```
+
+`/healthz` 回純文字 `ok`。**不要用首頁判斷**——合體模式下首頁本來就會回網頁版，
+看它回不回 HTML 是判斷不出中繼站死活的。
+
+NIP-11 的 `version` 欄位是確認「線上跑的是不是我剛推的那一版」的唯一方式。
+
 ### 選配：中繼站與網頁前端合體成同一個 Worker（ADR-0354）
 
 想要「一個網域、一次部署」的話，多打一個指令就好：
