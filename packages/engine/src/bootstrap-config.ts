@@ -18,4 +18,9 @@ export const ANCHOR_RELAYS: string[] = [
 ];
 
 /** 維護者公鑰（hex，64 字元）；發佈簽章 relay 清單者。留空 = 不學帶內清單。 */
-export const MAINTAINER_PUBKEY = "6efd2603d1d01ebe159410ab12e6f840268cf874015c75a779928a5b397a0e65";
+// 🔄 2026-09-18 輪替（ADR-0358）。舊值 `6efd2603…` 曾在金鑰住在 CI 的期間被釘進來
+// （2026-07-03～07-23，ADR-0239 判定為已曝險），故換掉。
+//
+// ⚠ 這是**編譯期常數**：已出貨的客戶端仍只認舊公鑰。並存期間 `relays.json` 每次變動
+// 都要用新舊金鑰**各簽一次**，否則舊客戶端會收不到任何清單更新而變成孤島。
+export const MAINTAINER_PUBKEY = "7b5cd386c71c1c68ecf979ffe9dde6a008090ee3fbe377934a1bbb3ff6dd5114";
