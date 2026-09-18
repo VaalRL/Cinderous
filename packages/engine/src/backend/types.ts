@@ -247,7 +247,14 @@ export interface ChatBackendEvents {
   onPeerConnection?(contact: PubkeyHex, connected: boolean, path?: IcePath): void;
   /** Relay pool（home + 外部座）各自的連線狀態；`stale`＝連續離線過久，hint 可能過期（ADR-0034/0036）。 */
   onRelayPool?(relays: { url: string; state: ConnectionState; home: boolean; stale: boolean }[]): void;
-  /** P2P 送檔進度（`id` 對應 sendFile 回傳值；`sent`/`total` 為位元組）。 */
+  /**
+   * P2P 檔案傳輸進度，**收發兩個方向共用**（`id`＝傳輸 id，也就是訊息的 `file.id`）。
+   *
+   * ADR-0363 起收檔端也會回報。呼叫端不必分方向——訊息本身的 `outgoing` 已經說明了是哪一種，
+   * 要做的都是同一件事：把那一則的 `sent` 更新掉。
+   *
+   * 已節流（約 150 ms 一次），但**頭尾一定送**：`0` 是起點、`total` 是完成。
+   */
   onFileProgress?(contact: PubkeyHex, id: string, sent: number, total: number): void;
   /**
    * 此裝置經 P2P 收到某檔案的**位元組**（ADR-0093）：前端據此跳「另存新檔」對話框，

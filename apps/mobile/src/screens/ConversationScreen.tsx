@@ -580,6 +580,16 @@ export function ConversationScreen({
     if (!f) return "";
     const size = formatBytes(f.size); // ADR-0344：與桌面／中繼提示共用同一個格式（原為就地複製）
     if (f.savedPath) return `${t("file_saved")}：${f.savedPath}`;
+    // 傳輸中（ADR-0363）：桌面畫進度條，這裡把同樣的資訊寫進附註那一行。
+    // 送出端從 sent=0 就算在傳（是我們自己在送）；收檔端要等第一塊真的到（見下）。
+    const moving = m.outgoing ? f.sent < f.size : f.sent > 0 && f.sent < f.size;
+    if (moving) {
+      const pct = f.size > 0 ? Math.min(100, Math.round((f.sent / f.size) * 100)) : 0;
+      return `${t(m.outgoing ? "file_sending" : "file_receiving")} ${pct}%（${formatBytes(f.sent)} / ${size}）`;
+    }
+    // 🔴 只有在**真的沒有位元組在流**時才是這句（ADR-0093 的多裝置語意）。
+    // 在此之前它會在整段收檔期間顯示，而檔案上限已經是 1 GiB——收件人會盯著一個
+    // 說「檔案不在這台」的泡泡好幾分鐘，而檔案正在傳進來。
     if (!m.outgoing && !f.url && f.sent < f.size) return `📍 ${t("file_onOtherDevice")}`;
     return size;
   };

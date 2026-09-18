@@ -14,7 +14,7 @@
 // 行動端 app 殼與導覽（ADR-0085/0086/0087）：登入→底部分頁（聊天／聯絡人／設定）→點擊開對話（push）。
 // 接 @cinderous/engine 的 ChatBackend（示範或真實 relay，見 backend.ts）；主題/主色/語言由本殼掌管，
 // 設定分頁即時切換。正式版把後端換成注入 RelayChatBackend＋原生安全儲存即可（同一套 UI）。
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import type { AppStorage, ChatBackend, ChatMessage, CloudSyncMode, ConnectionState, Contact, Group, OrgInfo, OrgPolicy, PairBundleOrg, Status } from "@cinderous/engine";
 import {
   applyPairBundle,
@@ -28,13 +28,14 @@ import {
   loadProfiles,
   saveProfiles,
   LocalStorage,
+  onStorageQuota,
   openOpfsArchive,
   type PairBundle,
   shouldMuteOrgNotification,
 } from "@cinderous/engine";
 import { fileSizeOf } from "@cinderous/core"; // ADR-0346
 import { sendsUnstrippedImage } from "@cinderous/engine"; // ADR-0359：大到不能清 EXIF 的圖片先問過
-import { deriveStorageKey, generateSecretKey, GROUP_MEMBERS_MAX, groupSizeExceeded, makeBackupCode, newInviteToken, nsecDecode, nsecEncode, type OrgInvite } from "@cinderous/core";
+import { deriveStorageKey, generateSecretKey, GROUP_MEMBERS_MAX, groupSizeExceeded, makeBackupCode, newInviteToken, npubEncode, nsecDecode, nsecEncode, type OrgInvite } from "@cinderous/core";
 import {
   contactLabel,
   createPairingOffer,
@@ -280,6 +281,20 @@ export function AppSession({
   // 對話背景（ADR-0134，本地個人化）：開對話時載入該對話的偏好，換對話時更新。
   const [chatBg, setChatBgState] = useState<ChatBg | null>(null);
   const [retentionCap, setRetentionCapState] = useState<number>(() => readRetentionCap());
+  /**
+   * 本機儲存是否已滿（ADR-0363）。
+   *
+   * 掛勾（`onStorageQuota`）與桌面共用，一直都在，只是行動端從沒註冊過——配額爆掉時
+   * 只有一行 `console.warn`，而使用者看到的是「訊息收得到卻存不下來」，畫面上零線索。
+   * 手機 WebView 的配額比桌面小得多，**最會撞到的平台反而最安靜**。
+   */
+  const [storageFull, setStorageFull] = useState(false);
+  /** 備份狀態的重繪觸發器（ADR-0363）：值從後端現讀，這裡只要「有事發生就重畫」。 */
+  const [, bumpBackup] = useReducer((n: number) => n + 1, 0);
+  useEffect(() => {
+    onStorageQuota(() => setStorageFull(true));
+    return () => onStorageQuota(undefined);
+  }, []);
   const [readReceipts, setReadReceiptsState] = useState<boolean>(() => readReadReceipts());
   const [allowPublicTurn, setAllowPublicTurnState] = useState<boolean>(() => readAllowPublicTurn());
   // 通話（ADR-0101）：媒體全程 P2P，不經中繼。
@@ -648,6 +663,106 @@ export function AppSession({
           if (!cur) return c;
           return { ...c, [groupId]: cur.map((m) => (m.id === messageId ? { ...m, receipts } : m)) };
         }),
+      /**
+       * 檔案傳輸進度，**收發共用**（ADR-0363）。
+       *
+       * 行動端在此之前完全沒有接這個回呼：送一個大檔＝按下去之後數分鐘畫面毫無變化，
+       * 而收檔期間泡泡顯示的是「檔案在你另一台裝置」——那句話的本意是 ADR-0093 的
+       * 多裝置語意，不是「正在下載」。桌面一直都有進度條，這是純粹的接線漏掉。
+       */
+      onFileProgress: (pk, id, sent) =>
+        threads.setConvos((c) => {
+          const cur = c[pk];
+          if (!cur) return c;
+          let changed = false;
+          const next = cur.map((m) => {
+            if (!m.file || m.file.id !== id || m.file.sent === sent) return m;
+            changed = true;
+            return { ...m, file: { ...m.file, sent } };
+          });
+          return changed ? { ...c, [pk]: next } : c;
+        }),
+      /**
+       * 傳輸失敗（ADR-0363）：與桌面同一種呈現——在對話裡插一則系統訊息。
+       *
+       * 沒有它的話，檔案傳到一半失敗在手機上是**完全無聲**的：泡泡停在原地，
+       * 使用者不知道該重傳還是該等。
+       */
+      /**
+       * 企業工作身分輪替（ADR-0052／0363）。
+       *
+       * 🔴 **這不只是一句提示。** 後端已經把 storage 裡的歷史從舊 npub 接到新的，但記憶體裡的
+       * 對話表還鍵在舊的上面——沒有這段，輪替之後那條對話會分裂成兩半：新訊息進新鍵，
+       * 螢幕上開著的是舊鍵。桌面一直都有做，行動端沒有。
+       */
+      onIdentityRotated: (from, to, name) => {
+        const note: ChatMessage = {
+          id: `rot_${Date.now()}`,
+          outgoing: false,
+          text: `🔑 ${translate(localeRef.current, "identity_rotatedNote", { name })}`,
+          at: Date.now(),
+        };
+        threads.setConvos((prev) => {
+          // 先把所有對話（含群組）裡 sender=from 的訊息改寫成 to（群訊發送者標籤）。
+          const next: Record<string, ChatMessage[]> = {};
+          for (const [key, msgs] of Object.entries(prev)) {
+            next[key] = msgs.map((m) => (m.sender === from ? { ...m, sender: to } : m));
+          }
+          // 再把 1:1 舊對話併進新 npub，加上系統提示。
+          next[to] = [...(next[to] ?? []), ...(next[from] ?? []), note].sort((a, b) => a.at - b.at);
+          delete next[from];
+          return next;
+        });
+        if (threads.activeId === from) threads.open(to); // 正開著的那條要接續過去
+      },
+      /**
+       * 入群邀請被同意閘門擋下（ADR-0317／0363）：**不是丟掉**——邀請已緩存、邀請者已進請求區，
+       * 接受他時邀請就會生效。沒有這句提示，使用者只會覺得「他說邀請我了但我什麼都沒看到」。
+       */
+      onGroupInviteHeld: (from, groupName) =>
+        threads.setConvos((c) => ({
+          ...c,
+          [from]: [
+            ...(c[from] ?? []),
+            {
+              id: `gih_${Date.now()}`,
+              outgoing: false,
+              // 他還不是聯絡人（那正是被擋的原因）⇒ 沒有暱稱可用，顯示縮寫 npub（同請求區的呈現）。
+              text: translate(localeRef.current, "groupInvite_held", {
+                name: `${npubEncode(from).slice(0, 12)}…`,
+                group: groupName,
+              }),
+              at: Date.now(),
+            },
+          ],
+        })),
+      // ADR-0363：備份成敗一有變化就重畫設定頁（值仍從後端現讀）。
+      onCloudBackup: () => bumpBackup(),
+      /**
+       * 通話失敗留下**可行動**的提示（ADR-0243／0363），與桌面同一種呈現。
+       *
+       * 行動端在此之前只有視窗關閉，沒有任何原因。而 `unreachable`（限制網路下無 TURN 退路）
+       * 最常發生的地方**正是行動網路**——CGNAT／對稱 NAT 是電信網路的常態。
+       * 少了這句，使用者只知道「打不通」，不知道「換到 Wi-Fi 就會通」。
+       */
+      onCallFailed: (peer, reason) =>
+        threads.setConvos((c) => ({
+          ...c,
+          [peer]: [
+            ...(c[peer] ?? []),
+            {
+              id: `cf_${Date.now()}`,
+              outgoing: false,
+              text: `⚠️ ${translate(localeRef.current, reason === "unreachable" ? "call_failed_unreachable" : "call_failed_lost")}`,
+              at: Date.now(),
+            },
+          ],
+        })),
+      onFileError: (pk, reason) =>
+        threads.setConvos((c) => ({
+          ...c,
+          [pk]: [...(c[pk] ?? []), { id: `fe_${Date.now()}`, outgoing: false, text: `⚠️ ${reason}`, at: Date.now() }],
+        })),
       // 收到檔案位元組（ADR-0093）：另存到裝置，App 不保管本體；訊息本身由 backend 建好。
       onFileBytes: (pk, messageId, file) => {
         const patch = (url: string | null): void =>
@@ -1808,6 +1923,10 @@ export function AppSession({
                   : {}),
                 retention: retentionCap,
                 onRetention: changeRetention,
+                storageFull, // ADR-0363
+                ...(backendRef.current?.cloudBackupState
+                  ? { cloudBackupState: backendRef.current.cloudBackupState() }
+                  : {}),
                 onExport: exportAll,
                 readReceipts,
                 onReadReceipts: toggleReadReceipts,

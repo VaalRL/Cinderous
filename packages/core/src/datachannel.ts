@@ -410,6 +410,16 @@ export interface DataChannelHandlers {
   /** 經 P2P 通道收到對方在線狀態（ADR-0088 (e)：心跳卸載中繼）。 */
   onPresence?: (p: { s: string; m: string; np: string; hb?: number }) => void;
   onFile?: (file: ReceivedFile) => void;
+  /**
+   * 收檔進度（ADR-0363）：`received` 是**目前為止已知存在的位元組數**，續傳時含斷點之前的部分。
+   *
+   * ADR-0017 就記過「收檔端無逐塊進度（`DataChannelReceiver` 未回報），僅『接收中→完成』」，
+   * 那時檔案上限 100 MiB、窗口一閃而過。ADR-0346／0355 把上限提到 1 GiB 之後，
+   * 那個窗口變成好幾分鐘——而收件人在那幾分鐘裡看到的是一個**說檔案不在這台**的泡泡。
+   *
+   * **每一塊都會叫一次**（16 KiB 一塊）。節流是呼叫端的事——這一層不持有時鐘。
+   */
+  onProgress?: (id: string, received: number, size: number) => void;
   onError?: (reason: string) => void;
   /**
    * 送出控制訊息給對方（ADR-0355）。收端用它回 `file-resume`；**未提供＝完全不協商**，
@@ -705,6 +715,8 @@ export class DataChannelReceiver {
     partial.seen.add(chunk.seq);
     partial.offset = Math.max(partial.offset, at + chunk.bytes.length);
     const last = partial.seen.size === partial.meta.chunks;
+    // 放在兩種模式（memory／sink）的分岔**之前**，兩條路才都報得到（ADR-0363）。
+    this.handlers.onProgress?.(chunk.id, partial.offset, partial.meta.size);
 
     if (partial.mode === "memory") {
       // 延後配置（見 `Partial.buf`）：到這裡才確定對方真的在送資料。

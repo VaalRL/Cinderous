@@ -64,11 +64,19 @@ const DEVICE_OR_SHELL = new Set([
   // 之所以住在 AppSession 而非外殼，是因為 `enumerateDevices` 只在通話中（相機權限已給）
   // 才給得出有意義的資料 ⇒ 依附通話生命週期查詢，重掛後重查一次即可，無殘留風險。
   "cameraCount",
+  // ADR-0363：本機儲存是否已滿。講的是**這台裝置的磁碟**，換身分不會多出空間。
+  "storageFull",
 ]);
 
-/** 抽出所有 `const [x, setX] = useState` 的名稱與其 setter。 */
+/**
+ * 抽出所有 `const [x, setX] = useState` 的名稱與其 setter。
+ *
+ * ⚠ `useReducer` 也納入（ADR-0363）：它是**命名 state 的第二條路**，而這支擋板的整個價值
+ * 在於「新增 state 一定會被問到該歸哪一類」。只認 `useState` 的話，換個 hook 就整個繞過去了。
+ * 只取有名字的那些——`const [, dispatch]` 沒有留下值，沒有可洩漏的東西。
+ */
 function states(): { name: string; setter: string }[] {
-  const re = /const \[(\w+),\s*(\w+)\] = useState/g;
+  const re = /const \[(\w+),\s*(\w+)\] = use(?:State|Reducer)/g;
   const out: { name: string; setter: string }[] = [];
   for (let m = re.exec(SRC); m; m = re.exec(SRC)) out.push({ name: m[1]!, setter: m[2]! });
   return out;

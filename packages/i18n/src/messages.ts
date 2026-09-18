@@ -304,6 +304,11 @@ export interface Messages {
   fs_undecryptable: string;
   settings_groupInvite: string;
   settings_groupInviteHint: string;
+  /**
+   * 企業工作身分輪替後的系統提示（ADR-0052／0363）。
+   * 桌面原本把這句**硬寫成中文**，英文使用者會看到一串看不懂的字。
+   */
+  identity_rotatedNote: string;
   groupInvite_held: string;
   groupFs_summary: string;
   groupFs_known: string;
@@ -747,6 +752,12 @@ export interface Messages {
   file_unavailableHint: string;
   file_download: string;
   file_sending: string;
+  /**
+   * 收檔進度（ADR-0363）。在此之前收檔期間顯示的是 `file_onOtherDevice`——那句話的本意是
+   * ADR-0093 的多裝置語意（位元組去了你的另一台），不是「正在下載」。檔案上限提到 1 GiB 後，
+   * 收件人會盯著一個說「檔案不在這台」的泡泡好幾分鐘，而檔案正在傳進來。
+   */
+  file_receiving: string;
   /** 收檔另存後顯示的前綴（ADR-0093），後接儲存路徑。 */
   file_saved: string;
   /** 檔案位元組落在使用者的另一台裝置、此裝置只收到 metadata（ADR-0093）。 */
@@ -1327,6 +1338,7 @@ const zhHant: Messages = {
   fs_undecryptable: "⚠️ 這台裝置有 {count} 則收到的訊息解不開（最後一次：{when}）。可能是對方用了你已更換掉的舊金鑰，也可能只是損壞的資料——這兩者無法分辨。解不開的訊息不會顯示，也查不出是誰送的。若經常發生，請讓對方更新到最新版並保持上線。",
   settings_groupInvite: "允許任何人把我加進群組",
   settings_groupInviteHint: "關閉（預設）：只有你的聯絡人可以把你加進群組；陌生人的邀請會先進「訊息請求」，你接受那個人之後群組才會出現。開啟：任何知道你 npub 的人都能直接把你拉進群組。封鎖的人永遠擋得住，與此設定無關。",
+  identity_rotatedNote: "{name} 已更新金鑰（對話已接續）",
   groupInvite_held: "{name} 想把你加進「{group}」。在「訊息請求」接受他之後，群組才會出現。",
   groupFs_summary: "本群 {total} 位成員中，{covered} 位的訊息有前向保密。",
   groupFs_known: "加密子鑰已知",
@@ -1743,6 +1755,7 @@ const zhHant: Messages = {
   file_unavailableHint: "暫時無法傳檔——尚未與對方建立直連，此中繼也未提供檔案暫存。對方上線並建立直連後即可傳送（文字訊息不受影響）。",
   file_download: "下載",
   file_sending: "傳送中…",
+  file_receiving: "接收中…",
   file_saved: "已儲存於",
   file_onOtherDevice: "檔案在你另一台裝置",
   file_notSaved: "已接收（未儲存）",
@@ -2261,6 +2274,7 @@ const en: Messages = {
   fs_undecryptable: "⚠️ This device could not decrypt {count} received message(s) (last: {when}). It may be that the sender used a key you have since rotated away, or the data was simply corrupt — the two cannot be told apart. Undecryptable messages are not shown, and there is no way to tell who sent them. If this keeps happening, ask your contacts to update and stay online.",
   settings_groupInvite: "Let anyone add me to groups",
   settings_groupInviteHint: "Off (default): only your contacts can add you to a group; an invite from a stranger waits in Message requests and the group appears once you accept that person. On: anyone who knows your npub can add you directly. Blocked people are always refused, regardless of this setting.",
+  identity_rotatedNote: "{name} has rotated their key (the conversation continues)",
   groupInvite_held: "{name} wants to add you to \"{group}\". The group will appear once you accept them in Message requests.",
   groupFs_summary: "{covered} of {total} members receive forward-secret messages.",
   groupFs_known: "Encryption subkey known",
@@ -2678,6 +2692,7 @@ const en: Messages = {
     "Can't send a file right now — no direct link to this contact yet, and this relay offers no file store. Once they're online and a direct link is established you can send (text messages are unaffected).",
   file_download: "Download",
   file_sending: "Sending…",
+  file_receiving: "Receiving…",
   file_saved: "Saved to",
   file_onOtherDevice: "File is on your other device",
   file_notSaved: "Received (not saved)",

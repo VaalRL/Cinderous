@@ -32,7 +32,7 @@ import {
 } from "@cinderous/core";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { BrowserChatBackend } from "@cinderous/engine";
 import { normalizeRelayUrl, RelayChatBackend, shouldMuteOrgNotification, webSocketConnector } from "@cinderous/engine";
 import { DEFAULT_NOTIFY_PREFS, type NotifyPrefs, shouldNotify } from "@cinderous/engine";
@@ -927,6 +927,16 @@ export function App(): JSX.Element {
   // 每對話保留上限（ADR-0094）：0＝無上限（預設）。
   const [retentionCap, setRetentionCapState] = useState<number>(() => readRetentionCap());
   const [storageFull, setStorageFull] = useState<boolean>(false);
+  /**
+   * 雲端備份狀態的重繪觸發器（ADR-0071／0363）。
+   *
+   * 值本身每次都從後端現讀（`cloudBackupState()`），這裡只負責「有事發生了，重畫一次」——
+   * 所以刻意丟掉計數值，只留 dispatch。
+   *
+   * 🔴 在此之前註解已經提到這個觸發器、但**沒有任何程式碼 bump 它**，`onCloudBackup` 也沒接：
+   * 設定頁開著時備份失敗，畫面不會有任何變化。而「讓沉默看得見」正是 ADR-0071 稽核的整個重點。
+   */
+  const [, bumpBackup] = useReducer((n: number) => n + 1, 0);
   const setRetentionCap = (n: number): void => {
     const v = Math.max(0, Math.floor(n));
     try {
@@ -1476,7 +1486,13 @@ export function App(): JSX.Element {
       onIdentityRotated: (from, to, name) => {
         // 企業身分輪替（ADR-0052）：storage 已由後端接續；同步記憶體對話狀態（舊→新 npub）
         // 並注入一則系統提示。開啟中的對話一併換鍵。
-        const note: ChatMessage = { id: uid("rot"), outgoing: false, text: `🔑 ${name} 已更新金鑰（對話已接續）`, at: Date.now() };
+        // ADR-0363：這句原本是硬寫的中文，英文使用者會看到一串看不懂的字。
+        const note: ChatMessage = {
+          id: uid("rot"),
+          outgoing: false,
+          text: `🔑 ${tRef.current("identity_rotatedNote", { name })}`,
+          at: Date.now(),
+        };
         setConvos((prev) => {
           // 先把所有對話（含群組）中 sender=from 的訊息改寫為 to（群訊發送者標籤 remap）。
           const next: Record<string, ChatMessage[]> = {};
@@ -1539,6 +1555,8 @@ export function App(): JSX.Element {
         setConvos((prev) => patchFileByMsgId(prev, pk, messageId, { thumb })),
       // ADR-0223：backfill 收到的 blob 已入加密快取 → bump nonce 讓對話窗重讀快取、把占位重繪為動畫。
       onAssetCached: () => setBlobsNonce((n) => n + 1),
+      // ADR-0363：備份成敗一有變化就重畫設定頁（值仍從後端現讀）。
+      onCloudBackup: () => bumpBackup(),
       onFileError: (pk, reason) => {
         const msg: ChatMessage = { id: uid("fe"), outgoing: false, text: `⚠️ ${reason}`, at: Date.now() };
         setConvos((prev) => ({ ...prev, [pk]: [...(prev[pk] ?? []), msg] }));
@@ -3199,7 +3217,7 @@ export function App(): JSX.Element {
                   ? { onBackupNow: () => activeBackend.publishSnapshotNow?.() }
                   : {}),
                 // 備份狀況（ADR-0071／2026-09-18 稽核）：讓「開著卻從沒成功」看得見。
-                // `backupNonce` 只是重繪觸發器——值本身每次都從後端現讀。
+                // 值每次都從後端現讀；重畫的時機由 `onCloudBackup` → `bumpBackup` 驅動。
                 ...(activeBackend.cloudBackupState
                   ? { state: activeBackend.cloudBackupState() }
                   : {}),

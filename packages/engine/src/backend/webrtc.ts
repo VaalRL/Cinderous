@@ -32,6 +32,8 @@ export interface TransferHandlers {
   publishSignal: (event: NostrEvent) => void;
   /** 傳送進度（bytesSent / size）。 */
   onOutgoingProgress: (peer: PubkeyHex, id: string, sent: number, size: number) => void;
+  /** 收檔進度（received / size；ADR-0363）。續傳時 `received` 含斷點之前的部分。 */
+  onIncomingProgress?: (peer: PubkeyHex, id: string, received: number, size: number) => void;
   /** 收到完整檔案。 */
   onIncoming: (peer: PubkeyHex, file: ReceivedFile) => void;
   /**
@@ -111,6 +113,9 @@ const MAX_RESEND_ATTEMPTS = 3;
 const HIGH_WATER = 1 << 20; // 1 MiB：超過就暫緩送出，避免撐爆緩衝
 const CHUNK_SIZE = 16_384;
 
+/** 進度回報的最小間隔（毫秒；ADR-0363）。約每秒 6～7 次，肉眼已是連續的。 */
+const PROGRESS_INTERVAL_MS = 150;
+
 /**
  * 背壓排空的保險計時器（毫秒，ADR-0345）。
  *
@@ -127,6 +132,26 @@ const DRAIN_FALLBACK_MS = 250;
 export class WebRtcTransfer {
   private readonly peers = new Map<PubkeyHex, PeerConn>();
   private seq = 0;
+  /** 每個傳輸 id 上次回報進度的時刻（節流用；ADR-0363）。 */
+  private readonly lastProgressAt = new Map<string, number>();
+
+  /**
+   * 回報進度，**節流**（ADR-0363）。
+   *
+   * 分塊是 16 KiB，而檔案上限已經是 1 GiB（ADR-0346／0355）——逐塊回報＝**六萬五千次**
+   * 回呼，而每一次在 UI 端都是一趟「掃過整條對話、重建陣列」。改動上限的那次沒有回頭看
+   * 這裡，於是一個大檔傳輸會讓兩端的介面整段卡住。
+   *
+   * 頭尾一定送：`received === size` 是完成、`0` 是起點，兩者漏掉都會讓進度條停在錯的地方。
+   */
+  private throttled(id: string, received: number, size: number, emit: () => void): void {
+    const now = Date.now();
+    const last = this.lastProgressAt.get(id) ?? 0;
+    if (received > 0 && received < size && now - last < PROGRESS_INTERVAL_MS) return;
+    this.lastProgressAt.set(id, now);
+    if (received >= size) this.lastProgressAt.delete(id); // 傳完就不必再佔著
+    emit();
+  }
 
   constructor(
     private readonly ownSk: SecretKey,
@@ -274,6 +299,11 @@ export class WebRtcTransfer {
       rx: new DataChannelReceiver(
         {
           onFile: (file) => this.handlers.onIncoming(peerPk, file),
+          // ADR-0363：收檔進度。核心逐塊回報，節流在這一層（核心不持有時鐘）。
+          onProgress: (id, received, size) =>
+            this.throttled(id, received, size, () =>
+              this.handlers.onIncomingProgress?.(peerPk, id, received, size),
+            ),
           onTyping: () => this.handlers.onTyping?.(peerPk),
           onPresence: (p) => this.handlers.onPresence?.(peerPk, p),
           onError: (reason) => this.handlers.onError(peerPk, reason),
@@ -550,7 +580,8 @@ export class WebRtcTransfer {
         // 分塊框架為整段 buffer（offset 0），送底層 ArrayBuffer（零拷貝、無 base64 膨脹）。
         dc.send(next.value.buffer as ArrayBuffer);
         sentChunks += 1;
-        this.handlers.onOutgoingProgress(peerPk, job.id, Math.min(size, sentChunks * CHUNK_SIZE), size);
+        const sent = Math.min(size, sentChunks * CHUNK_SIZE);
+        this.throttled(job.id, sent, size, () => this.handlers.onOutgoingProgress(peerPk, job.id, sent, size));
       }
       // 結尾的整檔雜湊，緊跟最後一塊之後送出（有序通道 ⇒ 收端收齊後立刻拿到）。
       if (sha && dc.readyState === "open") dc.send(fileEndMessage(job.id, sha));

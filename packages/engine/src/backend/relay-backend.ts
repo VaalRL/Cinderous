@@ -846,6 +846,10 @@ export class RelayChatBackend implements ChatBackend {
       {
       publishSignal: (evt) => this.publishAddressed(evt),
       onOutgoingProgress: (peer, id, sent, total) => this.handlers?.onFileProgress?.(peer, id, sent, total),
+      // ADR-0363：收檔進度走**同一個**回呼——`id` 兩邊都是傳輸 id（＝訊息的 `file.id`），
+      // UI 端只要更新那一則的 `sent` 即可，不必為方向各寫一套。
+      onIncomingProgress: (peer, id, received, total) =>
+        this.handlers?.onFileProgress?.(peer, id, received, total),
       onIncoming: (peer, file) => {
         if (this.isBlocked(peer)) return;
         this.ensureKnown(peer); // ADR-0121：陌生人傳檔同樣只進請求區

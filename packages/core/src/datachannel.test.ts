@@ -888,3 +888,61 @@ describe("blobStream 讀不到來源", () => {
     expect([...got]).toEqual([2, 3]);
   });
 });
+
+// ── ADR-0363：收檔端的逐塊進度 ────────────────────────────────────────────────
+//
+// ADR-0017 就記過「收檔端無逐塊進度（`DataChannelReceiver` 未回報），僅『接收中→完成』」。
+// 那時上限 100 MiB，窗口一閃而過；ADR-0346／0355 把上限提到 1 GiB 之後，那個窗口變成
+// 好幾分鐘——而收件人在那幾分鐘裡看到的是一個**說檔案不在這台**的泡泡。
+
+describe("收檔進度（ADR-0363）", () => {
+  const begin = (over: Record<string, unknown> = {}) =>
+    JSON.stringify({ t: "file-begin", id: "z", name: "n", mime: "m", size: 6, chunks: 3, chunkSize: 2, ...over });
+
+  it("每收到一塊就回報一次，數字是「目前為止已知存在的位元組」", () => {
+    const onProgress = vi.fn();
+    const rx = new DataChannelReceiver({ onProgress });
+    rx.receive(begin());
+    expect(onProgress).not.toHaveBeenCalled(); // file-begin 本身不算進度（一個位元組都還沒到）
+    rx.receive(encodeFileChunk("z", 0, bytes(1, 2)));
+    rx.receive(encodeFileChunk("z", 1, bytes(3, 4)));
+    rx.receive(encodeFileChunk("z", 2, bytes(5, 6)));
+    expect(onProgress.mock.calls.map((c) => c[1])).toEqual([2, 4, 6]);
+    expect(onProgress.mock.calls.every((c) => c[0] === "z" && c[2] === 6)).toBe(true);
+  });
+
+  it("🔴 最後一筆一定等於檔案大小——少了它進度條會永遠停在 99%", () => {
+    const onProgress = vi.fn();
+    const rx = new DataChannelReceiver({ onProgress });
+    rx.receive(begin());
+    for (let i = 0; i < 3; i += 1) rx.receive(encodeFileChunk("z", i, bytes(i * 2 + 1, i * 2 + 2)));
+    expect(onProgress.mock.calls.at(-1)![1]).toBe(6);
+  });
+
+  it("亂序送達回報的是**已知的最遠位置**，不會忽高忽低", () => {
+    const onProgress = vi.fn();
+    const rx = new DataChannelReceiver({ onProgress });
+    rx.receive(begin());
+    rx.receive(encodeFileChunk("z", 2, bytes(5, 6))); // 先到最後一塊
+    rx.receive(encodeFileChunk("z", 0, bytes(1, 2)));
+    const seen = onProgress.mock.calls.map((c) => c[1] as number);
+    expect(seen).toEqual([6, 6]); // 單調不遞減
+  });
+
+  it("重複的分塊不重複計數（否則進度會超過 100%）", () => {
+    const onProgress = vi.fn();
+    const rx = new DataChannelReceiver({ onProgress });
+    rx.receive(begin());
+    rx.receive(encodeFileChunk("z", 0, bytes(1, 2)));
+    rx.receive(encodeFileChunk("z", 0, bytes(1, 2)));
+    expect(onProgress).toHaveBeenCalledTimes(1);
+  });
+
+  it("未提供 onProgress 時一切照舊（純新增，不改既有行為）", () => {
+    const onFile = vi.fn();
+    const rx = new DataChannelReceiver({ onFile });
+    rx.receive(begin());
+    for (let i = 0; i < 3; i += 1) rx.receive(encodeFileChunk("z", i, bytes(i * 2 + 1, i * 2 + 2)));
+    expect(onFile).toHaveBeenCalledTimes(1);
+  });
+});

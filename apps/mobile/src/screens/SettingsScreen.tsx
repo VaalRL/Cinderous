@@ -114,6 +114,7 @@ export function SettingsScreen({
   onNotifyHidePreview,
   onPairExport,
   retention,
+  storageFull,
   onRetention,
   onExport,
   readReceipts,
@@ -133,6 +134,7 @@ export function SettingsScreen({
   onForgetDevice,
   fs,
   cloudSync,
+  cloudBackupState,
   onCloudSync,
   identities,
   onSwitchIdentity,
@@ -197,6 +199,11 @@ export function SettingsScreen({
   /** 每對話保留上限（ADR-0094）；0＝無上限。未提供則不顯示。 */
   retention?: number;
   onRetention?: (n: number) => void;
+  /**
+   * 本機儲存已滿（ADR-0363）。引擎的 `onStorageQuota` 掛勾一直都在、桌面也一直有接，
+   * 行動端卻從不註冊——而手機 WebView 的配額比桌面小得多，**最會撞到的平台反而最安靜**。
+   */
+  storageFull?: boolean;
   /** 導出全部紀錄（ADR-0094）。 */
   onExport?: () => void;
   /** 已讀回條（ADR-0058）：opt-in＋互惠；關閉則不送、也不顯示對方已讀。 */
@@ -244,6 +251,12 @@ export function SettingsScreen({
   /** 加密雲端備份（ADR-0071）：off／basic（不含訊息）／full（含訊息）。 */
   cloudSync?: CloudSyncMode;
   onCloudSync?: (mode: CloudSyncMode) => void;
+  /**
+   * 備份成敗（ADR-0071 稽核／0363）。行動端原本**完全沒有**這個顯示：
+   * 設定頁說「備份已開啟」，實際上可能一顆快照都沒上去，使用者要到換機還原那天才發現。
+   * 那是純本機優先產品裡最貴的資料損失，而它在此之前只有一行 `console.warn`。
+   */
+  cloudBackupState?: { lastOkAt?: number; lastFailAt?: number; lastFailReason?: string };
   /** 身分清單（多身分，ADR-0138）：切換器顯示；未提供或僅 1 個時不顯示切換器。 */
   identities?: { pubkey: string; name: string; active: boolean }[];
   /** 切換到某身分（ADR-0138）。 */
@@ -1223,6 +1236,22 @@ export function SettingsScreen({
                 </Pressable>
               ))}
             </View>
+            {/* 備份狀況（ADR-0363）：開著備份卻從沒成功過，是這裡唯一真正要喊出來的情形。
+                與桌面共用同一組文案與同一條判準，不各寫一份。 */}
+            {cloudSync !== "off" && cloudBackupState ? (
+              <Text
+                style={cloudBackupState.lastOkAt === undefined ? styles.warn : styles.label}
+                testID="cloud-backup-state"
+              >
+                {cloudBackupState.lastOkAt === undefined
+                  ? t("settings_cloudNeverOk")
+                  : t("settings_cloudLastOk", { when: new Date(cloudBackupState.lastOkAt).toLocaleString() })}
+                {cloudBackupState.lastFailAt !== undefined &&
+                (cloudBackupState.lastOkAt === undefined || cloudBackupState.lastFailAt > cloudBackupState.lastOkAt)
+                  ? ` ${t("settings_cloudLastFail", { reason: cloudBackupState.lastFailReason ?? "" })}`
+                  : ""}
+              </Text>
+            ) : null}
           </View>
         ) : null}
 
@@ -1238,6 +1267,8 @@ export function SettingsScreen({
                 </Pressable>
               ))}
             </View>
+            {/* 配額已滿（ADR-0363）：與桌面同一句文案，就在「設保留上限」旁邊——那正是解法。 */}
+            {storageFull ? <Text style={styles.warn}>{t("settings_storageFull")}</Text> : null}
           </View>
         ) : null}
 

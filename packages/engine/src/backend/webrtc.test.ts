@@ -365,13 +365,26 @@ describe("WebRtcTransfer 送檔管線（ADR-0345／0346）", () => {
     expect(dc.waiters).toBe(0); // 沒有卡住 ⇒ 不該留下監聽
   });
 
-  it("進度逐塊回報，最後一筆等於檔案大小", async () => {
+  it("進度有頭有尾，最後一筆等於檔案大小", async () => {
     const size = 16_384 * 3;
     const { t, peer, progress } = setup();
     t.sendFile(peer, file(size));
     await settle();
-    expect(progress).toHaveLength(3);
+    expect(progress.length).toBeGreaterThan(0);
     expect(progress.at(-1)).toEqual([progress[0]![0], size, size]);
+  });
+
+  it("🔴 進度有節流——1 GiB／16 KiB 是六萬五千次回呼，每次都讓 UI 掃過整條對話", async () => {
+    // ADR-0363：分塊是 16 KiB，而檔案上限已經放寬到 1 GiB（ADR-0346／0355）。
+    // 改上限那次沒有回頭看這裡，於是一個大檔會讓兩端的介面整段卡住。
+    const chunks = 400;
+    const size = 16_384 * chunks;
+    const { t, peer, progress } = setup();
+    t.sendFile(peer, file(size));
+    await settle(5_000); // 每塊至少隔一個微任務（見 settle 檔頭）⇒ 400 塊要給足輪數
+    // 同一個 tick 內送完 400 塊 ⇒ 節流窗（150ms）只放行頭一筆，尾筆則必送。
+    expect(progress.length).toBeLessThan(chunks / 10);
+    expect(progress.at(-1)![1]).toBe(size); // 但完成那一筆絕不能被吃掉
   });
 
   it("不足一塊的尾段不會讓進度超過檔案大小", async () => {

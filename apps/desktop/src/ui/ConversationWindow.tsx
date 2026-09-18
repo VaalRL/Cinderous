@@ -3196,8 +3196,12 @@ function FileLine({
   const { t } = useI18n();
   const file = message.file!;
   const pct = file.size > 0 ? Math.min(100, Math.round((file.sent / file.size) * 100)) : 100;
-  // 送出端在傳輸完成前顯示進度；收件端一律已完成。
+  // 送出端在傳輸完成前顯示進度。
   const uploading = !file.incoming && file.sent < file.size;
+  // 🔴 收檔端也要有進度（ADR-0363）。`sent > 0` 是「位元組真的在流進來」的判準——
+  // `sent === 0` 分不出「還沒開始傳」與「位元組在我另一台裝置上」（ADR-0093），
+  // 那一格留給 `file_onOtherDevice`。第一塊 16 KiB 一到就跳成進度條。
+  const downloading = file.incoming && file.sent > 0 && file.sent < file.size;
   const isVoice = file.mime.startsWith("audio/");
   const isImage = file.mime.startsWith("image/");
 
@@ -3220,8 +3224,8 @@ function FileLine({
           <div className="filecard__info">
             <div className="filecard__name">{isVoice ? t("voice_alt") : file.name}</div>
             <div className="filecard__meta">{formatBytes(file.size)}</div>
-            {uploading ? (
-              <div className="filecard__bar" aria-label={t("file_sending")}>
+            {uploading || downloading ? (
+              <div className="filecard__bar" aria-label={t(uploading ? "file_sending" : "file_receiving")}>
                 <span style={{ width: `${pct}%` }} />
               </div>
             ) : file.url ? (
