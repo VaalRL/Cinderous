@@ -5,7 +5,9 @@
 // - 瀏覽器/web preview：無任意檔案系統存取，退回瀏覽器下載（最終路徑不可知），回傳可再下載的 URL。
 
 import { invoke, isTauri } from "@tauri-apps/api/core";
-import { readInboxFile, removeInboxFile } from "@cinderous/engine"; // ADR-0347
+import { readInboxFile, removeInboxFile, needsBytesToSend } from "@cinderous/engine"; // ADR-0347；ADR-0273/0102
+import type { OutgoingFileStream } from "@cinderous/core";
+import { tauriBundleIo } from "./bundle.js"; // fs_stat / fs_read_range（ADR-0355 已備好的逐塊讀）
 
 /** 另存結果：`savedPath`＝Tauri 選定路徑；`url`＝瀏覽器下載用物件 URL；皆無＝使用者取消。 */
 export interface SaveResult {
@@ -104,10 +106,10 @@ export interface PickedFile {
  *
  * 非 Tauri（瀏覽器）回 null，由呼叫端退回 `<input type=file>`（照舊，只是沒有路徑）。
  */
-export async function pickFileToSend(): Promise<PickedFile | null> {
+export async function pickFileToSend(): Promise<PickedSource | null> {
   if (!isTauri()) return null;
   const path = await invoke<string | null>("pick_existing_file", { name: "" });
-  return path ? await readFileAtPath(path) : null;
+  return path ? await openFileAtPath(path) : null;
 }
 
 /**
@@ -118,8 +120,62 @@ export async function readFileAtPath(path: string): Promise<PickedFile | null> {
   if (!isTauri()) return null;
   const bytes = await invoke<number[] | null>("read_saved_file", { path });
   if (!bytes) return null;
-  const name = path.split(/[\\/]/).pop() || "file";
+  const name = baseName(path);
   return { path, name, mime: mimeOf(name), bytes: new Uint8Array(bytes) };
+}
+
+/** 由路徑取出檔名（Windows 反斜線與 POSIX 斜線都吃）。 */
+function baseName(path: string): string {
+  return path.split(/[\\/]/).pop() || "file";
+}
+
+/**
+ * 原生選檔／拖放的結果：需要位元組的給位元組，其餘給惰性來源。
+ *
+ * 兩個變體都帶 `path`，因為原生端**總是**拿得到真實路徑（ADR-0103），重載後要靠它讀回原圖。
+ */
+export type PickedSource =
+  | { kind: "bytes"; file: PickedFile }
+  | { kind: "stream"; path: string; stream: OutgoingFileStream };
+
+/**
+ * 由**真實路徑**開啟一個要送出的檔案，**大檔不進 RAM**（ADR-0346 補完 Tauri 這一側）。
+ *
+ * ## 為什麼需要它
+ *
+ * `readFileAtPath` 走的是 `read_saved_file`，那個 command 把整份檔案序列化成 **JSON 數字
+ * 陣列**過 IPC——峰值約檔案大小的數倍 heap，而且在反序列化完成前一個位元組都還沒上網。
+ * 瀏覽器那一側早就靠 `blobStream` 惰性讀了（ADR-0346），Tauri 的迴紋針與原生拖放卻仍走
+ * 整檔讀，而收端上限已放寬到 1 GiB。於是打包版按迴紋針選一個大檔＝當場 OOM，
+ * 而**桌面版正是最可能被拿來傳大檔的那一個**。
+ *
+ * ## 判準沿用既有的那一條
+ *
+ * `needsBytesToSend`＝要做縮圖（ADR-0102）或清 EXIF（ADR-0273）才需要位元組，兩者都只對
+ * **32 MiB 以下的圖片**有意義。其餘一律 `fs_read_range` 逐塊讀。
+ *
+ * @returns 讀不到、或路徑是資料夾（由合集路徑處理，ADR-0355）時回 `null`。
+ */
+export async function openFileAtPath(path: string): Promise<PickedSource | null> {
+  if (!isTauri()) return null;
+  const name = baseName(path);
+  const mime = mimeOf(name);
+  const st = await tauriBundleIo.stat(path);
+  if (!st || st.isDir) return null;
+  if (needsBytesToSend(mime, st.size)) {
+    const file = await readFileAtPath(path);
+    return file ? { kind: "bytes", file } : null;
+  }
+  return {
+    kind: "stream",
+    path,
+    stream: {
+      name,
+      mime,
+      size: st.size,
+      slice: (offset, length) => tauriBundleIo.readRange(path, offset, length),
+    },
+  };
 }
 
 /** 讀回原檔的結果（ADR-0102）。 */

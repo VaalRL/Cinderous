@@ -46,12 +46,20 @@ import { safeNsecDecode } from "./nsec.js";
 import { getKeyVault, tauriKeyVault } from "./native/keyvault.js";
 import { wipeDeviceLocal, wipeIdentityLocal } from "./native/wipe.js";
 import { getNotifier, onNotificationClick } from "./native/notify.js";
-import { pickFileToSend, readFileAtPath, saveIncomingFile, saveStreamedFile, saveTextFile, type SaveResult } from "./native/save-file.js";
+import {
+  openFileAtPath,
+  pickFileToSend,
+  readFileAtPath,
+  saveIncomingFile,
+  saveStreamedFile,
+  saveTextFile,
+  type SaveResult,
+} from "./native/save-file.js";
 import { sweepInbox, tauriFileSink } from "./native/inbox-sink.js"; // ADR-0349：Tauri 原生落盤
 import { onNativeFileDrop } from "./native/file-drop.js";
 import { buildBundle, tauriBundleIo, type Bundle } from "./native/bundle.js"; // ADR-0355：整批折疊成合集
 import type { BundleActions } from "./ui/ConversationWindow.js";
-import type { TarListEntry } from "@cinderous/core";
+import type { OutgoingFileStream, TarListEntry } from "@cinderous/core";
 import {
   canExtractHere,
   extractWithTauri,
@@ -2481,6 +2489,21 @@ export function App(): JSX.Element {
     setOpen((prev) => (prev.includes(pk) ? prev : [...prev, pk]));
   };
 
+  /**
+   * 原生路徑的惰性送出（ADR-0346 補完 Tauri 這一側）：**整份檔案不進 RAM**。
+   *
+   * 與 `sendFileStreamed` 的差別只在來源——那邊是 `File`/`blobStream`，這邊是
+   * `fs_read_range` 逐塊讀。原生端拿得到真實路徑，所以本機重播不必 `createObjectURL`
+   * 先把整份載進記憶體，直接記 `savedPath` 就好。
+   */
+  const sendFileStreamedAt = async (pk: string, src: { path: string; stream: OutgoingFileStream }) => {
+    if (!activeBackend.sendFile) return;
+    if (!(await passesFileGate(pk, src.stream.size))) return;
+    const tid = activeBackend.sendFile(pk, src.stream, { savedPath: src.path });
+    setConvos((prev) => patchFileByTid(prev, pk, tid, { savedPath: src.path }));
+    setOpen((prev) => (prev.includes(pk) ? prev : [...prev, pk]));
+  };
+
   /** 送出一個檔案。`savedPath` 只有原生選檔拿得到（ADR-0103）；瀏覽器 <input> 沒有。 */
   const sendFileBytes = async (pk: string, name: string, mime: string, bytes: Uint8Array, savedPath?: string) => {
     if (!activeBackend.sendFile) return;
@@ -2521,8 +2544,13 @@ export function App(): JSX.Element {
 
   /** Tauri 原生選檔（ADR-0103）：**拿得到完整路徑** → 自己送出的圖片重載後也能看原圖。 */
   const attachFile = async (pk: string) => {
-    const picked = await pickFileToSend();
-    if (!picked) return; // 取消，或非 Tauri（呼叫端會退回 <input>）
+    const src = await pickFileToSend();
+    if (!src) return; // 取消，或非 Tauri（呼叫端會退回 <input>）
+    if (src.kind === "stream") {
+      await sendFileStreamedAt(pk, src); // 大檔／非圖片：逐塊讀，不整份進 RAM
+      return;
+    }
+    const picked = src.file;
     const s = await sanitizeImage(picked.bytes, picked.mime); // ADR-0273
     // 重編碼後位元組已與磁碟原檔不同 → 不再帶 path（避免「重載時讀回未清除的原檔」）。
     await sendFileBytes(
@@ -2602,8 +2630,13 @@ export function App(): JSX.Element {
     void (async () => {
       if (await trySendBundle(pk, paths)) return; // ADR-0355：整批折疊成一個合集
       for (const path of paths) {
-        const f = await readFileAtPath(path); // 資料夾/讀不到 → null，略過
-        if (f) await sendFileBytes(pk, f.name, f.mime, f.bytes, f.path);
+        // eslint-disable-next-line no-await-in-loop -- 逐檔序列化送出（檔案閘門會逐一詢問）
+        const src = await openFileAtPath(path); // 資料夾/讀不到 → null，略過
+        if (!src) continue;
+        // eslint-disable-next-line no-await-in-loop -- 同上
+        if (src.kind === "stream") await sendFileStreamedAt(pk, src);
+        // eslint-disable-next-line no-await-in-loop -- 同上
+        else await sendFileBytes(pk, src.file.name, src.file.mime, src.file.bytes, src.file.path);
       }
     })();
   };
