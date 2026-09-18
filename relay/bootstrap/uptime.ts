@@ -39,33 +39,95 @@ export const UPTIME_CAP = PROBES_PER_DAY * UPTIME_WINDOW_DAYS;
  */
 export const UPTIME_MIN_SAMPLES = PROBES_PER_DAY * 2;
 
-/** 每座 relay 的滾動 uptime 計數（維護者工具狀態；非伺服器狀態）。 */
+/** 每座 relay 的滾動 uptime 紀錄（維護者工具狀態；非伺服器狀態）。 */
 export interface UptimeRec {
+  /**
+   * 最近若干次探測的結果，**舊的在最前面**：`"1"`＝存活、`"0"`＝失敗。長度 ≤ `UPTIME_CAP`。
+   *
+   * 為什麼是一串字元而不是兩個計數，見 `recordProbe`。
+   */
+  window: string;
+}
+
+/** 檔案裡可能出現的舊形（ADR-0350 初版）：只有兩個累計數字。 */
+interface LegacyRec {
   probes: number;
   live: number;
 }
 
 /**
- * 記一次探測結果，回傳新的計數。
+ * 記一次探測結果，回傳新的紀錄：**append 一格、從最舊的那端擠掉多的**。
  *
- * 超過上限即**兩者同時折半**——保留可用率的比例，但讓遠古紀錄的權重衰減，
- * 使一座修好的節點不必用同樣長的時間才洗得掉舊污點。
+ * ## 為什麼不是「兩個計數，滿了就折半」（ADR-0360）
+ *
+ * 初版是 `{probes, live}`，超過上限時兩者同時折半，註解說那是「讓遠古紀錄的權重衰減，
+ * 使一座修好的節點不必用同樣長的時間才洗得掉舊污點」。
+ *
+ * 🔴 **折半根本沒有讓任何東西衰減。** 同時折半保留的是**比例**——120/119 折半之後是
+ * 61/60，那一次失敗原封不動地還在裡面，而且因為樣本數變小，它在比例裡的**份量反而變重**
+ * （0.83% → 1.64%）。唯一真的發生的事情是精度變粗，於是 99% 那道懸崖被反覆跨過：
+ *
+ * ```text
+ *   89 次探測、1 次失敗（實測值）→ 之後每一次都成功：
+ *     第  11 次後  100/99   99.00%  → weight 2
+ *     第  32 次後   61/60   98.36%  → weight 1   ← 折半，同一段歷史，相反的判決
+ *     第  71 次後  100/99   99.00%  → weight 2
+ *     第  92 次後   61/60   98.36%  → weight 1
+ *     …永遠如此
+ * ```
+ *
+ * 一座**連續 300 次探測全部成功**的 relay，會每五天被降級一次，原因是三個月前的一次逾時。
+ * 而降級的後果是整個容錯拓樸長時間只剩一座正常權重的錨點——那正是第二座錨點存在的理由。
+ *
+ * 真正的滑動視窗才做得到當初想要的事：失敗**滿 30 天就真的消失**，而且判決只取決於
+ * 「最近 30 天發生過什麼」，與「現在處在折半週期的哪一段」無關。
+ *
+ * 代價是狀態檔變大：每座 relay 從兩個數字變成 `UPTIME_CAP` 個字元（120 bytes）。
+ * 那是一個住在 git 分支上、只有維護者工具會讀的檔案，這點大小不構成理由。
  */
 export function recordProbe(rec: UptimeRec, live: boolean, cap = UPTIME_CAP): UptimeRec {
-  let probes = rec.probes + 1;
-  let liveCount = rec.live + (live ? 1 : 0);
-  // 迴圈而非單次：頻率調降後既有計數可能遠高於新上限（例如 448 對 120），
-  // 單次折半要好幾輪才收斂，期間的窗口長度是錯的。
-  while (probes > cap) {
-    probes = Math.round(probes / 2);
-    liveCount = Math.round(liveCount / 2);
-  }
-  return { probes, live: liveCount };
+  const w = rec.window + (live ? "1" : "0");
+  return { window: w.length > cap ? w.slice(w.length - cap) : w };
 }
 
 /** 可用率（%）；樣本不足回 `undefined`（＝未知，收錄邏輯據此維持試用）。 */
 export function uptimePct(rec: UptimeRec, minSamples = UPTIME_MIN_SAMPLES): number | undefined {
-  return rec.probes >= minSamples ? (rec.live / rec.probes) * 100 : undefined;
+  const n = rec.window.length;
+  if (n < minSamples) return undefined;
+  let ok = 0;
+  for (const c of rec.window) if (c === "1") ok += 1;
+  return (ok / n) * 100;
+}
+
+/**
+ * 把檔案裡讀到的一筆轉成 `UptimeRec`，**含舊形遷移**。
+ *
+ * 舊形只留下「總共探測幾次、其中幾次存活」，失敗**發生在什麼時候是查不回來的**。
+ * 所以這裡把失敗**均勻散佈**在視窗裡：擠在最舊那端等於假裝「早就修好了」，
+ * 擠在最新那端等於假裝「剛剛才壞」，兩者都是在編造我們沒有的資訊。均勻是唯一
+ * 不偏袒任何一邊的重建方式，而且三十天內它們本來就會全部滑出去。
+ */
+export function toRec(raw: UptimeRec | LegacyRec | undefined, cap = UPTIME_CAP): UptimeRec {
+  if (raw === undefined) return { window: "" };
+  if ("window" in raw) return { window: raw.window.slice(-cap) };
+  const probes = Math.max(0, Math.floor(raw.probes));
+  if (probes === 0) return { window: "" };
+  const n = Math.min(probes, cap);
+  const ok = Math.min(n, Math.max(0, Math.round((raw.live / probes) * n)));
+  const bad = n - ok;
+  // Bresenham：把 `bad` 個 "0" 平均撒進 n 格裡。
+  const out: string[] = [];
+  let acc = 0;
+  for (let i = 0; i < n; i += 1) {
+    acc += bad;
+    if (acc >= n) {
+      acc -= n;
+      out.push("0");
+    } else {
+      out.push("1");
+    }
+  }
+  return { window: out.join("") };
 }
 
 /**
@@ -105,5 +167,7 @@ export function historyOrThrow(raw: string | undefined, coldStart = false): Reco
     return {};
   }
   // 解析失敗照樣往上拋：壞掉的狀態和不存在的狀態後果相同，不該靜默吞掉。
-  return JSON.parse(raw) as Record<string, UptimeRec>;
+  const parsed = JSON.parse(raw) as Record<string, UptimeRec | LegacyRec>;
+  // 逐筆過 `toRec`：狀態檔裡可能還是舊形（ADR-0360 遷移），讀進來就統一。
+  return Object.fromEntries(Object.entries(parsed).map(([url, rec]) => [url, toRec(rec)]));
 }

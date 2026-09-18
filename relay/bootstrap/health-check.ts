@@ -24,7 +24,7 @@ import { autoAuth, parse, runConformance, withWs } from "./conformance.js";
 // 滾動窗的數學抽到 `uptime.ts`（ADR-0350）：窗口長度由探測頻率推導，並有測試把
 // 它與 workflow 的 cron 綁在一起——原本那個 `720 // ≈30 天/時` 是會過期的註解。
 import { decideList } from "./relay-list.js";
-import { historyOrThrow, recordProbe, uptimePct, type UptimeRec } from "./uptime.js";
+import { historyOrThrow, recordProbe, toRec, uptimePct, type UptimeRec } from "./uptime.js";
 
 // 打包後執行檔位於 relay/dist/；清單常駐 relay/bootstrap/。
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -95,7 +95,7 @@ async function main(): Promise<void> {
 
   const results = await Promise.all(
     active.map(async (entry) => {
-      const h = history[entry.url] ?? { probes: 0, live: 0 };
+      const h = toRec(history[entry.url]); // ADR-0360：未見過的座＝空視窗
       const conf = await runConformance(entry.url, uptimePct(h));
       history[entry.url] = recordProbe(h, conf.live);
       return { entry, conf };

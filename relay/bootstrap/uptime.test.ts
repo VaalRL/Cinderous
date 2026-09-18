@@ -4,6 +4,7 @@ import {
   historyOrThrow,
   PROBES_PER_DAY,
   recordProbe,
+  toRec,
   UPTIME_CAP,
   UPTIME_MIN_SAMPLES,
   UPTIME_WINDOW_DAYS,
@@ -34,47 +35,102 @@ describe("滾動窗長度由探測頻率推導（ADR-0350）", () => {
   });
 });
 
-describe("recordProbe", () => {
-  it("存活與不存活各自累加", () => {
-    expect(recordProbe({ probes: 0, live: 0 }, true)).toEqual({ probes: 1, live: 1 });
-    expect(recordProbe({ probes: 5, live: 5 }, false)).toEqual({ probes: 6, live: 5 });
+/** 由 "1"/"0" 字串直接造一筆紀錄，讓斷言讀起來就是那段歷史本身。 */
+const rec = (window: string): UptimeRec => ({ window });
+
+describe("recordProbe（ADR-0360：真的滑動視窗）", () => {
+  it("append 在最後——最新的在右邊", () => {
+    expect(recordProbe(rec(""), true)).toEqual(rec("1"));
+    expect(recordProbe(rec("11111"), false)).toEqual(rec("111110"));
   });
 
-  it("到頂折半，保留比例", () => {
-    const rec = recordProbe({ probes: 120, live: 60 }, true, 120); // 121 > 120
-    expect(rec).toEqual({ probes: 61, live: 31 }); // 比例仍約 50%
-    expect(uptimePct(rec)).toBeCloseTo(50.8, 0);
+  it("滿了就從最舊那端擠掉", () => {
+    expect(recordProbe(rec("01111"), true, 5)).toEqual(rec("11111"));
+    expect(recordProbe(rec("0111111111"), true, 5)).toEqual(rec("11111"));
   });
 
-  it("🔴 遠高於上限時一次收斂到窗內——頻率調降後的既有計數就是這種情況", () => {
-    // 448 是實測值（改動當下 `health-history.json` 裡的數字）。單次折半要跑兩輪才進窗，
-    // 期間的窗口長度是錯的；迴圈折半讓它一次到位。
-    const rec = recordProbe({ probes: 448, live: 448 }, true, 120);
-    expect(rec.probes).toBeLessThanOrEqual(120);
-    expect(rec.live / rec.probes).toBeCloseTo(1, 2); // 100% 的可用率不因折半而失真
+  it("🔴 一次失敗不得讓權重永遠震盪——這正是舊的「折半」造成的", () => {
+    // 舊實作把 probes/live 同時折半，保留的是**比例**，所以那一次失敗永遠洗不掉；
+    // 而樣本數變小又讓它在比例裡份量變重，於是 99% 那道懸崖被反覆跨過：
+    //   100/99 → 99.00%（weight 2）→ 折半 → 61/60 → 98.36%（weight 1）→ 爬回 → …
+    // 一座連續 300 次全部成功的 relay 每五天被降級一次，原因是三個月前的一次逾時。
+    let r: UptimeRec = rec("0"); // 第一次就掛
+    const seen = new Set<boolean>();
+    for (let i = 0; i < 400; i += 1) {
+      r = recordProbe(r, true); // 之後每一次都成功
+      if (r.window.length >= UPTIME_MIN_SAMPLES) seen.add(uptimePct(r)! >= 99);
+    }
+    expect(r.window).toBe("1".repeat(UPTIME_CAP)); // 那次失敗真的滑出去了
+    expect(uptimePct(r)).toBe(100);
+    // 收斂之後不再回頭：最後 100 次全都在 99% 以上。
+    expect(seen.has(true)).toBe(true);
   });
 
-  it("折半不會把可用率洗掉（連續多次仍維持比例）", () => {
-    let rec: UptimeRec = { probes: 100, live: 90 };
-    for (let i = 0; i < 200; i++) rec = recordProbe(rec, true, 120);
-    expect(rec.probes).toBeLessThanOrEqual(120);
-    expect(uptimePct(rec)!).toBeGreaterThan(95); // 之後一路存活 ⇒ 可用率該往上走
+  it("失敗滿一個窗口就真的消失（這是「衰減」原本想要的意思）", () => {
+    let r = rec("0" + "1".repeat(UPTIME_CAP - 1));
+    expect(uptimePct(r)!).toBeLessThan(100);
+    r = recordProbe(r, true); // 再一次成功即把最舊的那個 "0" 擠出去
+    expect(uptimePct(r)).toBe(100);
+  });
+
+  it("一個窗口內只有一次失敗仍是正式收錄（≥99%）——規則講得出口", () => {
+    const one = rec("0" + "1".repeat(UPTIME_CAP - 1));
+    expect(uptimePct(one)!).toBeGreaterThanOrEqual(99);
+    const two = rec("00" + "1".repeat(UPTIME_CAP - 2));
+    expect(uptimePct(two)!).toBeLessThan(99);
   });
 });
 
 describe("uptimePct", () => {
   it("樣本不足回 undefined（＝未知，維持試用）", () => {
-    expect(uptimePct({ probes: UPTIME_MIN_SAMPLES - 1, live: 3 })).toBeUndefined();
+    expect(uptimePct(rec("1".repeat(UPTIME_MIN_SAMPLES - 1)))).toBeUndefined();
   });
 
   it("樣本足夠即回百分比", () => {
-    expect(uptimePct({ probes: 10, live: 10 })).toBe(100);
-    expect(uptimePct({ probes: 10, live: 9 })).toBe(90);
+    expect(uptimePct(rec("1".repeat(10)))).toBe(100);
+    expect(uptimePct(rec("0" + "1".repeat(9)))).toBe(90);
   });
 
   it("🔴 undefined 與 0% 是不同的事——前者是「不知道」，後者是「確定全掛」", () => {
-    expect(uptimePct({ probes: 2, live: 0 })).toBeUndefined();
-    expect(uptimePct({ probes: 100, live: 0 })).toBe(0);
+    expect(uptimePct(rec("00"))).toBeUndefined();
+    expect(uptimePct(rec("0".repeat(100)))).toBe(0);
+  });
+});
+
+describe("toRec：舊形遷移（ADR-0360）", () => {
+  it("沒有紀錄＝空視窗", () => {
+    expect(toRec(undefined)).toEqual(rec(""));
+    expect(toRec({ probes: 0, live: 0 })).toEqual(rec(""));
+  });
+
+  it("新形原樣通過（只裁到上限）", () => {
+    expect(toRec(rec("1010"))).toEqual(rec("1010"));
+    expect(toRec(rec("1".repeat(UPTIME_CAP + 10)))).toEqual(rec("1".repeat(UPTIME_CAP)));
+  });
+
+  it("全數存活 → 全 1", () => {
+    expect(toRec({ probes: 66, live: 66 })).toEqual(rec("1".repeat(66)));
+  });
+
+  it("🔴 失敗均勻散佈，不擠在任何一端——我們查不回它何時發生，擠哪一邊都是在編造資訊", () => {
+    const r = toRec({ probes: 10, live: 8 });
+    expect(r.window.length).toBe(10);
+    expect([...r.window].filter((c) => c === "0").length).toBe(2);
+    expect(r.window.startsWith("00")).toBe(false);
+    expect(r.window.endsWith("00")).toBe(false);
+  });
+
+  it("超過上限只留最近一個窗口的份量，比例不失真", () => {
+    const r = toRec({ probes: 448, live: 448 });
+    expect(r.window.length).toBe(UPTIME_CAP);
+    expect(uptimePct(r)).toBe(100);
+  });
+
+  it("實測的那一筆：89 次 1 次失敗 → 遷移後仍是 98.9%，但之後三天就爬得回去", () => {
+    let r = toRec({ probes: 89, live: 88 });
+    expect(uptimePct(r)!).toBeCloseTo(98.88, 1);
+    for (let i = 0; i < 12; i += 1) r = recordProbe(r, true);
+    expect(uptimePct(r)!).toBeGreaterThanOrEqual(99); // 12 次探測＝3 天
   });
 });
 
@@ -114,9 +170,14 @@ describe("historyOrThrow：檔案不存在 ≠ 空歷史（ADR-0350 遷移後）
     expect(() => historyOrThrow("{ 這不是 JSON", true)).toThrow();
   });
 
-  it("正常內容照常解析", () => {
-    const raw = JSON.stringify({ "wss://a.example": { probes: 120, live: 119 } });
-    expect(historyOrThrow(raw)).toEqual({ "wss://a.example": { probes: 120, live: 119 } });
+  it("正常內容照常解析，且舊形在讀進來時就遷移（ADR-0360）", () => {
+    const raw = JSON.stringify({
+      "wss://a.example": { probes: 10, live: 10 }, // 舊形
+      "wss://b.example": { window: "1101" }, // 新形
+    });
+    const h = historyOrThrow(raw);
+    expect(h["wss://a.example"]).toEqual({ window: "1111111111" });
+    expect(h["wss://b.example"]).toEqual({ window: "1101" });
   });
 });
 
