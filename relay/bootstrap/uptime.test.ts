@@ -116,8 +116,17 @@ describe("toRec：舊形遷移（ADR-0360）", () => {
     const r = toRec({ probes: 10, live: 8 });
     expect(r.window.length).toBe(10);
     expect([...r.window].filter((c) => c === "0").length).toBe(2);
-    expect(r.window.startsWith("00")).toBe(false);
-    expect(r.window.endsWith("00")).toBe(false);
+    expect(r.window.startsWith("0")).toBe(false);
+    expect(r.window.endsWith("0")).toBe(false);
+  });
+
+  it("🔴 **單一**失敗要落在中間，不是最後一格——那等於「假裝剛剛才壞」", () => {
+    // 實測抓到的迴歸：累加器從 0 起跳時，唯一的那個 `0` 會被放到視窗尾端，
+    // 於是它要花滿滿一個窗口才洗得掉。生產狀態分支上的 89/88 就是這樣被遷移的。
+    const r = toRec({ probes: 89, live: 88 });
+    const at = r.window.indexOf("0");
+    expect(at).toBeGreaterThan(10);
+    expect(at).toBeLessThan(78);
   });
 
   it("超過上限只留最近一個窗口的份量，比例不失真", () => {

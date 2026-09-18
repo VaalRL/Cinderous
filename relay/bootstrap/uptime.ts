@@ -116,8 +116,12 @@ export function toRec(raw: UptimeRec | LegacyRec | undefined, cap = UPTIME_CAP):
   const ok = Math.min(n, Math.max(0, Math.round((raw.live / probes) * n)));
   const bad = n - ok;
   // Bresenham：把 `bad` 個 "0" 平均撒進 n 格裡。
+  //
+  // ⚠ 累加器要從**半個相位**起跳。從 0 起跳的話，單一失敗會落在**最後一格**——也就是
+  // 「假裝剛剛才壞」，正是這個函式的註解說要避免的那一端。實測抓到：遷移 89/88 那筆時，
+  // 那個 `0` 被放到了視窗尾端，於是它要花滿滿一個窗口才洗得掉，而不是從中間開始滑出去。
   const out: string[] = [];
-  let acc = 0;
+  let acc = Math.floor(n / 2);
   for (let i = 0; i < n; i += 1) {
     acc += bad;
     if (acc >= n) {
