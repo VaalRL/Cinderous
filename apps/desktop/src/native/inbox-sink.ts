@@ -8,6 +8,7 @@
 // 有測試）。這一層只是把 `FileSink` 的三個方法接到四個 command 上。
 
 import { invoke, isTauri } from "@tauri-apps/api/core";
+import { sweepInboxFiles } from "@cinderous/engine"; // 瀏覽器那一側的暫存區清理（ADR-0347）
 import type { FileSink, OpenFileSink } from "@cinderous/core";
 
 /**
@@ -56,7 +57,18 @@ export function tauriFileSink(): OpenFileSink | undefined {
  * 非 Tauri 或失敗皆靜默——清理失敗不該影響啟動。
  */
 export async function sweepInbox(): Promise<void> {
-  if (!isTauri()) return;
+  // 🔴 **兩種平台各有自己的暫存區**，不能只掃一邊。
+  //
+  // 這個檔案同一份程式碼會跑在 Tauri 殼裡，也會跑在**瀏覽器**裡（統一節點模式與官網的
+  // 網頁版）。先前這裡是 `if (!isTauri()) return;`，於是瀏覽器那一側的 OPFS 暫存檔
+  // **永遠不會被回收**——使用者每次在「另存」之前關掉分頁就留下一份 `.part`，累積到
+  // OPFS 配額爆掉，連封存（ADR-0111）都寫不進去。
+  //
+  // engine 早就備好了 `sweepInboxFiles()` 且有測試，只是從來沒有人在桌面這側呼叫它。
+  if (!isTauri()) {
+    await sweepInboxFiles();
+    return;
+  }
   try {
     await invoke("inbox_sweep");
   } catch {
