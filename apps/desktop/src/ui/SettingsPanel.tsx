@@ -231,6 +231,14 @@ export interface SettingsPanelProps {
     onChange: (mode: CloudSyncMode) => void;
     /** 立即備份（已開啟時才提供）。 */
     onBackupNow?: () => void;
+    /**
+     * 上次備份的成敗（ADR-0071／2026-09-18 稽核）。
+     *
+     * 🔴 在此之前，快照被拒只有一行 `console.warn`，而這一區照樣顯示「備份已開啟」
+     * ——兩者長得一模一樣，使用者要到換機還原那天才發現一顆都沒上去。
+     * 顯示「上次成功於」之後，沒動靜自己會說話。
+     */
+    state?: { lastOkAt?: number; lastFailAt?: number; lastFailReason?: string };
   };
   /** 本地密碼（H4，ADR-0067）：僅 Tauri 提供；未提供則不顯示安全區塊。回 false＝密碼錯誤。 */
   security?: {
@@ -1136,6 +1144,21 @@ function CloudSyncSettings({ value }: { value: NonNullable<SettingsPanelProps["c
         <button type="button" data-testid="cloud-backup-now" onClick={() => value.onBackupNow?.()}>
           {t("settings_cloudBackupNow")}
         </button>
+      ) : null}
+      {/* 備份狀況：開著備份卻從沒成功過，是這裡唯一真正要喊出來的情形。 */}
+      {value.mode !== "off" && value.state ? (
+        <p
+          className={value.state.lastOkAt === undefined ? "settings__warn" : "hint"}
+          data-testid="cloud-backup-state"
+        >
+          {value.state.lastOkAt === undefined
+            ? t("settings_cloudNeverOk")
+            : t("settings_cloudLastOk", { when: new Date(value.state.lastOkAt).toLocaleString() })}
+          {value.state.lastFailAt !== undefined &&
+          (value.state.lastOkAt === undefined || value.state.lastFailAt > value.state.lastOkAt)
+            ? ` ${t("settings_cloudLastFail", { reason: value.state.lastFailReason ?? "" })}`
+            : ""}
+        </p>
       ) : null}
     </section>
   );

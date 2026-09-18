@@ -716,6 +716,15 @@ export interface Messages {
   settings_cloudFull: string;
   settings_cloudOffConfirm: string;
   settings_cloudBackupNow: string;
+  /**
+   * 備份狀況（ADR-0071／2026-09-18 稽核）。
+   *
+   * 🔴 「從沒成功過」要用警示語氣：那正是使用者以為有備份、實際上沒有的情形，
+   * 而他要到換機還原那天才會發現。其餘只是資訊。
+   */
+  settings_cloudLastOk: string;
+  settings_cloudNeverOk: string;
+  settings_cloudLastFail: string;
   pair_title: string;
   pair_offerHint: string;
   pair_expiresIn: string;
@@ -1704,6 +1713,9 @@ const zhHant: Messages = {
   settings_cloudFull: "完整：基本＋近期訊息",
   settings_cloudOffConfirm: "關閉多裝置狀態同步？中繼站上此裝置的狀態將立即刪除，其他裝置將無法自動同步。",
   settings_cloudBackupNow: "立即同步",
+  settings_cloudLastOk: "上次成功備份：{when}",
+  settings_cloudNeverOk: "⚠️ 備份已開啟，但從來沒有成功過。這表示換到新裝置時什麼都還原不了。",
+  settings_cloudLastFail: "（最近一次嘗試失敗：{reason}）",
   pair_title: "配對新裝置",
   pair_offerHint: "在新裝置的登入畫面選「從舊裝置匯入」，掃描或貼上這段配對碼。兩台裝置需同時開著。",
   pair_expiresIn: "{sec} 秒後失效",
@@ -2633,6 +2645,9 @@ const en: Messages = {
   settings_cloudFull: "Full: basic + recent messages",
   settings_cloudOffConfirm: "Turn off multi-device state sync? This device's state on the relay is deleted immediately and your other devices can no longer auto-sync.",
   settings_cloudBackupNow: "Sync now",
+  settings_cloudLastOk: "Last successful backup: {when}",
+  settings_cloudNeverOk: "⚠️ Backup is on, but it has never succeeded. Nothing would be restored on a new device.",
+  settings_cloudLastFail: "(most recent attempt failed: {reason})",
   pair_title: "Pair a new device",
   pair_offerHint: "On the new device's sign-in screen choose “Import from old device”, then scan or paste this pairing code. Both devices must be running.",
   pair_expiresIn: "expires in {sec}s",

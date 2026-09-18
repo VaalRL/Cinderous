@@ -4464,3 +4464,80 @@ describe("裝置授權取代自我登記 S5（ADR-0322）", () => {
     stop();
   });
 });
+
+describe("雲端備份狀態可見性（ADR-0071／2026-09-18 稽核）", () => {
+  /** 讓 localStorage 在測試中可用；回傳那張表好斷言。 */
+  const withLocalStorage = () => {
+    const kv = new Map<string, string>();
+    (globalThis as Record<string, unknown>).localStorage = {
+      getItem: (k: string) => kv.get(k) ?? null,
+      setItem: (k: string, v: string) => void kv.set(k, v),
+      removeItem: (k: string) => void kv.delete(k),
+    };
+    return kv;
+  };
+
+  it("🔴 成功備份後留下 lastOkAt——沒有它，「從沒成功」與「剛成功」長得一樣", () => {
+    withLocalStorage();
+    const net = createInMemoryRelayNetwork();
+    const store = new MemoryStorage();
+    const a = new RelayChatBackend(store, (h: RelayClientHandlers) => net.connect("a", h), "Alice", {
+      cloudSync: { mode: "basic", deviceId: "desk" },
+    });
+    a.start(noop);
+    const st = a.cloudBackupState();
+    expect(st.lastOkAt).toBeGreaterThan(0);
+    expect(st.lastFailAt).toBeUndefined();
+    a.stop();
+  });
+
+  it("🔴 relay 拒收快照 → 記下失敗與原因，不再只是一行 console.warn", () => {
+    withLocalStorage();
+    // 站方只收訊息類 kind，不收 30078——這正是企業自架站最常見的設定失誤
+    // （見 OPERATOR-TODO：allowedKinds 沒加 30078 會默默拒收）。
+    const net = createInMemoryRelayNetwork({ allowedKinds: [1059] });
+    const store = new MemoryStorage();
+    const a = new RelayChatBackend(store, (h: RelayClientHandlers) => net.connect("a", h), "Alice", {
+      cloudSync: { mode: "basic", deviceId: "desk" },
+    });
+    const seen: Array<{ lastOkAt?: number; lastFailAt?: number }> = [];
+    a.start({ ...noop, onCloudBackup: (s) => seen.push(s) });
+
+    const st = a.cloudBackupState();
+    expect(st.lastFailAt).toBeGreaterThan(0);
+    expect(st.lastOkAt).toBeUndefined(); // 從沒成功過
+    expect(seen.length).toBeGreaterThan(0); // UI 收得到通知
+    a.stop();
+  });
+
+  it("🔴 失敗不得抹掉上次成功的時間——那正是使用者最需要知道的數字", () => {
+    const kv = withLocalStorage();
+    // 先手動放一筆「昨天成功過」，再讓這次失敗。
+    const yesterday = Date.now() - 86_400_000;
+    const store = new MemoryStorage();
+    const net = createInMemoryRelayNetwork({ allowedKinds: [1059] }); // 站方不收 30078
+    const a = new RelayChatBackend(store, (h: RelayClientHandlers) => net.connect("a", h), "Alice", {
+      cloudSync: { mode: "basic", deviceId: "desk" },
+    });
+    // 鍵是以 pubkey 前 8 碼組的；backend 已建好，直接問它自己那把。
+    const key = `nb.backupState.${a.self.pubkey.slice(0, 8)}`;
+    kv.set(key, JSON.stringify({ lastOkAt: yesterday }));
+
+    a.start(noop);
+
+    const st = a.cloudBackupState();
+    expect(st.lastOkAt).toBe(yesterday); // 保留
+    expect(st.lastFailAt).toBeGreaterThan(yesterday); // 並記下這次失敗
+    a.stop();
+  });
+
+  it("沒開備份時狀態是空的（不該假裝有備份過）", () => {
+    withLocalStorage();
+    const net = createInMemoryRelayNetwork();
+    const store = new MemoryStorage();
+    const a = new RelayChatBackend(store, (h: RelayClientHandlers) => net.connect("a", h), "Alice", {});
+    a.start(noop);
+    expect(a.cloudBackupState()).toEqual({});
+    a.stop();
+  });
+});

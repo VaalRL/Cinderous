@@ -174,7 +174,24 @@ export interface ChatMessage {
   receipts?: Record<string, "delivered" | "read">;
 }
 
+/**
+ * 雲端備份的狀況（ADR-0071／2026-09-18 稽核）。
+ *
+ * 🔴 只記失敗是不夠的：「從沒成功過」與「剛剛才成功」在畫面上會長得一樣。
+ * `lastOkAt` 才是使用者真正需要的那個數字——沒動靜時它自己會說話。
+ */
+export interface CloudBackupState {
+  /** 上次成功上傳的時間（毫秒）。從未成功過就沒有這個欄位。 */
+  lastOkAt?: number;
+  /** 上次失敗的時間（毫秒）。 */
+  lastFailAt?: number;
+  /** 上次失敗的原因（relay 的拒收訊息或重試耗盡）。 */
+  lastFailReason?: string;
+}
+
 export interface ChatBackendEvents {
+  /** 雲端備份成敗變動（ADR-0071）；UI 據此顯示「上次備份於…」與失敗原因。 */
+  onCloudBackup?: (state: CloudBackupState) => void;
   /** 聯絡人清單或其狀態/音樂有更新時觸發。 */
   onContacts(contacts: Contact[]): void;
   /** 收到（或自己送出的）一則訊息。 */
@@ -675,6 +692,13 @@ export interface ChatBackend {
   acknowledgeRelayStale?(url: string): void;
   /** 立即備份雲端快照（ADR-0071；已開啟模式時，跳過節流）。 */
   publishSnapshotNow?(): void;
+  /**
+   * 這個身分的雲端備份狀況（ADR-0071／2026-09-18 稽核）。
+   *
+   * 🔴 讓**沉默變得看得見**：在此之前，快照被拒只有一行 console.warn，而設定頁照樣顯示
+   * 「備份已開啟」——兩者長得一樣，使用者要到換機還原那天才發現一顆都沒上去。
+   */
+  cloudBackupState?(): CloudBackupState;
   /** 關閉雲端快照時清除 relay 上此裝置的快照（purge，ADR-0071）。 */
   purgeCloudSnapshot?(deviceId: string): void;
   /** 自己的 `npub`（供分享/加好友；僅真實 relay 後端提供）。 */

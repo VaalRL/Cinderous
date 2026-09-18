@@ -3137,6 +3137,11 @@ export function App(): JSX.Element {
                 ...(mode !== "off" && activeBackend.publishSnapshotNow
                   ? { onBackupNow: () => activeBackend.publishSnapshotNow?.() }
                   : {}),
+                // 備份狀況（ADR-0071／2026-09-18 稽核）：讓「開著卻從沒成功」看得見。
+                // `backupNonce` 只是重繪觸發器——值本身每次都從後端現讀。
+                ...(activeBackend.cloudBackupState
+                  ? { state: activeBackend.cloudBackupState() }
+                  : {}),
               },
             };
           })()}

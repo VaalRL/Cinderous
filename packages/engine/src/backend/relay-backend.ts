@@ -181,6 +181,7 @@ import type { AppStorage, MessageStatus, OrSetName, StoredCalendarEvent, StoredF
 import type {
   ChatBackend,
   ChatBackendEvents,
+  CloudBackupState,
   ChatMessage,
   ConnectionState,
   Contact,
@@ -530,6 +531,8 @@ export class RelayChatBackend implements ChatBackend {
   private snapTimer: ReturnType<typeof setInterval> | undefined;
   /** 行程提醒 tick（ADR-0266）：純本機，不碰網路。 */
   private remindTimer: ReturnType<typeof setInterval> | undefined;
+  /** 已送出、還在等 relay 回 OK 的快照事件 id（用來分辨哪一顆 OK 是快照的）。 */
+  private readonly pendingSnapshotIds = new Set<string>();
   /** 企業政策禁止快照上雲（ADR-0071）：名冊採用時設定，即刻停止發佈。 */
   private cloudBackupBlocked = false;
   /** durable 搬家（ADR-0069 T2/T3）：通知回呼、T2 門檻、T3 延遲、一次性 latch。 */
@@ -800,7 +803,16 @@ export class RelayChatBackend implements ChatBackend {
       send: (evt) => this.publishAddressed(evt),
       onDrop: (evt, reason) => {
         // 快照發佈失敗（拒收/重試耗盡）→ 清節流記錄讓 30 分後重試（審查修正 #5）。
-        if (evt.kind === SNAPSHOT_KIND) this.clearSnapshotThrottle();
+        if (evt.kind === SNAPSHOT_KIND) {
+          this.clearSnapshotThrottle();
+          // 🔴 原本這裡只有下面那行 `console.warn`，而 `markFailed` 畫的是**訊息列**的紅色
+          // 重試圖示——快照沒有訊息列，所以它什麼都不會畫。結果是設定頁顯示「備份已開啟」，
+          // 實際上一顆都沒上去，使用者換機還原時才發現。那是純本機優先產品裡最貴的資料損失。
+          //
+          // 最常見的成因是企業自架站的 `allowedKinds` 沒收 kind 30078（見 OPERATOR-TODO），
+          // 而那在拒收端只回一個沒人看的 `OK false`。
+          this.recordBackup({ ok: false, reason });
+        }
         // 明確拒收或重試耗盡 → 標記該訊息為傳送失敗（ADR-0095：UI 顯示紅色重試圖示）。
         console.warn(`[outbox] 事件 ${evt.id.slice(0, 8)}… 未送達：${reason}`);
         this.markFailed(evt.id);
@@ -815,6 +827,8 @@ export class RelayChatBackend implements ChatBackend {
         onOk: (id, accepted, message) => {
           this.outbox.onOk(id, accepted, message);
           if (accepted) this.markSent(id); // Tier 1（ADR-0058）：relay 接受＝已送中繼
+          // 備份成功也要留痕——只記失敗的話，「從沒成功過」與「剛剛才成功」長得一樣。
+          if (accepted && this.pendingSnapshotIds.delete(id)) this.recordBackup({ ok: true });
         },
         // NIP-42 AUTH（ADR-0057）：回應挑戰；認證成功後重掛訂閱（解「訂閱早於認證」）。
         authSigner: (challenge) => {
@@ -3480,6 +3494,45 @@ export class RelayChatBackend implements ChatBackend {
     }
   }
 
+  /** 備份狀態的儲存鍵（每身分一份；裝置無關——換裝置看到的是「這個身分」的備份狀況）。 */
+  private backupStateKey(): string {
+    return `nb.backupState.${this.self.pubkey.slice(0, 8)}`;
+  }
+
+  /** 記下一次備份的成敗。失敗保留上次成功的時間——那正是使用者最需要知道的數字。 */
+  private recordBackup(r: { ok: boolean; reason?: string }): void {
+    try {
+      const prev = this.cloudBackupState();
+      const next: CloudBackupState = r.ok
+        ? { lastOkAt: Date.now() }
+        : {
+            ...(prev.lastOkAt !== undefined ? { lastOkAt: prev.lastOkAt } : {}),
+            lastFailAt: Date.now(),
+            ...(r.reason ? { lastFailReason: r.reason } : {}),
+          };
+      localStorage.setItem(this.backupStateKey(), JSON.stringify(next));
+    } catch {
+      /* 無痕模式：這一版記不住，不影響備份本身 */
+    }
+    this.handlers?.onCloudBackup?.(this.cloudBackupState());
+  }
+
+  /**
+   * 這個身分的雲端備份狀況（ADR-0071／2026-09-18 稽核）。
+   *
+   * 🔴 存在的理由是**讓沉默變得看得見**。在此之前，快照被拒只有一行 `console.warn`，
+   * 而設定頁照樣顯示「備份已開啟」——兩者長得一模一樣，使用者要到換機還原那天才發現
+   * 一顆都沒上去。有了「上次成功於」，沒動靜自己會說話。
+   */
+  cloudBackupState(): CloudBackupState {
+    try {
+      const raw = localStorage.getItem(this.backupStateKey());
+      return raw ? (JSON.parse(raw) as CloudBackupState) : {};
+    } catch {
+      return {};
+    }
+  }
+
   /**
    * 關閉狀態對帳（審查修正 #6）：曾發佈過快照（留有節流記錄）但現在未啟用備份
    * → 開機補發 purge。切關當下的 flush 競態由此兜底，「已關閉＝雲端零殘留」最終一致。
@@ -3508,7 +3561,10 @@ export class RelayChatBackend implements ChatBackend {
     });
     const hash = JSON.stringify({ ...content, at: 0 }); // 比對不含產生時間
     if (!this.snapshotDue(hash)) return;
-    this.publishReliable(buildSnapshotEvent(JSON.stringify(content), this.sk, this.cloudSync.deviceId));
+    const evt = buildSnapshotEvent(JSON.stringify(content), this.sk, this.cloudSync.deviceId);
+    // 記下 id：`onOk` 是所有事件共用的，沒有這張表就分不出哪一顆 OK 是快照的。
+    this.pendingSnapshotIds.add(evt.id);
+    this.publishReliable(evt);
   }
 
   /**
