@@ -50,7 +50,6 @@ export * from "./group.js";
 export * from "./calendar.js";
 export * from "./date-detect.js";
 export * from "./datachannel.js";
-export * from "./connection.js";
 export * from "./pairing.js";
 export * from "./at-rest.js";
 export * from "./passlock-web.js";
