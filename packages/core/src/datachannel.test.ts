@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   blobStream,
+  FileSourceUnavailableError,
   DataChannelReceiver,
   DC_PROTOCOL_VERSION,
   decodeFileChunk,
@@ -841,5 +842,49 @@ describe("ADR-0355 整檔雜湊校驗", () => {
     rx.receive(fileEndMessage("h4", "00".repeat(32))); // 錯的雜湊也不擋
     await settle(80);
     expect(onFile).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ── 來源檔案讀不到時不得靜默卡死（ADR-0346 後續 2，2026-09-18 稽核）────────────
+
+describe("blobStream 讀不到來源", () => {
+  it("🔴 slice 失敗包成具名錯誤，而不是讓 reject 裸奔", async () => {
+    // 傳到一半檔案被搬走／隨身碟被拔掉——`File` 只是磁碟上那份檔案的把手。
+    const gone = {
+      size: 1024,
+      slice: () => ({
+        arrayBuffer: () => Promise.reject(new Error("NotReadableError")),
+      }),
+    };
+    const s = blobStream("報告.pdf", "application/pdf", gone as never);
+    await expect(s.slice(0, 64)).rejects.toBeInstanceOf(FileSourceUnavailableError);
+  });
+
+  it("錯誤帶得出檔名——使用者要知道是哪一個檔不見了", async () => {
+    const gone = {
+      size: 10,
+      slice: () => ({ arrayBuffer: () => Promise.reject(new Error("boom")) }),
+    };
+    try {
+      await blobStream("假期照片.zip", "application/zip", gone as never).slice(0, 4);
+      throw new Error("應該要拋");
+    } catch (e) {
+      expect(e).toBeInstanceOf(FileSourceUnavailableError);
+      expect((e as FileSourceUnavailableError).fileName).toBe("假期照片.zip");
+      expect((e as FileSourceUnavailableError).cause).toBeInstanceOf(Error);
+    }
+  });
+
+  it("讀得到時完全不受影響（包裝是零成本的）", async () => {
+    const ok = {
+      size: 4,
+      slice: (a: number, b: number) => ({
+        // ⚠ 不能用 `subarray(a,b).buffer`——那回的是整個底層緩衝區，不是切片。
+        arrayBuffer: async () => new Uint8Array([1, 2, 3, 4]).slice(a, b).buffer,
+      }),
+    };
+    // 第二個參數是**長度**不是終點：從位移 1 讀 2 個位元組。
+    const got = await blobStream("a.bin", "x", ok as never).slice(1, 2);
+    expect([...got]).toEqual([2, 3]);
   });
 });

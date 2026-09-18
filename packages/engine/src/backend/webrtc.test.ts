@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { generateSecretKey, getPublicKey } from "@cinderous/core";
+import { FileSourceUnavailableError, generateSecretKey, getPublicKey } from "@cinderous/core";
 import { WebRtcTransfer } from "./webrtc.js";
 import type { OpenFileSink, ReceivedFile } from "@cinderous/core";
 
@@ -481,6 +481,59 @@ describe("WebRtcTransfer 送檔管線（ADR-0345／0346）", () => {
     expect(dc.chunkCount).toBe(3);
     expect(dc.sent.filter((m) => typeof m === "string")).toHaveLength(2); // 兩個 file-begin
   });
+  // ── 來源檔案讀不到時不得靜默卡死（ADR-0346 後續 2，2026-09-18 稽核）──────────
+
+  /** 讀到第 `failAfter` 次就失敗的惰性來源——模擬傳到一半檔案被搬走。 */
+  const vanishing = (size: number, failAfter: number) => {
+    let reads = 0;
+    return {
+      name: "報告.pdf",
+      mime: "application/pdf",
+      size,
+      slice: async (offset: number, length: number) => {
+        reads += 1;
+        if (reads > failAfter) throw new FileSourceUnavailableError("報告.pdf", new Error("NotReadableError"));
+        return new Uint8Array(Math.min(length, size - offset));
+      },
+    };
+  };
+
+  it("🔴 傳到一半檔案不見了 → 回報可讀的錯誤，不是靜默停住", async () => {
+    const { t, peer, errors } = setup();
+    t.sendFile(peer, vanishing(16_384 * 4, 1));
+    await settle();
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain("報告.pdf");
+    expect(errors[0]).toContain("已不在原來的位置");
+  });
+  it("🔴 而且佇列不卡死——後續的檔案照樣送得出去", async () => {
+    // 這是整個修正的重點：原本 `sending` 永不歸零、job 不重排，
+    // 於是**那個對話之後什麼都送不出去**，而畫面只是停在「傳送中」。
+    const { t, peer, dc, errors } = setup();
+    t.sendFile(peer, vanishing(16_384 * 4, 1));
+    await settle();
+    const afterFailure = dc.sent.length;
+
+    t.sendFile(peer, file(16_384 * 2));
+    await settle();
+    expect(dc.sent.length).toBeGreaterThan(afterFailure);
+    expect(errors).toHaveLength(1); // 第二個檔沒有再報錯
+  });
+
+  it("進度歸零，讓 UI 的「傳送中」停下來", async () => {
+    const { t, peer, progress } = setup();
+    t.sendFile(peer, vanishing(16_384 * 4, 1));
+    await settle();
+    expect(progress.at(-1)?.[1]).toBe(0);
+  });
+
+  it("第一塊就讀不到（檔案早就沒了）也一樣處理", async () => {
+    const { t, peer, errors } = setup();
+    t.sendFile(peer, vanishing(16_384 * 2, 0));
+    await settle();
+    expect(errors[0]).toContain("報告.pdf");
+  });
+
 });
 
 describe("WebRtcTransfer 惰性來源送檔（ADR-0346）", () => {

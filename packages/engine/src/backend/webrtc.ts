@@ -19,6 +19,7 @@ import {
   type ReceivedFile,
   type SecretKey,
   type Signal,
+  FileSourceUnavailableError,
 } from "@cinderous/core";
 import { IcePathTracker, type IcePath } from "./ice-path.js";
 
@@ -474,6 +475,25 @@ export class WebRtcTransfer {
       running = true;
       try {
         await pumpLoop();
+      } catch (e) {
+        // 🔴 原本這裡只有 try/finally。呼叫端是 `void pump()`，所以 `pumpLoop` 一旦拋出
+        // （最常見的是來源檔案傳到一半被搬走，`slice` reject），就成了 unhandled rejection：
+        // `sending` 歸零了但 job 沒重排、`onError` 沒觸發，寄件者畫面停在「傳送中」，
+        // 而**那個對話的外送佇列整條卡死**。與 ADR-0294 P2 修掉的靜默分歧同型。
+        //
+        // 現在一律收斂成使用者看得到的錯誤。**不要再 shift 一次**——`job` 在 `flush`
+        // 開頭就已經從 outbox 取出來了，再 shift 會誤丟下一個還沒送的檔案。
+        peer.sending = false;
+        this.handlers.onError(
+          peerPk,
+          e instanceof FileSourceUnavailableError
+            ? `送不出「${e.fileName}」：檔案已不在原來的位置`
+            : `送檔失敗：${e instanceof Error ? e.message : String(e)}`,
+        );
+        // 進度歸零，讓 UI 的「傳送中」停下來（沿用既有 handler，不另開一個）。
+        this.handlers.onOutgoingProgress(peerPk, job.id, 0, size);
+        // 讀不到的檔案不重排：重試幾次都一樣，只會讓下一次 flush 再撞同一個。
+        if (peer.outbox.length > 0) this.flush(peerPk, peer);
       } finally {
         running = false;
       }

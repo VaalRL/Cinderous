@@ -149,6 +149,22 @@ export function bytesStream(file: OutgoingFile): OutgoingFileStream {
  * 這是 ADR-0346 的重點——瀏覽器的 `File` 本來就只是磁碟上那份檔案的把手，
  * 是 `await f.arrayBuffer()` 那一行把它整份拉進了記憶體。
  */
+/**
+ * 送出來源讀不到了（ADR-0346 後續 2）。
+ *
+ * 與一般傳輸錯誤分開，是因為**處置不同**：通道斷線可以續傳，而檔案不在了重試幾次都一樣，
+ * 應該直接告訴使用者「那個檔案找不到了」而不是讓他看著進度條不動。
+ */
+export class FileSourceUnavailableError extends Error {
+  constructor(
+    readonly fileName: string,
+    override readonly cause?: unknown,
+  ) {
+    super(`讀不到來源檔案：${fileName}`);
+    this.name = "FileSourceUnavailableError";
+  }
+}
+
 export function blobStream(name: string, mime: string, blob: BlobLike): OutgoingFileStream {
   return {
     name,
@@ -156,7 +172,17 @@ export function blobStream(name: string, mime: string, blob: BlobLike): Outgoing
     size: blob.size,
     slice: async (offset, length) => {
       const end = Math.min(offset + length, blob.size);
-      return new Uint8Array(await blob.slice(offset, end).arrayBuffer());
+      try {
+        return new Uint8Array(await blob.slice(offset, end).arrayBuffer());
+      } catch (e) {
+        // 🔴 傳到一半檔案被搬走／刪掉／隨身碟被拔掉——`File` 只是磁碟上那份檔案的把手，
+        // 讀取隨時可能失敗。原本這裡沒有 try/catch，reject 會一路穿過送出迴圈變成
+        // unhandled rejection：`sending` 永不歸零、job 不重排、`onError` 不觸發，
+        // 於是寄件者畫面停在「傳送中」，而**那個對話之後什麼都送不出去**。
+        //
+        // 包成具名錯誤，讓上層分得出「檔案沒了」與一般的通道故障——前者重試無意義。
+        throw new FileSourceUnavailableError(name, e);
+      }
     },
   };
 }
