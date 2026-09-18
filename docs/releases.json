@@ -1,5 +1,32 @@
 [
   {
+    "version": "0.0.16",
+    "date": "2026-09-18",
+    "released": true,
+    "zh": [
+      "🔐 **更換了中繼站清單的簽章金鑰**。舊的那把曾經短暫存在於自動化流程中（2026-07-03 至 07-23），雖然沒有跡象顯示它外流，但既然無法排除，就換掉。這一版起你的 App 會認新的金鑰。",
+      "⚠️ **請更新到這一版**。舊版本仍然可以用，但它只認得舊金鑰，會逐漸收不到中繼站清單的更新。",
+      "📦 **傳整個資料夾**。把資料夾拖進對話窗就能傳；檔案超過 8 個時也會自動打包成一份，不再是幾十則訊息洗版。收到的人可以先看裡面有什麼，再決定要不要解開。",
+      "⚠️ 打包傳送時，裡面的相片**不會**像單獨傳送那樣清除位置資訊——送出前會先問你一次。",
+      "🔄 **大檔案斷線後接得回去**。傳到一半斷線，重連後從斷點繼續，不必整個重來。傳完會比對整檔的雜湊，確認接對了。",
+      "🛠 **App 裡就能建立自己的中繼站**。設定 → 連線與備份 → 建立我的節點，跟著五個畫面走完，大約三分鐘。它跑在你自己的 Cloudflare 帳號上。",
+      "🐛 修正：檔案傳到一半被移走時，那個對話之後就什麼都送不出去，而畫面只是停在「傳送中」。",
+      "📖 官網新增完整的自架教學。",
+      "ℹ️ 已知：Android 版是測試版（debug 簽章，能接 USB 偵錯的人可讀取記憶體，請勿用它處理你真正在意的對話）；桌面版未經程式碼簽章，安裝時 Windows SmartScreen 會跳警告。"
+    ],
+    "en": [
+      "🔐 **The signing key for the relay list has been replaced.** The old one briefly lived in our automation (2026-07-03 to 07-23). There is no sign it leaked, but we cannot rule it out, so we replaced it. From this version your app trusts the new key.",
+      "⚠️ **Please update to this version.** Older builds keep working, but they only recognise the old key and will gradually stop receiving relay list updates.",
+      "📦 **Send a whole folder.** Drag it into the conversation. More than 8 files are packed into one bundle too, instead of flooding the chat with separate messages. The recipient can list what is inside before deciding to extract it.",
+      "⚠️ Photos inside a bundle do **not** get their location data stripped the way they do when sent individually — you are asked to confirm before sending.",
+      "🔄 **Large transfers survive a dropped connection.** Reconnecting resumes from where it stopped instead of starting over, and the whole file is hash-checked on arrival.",
+      "🛠 **Run your own relay from inside the app.** Settings → Connection and backup → Run my own node. Five screens, about three minutes. It runs on your own Cloudflare account.",
+      "🐛 Fixed: if a file was moved or deleted mid-transfer, that conversation could no longer send anything, while the screen just sat on \"sending\".",
+      "📖 A full self-hosting guide is now on the website.",
+      "ℹ️ Known limitations: the Android build is a test build (debug-signed — anyone who can attach USB debugging can read its memory, so do not use it for conversations you actually care about); the desktop build is not code-signed, so Windows SmartScreen will warn on install."
+    ]
+  },
+  {
     "version": "0.0.15",
     "date": "2026-08-05",
     "released": true,

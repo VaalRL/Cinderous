@@ -13,4 +13,4 @@
 //
 // ⚠ 由 `scripts/version-sync.mjs` 從 root `package.json` 同步——**不要手改**。
 // `pnpm version:check` 會在漂移時讓 CI 紅。
-export const RELAY_WORKER_VERSION = "0.0.15";
+export const RELAY_WORKER_VERSION = "0.0.16";
