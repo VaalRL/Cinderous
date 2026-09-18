@@ -31,7 +31,7 @@ Cinderous 透過「狀態信令」與「巨量資料傳輸」雙軌混合網路�
 ### 終端平台
 
 - **桌面端（第一優先）**：Rust **Tauri** + **React/TypeScript**，可打包成 Windows（MSI／NSIS）／macOS／Linux 安裝檔；私鑰託 OS 金鑰庫、背景 WebSocket 長連線、原生檔案存取（公司儲存槽等）。**同一套 React UI 也能直接跑在瀏覽器**（開發與 web 執行環境），以加密 localStorage／OPFS 落地——並非捨棄網頁，而是把「明文絕不落盤」做到瀏覽器（ADR-0112）。
-- **行動端（規劃中）**：目前為 **React Native Web**（與桌面**共用同一套 `RelayChatBackend`** engine、功能高度對齊）；**原生 Android／iOS App 尚未推出**，列於[產品藍圖](https://vaalrl.github.io/Cinderous/)的未來待辦——原生打包（Expo／RN）、系統金鑰庫、原生通知與背景推播待接（iOS 另需 macOS 建置）。
+- **行動端（規劃中）**：目前為 **React Native Web**（與桌面**共用同一套 `RelayChatBackend`** engine、功能高度對齊）；**Android 已有測試版 APK**（見 [Releases](https://github.com/VaalRL/Cinderous/releases)，Capacitor 殼，自 v0.0.14 起）；🔴 它目前以 **debug 憑證簽署且可被偵錯**——能接上 USB 偵錯的人可讀取行程記憶體，而 session 期間私鑰必然在裡面，請勿用它處理你真正在意的對話（ADR-0335，詳見 [`docs/SECURITY.md`](./docs/SECURITY.md)）。**iOS 尚未推出**（另需 macOS 建置）。原生通知與背景推播待接。
 - **中繼站**：Cloudflare Worker（Durable Objects 扇出），另有 Node 版可自架於容器。
 
 完整技術規格見 [`PRD.md`](./PRD.md)，模組邊界與資料流見 [`ARCHITECTURE.md`](./ARCHITECTURE.md)。

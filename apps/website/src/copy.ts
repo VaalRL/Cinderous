@@ -115,6 +115,15 @@ export interface Copy {
   hero_ic_github: string;
   hero_tip_windows: string;
   hero_soon: string;
+  /**
+   * Android 測試版的誠實標示（ADR-0335）。
+   *
+   * 🔴 出貨的 APK 是 **debug 簽章且可被偵錯**——任何能接 adb 的人可以附著行程讀記憶體，
+   * 而 session 期間 nsec 必然在裡面。以前官網寫「即將推出」，但它已經在 Releases 上六週了。
+   * 說它不存在是錯的，不加警告地推廣它也是錯的。
+   */
+  hero_ic_mobile_beta: string;
+  hero_mobile_caveat: string;
   hero_webapp: string;
   hero_tech: string;
   hero_github: string;
@@ -468,6 +477,8 @@ const zhHant: Copy = {
   hero_ic_github: "GitHub",
   hero_tip_windows: "下載 Windows 版",
   hero_soon: "即將推出",
+  hero_ic_mobile_beta: "Android（測試版）",
+  hero_mobile_caveat: "測試版：目前以 debug 憑證簽署，能接上 USB 偵錯的人可讀取記憶體。請勿用它處理你真正在意的對話。",
   hero_webapp: "在瀏覽器開啟",
   hero_tech: "看技術原理",
   hero_github: "在 GitHub 檢視原始碼",
@@ -849,6 +860,8 @@ const en: Copy = {
   hero_ic_github: "GitHub",
   hero_tip_windows: "Download for Windows",
   hero_soon: "Coming soon",
+  hero_ic_mobile_beta: "Android (test build)",
+  hero_mobile_caveat: "Test build: signed with a debug certificate, so anyone who can attach USB debugging can read its memory. Do not use it for conversations you actually care about.",
   hero_webapp: "Open in browser",
   hero_tech: "How it works",
   hero_github: "View source on GitHub",

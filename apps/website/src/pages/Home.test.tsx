@@ -18,12 +18,24 @@ describe("Home hero icon 按鈕列（ADR-0229）", () => {
     expect(html).toContain('aria-label="下載 Windows 版"');
   });
 
-  it("macOS 與行動版 disabled：aria-disabled＋灰階 class＋「即將推出」tooltip", () => {
+  it("macOS 仍 disabled：aria-disabled＋灰階 class＋「即將推出」tooltip", () => {
     const html = render();
+    // 只剩 macOS 一顆。行動版已經有出貨的 APK，繼續說「即將推出」是假的。
     const disabledCount = (html.match(/aria-disabled="true"/g) ?? []).length;
-    expect(disabledCount).toBe(2);
+    expect(disabledCount).toBe(1);
     expect(html).toContain("iconbtn--disabled");
     expect(html).toContain("即將推出");
+  });
+
+  it("🔴 行動版連得到 Releases，且標示測試版與偵錯警告（ADR-0335）", () => {
+    // APK 自 2026-08-05 就在 Releases 上——說它不存在是錯的。
+    // 但它是 debug 簽章、可被偵錯，所以不能只放一顆乾淨的下載鈕。
+    const html = render();
+    expect(html).toContain("Android（測試版）");
+    expect(html).toContain("debug 憑證");
+    expect(html).toContain("releases/latest");
+    // 那顆不再是 disabled 的 button。
+    expect(html).not.toContain('aria-label="行動版－即將推出"');
   });
 
   it("tooltip 與手機可見標籤皆存在；「看技術原理」保留文字連結", () => {

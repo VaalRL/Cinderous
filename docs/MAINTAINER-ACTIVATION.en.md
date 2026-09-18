@@ -2,9 +2,14 @@
 
 # Activating the Maintainer Role (Lighting Up the Signed Relay Pool)
 
-> This is an **operations manual**: it turns on the currently **implemented but dormant** "maintainer signed relay list" mechanism (ADR-0039 / 0092),
-> so that third-party self-hosted nodes can be automatically admitted into the official slot-selection pool. Dormant state today: `MAINTAINER_PUBKEY` is empty,
-> `relay/bootstrap/relays.json` is empty, and the GitHub secret `MAINTAINER_NSEC` is unset.
+> This is an **operations manual** for running the "maintainer signed relay list" mechanism
+> (ADR-0039 / 0092), which lets third-party self-hosted nodes be admitted into the official
+> slot-selection pool.
+>
+> **Current state (2026-09-18)**: `MAINTAINER_PUBKEY` has been set since 2026-07-18,
+> `relays.json` holds two anchors, and the mechanism is live. Steps (1) and (3) below are for
+> **first-time setup only**; for day-to-day work go straight to the offline signing section
+> and "Day-to-day maintainer work".
 
 ## ⚠️ Read first: this key is the "trust root"
 
@@ -35,14 +40,33 @@ Options: `MAINTAINER_NSEC_OUT=/path` to customize the output path; `MAINTAINER_N
 > You may also generate it with any standard Nostr key tool you trust (ideally offline). Two representations are needed:
 > `MAINTAINER_PUBKEY` = 32-byte x-only public key **hex (64 characters)**; `MAINTAINER_NSEC` = **`nsec1…`**.
 
-## ② Set the nsec as a GitHub Actions secret
+## ② Offline signing (ADR-0239)
 
-GitHub → repo → **Settings → Secrets and variables → Actions → New repository secret**
-- Name: `MAINTAINER_NSEC`
-- Value: the contents of the `maintainer.nsec` file (`nsec1…`)
+🔴 **Never set `MAINTAINER_NSEC` as a GitHub Actions secret.** This document used to say you
+should; that is exactly the anti-pattern ADR-0239 removed. Any poisoned transitive dependency
+in CI could read the trust root of the entire failover topology. `relay-health.yml` no longer
+holds or injects that secret (see line 23 of that file).
 
-`.github/workflows/relay-health.yml` already reads `secrets.MAINTAINER_NSEC`; when it is unset, it only updates the plaintext list and does not sign
-(`relay/bootstrap/health-check.ts`). Once set, **back up that file offline and delete it from your machine**.
+The key stays on your machine. CI only probes and updates the plaintext list; **you sign and
+publish locally**:
+
+```bash
+# 1. Fetch the runtime probe history (CI keeps it on the relay-health-state branch, not main)
+git fetch origin relay-health-state
+git show FETCH_HEAD:health-history.json > relay/bootstrap/health-history.json
+
+# 2. Sign the already-committed plaintext list offline and publish it in-band
+MAINTAINER_NSEC="$(cat /path/to/maintainer.nsec)" \
+  pnpm --filter @cinderous/relay bootstrap:sign
+```
+
+`--sign-only` does not re-probe. It signs whatever `relays.json` currently holds into a
+kind 10037 event and pushes it to healthy relays, where clients pick it up on connect.
+Without `MAINTAINER_NSEC` it fails loudly rather than skipping silently.
+
+**When to run it**: after `relays.json` changes (a node admitted, retired, or reweighted).
+CI changes the plaintext list but **will not sign for you**, so skipping this step means
+clients never see the new list.
 
 ## ③ Fill the public key into the code (= light up the trust root)
 
@@ -69,8 +93,11 @@ The candidate source is `relay/bootstrap/relays.json` itself (`listEntries` read
 }
 ```
 
-Then the hourly `relay-health.yml`: probe → `evaluateAdmission` sets `accepting`/`weight` → if an nsec is present, it signs and
-**publishes in-band** (`publishEvent`) to healthy relays, which clients learn as soon as they connect.
+Then `relay-health.yml` every 6 hours (cron `17 */6 * * *`): probe → `evaluateAdmission` sets
+`accepting`/`weight` → commits `relays.json` to main when it changed.
+
+⚠ **CI stops there — it neither signs nor publishes** (ADR-0239). To get the new list to
+clients, run the offline signing above yourself.
 
 - If your relay has `requireAuth:true`, the probe will **generate an ephemeral key on the spot** to perform NIP-42 AUTH (`conformance.ts` already handles this).
 - ADR-0039 recommends eventually assembling **≥2 anchors** on different domains/platforms to cover single-point risk.
@@ -95,7 +122,10 @@ Graded admission (ADR-0092):
 ## ⑥ Verify it is live
 
 - Actions → "Relay Health Check" → **Run workflow** (or wait for the cron — :17 every 6 hours, ADR-0350).
-- The log should show: `✅ <url>`, `signed relay list event (kind 10037)`, `📡 published to <url>`.
+- The CI log should show `✅ <url>` and
+  `未提供 MAINTAINER_NSEC：僅更新明文清單` — **that line is normal**, not a failure.
+- `signed relay list event (kind 10037)` and `📡 published to <url>` appear only when **you**
+  run the offline signing locally.
 - The bot commits to main only when `relays.json` actually changes; `health-history.json`
   (the rolling uptime counters) is runtime state, kept on the `relay-health-state` branch
   and **never on main** (ADR-0350).
@@ -120,8 +150,38 @@ Graded admission (ADR-0092):
 
 ## Key rotation
 
-Changing `MAINTAINER_PUBKEY` requires **rebuilding all clients** (compile-time constant), and keeping the old and new lists coexisting during the transition. Plan the process in advance to
-avoid turning clients into islands during an emergency rotation.
+### 🔴 The current key is due for rotation (ADR-0239 follow-up 2)
+
+`MAINTAINER_NSEC` was a GitHub Actions secret from **2026-07-03 until 2026-07-23**, and the
+public key currently pinned in clients, `6efd2603…`, was committed on **2026-07-18** — inside
+that window.
+
+ADR-0239 states that a key which entered CI in any form must be **treated as exposed and
+rotated once**. For those twenty days, any poisoned transitive dependency could have read it,
+and it is the **only** trust anchor pinned in every client: holding it means signing a relay
+list that clients adopt automatically (eclipse / metadata harvesting). There is no evidence it
+was taken, but absence of evidence is not evidence of absence.
+
+### Rotation procedure
+
+`MAINTAINER_PUBKEY` is a **compile-time constant**, so already-shipped clients will not pick up
+a new one. Order matters:
+
+1. **Generate the new key** locally and offline:
+   `pnpm --filter @cinderous/relay genkey:maintainer`
+   (the nsec is written to a file, never printed; keep the old key for now).
+2. **Commit the new public key** to `packages/engine/src/bootstrap-config.ts`, with an ADR
+   recording the rotation and why.
+3. **Rebuild and ship every client** (desktop, web, mobile, CLI). Until then, older clients
+   only trust the old key.
+4. **Wait for the new build to spread** before retiring the old key. During that period
+   **sign the same list with both keys** — old clients can only verify the old signature, and
+   retiring it early turns them into islands that receive no list updates at all, including
+   "this relay has retired".
+5. Once the old key has no remaining use, destroy every copy of it.
+
+⚠ Step 4 is not automated. While both keys are live, every `relays.json` change needs the
+offline signing run once per key.
 
 ## References
 

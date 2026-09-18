@@ -2,9 +2,12 @@
 
 # 啟用維護者角色（點亮簽章 relay 池）
 
-> 這份是**操作手冊**：把目前**已寫好但休眠**的「維護者簽章 relay 清單」機制（ADR-0039／0092）打開，
-> 讓第三方自架節點能被官方自動選座池收錄。休眠現況：`MAINTAINER_PUBKEY` 為空、
-> `relay/bootstrap/relays.json` 為空、GitHub secret `MAINTAINER_NSEC` 未設。
+> 這份是**操作手冊**：維運「維護者簽章 relay 清單」機制（ADR-0039／0092），
+> 讓第三方自架節點能被官方自動選座池收錄。
+>
+> **現況（2026-09-18）**：`MAINTAINER_PUBKEY` 已填（2026-07-18 起）、`relays.json` 已有兩座錨點、
+> 機制運作中。所以下面的 ①③ 是**首次啟用**才需要的步驟，日常維運直接看 §②（離線簽章）
+> 與「之後的維護者日常」。
 
 ## ⚠️ 先讀：這把金鑰是「信任根」
 
@@ -35,14 +38,29 @@ pnpm --filter @cinderous/relay genkey:maintainer
 > 也可用任何你信任的（最好離線的）標準 Nostr 金鑰工具產。需要兩種表示：
 > `MAINTAINER_PUBKEY` = 32-byte x-only 公鑰 **hex（64 字元）**；`MAINTAINER_NSEC` = **`nsec1…`**。
 
-## ② 把 nsec 設成 GitHub Actions secret
+## ② 離線簽章（ADR-0239）
 
-GitHub → repo → **Settings → Secrets and variables → Actions → New repository secret**
-- Name：`MAINTAINER_NSEC`
-- Value：`maintainer.nsec` 檔案內容（`nsec1…`）
+🔴 **絕對不要把 `MAINTAINER_NSEC` 設成 GitHub Actions secret。** 這份文件以前是這樣教的，
+那是 ADR-0239 拔掉的反模式：CI 的傳遞相依任何一個被投毒，就能讀走整個容錯拓樸的信任根。
+`relay-health.yml` 現在**不持有也不注入**這個 secret（見該檔第 23 行）。
 
-`.github/workflows/relay-health.yml` 已在讀 `secrets.MAINTAINER_NSEC`；沒設時只更新明文清單、不簽章
-（`relay/bootstrap/health-check.ts`）。設好後，**離線備份該檔並從本機刪除**。
+金鑰只留在你的機器上。CI 只做探測與更新明文清單；**簽章與發佈由你在本機執行**：
+
+```bash
+# 1. 取回執行期的探測歷史（CI 把它存在 relay-health-state 分支，不進 main）
+git fetch origin relay-health-state
+git show FETCH_HEAD:health-history.json > relay/bootstrap/health-history.json
+
+# 2. 對「已提交的明文清單」離線簽章並帶內發佈
+MAINTAINER_NSEC="$(cat /path/to/maintainer.nsec)" \
+  pnpm --filter @cinderous/relay bootstrap:sign
+```
+
+`--sign-only` 不重新探測，只對 `relays.json` 現有內容簽出 kind 10037 並推送到健康的 relay，
+客戶端連上即學到。少了 `MAINTAINER_NSEC` 它會直接報錯，不會靜默跳過。
+
+**什麼時候要跑**：`relays.json` 有變動之後（收錄新節點、標記退役、權重改變）。CI 改了明文清單
+但**不會**替你簽，所以不跑這一步的話，客戶端永遠看不到新清單。
 
 ## ③ 把公鑰填進 code（＝點亮信任根）
 
@@ -69,8 +87,10 @@ export const MAINTAINER_PUBKEY = "<你的 64 字元 hex 公鑰>";
 }
 ```
 
-之後每小時的 `relay-health.yml`：探測 → `evaluateAdmission` 定 `accepting`/`weight` → 有 nsec 即簽章並
-**帶內推送**（`publishEvent`）到健康 relay，客戶端連上即學到。
+之後每 6 小時的 `relay-health.yml`（cron `17 */6 * * *`）：探測 → `evaluateAdmission` 定
+`accepting`/`weight` → 變動時提交 `relays.json` 到 main。
+
+⚠ **CI 到此為止，不簽章也不發佈**（ADR-0239）。要讓客戶端看到新清單，你得自己跑 §② 的離線簽章。
 
 - 你的 relay 若 `requireAuth:true`，探測會**當場產臨時金鑰**做 NIP-42 AUTH（`conformance.ts` 已處理）。
 - ADR-0039 建議日後湊 **≥2 座**不同網域/平台的錨點，補單點風險。
@@ -95,7 +115,10 @@ export const MAINTAINER_PUBKEY = "<你的 64 字元 hex 公鑰>";
 ## ⑥ 驗證上線
 
 - Actions → 「Relay 健康檢查」→ **Run workflow**（或等 cron——每 6 小時的 :17，ADR-0350）。
-- Log 應出現：`✅ <url>`、`已簽章 relay 清單事件（kind 10037）`、`📡 發佈至 <url>`。
+- CI 的 log 應出現：`✅ <url>`，以及
+  `未提供 MAINTAINER_NSEC：僅更新明文清單`——**那一行是正常的**，不是故障。
+- `已簽章 relay 清單事件（kind 10037）` 與 `📡 發佈至 <url>` 只會出現在**你本機**跑
+  §② 的離線簽章時。
 - bot 只在 `relays.json` 真的變動時提交到 main；`health-history.json`（滾動 uptime 計數）
   是執行期狀態，存在 `relay-health-state` 分支、**不進 main**（ADR-0350）。
 - 用**重建後**的客戶端確認登入自動選座已從簽章清單預填。
@@ -118,8 +141,28 @@ export const MAINTAINER_PUBKEY = "<你的 64 字元 hex 公鑰>";
 
 ## 金鑰輪替
 
-換 `MAINTAINER_PUBKEY` 需要**重建所有客戶端**（編譯期常數），並在期間讓新舊清單並存過渡。事前規劃好流程，
-避免緊急輪替時把客戶端變孤島。
+### 🔴 目前這把金鑰待輪替（ADR-0239 後續 2）
+
+`MAINTAINER_NSEC` 曾經是 GitHub Actions secret：**2026-07-03 注入、2026-07-23 移出**。
+而現行公鑰 `6efd2603…` 是 **2026-07-18** 釘進客戶端的——正落在那個視窗內。
+
+ADR-0239 寫明「若曾以任何形式進過 CI，視為**已曝險**、應輪替一次」。那二十天裡任一傳遞相依
+被投毒都足以讀走它，而它是全體客戶端釘死的**唯一**信任錨：握有它就能簽出客戶端會自動採用的
+relay 清單（eclipse／元資料收割）。沒有證據顯示它被拿走，但「沒有證據」不是「沒有發生」。
+
+### 輪替程序
+
+`MAINTAINER_PUBKEY` 是**編譯期常數**，已出貨的客戶端不會自動吃到新公鑰，所以順序很重要：
+
+1. **產新金鑰**（本機、離線）：`pnpm --filter @cinderous/relay genkey:maintainer`
+   （nsec 只寫檔、永不印到 stdout；舊的先別刪）。
+2. **填新公鑰**進 `packages/engine/src/bootstrap-config.ts`，配一份 ADR 記錄輪替與原因。
+3. **重建並發佈所有客戶端**（桌面、網頁、行動、CLI）。舊版客戶端在此之前只認舊公鑰。
+4. **等出貨版本普及**再停用舊金鑰。這段期間**兩把都要簽**同一份清單——舊客戶端只驗得了舊簽章，
+   停太早會把它們變成孤島（收不到任何清單更新，包括「這座 relay 退役了」）。
+5. 舊金鑰的最後一個用途結束後，銷毀它的所有副本。
+
+⚠ 第 4 步沒有自動化。並存期間每次改 `relays.json` 都要用兩把金鑰各跑一次 §② 的離線簽章。
 
 ## 參考
 

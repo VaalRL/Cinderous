@@ -5,58 +5,24 @@
 
 ---
 
-## A. 混合式引導路由上線（ADR-0039）— Node1 下架時自動遷移
+## A. 混合式引導路由（ADR-0039）— ✅ 已上線（2026-09-18 覆核）
 
-要讓「單一中繼站下架、AB 零動作自動改走其他節點」真正生效，需完成以下。**全部留空時＝現行單/多 relay 行為，不會壞。**
+A1–A5 全部完成，這一節保留為紀錄。**不要照舊版步驟操作**——當時寫的 A3 路徑已不存在，
+A4 更是後來被 ADR-0239 拔掉的反模式。現況：
 
-### A1. 部署錨點 relay（2–3 座，綁定專屬網域）
-- 依 Phase C（ADR-0005）把 `relay/` 的 Worker 部署到 Cloudflare，**綁定至少 2 個獨立網域**（避免單一網域被扣押/DNS 污染仍是 SPOF）。
-  - 需要：Cloudflare 帳號。指令：`cd relay && npx wrangler deploy`（先設定 `wrangler.toml` 的路由與 D1 綁定）。
-  - 例：`wss://relay.你的網域.tw`、`wss://relay2.你的網域.tw`。
+| 當初的待辦 | 現況 |
+| --- | --- |
+| A1 部署 2 座錨點 | ✅ `cinder-relay.cinderous1` 與 `cinder-relay.jt0856`（兩個獨立 Cloudflare 帳號） |
+| A2 產維護者金鑰 | ✅ 已產。🔴 **但曾進 CI（2026-07-03～07-23），待輪替**——見 `MAINTAINER-ACTIVATION.md` |
+| A3 填客戶端設定 | ✅ 已填。⚠ 檔案早就搬到 `packages/engine/src/bootstrap-config.ts`（ADR-0100），舊路徑不存在 |
+| A4 設 GitHub Secret | ❌ **不要做**。ADR-0239 已把信任根移出 CI，改為本機離線簽章 |
+| A5 填初始節點清單 | ✅ `relay/bootstrap/relays.json` 已有兩座 |
 
-### A2. 產生維護者簽章金鑰（清單的信任根）
-- 產一組 Nostr 金鑰，**私鑰（nsec）絕不外流**、公鑰（hex）填進客戶端。
-  - 可用 App 內任一帳號的金鑰，或另產專用金鑰（建議專用）。
-  - 取得公鑰 hex：登入後在「我的 ID」看 npub，或用 core 的 `npubDecode`。
+日常維運（含離線簽章的實際指令）看 [`MAINTAINER-ACTIVATION.md`](./MAINTAINER-ACTIVATION.md)。
 
-### A3. 填入客戶端設定 `apps/desktop/src/bootstrap-config.ts`
-```ts
-export const ANCHOR_RELAYS = ["wss://relay.你的網域.tw", "wss://relay2.你的網域.tw"];
-export const MAINTAINER_PUBKEY = "你的維護者公鑰 hex（64 字元）";
-```
+⚠ **CI 每 6 小時探測並更新明文清單，但不簽章也不發佈**。清單變動後要由維護者在本機跑
+`bootstrap:sign`，否則客戶端永遠看不到新清單。
 
-### A4. 設定 GitHub Secret（讓 Actions 能簽章＋發佈清單）
-- Repo → Settings → Secrets and variables → Actions → New repository secret：
-  - Name: `MAINTAINER_NSEC`
-  - Value: 你的維護者私鑰 nsec（**與 A2 對應**）
-- 確認 repo 的 Actions 已啟用、且 workflow 有 `contents: write` 權限（`.github/workflows/relay-health.yml` 已宣告）。
-
-### A5. 填入初始節點清單 `relay/bootstrap/relays.json`
-```json
-{
-  "relays": ["wss://relay.你的網域.tw", "wss://node2.某社群.com"],
-  "entries": [
-    { "url": "wss://relay.你的網域.tw", "weight": 2 },
-    { "url": "wss://node2.某社群.com", "accepting": false }
-  ],
-  "updatedAt": 1
-}
-```
-- `entries`（ADR-0069，可省略＝全預設）：`accepting: false`＝停收新帳號分配（額度吃緊）、
-  `weight`＝自動分配權重、`status: "draining"`＝計劃退役（既有用戶分批自動搬走）、
-  `"retired"`＝已退役（免探測、保留於清單讓客戶端學到）。
-- Cron（每小時）會自動 REQ→EOSE 探測、剔除逾時者、簽章並**發佈到每座健康 relay**（客戶端連上即學到）。
-- 想立刻跑一次：GitHub → Actions →「Relay 健康檢查」→ Run workflow（`workflow_dispatch`）。
-
-### A6. 驗證上線
-- 本機模擬：`PORT=8899 node relay/dist/dev-server.js` 起一座、把它填進 relays.json、
-  `MAINTAINER_NSEC=<nsec> pnpm --filter @cinderous/relay bootstrap:run`，
-  應看到 `✅ 探測` → `已簽章 kind 10037` → `📡 發佈至 …`。
-- 真機：兩台裝置填好 A3 設定，其一 home 指向會下架的節點，關掉該節點後觀察訊息是否仍送達（經錨點），5 分鐘後 home 是否自動遞補（設定面板連線狀態）。
-
-> **物理極限（任何方案都一樣）**：A、B 兩端都要跑「填好 A3 設定」的新版；下架節點上**尚未取件的離線留言**會隨之消失（NIP-40 本來也只存 7 天）。
-
----
 
 ## B. 此環境（雲端沙箱）無法執行、需你在對應環境完成的事
 

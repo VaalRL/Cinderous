@@ -68,16 +68,19 @@ export function Home({
               <span className="iconbtn__label">{c.hero_ic_mac}</span>
               <span className="iconbtn__tip">{c.hero_soon}</span>
             </button>
-            <button
-              type="button"
-              className="iconbtn iconbtn--disabled"
-              aria-disabled="true"
-              aria-label={`${c.hero_ic_mobile}－${c.hero_soon}`}
+            {/* Android 測試版（ADR-0335）：APK 自 2026-08-05 就在 Releases 上，說它「即將推出」
+                是假的。但它是 debug 簽章、可被偵錯，所以連結旁邊要帶警告，不能只放一顆下載鈕。 */}
+            <a
+              className="iconbtn"
+              href={`${GITHUB_URL}/releases/latest`}
+              target="_blank"
+              rel="noreferrer"
+              aria-label={`${c.hero_ic_mobile_beta}－${c.hero_mobile_caveat}`}
             >
               <MobileIcon />
-              <span className="iconbtn__label">{c.hero_ic_mobile}</span>
-              <span className="iconbtn__tip">{c.hero_soon}</span>
-            </button>
+              <span className="iconbtn__label">{c.hero_ic_mobile_beta}</span>
+              <span className="iconbtn__tip">{c.hero_mobile_caveat}</span>
+            </a>
             <a
               className="iconbtn"
               href={WEBAPP_URL}
