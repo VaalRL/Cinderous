@@ -308,6 +308,16 @@ export interface Messages {
    * 企業工作身分輪替後的系統提示（ADR-0052／0363）。
    * 桌面原本把這句**硬寫成中文**，英文使用者會看到一串看不懂的字。
    */
+  /**
+   * 送出後超過中繼保存期仍未收到送達回條（PRD §9／ADR-0364）。
+   *
+   * 🔴 文案必須說「可能」。有一條會誤判的路徑：對方第 1 天就收到並回了送達回條，但**寄件者
+   * 自己離線超過保存期**，那則回條也過期了。說成「已過期」就是用一個新的假確定性換掉舊的，
+   * 而 PRD 要的是**拿掉**假確定性。
+   */
+  msg_maybeUndelivered: string;
+  /** 離線太久、可能漏訊的提示（PRD §9 後半）。同樣是推論，不是偵測。 */
+  offlineGap_notice: string;
   identity_rotatedNote: string;
   groupInvite_held: string;
   groupFs_summary: string;
@@ -1338,6 +1348,10 @@ const zhHant: Messages = {
   fs_undecryptable: "⚠️ 這台裝置有 {count} 則收到的訊息解不開（最後一次：{when}）。可能是對方用了你已更換掉的舊金鑰，也可能只是損壞的資料——這兩者無法分辨。解不開的訊息不會顯示，也查不出是誰送的。若經常發生，請讓對方更新到最新版並保持上線。",
   settings_groupInvite: "允許任何人把我加進群組",
   settings_groupInviteHint: "關閉（預設）：只有你的聯絡人可以把你加進群組；陌生人的邀請會先進「訊息請求」，你接受那個人之後群組才會出現。開啟：任何知道你 npub 的人都能直接把你拉進群組。封鎖的人永遠擋得住，與此設定無關。",
+  msg_maybeUndelivered:
+    "可能未送達——送出已超過 {days} 天，仍沒收到對方的送達回條。中繼站只保存 {days} 天，超過就會刪除，對方之後上線也拉不回來。建議重傳一次。",
+  offlineGap_notice:
+    "你已經 {days} 天沒有連上線。中繼站只保存 {ttl} 天的離線留言，這段期間有人傳給你的訊息**可能已經過期消失**——不會補送，也查不出漏了哪些。要緊的事建議請對方再傳一次。",
   identity_rotatedNote: "{name} 已更新金鑰（對話已接續）",
   groupInvite_held: "{name} 想把你加進「{group}」。在「訊息請求」接受他之後，群組才會出現。",
   groupFs_summary: "本群 {total} 位成員中，{covered} 位的訊息有前向保密。",
@@ -2274,6 +2288,10 @@ const en: Messages = {
   fs_undecryptable: "⚠️ This device could not decrypt {count} received message(s) (last: {when}). It may be that the sender used a key you have since rotated away, or the data was simply corrupt — the two cannot be told apart. Undecryptable messages are not shown, and there is no way to tell who sent them. If this keeps happening, ask your contacts to update and stay online.",
   settings_groupInvite: "Let anyone add me to groups",
   settings_groupInviteHint: "Off (default): only your contacts can add you to a group; an invite from a stranger waits in Message requests and the group appears once you accept that person. On: anyone who knows your npub can add you directly. Blocked people are always refused, regardless of this setting.",
+  msg_maybeUndelivered:
+    "May not have been delivered — sent over {days} days ago with no delivery receipt. Relays only keep offline messages for {days} days, then delete them; the recipient cannot retrieve it later. Consider sending it again.",
+  offlineGap_notice:
+    "You have not been online for {days} days. Relays keep offline messages for only {ttl} days, so anything sent to you during that time **may have expired and been deleted** — it will not be redelivered, and there is no way to tell what was lost. Ask people to resend anything important.",
   identity_rotatedNote: "{name} has rotated their key (the conversation continues)",
   groupInvite_held: "{name} wants to add you to \"{group}\". The group will appear once you accept them in Message requests.",
   groupFs_summary: "{covered} of {total} members receive forward-secret messages.",

@@ -10,7 +10,13 @@ import { alsoMainTag, replyTag } from "./thread.js";
 
 const KIND_CHAT = 14;
 const DAY_SECONDS = 86_400;
-const DEFAULT_TTL_SECONDS = 7 * DAY_SECONDS;
+/**
+ * 離線留言在中繼上的預設保存期（NIP-40，ADR-0065）。
+ *
+ * 導出是因為**寄件端要據此判斷「這則是不是已經過期了」**（PRD §9／ADR-0364）——
+ * 在兩個地方各寫一個 7 天，遲早會有一邊改了另一邊沒改。
+ */
+export const DEFAULT_TTL_SECONDS = 7 * DAY_SECONDS;
 
 /**
  * 收件人標記（ADR-0107）：寫在 **rumor 內層**，供**自封副本**抵達自己的其他裝置時，

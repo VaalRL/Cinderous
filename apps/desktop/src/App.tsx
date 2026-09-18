@@ -1557,6 +1557,22 @@ export function App(): JSX.Element {
       onAssetCached: () => setBlobsNonce((n) => n + 1),
       // ADR-0363：備份成敗一有變化就重畫設定頁（值仍從後端現讀）。
       onCloudBackup: () => bumpBackup(),
+      /**
+       * 離線太久 → 可能漏訊（PRD §9／ADR-0364）。
+       *
+       * 中繼刪掉的 Gift Wrap **不留痕跡**，重新上線也拉不回來，而且查不出漏了哪些。
+       * 在此之前使用者什麼都看不到：畫面一切正常，只是有些訊息永遠不會出現。
+       * 塞在設定頁裡沒有用——要在他一回來就看到。
+       */
+      onOfflineGap: (offlineMs) => {
+        const day = 86_400_000;
+        void alert(
+          tRef.current("offlineGap_notice", {
+            days: Math.floor(offlineMs / day),
+            ttl: Math.round((activeBackend.messageTtlMs?.() ?? 7 * day) / day),
+          }),
+        );
+      },
       onFileError: (pk, reason) => {
         const msg: ChatMessage = { id: uid("fe"), outgoing: false, text: `⚠️ ${reason}`, at: Date.now() };
         setConvos((prev) => ({ ...prev, [pk]: [...(prev[pk] ?? []), msg] }));
@@ -3614,6 +3630,7 @@ export function App(): JSX.Element {
                 setConvos((prev) => patchFileByMsgId(prev, pk, messageId, { savedPath: newPath }));
               }}
               onClose={() => closeConvo(pk)}
+            {...(activeBackend.messageTtlMs ? { msgTtlMs: activeBackend.messageTtlMs() } : {})}
             />
             </div>
           );
@@ -3717,6 +3734,7 @@ export function App(): JSX.Element {
               setConvos((prev) => patchFileByMsgId(prev, pk, messageId, { savedPath: newPath }));
             }}
             onClose={() => closeConvo(pk)}
+          {...(activeBackend.messageTtlMs ? { msgTtlMs: activeBackend.messageTtlMs() } : {})}
           />
           </div>
         );

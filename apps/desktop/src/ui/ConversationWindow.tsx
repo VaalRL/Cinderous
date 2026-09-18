@@ -19,6 +19,7 @@ import { formatBytes, getKv, mainMessages, replyCounts, rootIdOf, threadMessages
 import type { MessageKey } from "@cinderous/i18n";
 import type { ChatMessage, Contact, IcePath, MessageStatus, Self } from "@cinderous/engine";
 import { contactLabel } from "@cinderous/engine";
+import { DEFAULT_MESSAGE_TTL_MS, looksUndelivered } from "@cinderous/engine"; // PRD §9／ADR-0364
 import {
   formatCustomSticker,
   formatSticker,
@@ -370,6 +371,11 @@ export interface ConversationProps {
    * 後者是平台能力，兩件事都不該讓一個渲染元件去碰。
    */
   onBundle?: (message: ChatMessage) => BundleActions | null;
+  /**
+   * 離線留言在中繼的保存期（毫秒；ADR-0364）。企業自架站可由名冊政策改（ADR-0160），
+   * 所以不能在 UI 寫死 7 天——寫死會讓保留 30 天的站一直誤報「可能未送達」。
+   */
+  msgTtlMs?: number;
   /** 此聯絡人的私有標籤（ADR-0158：經典佈局入口）；與 onAddLabel 一起提供才顯示標籤列。 */
   labels?: string[];
   /** 新增私有標籤（ADR-0040 資料層；App 負責正規化/去重/持久化）。 */
@@ -1758,6 +1764,7 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
               onDeposit={props.onDepositFile}
               {...(props.onBundle ? { onBundle: props.onBundle } : {})}
               {...(whoColorOf(m) ? { whoColor: whoColorOf(m) } : {})}
+              {...(props.msgTtlMs !== undefined ? { msgTtlMs: props.msgTtlMs } : {})}
             />
           ))}
         </div>
@@ -2650,6 +2657,7 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
                 ownedIds={ownedIds} getBlob={getBlob}
               {...(props.onPickDate ? { onPickDate: props.onPickDate } : {})}
                 onOwnSticker={ownSticker}
+              {...(props.msgTtlMs !== undefined ? { msgTtlMs: props.msgTtlMs } : {})}
               />
             ))}
           </div>
@@ -2824,6 +2832,7 @@ export function ConversationWindow(props: ConversationProps): JSX.Element {
               {...(props.onPickDate ? { onPickDate: props.onPickDate } : {})}
               onOwnSticker={ownSticker}
               expanded
+            {...(props.msgTtlMs !== undefined ? { msgTtlMs: props.msgTtlMs } : {})}
             />
           </div>
         </div>
@@ -2854,6 +2863,7 @@ function MessageLine({
   onBundle,
   onPickDate,
   whoColor,
+  msgTtlMs,
 }: {
   message: ChatMessage;
   who: string;
@@ -2892,8 +2902,17 @@ function MessageLine({
   onBundle?: ((message: ChatMessage) => BundleActions | null) | undefined;
   /** 發言者名字色（ADR-0271）：群組限定的每人專屬色；未提供＝沿用 CSS 的 `--in-name`。 */
   whoColor?: string | undefined;
+  /** 離線留言在中繼的保存期（ADR-0364）；未提供＝用公共站的 7 天。 */
+  msgTtlMs?: number | undefined;
 }): JSX.Element {
   const { t } = useI18n();
+  /**
+   * 超過保存期仍停在「已送中繼」＝對方永遠收不到了（PRD §9／ADR-0364）。
+   * 有值＝要顯示的警告文字；`undefined`＝照常顯示狀態勾。
+   */
+  const undelivered = looksUndelivered(message, msgTtlMs)
+    ? t("msg_maybeUndelivered", { days: Math.round((msgTtlMs ?? DEFAULT_MESSAGE_TTL_MS) / 86_400_000) })
+    : undefined;
   const [picking, setPicking] = useState(false);
   const [copied, setCopied] = useState(false);
   const react = (emoji: string) => {
@@ -2962,13 +2981,21 @@ function MessageLine({
       </span>
       <span className="time">{new Date(message.at).toLocaleTimeString()}</span>
       {message.outgoing && message.status ? (
-        <span
-          className={`tick tick--${message.status}`}
-          title={t(MSG_STATUS_KEY[message.status])}
-          aria-label={t(MSG_STATUS_KEY[message.status])}
-        >
-          <MsgStatusIcon status={message.status} />
-        </span>
+        undelivered ? (
+          // PRD §9／ADR-0364：超過中繼保存期仍停在「已送中繼」＝對方永遠收不到了。
+          // 在此之前這裡顯示的是一個安靜的勾，與「剛送出」長得一模一樣。
+          <span className="tick tick--undelivered" title={undelivered} aria-label={undelivered}>
+            ⚠
+          </span>
+        ) : (
+          <span
+            className={`tick tick--${message.status}`}
+            title={t(MSG_STATUS_KEY[message.status])}
+            aria-label={t(MSG_STATUS_KEY[message.status])}
+          >
+            <MsgStatusIcon status={message.status} />
+          </span>
+        )
       ) : null}
       {message.outgoing && groupRead && groupRead.count > 0 ? (
         // 名單制（≤5 人）列出誰已讀；計數制（6–10 人）只給 M/N。大群不會走到這（groupRead 為 undefined）。

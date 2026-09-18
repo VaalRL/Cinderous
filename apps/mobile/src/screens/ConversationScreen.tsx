@@ -22,7 +22,7 @@ import {
   validateStickerSvg,
 } from "@cinderous/core";
 import type { CallMedia, MentionCandidate } from "@cinderous/core";
-import { formatBytes, replyCounts } from "@cinderous/engine";
+import { DEFAULT_MESSAGE_TTL_MS, formatBytes, looksUndelivered, replyCounts } from "@cinderous/engine";
 import type { CalendarEventInput, ChatMessage, IcePath, MessageStatus, RsvpStatus, StoredCalendarEvent } from "@cinderous/engine";
 import { type Locale, type MessageKey, translate } from "@cinderous/i18n";
 import { BG_PRESETS, type ChatBg, chatBgStyle, p2pPathChip, P2P_PATH_COLORS, resolveTheme, type Theme, type ThemeTokens } from "@cinderous/theme";
@@ -110,6 +110,8 @@ function makeStyles(tk: ThemeTokens) {
     textMine: { color: "#ffffff", fontSize: 14 },
     textTheir: { color: tk.ink, fontSize: 14 },
     status: { flexDirection: "row", alignItems: "center", gap: 4, marginTop: 2, marginRight: 4 },
+    // 可能未送達的警示記號（ADR-0364）：與狀態勾同一格，但顯眼。
+    warn: { fontSize: 11, color: "#e5484d" },
     members: {
       backgroundColor: tk.panel,
       borderBottomWidth: 1,
@@ -356,8 +358,14 @@ export function ConversationScreen({
   theme = "light",
   accent = null,
   accent2 = null,
+  msgTtlMs,
 }: {
   name: string;
+  /**
+   * 離線留言在中繼的保存期（毫秒；ADR-0364）。企業自架站可由名冊政策改（ADR-0160），
+   * 所以不能在 UI 寫死 7 天——寫死會讓保留 30 天的站一直誤報「可能未送達」。
+   */
+  msgTtlMs?: number;
   /**
    * 本地暱稱（ADR-0148，1:1）：`name` 已是顯示用（暱稱優先）；這裡另給對方廣播名與目前暱稱，
    * 供點標頭在暱稱↔廣播名間切換、與設定/清除暱稱。未提供＝群組/示範，不顯示暱稱功能。
@@ -575,6 +583,10 @@ export function ConversationScreen({
    * 檔案訊息的附註（ADR-0093 語意，與桌面一致）：
    * 已存路徑 → 顯示路徑；只有 metadata（位元組落在另一台）→ 提示；否則顯示大小。
    */
+  /** 「可能未送達」的說明文字（PRD §9／ADR-0364）——說「可能」是刻意的，見 i18n 檔頭。 */
+  const undeliveredLabel = (): string =>
+    t("msg_maybeUndelivered", { days: Math.round((msgTtlMs ?? DEFAULT_MESSAGE_TTL_MS) / 86_400_000) });
+
   const fileNote = (m: ChatMessage): string => {
     const f = m.file;
     if (!f) return "";
@@ -1273,7 +1285,13 @@ export function ConversationScreen({
                 群組另依分級顯示「誰已讀」（≤5）或「已讀 M/N」（6–10）；大群不顯示。 */}
             {!gone && m.outgoing && (m.status || groupReadOf(m)) ? (
               <View style={styles.status}>
-                {m.status ? (
+                {/* 超過中繼保存期仍停在「已送中繼」＝對方永遠收不到了（PRD §9／ADR-0364）。
+                    在此之前這裡是一個安靜的勾，與「剛送出」長得一模一樣。 */}
+                {m.status && looksUndelivered(m, msgTtlMs) ? (
+                  <Text style={styles.warn} aria-label={undeliveredLabel()}>
+                    ⚠
+                  </Text>
+                ) : m.status ? (
                   <View aria-label={t(MSG_STATUS_KEY[m.status])}>
                     <MsgStatusIcon status={m.status} color={statusColor(m.status)} size={12} />
                   </View>

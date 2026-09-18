@@ -4541,3 +4541,118 @@ describe("雲端備份狀態可見性（ADR-0071／2026-09-18 稽核）", () => 
     a.stop();
   });
 });
+
+// ── PRD §9 後半：離線太久 → 可能漏訊（ADR-0364）─────────────────────────────
+
+describe("離線缺口提示（PRD §9／ADR-0364）", () => {
+  const withLocalStorage = () => {
+    const kv = new Map<string, string>();
+    (globalThis as Record<string, unknown>).localStorage = {
+      getItem: (k: string) => kv.get(k) ?? null,
+      setItem: (k: string, v: string) => void kv.set(k, v),
+      removeItem: (k: string) => void kv.delete(k),
+    };
+    return kv;
+  };
+
+  /**
+   * 起一個**會回報連線狀態**的後端。
+   *
+   * ⚠ `createInMemoryRelayNetwork` 的 `connect` 不會呼叫 `onStatus`——替身只模擬協定，
+   * 不模擬 WebSocket 生命週期。而離線缺口的判定掛在「連上線的那一刻」（那才是缺口結束的時候），
+   * 所以這裡要自己把它叫起來。
+   */
+  const boot = (store: MemoryStorage) => {
+    const net = createInMemoryRelayNetwork();
+    let notify: ((s: "connecting" | "online" | "offline") => void) | undefined;
+    const a = new RelayChatBackend(
+      store,
+      (h: RelayClientHandlers, onStatus?: (s: "connecting" | "online" | "offline") => void) => {
+        notify = onStatus;
+        return net.connect("a", h);
+      },
+      "Alice",
+      {},
+    );
+    const gaps: number[] = [];
+    a.start({ ...noop, onOfflineGap: (ms) => gaps.push(ms) });
+    notify?.("online");
+    return { a, gaps, online: () => notify?.("online") };
+  };
+
+  /** 上次在線時刻的儲存鍵（含 pubkey 前綴，不寫死）。 */
+  const onlineKey = (kv: Map<string, string>) => [...kv.keys()].find((k) => k.startsWith("nb.lastOnline."));
+
+  it("🔴 離線超過保存期 → 提示；使用者在此之前完全看不到自己漏了訊息", () => {
+    const kv = withLocalStorage();
+    const store = new MemoryStorage();
+    const first = boot(store);
+    const key = onlineKey(kv);
+    expect(key, "連上線之後應該留下時刻").toBeDefined();
+    first.a.stop();
+
+    // 把它改成 30 天前 ⇒ 下一次啟動就是「離線 30 天後回來」。
+    kv.set(key!, String(Date.now() - 30 * 86_400_000));
+    const again = boot(store);
+    expect(again.gaps).toHaveLength(1);
+    expect(again.gaps[0]!).toBeGreaterThan(29 * 86_400_000);
+    again.a.stop();
+  });
+
+  it("離線沒超過保存期就不吵", () => {
+    const kv = withLocalStorage();
+    const store = new MemoryStorage();
+    const first = boot(store);
+    const key = onlineKey(kv)!;
+    first.a.stop();
+    kv.set(key, String(Date.now() - 2 * 86_400_000)); // 兩天
+    const again = boot(store);
+    expect(again.gaps).toEqual([]);
+    again.a.stop();
+  });
+
+  it("🔴 首次啟用不報——那是新裝置，不是「漏了一週」", () => {
+    withLocalStorage();
+    const { a, gaps } = boot(new MemoryStorage());
+    expect(gaps).toEqual([]);
+    a.stop();
+  });
+
+  it("一次啟動只說一次：網路不穩會反覆觸發 online，每次都說等於洗版", () => {
+    const kv = withLocalStorage();
+    const store = new MemoryStorage();
+    const first = boot(store);
+    const key = onlineKey(kv)!;
+    first.a.stop();
+    kv.set(key, String(Date.now() - 30 * 86_400_000));
+
+    const again = boot(store);
+    again.online();
+    again.online();
+    expect(again.gaps).toHaveLength(1);
+    again.a.stop();
+  });
+
+  it("🔴 連上線後那個時刻會被蓋成現在——否則每次啟動都報同一個缺口", () => {
+    const kv = withLocalStorage();
+    const store = new MemoryStorage();
+    const first = boot(store);
+    const key = onlineKey(kv)!;
+    first.a.stop();
+    kv.set(key, String(Date.now() - 30 * 86_400_000));
+
+    const second = boot(store);
+    expect(second.gaps).toHaveLength(1);
+    second.a.stop();
+    const third = boot(store);
+    expect(third.gaps).toEqual([]);
+    third.a.stop();
+  });
+
+  it("messageTtlMs 預設是 7 天（公共站的 NIP-40）", () => {
+    withLocalStorage();
+    const { a } = boot(new MemoryStorage());
+    expect(a.messageTtlMs()).toBe(7 * 86_400_000);
+    a.stop();
+  });
+});

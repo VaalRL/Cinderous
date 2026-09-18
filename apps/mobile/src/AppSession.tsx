@@ -739,6 +739,21 @@ export function AppSession({
       // ADR-0363：備份成敗一有變化就重畫設定頁（值仍從後端現讀）。
       onCloudBackup: () => bumpBackup(),
       /**
+       * 離線太久 → 可能漏訊（PRD §9／ADR-0364）。
+       *
+       * 中繼刪掉的 Gift Wrap **不留痕跡**，重新上線也拉不回來，而且查不出漏了哪些。
+       * 在此之前使用者什麼都看不到：畫面一切正常，只是有些訊息永遠不會出現。
+       */
+      onOfflineGap: (offlineMs) => {
+        const day = 86_400_000;
+        window.alert(
+          translate(localeRef.current, "offlineGap_notice", {
+            days: Math.floor(offlineMs / day),
+            ttl: Math.round((backendRef.current?.messageTtlMs?.() ?? 7 * day) / day),
+          }),
+        );
+      },
+      /**
        * 通話失敗留下**可行動**的提示（ADR-0243／0363），與桌面同一種呈現。
        *
        * 行動端在此之前只有視窗關閉，沒有任何原因。而 `unreachable`（限制網路下無 TURN 退路）
@@ -1763,6 +1778,7 @@ export function AppSession({
           {...callProps}
           {...stickerProps}
           {...themeProps}
+        {...(backendRef.current?.messageTtlMs ? { msgTtlMs: backendRef.current.messageTtlMs() } : {})}
         />
         {callOverlay}
       </View>

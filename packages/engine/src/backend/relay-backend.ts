@@ -170,6 +170,7 @@ import { opfsFileSink } from "../storage/opfs-file-sink.js"; // ADR-0347：收�
 import type { IcePath } from "./ice-path.js"; // ADR-0344
 import { relayFileWarningFor, type RelayFileWarning } from "./file-gate.js"; // ADR-0344
 import { fetchTurnWithFallback, turnEndpointCandidates, turnRefreshDelayMs } from "./turn-fetch.js";
+import { DEFAULT_MESSAGE_TTL_MS, offlineGapMs } from "../message-delivery.js"; // PRD §9／ADR-0364
 import { WebRtcCall } from "./webrtc-call.js";
 import { WebRtcTransfer } from "./webrtc.js";
 import { buildSnapshotContent, mergeSnapshotContent, parseSnapshotContent } from "../storage/cloud-snapshot.js";
@@ -533,6 +534,12 @@ export class RelayChatBackend implements ChatBackend {
   private remindTimer: ReturnType<typeof setInterval> | undefined;
   /** 已送出、還在等 relay 回 OK 的快照事件 id（用來分辨哪一顆 OK 是快照的）。 */
   private readonly pendingSnapshotIds = new Set<string>();
+  /** 離線缺口這一輪已經**算過**了（PRD §9／ADR-0364）：算完就被 `touchOnline` 蓋掉，只有一次機會。 */
+  private offlineGapChecked = false;
+  /** 算出來但還沒送出去的離線缺口（毫秒）；等到有人接為止。 */
+  private pendingOfflineGap: number | undefined;
+  /** 上次把「我在線」寫進 localStorage 的時刻（節流用；見 `touchOnline`）。 */
+  private lastOnlineWriteAt = 0;
   /** 企業政策禁止快照上雲（ADR-0071）：名冊採用時設定，即刻停止發佈。 */
   private cloudBackupBlocked = false;
   /** durable 搬家（ADR-0069 T2/T3）：通知回呼、T2 門檻、T3 延遲、一次性 latch。 */
@@ -919,7 +926,10 @@ export class RelayChatBackend implements ChatBackend {
     this.sweepReminders(); // ADR-0266：App 關著時錯過的提醒，開起來還在寬限窗內就補說一聲
     // 提醒 tick（ADR-0266）：純本機、零中繼流量。30 秒一次——提醒的粒度是分鐘，
     // 每秒掃只是白費電；30 秒最壞遲到半分鐘，感受不到。
-    this.remindTimer = setInterval(() => this.sweepReminders(), 30_000);
+    this.remindTimer = setInterval(() => {
+      this.sweepReminders();
+      this.touchOnline(false); // PRD §9：App 開著的期間也要續命，否則長時間開著會被誤判成離線
+    }, 30_000);
     this.snapTimer = setInterval(() => this.maybePublishSnapshot(), 30 * 60_000);
     this.scheduleBeat();
     this.renderTimer = setInterval(() => {
@@ -3171,6 +3181,12 @@ export class RelayChatBackend implements ChatBackend {
   private onConnection(state: ConnectionState): void {
     this.trackRelayState(this.originalHomeUrl ?? "", state);
     this.handlers?.onConnection?.(state);
+    // 離線缺口（PRD §9／ADR-0364）：連上的那一刻先算，再把「我在線」的時刻蓋掉。
+    // 順序不能反——蓋掉之後就再也算不出來了。
+    if (state === "online") {
+      this.reportOfflineGap();
+      this.touchOnline(true);
+    }
     // 重連成功後重新訂閱並發送心跳（RelayClient 不會自動重送訂閱）
     if (state === "online" && this.handlers) {
       this.resubscribe();
@@ -3535,6 +3551,74 @@ export class RelayChatBackend implements ChatBackend {
     } catch {
       return {};
     }
+  }
+
+  /**
+   * 這條連線上，離線留言在中繼能活多久（毫秒）。
+   *
+   * 企業自架站可由名冊政策拉長或縮短（ADR-0160）；公共站就是 NIP-40 的 7 天（ADR-0065）。
+   * 寄件端要用它判斷「這則是不是已經過期了」（PRD §9／ADR-0364）。
+   */
+  messageTtlMs(): number {
+    const ttl = policyTtlSeconds(this.lastRoster?.policy);
+    return ttl !== undefined ? ttl * 1000 : DEFAULT_MESSAGE_TTL_MS;
+  }
+
+  /** 「我在線」的時刻的儲存鍵（每身分一份）。 */
+  private lastOnlineKey(): string {
+    return `nb.lastOnline.${this.self.pubkey.slice(0, 8)}`;
+  }
+
+  /**
+   * 記下「此刻我在線」。`force` 時忽略節流（剛連上那一刻要準）。
+   *
+   * 節流成 5 分鐘一次：這個值的用途是判斷**天**等級的離線，寫得再密也沒有額外精度，
+   * 而 30 秒一次 localStorage 寫入是一天 2880 次的無謂損耗。
+   */
+  private touchOnline(force: boolean): void {
+    const now = Date.now();
+    if (!force && now - this.lastOnlineWriteAt < 5 * 60_000) return;
+    this.lastOnlineWriteAt = now;
+    try {
+      localStorage.setItem(this.lastOnlineKey(), String(now));
+    } catch {
+      /* 無痕模式：這一版記不住，不影響通訊本身 */
+    }
+  }
+
+  /**
+   * 離線太久 → 提示可能有訊息缺口（PRD §9 後半／ADR-0364）。
+   *
+   * 🔴 這是**推論，不是偵測**。中繼刪掉的 Gift Wrap 不會留下任何痕跡，重新上線也拉不回來——
+   * 協定層沒有「你錯過了 N 則」這種信號可言。所以只能拿自己的「上次在線時刻」推，
+   * 而且必須照實說成推論（文案是「可能」）。
+   *
+   * 一次啟動只說一次：網路不穩時 `onConnection('online')` 會反覆觸發，每次都說等於洗版。
+   */
+  private reportOfflineGap(): void {
+    // ① 只算一次——算完緊接著就會被 `touchOnline` 蓋掉，證據只存在這一瞬間。
+    if (!this.offlineGapChecked) {
+      this.offlineGapChecked = true;
+      try {
+        const raw = localStorage.getItem(this.lastOnlineKey());
+        const last = raw ? Number(raw) : undefined;
+        if (last !== undefined && Number.isFinite(last)) {
+          this.pendingOfflineGap = offlineGapMs(last, this.messageTtlMs());
+        }
+      } catch {
+        /* 讀不到就沒有依據，寧可不說 */
+      }
+    }
+    // ② 算出來之後**等到有人接**才送。
+    //
+    // 🔴 `onStatus` 可能在 `start()` 把 handlers 掛上**之前**就同步觸發（測試替身會，
+    // 生產環境的 WS 在極快連上時也會）。把「算過了」直接當成「說過了」的話，
+    // 通知會落進一個還不存在的 handler，而證據已經被蓋掉——缺口就此永遠消失。
+    const notify = this.handlers?.onOfflineGap;
+    if (this.pendingOfflineGap === undefined || !notify) return;
+    const gap = this.pendingOfflineGap;
+    this.pendingOfflineGap = undefined;
+    notify(gap);
   }
 
   /**

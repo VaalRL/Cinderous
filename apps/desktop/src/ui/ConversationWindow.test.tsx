@@ -13,7 +13,7 @@ const contact: Contact = { pubkey: "bb", name: "Bob", status: "online", statusMe
 const mkMessages = (n: number): ChatMessage[] =>
   Array.from({ length: n }, (_, i) => ({ id: `m${i}`, outgoing: i % 2 === 0, text: `msg-${i}`, at: i }));
 
-const render = (messages: ChatMessage[]) =>
+const render = (messages: ChatMessage[], msgTtlMs?: number) =>
   renderToStaticMarkup(
     <I18nProvider locale="en">
       <ThemeProvider>
@@ -21,6 +21,7 @@ const render = (messages: ChatMessage[]) =>
           self={self}
           contact={contact}
           messages={messages}
+          {...(msgTtlMs !== undefined ? { msgTtlMs } : {})}
           typing={false}
           nudgeSignal={0}
           onSend={() => {}}
@@ -439,7 +440,15 @@ describe("浮動視窗（ADR-0216）", () => {
 });
 
 describe("ConversationWindow 送出狀態圖示（ADR-0058／0095 眼睛語言）", () => {
-  const out = (status: MessageStatus): ChatMessage => ({ id: "x", outgoing: true, text: "hi", at: 1, status });
+  // ⚠ `at` 必須是**現在**：ADR-0364 之後，超過中繼保存期仍停在 `sent` 的訊息會改顯示
+  // 「可能未送達」的警示記號，而 `at: 1`（1970 年）每一則都符合那個條件。
+  const out = (status: MessageStatus, at = Date.now()): ChatMessage => ({
+    id: "x",
+    outgoing: true,
+    text: "hi",
+    at,
+    status,
+  });
 
   it("已讀＝張開眼（有瞳孔）＋ tick--read（主色）＋較粗線", () => {
     const html = render([out("read")]);
@@ -457,6 +466,20 @@ describe("ConversationWindow 送出狀態圖示（ADR-0058／0095 眼睛語言�
     const sent = render([out("sent")]);
     expect(sent).toContain("tick--sent");
     expect(sent).not.toContain("<circle"); // 閉眼＝沒有瞳孔
+  });
+
+  it("🔴 超過保存期仍停在「已送中繼」→ 改顯示警示，不再是一個安靜的勾（PRD §9／ADR-0364）", () => {
+    // 收件端一拿到就無條件回 delivered（ADR-0058 Tier 2），所以「過了 7 天還是 sent」
+    // ＝對方從來沒把它取下來，而中繼已經依 NIP-40 刪掉了它。
+    const html = render([out("sent", Date.now() - 8 * 86_400_000)]);
+    expect(html).toContain("tick--undelivered");
+    expect(html).not.toContain("tick--sent");
+  });
+
+  it("企業站把保留期拉長時不誤報（門檻跟著政策走）", () => {
+    const html = render([out("sent", Date.now() - 8 * 86_400_000)], 30 * 86_400_000);
+    expect(html).toContain("tick--sent");
+    expect(html).not.toContain("tick--undelivered");
   });
 
   it("傳送失敗＝紅色重試圖示（tick--failed）", () => {

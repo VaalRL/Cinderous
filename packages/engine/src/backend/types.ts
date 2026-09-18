@@ -236,6 +236,14 @@ export interface ChatBackendEvents {
   /** 與中繼站的連線狀態改變。 */
   onConnection?(state: ConnectionState): void;
   /**
+   * 這次離線久到可能漏訊了（PRD §9／ADR-0364）：`offlineMs` 是離線的毫秒數。
+   *
+   * 離線超過中繼保存期的那段時間，別人傳來的 Gift Wrap 會在中繼上過期消失，**重新上線
+   * 也拉不回來**。協定層沒有「你錯過了 N 則」的信號（中繼刪掉的東西不留痕跡），所以這是
+   * **推論**——UI 的文案必須照實說成推論。一次啟動只發一次。
+   */
+  onOfflineGap?(offlineMs: number): void;
+  /**
    * 與某聯絡人的 P2P 直連狀態改變（ADR-0213）：`connected`＝資料通道開啟（直連可用）。
    * 對話標題列據此顯示連線品質晶片；P2P 失敗不影響文字訊息（走 relay）。
    *
@@ -706,6 +714,11 @@ export interface ChatBackend {
    * 「備份已開啟」——兩者長得一樣，使用者要到換機還原那天才發現一顆都沒上去。
    */
   cloudBackupState?(): CloudBackupState;
+  /**
+   * 這條連線上離線留言的保存期（毫秒；ADR-0364）。企業自架站可由名冊政策改（ADR-0160）。
+   * UI 用它判斷「這則是不是已經過期了」——見 `looksUndelivered`。
+   */
+  messageTtlMs?(): number;
   /** 關閉雲端快照時清除 relay 上此裝置的快照（purge，ADR-0071）。 */
   purgeCloudSnapshot?(deviceId: string): void;
   /** 自己的 `npub`（供分享/加好友；僅真實 relay 後端提供）。 */
