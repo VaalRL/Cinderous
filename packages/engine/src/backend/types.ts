@@ -348,6 +348,16 @@ export interface ChatBackendEvents {
    */
   onFsDowngrade?(peer: PubkeyHex): void;
   /**
+   * 對方**退回了較弱的 FS 機制**（ADR-0302 §3／§4，2026-09-19）。
+   *
+   * 🔴 與 `onFsDowngrade` **必須是兩句話**。那一句說的是「還沒收到他的目前金鑰、
+   * 這則以一般方式加密、稍後會自動更新」——對本情況**三句全是假的**：
+   * 我們**有**他的金鑰、訊息**有**加密（只是較弱的機制）、而且它**不會**自己好。
+   *
+   * 這是 ADR-0302 §3 記強度之後才看得見的情況：攻擊者供應一份較舊的簽章個人檔即可造成。
+   */
+  onFsRollback?(contact: PubkeyHex): void;
+  /**
    * 對方宣告了**我們不支援的** FS 機制（ADR-0306 D3.3c／ADR-0302 §2）。
    *
    * ⚠ **不得**與 `onFsDowngrade` 混用：那句話的意思是「對方可能正在被攻擊」，

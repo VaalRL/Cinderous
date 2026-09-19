@@ -263,6 +263,9 @@ function msgTime(rumor: Rumor): number {
 }
 
 /** 兩筆釘選是否等價（ADR-0302 §3）——用來判斷「這次宣告有沒有改變任何東西」。 */
+/** 降級的成因（ADR-0302 §4）：兩者的文案**不能共用**，見 `notice` 那段的說明。 */
+type FsDowngradeReason = "noKey" | "rollback";
+
 function sameFsPin(a: FsPin | undefined, b: FsPin): boolean {
   return a !== undefined && a.scheme === b.scheme && a.at === b.at && a.declared === b.declared;
 }
@@ -630,7 +633,7 @@ export class RelayChatBackend implements ChatBackend {
    * `undefined` 值＝目前沒有警告；記住它才能在「復原後又出事」時再說一次。
    * 刻意不持久化：重啟後重講一次可接受（寧可多說，不可漏說）。
    */
-  private readonly fsNoticed = new Map<PubkeyHex, "unsupported" | "downgrade" | undefined>();
+  private readonly fsNoticed = new Map<PubkeyHex, "unsupported" | "downgrade" | "rollback" | undefined>();
   private readonly presence = new PresenceTracker();
   private readonly statuses = new Map<PubkeyHex, PresencePayload>();
   private nowPlaying = "";
@@ -1393,10 +1396,13 @@ export class RelayChatBackend implements ChatBackend {
    * 2. **宣告的機制比釘選的弱**（新增）：他仍然有 EK，但那把 EK 屬於較弱的機制
    *    ——舊的布林判定看不出這一種，而攻擊者只要供應一份較舊的個人檔就做得到。
    */
-  private fsWouldDowngrade(to: PubkeyHex): boolean {
+  private fsWouldDowngrade(to: PubkeyHex): FsDowngradeReason | undefined {
     const pin = this.fsState.pinned?.[to];
-    if (pin === undefined) return false;
-    return !this.fsState.contactEks[to] || pinIsDowngraded(pin);
+    if (pin === undefined) return undefined;
+    // 順序要緊：`rollback` 是**確定的**訊號（對方明說要用較弱的），
+    // `noKey` 是**可能只是還沒同步**。兩者同時成立時說前者，因為它比較確定也比較嚴重。
+    if (pinIsDowngraded(pin)) return "rollback";
+    return this.fsState.contactEks[to] ? undefined : "noKey";
   }
   /** 多鑰解封並順帶學對方 EK（rumor 內嵌 hint）。取代裸 unwrapMessage——FS 未啟用時候選只有 IK＝行為不變。 */
   private openFs(event: NostrEvent): UnwrappedMessage {
@@ -2193,7 +2199,12 @@ export class RelayChatBackend implements ChatBackend {
     if (event.kind === EK_ANNOUNCE_KIND) {
       // ADR-0245：聯絡人的 EK 公告（kind 10040，IK 簽章）→ 學到其當前 EK（供加密給他們）。
       const read = readEkAnnounce(event);
-      if (read && this.contacts.some((c) => c.pubkey === read.ik)) this.learnContactEk(read.ik, read.ek);
+      if (read && this.contacts.some((c) => c.pubkey === read.ik)) {
+        // ADR-0302 §1（公告這半，2026-09-19 補）：版本不認得＝**對方升級了**，不是沒有 EK。
+        // 兩者若都當成「沒學到」，升級的對方會被誤報成「疑似降級（可能正在被攻擊）」。
+        if (read.kind === "newer") this.markFsUnsupported(read.ik, `ek-v${read.v}`);
+        else this.learnContactEk(read.ik, read.ek);
+      }
       return;
     }
     if (event.kind === SNAPSHOT_KIND) {
@@ -3346,12 +3357,18 @@ export class RelayChatBackend implements ChatBackend {
     // ⚠ 存的是**原始字串**，判定在此處**重算**——不可把「不支援」當成結論存起來：
     // 日後我們新增支援時那筆記錄還在，就會繼續叫使用者「請更新」，直到對方重送個人檔為止。
     const declared = this.fsState.unsupported?.[to];
-    const notice: "unsupported" | "downgrade" | undefined =
+    // ADR-0302 §4（完整形態，2026-09-19）：三種情況三句話，**不得混用**。
+    // 🔴 `rollback` 是 ADR-0302 §3 帶進來的新情況，而既有的降級文案對它**字面為假**——
+    // 那句話說「還沒收到他的目前金鑰／以一般方式加密／稍後會自動更新」，
+    // 但退回較弱機制的對方我們**有**他的金鑰、訊息**有**加密、而且它**不會**自己好。
+    const notice: "unsupported" | "downgrade" | "rollback" | undefined =
       declared !== undefined && readFsCapability(declared) === "unknown"
         ? "unsupported"
-        : this.fsWouldDowngrade(to)
-          ? "downgrade"
-          : undefined;
+        : this.fsWouldDowngrade(to) === "rollback"
+          ? "rollback"
+          : this.fsWouldDowngrade(to) === "noKey"
+            ? "downgrade"
+            : undefined;
     // 去重（每則都插一次會洗版，而洗版直接導致無視＝揭露失效）：
     // 只在**該聯絡人的警告種類改變時**才通知一次。狀況復原（→ undefined）也記，
     // 這樣之後若又出事，會再說一次——否則使用者永遠看不到第二次。
@@ -3360,6 +3377,7 @@ export class RelayChatBackend implements ChatBackend {
     if (this.fsNoticed.get(to) !== notice) {
       this.fsNoticed.set(to, notice);
       if (notice === "unsupported") this.handlers?.onFsUnsupported?.(to, declared as string);
+      else if (notice === "rollback") this.handlers?.onFsRollback?.(to);
       else if (notice === "downgrade") this.handlers?.onFsDowngrade?.(to);
     }
     const fs = this.fsSendOpt(); // ADR-0245：啟用 FS 時加密到收件人 EK＋內嵌我的 EK（不知對方 EK 則退回身分）

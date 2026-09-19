@@ -355,13 +355,41 @@ export function buildEkAnnounce(
  * 驗證並解析 kind 10040 公告（不信任網路來源）：檢查 kind、簽章、內容格式與公鑰合法性。
  * 回 `{ ik, ek, next? }`（`ik`＝公告者身分＝`event.pubkey`）；任何不合法 → `null`。
  */
-export function readEkAnnounce(event: NostrEvent): { ik: PubkeyHex; ek: PubkeyHex; next?: PubkeyHex } | null {
+/** EK 公告的目前版本（`buildEkAnnounce` 寫進 `content.v`）。 */
+export const EK_ANNOUNCE_VERSION = 1;
+
+/**
+ * 讀 kind 10040 公告的結果（ADR-0302 §1）。
+ *
+ * 🔴 **「不認得的版本」與「垃圾」必須分開。** 兩者都回 `null` 的話，一個**升級了的**對方
+ * 在我們眼中就等於「沒有 EK」，而那會讓送訊時跳出「疑似降級（對方可能被攻擊）」
+ * ——對升級的人那是謊話（ADR-0302 §2／§4 的紅線）。個人檔那半已於 ADR-0306 D3.3c 做掉，
+ * 公告這半一直漏著，而**後量子的公告正是 `v: 2`**：不修的話第一個升級的人就會被誤報。
+ */
+export type EkAnnounce =
+  | { kind: "ok"; ik: PubkeyHex; ek: PubkeyHex; next?: PubkeyHex }
+  /** 結構合法、簽章正確，但 `v` 不是我們認得的 ⇒ **對方升級了**，不是壞掉。 */
+  | { kind: "newer"; ik: PubkeyHex; v: number };
+
+/**
+ * 驗證並解析 kind 10040 公告（不信任網路來源）。
+ *
+ * 回 `null` 的只有**真正的壞東西**：kind 不符、簽章錯、content 不是 JSON、
+ * 或版本雖認得但欄位不合法。版本不認得但結構完整 → 回 `"newer"`。
+ */
+export function readEkAnnounce(event: NostrEvent): EkAnnounce | null {
   if (event.kind !== EK_ANNOUNCE_KIND) return null;
   if (!verifyEvent(event)) return null;
   try {
     const c = JSON.parse(event.content) as { v?: unknown; ek?: unknown; next?: unknown };
-    if (c.v !== 1 || typeof c.ek !== "string" || !PK_RE.test(c.ek)) return null;
-    const out: { ik: PubkeyHex; ek: PubkeyHex; next?: PubkeyHex } = { ik: event.pubkey, ek: c.ek };
+    // 未來的版本：只要 `v` 是個合理的數字就當成「對方升級了」。
+    // ⚠ 這裡**刻意不檢查其餘欄位**——我們不知道未來的格式長什麼樣，拿今天的規則去驗它
+    // 只會把合法的新版判成垃圾，那正是本次要修的病。
+    if (typeof c.v === "number" && Number.isInteger(c.v) && c.v > EK_ANNOUNCE_VERSION) {
+      return { kind: "newer", ik: event.pubkey, v: c.v };
+    }
+    if (c.v !== EK_ANNOUNCE_VERSION || typeof c.ek !== "string" || !PK_RE.test(c.ek)) return null;
+    const out: EkAnnounce = { kind: "ok", ik: event.pubkey, ek: c.ek };
     if (typeof c.next === "string" && PK_RE.test(c.next)) out.next = c.next;
     return out;
   } catch {

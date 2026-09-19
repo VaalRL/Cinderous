@@ -1629,6 +1629,13 @@ export function App(): JSX.Element {
         const msg: ChatMessage = { id: uid("fsd"), outgoing: false, text: tRef.current("fs_downgradeWarning"), at: Date.now() };
         setConvos((prev) => ({ ...prev, [peer]: [...(prev[peer] ?? []), msg] }));
       },
+      // ADR-0302 §4（完整形態）：對方**退回較弱的機制**。與上面那句是兩件事——
+      // 那句說「還沒收到他的金鑰、稍後會自動更新」，而這裡我們**有**他的金鑰、
+      // 訊息**有**加密（只是較弱的），而且它**不會**自己好。
+      onFsRollback: (peer) => {
+        const msg: ChatMessage = { id: uid("fsr"), outgoing: false, text: tRef.current("fs_rollbackWarning"), at: Date.now() };
+        setConvos((prev) => ({ ...prev, [peer]: [...(prev[peer] ?? []), msg] }));
+      },
       // ADR-0306 D3.3c：對方宣告了我們不支援的機制＝**對方升級了**，不是降級。
       // 這裡刻意用另一句文案——把「你該更新」顯示成「對方可能被攻擊」就是說謊（ADR-0302 §4）。
       onFsUnsupported: (peer) => {

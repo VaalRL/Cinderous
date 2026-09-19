@@ -1,3 +1,5 @@
+import { finalizeEvent } from "./sign.js";
+import type { NostrEvent } from "./event.js";
 import { describe, expect, it } from "vitest";
 import { wrapMessage } from "./giftwrap.js";
 import { getPublicKey, generateSecretKey } from "./keys.js";
@@ -43,14 +45,15 @@ describe("kind 10040 EK 公告（IK 簽章、可驗證）", () => {
     const ev = buildEkAnnounce(ik, cur.pk, { next: nxt.pk, now: 1000 });
     expect(ev.kind).toBe(EK_ANNOUNCE_KIND);
     const read = readEkAnnounce(ev);
-    expect(read).toEqual({ ik: getPublicKey(ik), ek: cur.pk, next: nxt.pk });
+    // ADR-0302 §1：結果帶 `kind` 以區分「不認得的版本」與垃圾。
+    expect(read).toEqual({ kind: "ok", ik: getPublicKey(ik), ek: cur.pk, next: nxt.pk });
   });
 
   it("只帶當前（無 next）", () => {
     const ik = generateSecretKey();
     const cur = generateEncryptionKey();
     const read = readEkAnnounce(buildEkAnnounce(ik, cur.pk, { now: 1 }));
-    expect(read).toEqual({ ik: getPublicKey(ik), ek: cur.pk });
+    expect(read).toEqual({ kind: "ok", ik: getPublicKey(ik), ek: cur.pk });
   });
 
   it("竄改/錯 kind/壞簽章/畸形內容 → null（不信任網路來源）", () => {
@@ -409,5 +412,48 @@ describe("釘選的強度（ADR-0302 §3）", () => {
   it("pinIsDowngraded 對未釘選與布林形都不誤報", () => {
     expect(pinIsDowngraded(undefined)).toBe(false);
     expect(pinIsDowngraded(true)).toBe(false);
+  });
+});
+
+// ── ADR-0302 §1 的另一半：公告的未知版本 ────────────────────────────────────
+//
+// 個人檔那半由 ADR-0306 D3.3c 做掉了，**公告這半一直漏著**：`v !== 1` 與垃圾同樣回 null
+// ⇒ 一個升級了的對方在我們眼中等於「沒有 EK」⇒ 送訊時跳「疑似降級（對方可能被攻擊）」。
+// 而**後量子的公告正是 `v: 2`**——不修的話第一個升級的人就會被誤報。
+
+describe("EK 公告的未知版本（ADR-0302 §1）", () => {
+  const sk = generateSecretKey();
+  const ik = getPublicKey(sk);
+  /** 直接造一顆帶任意 content 的 10040（繞過 buildEkAnnounce 的 v 固定為 1）。 */
+  const announce = (content: unknown): NostrEvent =>
+    finalizeEvent({ kind: EK_ANNOUNCE_KIND, created_at: 1000, tags: [], content: JSON.stringify(content) }, sk);
+
+  it("目前版本照常解析", () => {
+    const ek = getPublicKey(generateSecretKey());
+    const r = readEkAnnounce(announce({ v: 1, ek }));
+    expect(r).toEqual({ kind: "ok", ik, ek });
+  });
+
+  it("🔴 `v: 2` 回「對方升級了」，**不是** null——後量子的公告正是這一版", () => {
+    const r = readEkAnnounce(announce({ v: 2, ek: "whatever-the-future-looks-like" }));
+    expect(r).toEqual({ kind: "newer", ik, v: 2 });
+  });
+
+  it("🔴 未來版本**不驗其餘欄位**——拿今天的規則去驗它只會把合法的新版判成垃圾", () => {
+    expect(readEkAnnounce(announce({ v: 99 }))?.kind).toBe("newer");
+    expect(readEkAnnounce(announce({ v: 3, pq: { anything: true } }))?.kind).toBe("newer");
+  });
+
+  it("真正的壞東西仍然回 null（垃圾與「新版」必須分得開，但不能全部放行）", () => {
+    expect(readEkAnnounce(announce({ v: 1, ek: "不是公鑰" }))).toBeNull(); // 認得的版本、欄位不合法
+    expect(readEkAnnounce(announce({ v: 0, ek: "x" }))).toBeNull(); // 比目前還舊＝不合法
+    expect(readEkAnnounce(announce({ v: "2", ek: "x" }))).toBeNull(); // v 不是數字
+    expect(readEkAnnounce(announce({ v: 1.5 }))).toBeNull(); // 非整數
+    expect(readEkAnnounce({ ...announce({ v: 1 }), kind: 1 })).toBeNull(); // kind 不符
+  });
+
+  it("🔴 簽章錯的一律丟棄——「新版」不是繞過驗證的後門", () => {
+    const evt = announce({ v: 2 });
+    expect(readEkAnnounce({ ...evt, content: JSON.stringify({ v: 2, tampered: true }) })).toBeNull();
   });
 });

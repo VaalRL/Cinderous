@@ -1,4 +1,4 @@
-import { ASSET_CHUNK_CHARS, contentHash, readPin, pinAfterDeclare, pinIsDowngraded, FS_CAPABILITY, FS_RETIRED, generateEncryptionKey, sealAndWrap, buildSnapshotEvent, buildDeviceDirectory, buildEkEnvelope, openEkEnvelope, KIND, RelayClient, applyRosterRotations, generateSecretKey, getPublicKey, npubEncode, nsecDecode, nsecEncode, shardPrefix, signOrgRoster, type NostrEvent, type RelayClientHandlers, wrapGroupControl, wrapGroupMessage, wrapMessage, wrapProfile, wrapReceipt } from "@cinderous/core";
+import { ASSET_CHUNK_CHARS, contentHash, finalizeEvent, readPin, pinAfterDeclare, pinIsDowngraded, FS_CAPABILITY, FS_RETIRED, generateEncryptionKey, sealAndWrap, buildSnapshotEvent, buildDeviceDirectory, buildEkEnvelope, openEkEnvelope, KIND, RelayClient, applyRosterRotations, generateSecretKey, getPublicKey, npubEncode, nsecDecode, nsecEncode, shardPrefix, signOrgRoster, type NostrEvent, type RelayClientHandlers, wrapGroupControl, wrapGroupMessage, wrapMessage, wrapProfile, wrapReceipt } from "@cinderous/core";
 import { createInMemoryRelayNetwork, createShardedRelayNetwork, MessageStore } from "@cinderous/relay";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryStorage } from "../storage/memory.js";
@@ -4685,6 +4685,8 @@ describe("退回較弱機制＝降級（ADR-0302 §3）", () => {
   });
 
   it("🔴 有證據時即使仍有對方的 EK 也要警告——舊判定在這一格是瞎的", () => {
+    // ⚠ 2026-09-19（§4 完整形態）起，這一格走 `onFsRollback` 而非 `onFsDowngrade`——
+    // 兩句話講的是不同的事（見 i18n 的文案紅線）。這裡驗的仍是「有警告」。
     const net = createInMemoryRelayNetwork();
     const bobSk = generateSecretKey();
     const bobPk = getPublicKey(bobSk);
@@ -4697,10 +4699,10 @@ describe("退回較弱機制＝降級（ADR-0302 §3）", () => {
       pinned: { [bobPk]: { scheme: "ek-pq-v1", at: 1000, declared: FS_CAPABILITY } },
     });
     const a = new RelayChatBackend(store, (h) => net.connect("a", h), "Alice");
-    const downgrades: string[] = [];
-    a.start({ ...noop, onFsDowngrade: (pk) => downgrades.push(pk) });
+    const warned: string[] = [];
+    a.start({ ...noop, onFsRollback: (pk) => warned.push(pk) });
     a.sendMessage(bobPk, "嗨");
-    expect(downgrades).toContain(bobPk);
+    expect(warned).toContain(bobPk);
     a.stop();
   });
 
@@ -4716,10 +4718,10 @@ describe("退回較弱機制＝降級（ADR-0302 §3）", () => {
       pinned: { [bobPk]: { scheme: FS_CAPABILITY, at: 1000 } },
     });
     const a = new RelayChatBackend(store, (h) => net.connect("a", h), "Alice");
-    const downgrades: string[] = [];
-    a.start({ ...noop, onFsDowngrade: (pk) => downgrades.push(pk) });
+    const warned: string[] = [];
+    a.start({ ...noop, onFsDowngrade: (pk) => warned.push(pk), onFsRollback: (pk) => warned.push(pk) });
     a.sendMessage(bobPk, "嗨");
-    expect(downgrades).toEqual([]);
+    expect(warned).toEqual([]);
     a.stop();
   });
 
@@ -4734,6 +4736,99 @@ describe("退回較弱機制＝降級（ADR-0302 §3）", () => {
     a.start({ ...noop, onFsDowngrade: (pk) => downgrades.push(pk) });
     a.sendMessage(bobPk, "嗨");
     expect(downgrades).toContain(bobPk);
+    a.stop();
+  });
+});
+
+// ── ADR-0302 §4 完整形態 ＋ §1 的公告那半 ───────────────────────────────────
+
+describe("三種 FS 提示互不混用（ADR-0302 §4／§1）", () => {
+  /** 起一個 Alice，回傳三種提示各自收到的 pubkey。 */
+  const boot = (fs: Parameters<MemoryStorage["saveFsState"]>[0]) => {
+    const net = createInMemoryRelayNetwork();
+    const store = new MemoryStorage();
+    store.saveFsState(fs);
+    const a = new RelayChatBackend(store, (h) => net.connect("a", h), "Alice");
+    const downgrade: string[] = [];
+    const rollback: string[] = [];
+    const unsupported: string[] = [];
+    a.start({
+      ...noop,
+      onFsDowngrade: (pk) => downgrade.push(pk),
+      onFsRollback: (pk) => rollback.push(pk),
+      onFsUnsupported: (pk) => unsupported.push(pk),
+    });
+    return { a, net, downgrade, rollback, unsupported };
+  };
+
+  // ⚠ 必須是真的曲線點——`sendMessage` 會對它做 ECDH，假字串會在那裡丟例外。
+  const bobPk = getPublicKey(generateSecretKey());
+
+  it("🔴 退回較弱機制 → `onFsRollback`，**不是** `onFsDowngrade`", () => {
+    // 那兩句話講的是完全不同的事：降級那句說「還沒收到他的金鑰、稍後會自動更新」，
+    // 而這裡我們**有**他的金鑰、訊息**有**加密、且它**不會**自己好。
+    const { a, downgrade, rollback } = boot({
+      enabled: true,
+      keys: [],
+      contactEks: { [bobPk]: "ek-pub" },
+      pinned: { [bobPk]: { scheme: "ek-pq-v1", at: 1000, declared: FS_CAPABILITY } },
+    });
+    a.sendMessage(bobPk, "嗨");
+    expect(rollback).toContain(bobPk);
+    expect(downgrade).toEqual([]);
+    a.stop();
+  });
+
+  it("只是還沒收到金鑰 → `onFsDowngrade`（原有行為不變）", () => {
+    const { a, downgrade, rollback } = boot({
+      enabled: true,
+      keys: [],
+      contactEks: {},
+      pinned: { [bobPk]: true as const },
+    });
+    a.sendMessage(bobPk, "嗨");
+    expect(downgrade).toContain(bobPk);
+    expect(rollback).toEqual([]);
+    a.stop();
+  });
+
+  it("🔴 兩者同時成立時說 rollback——它比較確定，也比較嚴重", () => {
+    const { a, downgrade, rollback } = boot({
+      enabled: true,
+      keys: [],
+      contactEks: {}, // 沒有 EK
+      pinned: { [bobPk]: { scheme: "ek-pq-v1", at: 1000, declared: FS_CAPABILITY } }, // 且退回過
+    });
+    a.sendMessage(bobPk, "嗨");
+    expect(rollback).toContain(bobPk);
+    expect(downgrade).toEqual([]);
+    a.stop();
+  });
+
+  it("🔴 對方送來更新版的 EK 公告 → 當成「升級了」，不得誤報成降級（ADR-0302 §1 的公告那半）", () => {
+    const net = createInMemoryRelayNetwork();
+    const bobSk = generateSecretKey();
+    const bob = getPublicKey(bobSk);
+    const store = new MemoryStorage();
+    store.saveFsState({ enabled: true, keys: [], contactEks: {}, pinned: { [bob]: true as const } });
+    const a = new RelayChatBackend(store, (h) => net.connect("a", h), "Alice");
+    const downgrade: string[] = [];
+    const unsupported: string[] = [];
+    a.start({
+      ...noop,
+      onFsDowngrade: (pk) => downgrade.push(pk),
+      onFsUnsupported: (pk) => unsupported.push(pk),
+    });
+    a.addContact(npubEncode(bob));
+    // 一顆 v:2 的公告（＝後量子那一版的形狀）。
+    const evt = finalizeEvent(
+      { kind: 10040, created_at: Math.floor(Date.now() / 1000), tags: [], content: JSON.stringify({ v: 2 }) },
+      bobSk,
+    );
+    net.connect("bob-announce", {}).publish(evt);
+    a.sendMessage(bob, "嗨");
+    expect(unsupported).toContain(bob); // 對方升級了 → 請更新
+    expect(downgrade).toEqual([]); // 🔴 不得說成「可能正在被攻擊」
     a.stop();
   });
 });

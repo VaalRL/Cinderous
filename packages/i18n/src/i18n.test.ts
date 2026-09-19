@@ -47,6 +47,27 @@ describe("FS 文案紅線（ADR-0302 §4／ADR-0306 D1）", () => {
     }
   });
 
+  it("🔴 三句話兩兩互異（ADR-0302 §4 的完整形態）", () => {
+    // ADR-0302 §3 記強度之後多了第三種情況：**對方退回較弱的機制**。
+    // 那與「還沒收到他的金鑰」是完全不同的事，共用一句話就是把確定的訊號講成暫時的雜訊。
+    for (const locale of LOCALES) {
+      const three = ["fs_downgradeWarning", "fs_rollbackWarning", "fs_unsupportedWarning"] as const;
+      const said = three.map((k) => translate(locale, k));
+      expect(new Set(said).size).toBe(3);
+    }
+  });
+
+  it("🔴 退回較弱機制**不得**說成「稍後會自動更新」——它不會自己好", () => {
+    // 既有的 fs_downgradeWarning 有這層安撫（對它自己的情況是對的：金鑰還沒同步而已）。
+    // 退回較弱機制是對方**明說**要用較弱的，安撫在這裡是誤導。
+    const zh = translate("zh-Hant", "fs_rollbackWarning");
+    expect(zh).toContain("較弱");
+    expect(zh).not.toContain("自動更新");
+    const en = translate("en", "fs_rollbackWarning").toLowerCase();
+    expect(en).toContain("weaker");
+    expect(en).not.toContain("automatically");
+  });
+
   it("🔴「不支援的機制」不得寫成安全警告——對方是升級了，不是被攻擊", () => {
     // 把「你該更新」顯示成「對方可能被攻擊」就是說謊（同 ADR-0278／0287 的立場）。
     expect(translate("zh-Hant", "fs_unsupportedWarning")).toContain("更新");

@@ -359,6 +359,14 @@ export interface Messages {
   devices_tierEphemeral: string;
   devices_tierWasPlain: string;
   fs_downgradeWarning: string;
+  /**
+   * 對方**退回了較弱的 FS 機制**（ADR-0302 §3／§4）。
+   *
+   * 🔴 **不能與 `fs_downgradeWarning` 共用。** 那一句說「還沒收到他的目前金鑰、以一般方式
+   * 加密、稍後會自動更新」——對本情況**三句全是假的**：我們有他的金鑰、訊息有加密
+   * （只是較弱的機制）、而且它不會自己好。說成那樣是把一個確定的訊號講成暫時的雜訊。
+   */
+  fs_rollbackWarning: string;
   fs_unsupportedWarning: string;
   ai_stylePolite: string;
   ai_styleConcise: string;
@@ -1395,6 +1403,8 @@ const zhHant: Messages = {
   fs_disable: "停用前向保密",
   fs_disableConfirm: "要停用前向保密嗎？\n\n・之後送出的訊息**不再**有前向保密（回到與一般訊息相同的保護）。\n・已經送出的訊息不受影響。\n・你的聯絡人會收到「已停用」的明確通知——這是必要的，否則他們會以為你還開著。\n・本機歷史、身分、備份碼都不受影響。\n・可以隨時再開啟。",
   fs_downgradeWarning: "⚠️ 這位聯絡人啟用了前向保密，但你這端還沒收到他的目前金鑰——這則訊息暫時以一般方式加密（無前向保密）。可能是對方金鑰尚未同步（稍後會自動更新），若持續出現請留意。",
+  fs_rollbackWarning:
+    "⚠️ 這位聯絡人**改用了較弱的加密機制**——你先前見過他使用更強的那一種。訊息仍然加密，但保護程度比之前低，而且這不會自己恢復。可能是他換了裝置或降級了軟體；若你沒有預期這件事，建議透過其他管道向他確認。",
   fs_unsupportedWarning: "ℹ️ 這位聯絡人使用了你這個版本還不支援的加密機制，因此這則訊息以你們雙方都支援的方式加密。請更新到最新版本。（這不是安全警告——對方並沒有降級。）",
   ai_stylePolite: "更客氣",
   ai_styleConcise: "更精簡",
@@ -2335,6 +2345,8 @@ const en: Messages = {
   fs_disable: "Turn off forward secrecy",
   fs_disableConfirm: "Turn off forward secrecy?\n\n• Messages you send from now on will **no longer** have forward secrecy (same protection as ordinary messages).\n• Messages already sent are unaffected.\n• Your contacts will be told explicitly that you turned it off — this is necessary, otherwise they would keep assuming you still have it on.\n• Local history, identity and backup code are unaffected.\n• You can turn it back on at any time.",
   fs_downgradeWarning: "⚠️ This contact has forward secrecy enabled, but you haven't received their current key yet — this message was encrypted the ordinary way (no forward secrecy). Their key may not be synced yet (it'll update automatically); take note if this persists.",
+  fs_rollbackWarning:
+    "⚠️ This contact has **switched to a weaker encryption scheme** — you have seen them use a stronger one before. Messages are still encrypted, but less well protected than before, and this will not fix itself. They may have changed devices or downgraded their software; if you were not expecting this, confirm with them through another channel.",
   fs_unsupportedWarning: "ℹ️ This contact uses an encryption scheme your version doesn't support yet, so this message was encrypted with one you both support. Please update to the latest version. (This is not a security warning — they have not downgraded.)",
   ai_stylePolite: "More polite",
   ai_styleConcise: "More concise",
