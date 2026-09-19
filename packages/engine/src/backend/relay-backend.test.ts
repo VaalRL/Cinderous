@@ -1,4 +1,4 @@
-import { ASSET_CHUNK_CHARS, contentHash, FS_CAPABILITY, FS_RETIRED, generateEncryptionKey, sealAndWrap, buildSnapshotEvent, buildDeviceDirectory, buildEkEnvelope, openEkEnvelope, KIND, RelayClient, applyRosterRotations, generateSecretKey, getPublicKey, npubEncode, nsecDecode, nsecEncode, shardPrefix, signOrgRoster, type NostrEvent, type RelayClientHandlers, wrapGroupControl, wrapGroupMessage, wrapMessage, wrapProfile, wrapReceipt } from "@cinderous/core";
+import { ASSET_CHUNK_CHARS, contentHash, readPin, pinAfterDeclare, pinIsDowngraded, FS_CAPABILITY, FS_RETIRED, generateEncryptionKey, sealAndWrap, buildSnapshotEvent, buildDeviceDirectory, buildEkEnvelope, openEkEnvelope, KIND, RelayClient, applyRosterRotations, generateSecretKey, getPublicKey, npubEncode, nsecDecode, nsecEncode, shardPrefix, signOrgRoster, type NostrEvent, type RelayClientHandlers, wrapGroupControl, wrapGroupMessage, wrapMessage, wrapProfile, wrapReceipt } from "@cinderous/core";
 import { createInMemoryRelayNetwork, createShardedRelayNetwork, MessageStore } from "@cinderous/relay";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryStorage } from "../storage/memory.js";
@@ -3287,7 +3287,7 @@ describe("前向保密（ADR-0245 Phase 1b：opt-in 手動輪替）", () => {
     const bobPk = getPublicKey(generateSecretKey());
     const storeA = new MemoryStorage();
     // Alice 啟用 FS、已釘選「Bob 期望 FS」（見過其簽章能力宣告），但沒有 Bob 的 EK（EK 未到/被剝除）。
-    storeA.saveFsState({ enabled: true, keys: [], contactEks: {}, pinned: { [bobPk]: true } });
+    storeA.saveFsState({ enabled: true, keys: [], contactEks: {}, pinned: { [bobPk]: true as const } });
     const a = new RelayChatBackend(storeA, (h) => net.connect("a", h), "Alice");
     const downgrades: string[] = [];
     a.start({ ...noop, onFsDowngrade: (pk) => downgrades.push(pk) });
@@ -3324,7 +3324,7 @@ describe("FS 退場語意（ADR-0306 D3.3c：軟／硬退共用的能力宣告�
     const bobSk = generateSecretKey();
     const bobPk = getPublicKey(bobSk);
     const storeA = new MemoryStorage();
-    storeA.saveFsState({ enabled: true, keys: [], contactEks: {}, pinned: { [bobPk]: true } });
+    storeA.saveFsState({ enabled: true, keys: [], contactEks: {}, pinned: { [bobPk]: true as const } });
     const a = new RelayChatBackend(storeA, (h) => net.connect("a", h), "Alice");
     const downgrades: string[] = [];
     a.start({ ...noop, onFsDowngrade: (pk) => downgrades.push(pk) });
@@ -3347,7 +3347,7 @@ describe("FS 退場語意（ADR-0306 D3.3c：軟／硬退共用的能力宣告�
     const bobSk = generateSecretKey();
     const bobPk = getPublicKey(bobSk);
     const storeA = new MemoryStorage();
-    storeA.saveFsState({ enabled: true, keys: [], contactEks: {}, pinned: { [bobPk]: true } });
+    storeA.saveFsState({ enabled: true, keys: [], contactEks: {}, pinned: { [bobPk]: true as const } });
     const a = new RelayChatBackend(storeA, (h) => net.connect("a", h), "Alice");
     const downgrades: string[] = [];
     const unsupported: [string, string][] = [];
@@ -3428,7 +3428,7 @@ describe("FS 能力判定的時效性（審查發現：存下來的結論會過�
       enabled: true,
       keys: [],
       contactEks: {},
-      pinned: { [bobPk]: true },
+      pinned: { [bobPk]: true as const },
       unsupported: { [bobPk]: FS_CAPABILITY },
     });
     const a = new RelayChatBackend(storeA, (h) => net.connect("a", h), "Alice");
@@ -3460,7 +3460,7 @@ describe("FS 能力判定的時效性（審查發現：存下來的結論會過�
 describe("FS 警告去重（審查發現：每送一則插一次會洗版）", () => {
   const pinnedNoEk = (peer: string) => {
     const s = new MemoryStorage();
-    s.saveFsState({ enabled: true, keys: [], contactEks: {}, pinned: { [peer]: true } });
+    s.saveFsState({ enabled: true, keys: [], contactEks: {}, pinned: { [peer]: true as const } });
     return s;
   };
 
@@ -3482,7 +3482,7 @@ describe("FS 警告去重（審查發現：每送一則插一次會洗版）", (
     const bobPk = getPublicKey(generateSecretKey());
     const carolPk = getPublicKey(generateSecretKey());
     const s = new MemoryStorage();
-    s.saveFsState({ enabled: true, keys: [], contactEks: {}, pinned: { [bobPk]: true, [carolPk]: true } });
+    s.saveFsState({ enabled: true, keys: [], contactEks: {}, pinned: { [bobPk]: true as const, [carolPk]: true } });
     const a = new RelayChatBackend(s, (h) => net.connect("a", h), "Alice");
     const downgrades: string[] = [];
     a.start({ ...noop, onFsDowngrade: (pk) => downgrades.push(pk) });
@@ -3666,7 +3666,8 @@ describe("FS 停用＝明示退場（ADR-0314）", () => {
     const { a, b, storeB } = setup();
     a.enableFs();
     a.sendMessage(b.self.pubkey, "先讓 Bob 釘選 Alice 用 FS");
-    expect(storeB.loadFsState().pinned?.[a.self.pubkey]).toBe(true);
+    // ADR-0302 §3：釘選記的是機制而非布林。
+    expect(readPin(storeB.loadFsState().pinned?.[a.self.pubkey])?.scheme).toBe(FS_CAPABILITY);
 
     a.disableFs();
     // 退場宣告到達 → 解除釘選（不是留著釘選然後每次送訊都喊「對方可能被攻擊」）。
@@ -4653,6 +4654,86 @@ describe("離線缺口提示（PRD §9／ADR-0364）", () => {
     withLocalStorage();
     const { a } = boot(new MemoryStorage());
     expect(a.messageTtlMs()).toBe(7 * 86_400_000);
+    a.stop();
+  });
+});
+
+// ── ADR-0302 §3：釘選記強度之後才擋得住的那個攻擊 ────────────────────────────
+//
+// 舊的降級判定是「釘過他、但現在沒有他的 EK」。一個**仍然有 EK、只是退回較弱機制**的
+// 對方完全看不出來——攻擊者（或被控制的中繼）只要供應一份較舊的簽章個人檔就做得到。
+// 這一組測試證明現在抓得到，並且**不會反過來誤報**。
+
+describe("退回較弱機制＝降級（ADR-0302 §3）", () => {
+  it("🔴 釘選的基準不會被較弱的宣告拉低，且留下降級證據", () => {
+    const pk = "b".repeat(64);
+    const store = new MemoryStorage();
+    // 先手動把他釘在一個較強的機制上（生產目前只有 ek-v1，故直接寫入狀態模擬未來）。
+    store.saveFsState({
+      enabled: true,
+      keys: [],
+      contactEks: { [pk]: "ek-pub" },
+      pinned: { [pk]: { scheme: "ek-pq-v1", at: 1000 } },
+    });
+    // 對方改宣告較弱的 ek-v1（＝今天我們認得的那一版）。
+    const next = pinAfterDeclare(store.loadFsState().pinned?.[pk], FS_CAPABILITY, 2000, {
+      "ek-v1": 1,
+      "ek-pq-v1": 2,
+    });
+    expect(next.scheme).toBe("ek-pq-v1"); // 基準沒被拉低
+    expect(pinIsDowngraded(next)).toBe(true); // 但留下證據
+  });
+
+  it("🔴 有證據時即使仍有對方的 EK 也要警告——舊判定在這一格是瞎的", () => {
+    const net = createInMemoryRelayNetwork();
+    const bobSk = generateSecretKey();
+    const bobPk = getPublicKey(bobSk);
+    const store = new MemoryStorage();
+    // 關鍵：**contactEks 有值**。舊的 `pinned && !contactEks` 因此不會觸發。
+    store.saveFsState({
+      enabled: true,
+      keys: [],
+      contactEks: { [bobPk]: "ek-pub" },
+      pinned: { [bobPk]: { scheme: "ek-pq-v1", at: 1000, declared: FS_CAPABILITY } },
+    });
+    const a = new RelayChatBackend(store, (h) => net.connect("a", h), "Alice");
+    const downgrades: string[] = [];
+    a.start({ ...noop, onFsDowngrade: (pk) => downgrades.push(pk) });
+    a.sendMessage(bobPk, "嗨");
+    expect(downgrades).toContain(bobPk);
+    a.stop();
+  });
+
+  it("沒有降級證據＋有 EK → 不警告（不得製造假警報）", () => {
+    const net = createInMemoryRelayNetwork();
+    const bobSk = generateSecretKey();
+    const bobPk = getPublicKey(bobSk);
+    const store = new MemoryStorage();
+    store.saveFsState({
+      enabled: true,
+      keys: [],
+      contactEks: { [bobPk]: "ek-pub" },
+      pinned: { [bobPk]: { scheme: FS_CAPABILITY, at: 1000 } },
+    });
+    const a = new RelayChatBackend(store, (h) => net.connect("a", h), "Alice");
+    const downgrades: string[] = [];
+    a.start({ ...noop, onFsDowngrade: (pk) => downgrades.push(pk) });
+    a.sendMessage(bobPk, "嗨");
+    expect(downgrades).toEqual([]);
+    a.stop();
+  });
+
+  it("舊的布林釘選＋無 EK → 仍然警告（原有行為一個位元都沒變）", () => {
+    const net = createInMemoryRelayNetwork();
+    const bobSk = generateSecretKey();
+    const bobPk = getPublicKey(bobSk);
+    const store = new MemoryStorage();
+    store.saveFsState({ enabled: true, keys: [], contactEks: {}, pinned: { [bobPk]: true as const } });
+    const a = new RelayChatBackend(store, (h) => net.connect("a", h), "Alice");
+    const downgrades: string[] = [];
+    a.start({ ...noop, onFsDowngrade: (pk) => downgrades.push(pk) });
+    a.sendMessage(bobPk, "嗨");
+    expect(downgrades).toContain(bobPk);
     a.stop();
   });
 });

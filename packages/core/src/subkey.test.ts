@@ -3,22 +3,26 @@ import { wrapMessage } from "./giftwrap.js";
 import { getPublicKey, generateSecretKey } from "./keys.js";
 import { sealAndWrap } from "./nip59.js";
 import {
-  buildEkAnnounce,
   EK_ANNOUNCE_KIND,
-  ekHintOf,
+  EMPTY_FS_FAILURE_LOG,
   FS_CAPABILITY,
   FS_CAPABILITY_MAX_LEN,
   FS_GRACE_MS,
   FS_RETIRED,
+  FS_ROTATE_INTERVAL_MS,
+  buildEkAnnounce,
+  compareFsStrength,
+  ekHintOf,
   generateEncryptionKey,
   openWrapWithEks,
+  pinAfterDeclare,
+  pinIsDowngraded,
   pruneFsKeys,
-  shouldRotateFs,
-  recordFsFailure,
-  EMPTY_FS_FAILURE_LOG,
-  FS_ROTATE_INTERVAL_MS,
   readEkAnnounce,
   readFsCapability,
+  readPin,
+  recordFsFailure,
+  shouldRotateFs,
   withEkHint,
 } from "./subkey.js";
 
@@ -318,5 +322,92 @@ describe("recordFsFailure（ADR-0316 可觀測性）", () => {
     const before = { ...EMPTY_FS_FAILURE_LOG };
     recordFsFailure(EMPTY_FS_FAILURE_LOG, t, true);
     expect(EMPTY_FS_FAILURE_LOG).toEqual(before);
+  });
+});
+
+// ── ADR-0302 §3：釘選要記強度而非布林 ────────────────────────────────────────
+//
+// 舊的 `pinned: Record<string, boolean>` 只說得出「期望 FS / 不期望」。降級判定因此是
+// 「釘過他、但現在沒有他的 EK」——一個**仍然有 EK、只是退回較弱機制**的對方完全看不出來。
+
+describe("釘選的強度（ADR-0302 §3）", () => {
+  /** 兩個機制的測試用序（生產環境目前只有 ek-v1；見 FS_SCHEME_RANK 的偏序警告）。 */
+  const RANK = { "ek-v1": 1, "ek-pq-v1": 2 } as const;
+
+  describe("readPin：吸收舊的布林形", () => {
+    it("🔴 `true` 視為 ek-v1——舊存檔與舊版客戶端的快照會一直送這個過來", () => {
+      expect(readPin(true)).toEqual({ scheme: "ek-v1", at: 0 });
+    });
+    it("`at: 0` 是刻意的：我們不知道它何時被釘上，假造「現在」會讓它看起來比實際新", () => {
+      expect(readPin(true)!.at).toBe(0);
+    });
+    it("新形原樣通過；未釘選回 undefined", () => {
+      expect(readPin({ scheme: "ek-pq-v1", at: 5 })).toEqual({ scheme: "ek-pq-v1", at: 5 });
+      expect(readPin(undefined)).toBeUndefined();
+    });
+  });
+
+  describe("compareFsStrength", () => {
+    it("認得的照序比", () => {
+      expect(compareFsStrength("ek-v1", "ek-pq-v1", RANK)).toBe("weaker");
+      expect(compareFsStrength("ek-pq-v1", "ek-v1", RANK)).toBe("stronger");
+      expect(compareFsStrength("ek-v1", "ek-v1", RANK)).toBe("same");
+    });
+    it("🔴 不認得的回 incomparable，**不是** weaker——那是安全側的預設", () => {
+      // 把「我沒聽過這個機制」當成降級，就是把「你該更新」講成「對方可能正在被攻擊」
+      // （ADR-0302 §4 的紅線）。那種情形走 markFsUnsupported 那條路。
+      expect(compareFsStrength("ratchet-v9000", "ek-v1", RANK)).toBe("incomparable");
+      expect(compareFsStrength("ek-v1", "ratchet-v9000", RANK)).toBe("incomparable");
+    });
+    it("生產的預設表只有 ek-v1（新機制要顯式加進去才比得了）", () => {
+      expect(compareFsStrength("ek-v1", "ek-v1")).toBe("same");
+      expect(compareFsStrength("ek-pq-v1", "ek-v1")).toBe("incomparable");
+    });
+  });
+
+  describe("pinAfterDeclare：scheme 只升不降", () => {
+    it("首次宣告即釘上", () => {
+      expect(pinAfterDeclare(undefined, "ek-v1", 100, RANK)).toEqual({ scheme: "ek-v1", at: 100 });
+    });
+
+    it("宣告更強 → 升級基準並清掉降級證據", () => {
+      const prev = { scheme: "ek-v1", at: 100, declared: "ek-v1" };
+      expect(pinAfterDeclare(prev, "ek-pq-v1", 200, RANK)).toEqual({ scheme: "ek-pq-v1", at: 200 });
+    });
+
+    it("🔴 宣告較弱 → **基準不動**，只記下對方現在說的（否則 TOFU 形同虛設）", () => {
+      // 若允許較弱的宣告覆蓋釘選，攻擊者只要宣告弱的就能把基準拉低。
+      const prev = { scheme: "ek-pq-v1", at: 100 };
+      const next = pinAfterDeclare(prev, "ek-v1", 200, RANK);
+      expect(next.scheme).toBe("ek-pq-v1"); // 基準沒被拉低
+      expect(next.at).toBe(100); // 時間也不動
+      expect(next.declared).toBe("ek-v1"); // 但留下證據
+      expect(pinIsDowngraded(next)).toBe(true);
+    });
+
+    it("🔴 從舊的布林形起跳也擋得住降級（遷移期最容易漏的那一格）", () => {
+      // 舊存檔是 `true`＝ek-v1。對方若宣告更強的再退回，一樣要擋。
+      const up = pinAfterDeclare(true, "ek-pq-v1", 200, RANK);
+      expect(up.scheme).toBe("ek-pq-v1");
+      expect(pinAfterDeclare(up, "ek-v1", 300, RANK).scheme).toBe("ek-pq-v1");
+    });
+
+    it("宣告相同 → 回到正常，清掉降級證據（對方修好了／攻擊停了）", () => {
+      const downgraded = { scheme: "ek-pq-v1", at: 100, declared: "ek-v1" };
+      const back = pinAfterDeclare(downgraded, "ek-pq-v1", 300, RANK);
+      expect(pinIsDowngraded(back)).toBe(false);
+      expect(back.at).toBe(100); // 基準的時間是「何時升上來的」，不因複述而更新
+    });
+
+    it("不可比（含不認得）→ 釘選完全不動", () => {
+      const prev = { scheme: "ek-v1", at: 100 };
+      expect(pinAfterDeclare(prev, "ratchet-v9000", 200, RANK)).toEqual(prev);
+      expect(pinIsDowngraded(pinAfterDeclare(prev, "ratchet-v9000", 200, RANK))).toBe(false);
+    });
+  });
+
+  it("pinIsDowngraded 對未釘選與布林形都不誤報", () => {
+    expect(pinIsDowngraded(undefined)).toBe(false);
+    expect(pinIsDowngraded(true)).toBe(false);
   });
 });

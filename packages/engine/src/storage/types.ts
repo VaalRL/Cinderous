@@ -1,6 +1,6 @@
 /** 本機持久化的資料型別（身分、聯絡人、訊息）。 */
 
-import type { AssetBlob, AssetTombstone, CustomAsset, FsFailureLog, OrSetTombstone, PendingFsEvent, SyncedPrefs } from "@cinderous/core";
+import type { AssetBlob, AssetTombstone, CustomAsset, FsFailureLog, OrSetTombstone, PendingFsEvent, StoredFsPin, SyncedPrefs } from "@cinderous/core";
 import type { MessageArchive } from "./archive.js";
 
 /**
@@ -501,10 +501,18 @@ export interface StoredFsState {
   /** 每聯絡人學到的當前 EK 公鑰（聯絡人 pubkey → ek pubkey）。 */
   contactEks: Record<string, string>;
   /**
-   * TOFU 釘選「此聯絡人期望 FS」（ADR-0245，pubkey → true）：見其簽章個人檔 `fs` 宣告或學到其 EK 即釘。
-   * 釘選後若送訊時無其 EK → 不得靜默退回靜態，發降級警告。可選（舊資料缺＝視為空）。
+   * TOFU 釘選（ADR-0245；ADR-0302 §3 起**記強度而非布林**）：見其簽章個人檔 `fs` 宣告或
+   * 學到其 EK 即釘。釘選後若送訊時無其 EK → 不得靜默退回靜態，發降級警告。
+   *
+   * 🔴 **值可能是舊的 `true`**（`StoredFsPin`）——不只是本機舊存檔，**舊版客戶端的雲端快照
+   * 會一直送這個過來**，所以那條路徑不會消失。一律用 `readPin()` 讀，不要直接當布林用。
+   *
+   * 為什麼要記強度：布林只說得出「期望 FS / 不期望」，而「從強機制退回弱機制」**也是降級**。
+   * 一個仍然有 EK、只是退回較弱機制的對方，在舊判定（`pinned && !contactEks`）下完全看不出來。
+   *
+   * 可選（舊資料缺＝視為空）。
    */
-  pinned?: Record<string, boolean>;
+  pinned?: Record<string, StoredFsPin>;
   /**
    * 對方宣告了**我們不支援的** FS 機制時，記下其原始能力字串（ADR-0306 D3.3c）。
    *

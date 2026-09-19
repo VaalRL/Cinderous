@@ -9,7 +9,7 @@ import {
 } from "./cloud-snapshot.js";
 import { MemoryStorage } from "./memory.js";
 import type { StoredMessage } from "./types.js";
-import { type AssetTombstone, type CustomAsset, FS_GRACE_MS, OR_SET_TOMBSTONE_RETENTION_MS } from "@cinderous/core";
+import { type AssetTombstone, type CustomAsset, FS_GRACE_MS, OR_SET_TOMBSTONE_RETENTION_MS, strongerPin } from "@cinderous/core";
 
 const msg = (id: string, contact: string, at: number, text = id): StoredMessage => ({
   id,
@@ -511,7 +511,7 @@ describe("FS 狀態的快照合併（ADR-0306 D3.3c 的欄位不得掉）", () =
     // merged 是逐欄位建構的，漏一個欄位就是靜默丟資料；而這個欄位掉了之後，
     // fsWouldDowngrade 會接手，對「升級了的聯絡人」跳出「對方可能被攻擊」。
     const dst = new MemoryStorage();
-    dst.saveFsState({ enabled: true, keys: [], contactEks: {}, pinned: { bob: true }, unsupported: { bob: "ratchet-v1" } });
+    dst.saveFsState({ enabled: true, keys: [], contactEks: {}, pinned: { bob: true as const }, unsupported: { bob: "ratchet-v1" } });
     mergeSnapshotContent(dst, withFs({ enabled: true, keys: [], contactEks: {}, pinned: {} }));
     expect(dst.loadFsState().unsupported).toEqual({ bob: "ratchet-v1" });
   });
@@ -612,5 +612,44 @@ describe("FS 狀態的快照合併（ADR-0306 D3.3c 的欄位不得掉）", () =
     dst.saveFsState({ enabled: true, keys: [], contactEks: {}, pinned: {} });
     const { changed } = mergeSnapshotContent(dst, withFs({ enabled: true, keys: [], contactEks: {}, pinned: {} }));
     expect(changed).toBe(false);
+  });
+});
+
+// ── ADR-0302 §3：合併釘選時取較強的 ─────────────────────────────────────────
+
+describe("釘選合併取較強（ADR-0302 §3）", () => {
+  const RANK = { "ek-v1": 1, "ek-pq-v1": 2 } as const;
+
+  it("🔴 遠端較強、本機較弱 → 取遠端；本機優先會把較強的那筆丟掉", () => {
+    expect(strongerPin({ scheme: "ek-v1", at: 1 }, { scheme: "ek-pq-v1", at: 2 }, RANK)).toEqual({
+      scheme: "ek-pq-v1",
+      at: 2,
+    });
+  });
+
+  it("本機較強 → 取本機", () => {
+    expect(strongerPin({ scheme: "ek-pq-v1", at: 2 }, { scheme: "ek-v1", at: 1 }, RANK)?.scheme).toBe("ek-pq-v1");
+  });
+
+  it("🔴 舊的布林形參與合併時不得把較強的拉低（遷移期最容易漏的那一格）", () => {
+    // 另一台還在舊版、送來的快照裡是 `true`（＝ek-v1）；本機已經升到 ek-pq-v1。
+    expect(strongerPin({ scheme: "ek-pq-v1", at: 5 }, true, RANK)?.scheme).toBe("ek-pq-v1");
+    expect(strongerPin(true, { scheme: "ek-pq-v1", at: 5 }, RANK)?.scheme).toBe("ek-pq-v1");
+  });
+
+  it("同基準 → 取較早的釘選時間（TOFU 以最早為準），且降級證據任一邊看到就算數", () => {
+    const merged = strongerPin({ scheme: "ek-v1", at: 9 }, { scheme: "ek-v1", at: 3, declared: "ek-v1" }, RANK);
+    expect(merged).toEqual({ scheme: "ek-v1", at: 3, declared: "ek-v1" });
+  });
+
+  it("只有一邊有 → 留下那一邊；兩邊都沒有 → undefined", () => {
+    expect(strongerPin({ scheme: "ek-v1", at: 1 }, undefined, RANK)?.scheme).toBe("ek-v1");
+    expect(strongerPin(undefined, { scheme: "ek-v1", at: 1 }, RANK)?.scheme).toBe("ek-v1");
+    expect(strongerPin(undefined, undefined, RANK)).toBeUndefined();
+  });
+
+  it("不可比 → 保留本機那一筆（換掉會讓行為隨合併順序漂移）", () => {
+    const local = { scheme: "ratchet-v9000", at: 1 };
+    expect(strongerPin(local, { scheme: "ek-v1", at: 2 }, RANK)).toEqual(local);
   });
 });

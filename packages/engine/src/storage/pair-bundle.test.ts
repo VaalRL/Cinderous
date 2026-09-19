@@ -125,7 +125,7 @@ describe("配對捆包帶 FS 金鑰（審查發現：不帶＝新裝置永遠解
     enabled: true,
     keys: [{ nsec: "ek-nsec-1", pk: "ek-pk-1", at: 1000 }],
     contactEks: { bob: "bob-ek" },
-    pinned: { bob: true },
+    pinned: { bob: true as const },
     unsupported: { carol: "ratchet-v1" },
   };
 

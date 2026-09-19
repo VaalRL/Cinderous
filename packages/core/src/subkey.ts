@@ -114,6 +114,140 @@ export function pruneFsKeys<T extends { at: number }>(keys: T[], now: number, gr
   return sorted.filter((k, i) => i === sorted.length - 1 || now - (sorted[i + 1] as { at: number }).at <= graceMs);
 }
 
+// ── 釘選要記強度而非布林（ADR-0302 §3）──────────────────────────────────────
+//
+// 舊的釘選是 `Record<string, boolean>`，只表達得出「這個人期望 FS / 不期望」。
+// 🔴 那撐不住第二種機制：「從強機制退回弱機制」**也是降級**，而布林說不出口——
+// 一個**仍然有 EK、只是退回較弱機制**的對方，在舊判定（`pinned && !contactEks`）下
+// 完全看不出來。攻擊者只要供應一份較舊的個人檔就能靜默把你降級。
+
+/** 一筆 TOFU 釘選（ADR-0302 §3）。 */
+export interface FsPin {
+  /** 曾見過**最強**的機制（TOFU 基準）——**只升不降**，見 `pinAfterDeclare`。 */
+  scheme: string;
+  /** 這個 `scheme` 被釘上的時間（毫秒）。 */
+  at: number;
+  /**
+   * 對方**目前**宣告的機制；與 `scheme` 相同時省略。
+   * 有值＝對方退回了較弱的機制＝降級證據（送訊時據此警告）。
+   */
+  declared?: string;
+}
+
+/** 儲存形。⚠ 舊資料（與舊版客戶端送來的快照）是 `true`，**會一直存在**，見 `readPin`。 */
+export type StoredFsPin = FsPin | true;
+
+/**
+ * 讀一筆釘選，**吸收舊的布林形**（ADR-0302 §3：`true` 視為 `{ scheme: "ek-v1", at: 0 }`）。
+ *
+ * `at: 0` 是刻意的——我們不知道它何時被釘上，而假造一個「現在」會讓它看起來比實際新。
+ */
+export function readPin(v: StoredFsPin | undefined): FsPin | undefined {
+  if (v === undefined) return undefined;
+  if (v === true) return { scheme: FS_CAPABILITY, at: 0 };
+  return v;
+}
+
+/**
+ * 已知機制的強度序（ADR-0302 §3）。**未列出的一律視為「不可比」**，不是「較弱」。
+ *
+ * ⚠ **這張表不保證是全序。** 目前只有一項所以看不出來，但選項空間其實有兩個軸——
+ * 「共用金鑰 vs per-device session」與「古典 vs 後量子」。`ek-pq-v1`（後量子但無 PCS）
+ * 與 `ratchet-v1`（有 PCS 但非後量子）**各有對方沒有的東西**，用一個整數排不出來。
+ * 真要加第二個軸時這裡要換成偏序，而 `compareFsStrength` 的 `"incomparable"`
+ * 已經替那一天留好位置（見 `docs/research/double-ratchet-on-current-design.md` §1.1）。
+ */
+export const FS_SCHEME_RANK: Readonly<Record<string, number>> = { [FS_CAPABILITY]: 1 };
+
+/** 兩個機制的強度關係。`"incomparable"` 涵蓋「不認得」與「兩軸各有勝負」。 */
+export type FsStrength = "weaker" | "same" | "stronger" | "incomparable";
+
+/**
+ * 比較 `a` 相對於 `b` 的強度（ADR-0302 §3）。
+ *
+ * 🔴 **不認得的一律回 `"incomparable"`，不回 `"weaker"`。** 那是安全側的預設：
+ * 把「我沒聽過這個機制」當成降級，就是把「你該更新」講成「對方可能被攻擊」
+ * ——ADR-0302 §4 的紅線。那種情形由 `markFsUnsupported` 走另一條路處理。
+ */
+export function compareFsStrength(
+  a: string,
+  b: string,
+  rank: Readonly<Record<string, number>> = FS_SCHEME_RANK,
+): FsStrength {
+  const ra = rank[a];
+  const rb = rank[b];
+  if (ra === undefined || rb === undefined) return "incomparable";
+  return ra < rb ? "weaker" : ra > rb ? "stronger" : "same";
+}
+
+/**
+ * 收到對方的能力宣告後，算出新的釘選（ADR-0302 §3）。純函式，供引擎與測試共用。
+ *
+ * 規則只有一條，但它是整個 TOFU 的根：**`scheme` 只升不降**。
+ * 若允許較弱的宣告覆蓋釘選，攻擊者只要宣告弱的就能把基準拉低 ⇒ 釘選形同虛設。
+ * 較弱的宣告改記進 `declared`，讓送訊時警告得出來。
+ */
+export function pinAfterDeclare(
+  prev: StoredFsPin | undefined,
+  scheme: string,
+  now: number,
+  rank: Readonly<Record<string, number>> = FS_SCHEME_RANK,
+): FsPin {
+  const old = readPin(prev);
+  if (!old) return { scheme, at: now };
+  switch (compareFsStrength(scheme, old.scheme, rank)) {
+    case "stronger":
+      return { scheme, at: now }; // 升級基準，順帶清掉舊的降級證據
+    case "weaker":
+      return { ...old, declared: scheme }; // **不動基準**，記下對方現在說的
+    case "same":
+      return { scheme: old.scheme, at: old.at }; // 回到正常 → 清掉降級證據
+    default:
+      return old; // 不可比（含不認得）→ 不動；那條路由 `markFsUnsupported` 處理
+  }
+}
+
+/**
+ * 合併兩筆釘選，**取較強的**（ADR-0302 §3；雲端快照與配對捆包用）。
+ *
+ * 🔴 原本的合併是「union，本機優先」。換成記強度之後那會**拉低基準**：
+ * 遠端若釘了較強的機制而本機還在較弱的，本機優先就等於把較強的那筆丟掉。
+ * TOFU 的「一台釘＝全釘」推廣到多強度，正確的形狀是**取最強**。
+ *
+ * 降級證據（`declared`）只在**兩邊基準相同**時保留——基準不同時取較強的那一筆，
+ * 而較弱那一筆的「目前宣告」對較強的基準沒有意義。
+ */
+export function strongerPin(
+  a: StoredFsPin | undefined,
+  b: StoredFsPin | undefined,
+  rank: Readonly<Record<string, number>> = FS_SCHEME_RANK,
+): FsPin | undefined {
+  const x = readPin(a);
+  const y = readPin(b);
+  if (!x) return y;
+  if (!y) return x;
+  switch (compareFsStrength(x.scheme, y.scheme, rank)) {
+    case "stronger":
+      return x;
+    case "weaker":
+      return y;
+    case "same":
+      // 同基準：留住降級證據（任一邊看到就算數），並取較早的釘選時間（TOFU 以最早為準）。
+      return {
+        scheme: x.scheme,
+        at: Math.min(x.at, y.at),
+        ...(x.declared ?? y.declared ? { declared: x.declared ?? y.declared } : {}),
+      };
+    default:
+      // 不可比：保留本機那一筆（`a`）——沒有依據說另一邊更好，而換掉會讓行為隨合併順序漂移。
+      return x;
+  }
+}
+
+/** 這筆釘選代表「對方退回了較弱的機制」嗎（ADR-0302 §3 的降級判據之一）。 */
+export function pinIsDowngraded(v: StoredFsPin | undefined): boolean {
+  return readPin(v)?.declared !== undefined;
+}
 /**
  * 解封失敗的觀測記錄（ADR-0316）。
  *

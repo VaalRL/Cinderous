@@ -162,6 +162,10 @@ import {
   pruneFsKeys,
   readEkAnnounce,
   readFsCapability,
+  readPin,
+  pinAfterDeclare,
+  pinIsDowngraded,
+  type FsPin,
   type UnwrappedMessage,
 } from "@cinderous/core";
 import { loadRelayCheck, recordAuthObservation } from "./relay-check.js"; // ADR-0275：A 層健檢
@@ -256,6 +260,11 @@ function omitKey<T>(map: Record<string, T> | undefined, key: string): Record<str
  */
 function msgTime(rumor: Rumor): number {
   return Math.min(rumor.created_at * 1000, Date.now());
+}
+
+/** 兩筆釘選是否等價（ADR-0302 §3）——用來判斷「這次宣告有沒有改變任何東西」。 */
+function sameFsPin(a: FsPin | undefined, b: FsPin): boolean {
+  return a !== undefined && a.scheme === b.scheme && a.at === b.at && a.declared === b.declared;
 }
 
 function storedToChat(m: StoredMessage): ChatMessage {
@@ -1320,24 +1329,37 @@ export class RelayChatBackend implements ChatBackend {
     return { encryptToFor: fs.encryptToFor, ...(myEk ? { myEk: myEk.pk } : {}) };
   }
 
-  /** 學到某聯絡人當前 EK（收 10040 或訊息內嵌 hint）；順帶 TOFU 釘選「此人用 FS」。 */
+  /**
+   * 學到某聯絡人當前 EK（收 10040 或訊息內嵌 hint）；順帶 TOFU 釘選「此人用 FS」。
+   *
+   * ⚠ 這條路只知道「他有 EK」，**不知道他宣告的是哪一版機制**（10040 目前沒有帶）。
+   * 故一律以 `FS_CAPABILITY` 釘——而 `pinAfterDeclare` 保證那不會把既有的較強釘選拉低。
+   */
   private learnContactEk(pubkey: PubkeyHex, ek: string): void {
-    const known = this.fsState.contactEks[pubkey] === ek && (this.fsState.pinned?.[pubkey] ?? false);
-    if (known) return;
+    const cur = this.fsState.pinned?.[pubkey];
+    const next = pinAfterDeclare(cur, FS_CAPABILITY, Date.now());
+    if (this.fsState.contactEks[pubkey] === ek && cur !== undefined && sameFsPin(readPin(cur), next)) return;
     this.fsState = {
       ...this.fsState,
       contactEks: { ...this.fsState.contactEks, [pubkey]: ek },
-      pinned: { ...(this.fsState.pinned ?? {}), [pubkey]: true }, // 學到 EK＝證據他用 FS → 釘選
+      pinned: { ...(this.fsState.pinned ?? {}), [pubkey]: next }, // 學到 EK＝證據他用 FS → 釘選
     };
     this.persistFs();
   }
-  /** TOFU 釘選「此聯絡人期望 FS」（見其簽章個人檔 `fs` 宣告）。 */
-  private pinFs(pubkey: PubkeyHex): void {
+  /**
+   * TOFU 釘選（ADR-0245；ADR-0302 §3 起記強度）：見其簽章個人檔的 `fs` 宣告。
+   *
+   * 🔴 **基準只升不降**（`pinAfterDeclare`）。較弱的宣告不覆蓋釘選，只記進 `declared`
+   * 供送訊時警告——否則攻擊者只要供應一份較舊的個人檔就能把基準拉低，釘選形同虛設。
+   */
+  private pinFs(pubkey: PubkeyHex, scheme: string): void {
     const wasUnsupported = this.fsState.unsupported?.[pubkey] !== undefined;
-    if (this.fsState.pinned?.[pubkey] && !wasUnsupported) return;
+    const cur = this.fsState.pinned?.[pubkey];
+    const next = pinAfterDeclare(cur, scheme, Date.now());
+    if (cur !== undefined && sameFsPin(readPin(cur), next) && !wasUnsupported) return;
     this.fsState = {
       ...this.fsState,
-      pinned: { ...(this.fsState.pinned ?? {}), [pubkey]: true },
+      pinned: { ...(this.fsState.pinned ?? {}), [pubkey]: next },
       ...(wasUnsupported ? { unsupported: omitKey(this.fsState.unsupported, pubkey) } : {}),
     };
     this.persistFs();
@@ -1364,9 +1386,17 @@ export class RelayChatBackend implements ChatBackend {
     this.fsState = { ...this.fsState, unsupported: { ...(this.fsState.unsupported ?? {}), [pubkey]: declared } };
     this.persistFs();
   }
-  /** 降級偵測（ADR-0245）：已釘選 FS 的聯絡人卻無其 EK → 送訊會退回靜態＝疑似降級，回 true 供警告。 */
+  /**
+   * 降級偵測（ADR-0245；ADR-0302 §3 擴充）。已釘選的聯絡人出現以下任一即回 true：
+   *
+   * 1. **無其 EK**（原判據）：送訊會退回靜態身分金鑰。
+   * 2. **宣告的機制比釘選的弱**（新增）：他仍然有 EK，但那把 EK 屬於較弱的機制
+   *    ——舊的布林判定看不出這一種，而攻擊者只要供應一份較舊的個人檔就做得到。
+   */
   private fsWouldDowngrade(to: PubkeyHex): boolean {
-    return (this.fsState.pinned?.[to] ?? false) && !this.fsState.contactEks[to];
+    const pin = this.fsState.pinned?.[to];
+    if (pin === undefined) return false;
+    return !this.fsState.contactEks[to] || pinIsDowngraded(pin);
   }
   /** 多鑰解封並順帶學對方 EK（rumor 內嵌 hint）。取代裸 unwrapMessage——FS 未啟用時候選只有 IK＝行為不變。 */
   private openFs(event: NostrEvent): UnwrappedMessage {
@@ -1501,7 +1531,7 @@ export class RelayChatBackend implements ChatBackend {
    */
   fsPeerState(pubkey: PubkeyHex): "known" | "unknown" | "lost" {
     if (this.fsState.contactEks[pubkey]) return "known";
-    return this.fsState.pinned?.[pubkey] ? "lost" : "unknown";
+    return this.fsState.pinned?.[pubkey] !== undefined ? "lost" : "unknown";
   }
 
   /**
@@ -2402,7 +2432,7 @@ export class RelayChatBackend implements ChatBackend {
       // 都掉進「沒有 FS」那一格——前者永遠解不掉釘選、後者被誤報為降級（ADR-0302 §2）。
       switch (readFsCapability(profile.fs)) {
         case "fs":
-          this.pinFs(sender);
+          this.pinFs(sender, profile.fs as string);
           break;
         case "retired":
           this.unpinFs(sender);

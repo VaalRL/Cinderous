@@ -21,6 +21,8 @@ import {
   type CustomAsset,
   type OrSetTombstone,
   type SyncedPrefs,
+  strongerPin,
+  type StoredFsPin,
 } from "@cinderous/core";
 import { stripDeviceLocalFile } from "./types.js";
 import { utf8ByteLength } from "./utf8-size.js";
@@ -248,6 +250,19 @@ function saveTombstonesIfChanged(storage: AppStorage, set: OrSetName, merged: Or
  * 合併快照進本機儲存（交換律）。回傳有訊息補回的對話鍵（供 UI 重放歷史）；
  * 無任何變更時 `changed` 為 false。
  */
+/** 逐筆取較強的釘選（ADR-0302 §3）；任一邊有就留下。 */
+function mergePinned(
+  remote: Record<string, StoredFsPin> | undefined,
+  local: Record<string, StoredFsPin> | undefined,
+): Record<string, StoredFsPin> {
+  const out: Record<string, StoredFsPin> = {};
+  for (const pk of new Set([...Object.keys(remote ?? {}), ...Object.keys(local ?? {})])) {
+    const merged = strongerPin(local?.[pk], remote?.[pk]);
+    if (merged) out[pk] = merged;
+  }
+  return out;
+}
+
 export function mergeSnapshotContent(
   storage: AppStorage,
   content: CloudSnapshotContent,
@@ -369,7 +384,11 @@ export function mergeSnapshotContent(
       ...(vote.at !== undefined ? { enabledAt: vote.at } : {}),
       keys: pruneFsKeys([...byPk.values()], opts.now ?? Date.now()), // union 後修剪逾 grace
       contactEks: { ...(content.fs.contactEks ?? {}), ...local.contactEks }, // union，本地衝突優先
-      pinned: { ...(content.fs.pinned ?? {}), ...(local.pinned ?? {}) }, // union 釘選（ADR-0245：一台釘＝全釘）
+      // 釘選：union，但**逐筆取較強的**（ADR-0302 §3）。
+      // 🔴 原本是「本機優先」，換成記強度之後那會**拉低基準**——遠端釘了較強的機制而本機
+      // 還在較弱的，本機優先就把較強的那筆丟掉了。TOFU 的「一台釘＝全釘」推廣到多強度，
+      // 正確的形狀是取最強。
+      pinned: mergePinned(content.fs.pinned, local.pinned),
       // ADR-0306 D3.3c：`unsupported`（對方宣告了本版不支援的機制）同樣要 union、本機優先。
       // ⚠ 本物件是**逐欄位建構**的——漏一個欄位就是靜默丟資料，而丟掉這一格的後果不是
       // 「少一個提示」，是 `fsWouldDowngrade` 接手 ⇒ 對**升級了的**聯絡人跳出
