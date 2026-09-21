@@ -94,6 +94,38 @@ describe("FS 文案紅線（ADR-0302 §4／ADR-0306 D1）", () => {
   });
 });
 
+// ── 🔴 後量子文案紅線（ADR-0365／ADR-0306 D2.2）────────────────────────────
+//
+// 本版**還沒有任何後量子文案**（公告開關關著、沒有對應的 UI），所以下面這組測試
+// 今天是空跑的。**這正是重點**：它不是在驗現況，是在「有人寫下第一句」的那一刻咬住。
+//
+// 為什麼這條線必須存在：混合式 KEM 換掉的只有**加密**。事件簽章仍是 secp256k1
+// ⇒ 一個真的有量子電腦的攻擊者**照樣偽造得出訊息**。我們買到的只有一件事：
+// 今天被側錄的密文，未來解不開（harvest-now-decrypt-later）。
+// 把那寫成「量子安全」，與 ADR-0302 §4 抓過的「對等宣稱」是同一種謊。
+describe("後量子文案紅線（ADR-0365）", () => {
+  /** 掃全部語系的全部字串。 */
+  const everyString = (): { locale: string; key: string; text: string }[] =>
+    LOCALES.flatMap((locale) =>
+      Object.entries(catalog[locale]).map(([key, text]) => ({ locale, key, text: String(text) })),
+    );
+
+  it("🔴 沒有任何一則文案宣稱「量子安全／抗量子」這類包山包海的話", () => {
+    // 這些詞的問題不在於誇張，在於它們指的是**整個產品**，而我們換掉的只有加密那一半。
+    const banned = [/量子安全/, /抗量子/, /防量子/, /量子級/, /quantum[-\s]?safe/i, /quantum[-\s]?proof/i];
+    const bad = everyString().filter((e) => banned.some((re) => re.test(e.text)));
+    expect(bad.map((e) => `${e.locale}:${e.key}`)).toEqual([]);
+  });
+
+  it("🔴 提到「後量子」的文案必須同時寫明實驗性／未經審計", () => {
+    // 與 `fs_unaudited`／`fs_enableConfirm` 同一條規則（ADR-0306 D1）：
+    // 一個尚未經外部審計的自製組合器，不該以成熟功能的口吻出現。
+    const mentions = everyString().filter((e) => /後量子|post[-\s]?quantum/i.test(e.text));
+    const qualified = (t: string) => /實驗性|未經.*審計|experimental|unaudited|not.*audited/i.test(t);
+    expect(mentions.filter((e) => !qualified(e.text)).map((e) => `${e.locale}:${e.key}`)).toEqual([]);
+  });
+});
+
 // ADR-0305 §6.1：這句文案在「還原範圍」上說得比實際多。與入口整併**脫鉤**、必改。
 describe("中繼大檔提示的文案紅線（ADR-0344）", () => {
   it("🔴「確定在中繼上」與「無法確認」必須是不同的兩句話", () => {

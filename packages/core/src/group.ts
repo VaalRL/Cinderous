@@ -12,7 +12,7 @@ import type { FileMeta, WrappedMessage } from "./giftwrap.js";
 import { getPublicKey, type PubkeyHex, type SecretKey } from "./keys.js";
 import { mentionTags } from "./mention.js";
 import { EK_HINT_TAG } from "./subkey.js";
-import type { Rumor, RumorInput } from "./nip59.js";
+import type { RecipientLike, Rumor, RumorInput } from "./nip59.js";
 import { sealAndWrap } from "./nip59.js";
 import { alsoMainTag, replyTag } from "./thread.js";
 
@@ -190,7 +190,7 @@ function fanOutGroupRumor(
    * 回條與引用都以它為鍵（ADR-0095）。1:1 那套「在 rumor 內嵌 ek hint」在這裡會讓
    * 每次輪替都產生不同的 id。
    */
-  encryptToFor?: (identityPk: PubkeyHex) => PubkeyHex,
+  encryptToFor?: (identityPk: PubkeyHex) => RecipientLike,
   /**
    * 我的當前 EK（ADR-0326）：夾在 **seal 層** tags 裡，讓收件人學到我的 EK。
    *
@@ -234,7 +234,7 @@ export function wrapGroupMessage(
     alsoMain?: boolean;
     expiration?: number;
     /** FS retarget（ADR-0320）：身分 pk → 其 EK；逐位成員決定，不知道就退回身分。 */
-    encryptToFor?: (identityPk: PubkeyHex) => PubkeyHex;
+    encryptToFor?: (identityPk: PubkeyHex) => RecipientLike;
     /** 我的當前 EK（ADR-0326）：夾在 seal 層讓收件人學到，不動 `rumor.id`。 */
     myEk?: PubkeyHex;
   } = {},
@@ -271,7 +271,7 @@ export function wrapGroupFile(
     relayHint?: string;
     expiration?: number;
     /** FS retarget（ADR-0320）：檔名/大小/類型與 1:1 同樣敏感（ADR-0318）。 */
-    encryptToFor?: (identityPk: PubkeyHex) => PubkeyHex;
+    encryptToFor?: (identityPk: PubkeyHex) => RecipientLike;
     /** 我的當前 EK（ADR-0326）：夾在 seal 層讓收件人學到，不動 `rumor.id`。 */
     myEk?: PubkeyHex;
   } = {},

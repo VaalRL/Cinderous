@@ -379,11 +379,17 @@ export function mergeSnapshotContent(
           { enabled: local.enabled, ...(local.enabledAt !== undefined ? { at: local.enabledAt } : {}) },
           { enabled: content.fs.enabled === true, ...(content.fs.enabledAt !== undefined ? { at: content.fs.enabledAt } : {}) },
         );
+    const mergedEks = { ...(content.fs.contactEks ?? {}), ...local.contactEks };
+    const mergedPq = pairContactPq(mergedEks, local, content.fs);
     const merged: StoredFsState = {
       enabled: vote.enabled,
       ...(vote.at !== undefined ? { enabledAt: vote.at } : {}),
       keys: pruneFsKeys([...byPk.values()], opts.now ?? Date.now()), // union 後修剪逾 grace
-      contactEks: { ...(content.fs.contactEks ?? {}), ...local.contactEks }, // union，本地衝突優先
+      contactEks: mergedEks, // union，本地衝突優先
+      // 🔴 ADR-0365：`contactPq` **不能**獨立 union。`ek` 與 `pq` 是一對，各自合併會合出
+      // 「本機的 ek ＋ 遠端的 pq」這種對方手上根本不存在的組合 ⇒ 送出去的訊息永久解不開。
+      // 故逐人從**提供了那把 ek 的同一側**取 pq（見 `pairContactPq`）。
+      ...(mergedPq ? { contactPq: mergedPq } : {}),
       // 釘選：union，但**逐筆取較強的**（ADR-0302 §3）。
       // 🔴 原本是「本機優先」，換成記強度之後那會**拉低基準**——遠端釘了較強的機制而本機
       // 還在較弱的，本機優先就把較強的那筆丟掉了。TOFU 的「一台釘＝全釘」推廣到多強度，
@@ -473,4 +479,32 @@ export function mergeSnapshotContent(
     }
   }
   return { changed, convos };
+}
+
+/**
+ * 把 `contactPq` 按「ek 來自哪一側」對齊（ADR-0365）。
+ *
+ * 🔴 存在的理由是一個**不會有任何測試自然變紅**的資料毀損：混合式訊息要收件人拿出
+ * 「同一把 EK 的古典私鑰 ＋ 後量子私鑰」才解得開。兩個 map 各自 union 的話，
+ * 只要兩台裝置學到的 EK 不同步，就會產生「A 側的 ek ＋ B 側的 pq」——
+ * 那個組合在對方的候選金鑰裡不存在，訊息送得出去、對方卻**永遠解不開**。
+ *
+ * 規則很簡單：某人的 `ek` 是從哪一側勝出的，`pq` 就只能從那一側拿；那一側沒有就沒有
+ * （退回純古典＝今天的基準線）。
+ *
+ * 兩側都沒有任何 `pq` 時回 `undefined`，避免對既有存檔憑空生一個空欄位而觸發無謂的快照重寫。
+ */
+function pairContactPq(
+  mergedEks: Record<string, string>,
+  local: StoredFsState,
+  remote: StoredFsState,
+): Record<string, string> | undefined {
+  if (!local.contactPq && !remote.contactPq) return undefined;
+  const out: Record<string, string> = {};
+  for (const [pubkey, ek] of Object.entries(mergedEks)) {
+    const side = local.contactEks[pubkey] === ek ? local : remote;
+    const pq = side.contactPq?.[pubkey];
+    if (pq) out[pubkey] = pq;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
 }

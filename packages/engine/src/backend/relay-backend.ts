@@ -167,6 +167,17 @@ import {
   pinIsDowngraded,
   type FsPin,
   type UnwrappedMessage,
+  // 後量子 EK（ADR-0365）。公告那一半由 `EK_PQ_ANNOUNCE` 控制，**預設關著**；
+  // 讀與解的那一半一律開著（先普及、後開播，理由見該常數）。
+  decodePqPublicKey,
+  encodePqPublicKey,
+  encodePqSeed,
+  EK_PQ_ANNOUNCE,
+  generatePqSeed,
+  type PqKeyPair,
+  pqKeyFromStored,
+  type RecipientKeyLike,
+  type RecipientLike,
 } from "@cinderous/core";
 import { loadRelayCheck, recordAuthObservation } from "./relay-check.js"; // ADR-0275：A 層健檢
 import { buildRtcConfig } from "./rtc-config.js";
@@ -1286,23 +1297,73 @@ export class RelayChatBackend implements ChatBackend {
   fsEnabled(): boolean {
     return this.fsState.enabled;
   }
-  /** 我當前的 EK（最新一把）；未啟用/無金鑰回 undefined。 */
-  private myCurrentEk(): { sk: SecretKey; pk: string } | undefined {
+  /**
+   * 種子 → ML-KEM 金鑰對的記憶體快取（ADR-0365）。
+   *
+   * 儲存層只放 64-byte 種子（展開後 2400 bytes 會讓 ADR-0322 S2 的分發事件
+   * 從 4.5 KB 漲到 110 KB）。展開一次約 0.3 ms，而 `fsDecryptCandidates()`
+   * **每收一則訊息就會被呼叫一次**、且會逐把重試 ⇒ 不快取等於每則訊息重算好幾次。
+   *
+   * 鍵是種子字串本身：同一顆種子永遠導出同一對金鑰（`pqKeyFromSeed` 是決定性的）。
+   */
+  private readonly pqCache = new Map<string, PqKeyPair>();
+
+  /** 展開某一把 EK 的後量子那一半；沒種子或種子壞掉回 undefined（＝這把只有古典）。 */
+  private pqOf(key: { pq?: string }): PqKeyPair | undefined {
+    if (!key.pq) return undefined;
+    const hit = this.pqCache.get(key.pq);
+    if (hit) return hit;
+    const kp = pqKeyFromStored(key.pq);
+    if (kp) this.pqCache.set(key.pq, kp);
+    return kp;
+  }
+
+  /** 我當前的 EK（最新一把）；未啟用/無金鑰回 undefined。`pq` 為其後量子那一半（可能沒有）。 */
+  private myCurrentEk(): { sk: SecretKey; pk: string; pq?: PqKeyPair } | undefined {
     const latest = [...this.fsState.keys].sort((a, b) => a.at - b.at).at(-1);
-    return latest ? { sk: nsecDecode(latest.nsec), pk: latest.pk } : undefined;
+    if (!latest) return undefined;
+    const pq = this.pqOf(latest);
+    return { sk: nsecDecode(latest.nsec), pk: latest.pk, ...(pq ? { pq } : {}) };
   }
-  /** 解封候選私鑰：我的所有 EK（current＋grace 內舊把）＋身分金鑰（向後相容/退回）。 */
-  private fsDecryptCandidates(): SecretKey[] {
-    return [...this.fsState.keys.map((k) => nsecDecode(k.nsec)), this.sk];
+  /**
+   * 解封候選私鑰：我的所有 EK（current＋grace 內舊把）＋身分金鑰（向後相容/退回）。
+   *
+   * 🔴 **古典與後量子必須成對交出**（ADR-0365）：混合式訊息要「同一把 EK 的兩半」
+   * 才解得開，拆開來配對會得到一個根本不存在的組合。這裡每一項都來自同一個
+   * `StoredFsKey`，配對是天然成立的——但任何人要改這個函式時得記得這件事。
+   *
+   * 身分金鑰那一項**沒有**後量子半邊：IK 是長期金鑰、沒有對應的 ML-KEM 種子，
+   * 而加密到 IK 的訊息本來就是「對方不知道我有 FS」的退回路徑，不會是混合式。
+   */
+  private fsDecryptCandidates(): RecipientKeyLike[] {
+    const eks: RecipientKeyLike[] = this.fsState.keys.map((k) => {
+      const pq = this.pqOf(k);
+      return pq ? { sk: nsecDecode(k.nsec), pqSk: pq.sk } : nsecDecode(k.nsec);
+    });
+    return [...eks, this.sk];
   }
-  /** 送訊息的 FS 選項：啟用且有 EK 才回。encryptToFor＝收件人 learned EK（不知則退回身分＝該則無 FS），自我副本用自己 EK。 */
-  private fsSendOpt(): { encryptToFor: (pk: PubkeyHex) => PubkeyHex; myEk: string } | undefined {
+  /**
+   * 送訊息的 FS 選項：啟用且有 EK 才回。encryptToFor＝收件人 learned EK
+   * （不知則退回身分＝該則無 FS），自我副本用自己 EK。
+   *
+   * ADR-0365：知道對方那把 EK 的 ML-KEM 公鑰時，順帶交出去 ⇒ 該則走混合式封裝。
+   * 學不到（對方沒升級／中繼扣住公告）就照舊走純古典——那是今天的基準線，不是退步。
+   */
+  private fsSendOpt(): { encryptToFor: (pk: PubkeyHex) => RecipientLike; myEk: string } | undefined {
     const my = this.myCurrentEk();
     if (!this.fsEnabled() || !my) return undefined;
     const selfPk = this.self.pubkey;
     return {
       myEk: my.pk,
-      encryptToFor: (pk) => (pk === selfPk ? my.pk : this.fsState.contactEks[pk] ?? pk),
+      encryptToFor: (pk) => {
+        // 自我副本：加密到自己的當前 EK，後量子那半直接用手上的公鑰（不必繞公告）。
+        if (pk === selfPk) return my.pq ? { pk: my.pk, pq: my.pq.pk } : my.pk;
+        const ek = this.fsState.contactEks[pk];
+        if (!ek) return pk; // 不知其 EK → 退回身分金鑰（該則無 FS，既有行為）
+        const pqB64 = this.fsState.contactPq?.[pk];
+        const pq = pqB64 ? decodePqPublicKey(pqB64) : undefined;
+        return pq ? { pk: ek, pq } : ek;
+      },
     };
   }
   /**
@@ -1312,7 +1373,7 @@ export class RelayChatBackend implements ChatBackend {
    * 是跨成員／跨時間的識別碼（ADR-0095／0264 §9），把每 7 天輪替一次的值放進去
    * ⇒ 同一個行程補送前後會得到不同 id ＝ 重複行程 ＋ 孤兒 RSVP。hint 由 kind 10040 承擔。
    */
-  private fsRetarget(): { encryptToFor: (pk: PubkeyHex) => PubkeyHex } | Record<string, never> {
+  private fsRetarget(): { encryptToFor: (pk: PubkeyHex) => RecipientLike } | Record<string, never> {
     const fs = this.fsSendOpt();
     return fs ? { encryptToFor: fs.encryptToFor } : {};
   }
@@ -1325,7 +1386,7 @@ export class RelayChatBackend implements ChatBackend {
    * 也不會隨時間改善（實測見 ADR-0326 §1）。seal 層 hint 讓群訊自己帶著發現機制，
    * 不必為此把群成員集合也交給中繼（那才是真正的代價）。
    */
-  private fsRetargetGroup(): { encryptToFor?: (pk: PubkeyHex) => PubkeyHex; myEk?: PubkeyHex } {
+  private fsRetargetGroup(): { encryptToFor?: (pk: PubkeyHex) => RecipientLike; myEk?: PubkeyHex } {
     const fs = this.fsSendOpt();
     if (!fs) return {};
     const myEk = this.myCurrentEk();
@@ -1338,13 +1399,25 @@ export class RelayChatBackend implements ChatBackend {
    * ⚠ 這條路只知道「他有 EK」，**不知道他宣告的是哪一版機制**（10040 目前沒有帶）。
    * 故一律以 `FS_CAPABILITY` 釘——而 `pinAfterDeclare` 保證那不會把既有的較強釘選拉低。
    */
-  private learnContactEk(pubkey: PubkeyHex, ek: string): void {
+  private learnContactEk(pubkey: PubkeyHex, ek: string, pq?: string): void {
     const cur = this.fsState.pinned?.[pubkey];
     const next = pinAfterDeclare(cur, FS_CAPABILITY, Date.now());
-    if (this.fsState.contactEks[pubkey] === ek && cur !== undefined && sameFsPin(readPin(cur), next)) return;
+    const sameEk = this.fsState.contactEks[pubkey] === ek;
+    // 🔴 ADR-0365：`ek` 與 `pq` 是一對。
+    // - 公告帶了 `pq` → 用新的。
+    // - **沒帶**且 `ek` 沒變 → 保留舊的（訊息內嵌的 `ek` hint 走這條，它本來就不帶 pq，
+    //   不保留的話每收一則 1:1 訊息就會把公告學到的 pq 洗掉 ⇒ 混合式永遠開不起來）。
+    // - **沒帶**且 `ek` 換了 → **刪掉**。把新 EK 配上舊 pq 會產生一個對方手上不存在的
+    //   組合，送出去的訊息**永久解不開**（且看起來一切正常，直到對方說收不到）。
+    const prevPq = this.fsState.contactPq?.[pubkey];
+    const nextPq = pq ?? (sameEk ? prevPq : undefined);
+    if (sameEk && nextPq === prevPq && cur !== undefined && sameFsPin(readPin(cur), next)) return;
     this.fsState = {
       ...this.fsState,
       contactEks: { ...this.fsState.contactEks, [pubkey]: ek },
+      contactPq: nextPq
+        ? { ...(this.fsState.contactPq ?? {}), [pubkey]: nextPq }
+        : omitKey(this.fsState.contactPq, pubkey),
       pinned: { ...(this.fsState.pinned ?? {}), [pubkey]: next }, // 學到 EK＝證據他用 FS → 釘選
     };
     this.persistFs();
@@ -1417,7 +1490,11 @@ export class RelayChatBackend implements ChatBackend {
   private publishEkAnnounce(): void {
     const my = this.myCurrentEk();
     if (!my) return;
-    const announce = buildEkAnnounce(this.sk, my.pk);
+    // ADR-0365：`EK_PQ_ANNOUNCE` 關著時**永遠發 v1**——那是順序紅線（先普及讀端、再開播）。
+    // 翻開後也只有「這把 EK 真的有種子」才發 v2：舊版客戶端往返分發事件時會把種子丟掉，
+    // 那時發 v2 等於公告一把自己解不開的金鑰。
+    const pq = EK_PQ_ANNOUNCE && my.pq ? encodePqPublicKey(my.pq.pk) : undefined;
+    const announce = buildEkAnnounce(this.sk, my.pk, pq ? { pq } : {});
     this.client.publish(announce);
     for (const c of this.relayPool.values()) c.publish(announce);
   }
@@ -1431,7 +1508,13 @@ export class RelayChatBackend implements ChatBackend {
       enabled: true,
       enabledAt: Date.now(), // ADR-0334：使用者動作的時間，供多裝置 LWW
       retired: false, // ADR-0314：重新啟用即清掉退場旗標（否則個人檔會繼續宣告 "none"）
-      keys: [...this.fsState.keys, { nsec: nsecEncode(ek.sk), pk: ek.pk, at: Date.now() }],
+      // ADR-0365：順帶生一顆 64-byte 的後量子種子。**現在就生**而不等公告開關翻開，
+      // 因為種子要先透過 ADR-0322 S2 分發到每一台裝置；等到要用才生，第一週會沒得用。
+      // 沒公告 ⇒ 沒有人會拿它加密給我 ⇒ 現在生是零風險的。
+      keys: [
+        ...this.fsState.keys,
+        { nsec: nsecEncode(ek.sk), pk: ek.pk, at: Date.now(), pq: encodePqSeed(generatePqSeed()) },
+      ],
     };
     this.persistFs();
     this.resubscribe(); // 掛上 `{kinds:[10040], authors:[聯絡人]}` 訂閱（搭 presence）
@@ -1870,7 +1953,13 @@ export class RelayChatBackend implements ChatBackend {
     const ek = generateEncryptionKey();
     this.fsState = {
       ...this.fsState,
-      keys: [...this.fsState.keys, { nsec: nsecEncode(ek.sk), pk: ek.pk, at: Date.now() }],
+      // ADR-0365：順帶生一顆 64-byte 的後量子種子。**現在就生**而不等公告開關翻開，
+      // 因為種子要先透過 ADR-0322 S2 分發到每一台裝置；等到要用才生，第一週會沒得用。
+      // 沒公告 ⇒ 沒有人會拿它加密給我 ⇒ 現在生是零風險的。
+      keys: [
+        ...this.fsState.keys,
+        { nsec: nsecEncode(ek.sk), pk: ek.pk, at: Date.now(), pq: encodePqSeed(generatePqSeed()) },
+      ],
     };
     this.persistFs();
     this.pruneFs(); // 換鑰時順帶修剪（前一輪逾 grace 的更舊 EK）
@@ -2203,7 +2292,8 @@ export class RelayChatBackend implements ChatBackend {
         // ADR-0302 §1（公告這半，2026-09-19 補）：版本不認得＝**對方升級了**，不是沒有 EK。
         // 兩者若都當成「沒學到」，升級的對方會被誤報成「疑似降級（可能正在被攻擊）」。
         if (read.kind === "newer") this.markFsUnsupported(read.ik, `ek-v${read.v}`);
-        else this.learnContactEk(read.ik, read.ek);
+        // ADR-0365：v2 公告多帶一個 `pq`（ML-KEM 公鑰）。v1 沒有 ⇒ `undefined` ⇒ 純古典。
+        else this.learnContactEk(read.ik, read.ek, read.pq);
       }
       return;
     }

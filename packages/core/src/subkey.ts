@@ -12,7 +12,7 @@
 
 import { type NostrEvent } from "./event.js";
 import { generateSecretKey, getPublicKey, type PubkeyHex, type SecretKey } from "./keys.js";
-import { type Opened, openWrap } from "./nip59.js";
+import { type Opened, openWrap, type RecipientKeyLike } from "./nip59.js";
 import { finalizeEvent, verifyEvent } from "./sign.js";
 
 /** 64 位小寫十六進位公鑰。 */
@@ -396,6 +396,31 @@ export const EK_ANNOUNCE_PQ_VERSION = 2;
 const EK_ANNOUNCE_MAX_KNOWN = EK_ANNOUNCE_PQ_VERSION;
 
 /**
+ * 🚦 **整個後量子推行只有這一個開關**（ADR-0365 Phase 4b）。
+ *
+ * `false` ＝ 這台裝置**讀得懂** v2 公告、也解得開混合式訊息，但**自己仍然發 v1**
+ * ⇒ 沒有任何人會加密混合式訊息給我。
+ *
+ * ## 為什麼是關著的——這是順序問題，不是程式問題
+ *
+ * 收件端的程式碼必須**先普及**，發件端才能開始發。倒過來的話：
+ * 我一旦公告 `pq`，任何已升級的對方就會用混合式加密給我，而我**另一台還沒更新的裝置**
+ * 解不開 ⇒ 那台裝置上的訊息**永久消失**（不是延遲，是沒有金鑰）。
+ * 中間沒有任何協商可言——公告是可取代事件，全網只有一份。
+ *
+ * ## 翻開它之前必須成立的條件
+ *
+ * 1. 帶著「讀得懂 v2」的版本已經發出去，且舊版本已充分汰換（觀察期自 2026-09-22 起算）。
+ * 2. `StoredFsKey.pq` 種子已在多裝置間確實同步（ADR-0322 S2 分發，且**舊版客戶端
+ *    會在往返時把這個欄位丟掉**——`ek-envelope.ts` 的 `parseKeys` 是逐欄位重建的）。
+ * 3. 外部密碼學審計已對 `hybrid-kem.ts` 的組合方式表過態（ADR-0306，期限 2027-01-30）。
+ *
+ * ⚠ 翻開它**不會**讓產品變成「量子安全」：簽章仍是 secp256k1。
+ *    文案紅線見 `nip59.ts` 檔頭與 ADR-0306 D2.2。
+ */
+export const EK_PQ_ANNOUNCE = false;
+
+/**
  * 讀 kind 10040 公告的結果（ADR-0302 §1）。
  *
  * 🔴 **「不認得的版本」與「垃圾」必須分開。** 兩者都回 `null` 的話，一個**升級了的**對方
@@ -478,8 +503,12 @@ export function ekHintOf(tags: string[][]): PubkeyHex | undefined {
  * - EK sk 命中＝正常 FS 解密（訊息到達時解一次，之後走本機封存）。
  * - 退回 IK sk＝向後相容（非 FS 寄件人加密到收件人身分金鑰）。
  * - 全部失敗＝拋（呼叫端顯示未解、待 EK 同步後重試）。nip44 有 MAC，錯鑰必失敗、無假陽性。
+ *
+ * 候選可以是裸的 `SecretKey`（純古典，現況），也可以是 `{ sk, pqSk }`（混合式，ADR-0365）。
+ * ⚠ **混合式候選要帶著展開後的 `pqSk` 進來**：這裡會逐把重試，在迴圈內展開種子等於
+ * 每次失敗都多跑一次 keygen；展開與快取是呼叫端的事。
  */
-export function openWrapWithEks(wrapEvent: NostrEvent, candidateSks: SecretKey[]): Opened {
+export function openWrapWithEks(wrapEvent: NostrEvent, candidateSks: RecipientKeyLike[]): Opened {
   let lastErr: unknown;
   for (const sk of candidateSks) {
     try {

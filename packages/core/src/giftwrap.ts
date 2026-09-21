@@ -4,7 +4,7 @@ import { KIND } from "./constants.js";
 import type { NostrEvent } from "./event.js";
 import { getPublicKey, type PubkeyHex, type SecretKey } from "./keys.js";
 import { mentionTags } from "./mention.js";
-import { openWrap, sealAndWrap, type Rumor, type RumorInput } from "./nip59.js";
+import { openWrap, type RecipientLike, sealAndWrap, type Rumor, type RumorInput } from "./nip59.js";
 import { withEkHint } from "./subkey.js";
 import { alsoMainTag, replyTag } from "./thread.js";
 
@@ -64,7 +64,7 @@ export function wrapForBoth(
   recipients: PubkeyHex | PubkeyHex[],
   outerExpiration: number,
   /** ADR-0245：把某身分要**加密到的 pk**（其 EK）；省略＝加密到身分本身（現況/向後相容）。 */
-  opts: { encryptToFor?: (identityPk: PubkeyHex) => PubkeyHex } = {},
+  opts: { encryptToFor?: (identityPk: PubkeyHex) => RecipientLike } = {},
 ): WrappedMessage {
   const senderPk = getPublicKey(senderSk);
   const id = getEventHash({ ...input, pubkey: senderPk });
@@ -115,7 +115,7 @@ export interface WrapOptions {
    * 當前 EK（`myEk`，供對方即時學到）。`encryptToFor(身分pk)` 回該身分要加密到的 pk——收件人的 EK
    * （不知時退回身分 pk＝向後相容）、自我副本的自己 EK。外層 `#p` 仍為身分（供路由）。
    */
-  fs?: { encryptToFor: (identityPk: PubkeyHex) => PubkeyHex; myEk: PubkeyHex };
+  fs?: { encryptToFor: (identityPk: PubkeyHex) => RecipientLike; myEk: PubkeyHex };
 }
 
 /**
@@ -183,7 +183,7 @@ export function wrapFileMessage(
      * 是跨成員/跨時間的識別（ADR-0095），把會輪替的值放進去會讓識別碼變成非決定性。
      * hint 的功能由 kind 10040 公告承擔（ADR-0313 讓它每 7 天刷新）。
      */
-    encryptToFor?: (identityPk: PubkeyHex) => PubkeyHex;
+    encryptToFor?: (identityPk: PubkeyHex) => RecipientLike;
   } = {},
 ): WrappedMessage {
   const nowSec = opts.now ?? Math.floor(Date.now() / 1000);

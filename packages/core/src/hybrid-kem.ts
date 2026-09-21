@@ -27,6 +27,7 @@
 //   我們只改「怎麼算出那把金鑰」，payload 仍是 NIP-44 v2。
 // - 不做棘輪、不持有狀態：每則訊息各自封裝一次（見計畫 §2.3 為何無狀態）。
 
+import { base64 } from "@scure/base";
 import { ml_kem768 } from "@noble/post-quantum/ml-kem.js";
 import { hkdf } from "@noble/hashes/hkdf.js";
 import { sha256 } from "@noble/hashes/sha2.js";
@@ -86,8 +87,14 @@ export function pqKeyFromSeed(seed: Uint8Array): PqKeyPair {
   return { sk: kp.secretKey, pk: kp.publicKey };
 }
 
-/** 封裝（寄件端）：對收件人的 `pk` 產生一份密文與共享祕密。 */
+/**
+ * 封裝（寄件端）：對收件人的 `pk` 產生一份密文與共享祕密。
+ *
+ * 長度先自己擋一次，錯誤訊息才指得出是「對方公告的 `pq` 欄位壞了」，
+ * 而不是從相依函式庫冒出一句看不懂的話。
+ */
 export function pqEncapsulate(pk: Uint8Array): { ct: Uint8Array; ss: Uint8Array } {
+  if (pk.length !== PQ_PUBLIC_KEY_BYTES) throw new Error("hybrid-kem：ML-KEM 公鑰長度不正確");
   const r = ml_kem768.encapsulate(pk);
   return { ct: r.cipherText, ss: r.sharedSecret };
 }
@@ -158,4 +165,51 @@ export function hybridConversationKey(args: {
   info.set(ct, label.length);
 
   return hkdf(sha256, ikm, sha256(utf8ToBytes(HYBRID_LABEL)), info, 32);
+}
+
+// ── 儲存與線路上的字串形態 ──────────────────────────────────────────────────
+//
+// 種子與公鑰在儲存（`StoredFsKey.pq`）與公告（kind 10040 的 `pq`）裡都是 base64 字串。
+// 編解碼與長度驗證**只在這裡做一次**，使用端拿到的一律是已經驗過的位元組
+// ——不然每個呼叫端都得各自記得驗一次，而漏掉的那個會在別人的裝置上才炸開。
+
+/** 把種子編成可存進 `StoredFsKey.pq` 的字串。 */
+export function encodePqSeed(seed: Uint8Array): string {
+  return base64.encode(seed);
+}
+
+/**
+ * 從儲存的字串展開金鑰對。
+ *
+ * ⚠ **壞值回 `undefined` 而不拋**：這是解封候選清單的來源，一把壞掉的種子
+ * （舊版客戶端往返時截斷、手改存檔）不該讓其餘還好的金鑰一起失效。
+ */
+export function pqKeyFromStored(seed: string): PqKeyPair | undefined {
+  try {
+    const bytes = base64.decode(seed);
+    if (bytes.length !== PQ_SEED_BYTES) return undefined;
+    return pqKeyFromSeed(bytes);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * 讀公告（kind 10040 的 `pq`）帶來的 ML-KEM 公鑰。
+ *
+ * ⚠ 同樣**回 `undefined` 而不拋**：壞掉的公告只該讓這則訊息退回純古典（今天的基準線），
+ * 不該讓訊息送不出去。`readEkAnnounce` 刻意不驗這個欄位，驗在這裡。
+ */
+export function decodePqPublicKey(b64: string): Uint8Array | undefined {
+  try {
+    const bytes = base64.decode(b64);
+    return bytes.length === PQ_PUBLIC_KEY_BYTES ? bytes : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** 把 ML-KEM 公鑰編成公告用的字串。 */
+export function encodePqPublicKey(pk: Uint8Array): string {
+  return base64.encode(pk);
 }

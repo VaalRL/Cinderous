@@ -31,7 +31,7 @@ import { getEventHash, type NostrEvent } from "./event.js";
 import type { WrappedMessage } from "./giftwrap.js";
 import type { Group } from "./group.js";
 import { getPublicKey, type PubkeyHex, type SecretKey } from "./keys.js";
-import type { Rumor, RumorInput } from "./nip59.js";
+import type { RecipientLike, Rumor, RumorInput } from "./nip59.js";
 import { sealAndWrap } from "./nip59.js";
 
 const DAY_SECONDS = 86_400;
@@ -148,7 +148,7 @@ function fanOut(
   senderPk: PubkeyHex,
   recipients: PubkeyHex[],
   expiration?: number,
-  encryptToFor?: (identityPk: PubkeyHex) => PubkeyHex,
+  encryptToFor?: (identityPk: PubkeyHex) => RecipientLike,
 ): WrappedMessage {
   const id = getEventHash({ ...input, pubkey: senderPk });
   const outerExpiration = expiration ?? input.created_at + DEFAULT_TTL_SECONDS;
@@ -189,7 +189,7 @@ export function wrapCalendarEvent(
      */
     groupId?: string;
     /** FS retarget（ADR-0318）：身分 pk → 其 EK。省略＝加密到身分（現況）。 */
-    encryptToFor?: (identityPk: PubkeyHex) => PubkeyHex;
+    encryptToFor?: (identityPk: PubkeyHex) => RecipientLike;
   } = {},
 ): WrappedMessage {
   const senderPk = getPublicKey(senderSk);
@@ -218,7 +218,7 @@ export function wrapGroupCalendarEvent(
     eventId?: string;
     expiration?: number;
     /** FS retarget（ADR-0318）：身分 pk → 其 EK。省略＝加密到身分（現況）。 */
-    encryptToFor?: (identityPk: PubkeyHex) => PubkeyHex;
+    encryptToFor?: (identityPk: PubkeyHex) => RecipientLike;
   } = {},
 ): WrappedMessage {
   const senderPk = getPublicKey(senderSk);
@@ -247,7 +247,7 @@ export function wrapCalendarRsvp(
     groupId?: string;
     expiration?: number;
     /** FS retarget（ADR-0318）：身分 pk → 其 EK。省略＝加密到身分（現況）。 */
-    encryptToFor?: (identityPk: PubkeyHex) => PubkeyHex;
+    encryptToFor?: (identityPk: PubkeyHex) => RecipientLike;
   } = {},
 ): WrappedMessage {
   const senderPk = getPublicKey(senderSk);

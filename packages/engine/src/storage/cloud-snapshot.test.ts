@@ -268,6 +268,63 @@ describe("多裝置 EK 同步（ADR-0245）", () => {
     expect(fs.enabled).toBe(true);
   });
 
+  // ── 🔴 ADR-0365：`contactPq` 必須跟著 `contactEks` 同側走 ───────────────────
+  //
+  // 兩個 map 各自 union 會合出「本機的 ek ＋ 遠端的 pq」。那個組合在對方手上**不存在**
+  // ——混合式訊息要「同一把 EK 的兩半」才解得開 ⇒ 訊息送得出去、對方永遠解不開。
+  // 這種毀損不會讓任何既有測試變紅，所以在這裡釘死。
+
+  it("🔴 ek 由本機勝出 ⇒ pq 也只能取本機的（不得拿遠端的 pq 配本機的 ek）", () => {
+    const dst = new MemoryStorage();
+    dst.saveFsState({
+      enabled: true,
+      keys: [],
+      contactEks: { bob: "ekLocal" },
+      contactPq: { bob: "pqLocal" },
+    });
+    mergeSnapshotContent(
+      dst,
+      base({ enabled: true, keys: [], contactEks: { bob: "ekRemote" }, contactPq: { bob: "pqRemote" } }),
+      { now: 2000 },
+    );
+    const fs = dst.loadFsState();
+    expect(fs.contactEks.bob).toBe("ekLocal"); // 本機衝突優先（既有規則）
+    expect(fs.contactPq?.bob).toBe("pqLocal"); // ⇒ pq 也必須是本機那一份
+  });
+
+  it("🔴 ek 由遠端帶進來（本機沒有這個人）⇒ pq 取遠端的", () => {
+    const dst = new MemoryStorage();
+    dst.saveFsState({ enabled: true, keys: [], contactEks: {}, contactPq: {} });
+    mergeSnapshotContent(
+      dst,
+      base({ enabled: true, keys: [], contactEks: { carol: "ekRemote" }, contactPq: { carol: "pqRemote" } }),
+      { now: 2000 },
+    );
+    const fs = dst.loadFsState();
+    expect(fs.contactEks.carol).toBe("ekRemote");
+    expect(fs.contactPq?.carol).toBe("pqRemote");
+  });
+
+  it("🔴 勝出那一側沒有 pq ⇒ 這個人就**沒有** pq（退回純古典，而不是撿另一側的）", () => {
+    const dst = new MemoryStorage();
+    dst.saveFsState({ enabled: true, keys: [], contactEks: { bob: "ekLocal" } }); // 本機沒 pq
+    mergeSnapshotContent(
+      dst,
+      base({ enabled: true, keys: [], contactEks: { bob: "ekRemote" }, contactPq: { bob: "pqRemote" } }),
+      { now: 2000 },
+    );
+    const fs = dst.loadFsState();
+    expect(fs.contactEks.bob).toBe("ekLocal");
+    expect(fs.contactPq?.bob).toBeUndefined();
+  });
+
+  it("兩側都沒有 pq ⇒ 不憑空生出 contactPq 欄位（避免無謂的快照重寫）", () => {
+    const dst = new MemoryStorage();
+    dst.saveFsState({ enabled: true, keys: [], contactEks: { bob: "ekLocal" } });
+    mergeSnapshotContent(dst, base({ enabled: true, keys: [], contactEks: { carol: "ekC" } }), { now: 2000 });
+    expect(dst.loadFsState().contactPq).toBeUndefined();
+  });
+
   it("另一裝置啟用了 FS（本機未啟）→ 同步後本機也 enabled、拿到其 EK", () => {
     const dst = new MemoryStorage(); // 預設未啟用
     mergeSnapshotContent(dst, base({ enabled: true, keys: [{ nsec: "n", pk: "pk", at: 5 }], contactEks: {} }), { now: 5 });

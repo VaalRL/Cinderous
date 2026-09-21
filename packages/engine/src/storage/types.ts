@@ -509,6 +509,15 @@ export interface StoredFsState {
   /** 每聯絡人學到的當前 EK 公鑰（聯絡人 pubkey → ek pubkey）。 */
   contactEks: Record<string, string>;
   /**
+   * 每聯絡人學到的 ML-KEM 封裝金鑰（聯絡人 pubkey → base64 公鑰；ADR-0365）。可選。
+   *
+   * 🔴 **這個值和 `contactEks[同一人]` 是一對，不可各自更新。**
+   * 混合式訊息要對方拿「同一把 EK 的古典私鑰 ＋ 後量子私鑰」才解得開，
+   * 若把新的 `ek` 配上舊的 `pq`，對方的候選金鑰裡**不存在那個組合** ⇒ 訊息永久解不開。
+   * 故只由 `learnContactEk()` 一處原子更新：`ek` 換了而新公告沒帶 `pq` ⇒ 這裡要**刪掉**。
+   */
+  contactPq?: Record<string, string>;
+  /**
    * TOFU 釘選（ADR-0245；ADR-0302 §3 起**記強度而非布林**）：見其簽章個人檔 `fs` 宣告或
    * 學到其 EK 即釘。釘選後若送訊時無其 EK → 不得靜默退回靜態，發降級警告。
    *

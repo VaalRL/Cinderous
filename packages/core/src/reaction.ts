@@ -1,7 +1,7 @@
 import { KIND } from "./constants.js";
 import { wrapForBoth, type WrappedMessage } from "./giftwrap.js";
 import type { PubkeyHex, SecretKey } from "./keys.js";
-import type { Rumor } from "./nip59.js";
+import type { RecipientLike, Rumor } from "./nip59.js";
 
 const DAY_SECONDS = 86_400;
 const DEFAULT_TTL_SECONDS = 7 * DAY_SECONDS;
@@ -31,7 +31,7 @@ export function wrapReaction(
      * ⚠ 同樣**不帶 `ek` hint**——`wrapForBoth` 的 `id` 是 rumor 雜湊，群組扇出時跨成員一致，
      * 把每 7 天輪替的值放進 rumor 會讓它變成非決定性（ADR-0318 的同一條理由）。
      */
-    encryptToFor?: (identityPk: PubkeyHex) => PubkeyHex;
+    encryptToFor?: (identityPk: PubkeyHex) => RecipientLike;
   } = {},
 ): WrappedMessage {
   const nowSec = opts.now ?? Math.floor(Date.now() / 1000);

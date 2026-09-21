@@ -50,7 +50,7 @@ export * from "./group.js";
 export * from "./calendar.js";
 export * from "./date-detect.js";
 export * from "./datachannel.js";
-export * from "./hybrid-kem.js"; // 後量子 EK Phase 2（尚未接線）
+export * from "./hybrid-kem.js"; // 後量子 EK（ADR-0365；公告開關 EK_PQ_ANNOUNCE 預設關）
 export * from "./pairing.js";
 export * from "./at-rest.js";
 export * from "./passlock-web.js";
