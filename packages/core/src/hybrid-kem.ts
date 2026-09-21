@@ -30,7 +30,7 @@
 import { ml_kem768 } from "@noble/post-quantum/ml-kem.js";
 import { hkdf } from "@noble/hashes/hkdf.js";
 import { sha256 } from "@noble/hashes/sha2.js";
-import { utf8ToBytes } from "@noble/hashes/utils.js";
+import { randomBytes, utf8ToBytes } from "@noble/hashes/utils.js";
 
 /** ML-KEM-768 封裝金鑰（公鑰）長度。 */
 export const PQ_PUBLIC_KEY_BYTES = 1184;
@@ -47,7 +47,19 @@ export const PQ_CIPHERTEXT_BYTES = 1088;
  */
 const HYBRID_LABEL = "cinder-ek-pq-v1";
 
-/** 一對 ML-KEM-768 金鑰。 */
+/**
+ * 種子長度（FIPS 203 的 `d ‖ z`，各 32 bytes）。
+ *
+ * 🔵 **我們只存種子，不存展開後的金鑰**——這是實測驅動的設計（Phase 3）。
+ * 把 2400 bytes 的私鑰放進 ADR-0322 S2 的 per-device 分發事件，實測讓那顆事件
+ * 從 4.5 KB 漲到 **110 KB（中繼 256 KiB 上限的 42%）**——因為分發會對每台裝置各加密一份，
+ * 還要補空槽到 8 的倍數（藏裝置數，ADR-0322）。改存 64 bytes 的種子之後那個乘數就無害了。
+ *
+ * ⚠ 代價：每次用之前要重跑一次 keygen（實測 0.3 ms），在記憶體快取即可。
+ */
+export const PQ_SEED_BYTES = 64;
+
+/** 一對 ML-KEM-768 金鑰（由種子導出，不持久化）。 */
 export interface PqKeyPair {
   /** 解封裝金鑰（私鑰），2400 bytes。 */
   sk: Uint8Array;
@@ -55,9 +67,22 @@ export interface PqKeyPair {
   pk: Uint8Array;
 }
 
-/** 產生一對 ML-KEM-768 金鑰（與古典 EK 同壽命：每週一把、grace 7 天）。 */
-export function generatePqKey(): PqKeyPair {
-  const kp = ml_kem768.keygen();
+/** 產生一顆新的種子（與古典 EK 同壽命：每週一把、grace 7 天）。 */
+export function generatePqSeed(): Uint8Array {
+  return randomBytes(PQ_SEED_BYTES);
+}
+
+/**
+ * 由種子決定性導出金鑰對（FIPS 203 的 KeyGen(d, z)）。
+ *
+ * ⚠ **這個導出必須跨版本穩定**，否則舊種子會導出不同的金鑰 ⇒ 所有既有訊息解不開。
+ * FIPS 203 把它標準化了，任何合規實作結果相同；但我們用的 `@noble/post-quantum`
+ * 是 **pre-1.0**，所以 `hybrid-kem.test.ts` 用一組**釘死的測試向量**把它鎖住——
+ * 函式庫若改了導出方式，那條測試會紅。
+ */
+export function pqKeyFromSeed(seed: Uint8Array): PqKeyPair {
+  if (seed.length !== PQ_SEED_BYTES) throw new Error("hybrid-kem：種子長度必須是 64 bytes");
+  const kp = ml_kem768.keygen(seed);
   return { sk: kp.secretKey, pk: kp.publicKey };
 }
 

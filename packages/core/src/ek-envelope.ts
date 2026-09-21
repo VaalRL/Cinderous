@@ -33,6 +33,19 @@ export interface EkKey {
   pk: PubkeyHex;
   /** 生成時間（毫秒）。 */
   at: number;
+  /**
+   * 後量子那一半的**種子**（64 bytes，base64；Phase 3）。**可選**＝舊金鑰與舊裝置沒有。
+   *
+   * 🔵 **存種子而非展開後的 2400-byte 私鑰**，是實測驅動的：分發會對每台裝置各加密一份、
+   * 還要補空槽到 8 的倍數（藏裝置數，ADR-0322）⇒ 實測這顆事件會從 **4.5 KB 漲到 110 KB**
+   * （中繼 256 KiB 上限的 42%）。換成種子之後那個乘數就無害了。
+   *
+   * 🔴 **這個欄位非加不可，不是「順便」。** `parseKeys` 是**逐欄位重建**的
+   * （`out.push({ nsec, pk, at })`）⇒ 不列進來就會被**靜默丟掉**，
+   * 而後果是：從分發事件拿到金鑰的那台裝置只有古典那一半，
+   * 解不開後量子訊息 ⇒ 掉進 ADR-0316 的 `maybeEkLoss` 桶，看起來像「金鑰還沒同步」。
+   */
+  pq?: string;
 }
 
 /**
@@ -98,9 +111,16 @@ function parseKeys(raw: unknown): EkKey[] | null {
   const out: EkKey[] = [];
   for (const k of raw) {
     if (!k || typeof k !== "object") return null;
-    const { nsec, pk, at } = k as { nsec?: unknown; pk?: unknown; at?: unknown };
+    const { nsec, pk, at, pq } = k as { nsec?: unknown; pk?: unknown; at?: unknown; pq?: unknown };
     if (typeof nsec !== "string" || typeof pk !== "string" || typeof at !== "number") return null;
     if (!/^[0-9a-f]{64}$/.test(pk) || !Number.isFinite(at)) return null;
+    // 後量子種子（Phase 3）：**缺席合法**（舊金鑰／舊裝置），但**在場就必須是非空字串**。
+    // ⚠ 這裡刻意**不**驗 base64 或長度——那是使用端的事，而在這裡誤判會讓整份金鑰被丟掉。
+    if (pq !== undefined) {
+      if (typeof pq !== "string" || !pq) return null;
+      out.push({ nsec, pk, at, pq });
+      continue;
+    }
     out.push({ nsec, pk, at });
   }
   return out;

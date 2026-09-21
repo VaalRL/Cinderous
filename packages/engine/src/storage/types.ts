@@ -480,6 +480,14 @@ export interface StoredFsKey {
   nsec: string;
   pk: string;
   at: number;
+  /**
+   * 後量子那一半的**種子**（64 bytes，base64；Phase 3）。**可選**＝舊金鑰沒有。
+   * 公私鑰由它決定性導出（`pqKeyFromSeed`），不另存——理由見 `EkKey.pq`。
+   *
+   * 與 `EkKey`（`packages/core/src/ek-envelope.ts`）保持同形——那邊是 ADR-0322 S2
+   * 的 per-device 分發，**而它是逐欄位重建的**，所以兩邊必須一起改，否則會靜默丟掉。
+   */
+  pq?: string;
 }
 
 /** 前向保密本機狀態（ADR-0245）。 */

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { generateSecretKey, getPublicKey, nsecEncode } from "./keys.js";
-import { buildEkEnvelope, EK_ENVELOPE_KIND, EK_ENVELOPE_SLOTS, openEkEnvelope } from "./ek-envelope.js";
+import { buildEkEnvelope, EK_ENVELOPE_KIND, EK_ENVELOPE_SLOTS, openEkEnvelope, type EkKey } from "./ek-envelope.js";
+import { finalizeEvent } from "./sign.js";
+import { encryptDM } from "./nip44.js";
 
 const idSk = generateSecretKey();
 const idPk = getPublicKey(idSk);
@@ -69,5 +71,56 @@ describe("EK per-device 分發（ADR-0322 S2）", () => {
     const d = generateSecretKey();
     const bad = buildEkEnvelope(idSk, [getPublicKey(d)], [{ nsec: "x", pk: "zz", at: 1 }] as never, { now: 1 });
     expect(openEkEnvelope(bad, d, idPk)).toBeNull();
+  });
+});
+
+// ── 後量子那一半必須通過分發（Phase 3）────────────────────────────────────────
+//
+// 🔴 `parseKeys` 是**逐欄位重建**的。Phase 3 加 `pq` 之前它是 `out.push({ nsec, pk, at })`
+// ⇒ 任何新欄位都會被**靜默丟掉**。後果不是「少一個欄位」，是：從分發事件拿到金鑰的
+// 那台裝置只有古典那一半、解不開後量子訊息，而畫面上看起來像「金鑰還沒同步」
+// （掉進 ADR-0316 的 maybeEkLoss 桶）。
+
+describe("EK 分發帶得動後量子金鑰（Phase 3）", () => {
+  const devSk = generateSecretKey();
+  const devPk = getPublicKey(devSk);
+
+  const pqKey = (n: string): EkKey => ({
+    nsec: nsecEncode(generateSecretKey()),
+    pk: getPublicKey(generateSecretKey()),
+    at: 1000,
+    pq: `seed-${n}`,
+  });
+
+  it("🔴 pq 原樣往返——少了它，收到金鑰的裝置解不開後量子訊息", () => {
+    const k = pqKey("a");
+    const evt = buildEkEnvelope(idSk, [devPk], [k]);
+    const got = openEkEnvelope(evt, devSk, idPk);
+    expect(got).toEqual([k]);
+    expect(got?.[0]?.pq).toBe("seed-a");
+  });
+
+  it("古典與後量子金鑰混在同一份清單裡都過得去（遷移期的常態）", () => {
+    const classic: EkKey = { nsec: nsecEncode(generateSecretKey()), pk: getPublicKey(generateSecretKey()), at: 1 };
+    const hybrid = pqKey("b");
+    const got = openEkEnvelope(buildEkEnvelope(idSk, [devPk], [classic, hybrid]), devSk, idPk);
+    expect(got).toEqual([classic, hybrid]);
+    expect(got?.[0]?.pq).toBeUndefined();
+    expect(got?.[1]?.pq).toBeDefined();
+  });
+
+  it("沒有 pq 的舊金鑰照舊（向後相容，不得無中生有）", () => {
+    const classic: EkKey = { nsec: nsecEncode(generateSecretKey()), pk: getPublicKey(generateSecretKey()), at: 1 };
+    const got = openEkEnvelope(buildEkEnvelope(idSk, [devPk], [classic]), devSk, idPk);
+    expect(got?.[0]).not.toHaveProperty("pq");
+  });
+
+  it("🔴 pq 型別不對 ⇒ 整份丟棄（壞資料會在使用時才爆，留著只是把錯誤往後推）", () => {
+    const broken = [{ nsec: nsecEncode(generateSecretKey()), pk: getPublicKey(generateSecretKey()), at: 1, pq: { 不是: "字串" } }];
+    const evt = finalizeEvent(
+      { kind: EK_ENVELOPE_KIND, created_at: 1, tags: [], content: JSON.stringify([encryptDM(JSON.stringify(broken), idSk, devPk)]) },
+      idSk,
+    );
+    expect(openEkEnvelope(evt, devSk, idPk)).toBeNull();
   });
 });

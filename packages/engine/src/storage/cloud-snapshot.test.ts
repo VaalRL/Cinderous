@@ -653,3 +653,59 @@ describe("釘選合併取較強（ADR-0302 §3）", () => {
     expect(strongerPin(local, { scheme: "ek-v1", at: 2 }, RANK)).toEqual(local);
   });
 });
+
+// ── 後量子金鑰必須通過所有同步路徑（Phase 3）──────────────────────────────────
+
+describe("後量子 EK 通過同步路徑（Phase 3）", () => {
+  const pqKey = (pk: string, at: number) => ({
+    nsec: "nsec-" + pk,
+    pk,
+    at,
+    pq: "seed-" + pk,
+  });
+
+  it("🔴 快照打包帶得走 pq", () => {
+    const s = new MemoryStorage();
+    s.saveFsState({ enabled: true, keys: [pqKey("a", Date.now())], contactEks: {} });
+    const c = buildSnapshotContent(s, "full");
+    expect(c.fs?.keys[0]?.pq).toBe("seed-a");
+  });
+
+  it("🔴 快照合併帶得回 pq（另一台裝置的金鑰要能用）", () => {
+    const dst = new MemoryStorage();
+    dst.saveFsState({ enabled: true, keys: [], contactEks: {} });
+    const src = new MemoryStorage();
+    src.saveFsState({ enabled: true, keys: [pqKey("b", Date.now())], contactEks: {} });
+    mergeSnapshotContent(dst, buildSnapshotContent(src, "full"));
+    expect(dst.loadFsState().keys[0]?.pq).toBe("seed-b");
+  });
+
+  it("古典與後量子金鑰混合合併都不丟（遷移期的常態）", () => {
+    const dst = new MemoryStorage();
+    const now = Date.now();
+    dst.saveFsState({ enabled: true, keys: [{ nsec: "n1", pk: "c1", at: now }], contactEks: {} });
+    const src = new MemoryStorage();
+    src.saveFsState({ enabled: true, keys: [pqKey("c2", now)], contactEks: {} });
+    mergeSnapshotContent(dst, buildSnapshotContent(src, "full"));
+    const byPk = Object.fromEntries(dst.loadFsState().keys.map((k) => [k.pk, k]));
+    expect(byPk["c1"]?.pq).toBeUndefined();
+    expect(byPk["c2"]?.pq).toBeDefined();
+  });
+
+  it("⚠ pq 會吃掉訊息預算，但**不會撐破**快照上限（失敗方向落在安全側）", () => {
+    // 預算是「先算基底、剩下的裝訊息」⇒ 金鑰變大只會讓備份的訊息變少，不會讓 relay 拒收。
+    const s = new MemoryStorage();
+    const big = "x".repeat(88); // base64(64 bytes) 的量級
+    s.saveFsState({
+      enabled: true,
+      keys: [{ nsec: "n", pk: "p", at: Date.now(), pq: big }],
+      contactEks: {},
+    });
+    for (let i = 0; i < 400; i += 1) {
+      s.appendMessage({ id: `m${i}`, contact: "peer", outgoing: true, text: "字".repeat(200), at: i });
+    }
+    const c = buildSnapshotContent(s, "full");
+    expect(c.fs?.keys[0]?.pq).toBe(big); // 金鑰沒被裁掉
+    expect(JSON.stringify(c).length).toBeLessThan(256 * 1024); // 仍在 relay 上限內
+  });
+});

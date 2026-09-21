@@ -244,3 +244,20 @@ describe("配對捆包的大小（ADR-0072／0305 §7：不做續傳，改為誠
     expect(justOver.length).toBeLessThan(LARGE_BUNDLE_BYTES); // ← 證明 .length 會漏報
   });
 });
+
+// ── 後量子金鑰必須通過配對捆包（Phase 3）──────────────────────────────────────
+
+describe("後量子 EK 通過配對捆包（Phase 3）", () => {
+  it("🔴 搬到新裝置時帶得走 pq——少了它，新裝置解不開後量子訊息", () => {
+    const src = new MemoryStorage();
+    src.saveIdentity({ nsec: "nsec1", name: "我" });
+    src.saveFsState({
+      enabled: true,
+      keys: [{ nsec: "n", pk: "p", at: 1000, pq: "seed-1" }],
+      contactEks: {},
+    });
+    const dst = new MemoryStorage();
+    applyPairBundle(dst, parsePairBundle(buildPairBundle(src, { relayUrl: "wss://home" }))!);
+    expect(dst.loadFsState().keys[0]?.pq).toBe("seed-1");
+  });
+});

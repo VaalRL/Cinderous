@@ -1,4 +1,4 @@
-// 混合式金鑰封裝（後量子 EK Phase 2）。
+// 混合式金鑰封裝（後量子 EK Phase 2／3）。
 //
 // 🔴 本檔最重要的一組測試是「**少任何一半就導不出同一把金鑰**」。
 // 原因見 `hybrid-kem.ts` 檔頭：混合式 KDF 若把古典那一半接錯，結果是**降低了古典
@@ -7,21 +7,26 @@
 
 import { describe, expect, it } from "vitest";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
+import { sha256 } from "@noble/hashes/sha2.js";
 import {
-  generatePqKey,
+  generatePqSeed,
   hybridConversationKey,
   PQ_CIPHERTEXT_BYTES,
   PQ_PUBLIC_KEY_BYTES,
   PQ_SECRET_KEY_BYTES,
+  PQ_SEED_BYTES,
   pqDecapsulate,
   pqEncapsulate,
+  pqKeyFromSeed,
 } from "./hybrid-kem.js";
 
 const hex = (b: Uint8Array): string => Buffer.from(b).toString("hex");
+/** 一對新的 ML-KEM 金鑰（種子隨機）。 */
+const newKey = () => pqKeyFromSeed(generatePqSeed());
 
 describe("ML-KEM-768 原語", () => {
   it("金鑰與密文的長度符合 FIPS 203（訊息體積的成本就是這個數字）", () => {
-    const kp = generatePqKey();
+    const kp = newKey();
     expect(kp.pk.length).toBe(PQ_PUBLIC_KEY_BYTES);
     expect(kp.pk.length).toBe(1184);
     expect(kp.sk.length).toBe(PQ_SECRET_KEY_BYTES);
@@ -31,13 +36,13 @@ describe("ML-KEM-768 原語", () => {
   });
 
   it("封裝／解封裝往返得到同一把共享祕密", () => {
-    const kp = generatePqKey();
+    const kp = newKey();
     const { ct, ss } = pqEncapsulate(kp.pk);
     expect(hex(pqDecapsulate(kp.sk, ct))).toBe(hex(ss));
   });
 
   it("每次封裝都是新的（同一把公鑰兩次封裝不得相同）", () => {
-    const kp = generatePqKey();
+    const kp = newKey();
     const a = pqEncapsulate(kp.pk);
     const b = pqEncapsulate(kp.pk);
     expect(hex(a.ct)).not.toBe(hex(b.ct));
@@ -47,7 +52,7 @@ describe("ML-KEM-768 原語", () => {
   it("🔴 隱式拒絕：密文被竄改**不會拋錯**，而是回一把不同的祕密", () => {
     // 這是 ML-KEM 的設計，不是缺陷。但讀程式的人必須知道「解封裝成功」≠「密文是好的」
     // ——真正的攔截在 NIP-44 那層的 MAC 驗證（落進 ADR-0316 的 maybeEkLoss 桶）。
-    const kp = generatePqKey();
+    const kp = newKey();
     const { ct, ss } = pqEncapsulate(kp.pk);
     const tampered = new Uint8Array(ct);
     tampered[0] = (tampered[0]! ^ 0xff) & 0xff;
@@ -56,10 +61,49 @@ describe("ML-KEM-768 原語", () => {
   });
 
   it("用錯金鑰同樣不拋，只是得到不同的祕密", () => {
-    const a = generatePqKey();
-    const b = generatePqKey();
+    const a = newKey();
+    const b = newKey();
     const { ct, ss } = pqEncapsulate(a.pk);
     expect(hex(pqDecapsulate(b.sk, ct))).not.toBe(hex(ss));
+  });
+});
+
+// ── 🔴 種子導出必須跨版本穩定（Phase 3）────────────────────────────────────────
+
+describe("種子導出（只存 64 bytes，不存 2400）", () => {
+  it("種子長度是 FIPS 203 的 d‖z", () => {
+    expect(PQ_SEED_BYTES).toBe(64);
+    expect(generatePqSeed().length).toBe(64);
+  });
+
+  it("同一顆種子永遠導出同一對金鑰", () => {
+    const seed = new Uint8Array(64).fill(7);
+    const a = pqKeyFromSeed(seed);
+    const b = pqKeyFromSeed(seed);
+    expect(hex(a.pk)).toBe(hex(b.pk));
+    expect(hex(a.sk)).toBe(hex(b.sk));
+  });
+
+  it("🔴 釘死的測試向量——相依若改了導出方式，這條會紅", () => {
+    // ⚠ 我們**只存種子**（64 bytes）而不存展開後的 2400-byte 私鑰（理由見 `PQ_SEED_BYTES`：
+    // 實測 per-device 分發事件會從 4.5 KB 漲到 110 KB）。
+    // 代價是：導出方式一變，既有種子就導出**不同的金鑰** ⇒ 所有訊息解不開。
+    // FIPS 203 把 KeyGen(d,z) 標準化了，但 `@noble/post-quantum` 是 **pre-1.0**
+    // ⇒ 用固定向量鎖住，升級相依時才會被告知而不是靜默壞掉。
+    const seed = new Uint8Array(64);
+    for (let i = 0; i < 64; i += 1) seed[i] = i;
+    const kp = pqKeyFromSeed(seed);
+    expect(kp.pk.length).toBe(1184);
+    expect(hex(sha256(kp.pk))).toBe("0b7934c83125c788995e2ba6bd761e33046b3e40571be53e023309a29f398cc9");
+  });
+
+  it("不同種子導出不同金鑰", () => {
+    expect(hex(newKey().pk)).not.toBe(hex(newKey().pk));
+  });
+
+  it("種子長度不對即拋", () => {
+    expect(() => pqKeyFromSeed(new Uint8Array(32))).toThrow();
+    expect(() => pqKeyFromSeed(new Uint8Array(0))).toThrow();
   });
 });
 
@@ -69,7 +113,7 @@ describe("混合式對話金鑰", () => {
     const aSk = secp256k1.utils.randomSecretKey();
     const bSk = secp256k1.utils.randomSecretKey();
     const ssClassic = secp256k1.getSharedSecret(aSk, secp256k1.getPublicKey(bSk)).slice(1, 33);
-    const kp = generatePqKey();
+    const kp = newKey();
     const { ct, ss: ssPq } = pqEncapsulate(kp.pk);
     return { ssClassic, ssPq, ct, kp };
   };
@@ -145,16 +189,18 @@ describe("混合式對話金鑰", () => {
   it("端到端：寄件端封裝、收件端解封裝，兩邊導出同一把金鑰", () => {
     const aSk = secp256k1.utils.randomSecretKey();
     const bSk = secp256k1.utils.randomSecretKey();
-    const bPq = generatePqKey();
+    const bSeed = generatePqSeed();
+    const bPq = pqKeyFromSeed(bSeed);
 
-    // 寄件端
+    // 寄件端（只知道對方的公鑰）
     const ssClassicSend = secp256k1.getSharedSecret(aSk, secp256k1.getPublicKey(bSk)).slice(1, 33);
     const { ct, ss: ssPqSend } = pqEncapsulate(bPq.pk);
     const kSend = hybridConversationKey({ ssClassic: ssClassicSend, ssPq: ssPqSend, ct, layer: "wrap" });
 
-    // 收件端（只拿得到 ct）
+    // 收件端（只存了種子，用時才展開）
+    const recovered = pqKeyFromSeed(bSeed);
     const ssClassicRecv = secp256k1.getSharedSecret(bSk, secp256k1.getPublicKey(aSk)).slice(1, 33);
-    const ssPqRecv = pqDecapsulate(bPq.sk, ct);
+    const ssPqRecv = pqDecapsulate(recovered.sk, ct);
     const kRecv = hybridConversationKey({ ssClassic: ssClassicRecv, ssPq: ssPqRecv, ct, layer: "wrap" });
 
     expect(hex(kSend)).toBe(hex(kRecv));
