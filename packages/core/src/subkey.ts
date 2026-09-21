@@ -342,9 +342,37 @@ export function generateEncryptionKey(): EncryptionKey {
 export function buildEkAnnounce(
   ikSk: SecretKey,
   ekPk: PubkeyHex,
-  opts: { next?: PubkeyHex; now?: number } = {},
+  opts: {
+    next?: PubkeyHex;
+    now?: number;
+    /**
+     * 後量子封裝金鑰（base64；Phase 2）。**給了才發 `v: 2`。**
+     *
+     * 🔴 預設不給、預設仍發 `v: 1` 是**順序紅線**（計畫 §5）：
+     * 還沒更新的客戶端讀到 `v: 2` 會回 `null` ⇒ 在它眼中對方「沒有 EK」
+     * ⇒ 送訊時跳「疑似降級（對方可能正在被攻擊）」
+     * ⇒ **第一個升級的人會被所有舊版聯絡人誤報成被攻擊**。
+     *
+     * 形狀同 ADR-0358 的金鑰輪替並存期：**先發布讀得懂 v2 的版本 → 等普及 → 才開始發 v2**。
+     */
+    pq?: string;
+    /** 下一週的後量子封裝金鑰（消除週界空窗；同 `next` 的理由）。 */
+    nextPq?: string;
+  } = {},
 ): NostrEvent {
-  const content = JSON.stringify({ v: 1, ek: ekPk, ...(opts.next ? { next: opts.next } : {}) });
+  // `ek` 在 v2 也**必須保留**——還沒升級的寄件人只讀得懂它，拿掉等於讓所有舊版聯絡人
+  // 完全送不出 FS 訊息（退回身分金鑰）。
+  const content = JSON.stringify(
+    opts.pq
+      ? {
+          v: 2,
+          ek: ekPk,
+          pq: opts.pq,
+          ...(opts.next ? { next: opts.next } : {}),
+          ...(opts.nextPq ? { nextPq: opts.nextPq } : {}),
+        }
+      : { v: 1, ek: ekPk, ...(opts.next ? { next: opts.next } : {}) },
+  );
   return finalizeEvent(
     { kind: EK_ANNOUNCE_KIND, created_at: opts.now ?? Math.floor(Date.now() / 1000), tags: [], content },
     ikSk,
@@ -355,8 +383,17 @@ export function buildEkAnnounce(
  * 驗證並解析 kind 10040 公告（不信任網路來源）：檢查 kind、簽章、內容格式與公鑰合法性。
  * 回 `{ ik, ek, next? }`（`ik`＝公告者身分＝`event.pubkey`）；任何不合法 → `null`。
  */
-/** EK 公告的目前版本（`buildEkAnnounce` 寫進 `content.v`）。 */
+/** EK 公告的古典版本（`buildEkAnnounce` 預設寫進 `content.v`）。 */
 export const EK_ANNOUNCE_VERSION = 1;
+
+/**
+ * 後量子公告版本（Phase 2）。⚠ **讀得懂 ≠ 發得出**——
+ * `buildEkAnnounce` 只有在明確給了 `pq` 時才發這一版，理由見該函式的 `pq` 說明。
+ */
+export const EK_ANNOUNCE_PQ_VERSION = 2;
+
+/** 目前認得的最高版本；超過即回 `"newer"`（＝對方升級了，不是壞掉）。 */
+const EK_ANNOUNCE_MAX_KNOWN = EK_ANNOUNCE_PQ_VERSION;
 
 /**
  * 讀 kind 10040 公告的結果（ADR-0302 §1）。
@@ -367,7 +404,15 @@ export const EK_ANNOUNCE_VERSION = 1;
  * 公告這半一直漏著，而**後量子的公告正是 `v: 2`**：不修的話第一個升級的人就會被誤報。
  */
 export type EkAnnounce =
-  | { kind: "ok"; ik: PubkeyHex; ek: PubkeyHex; next?: PubkeyHex }
+  | {
+      kind: "ok";
+      ik: PubkeyHex;
+      ek: PubkeyHex;
+      next?: PubkeyHex;
+      /** 後量子封裝金鑰（base64）；`v: 1` 的公告沒有這一欄。 */
+      pq?: string;
+      nextPq?: string;
+    }
   /** 結構合法、簽章正確，但 `v` 不是我們認得的 ⇒ **對方升級了**，不是壞掉。 */
   | { kind: "newer"; ik: PubkeyHex; v: number };
 
@@ -381,16 +426,36 @@ export function readEkAnnounce(event: NostrEvent): EkAnnounce | null {
   if (event.kind !== EK_ANNOUNCE_KIND) return null;
   if (!verifyEvent(event)) return null;
   try {
-    const c = JSON.parse(event.content) as { v?: unknown; ek?: unknown; next?: unknown };
+    const c = JSON.parse(event.content) as {
+      v?: unknown;
+      ek?: unknown;
+      next?: unknown;
+      pq?: unknown;
+      nextPq?: unknown;
+    };
     // 未來的版本：只要 `v` 是個合理的數字就當成「對方升級了」。
     // ⚠ 這裡**刻意不檢查其餘欄位**——我們不知道未來的格式長什麼樣，拿今天的規則去驗它
     // 只會把合法的新版判成垃圾，那正是本次要修的病。
-    if (typeof c.v === "number" && Number.isInteger(c.v) && c.v > EK_ANNOUNCE_VERSION) {
+    if (typeof c.v === "number" && Number.isInteger(c.v) && c.v > EK_ANNOUNCE_MAX_KNOWN) {
       return { kind: "newer", ik: event.pubkey, v: c.v };
     }
-    if (c.v !== EK_ANNOUNCE_VERSION || typeof c.ek !== "string" || !PK_RE.test(c.ek)) return null;
+    // v1 與 v2 都要求 `ek` 合法——v2 只是**多**一個 `pq`，不是換掉 `ek`。
+    if (
+      (c.v !== EK_ANNOUNCE_VERSION && c.v !== EK_ANNOUNCE_PQ_VERSION) ||
+      typeof c.ek !== "string" ||
+      !PK_RE.test(c.ek)
+    ) {
+      return null;
+    }
     const out: EkAnnounce = { kind: "ok", ik: event.pubkey, ek: c.ek };
     if (typeof c.next === "string" && PK_RE.test(c.next)) out.next = c.next;
+    // ⚠ `pq` 只做「是不是非空字串」的形狀檢查，**不解 base64、不驗長度**：
+    // 那些是使用端的事，而在這裡誤判會把一個合法的新版公告整顆丟掉（回 null）
+    // ⇒ 又變成「升級的人被誤報成沒有 EK」。寧可帶著壞值往下走，讓使用端自己失敗。
+    if (c.v === EK_ANNOUNCE_PQ_VERSION) {
+      if (typeof c.pq === "string" && c.pq.length > 0) out.pq = c.pq;
+      if (typeof c.nextPq === "string" && c.nextPq.length > 0) out.nextPq = c.nextPq;
+    }
     return out;
   } catch {
     return null;

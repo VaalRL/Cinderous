@@ -50,6 +50,7 @@ export * from "./group.js";
 export * from "./calendar.js";
 export * from "./date-detect.js";
 export * from "./datachannel.js";
+export * from "./hybrid-kem.js"; // 後量子 EK Phase 2（尚未接線）
 export * from "./pairing.js";
 export * from "./at-rest.js";
 export * from "./passlock-web.js";

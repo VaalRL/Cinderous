@@ -434,14 +434,16 @@ describe("EK 公告的未知版本（ADR-0302 §1）", () => {
     expect(r).toEqual({ kind: "ok", ik, ek });
   });
 
-  it("🔴 `v: 2` 回「對方升級了」，**不是** null——後量子的公告正是這一版", () => {
-    const r = readEkAnnounce(announce({ v: 2, ek: "whatever-the-future-looks-like" }));
-    expect(r).toEqual({ kind: "newer", ik, v: 2 });
+  it("🔴 比我們認得的更新的版本回「對方升級了」，**不是** null", () => {
+    // ⚠ 2026-09-21：`v: 2` 已經是**我們認得的**版本（後量子公告），所以門檻上移到 3。
+    // 這條測試的意圖沒變——不認得的版本必須與垃圾分開。
+    const r = readEkAnnounce(announce({ v: 3, ek: "whatever-the-future-looks-like" }));
+    expect(r).toEqual({ kind: "newer", ik, v: 3 });
   });
 
   it("🔴 未來版本**不驗其餘欄位**——拿今天的規則去驗它只會把合法的新版判成垃圾", () => {
     expect(readEkAnnounce(announce({ v: 99 }))?.kind).toBe("newer");
-    expect(readEkAnnounce(announce({ v: 3, pq: { anything: true } }))?.kind).toBe("newer");
+    expect(readEkAnnounce(announce({ v: 4, pq: { anything: true } }))?.kind).toBe("newer");
   });
 
   it("真正的壞東西仍然回 null（垃圾與「新版」必須分得開，但不能全部放行）", () => {
@@ -453,7 +455,88 @@ describe("EK 公告的未知版本（ADR-0302 §1）", () => {
   });
 
   it("🔴 簽章錯的一律丟棄——「新版」不是繞過驗證的後門", () => {
-    const evt = announce({ v: 2 });
-    expect(readEkAnnounce({ ...evt, content: JSON.stringify({ v: 2, tampered: true }) })).toBeNull();
+    const evt = announce({ v: 3 });
+    expect(readEkAnnounce({ ...evt, content: JSON.stringify({ v: 3, tampered: true }) })).toBeNull();
+  });
+});
+
+// ── 後量子公告 v2（Phase 2）──────────────────────────────────────────────────
+
+describe("後量子 EK 公告（v2，Phase 2）", () => {
+  const sk2 = generateSecretKey();
+  const ik2 = getPublicKey(sk2);
+  const ek = getPublicKey(generateSecretKey());
+  const nextEk = getPublicKey(generateSecretKey());
+
+  it("🔴 預設仍發 v1——讀端還沒普及之前不得開始發 v2（計畫 §5 的順序紅線）", () => {
+    // 還沒更新的客戶端讀到 v2 會回 null ⇒ 在它眼中對方「沒有 EK」⇒ 跳「疑似降級」。
+    // ⇒ 第一個升級的人會被所有舊版聯絡人誤報成被攻擊。
+    const evt = buildEkAnnounce(sk2, ek);
+    expect(JSON.parse(evt.content).v).toBe(1);
+    expect(JSON.parse(evt.content).pq).toBeUndefined();
+  });
+
+  it("明確給了 pq 才發 v2", () => {
+    const evt = buildEkAnnounce(sk2, ek, { pq: "cHE=" });
+    const c = JSON.parse(evt.content);
+    expect(c.v).toBe(2);
+    expect(c.pq).toBe("cHE=");
+  });
+
+  it("🔴 v2 **必須保留 `ek` 欄位**——還沒升級的寄件人只讀得懂它", () => {
+    // 拿掉 ek 等於讓所有舊版聯絡人完全送不出 FS 訊息（退回身分金鑰）。
+    const c = JSON.parse(buildEkAnnounce(sk2, ek, { pq: "cHE=", next: nextEk, nextPq: "bnE=" }).content);
+    expect(c.ek).toBe(ek);
+    expect(c.next).toBe(nextEk);
+    expect(c.nextPq).toBe("bnE=");
+  });
+
+  it("v2 往返：讀回 ek 與 pq", () => {
+    const r = readEkAnnounce(buildEkAnnounce(sk2, ek, { pq: "cHE=", next: nextEk, nextPq: "bnE=" }));
+    expect(r).toEqual({ kind: "ok", ik: ik2, ek, next: nextEk, pq: "cHE=", nextPq: "bnE=" });
+  });
+
+  it("v1 讀回來沒有 pq 欄位（不得無中生有）", () => {
+    const r = readEkAnnounce(buildEkAnnounce(sk2, ek));
+    expect(r).toEqual({ kind: "ok", ik: ik2, ek });
+  });
+
+  it("🔴 v2 但 `ek` 不合法 ⇒ null（v2 是**多**一個 pq，不是換掉 ek）", () => {
+    const evt = finalizeEvent(
+      {
+        kind: EK_ANNOUNCE_KIND,
+        created_at: 1000,
+        tags: [],
+        content: JSON.stringify({ v: 2, ek: "不是公鑰", pq: "cHE=" }),
+      },
+      sk2,
+    );
+    expect(readEkAnnounce(evt)).toBeNull();
+  });
+
+  it("⚠ `pq` 只做形狀檢查，不解 base64——誤判會把合法的新版整顆丟掉", () => {
+    // 寧可帶著壞值往下走讓使用端自己失敗，也不要回 null（那又變成「升級的人沒有 EK」）。
+    const evt = finalizeEvent(
+      {
+        kind: EK_ANNOUNCE_KIND,
+        created_at: 1000,
+        tags: [],
+        content: JSON.stringify({ v: 2, ek, pq: "這不是合法的 base64!!!" }),
+      },
+      sk2,
+    );
+    const r = readEkAnnounce(evt);
+    expect(r?.kind).toBe("ok");
+    expect(r?.kind === "ok" && r.pq).toBe("這不是合法的 base64!!!");
+  });
+
+  it("v2 但 pq 是空字串 ⇒ 當成沒有（退回古典，而不是拋）", () => {
+    const evt = finalizeEvent(
+      { kind: EK_ANNOUNCE_KIND, created_at: 1000, tags: [], content: JSON.stringify({ v: 2, ek, pq: "" }) },
+      sk2,
+    );
+    const r = readEkAnnounce(evt);
+    expect(r?.kind).toBe("ok");
+    expect(r?.kind === "ok" && r.pq).toBeUndefined();
   });
 });

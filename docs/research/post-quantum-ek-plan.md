@@ -122,18 +122,27 @@ EK_e = { classic: secp256k1 金鑰對, pq: ML-KEM-768 金鑰對 }
 
 ### Phase 1 — 讀端先行（🔴 順序紅線，見 §5）
 
-- ✅ `readEkAnnounce` 能把 `v:2` 當成「對方升級了」而非垃圾——**已完成**
+- ✅ `readEkAnnounce` 能把 `v:2` 當成「對方升級了」而非垃圾——2026-09-19 完成
+- ✅ 進一步：**讀得懂 v2 的完整內容**（`pq`／`nextPq`）——2026-09-22（Phase 2 順便完成）
 - ⏳ **等它普及**。在足夠多的客戶端能正確讀懂 `v:2` 之前，**不得開始發佈 `v:2`**
+  ⚠ 時鐘從**帶有這份讀端的版本發布之日**起算，不是從寫完程式起算
 
-### Phase 2 — 核心密碼學（純函式，不接線）
+### Phase 2 — 核心密碼學（純函式，不接線）✅ **已完成（2026-09-22）**
 
-- `packages/core`：混合 KDF、`buildEkAnnounce` v2、`readEkAnnounce` 解析 `pq`
-- 相依：`@noble/post-quantum`（v0.7.x，與現有 `@noble/*` 同一維護者）
-- ⚠ `openWrapWithEks(event, candidateSks: SecretKey[])` 的簽章要改——
-  混合式解封需要**成對**的（古典 sk, PQ sk），不是一個扁平的 `SecretKey[]`。
-  🔵 **實測：生產端只有一個呼叫點**（`relay-backend.ts:1409`，餵 `fsDecryptCandidates()`）
-  ⇒ 改動面比想像小
-- **完全不改變行為**：沒有人呼叫它，純粹把積木放好＋測試
+- ✅ `packages/core/src/hybrid-kem.ts`：ML-KEM-768 原語 ＋ 混合式 KDF（15 條測試）
+- ✅ `buildEkAnnounce` 支援 v2，**但預設仍發 v1**（順序紅線，見 §5）
+- ✅ `readEkAnnounce` **讀得懂 v2**（`pq`／`nextPq`），未知版本的門檻上移到 v3
+- ✅ 相依 `@noble/post-quantum` 0.7.1。實測三個 noble 版本並存，**沒有強迫升級**
+- ✅ **行為零改變**：全庫 2598 條測試綠
+
+🔵 **一個規劃時沒想到的好處**：Phase 2 的讀端工作**就是 Phase 1 的內容物**——
+`readEkAnnounce` 讀得懂 v2 的那一刻，Phase 1 的「等普及」時鐘就可以開始跑了。
+兩個階段實際上合而為一。
+
+⏸ **`openWrapWithEks` 的簽章改動延到 Phase 4**。原本排在這裡，但它有一個生產呼叫點
+（`relay-backend.ts:1409`），改了就是行為改動 ⇒ 違反本階段「零改變」的前提；
+而且在**線路格式（`ct` 放哪個 tag）決定之前**動它是過早。
+🔵 實測那個呼叫點**只有一個**，所以延後不會讓 Phase 4 變重。
 
 ### Phase 3 — 金鑰生命週期
 

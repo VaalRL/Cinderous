@@ -1,4 +1,4 @@
-import { ASSET_CHUNK_CHARS, contentHash, finalizeEvent, readPin, pinAfterDeclare, pinIsDowngraded, FS_CAPABILITY, FS_RETIRED, generateEncryptionKey, sealAndWrap, buildSnapshotEvent, buildDeviceDirectory, buildEkEnvelope, openEkEnvelope, KIND, RelayClient, applyRosterRotations, generateSecretKey, getPublicKey, npubEncode, nsecDecode, nsecEncode, shardPrefix, signOrgRoster, type NostrEvent, type RelayClientHandlers, wrapGroupControl, wrapGroupMessage, wrapMessage, wrapProfile, wrapReceipt } from "@cinderous/core";
+import { ASSET_CHUNK_CHARS, buildEkAnnounce, contentHash, finalizeEvent, readPin, pinAfterDeclare, pinIsDowngraded, FS_CAPABILITY, FS_RETIRED, generateEncryptionKey, sealAndWrap, buildSnapshotEvent, buildDeviceDirectory, buildEkEnvelope, openEkEnvelope, KIND, RelayClient, applyRosterRotations, generateSecretKey, getPublicKey, npubEncode, nsecDecode, nsecEncode, shardPrefix, signOrgRoster, type NostrEvent, type RelayClientHandlers, wrapGroupControl, wrapGroupMessage, wrapMessage, wrapProfile, wrapReceipt } from "@cinderous/core";
 import { createInMemoryRelayNetwork, createShardedRelayNetwork, MessageStore } from "@cinderous/relay";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryStorage } from "../storage/memory.js";
@@ -4820,15 +4820,43 @@ describe("三種 FS 提示互不混用（ADR-0302 §4／§1）", () => {
       onFsUnsupported: (pk) => unsupported.push(pk),
     });
     a.addContact(npubEncode(bob));
-    // 一顆 v:2 的公告（＝後量子那一版的形狀）。
+    // ⚠ 2026-09-21：`v: 2` 已是**我們認得的**後量子公告，所以這裡用 v3 代表「更新的版本」。
     const evt = finalizeEvent(
-      { kind: 10040, created_at: Math.floor(Date.now() / 1000), tags: [], content: JSON.stringify({ v: 2 }) },
+      { kind: 10040, created_at: Math.floor(Date.now() / 1000), tags: [], content: JSON.stringify({ v: 3 }) },
       bobSk,
     );
     net.connect("bob-announce", {}).publish(evt);
     a.sendMessage(bob, "嗨");
     expect(unsupported).toContain(bob); // 對方升級了 → 請更新
     expect(downgrade).toEqual([]); // 🔴 不得說成「可能正在被攻擊」
+    a.stop();
+  });
+
+  it("🔴 v:2（後量子）公告照常學到 EK——這就是「讀端先行」要買到的東西", () => {
+    // 後量子計畫 §5 的順序紅線：讀端必須**先**普及，否則第一個升級到 v2 的人
+    // 會被所有舊版聯絡人當成「沒有 EK」⇒ 誤報成疑似降級。
+    // 這條測試證明：讀得懂 v2 的客戶端會把它當成正常的 EK 公告，不發任何警告。
+    const net = createInMemoryRelayNetwork();
+    const bobSk = generateSecretKey();
+    const bob = getPublicKey(bobSk);
+    const ek = getPublicKey(generateSecretKey());
+    const store = new MemoryStorage();
+    store.saveFsState({ enabled: true, keys: [], contactEks: {}, pinned: {} });
+    const a = new RelayChatBackend(store, (h) => net.connect("a", h), "Alice");
+    const downgrade: string[] = [];
+    const unsupported: string[] = [];
+    a.start({
+      ...noop,
+      onFsDowngrade: (pk) => downgrade.push(pk),
+      onFsUnsupported: (pk) => unsupported.push(pk),
+    });
+    a.addContact(npubEncode(bob));
+    net.connect("bob-pq", {}).publish(buildEkAnnounce(bobSk, ek, { pq: "cHE=" }));
+    a.sendMessage(bob, "嗨");
+
+    expect(store.loadFsState().contactEks[bob]).toBe(ek); // 學到了古典那一把
+    expect(unsupported).toEqual([]); // 不是「請更新」
+    expect(downgrade).toEqual([]); // 🔴 更不是「疑似降級」
     a.stop();
   });
 });
