@@ -1,5 +1,28 @@
 [
   {
+    "version": "0.0.18",
+    "date": "2026-09-21",
+    "released": true,
+    "zh": [
+      "🔴 **請把你的每一台裝置都更新到這一版。** 這一版開始，開了前向保密的對話會用新的加密方式。**沒更新的那台裝置會解不開送來的訊息，而且是永久的**——不是晚點會補上，是那台沒有對應的金鑰。手機、桌機、任何你還在用的裝置，一台都不要漏。",
+      "🧪 **後量子加密已啟用（實驗性）。** 上一版說「元件已就位、尚未啟用」，這一版把它打開了。它解決的是一個今天就在發生的問題：中繼站上的密文可能被側錄下來留著，等到未來有足夠強的量子電腦再解開。這一版起，那些密文**在未來也解不開**。",
+      "⚠️ **這不等於「量子安全」，請不要這樣理解。** 換掉的只有「內容加密」那一半；**簽章沒有改**，所以一個擁有量子電腦的攻擊者**仍然偽造得出訊息**。買到的只有一件事：內容的機密性。",
+      "⚠️ **前向保密（含這次的後量子）仍是實驗性選項、預設關閉，且尚未經過外部密碼學審計。** 我們用的組合方式是依標準做法自行組出來的，沒有照搬任何已經公開審查過的方案。要不要打開由你決定，設定→隱私。",
+      "📈 **代價：每則訊息大約多 1.4 KB。** 只在雙方都更新、且你開了前向保密時才會發生；對方沒更新就自動退回原本的方式，訊息照樣送得到。檔案本體走點對點，不受影響。",
+      "🔎 **降級偵測跟著升級了。** 如果某個聯絡人從較強的加密方式退回較弱的，你會看到提示；而單純收到對方的訊息**不會**再誤觸發那個提示（上一版的判斷會把「對方傳了一則訊息」誤讀成「對方退回較弱機制」）。",
+      "ℹ️ 已知：Android 版是測試版（debug 簽章，能接 USB 偵錯的人可讀取記憶體，請勿用它處理你真正在意的對話）；桌面版未經程式碼簽章，安裝時 Windows SmartScreen 會跳警告。"
+    ],
+    "en": [
+      "🔴 **Update every device you use to this version.** From this release, conversations with forward secrecy enabled use a new encryption scheme. **A device left on an older version will not be able to decrypt incoming messages, permanently** — it is not a delay, that device simply does not have the matching key. Phone, desktop, anything you still use: do not skip one.",
+      "🧪 **Post-quantum encryption is now on (experimental).** The previous release said the pieces were in place but not switched on; this one switches them on. It addresses something happening today: ciphertext sitting on relays can be recorded and kept until a large enough quantum computer exists. From this version, that recorded ciphertext **stays unreadable**.",
+      "⚠️ **This is not \"quantum-safe\", please do not read it that way.** Only the content encryption changed; **signatures are unchanged**, so an attacker with a quantum computer could **still forge messages**. What you gain is confidentiality of content, and nothing else.",
+      "⚠️ **Forward secrecy, including this post-quantum work, remains an experimental option, off by default, and has not been externally audited.** The construction follows standard practice but is assembled by us; it is not a copy of any publicly reviewed scheme. Whether to turn it on is your call: Settings → Privacy.",
+      "📈 **The cost: roughly 1.4 KB more per message.** Only when both sides have updated and you have forward secrecy on; if the other side has not updated it falls back to the previous scheme and messages still arrive. File contents travel peer-to-peer and are unaffected.",
+      "🔎 **Downgrade detection was upgraded with it.** If a contact falls back from a stronger scheme to a weaker one, you will be told; and simply receiving a message from them no longer triggers that warning by mistake (the previous version could read \"they sent a message\" as \"they fell back to a weaker scheme\").",
+      "ℹ️ Known: the Android build is a test build (debug-signed; anyone with USB debugging access can read its memory — do not use it for conversations you actually care about). The desktop build is not code-signed, so Windows SmartScreen will warn during install."
+    ]
+  },
+  {
     "version": "0.0.17",
     "date": "2026-09-22",
     "released": true,
