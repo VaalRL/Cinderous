@@ -24,6 +24,7 @@ import { avatarFromUrl, pickAvatarImage } from "../native/avatar.js";
 import { copyText } from "../native/clipboard.js";
 import { isNativeShell } from "../native/platform.js";
 import { StatusSegments } from "./SelfStatusBar.js";
+import { APP_VERSION } from "../version.js";
 
 const ACCENTS: { label: string; hex: string | null }[] = [
   { label: "預設", hex: null },
@@ -1291,6 +1292,13 @@ export function SettingsScreen({
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>{t("mobileSettings_relay")}</Text>
           <Text style={styles.value} numberOfLines={1}>{relayUrl ?? t("mobileSettings_relayDemo")}</Text>
+        </View>
+
+        {/* 關於（ADR-0227 P2）：桌面早就有，行動端一直缺——使用者無從得知自己跑的是哪一版，
+            而「請更新到某版」這種提示（如 ADR-0365 的裝置閘門）沒有版號就無法自我核對。 */}
+        <View style={styles.section} testID="about-section">
+          <Text style={styles.sectionTitle}>{t("settings_aboutVersion")}</Text>
+          <Text style={styles.value} selectable testID="about-version">{APP_VERSION}</Text>
         </View>
 
         <Pressable style={styles.logout} accessibilityRole="button" testID="logout" onPress={onLogout}>
