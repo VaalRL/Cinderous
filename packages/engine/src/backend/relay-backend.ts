@@ -150,7 +150,9 @@ import {
   withDevice,
   type DeviceDirectory,
   FS_CAPABILITY,
+  FS_CAPABILITY_PQ,
   FS_RETIRED,
+  pinOnEvidence,
   generateEncryptionKey,
   recordFsFailure,
   retainPendingFs,
@@ -1396,21 +1398,32 @@ export class RelayChatBackend implements ChatBackend {
   /**
    * 學到某聯絡人當前 EK（收 10040 或訊息內嵌 hint）；順帶 TOFU 釘選「此人用 FS」。
    *
-   * ⚠ 這條路只知道「他有 EK」，**不知道他宣告的是哪一版機制**（10040 目前沒有帶）。
-   * 故一律以 `FS_CAPABILITY` 釘——而 `pinAfterDeclare` 保證那不會把既有的較強釘選拉低。
+   * `scheme` 是**這個來源說得出的機制**：
+   * - kind 10040 `v:2`（帶 `pq`）⇒ `FS_CAPABILITY_PQ`
+   * - kind 10040 `v:1` ⇒ `FS_CAPABILITY`（**真的能判降級**：他上週還在發 v2）
+   * - 訊息內嵌的 `ek` hint ⇒ **`undefined`**，因為 hint 不帶版本
+   *
+   * 🔴 hint 那條**必須**是 `undefined`，不能塞 `FS_CAPABILITY` 充數（ADR-0365）。
+   * 在只有一階的世界裡那樣做無害；`ek-pq-v1` 進來之後，拿 `ek-v1` 去
+   * `pinAfterDeclare` 一個已釘在 `ek-pq-v1` 的對方會判成 `"weaker"` ⇒ 寫下降級證據
+   * ⇒ 送訊時跳「對方退回較弱的機制」，**而對方只是傳了一則訊息給我**。
    */
-  private learnContactEk(pubkey: PubkeyHex, ek: string, pq?: string): void {
+  private learnContactEk(pubkey: PubkeyHex, ek: string, pq?: string, scheme?: string): void {
     const cur = this.fsState.pinned?.[pubkey];
-    const next = pinAfterDeclare(cur, FS_CAPABILITY, Date.now());
+    const next =
+      scheme === undefined
+        ? pinOnEvidence(cur, FS_CAPABILITY, Date.now())
+        : pinAfterDeclare(cur, scheme, Date.now());
     const sameEk = this.fsState.contactEks[pubkey] === ek;
-    // 🔴 ADR-0365：`ek` 與 `pq` 是一對。
-    // - 公告帶了 `pq` → 用新的。
-    // - **沒帶**且 `ek` 沒變 → 保留舊的（訊息內嵌的 `ek` hint 走這條，它本來就不帶 pq，
-    //   不保留的話每收一則 1:1 訊息就會把公告學到的 pq 洗掉 ⇒ 混合式永遠開不起來）。
-    // - **沒帶**且 `ek` 換了 → **刪掉**。把新 EK 配上舊 pq 會產生一個對方手上不存在的
-    //   組合，送出去的訊息**永久解不開**（且看起來一切正常，直到對方說收不到）。
+    // 🔴 ADR-0365：`ek` 與 `pq` 是一對，而「沒帶 pq」要看**來源說不說得出版本**。
+    // - 帶了 `pq` → 用新的。
+    // - 沒帶，且來源是**不帶版本的 hint**（`scheme === undefined`）且 `ek` 沒變 → **保留**。
+    //   不保留的話每收一則 1:1 訊息就會把公告學到的 pq 洗掉 ⇒ 混合式永遠開不起來。
+    // - 沒帶，且來源是**公告**（v1）→ **刪掉**。v1 是一句明確的「我沒有 pq」，
+    //   不是資訊缺失。留著會繼續對他發混合式，而他若真的退版就解不開 ⇒ 永久丟訊。
+    // - 沒帶且 `ek` 換了 → **刪掉**。把新 EK 配上舊 pq 會產生一個對方手上不存在的組合。
     const prevPq = this.fsState.contactPq?.[pubkey];
-    const nextPq = pq ?? (sameEk ? prevPq : undefined);
+    const nextPq = pq ?? (scheme === undefined && sameEk ? prevPq : undefined);
     if (sameEk && nextPq === prevPq && cur !== undefined && sameFsPin(readPin(cur), next)) return;
     this.fsState = {
       ...this.fsState,
@@ -1486,14 +1499,32 @@ export class RelayChatBackend implements ChatBackend {
     if (ek) this.learnContactEk(opened.sender, ek);
     return opened;
   }
+  /**
+   * 這一輪公告會不會帶 `pq`（ADR-0365）。兩個條件都要成立：
+   *
+   * 1. `EK_PQ_ANNOUNCE` 開著（順序紅線；見該常數）。
+   * 2. **當前這把 EK 真的有種子**——舊版客戶端往返 ADR-0322 S2 的分發事件時會把
+   *    `pq` 欄位丟掉（`parseKeys` 是逐欄位重建的），那時發 v2 等於公告一把自己解不開的金鑰。
+   *
+   * 🔴 個人檔的能力宣告（`myFsCapability`）**必須走同一個判斷**。宣告比實際做的多，
+   * 就是 ADR-0302 §4 的那種謊；而且會讓對方釘在 `ek-pq-v1`、再從 v1 公告學到 EK 時
+   * 被判成「退回較弱機制」。
+   */
+  private announcedPq(): string | undefined {
+    const my = this.myCurrentEk();
+    return EK_PQ_ANNOUNCE && my?.pq ? encodePqPublicKey(my.pq.pk) : undefined;
+  }
+
+  /** 我在簽章個人檔裡要宣告的 FS 能力。與 `announcedPq()` 同源，保證說到做到。 */
+  private myFsCapability(): string {
+    return this.announcedPq() ? FS_CAPABILITY_PQ : FS_CAPABILITY;
+  }
+
   /** 發佈 kind 10040 EK 公告（IK 簽章、可取代）到 home＋pool——聯絡人訂 `authors:[我]` 學到我的當前 EK。 */
   private publishEkAnnounce(): void {
     const my = this.myCurrentEk();
     if (!my) return;
-    // ADR-0365：`EK_PQ_ANNOUNCE` 關著時**永遠發 v1**——那是順序紅線（先普及讀端、再開播）。
-    // 翻開後也只有「這把 EK 真的有種子」才發 v2：舊版客戶端往返分發事件時會把種子丟掉，
-    // 那時發 v2 等於公告一把自己解不開的金鑰。
-    const pq = EK_PQ_ANNOUNCE && my.pq ? encodePqPublicKey(my.pq.pk) : undefined;
+    const pq = this.announcedPq();
     const announce = buildEkAnnounce(this.sk, my.pk, pq ? { pq } : {});
     this.client.publish(announce);
     for (const c of this.relayPool.values()) c.publish(announce);
@@ -2293,7 +2324,9 @@ export class RelayChatBackend implements ChatBackend {
         // 兩者若都當成「沒學到」，升級的對方會被誤報成「疑似降級（可能正在被攻擊）」。
         if (read.kind === "newer") this.markFsUnsupported(read.ik, `ek-v${read.v}`);
         // ADR-0365：v2 公告多帶一個 `pq`（ML-KEM 公鑰）。v1 沒有 ⇒ `undefined` ⇒ 純古典。
-        else this.learnContactEk(read.ik, read.ek, read.pq);
+        // 公告**帶得出版本**，所以這條路可以（也應該）判定機制：v2⇒pq、v1⇒古典。
+        // 從 v2 退回 v1 是**真的降級訊號**，該讓 `pinIsDowngraded` 看見。
+        else this.learnContactEk(read.ik, read.ek, read.pq, read.pq ? FS_CAPABILITY_PQ : FS_CAPABILITY);
       }
       return;
     }
@@ -3539,7 +3572,8 @@ export class RelayChatBackend implements ChatBackend {
       // ADR-0245：FS 啟用時宣告 capability（IK 簽章、不可偽造）→ 對方 TOFU 釘選、降級偵測。
       // ADR-0314 三態：啟用＝`ek-v1`／停用過＝`none`（明示退場）／從未啟用＝欄位缺席。
       // 「從未啟用」是絕大多數使用者——對他們送 `none` 等於向全網宣告一件沒發生過的事。
-      ...(this.fsEnabled() ? { fs: FS_CAPABILITY } : this.fsState.retired ? { fs: FS_RETIRED } : {}),
+      // ADR-0365：啟用那一格再分兩級（`ek-v1`／`ek-pq-v1`），由 `myFsCapability()` 與實際公告同源決定。
+      ...(this.fsEnabled() ? { fs: this.myFsCapability() } : this.fsState.retired ? { fs: FS_RETIRED } : {}),
     };
     // hint 讓「每次開機廣播」同時成為全聯絡人的路由刷新——搬家後自動改道、陳舊自癒。
     this.publishReliable(wrapProfile(profile, this.sk, pubkey, this.homeUrl ? { relayHint: this.homeUrl } : {}));

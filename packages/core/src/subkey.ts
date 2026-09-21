@@ -25,6 +25,18 @@ export const EK_ANNOUNCE_KIND = 10040;
 export const FS_CAPABILITY = "ek-v1";
 
 /**
+ * 混合式（後量子）EK 的能力值（ADR-0365 Phase 4b）。
+ *
+ * 比 `ek-v1` **強**：同樣的輪替與刪除性質，外加「今天被側錄的密文未來解不開」。
+ * 長度 8 ≤ `FS_CAPABILITY_MAX_LEN`（超過會被 `parseProfile` 整欄丟掉而**靜默失效**）。
+ *
+ * ⚠ 宣告它的條件與 `EK_PQ_ANNOUNCE` **綁在一起**：沒有真的公告 `pq` 就宣告這個值，
+ * 是在說一件沒在跑的事（ADR-0302 §4 的紅線），而且會讓每個舊版聯絡人白白記進
+ * `unsupported`。兩者必須同時成立。
+ */
+export const FS_CAPABILITY_PQ = "ek-pq-v1";
+
+/**
  * **明示退場**的能力值（ADR-0306 D3.3）：宣告「我不再做 FS」。
  *
  * 為什麼需要一個明示值，而不是把欄位拿掉：欄位缺席與「刻意停止」在收件端**看起來一樣**，
@@ -49,7 +61,7 @@ export const FS_CAPABILITY_MAX_LEN = 16;
 /**
  * 對方的 FS 能力宣告，解讀為四種**互斥**狀態（ADR-0306 D3.3c／ADR-0302 §1–2）。
  *
- * - `fs`：正在做我們支援的 FS（`ek-v1`）⇒ TOFU 釘選。
+ * - `fs`：正在做我們支援的 FS（**凡在 `FS_SCHEME_RANK` 內者**：`ek-v1`／`ek-pq-v1`）⇒ TOFU 釘選。
  * - `retired`：**明示停止**（硬退）⇒ 應解除釘選，不得再發降級警告。
  * - `unknown`：宣告了我們不認得的機制（例如日後的 `ek-v2`／`ratchet-v1`）
  *   ⇒ 對方是**升級**不是降級；⚠ 舊碼把它與 `absent` 混為一談（ADR-0302 §2 指出
@@ -58,13 +70,23 @@ export const FS_CAPABILITY_MAX_LEN = 16;
  */
 export type FsCapability = "fs" | "retired" | "unknown" | "absent";
 
-/** 解讀簽章個人檔的 `fs` 欄位。不信任網路來源：非字串／空白一律當 `absent`。 */
-export function readFsCapability(fs: unknown): FsCapability {
+/**
+ * 解讀簽章個人檔的 `fs` 欄位。不信任網路來源：非字串／空白一律當 `absent`。
+ *
+ * 🔴 **「我們支援哪些機制」一律由 `FS_SCHEME_RANK` 決定，不得再寫死一個字串**（ADR-0365）。
+ * 原本這裡是 `v === FS_CAPABILITY`，於是加入 `ek-pq-v1` 的那一刻，**同一個版本的兩台
+ * 客戶端會互相判成「宣告了我不認得的機制，請更新」**——雙方都是最新版，卻都叫對方更新。
+ * 強度表與「認不認得」必須是同一份事實。
+ */
+export function readFsCapability(
+  fs: unknown,
+  rank: Readonly<Record<string, number>> = FS_SCHEME_RANK,
+): FsCapability {
   if (typeof fs !== "string") return "absent";
   const v = fs.trim();
   if (!v) return "absent";
-  if (v === FS_CAPABILITY) return "fs";
   if (v === FS_RETIRED) return "retired";
+  if (rank[v] !== undefined) return "fs";
   return "unknown";
 }
 
@@ -157,7 +179,10 @@ export function readPin(v: StoredFsPin | undefined): FsPin | undefined {
  * 真要加第二個軸時這裡要換成偏序，而 `compareFsStrength` 的 `"incomparable"`
  * 已經替那一天留好位置（見 `docs/research/double-ratchet-on-current-design.md` §1.1）。
  */
-export const FS_SCHEME_RANK: Readonly<Record<string, number>> = { [FS_CAPABILITY]: 1 };
+export const FS_SCHEME_RANK: Readonly<Record<string, number>> = {
+  [FS_CAPABILITY]: 1,
+  [FS_CAPABILITY_PQ]: 2, // ADR-0365：同樣的 FS 性質＋後量子機密性 ⇒ 真的更強，不是另一軸
+};
 
 /** 兩個機制的強度關係。`"incomparable"` 涵蓋「不認得」與「兩軸各有勝負」。 */
 export type FsStrength = "weaker" | "same" | "stronger" | "incomparable";
@@ -242,6 +267,22 @@ export function strongerPin(
       // 不可比：保留本機那一筆（`a`）——沒有依據說另一邊更好，而換掉會讓行為隨合併順序漂移。
       return x;
   }
+}
+
+/**
+ * 只有「他有 EK」這個證據、**不知道是哪一版機制**時的釘選（ADR-0365）。
+ *
+ * 🔴 **存在的理由是一個假警報。** 訊息內嵌的 `ek` hint（ADR-0245／0326）只說明對方有 EK，
+ * 不帶版本。在只有一階的世界裡拿 `FS_CAPABILITY` 去 `pinAfterDeclare` 是無害的；
+ * 但 `ek-pq-v1` 進來之後，那個呼叫對一個已釘在 `ek-pq-v1` 的對方會判成 `"weaker"`
+ * ⇒ 寫下 `declared: "ek-v1"` ⇒ `pinIsDowngraded` 為真 ⇒ 送訊時跳
+ * 「對方退回較弱的機制」——**而對方什麼都沒做，他只是傳了一則訊息給我**。
+ *
+ * ⇒ 規則：**已經釘過就完全不動**（不動基準、也不寫降級證據）；沒釘過才以 `fallback` 建立。
+ * 真正的降級只能由**帶版本的來源**判定：kind 10040 的 `v`，或簽章個人檔的 `fs` 宣告。
+ */
+export function pinOnEvidence(prev: StoredFsPin | undefined, fallback: string, now: number): FsPin {
+  return readPin(prev) ?? { scheme: fallback, at: now };
 }
 
 /** 這筆釘選代表「對方退回了較弱的機制」嗎（ADR-0302 §3 的降級判據之一）。 */
@@ -398,27 +439,35 @@ const EK_ANNOUNCE_MAX_KNOWN = EK_ANNOUNCE_PQ_VERSION;
 /**
  * 🚦 **整個後量子推行只有這一個開關**（ADR-0365 Phase 4b）。
  *
- * `false` ＝ 這台裝置**讀得懂** v2 公告、也解得開混合式訊息，但**自己仍然發 v1**
- * ⇒ 沒有任何人會加密混合式訊息給我。
+ * `true` ＝ 我的 kind 10040 公告帶 `pq`（`v:2`），升級過的對方會用混合式加密給我；
+ * 同時個人檔宣告 `FS_CAPABILITY_PQ`。兩件事**必須同時**發生，理由見該常數。
  *
- * ## 為什麼是關著的——這是順序問題，不是程式問題
+ * ## 為什麼一開始是關著的，以及憑什麼現在打開
  *
- * 收件端的程式碼必須**先普及**，發件端才能開始發。倒過來的話：
- * 我一旦公告 `pq`，任何已升級的對方就會用混合式加密給我，而我**另一台還沒更新的裝置**
- * 解不開 ⇒ 那台裝置上的訊息**永久消失**（不是延遲，是沒有金鑰）。
- * 中間沒有任何協商可言——公告是可取代事件，全網只有一份。
+ * 風險從來不是「陌生人解不開」——那只會退回純古典。真正的風險是
+ * **我自己另一台還沒更新的裝置**：它拿得到 EK 私鑰（ADR-0322 S2 分發），卻沒有 pq 種子、
+ * 也沒有混合式程式碼 ⇒ 那台上的訊息**永久解不開**（不是延遲，是沒有金鑰）。
+ * 公告是可取代事件、全網只有一份，中間沒有協商餘地。
  *
- * ## 翻開它之前必須成立的條件
+ * 2026-09-21 實測第三方安裝基數：GitHub Releases 史上總下載 **12 次**，
+ * 而帶著 v2 讀端的 v0.0.16／v0.0.17 是 **0**；兩座中繼 30 天 requests 2,235 與 74，
+ * 且尖峰日與發版日重合 ⇒ 沒有第三方安裝基數要等。
  *
- * 1. 帶著「讀得懂 v2」的版本已經發出去，且舊版本已充分汰換（觀察期自 2026-09-22 起算）。
- * 2. `StoredFsKey.pq` 種子已在多裝置間確實同步（ADR-0322 S2 分發，且**舊版客戶端
- *    會在往返時把這個欄位丟掉**——`ek-envelope.ts` 的 `parseKeys` 是逐欄位重建的）。
- * 3. 外部密碼學審計已對 `hybrid-kem.ts` 的組合方式表過態（ADR-0306，期限 2027-01-30）。
+ * ⚠ **但下載量看不到自己的裝置**（v0.0.15 起皆本機建置），而中繼因 ADR-0123 具名訂閱
+ * 也數不出身分數。⇒ 這個開關的**真正閘門是發版前的人工確認**：
+ * 「我手上每一台裝置都跑到了這一版嗎」（設定→裝置，對照 ADR-0322 目錄）。
+ * 程式擋不住這件事——只有一台漏掉，那台就開始永久丟訊。
  *
- * ⚠ 翻開它**不會**讓產品變成「量子安全」：簽章仍是 secp256k1。
- *    文案紅線見 `nip59.ts` 檔頭與 ADR-0306 D2.2。
+ * ## 打開之後仍然成立的事
+ *
+ * - 對方沒升級 ⇒ 我讀到 v1 公告 ⇒ 該則走純古典。**不斷訊**。
+ * - 我的 EK 沒有種子（舊金鑰、或被舊版客戶端往返時丟掉）⇒ 仍發 v1。**不說謊**。
+ * - 這**不會**讓產品變成「量子安全」：簽章仍是 secp256k1。文案紅線見 `nip59.ts` 檔頭、
+ *   ADR-0306 D2.2，以及 `packages/i18n/src/i18n.test.ts` 的後量子文案紅線。
+ * - 外部密碼學審計（ADR-0306，期限 2027-01-30）**仍未完成**——FS 整體本來就以
+ *   「實驗性、預設關閉、未經審計」出貨，後量子繼承同一個姿態，不是新增一類曝險。
  */
-export const EK_PQ_ANNOUNCE = false;
+export const EK_PQ_ANNOUNCE = true;
 
 /**
  * 讀 kind 10040 公告的結果（ADR-0302 §1）。

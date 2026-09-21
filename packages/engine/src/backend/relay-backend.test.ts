@@ -1,4 +1,4 @@
-import { ASSET_CHUNK_CHARS, buildEkAnnounce, contentHash, finalizeEvent, readPin, pinAfterDeclare, pinIsDowngraded, FS_CAPABILITY, FS_RETIRED, generateEncryptionKey, sealAndWrap, buildSnapshotEvent, buildDeviceDirectory, buildEkEnvelope, openEkEnvelope, KIND, RelayClient, applyRosterRotations, generateSecretKey, getPublicKey, npubEncode, nsecDecode, nsecEncode, shardPrefix, signOrgRoster, type NostrEvent, type RelayClientHandlers, wrapGroupControl, wrapGroupMessage, wrapMessage, wrapProfile, wrapReceipt } from "@cinderous/core";
+import { ASSET_CHUNK_CHARS, buildEkAnnounce, contentHash, finalizeEvent, readPin, pinAfterDeclare, pinIsDowngraded, FS_CAPABILITY, FS_CAPABILITY_PQ, FS_RETIRED, generateEncryptionKey, sealAndWrap, buildSnapshotEvent, buildDeviceDirectory, buildEkEnvelope, openEkEnvelope, KIND, RelayClient, applyRosterRotations, generateSecretKey, getPublicKey, npubEncode, nsecDecode, nsecEncode, shardPrefix, signOrgRoster, type NostrEvent, type RelayClientHandlers, wrapGroupControl, wrapGroupMessage, wrapMessage, wrapProfile, wrapReceipt } from "@cinderous/core";
 import { createInMemoryRelayNetwork, createShardedRelayNetwork, MessageStore } from "@cinderous/relay";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MemoryStorage } from "../storage/memory.js";
@@ -3667,7 +3667,8 @@ describe("FS 停用＝明示退場（ADR-0314）", () => {
     a.enableFs();
     a.sendMessage(b.self.pubkey, "先讓 Bob 釘選 Alice 用 FS");
     // ADR-0302 §3：釘選記的是機制而非布林。
-    expect(readPin(storeB.loadFsState().pinned?.[a.self.pubkey])?.scheme).toBe(FS_CAPABILITY);
+    // ADR-0365 起啟用 FS 的宣告是 `ek-pq-v1`（混合式），不再是 `ek-v1`。
+    expect(readPin(storeB.loadFsState().pinned?.[a.self.pubkey])?.scheme).toBe(FS_CAPABILITY_PQ);
 
     a.disableFs();
     // 退場宣告到達 → 解除釘選（不是留著釘選然後每次送訊都喊「對方可能被攻擊」）。

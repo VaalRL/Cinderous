@@ -362,9 +362,17 @@ describe("釘選的強度（ADR-0302 §3）", () => {
       expect(compareFsStrength("ratchet-v9000", "ek-v1", RANK)).toBe("incomparable");
       expect(compareFsStrength("ek-v1", "ratchet-v9000", RANK)).toBe("incomparable");
     });
-    it("生產的預設表只有 ek-v1（新機制要顯式加進去才比得了）", () => {
+    it("生產的預設表有 ek-v1 與 ek-pq-v1 兩階（ADR-0365）", () => {
       expect(compareFsStrength("ek-v1", "ek-v1")).toBe("same");
-      expect(compareFsStrength("ek-pq-v1", "ek-v1")).toBe("incomparable");
+      expect(compareFsStrength("ek-pq-v1", "ek-v1")).toBe("stronger");
+      expect(compareFsStrength("ek-v1", "ek-pq-v1")).toBe("weaker");
+    });
+
+    it("仍然只有顯式加進表裡的機制比得了（沒聽過的一律 incomparable）", () => {
+      // 這是安全側的預設：把「我沒聽過這個機制」當成降級，就是把「你該更新」
+      // 講成「對方可能被攻擊」（ADR-0302 §4 的紅線）。
+      expect(compareFsStrength("ratchet-v1", "ek-v1")).toBe("incomparable");
+      expect(compareFsStrength("ek-pq-v1", "ratchet-v1")).toBe("incomparable");
     });
   });
 

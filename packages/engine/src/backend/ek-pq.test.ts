@@ -13,13 +13,18 @@ import { createInMemoryRelayNetwork } from "@cinderous/relay";
 import {
   buildEkAnnounce,
   EK_ANNOUNCE_KIND,
+  decodePqPublicKey,
   EK_PQ_ANNOUNCE,
   encodePqPublicKey,
   encodePqSeed,
   generateSecretKey,
   getPublicKey,
+  FS_CAPABILITY,
+  FS_CAPABILITY_PQ,
   KIND,
   nsecEncode,
+  pinIsDowngraded,
+  readPin,
   wrapMessage,
   PQ_CT_TAG,
   PQ_SEED_BYTES,
@@ -88,23 +93,103 @@ function boot() {
   return { net, a, b, storeA, storeB, bSk, sent, bIncoming, bEk, bPqPk, announceFromB, lastWrapTo };
 }
 
-describe("🚦 公告開關（順序紅線）", () => {
-  it("🔴 本版的 EK_PQ_ANNOUNCE 必須是 false", () => {
-    // 翻開它之前要先滿足的三個條件寫在該常數的註解。把它釘在測試裡，
-    // 是因為「不小心翻開」的後果不是回報得出來的錯誤，是**別人裝置上訊息永久消失**。
-    expect(EK_PQ_ANNOUNCE).toBe(false);
+describe("🚦 公告開關（Phase 4b 已翻開）", () => {
+  it("EK_PQ_ANNOUNCE 已開啟", () => {
+    // 翻開的依據與**仍然擋著的那件事**（發版前人工確認每台自己的裝置都跑新版）
+    // 寫在該常數的註解。程式擋不住那件事，所以那裡是唯一的記載處。
+    expect(EK_PQ_ANNOUNCE).toBe(true);
   });
 
-  it("🔴 啟用 FS 發出的 kind 10040 仍是 v1，且**不帶** pq 欄位", () => {
+  it("啟用 FS 發出的 kind 10040 是 v2 且帶合法的 pq", () => {
     const { a, sent } = boot();
     a.enableFs();
     const announces = sent.filter((e) => e.kind === EK_ANNOUNCE_KIND);
     expect(announces.length).toBeGreaterThan(0);
     for (const e of announces) {
       const c = JSON.parse(e.content) as { v: number; pq?: string };
-      expect(c.v).toBe(1);
-      expect(c.pq).toBeUndefined();
+      expect(c.v).toBe(2);
+      expect(decodePqPublicKey(c.pq!)?.length).toBe(1184); // 解得開、長度對
     }
+  });
+
+  it("🔴 v1 的 `ek` 欄位在 v2 也必須保留（拿掉＝舊版聯絡人完全送不出 FS 訊息）", () => {
+    const { a, sent } = boot();
+    a.enableFs();
+    const c = JSON.parse(sent.filter((e) => e.kind === EK_ANNOUNCE_KIND).at(-1)!.content) as { ek?: string };
+    expect(c.ek).toMatch(/^[0-9a-f]{64}$/);
+  });
+});
+
+describe("能力宣告（ek-pq-v1）", () => {
+  it("對方由我的簽章個人檔釘到 ek-pq-v1", () => {
+    const { a, b, storeB } = boot();
+    a.enableFs();
+    expect(readPin(storeB.loadFsState().pinned?.[a.self.pubkey])?.scheme).toBe(FS_CAPABILITY_PQ);
+  });
+
+  it("🔴 我的 EK 沒有種子時，宣告退回 ek-v1（說到做到，不得宣告一件沒在跑的事）", () => {
+    // 會發生的路徑：舊版客戶端往返 ADR-0322 S2 的分發事件時把 `pq` 欄位丟掉
+    //（`parseKeys` 是逐欄位重建的）。那時仍宣告 ek-pq-v1 就是 ADR-0302 §4 的那種謊。
+    const { a, storeA, net } = boot();
+    a.enableFs();
+    a.stop();
+    const fs = storeA.loadFsState();
+    storeA.saveFsState({ ...fs, keys: fs.keys.map(({ nsec, pk, at }) => ({ nsec, pk, at })) }); // 種子被丟掉
+    const a2 = new RelayChatBackend(storeA, (h) => net.connect("a2", h), "Alice");
+    a2.start(noop);
+
+    const storeC = new MemoryStorage();
+    const c = new RelayChatBackend(storeC, (h) => net.connect("c", h), "Carol");
+    c.start(noop);
+    c.addContact(a2.selfNpub);
+    a2.addContact(c.selfNpub); // ⇒ sendProfileTo(c)
+
+    expect(readPin(storeC.loadFsState().pinned?.[a2.self.pubkey])?.scheme).toBe(FS_CAPABILITY);
+    a2.stop();
+    c.stop();
+  });
+});
+
+describe("🔴 兩階強度之後的假警報防線", () => {
+  /** 某人的釘選是否被判成「退回較弱機制」。 */
+  const rolledBack = (store: MemoryStorage, pk: string) =>
+    pinIsDowngraded(store.loadFsState().pinned?.[pk]);
+
+  it("🔴 收到對方**不帶版本的** ek hint 不得被判成降級", () => {
+    // hint（ADR-0245／0326）只說明「他有 EK」。在只有一階的世界拿 ek-v1 去比對是無害的，
+    // 但兩階之後那會把一個已釘在 ek-pq-v1 的對方判成「退回較弱機制」
+    // ——而他什麼都沒做，只是傳了一則訊息給我。
+    const { a, b, storeA } = boot();
+    a.enableFs();
+    b.enableFs(); // B 也是 pq ⇒ A 由個人檔＋v2 公告釘在 ek-pq-v1
+    expect(readPin(storeA.loadFsState().pinned?.[b.self.pubkey])?.scheme).toBe(FS_CAPABILITY_PQ);
+
+    b.sendMessage(a.self.pubkey, "一則普通訊息"); // 只帶 ek hint，不帶版本
+    expect(rolledBack(storeA, b.self.pubkey)).toBe(false);
+    expect(readPin(storeA.loadFsState().pinned?.[b.self.pubkey])?.scheme).toBe(FS_CAPABILITY_PQ);
+  });
+
+  it("對方的公告從 v2 退回 v1 **才**算降級（那是明確的訊號）", () => {
+    const { a, b, storeA, bEk, announceFromB } = boot();
+    a.enableFs();
+    b.enableFs();
+    expect(rolledBack(storeA, b.self.pubkey)).toBe(false);
+
+    announceFromB(bEk().pk, undefined, 120); // 同一把 ek，但改發 v1
+    expect(rolledBack(storeA, b.self.pubkey)).toBe(true);
+  });
+
+  it("🔴 而且退回 v1 之後**不再**對他發混合式（v1 是「我沒有 pq」，不是資訊缺失）", () => {
+    // 留著舊的 pq 會繼續對他發混合式；他若真的退版就解不開 ⇒ 永久丟訊。
+    const { a, b, storeA, bEk, announceFromB, lastWrapTo, bIncoming } = boot();
+    a.enableFs();
+    b.enableFs();
+    announceFromB(bEk().pk, undefined, 120);
+    expect(storeA.loadFsState().contactPq?.[b.self.pubkey]).toBeUndefined();
+
+    a.sendMessage(b.self.pubkey, "退回古典");
+    expect(lastWrapTo(b.self.pubkey).tags.some((t) => t[0] === PQ_CT_TAG)).toBe(false);
+    expect(bIncoming.map((m) => m.text)).toContain("退回古典");
   });
 });
 
