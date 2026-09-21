@@ -20,6 +20,7 @@ import {
   getPublicKey,
   KIND,
   nsecEncode,
+  wrapMessage,
   PQ_CT_TAG,
   PQ_SEED_BYTES,
   pqKeyFromStored,
@@ -217,5 +218,40 @@ describe("自我副本", () => {
     );
     expect(mine.length).toBeGreaterThan(0);
     expect(mine.at(-1)!.tags.some((t) => t[0] === PQ_CT_TAG)).toBe(true);
+  });
+});
+
+describe("輪替與 grace（驗收條件 5）", () => {
+  it("輪替出來的新 EK 也帶種子，且與舊的不同", () => {
+    const { a, storeA } = boot();
+    a.enableFs();
+    const before = storeA.loadFsState().keys.at(-1)!;
+    a.rotateEncryptionKey();
+    const after = storeA.loadFsState().keys.at(-1)!;
+    expect(after.pk).not.toBe(before.pk);
+    expect(pqKeyFromStored(after.pq!)).toBeDefined();
+    expect(after.pq).not.toBe(before.pq); // 兩半一起換，不是只換古典那半
+  });
+
+  it("🔴 輪替後，加密到**舊** EK＋舊 pq 的在途訊息仍解得開（grace 期內兩半都要留著）", () => {
+    // 這是 `fsDecryptCandidates()` 真正要做對的事：每一把舊 EK 都要把自己的後量子那半
+    // **配對**交出去。拆開交（或只交當前那把）會讓輪替當下所有在途的混合式訊息消失，
+    // 而那看起來就只是「對方沒收到」。
+    const { a, b, bSk, net, storeA } = boot();
+    a.enableFs();
+    const old = storeA.loadFsState().keys.at(-1)!;
+    const oldPq = pqKeyFromStored(old.pq!)!.pk;
+
+    a.rotateEncryptionKey();
+    expect(storeA.loadFsState().keys.at(-1)!.pk).not.toBe(old.pk); // 確實換過了
+
+    // B 手上還是舊的公告（在途訊息就是這樣產生的）
+    const wrapped = wrapMessage("輪替前就上路的訊息", bSk, a.self.pubkey, {
+      fs: { encryptToFor: () => ({ pk: old.pk, pq: oldPq }), myEk: b.self.pubkey },
+    });
+    expect(wrapped.events[0]!.tags.some((t) => t[0] === PQ_CT_TAG)).toBe(true);
+    net.connect("y", {}).publish(wrapped.events[0]!);
+
+    expect(storeA.loadMessages(b.self.pubkey).map((m) => m.text)).toContain("輪替前就上路的訊息");
   });
 });
