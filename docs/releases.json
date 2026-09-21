@@ -1,5 +1,38 @@
 [
   {
+    "version": "0.0.17",
+    "date": "2026-09-22",
+    "released": true,
+    "zh": [
+      "🔴 **修正：把照片「拖」進對話窗時，位置資訊沒有被清除。** 按迴紋針選檔會清，拖放不會——而拖放是更常用的那一個。⚠️ **先前用拖放送出的照片已經帶著拍攝位置出去了，那無法回收**；收件者手上那份就是原檔。這一版起兩種方式都會清。",
+      "⚠️ **很大的圖片（超過 32 MB）仍然不會清除位置資訊**，因為重新編碼那麼大的圖會讓 App 當掉。這一版起送出前會**先問你一次**，不再是靜悄悄地送出去。想清掉的話，先縮圖再傳。",
+      "📶 **收檔終於看得到進度。** 以前對方傳大檔給你時，畫面上寫的是「檔案在你另一台裝置」——那句話是錯的，檔案正在傳進來。現在會顯示接收進度。",
+      "📱 **手機版補上一批一直缺的提示**：傳檔進度與失敗原因、通話打不通的原因（限制網路下建議改用 Wi-Fi）、本機空間已滿的警告、雲端備份的狀況、以及同事更新金鑰後的接續提示。這些桌面版一直都有。",
+      "💾 **「雲端備份已開啟」不再等於「備份成功」。** 設定頁現在會顯示上次成功備份的時間；如果從來沒成功過，它會說出來——以前那是完全安靜的，要到換機還原那天才發現。",
+      "✉️ **送出的訊息若對方一直沒收到，現在看得出來。** 中繼站只保存 7 天，超過就刪除。超過保存期仍沒收到送達回條的訊息會標成「可能未送達」，並建議重傳。",
+      "🕳 **離線太久回來時會提醒你可能漏了訊息。** 那段期間別人傳給你的東西可能已經在中繼站上過期消失，不會補送，也查不出漏了哪些。",
+      "🗂 **匯出紀錄不再有大小限制。** 用了很久的人匯出時可能會失敗，現在改成逐塊寫入，多大都行。",
+      "🖥 **桌面版選很大的檔案不再吃光記憶體**；網頁版的暫存檔也終於會被回收（以前會一直累積到空間滿了連訊息都存不下來）。",
+      "🔒 **加密機制的版本協商變嚴謹了**：如果對方從較強的加密方式退回較弱的，你會看到提示。以前這種情況是看不出來的。",
+      "🧪 **內部準備：後量子加密的基礎元件已就位**，但**尚未啟用**，目前不影響任何加密行為。它需要先讓大多數人更新到這一版之後才能打開——所以**請更新**。⚠️ 完成之後保護的是訊息內容的機密性，**不是**身分真實性；而且與現有的前向保密一樣**尚未經過外部密碼學審計**。",
+      "ℹ️ 已知：Android 版是測試版（debug 簽章，能接 USB 偵錯的人可讀取記憶體，請勿用它處理你真正在意的對話）；桌面版未經程式碼簽章，安裝時 Windows SmartScreen 會跳警告。"
+    ],
+    "en": [
+      "🔴 **Fixed: photos **dragged** into a conversation did not have their location stripped.** Picking a file with the paperclip stripped it; dragging did not — and dragging is the more common action. ⚠️ **Photos you sent this way already went out with their capture location, and that cannot be undone**; the recipient has the original. From this version both paths strip it.",
+      "⚠️ **Very large images (over 32 MB) still do not get their location stripped**, because re-encoding something that large would destabilise the app. From this version you are **asked first** instead of it happening silently. To strip it, resize the image before sending.",
+      "📶 **Receiving a file finally shows progress.** Previously an incoming transfer said \"file is on your other device\" — which was simply wrong, the file was arriving. It now shows a progress indicator.",
+      "📱 **The mobile app gained a batch of notices it had been missing**: transfer progress and failure reasons, why a call could not connect (switch to Wi-Fi on restricted networks), a warning when local storage is full, cloud backup status, and continuity after a colleague rotates their key. The desktop app had all of these already.",
+      "💾 **\"Cloud backup is on\" no longer implies \"backup is working\".** Settings now shows when the last successful backup happened, and says so plainly if there has never been one — previously that was entirely silent until the day you restored onto a new device.",
+      "✉️ **You can now tell when a message you sent was never picked up.** Relays only hold offline messages for 7 days. A message with no delivery receipt after that window is marked \"may not have been delivered\", with a suggestion to resend.",
+      "🕳 **Coming back after a long time offline now warns you that you may have missed messages.** Anything sent to you during that window may have expired on the relay; it is not redelivered and there is no way to tell what was lost.",
+      "🗂 **Exporting your records no longer has a size limit.** Long-time users could hit a failure; it now writes in chunks, at any size.",
+      "🖥 **Picking a very large file on desktop no longer exhausts memory**, and the browser build finally reclaims its temporary files (they used to accumulate until storage filled up and messages could not even be saved).",
+      "🔒 **Encryption version negotiation is stricter**: if a contact rolls back from a stronger scheme to a weaker one, you are told. That case was previously invisible.",
+      "🧪 **Groundwork: the building blocks for post-quantum encryption are in place, but **not enabled** — nothing about encryption behaves differently yet. Turning it on requires most people to be on this version first, so **please update**. ⚠️ When it does land it protects the confidentiality of message contents, **not** the authenticity of identities; and like the existing forward secrecy it has **not been externally audited**.",
+      "ℹ️ Known limitations: the Android build is a test build (debug-signed — anyone who can attach USB debugging can read its memory, so do not use it for conversations you actually care about); the desktop build is not code-signed, so Windows SmartScreen will warn on install."
+    ]
+  },
+  {
     "version": "0.0.16",
     "date": "2026-09-18",
     "released": true,
