@@ -246,3 +246,62 @@ describe("可尋址配額與 TTL 可設定（ADR-0366 P1 #7／#8）", () => {
     expect(s.query({ authors: ["a"], kinds: [31081] } as never, 1000 + 60 * 86_400)).toHaveLength(1);
   });
 });
+
+describe("可尋址的兩道容量閘（ADR-0366 §容量二）", () => {
+  /** 產一顆指定大小（序列化後約 bytes）的可尋址事件。 */
+  const sized = (pubkey: string, d: string, bytes: number, kind = 31081): NostrEvent => {
+    const shell = JSON.stringify({
+      id: `${pubkey}-${kind}-${d}`,
+      pubkey,
+      created_at: 1000,
+      kind,
+      tags: [["d", d]],
+      content: "",
+      sig: "",
+    }).length;
+    return {
+      id: `${pubkey}-${kind}-${d}`,
+      pubkey,
+      created_at: 1000,
+      kind,
+      tags: [["d", d]],
+      content: "x".repeat(Math.max(0, bytes - shell)),
+      sig: "",
+    } as NostrEvent;
+  };
+
+  it("單顆上限可調小——車道的牌組只有幾 KB，沒有理由沿用加密快照的 256KB", () => {
+    const s = new MessageStore({ addressableMaxBytes: 4_096, addressablePerAuthor: 64 });
+    expect(s.putAddressable(sized("a", "ok", 4_000), 1000)).toBe(true);
+    expect(s.putAddressable(sized("a", "toobig", 8_000), 1000)).toBe(false);
+  });
+
+  it("🔴 每作者總量上限：跨 kind 也算，因為 kind 是發送方自選的", () => {
+    // 沒有這一條，「每 (pubkey, kind) 64 個」實際上等於「每人一萬 × 64 個」。
+    const s = new MessageStore({
+      addressableMaxBytes: 4_096,
+      addressablePerAuthor: 64,
+      addressableBytesPerAuthor: 10_000,
+    });
+    expect(s.putAddressable(sized("a", "d1", 4_000, 31081), 1000)).toBe(true);
+    expect(s.putAddressable(sized("a", "d2", 4_000, 31082), 1000)).toBe(true); // 換一個 kind 也照算
+    expect(s.putAddressable(sized("a", "d3", 4_000, 31083), 1000)).toBe(false); // 超過總量
+    // 另一個作者不受影響
+    expect(s.putAddressable(sized("b", "d1", 4_000, 31081), 1000)).toBe(true);
+  });
+
+  it("🔴 取代既有位址算的是**差額**，不是全額——否則更新到一半就再也更新不了", () => {
+    const s = new MessageStore({ addressableMaxBytes: 8_192, addressableBytesPerAuthor: 10_000 });
+    expect(s.putAddressable(sized("a", "d1", 8_000), 1000)).toBe(true);
+    // 同一個位址更新成同樣大小：總量沒有變，必須收
+    const again = { ...sized("a", "d1", 8_000), id: "a-31081-d1-v2", created_at: 2000 } as NostrEvent;
+    expect(s.putAddressable(again, 1000)).toBe(true);
+    // 但換一個新位址就會超過
+    expect(s.putAddressable(sized("a", "d2", 8_000), 1000)).toBe(false);
+  });
+
+  it("未設定＝不限制（自架站與現有部署維持原行為）", () => {
+    const s = new MessageStore();
+    expect(s.putAddressable(sized("a", "d1", 200_000), 1000)).toBe(true);
+  });
+});

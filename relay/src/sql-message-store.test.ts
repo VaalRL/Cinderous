@@ -400,3 +400,57 @@ describe("🔴 標籤 filter 必須下推 SQL（ADR-0366 P1 #5）", () => {
     expect(sql.query(filter, 1).map((e) => e.id)).toEqual(mem.query(filter, 1).map((e) => e.id));
   });
 });
+
+describe("SQL 版的可尋址容量閘與記憶體版一致（ADR-0366 §容量二）", () => {
+  const sized = (pubkey: string, d: string, bytes: number, kind = 31081): NostrEvent => {
+    const id = `${pubkey}-${kind}-${d}`;
+    const shell = JSON.stringify({
+      id,
+      pubkey,
+      created_at: 1000,
+      kind,
+      tags: [["d", d]],
+      content: "",
+      sig: "",
+    }).length;
+    return {
+      id,
+      pubkey,
+      created_at: 1000,
+      kind,
+      tags: [["d", d]],
+      content: "x".repeat(Math.max(0, bytes - shell)),
+      sig: "",
+    } as NostrEvent;
+  };
+
+  const opts = {
+    addressableMaxBytes: 4_096,
+    addressablePerAuthor: 64,
+    addressableBytesPerAuthor: 10_000,
+  };
+
+  it("兩個實作對同一串寫入給出同一串答案", () => {
+    const sql = new SqlMessageStore(nodeSqlExec(), opts);
+    const mem = new MessageStore(opts);
+    const writes: NostrEvent[] = [
+      sized("a", "d1", 4_000, 31081),
+      sized("a", "d2", 4_000, 31082), // 換 kind 仍算進同一個作者
+      sized("a", "d3", 4_000, 31083), // 超過總量 → false
+      sized("a", "big", 8_000, 31081), // 超過單顆上限 → false
+      sized("b", "d1", 4_000, 31081), // 別的作者不受影響
+      { ...sized("a", "d1", 4_000, 31081), id: "a-31081-d1-v2", created_at: 2000 } as NostrEvent, // 取代＝算差額
+    ];
+    const results = (store: SqlMessageStore | MessageStore): boolean[] =>
+      writes.map((e) => store.putAddressable(e, 1000));
+    expect(results(sql)).toEqual(results(mem));
+    expect(results(new SqlMessageStore(nodeSqlExec(), opts))).toEqual([
+      true,
+      true,
+      false,
+      false,
+      true,
+      true,
+    ]);
+  });
+});

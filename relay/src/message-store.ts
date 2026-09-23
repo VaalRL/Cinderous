@@ -36,6 +36,25 @@ export interface MessageStoreOptions {
    * 自架的世界站可以拉長——挑戰窗的長度因此是**可調的營運參數**，不是協定限制。
    */
   addressableTtlSeconds?: number;
+  /**
+   * 單顆可尋址事件的位元組上限；預設 {@link ADDRESSABLE_MAX_BYTES}（256KB）。
+   *
+   * 256KB 是為 ADR-0071 的**加密雲端快照**訂的。第三方車道上的東西小得多
+   * （一份牌組約 2KB、世界快照數十 KB），沿用 256KB 等於把「每分鐘能塞進多少位元組」
+   * 放大八倍——而那個乘積就是塞爆一顆 DO 需要多久（ADR-0366 §容量二）。
+   */
+  addressableMaxBytes?: number;
+  /**
+   * **每個作者**的可尋址總位元組上限（跨所有 kind）；未設＝不限制。
+   *
+   * 🔴 為什麼需要它：{@link addressablePerAuthor} 的計數範圍是 **(pubkey, kind)**，
+   * 而 NIP-33 的 kind 區間有一萬個、且由發送方自選 ⇒ 「每人每 kind 64 個」實際上是
+   * 「每人 64 萬個」。沒有這一條，可尋址儲存對單一作者是無界的。
+   *
+   * ⚠ 它**擋不住換金鑰的人**（pubkey 不用錢）：真正的速率界線是每連線訊息上限
+   * 乘上 {@link addressableMaxBytes}。這一條擋的是「單一身分無限累積」。
+   */
+  addressableBytesPerAuthor?: number;
 }
 
 /** 預設留言壽命上限：7 天（對齊 client 端 gift wrap 的預設 TTL）。 */
@@ -223,11 +242,22 @@ export class MessageStore implements OfflineStore {
       }
       return true;
     }
-    if (JSON.stringify(event).length > ADDRESSABLE_MAX_BYTES) return false;
+    const size = JSON.stringify(event).length;
+    if (size > (this.opts.addressableMaxBytes ?? ADDRESSABLE_MAX_BYTES)) return false;
     if (!existing) {
       let count = 0;
       for (const k of this.addressable.keys()) if (k.startsWith(prefix)) count++;
       if (count >= (this.opts.addressablePerAuthor ?? ADDRESSABLE_MAX_PER_AUTHOR)) return false;
+    }
+    const budget = this.opts.addressableBytesPerAuthor;
+    if (budget !== undefined) {
+      // 取代既有位址時算的是**差額**：把舊的那顆先扣掉，否則更新到一半就再也更新不了。
+      let used = 0;
+      for (const [k, e] of this.addressable) {
+        if (e.pubkey !== event.pubkey || k === key) continue;
+        used += JSON.stringify(e).length;
+      }
+      if (used + size > budget) return false;
     }
     const eff = effectiveExpiration(event, nowSec, this.opts.addressableTtlSeconds ?? ADDRESSABLE_TTL_SECONDS);
     if (eff <= nowSec) return false;

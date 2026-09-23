@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { TIMESTAMP_JITTER_SECONDS } from "@cinderous/core";
 import { describe, expect, it } from "vitest";
-import { ABUSE_GUARD, APP_ADDRESSABLE_PER_AUTHOR, MAX_EVENTS_PER_MINUTE, MAX_MESSAGES_PER_MINUTE, messagesPerMinuteFrom, MAX_PAST_SKEW_SEC, MAX_POW_DIFFICULTY, PUBLIC_LANE_ADDRESSABLE_PER_AUTHOR, TTL_CAP_DAYS, knownLanes, acceptFileEvents, eventsPerMinuteFrom, firstHost, guardFor, powForLane, storeOptions, ttlSecondsFromDays } from "./host-config.js";
+import { ABUSE_GUARD, APP_ADDRESSABLE_PER_AUTHOR, MAX_EVENTS_PER_MINUTE, MAX_MESSAGES_PER_MINUTE, messagesPerMinuteFrom, MAX_PAST_SKEW_SEC, APP_ADDRESSABLE_BYTES_PER_AUTHOR, APP_ADDRESSABLE_MAX_BYTES, MAX_POW_DIFFICULTY, PUBLIC_LANE_ADDRESSABLE_BYTES_PER_AUTHOR, PUBLIC_LANE_ADDRESSABLE_PER_AUTHOR, STRICT_ADDRESSABLE_BYTES_PER_AUTHOR, TTL_CAP_DAYS, knownLanes, acceptFileEvents, eventsPerMinuteFrom, firstHost, guardFor, powForLane, storeOptions, ttlSecondsFromDays } from "./host-config.js";
 
 // 宿主組裝設定（ADR-0235 H1）。H1 的教訓是「組裝層沒人測」——防護在 core 裡寫對了也測了，
 // 但 worker 從未把參數傳進去。這裡把常數與衍生邏輯的**不變量**釘死，兩座宿主不可能各走各的。
@@ -40,9 +40,13 @@ describe("host-config：TTL 天數 → 秒（ADR-0160）", () => {
     expect(ttlSecondsFromDays("99999")).toBe(TTL_CAP_DAYS * 86_400);
   });
 
-  it("storeOptions 一律帶每收件人上限；TTL 依 env", () => {
-    expect(storeOptions(undefined)).toEqual({ maxPerRecipient: 500 });
-    expect(storeOptions("90")).toEqual({ maxPerRecipient: 500, maxTtlSeconds: 90 * 86_400 });
+  it("storeOptions 一律帶每收件人上限與每作者可尋址總量；TTL 依 env", () => {
+    const base = {
+      maxPerRecipient: 500,
+      addressableBytesPerAuthor: STRICT_ADDRESSABLE_BYTES_PER_AUTHOR,
+    };
+    expect(storeOptions(undefined)).toEqual(base);
+    expect(storeOptions("90")).toEqual({ ...base, maxTtlSeconds: 90 * 86_400 });
   });
 });
 
@@ -251,5 +255,41 @@ describe("已知租戶名單（ADR-0366 §裁示）", () => {
     for (const known of [true, false]) {
       expect(storeOptions(undefined, "strict", known).addressablePerAuthor).toBeUndefined();
     }
+  });
+});
+
+describe("可尋址的兩道容量閘（ADR-0366 §容量二）", () => {
+  it("車道的單顆上限縮小；嚴格平面維持 256KB（那是雲端快照的尺寸）", () => {
+    expect(storeOptions(undefined, "app", true).addressableMaxBytes).toBe(APP_ADDRESSABLE_MAX_BYTES);
+    expect(storeOptions(undefined, "app", false).addressableMaxBytes).toBe(
+      APP_ADDRESSABLE_MAX_BYTES,
+    );
+    // 嚴格平面不設＝沿用 message-store 的 256KB，ADR-0071 的快照照舊放得下
+    expect(storeOptions(undefined, "strict").addressableMaxBytes).toBeUndefined();
+  });
+
+  it("🔴 三種情境都有每作者總量上限——沒有它，位址配額實際上是無界的", () => {
+    expect(storeOptions(undefined, "strict").addressableBytesPerAuthor).toBe(
+      STRICT_ADDRESSABLE_BYTES_PER_AUTHOR,
+    );
+    expect(storeOptions(undefined, "app", true).addressableBytesPerAuthor).toBe(
+      APP_ADDRESSABLE_BYTES_PER_AUTHOR,
+    );
+    expect(storeOptions(undefined, "app", false).addressableBytesPerAuthor).toBe(
+      PUBLIC_LANE_ADDRESSABLE_BYTES_PER_AUTHOR,
+    );
+  });
+
+  it("總量預算必須容得下該情境「位址數 × 單顆上限」的一個 kind，否則計數配額形同虛設", () => {
+    // 若預算比「一個 kind 塞滿」還小，玩家會在第一個 kind 就撞牆，而錯誤訊息會指向
+    // 總量——那是兩種完全不同的診斷。
+    expect(APP_ADDRESSABLE_BYTES_PER_AUTHOR).toBeGreaterThanOrEqual(
+      APP_ADDRESSABLE_PER_AUTHOR * APP_ADDRESSABLE_MAX_BYTES,
+    );
+    expect(PUBLIC_LANE_ADDRESSABLE_BYTES_PER_AUTHOR).toBeGreaterThanOrEqual(
+      PUBLIC_LANE_ADDRESSABLE_PER_AUTHOR * APP_ADDRESSABLE_MAX_BYTES,
+    );
+    // 嚴格平面：ADR-0071 的 5 台裝置 × 256KB 必須放得下
+    expect(STRICT_ADDRESSABLE_BYTES_PER_AUTHOR).toBeGreaterThan(5 * 262_144);
   });
 });

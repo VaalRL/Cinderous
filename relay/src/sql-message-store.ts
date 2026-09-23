@@ -125,6 +125,9 @@ export class SqlMessageStore implements OfflineStore {
       )`,
     );
     this.sql(`CREATE INDEX IF NOT EXISTS idx_addressable_expiration ON addressable(expiration)`);
+    // 每作者總量查詢用（ADR-0366 §容量二）：主鍵是 (kind, pubkey, d)，前綴是 kind，
+    // 所以 `WHERE pubkey = ?` 走不到主鍵 ⇒ 沒有這個索引就是每次寫入掃全表。
+    this.sql(`CREATE INDEX IF NOT EXISTS idx_addressable_pubkey ON addressable(pubkey)`);
     // ADR-0065 遷移：修正前寫入的無到期列（NULL）補上有界壽命，讓 prune 能收走。
     this.sql(
       `UPDATE offline_msgs SET expiration = created_at + ? WHERE expiration IS NULL`,
@@ -196,10 +199,22 @@ export class SqlMessageStore implements OfflineStore {
       return true;
     }
     const json = JSON.stringify(event);
-    if (json.length > ADDRESSABLE_MAX_BYTES) return false;
+    if (json.length > (this.opts.addressableMaxBytes ?? ADDRESSABLE_MAX_BYTES)) return false;
     if (!existing[0]) {
       const count = this.sql(`SELECT COUNT(*) AS n FROM addressable WHERE kind = ? AND pubkey = ?`, event.kind, event.pubkey);
       if (((count[0]?.n as number) ?? 0) >= (this.opts.addressablePerAuthor ?? ADDRESSABLE_MAX_PER_AUTHOR)) return false;
+    }
+    const budget = this.opts.addressableBytesPerAuthor;
+    if (budget !== undefined) {
+      // 取代既有位址算**差額**：把要被取代的那一列先排除掉（行為與記憶體版逐字對齊）。
+      const used = this.sql(
+        `SELECT COALESCE(SUM(LENGTH(json)), 0) AS n FROM addressable
+         WHERE pubkey = ? AND NOT (kind = ? AND d = ?)`,
+        event.pubkey,
+        event.kind,
+        d,
+      );
+      if (((used[0]?.n as number) ?? 0) + json.length > budget) return false;
     }
     const eff = effectiveExpiration(event, nowSec, this.opts.addressableTtlSeconds ?? ADDRESSABLE_TTL_SECONDS);
     if (eff <= nowSec) return false;

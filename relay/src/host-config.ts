@@ -227,6 +227,38 @@ export const APP_ADDRESSABLE_PER_AUTHOR = 64;
 export const PUBLIC_LANE_ADDRESSABLE_PER_AUTHOR = 16;
 
 /**
+ * 車道上單顆可尋址事件的位元組上限（ADR-0366 §容量二）。
+ *
+ * 預設的 256KB 是為 ADR-0071 的**加密雲端快照**訂的；車道上的東西小得多
+ * （《元素使》一份牌組約 2KB、世界快照數十 KB）。而「單顆上限 × 每連線訊息上限」
+ * 就是**一條連線每分鐘能塞進多少位元組**——256KB × 240 ≈ 60MB/分，換成 32KB
+ * 立刻降為 1/8。這是目前最便宜、最有效的一道。
+ *
+ * ⚠ 車道日後若真要放大型快照，改這個數字之前要先重算上面那個乘積。
+ */
+export const APP_ADDRESSABLE_MAX_BYTES = 32 * 1024;
+
+/**
+ * **每個作者**的可尋址總位元組上限（跨所有 kind；ADR-0366 §容量二）。
+ *
+ * 🔴 為什麼兩個平面都要有：位址配額的計數範圍是 (pubkey, **kind**)，而 kind 區間有一萬個
+ * 且由發送方自選 ⇒ 沒有這一條，「每人每 kind N 個」實際上是「每人 N 萬個」，
+ * 單一作者的可尋址儲存是**無界**的。嚴格平面同樣如此（NIP-42 擋不住——金鑰不用錢）。
+ *
+ * 數字的根據：
+ * - 嚴格平面現有最大用途是 ADR-0071 的雲端快照，5 台裝置 × 256KB ＝ 1.25MB ⇒ 8MB 非常寬鬆。
+ * - 車道（已知租戶）64 × 32KB ＝ 2MB／kind ⇒ 8MB 容得下牌組＋多個 epoch 的世界快照。
+ * - 公用車道 16 × 32KB ＝ 512KB／kind ⇒ 2MB 對一般可尋址用途足夠。
+ *
+ * ⚠ **它擋不住換金鑰的人**（pubkey 不用錢，鑄一把是微秒級的事）。它擋的是「單一身分
+ * 無限累積」；速率那一側由每連線訊息上限 × 單顆上限決定。要讓**總量**真的有界，
+ * 還需要一道「整顆 DO 的可尋址容量天花板＋淘汰」——尚未實作，見 ADR-0366 §容量二。
+ */
+export const STRICT_ADDRESSABLE_BYTES_PER_AUTHOR = 8 * 1024 * 1024;
+export const APP_ADDRESSABLE_BYTES_PER_AUTHOR = 8 * 1024 * 1024;
+export const PUBLIC_LANE_ADDRESSABLE_BYTES_PER_AUTHOR = 2 * 1024 * 1024;
+
+/**
  * 站方的已知租戶名單（`APP_LANES`，逗號分隔；ADR-0366 §裁示）。
  *
  * 🔴 **它不是白名單**：不在名單上的車道照常服務——錨點同時是公用 relay。
@@ -261,9 +293,18 @@ export function storeOptions(
 ): MessageStoreOptions {
   const ttl = ttlSecondsFromDays(maxTtlDaysRaw);
   const addressable = knownLane ? APP_ADDRESSABLE_PER_AUTHOR : PUBLIC_LANE_ADDRESSABLE_PER_AUTHOR;
+  const bytesPerAuthor =
+    profile !== "app"
+      ? STRICT_ADDRESSABLE_BYTES_PER_AUTHOR
+      : knownLane
+        ? APP_ADDRESSABLE_BYTES_PER_AUTHOR
+        : PUBLIC_LANE_ADDRESSABLE_BYTES_PER_AUTHOR;
   return {
     maxPerRecipient: MAX_PER_RECIPIENT,
+    addressableBytesPerAuthor: bytesPerAuthor,
     ...(ttl !== undefined ? { maxTtlSeconds: ttl } : {}),
-    ...(profile === "app" ? { addressablePerAuthor: addressable } : {}),
+    ...(profile === "app"
+      ? { addressablePerAuthor: addressable, addressableMaxBytes: APP_ADDRESSABLE_MAX_BYTES }
+      : {}),
   };
 }
