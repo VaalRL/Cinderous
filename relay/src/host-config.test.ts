@@ -1,16 +1,6 @@
 import { TIMESTAMP_JITTER_SECONDS } from "@cinderous/core";
 import { describe, expect, it } from "vitest";
-import {
-  ABUSE_GUARD,
-  acceptFileEvents,
-  eventsPerMinuteFrom,
-  firstHost,
-  MAX_EVENTS_PER_MINUTE,
-  MAX_PAST_SKEW_SEC,
-  storeOptions,
-  ttlSecondsFromDays,
-  TTL_CAP_DAYS,
-} from "./host-config.js";
+import { ABUSE_GUARD, MAX_EVENTS_PER_MINUTE, MAX_PAST_SKEW_SEC, TTL_CAP_DAYS, acceptFileEvents, eventsPerMinuteFrom, firstHost, guardFor, storeOptions, ttlSecondsFromDays } from "./host-config.js";
 
 // 宿主組裝設定（ADR-0235 H1）。H1 的教訓是「組裝層沒人測」——防護在 core 裡寫對了也測了，
 // 但 worker 從未把參數傳進去。這裡把常數與衍生邏輯的**不變量**釘死，兩座宿主不可能各走各的。
@@ -92,5 +82,34 @@ describe("host-config：主機正規化（ADR-0235 H2）", () => {
     expect(firstHost(undefined)).toBeUndefined();
     expect(firstHost("")).toBeUndefined();
     expect(firstHost("   ")).toBeUndefined();
+  });
+});
+
+describe("車道政策（ADR-0366 §決策 5）", () => {
+  it("嚴格＝今天的行為：要求 AUTH、不放寬訂閱", () => {
+    const strict = guardFor("strict") as Record<string, unknown>;
+    expect(strict.requireAuth).toBe(true);
+    expect(strict.publicLane).toBeUndefined();
+  });
+
+  it("車道＝放寬訂閱、不要求 AUTH", () => {
+    const app = guardFor("app") as Record<string, unknown>;
+    expect(app.publicLane).toBe(true);
+    expect(app.requireAuth).toBe(false);
+  });
+
+  it("🔴 兩份 profile **只差在這兩件事**——濫用防護一個數字都不准放寬", () => {
+    // 這條不變量是 ADR-0366 §決策 5 的全部：放寬的只有「訂閱形狀」與「認證」。
+    // 若哪天有人順手把車道的 maxEventsPerMinute 調高、或把事件大小上限放寬，
+    // 這支測試會變紅——那正是它存在的理由。
+    const strip = (o: Record<string, unknown>) => {
+      const { requireAuth: _a, publicLane: _b, ...rest } = o;
+      return rest;
+    };
+    expect(strip(guardFor("app") as Record<string, unknown>)).toEqual(
+      strip(guardFor("strict") as Record<string, unknown>),
+    );
+    // 而且那份共同部分就是 ABUSE_GUARD 本身（兩座宿主的單一真實來源）。
+    expect(strip(guardFor("app") as Record<string, unknown>)).toEqual({ ...ABUSE_GUARD });
   });
 });

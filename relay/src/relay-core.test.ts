@@ -937,3 +937,124 @@ describe("RelayCore — Gift Wrap 洪水須以認證身分限速（ADR-0235 H1 �
     expect(core.handle("c1", EVENT(b))[0]?.message[3]).toContain("rate-limited");
   });
 });
+
+describe("ADR-0366 §決策 5：第三方車道的三道閘", () => {
+  const authed = (opts: Record<string, unknown>) => {
+    const sk = generateSecretKey();
+    const pk = getPublicKey(sk);
+    const core = new RelayCore({ requireAuth: true, authChallenge: () => "ch", ...opts });
+    core.connect("c");
+    core.handle("c", JSON.stringify(["AUTH", buildAuthEvent("ch", "wss://relay.example", sk)]));
+    return { core, pk, sk };
+  };
+  const closedReason = (out: { message: unknown[] }[]) =>
+    out.find((o) => o.message[0] === "CLOSED")?.message[2];
+
+  describe("閘一：scoped() 放行標籤 filter（只在車道）", () => {
+    it("🔴 大廳／世界／牌組的 filter 在**嚴格**平面仍然被擋", () => {
+      const { core } = authed({});
+      // 這三個正是下游實際送出的形狀（NAGD 大廳、世界動作、元素使牌組瀏覽）。
+      for (const f of [
+        { kinds: [20078], "#t": ["nagd"], "#g": ["chess"] },
+        { kinds: [1078], "#w": ["world-1"] },
+        { kinds: [31081], "#d": ["openetg-arena-deck"] },
+      ]) {
+        expect(closedReason(core.handle("c", REQ("s", f)))).toContain("restricted");
+      }
+    });
+
+    it("同樣三個 filter 在車道上放行", () => {
+      const { core } = authed({ publicLane: true });
+      for (const f of [
+        { kinds: [20078], "#t": ["nagd"], "#g": ["chess"] },
+        { kinds: [1078], "#w": ["world-1"] },
+        { kinds: [31081], "#d": ["openetg-arena-deck"] },
+      ]) {
+        expect(core.handle("c", REQ("s", f))).toContainEqual({ to: "c", message: ["EOSE", "s"] });
+      }
+    });
+
+    it("🔴 車道**仍然**擋掉裸 filter——消防水管換條車道還是消防水管", () => {
+      const { core } = authed({ publicLane: true });
+      expect(closedReason(core.handle("c", REQ("s", { kinds: [20000] })))).toContain("restricted");
+      expect(closedReason(core.handle("c", REQ("s2", {})))).toContain("restricted");
+    });
+
+    it("空的標籤陣列不算具名（匹配不到任何東西，放行只有成本沒有收穫）", () => {
+      const { core } = authed({ publicLane: true });
+      expect(closedReason(core.handle("c", REQ("s", { kinds: [1078], "#t": [] })))).toContain("restricted");
+    });
+
+    it("🔴 `#p` 仍然只能是自己——車道不放寬這一條", () => {
+      const { core } = authed({ publicLane: true });
+      const other = getPublicKey(generateSecretKey());
+      // 即使同時帶了別的標籤，`#p` 指向別人依然被擋（否則等於能讀他人收件匣的元資料）。
+      const out = core.handle("c", REQ("s", { kinds: [20078], "#t": ["nagd"], "#p": [other] }));
+      expect(closedReason(out)).toContain("restricted");
+    });
+
+    it("被拒時說得出這條車道接受什麼（ADR-0123：沉默的空回應會讓人跑去別處找 bug）", () => {
+      expect(closedReason(authed({ publicLane: true }).core.handle("c", REQ("s", {})))).toContain("標籤");
+      expect(closedReason(authed({}).core.handle("c", REQ("s", {})))).not.toContain("標籤");
+    });
+  });
+
+  describe("閘二：可尋址的「只回作者本人」收窄到 SNAPSHOT_KIND", () => {
+    const addressable = (kind: number, sk: ReturnType<typeof generateSecretKey>) =>
+      finalizeEvent(
+        { kind, created_at: Math.floor(Date.now() / 1000), tags: [["d", "x"]], content: "內容" },
+        sk,
+      );
+
+    it("🔴 kind 30078（快照）仍然只回作者本人——ADR-0071 不受影響", () => {
+      const alice = authed({});
+      const bob = authed({});
+      // 兩個 core 是各自獨立的，改用同一個 core 的兩條連線才測得到扇出閘門。
+      const core = new RelayCore({ requireAuth: true, authChallenge: () => "ch" });
+      const aSk = generateSecretKey();
+      core.connect("alice");
+      core.handle("alice", JSON.stringify(["AUTH", buildAuthEvent("ch", "wss://relay.example", aSk)]));
+      core.connect("bob");
+      core.handle("bob", JSON.stringify(["AUTH", buildAuthEvent("ch", "wss://relay.example", generateSecretKey())]));
+      core.handle("bob", REQ("watch", { kinds: [30078], authors: [getPublicKey(aSk)] }));
+
+      const out = core.handle("alice", EVENT(addressable(30078, aSk)));
+      expect(out.some((o) => o.to === "bob")).toBe(false);
+      expect(alice.pk).not.toBe(bob.pk); // 只是確保 helper 真的產生不同身分
+    });
+
+    it("🔴 其他可尋址 kind（第三方公開資料）**現在讀得到**——這正是先前三重阻擋的第二重", () => {
+      const core = new RelayCore({ requireAuth: true, authChallenge: () => "ch" });
+      const aSk = generateSecretKey();
+      core.connect("alice");
+      core.handle("alice", JSON.stringify(["AUTH", buildAuthEvent("ch", "wss://relay.example", aSk)]));
+      core.connect("bob");
+      core.handle("bob", JSON.stringify(["AUTH", buildAuthEvent("ch", "wss://relay.example", generateSecretKey())]));
+      core.handle("bob", REQ("watch", { kinds: [31081], authors: [getPublicKey(aSk)] }));
+
+      const deck = addressable(31081, aSk);
+      expect(core.handle("alice", EVENT(deck))).toContainEqual({
+        to: "bob",
+        message: ["EVENT", "watch", deck],
+      });
+    });
+
+    it("歷史回放同樣只閘快照，不閘其他可尋址 kind", () => {
+      const store = new MessageStore();
+      const core = new RelayCore({ store, requireAuth: true, authChallenge: () => "ch" });
+      const aSk = generateSecretKey();
+      core.connect("alice");
+      core.handle("alice", JSON.stringify(["AUTH", buildAuthEvent("ch", "wss://relay.example", aSk)]));
+      core.handle("alice", EVENT(addressable(30078, aSk)));
+      core.handle("alice", EVENT(addressable(31081, aSk)));
+
+      core.connect("bob");
+      core.handle("bob", JSON.stringify(["AUTH", buildAuthEvent("ch", "wss://relay.example", generateSecretKey())]));
+      const kinds = core
+        .handle("bob", REQ("s", { kinds: [30078, 31081], authors: [getPublicKey(aSk)] }))
+        .filter((o) => o.message[0] === "EVENT")
+        .map((o) => (o.message[2] as NostrEvent).kind);
+      expect(kinds).toEqual([31081]);
+    });
+  });
+});

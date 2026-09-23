@@ -45,7 +45,7 @@ const MAX_P_TAGS = 16;
 import {
   FILE_EVENT_MAX_BYTES,
   FILE_WRAP_KIND,
-  isAddressableKind,
+  isAuthorOnlyKind,
   isReplaceableOrAddressable,
   recipientsOf,
   type OfflineStore,
@@ -166,6 +166,14 @@ export interface RelayCoreOptions {
    * 企業模式維持 allowlist、不開此項（ADR-0044）。
    */
   requireAuth?: boolean;
+  /**
+   * 第三方應用車道（ADR-0366）：放寬 `scoped()`，讓「帶任一標籤 filter」也算具名
+   * （大廳、世界、牌組瀏覽都是這個形狀）。**未設＝嚴格**，Cinderous 訊息平面不受影響。
+   *
+   * 🔴 這個旗標**只有在該連線已被路由到獨立 DO 時**才可以開——它不是權限開關，
+   * 是「這顆 DO 裡沒有 Cinderous 資料」這個事實的下游推論。見 `shard.ts` 的 `routeForPath`。
+   */
+  publicLane?: boolean;
   /** 產生 AUTH 挑戰字串（測試可注入以求確定性）；預設 `crypto.randomUUID()`。 */
   authChallenge?: () => string;
   /**
@@ -339,7 +347,13 @@ export class RelayCore {
           return [
             {
               to: connId,
-              message: ["CLOSED", msg.subId, "restricted: 訂閱必須指定 #p（自己）或 authors（ADR-0123）"],
+              message: [
+                "CLOSED",
+                msg.subId,
+                this.opts.publicLane
+                  ? "restricted: 訂閱必須指定標籤、#p（自己）或 authors（ADR-0366）"
+                  : "restricted: 訂閱必須指定 #p（自己）或 authors（ADR-0123）",
+              ],
             },
           ];
         }
@@ -431,6 +445,16 @@ export class RelayCore {
         if (!pValues.every((v) => v === self)) return false; // 只能查自己的收件匣（ADR-0057）
         continue;
       }
+      // 第三方車道（ADR-0366 §決策 5）：**任一個**非 `#p` 的標籤 filter 也算具名。
+      //
+      // 為什麼這對車道是安全的、對訊息平面不是：這兩者是**物理上不同的 DO**
+      //（`routeForPath` 在選 DO 之前就分流了），車道那顆 DO 的儲存裡從頭到尾
+      // 沒有任何一顆 Cinderous 事件 ⇒ 放寬它讀不到任何本來讀不到的東西。
+      //
+      // ⚠ 仍然擋掉裸的 `{"kinds":[…]}` 與 `{}`——那是 ADR-0123 的消防水管，
+      // 換到哪條車道都還是消防水管（只是被沖的人不同）。`#p` 的「只能是自己」
+      // 也**刻意保留**：遊戲的指名信令本來就只讀自己的收件匣，放寬它零收益。
+      if (this.opts.publicLane && hasTagScope(filter)) continue;
       const authors = filter.authors;
       // 該擋的是 `authors` **不存在**（＝不過濾作者＝全站）。
       //
@@ -469,8 +493,9 @@ export class RelayCore {
       for (const filter of filters) {
         for (const event of this.opts.store.query(filter, nowSec)) {
           if (seen.has(event.id)) continue;
-          // ADR-0071：快照（可尋址密文）只回給作者本人（requireAuth 時）——不論 filter 形狀。
-          if (this.requireAuth && isAddressableKind(event.kind) && event.pubkey !== self) continue;
+          // ADR-0071：快照只回給作者本人（requireAuth 時）——不論 filter 形狀。
+          // ADR-0366 §決策 5：閘門收窄到 `SNAPSHOT_KIND`，不再涵蓋整個可尋址區間。
+          if (this.requireAuth && isAuthorOnlyKind(event.kind) && event.pubkey !== self) continue;
           seen.add(event.id);
           out.push({ to: connId, message: ["EVENT", subId, event] });
         }
@@ -580,8 +605,8 @@ export class RelayCore {
     const candidates = new Set<SubEntry>(this.byKind.get(event.kind));
     for (const entry of this.anyKindSubs) candidates.add(entry);
     for (const entry of candidates) {
-      // ADR-0071：快照（可尋址密文）只回給作者本人——requireAuth 時即時扇出也閘門。
-      if (this.requireAuth && isAddressableKind(event.kind) && this.authState.get(entry.connId)?.pubkey !== event.pubkey) {
+      // ADR-0071：快照只回給作者本人——requireAuth 時即時扇出也閘門（ADR-0366 §決策 5 收窄）。
+      if (this.requireAuth && isAuthorOnlyKind(event.kind) && this.authState.get(entry.connId)?.pubkey !== event.pubkey) {
         continue;
       }
       if (entry.filters.some((f) => matchFilter(f, event))) {
@@ -670,6 +695,23 @@ export class RelayCore {
     }
     this.anyKindSubs.delete(entry);
   }
+}
+
+/**
+ * filter 是否帶了**非 `#p`** 的標籤條件（ADR-0366 §決策 5 的「具名」放寬）。
+ *
+ * 空陣列不算——`{"#t":[]}` 匹配不到任何東西，放行它等於放行裸 filter 的成本
+ * 而沒有任何收穫（同 ADR-0123 對 `authors: []` 的推理，只是方向相反：
+ * 那裡放行是因為新使用者真的會送出它，這裡沒有任何合法客戶端會送 `#t: []`）。
+ */
+function hasTagScope(filter: RelayFilter): boolean {
+  for (const key in filter) {
+    if (key.charCodeAt(0) !== 35 /* '#' */) continue;
+    if (key === "#p") continue;
+    const values = filter[key as `#${string}`];
+    if (values && values.length > 0) return true;
+  }
+  return false;
 }
 
 function buildEntry(connId: string, subId: string, filters: RelayFilter[]): SubEntry {

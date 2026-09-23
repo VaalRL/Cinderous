@@ -74,6 +74,9 @@ class FakeState {
     return [];
   }
 
+  /** key-value storage（ADR-0366 用它記住本實例的車道政策）；與 sql 同樣跨「休眠」保留。 */
+  kv = new Map<string, unknown>();
+
   storage = {
     sql: {
       exec: (query: string, ...bindings: (string | number | null)[]) => ({
@@ -83,6 +86,10 @@ class FakeState {
     getAlarm: async (): Promise<number | null> => this.alarm,
     setAlarm: async (t: number): Promise<void> => {
       this.alarm = t;
+    },
+    get: async <T>(key: string): Promise<T | undefined> => this.kv.get(key) as T | undefined,
+    put: async (key: string, value: unknown): Promise<void> => {
+      this.kv.set(key, value);
     },
   };
 
@@ -106,8 +113,12 @@ beforeAll(() => {
   (globalThis as unknown as { Response: unknown }).Response = class {
     constructor(
       public body: unknown,
-      public init: unknown,
+      public init?: { status?: number },
     ) {}
+    /** 真 Response 有；替身漏了會讓「回幾號」這類斷言永遠拿到 undefined。 */
+    get status(): number {
+      return this.init?.status ?? 200;
+    }
   };
 });
 
@@ -118,10 +129,16 @@ function newRoom(state: FakeState, env: Env = {} as Env): RelayRoom {
   return new RelayRoom(state as unknown as DurableObjectState, env);
 }
 
-/** 模擬一次連線升級：回傳伺服端 socket，其 attachment 內含 connId。 */
-function open(room: RelayRoom, state: FakeState): FakeWs {
+/**
+ * 模擬一次連線升級：回傳伺服端 socket，其 attachment 內含 connId。
+ *
+ * `fetch` 自 ADR-0366 起是 async（要把車道政策寫進 storage 釘住），故此 helper 也是。
+ * `lane` 未指定＝嚴格平面，與路由方對 `/`、`/s/<n>`、`/presence` 的判定一致。
+ */
+async function open(room: RelayRoom, state: FakeState, lane: "strict" | "app" = "strict"): Promise<FakeWs> {
   const before = state.sockets.length;
-  room.fetch(new Request(`https://${HOST}/`));
+  // 政策由**路徑**決定（與 worker 路由同一個 `routeForPath`），故這裡也用路徑。
+  await room.fetch(new Request(`https://${HOST}${lane === "app" ? "/app/testgame" : "/"}`));
   return state.sockets[before]!; // 本次新掛上的伺服端連線
 }
 
@@ -158,36 +175,36 @@ const heartbeat = (sk: SecretKey, createdAt = Math.floor(Date.now() / 1000)): No
 // ── 測試 ────────────────────────────────────────────────────────────────────
 
 describe("RelayRoom — 連線與 NIP-42（真實宿主路徑）", () => {
-  it("升級即發出 AUTH 挑戰，並存進 attachment（休眠可還原）", () => {
+  it("升級即發出 AUTH 挑戰，並存進 attachment（休眠可還原）", async () => {
     const state = new FakeState();
     const room = newRoom(state);
-    const ws = open(room, state);
+    const ws = await open(room, state);
     const msgs = ws.drain() as [string, string][];
     expect(msgs[0]?.[0]).toBe("AUTH");
     expect(typeof (ws.attachment as { connId: string }).connId).toBe("string");
   });
 
-  it("正確 challenge + relay tag → 認證成功", () => {
+  it("正確 challenge + relay tag → 認證成功", async () => {
     const state = new FakeState();
     const room = newRoom(state);
-    const ws = open(room, state);
+    const ws = await open(room, state);
     expect(authenticate(room, ws, generateSecretKey())).toBe(true);
   });
 
-  it("🔴 relay tag 指向別站 → 拒絕（宿主有把 request 主機接進 connect）", () => {
+  it("🔴 relay tag 指向別站 → 拒絕（宿主有把 request 主機接進 connect）", async () => {
     const state = new FakeState();
     const room = newRoom(state);
-    const ws = open(room, state);
+    const ws = await open(room, state);
     // challenge 是對的（模擬攻擊者從真中繼轉來的），但 relay tag 指向 evil。
     expect(authenticate(room, ws, generateSecretKey(), "wss://evil.example")).toBe(false);
   });
 });
 
 describe("RelayRoom — 濫用防護確實接上了（ADR-0235 H1 回歸）", () => {
-  it("未來時戳被拒——證明 maxFutureSkewSec 有經 worker 傳進 core", () => {
+  it("未來時戳被拒——證明 maxFutureSkewSec 有經 worker 傳進 core", async () => {
     const state = new FakeState();
     const room = newRoom(state);
-    const ws = open(room, state);
+    const ws = await open(room, state);
     const sk = generateSecretKey();
     authenticate(room, ws, sk);
     const future = heartbeat(sk, Math.floor(Date.now() / 1000) + 3600);
@@ -196,10 +213,10 @@ describe("RelayRoom — 濫用防護確實接上了（ADR-0235 H1 回歸）", ()
     expect(ok[3]).toContain("時間戳");
   });
 
-  it("重放同一事件被拒——證明 replayWindowSec 有接上（修正前 seenIds 永遠是空的）", () => {
+  it("重放同一事件被拒——證明 replayWindowSec 有接上（修正前 seenIds 永遠是空的）", async () => {
     const state = new FakeState();
     const room = newRoom(state);
-    const ws = open(room, state);
+    const ws = await open(room, state);
     const sk = generateSecretKey();
     authenticate(room, ws, sk);
     const beat = heartbeat(sk);
@@ -210,10 +227,10 @@ describe("RelayRoom — 濫用防護確實接上了（ADR-0235 H1 回歸）", ()
     expect(second[3]).toContain("duplicate");
   });
 
-  it("未認證不得發布（requireAuth 有接上）", () => {
+  it("未認證不得發布（requireAuth 有接上）", async () => {
     const state = new FakeState();
     const room = newRoom(state);
-    const ws = open(room, state);
+    const ws = await open(room, state);
     // 未認證的 EVENT：回應含拒絕 OK ＋ 重發的 AUTH 挑戰，故用型別找出那則 OK。
     const out = send(room, ws, ["EVENT", heartbeat(generateSecretKey())]) as [string, string, boolean, string][];
     const ok = out.find((m) => m[0] === "OK");
@@ -223,12 +240,12 @@ describe("RelayRoom — 濫用防護確實接上了（ADR-0235 H1 回歸）", ()
 });
 
 describe("RelayRoom — 收發與扇出", () => {
-  it("認證後訂閱→他人發布→收到扇出（完整往返）", () => {
+  it("認證後訂閱→他人發布→收到扇出（完整往返）", async () => {
     const state = new FakeState();
     const room = newRoom(state);
 
     const watcherSk = generateSecretKey();
-    const watcher = open(room, state);
+    const watcher = await open(room, state);
     authenticate(room, watcher, watcherSk);
     const req = send(room, watcher, ["REQ", "s1", { kinds: [20000], authors: [getPublicKey(generateSecretKey())] }]);
     expect((req[0] as [string, string])[0]).toBe("EOSE");
@@ -238,7 +255,7 @@ describe("RelayRoom — 收發與扇出", () => {
     const senderPk = getPublicKey(senderSk);
     send(room, watcher, ["REQ", "s2", { kinds: [20000], authors: [senderPk] }]);
 
-    const sender = open(room, state);
+    const sender = await open(room, state);
     authenticate(room, sender, senderSk);
     const beat = heartbeat(senderSk);
     send(room, sender, ["EVENT", beat]);
@@ -248,11 +265,11 @@ describe("RelayRoom — 收發與扇出", () => {
     expect(evented?.[2]?.id).toBe(beat.id);
   });
 
-  it("dispatch 只送給目標連線（tag 路由）", () => {
+  it("dispatch 只送給目標連線（tag 路由）", async () => {
     const state = new FakeState();
     const room = newRoom(state);
-    const a = open(room, state);
-    const b = open(room, state);
+    const a = await open(room, state);
+    const b = await open(room, state);
     a.drain();
     b.drain();
     // 對 a 送訊息，b 不應收到任何東西。
@@ -262,10 +279,10 @@ describe("RelayRoom — 收發與扇出", () => {
 });
 
 describe("RelayRoom — 休眠→喚醒還原（ADR-0059 + ADR-0235 H2）", () => {
-  it("認證狀態跨休眠存活：喚醒後的新 RelayRoom 仍認得已認證連線", () => {
+  it("認證狀態跨休眠存活：喚醒後的新 RelayRoom 仍認得已認證連線", async () => {
     const state = new FakeState();
     const room1 = newRoom(state);
-    const ws = open(room1, state);
+    const ws = await open(room1, state);
     authenticate(room1, ws, generateSecretKey());
 
     // 休眠：記憶體中的 RelayRoom 消失，但 storage 與 socket attachment 存活。
@@ -276,10 +293,10 @@ describe("RelayRoom — 休眠→喚醒還原（ADR-0059 + ADR-0235 H2）", () =
     expect(JSON.stringify(out)).not.toContain("auth-required");
   });
 
-  it("🔴 relayHost 跨休眠存活：喚醒後才認證，仍會驗 relay tag", () => {
+  it("🔴 relayHost 跨休眠存活：喚醒後才認證，仍會驗 relay tag", async () => {
     const state = new FakeState();
     const room1 = newRoom(state);
-    const ws = open(room1, state); // 連線建立→challenge 與 relayHost 寫進 attachment
+    const ws = await open(room1, state); // 連線建立→challenge 與 relayHost 寫進 attachment
     const challenge = challengeOf(ws);
 
     // 休眠前尚未認證。喚醒後才送 AUTH——relayHost 必須從 attachment 還原，否則檢查靜默失效。
@@ -290,18 +307,18 @@ describe("RelayRoom — 休眠→喚醒還原（ADR-0059 + ADR-0235 H2）", () =
     expect(ok?.[2]).toBe(false); // relayHost 有還原 → evil 被擋
 
     // 對照：同一喚醒後的 room，正確 relay tag 仍可認證成功。
-    const ws2 = open(room2, state);
+    const ws2 = await open(room2, state);
     expect(authenticate(room2, ws2, generateSecretKey())).toBe(true);
   });
 
-  it("離線留言跨休眠存活（DO SQLite）：喚醒後仍查得到", () => {
+  it("離線留言跨休眠存活（DO SQLite）：喚醒後仍查得到", async () => {
     const state = new FakeState();
     const room1 = newRoom(state);
 
     const recipientSk = generateSecretKey();
     const recipientPk = getPublicKey(recipientSk);
     const senderSk = generateSecretKey();
-    const sender = open(room1, state);
+    const sender = await open(room1, state);
     authenticate(room1, sender, senderSk);
     const dm = finalizeEvent(
       { kind: 1059, created_at: Math.floor(Date.now() / 1000), tags: [["p", recipientPk]], content: "x" },
@@ -311,7 +328,7 @@ describe("RelayRoom — 休眠→喚醒還原（ADR-0059 + ADR-0235 H2）", () =
 
     // 休眠 → 收件人上線拉取。
     const room2 = newRoom(state);
-    const reader = open(room2, state);
+    const reader = await open(room2, state);
     authenticate(room2, reader, recipientSk);
     const out = send(room2, reader, ["REQ", "inbox", { kinds: [1059], "#p": [recipientPk] }]) as [string, string, NostrEvent][];
     const evented = out.find((m) => m[0] === "EVENT");
@@ -369,6 +386,99 @@ describe("NIP-11 端點（ADR-0260 worker fetch）", () => {
   });
 });
 
+
+describe("第三方車道路由（ADR-0366 worker fetch）", () => {
+  /** 回傳 [DO 名, DO 收到的路徑, HTTP 狀態]。 */
+  const route = async (path: string): Promise<[string, string, number]> => {
+    let doName = "";
+    let seenPath = "";
+    const env = {
+      RELAY_ROOM: {
+        idFromName: (n: string) => {
+          doName = n;
+          return {} as never;
+        },
+        get: () => ({
+          fetch: (req: Request) => {
+            seenPath = new URL(req.url).pathname;
+            return new Response(null, { status: 101 });
+          },
+        }),
+      },
+    } as unknown as Env;
+    const res = await worker.fetch(
+      new Request(`https://${HOST}${path}`, { headers: { Upgrade: "websocket" } }),
+      env,
+    );
+    return [doName, seenPath, res.status];
+  };
+
+  it("/app/<laneId> → 車道 DO", async () => {
+    const [doName, , status] = await route("/app/elementalist");
+    expect(doName).toMatch(/^app-[0-7]$/);
+    expect(status).toBe(101);
+  });
+
+  it("🔴 request 原封不動轉給 DO——政策由 DO 自己對同一路徑算，兩邊不可能不一致", async () => {
+    for (const p of ["/", "/s/a", "/presence", "/app/elementalist"]) {
+      const [, seenPath] = await route(p);
+      expect(seenPath, p).toBe(p);
+    }
+  });
+
+  it("🔴 認不得的路徑回 404，且**根本不碰 DO**", async () => {
+    for (const p of ["/s/zz", "/s/ab", "/nope", "/app"]) {
+      const [doName, , status] = await route(p);
+      expect(status, p).toBe(404);
+      expect(doName, p).toBe(""); // idFromName 沒被呼叫
+    }
+  });
+});
+
+describe("RelayRoom — 車道政策釘住（ADR-0366）", () => {
+  it("車道連線放行標籤訂閱；嚴格平面同一個 filter 被擋", async () => {
+    const laneState = new FakeState();
+    const laneRoom = newRoom(laneState);
+    const lane = await open(laneRoom, laneState, "app");
+    // 車道不要求 AUTH，可直接訂閱（ADR-0366 §決策 5 的 requireAuth: false）
+    expect(send(laneRoom, lane, ["REQ", "s", { kinds: [1078], "#w": ["world-1"] }])).toContainEqual([
+      "EOSE",
+      "s",
+    ]);
+
+    const strictState = new FakeState();
+    const strictRoom = newRoom(strictState);
+    const strict = await open(strictRoom, strictState);
+    const out = send(strictRoom, strict, ["REQ", "s", { kinds: [1078], "#w": ["world-1"] }]);
+    // 嚴格平面先要 AUTH；就算認證了也會因為沒有 #p/authors 而被擋（見 relay-core 測試）。
+    expect(JSON.stringify(out)).toContain("auth-required");
+  });
+
+  it("🔴 政策跨休眠存活：喚醒後的新 RelayRoom 仍是車道", async () => {
+    const state = new FakeState();
+    await open(newRoom(state), state, "app");
+    // 休眠＝記憶體清空、storage 保留 ⇒ 新實例從 storage 還原政策
+    const woken = newRoom(state);
+    const ws = await open(woken, state, "app");
+    expect(send(woken, ws, ["REQ", "s", { kinds: [1078], "#w": ["w"] }])).toContainEqual(["EOSE", "s"]);
+  });
+
+  it("🔴 釘住之後收到不同政策 → 409，不切換（同一份儲存不可被兩套規則讀寫）", async () => {
+    const state = new FakeState();
+    const room = newRoom(state);
+    await open(room, state, "app");
+    const res = await room.fetch(new Request(`https://${HOST}/`)); // 同一顆 DO 收到嚴格平面的路徑
+    expect(res.status).toBe(409);
+  });
+
+  it("認不得的路徑漏進 DO 時一律當嚴格（fail-closed 的底線；正常情況 worker 已先 404）", async () => {
+    const state = new FakeState();
+    const room = newRoom(state);
+    await room.fetch(new Request(`https://${HOST}/s/zz`));
+    expect(state.kv.get("cinder:lane-profile")).toBe("strict");
+  });
+});
+
 describe("分片路由（ADR-0241 worker fetch）", () => {
   const routeOf = async (path: string): Promise<string> => {
     let routed = "";
@@ -397,11 +507,11 @@ describe("分片路由（ADR-0241 worker fetch）", () => {
 });
 
 describe("分片血條隔離（ADR-0241）", () => {
-  it("一片收畸形訊息（不拋）不影響另一片：他片的離線留言照樣查得到", () => {
+  it("一片收畸形訊息（不拋）不影響另一片：他片的離線留言照樣查得到", async () => {
     // shard-A：塞畸形訊息（模擬攻擊/崩潰路徑，C1 已保證不拋）——完全獨立的 state/DO。
     const stateA = new FakeState();
     const roomA = newRoom(stateA);
-    const wsA = open(roomA, stateA);
+    const wsA = await open(roomA, stateA);
     wsA.drain();
     expect(() => roomA.webSocketMessage(wsA as unknown as WebSocket, "not json{{{")).not.toThrow();
 
@@ -411,7 +521,7 @@ describe("分片血條隔離（ADR-0241）", () => {
     const recipientSk = generateSecretKey();
     const recipientPk = getPublicKey(recipientSk);
     const senderSk = generateSecretKey();
-    const sender = open(roomB, stateB);
+    const sender = await open(roomB, stateB);
     authenticate(roomB, sender, senderSk);
     const dm = finalizeEvent(
       { kind: 1059, created_at: Math.floor(Date.now() / 1000), tags: [["p", recipientPk]], content: "x" },
@@ -420,7 +530,7 @@ describe("分片血條隔離（ADR-0241）", () => {
     send(roomB, sender, ["EVENT", dm]);
 
     // shard-A 的故障不影響 shard-B：B 的收件人照常拉到留言（血條＝一崩 1/N）。
-    const reader = open(roomB, stateB);
+    const reader = await open(roomB, stateB);
     authenticate(roomB, reader, recipientSk);
     const out = send(roomB, reader, ["REQ", "inbox", { kinds: [1059], "#p": [recipientPk] }]) as [
       string,
@@ -432,10 +542,10 @@ describe("分片血條隔離（ADR-0241）", () => {
 });
 
 describe("RelayRoom — 崩潰韌性（ADR-0235 C1 宿主層）", () => {
-  it("畸形訊息不會讓房間拋例外（單一惡意訊息不打掛全域 DO）", () => {
+  it("畸形訊息不會讓房間拋例外（單一惡意訊息不打掛全域 DO）", async () => {
     const state = new FakeState();
     const room = newRoom(state);
-    const ws = open(room, state);
+    const ws = await open(room, state);
     ws.drain();
     expect(() => room.webSocketMessage(ws as unknown as WebSocket, "not json{{{")).not.toThrow();
     // tags 為物件的畸形事件（能通過驗簽卻讓 tags.find 拋）——解析層擋下，回 NOTICE。
@@ -447,10 +557,10 @@ describe("RelayRoom — 崩潰韌性（ADR-0235 C1 宿主層）", () => {
     ).not.toThrow();
   });
 
-  it("webSocketClose 清掉連線且不拋", () => {
+  it("webSocketClose 清掉連線且不拋", async () => {
     const state = new FakeState();
     const room = newRoom(state);
-    const ws = open(room, state);
+    const ws = await open(room, state);
     expect(() => room.webSocketClose(ws as unknown as WebSocket)).not.toThrow();
     expect(ws.closed).toBe(true);
   });

@@ -43,6 +43,26 @@ export function queryLimit(requested?: number): number {
 
 /** 檔案塊外層 kind（ADR-0162）；**必須鏡射 core `KIND.FILE_WRAP`**（relay 不依賴 core runtime）。 */
 export const FILE_WRAP_KIND = 1060;
+
+/**
+ * 加密雲端快照 kind（ADR-0071）；**必須鏡射 core `SNAPSHOT_KIND`**（同上，relay 不依賴 core runtime）。
+ *
+ * 為什麼這個常數存在：ADR-0071 的「只回給作者本人」原本是對**整個**可尋址區間
+ * （30000–39999）生效的，而那個區間裡只有這一個 kind 是「加密給自己的私人快照」。
+ * 其餘可尋址事件（第三方應用的公開資料）天生就是要給別人讀的，閘在那裡等於它們
+ * 永遠只有作者看得到。⇒ 閘門收窄到這一個 kind（ADR-0366 §決策 5）。
+ */
+export const SNAPSHOT_KIND = 30078;
+
+/**
+ * 是否為「只有作者本人讀得到」的私人可尋址事件（ADR-0071 ／ ADR-0366 §決策 5）。
+ *
+ * ⚠ **不要**改回 {@link isAddressableKind}——那是 NIP-33 的**儲存語意**（取代規則），
+ * 與「誰讀得到」是兩件事。混用會讓每一個新的可尋址 kind 都默默變成作者專屬。
+ */
+export function isAuthorOnlyKind(kind: number): boolean {
+  return kind === SNAPSHOT_KIND;
+}
 /** 檔案塊每收件人預設配額（≈500MB 密文；企業站自己的儲存自己決策）。 */
 export const DEFAULT_FILE_PER_RECIPIENT = 4000;
 /** 單顆檔案塊事件的大小 sanity 上限（48KB 明文 ×2 膨脹之上留餘裕）。 */

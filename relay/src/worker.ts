@@ -1,9 +1,9 @@
 import { verifyHttpAuth } from "@cinderous/core";
-import { ABUSE_GUARD, acceptFileEvents, firstHost, storeOptions } from "./host-config.js";
+import { acceptFileEvents, firstHost, guardFor, type RelayProfile, storeOptions } from "./host-config.js";
 import { buildRelayInfo, NIP11_HEADERS, wantsRelayInfo } from "./nip11.js";
 import { RELAY_WORKER_VERSION } from "./version.js";
 import { RelayCore, type ConnSnapshot, type Outbound } from "./relay-core.js";
-import { shardNameForPath } from "./shard.js";
+import { routeForPath } from "./shard.js";
 import { SqlMessageStore } from "./sql-message-store.js";
 
 export interface Env {
@@ -205,10 +205,18 @@ export default {
       if (env.ASSETS) return env.ASSETS.fetch(request);
       return new Response("Cinderous relay", { status: 200 });
     }
-    // 分片路由（ADR-0241）：依 URL 路徑選 DO——`/s/<prefix>` 訊息片、`/presence` 獨立層、
-    // 其他（含 `/`）回退舊全域 DO（遷移期＋最低版本閘前的舊客戶端）。每個實例都是獨立 RelayRoom，
-    // 血條＝一片崩只影響其 1/16 使用者。
-    const stub = env.RELAY_ROOM.get(env.RELAY_ROOM.idFromName(shardNameForPath(url.pathname)));
+    // 路由（ADR-0241 分片 ＋ ADR-0366 第三方車道）：依 URL 路徑同時決定 **DO 與政策**。
+    // 每個實例都是獨立 RelayRoom，血條＝一片崩只影響那一片。
+    //
+    // 🔴 **認不得的路徑直接拒絕**（ADR-0366 §決策 4）。原本是「其他一律回退舊全域」，
+    // 那讓 `/s/zz` 這種算錯分片的客戶端靜默落進別的平面；而一旦有了寬鬆車道，
+    // 任何 catch-all 都是一條把流量靜默送進錯誤政策的路。兩邊正面列舉、其餘 404。
+    const route = routeForPath(url.pathname);
+    if (!route) return new Response("unknown relay path", { status: 404 });
+    // 原始 request 原封不動轉給 DO——DO 對**同一個路徑**跑**同一個** `routeForPath` 算出政策，
+    // 所以兩邊不可能不一致。刻意不用標頭傳遞：那要 clone request，而「`Upgrade` 標頭在
+    // clone 之後還在不在」是平台細節，賭它不如不賭。
+    const stub = env.RELAY_ROOM.get(env.RELAY_ROOM.idFromName(route.doName));
     return stub.fetch(request);
   },
 };
@@ -218,33 +226,56 @@ export default {
  * duration。休眠會清空記憶體，故每連線的訂閱/認證狀態存在其 WebSocket 的 attachment，
  * 喚醒時從所有存活連線的 attachment 重建 RelayCore。
  */
+/** DO storage 裡記住本實例綁定的政策（ADR-0366）。 */
+const PROFILE_KEY = "cinder:lane-profile";
+
 export class RelayRoom {
   private readonly ctx: DurableObjectState;
-  private readonly core: RelayCore;
+  private readonly env: Env;
+  private core: RelayCore;
   private readonly store: SqlMessageStore;
   /** 本次喚醒是否已從 attachment 重建 RelayCore 狀態。 */
   private hydrated = false;
+  /** 本 DO 實例綁定的政策；由路由方在首次請求時釘住（ADR-0366）。 */
+  private profile: RelayProfile = "strict";
+  /** 政策是否已寫進 storage（釘住後不得再改，見 `fetch`）。 */
+  private profilePinned = false;
 
   constructor(ctx: DurableObjectState, env: Env) {
     this.ctx = ctx;
+    this.env = env;
     // 離線留言持久化於 DO 內建 SQLite（同步、免 D1；ADR-0056）——storage 跨休眠存活。
     const sql = ctx.storage.sql;
     const exec = (query: string, ...bindings: (string | number | null)[]): Record<string, unknown>[] =>
       sql.exec(query, ...bindings).toArray() as Record<string, unknown>[];
     this.store = new SqlMessageStore(exec, storeOptions(env.MAX_TTL_DAYS));
-    // 濫用防護（ADR-0235 H1）由 `host-config` 統一供應——與 `node-relay.ts` 用同一組常數，
-    // 兩座宿主不可能各走各的。NIP-42 AUTH（ADR-0057）＋單一全域房間 DO 的背景見該檔註解。
-    this.core = new RelayCore({
-      store: this.store,
-      requireAuth: true,
-      ...ABUSE_GUARD,
-      ...(acceptFileEvents(env.MAX_FILE_MB) ? { acceptFileEvents: true } : {}),
-    });
-    // C2：排程 NIP-40 過期清理（DO 休眠仍會被 alarm 喚醒執行）。
+    // 先以嚴格政策組起來：休眠喚醒後可能**沒有 fetch**（`webSocketMessage` 直接進來），
+    // 那時還沒讀到 storage，預設必須是**收得最緊**的那一邊。
+    this.core = this.buildCore("strict");
     ctx.blockConcurrencyWhile(async () => {
+      // 還原本實例綁定的政策（ADR-0366）。DO 名與政策是一對一的，所以這裡讀到什麼就是什麼。
+      const stored = await ctx.storage.get<RelayProfile>(PROFILE_KEY);
+      if (stored !== undefined) {
+        this.profile = stored;
+        this.profilePinned = true;
+        if (stored !== "strict") this.core = this.buildCore(stored);
+      }
+      // C2：排程 NIP-40 過期清理（DO 休眠仍會被 alarm 喚醒執行）。
       if ((await ctx.storage.getAlarm()) === null) {
         await ctx.storage.setAlarm(Date.now() + PRUNE_INTERVAL_MS);
       }
+    });
+  }
+
+  /**
+   * 以指定政策組 `RelayCore`。濫用防護由 `host-config` 統一供應（ADR-0235 H1）——
+   * 與 `node-relay.ts` 用同一組常數，兩座宿主不可能各走各的。
+   */
+  private buildCore(profile: RelayProfile): RelayCore {
+    return new RelayCore({
+      store: this.store,
+      ...guardFor(profile),
+      ...(acceptFileEvents(this.env.MAX_FILE_MB) ? { acceptFileEvents: true } : {}),
     });
   }
 
@@ -254,7 +285,21 @@ export class RelayRoom {
     await this.ctx.storage.setAlarm(Date.now() + PRUNE_INTERVAL_MS);
   }
 
-  fetch(request: Request): Response {
+  async fetch(request: Request): Promise<Response> {
+    // 政策由**本次請求的路徑**決定，用的是與 worker 路由同一個 `routeForPath`（SSOT）。
+    // 認不得的路徑在 worker 就被 404 擋掉了；真的漏進來就當嚴格（fail-closed）。
+    const wanted: RelayProfile = routeForPath(new URL(request.url).pathname)?.profile ?? "strict";
+    if (wanted !== this.profile || !this.profilePinned) {
+      // 🔴 一顆 DO 只服務一種政策。釘住之後還收到不同政策的請求，代表路由壞了
+      // （或有人在試）——**拒絕，不要切換**。切換等於讓同一份儲存被兩套規則讀寫過。
+      if (this.profilePinned) return new Response("lane profile mismatch", { status: 409 });
+      if (wanted !== this.profile) {
+        this.profile = wanted;
+        this.core = this.buildCore(wanted);
+      }
+      await this.ctx.storage.put(PROFILE_KEY, wanted);
+      this.profilePinned = true;
+    }
     const pair = new WebSocketPair();
     const client = pair[0];
     const server = pair[1];

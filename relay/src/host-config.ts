@@ -59,6 +59,40 @@ export const ABUSE_GUARD = {
 } as const satisfies Partial<RelayCoreOptions>;
 
 /**
+ * 第三方應用車道的政策（ADR-0366 §決策 5／7）。
+ *
+ * 與嚴格平面共用整組 {@link ABUSE_GUARD}——**放寬的只有訂閱形狀與認證**，
+ * 大小、tag 數、時鐘窗、訂閱數全部原樣。
+ *
+ * 🔴 `requireAuth: false` 的代價要講清楚：`RelayCore` 的速率桶在無 AUTH 時會退回
+ * `event.pubkey`（見 `relay-core.ts` 的註解），而那是發送方自選的 ⇒ **per-pubkey 限速
+ * 在這條車道上幾乎沒有牙**。誠實地說，開著 AUTH 也沒好多少（AUTH 只證明你掌握某把私鑰）。
+ * 真正要擋的手段是綁「比較貴的東西」：IP 為鍵的 CF rate limit（`/turn` 已有先例）
+ * 與 NIP-13 PoW——兩者都列在 ADR-0366 的後續行動，**不在本批**。
+ *
+ * 為什麼不乾脆要求 AUTH：下游其中一個客戶端的訊息 switch 根本不處理 `["AUTH", …]`
+ * （`default: return;`），要求認證等於把它永久鎖在門外。
+ */
+export const APP_LANE_GUARD = {
+  ...ABUSE_GUARD,
+  publicLane: true,
+  requireAuth: false,
+} as const satisfies Partial<RelayCoreOptions>;
+
+/** 路由出來的政策代號（`shard.ts` 的 `RelayRoute.profile`）。 */
+export type RelayProfile = "strict" | "app";
+
+/**
+ * 政策代號 → `RelayCore` 設定片段（ADR-0366）。**兩座宿主的單一真實來源。**
+ *
+ * 這個函式存在的理由與 `ABUSE_GUARD` 相同（見本檔開頭）：政策若由 worker 與 node-relay
+ * 各自拼一份，遲早會漂移成「路由到寬鬆 DO 卻套了嚴格政策」——而那只有在產線才看得出來。
+ */
+export function guardFor(profile: RelayProfile): Partial<RelayCoreOptions> {
+  return profile === "app" ? { ...APP_LANE_GUARD } : { requireAuth: true, ...ABUSE_GUARD };
+}
+
+/**
  * 由 `MAX_TTL_DAYS` 原始字串算出 store 的 `maxTtlSeconds`（ADR-0160）。
  * 未設／壞值／<1 → undefined（＝store 用預設 7 天）；否則 clamp 到 {@link TTL_CAP_DAYS}。
  */
