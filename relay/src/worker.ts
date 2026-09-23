@@ -4,7 +4,7 @@ import { buildRelayInfo, NIP11_HEADERS, wantsRelayInfo } from "./nip11.js";
 import { RELAY_WORKER_VERSION } from "./version.js";
 import { RelayCore, type ConnSnapshot, type Outbound } from "./relay-core.js";
 import { routeForPath } from "./shard.js";
-import { SqlMessageStore } from "./sql-message-store.js";
+import { type SqlExec, SqlMessageStore } from "./sql-message-store.js";
 
 export interface Env {
   RELAY_ROOM: DurableObjectNamespace;
@@ -150,15 +150,17 @@ export async function mintTurnResponse(
  * `authRequired: true` 是**寫死**的——worker 的 `RelayCore` 就是 `requireAuth: true`
  * （見 `RelayRoom` 建構子），拿一個獨立的旗標去描述它遲早會說謊。
  */
-export function relayInfoFrom(env: Env): Record<string, unknown> {
+export function relayInfoFrom(env: Env, profile: RelayProfile = "strict"): Record<string, unknown> {
   return buildRelayInfo({
+    profile,
     name: env.RELAY_NAME,
     description: env.RELAY_DESCRIPTION,
     pubkey: env.RELAY_PUBKEY,
     contact: env.RELAY_CONTACT,
     maxTtlDays: env.MAX_TTL_DAYS,
     acceptsFiles: acceptFileEvents(env.MAX_FILE_MB),
-    authRequired: true,
+    // 與實際生效的政策同源（`guardFor`）——拿獨立旗標描述它遲早會說謊（見本檔案上方註解）。
+    authRequired: guardFor(profile).requireAuth === true,
     // ADR-0356：出貨版號。讓任何人（與 App 的「一鍵更新節點」）看得出這座跑的是哪一版，
     // 也讓 ADR-0241 的跟版義務從「口頭提醒」變成「查得到的事實」。
     version: RELAY_WORKER_VERSION,
@@ -192,7 +194,10 @@ export default {
       // NIP-11（ADR-0260）：只有明確要 `application/nostr+json` 的請求拿到 JSON；
       // 其餘維持純文字 200（PaaS／容器健康檢查靠它，ADR-0089 定下的契約）。
       if (wantsRelayInfo(request.headers.get("Accept"))) {
-        return new Response(JSON.stringify(relayInfoFrom(env)), { status: 200, headers: NIP11_HEADERS });
+        // 依路徑回該車道的文件（ADR-0366）：一份文件描述不了兩種政策。
+        // 認不得的路徑仍給嚴格版——探測器問錯路徑不該拿到比較寬鬆的描述。
+        const profile = routeForPath(url.pathname)?.profile ?? "strict";
+        return new Response(JSON.stringify(relayInfoFrom(env, profile)), { status: 200, headers: NIP11_HEADERS });
       }
       // 健康檢查落點（ADR-0354）：**兩種模式都回純文字**。統一節點模式下 `/` 會變成網頁版首頁，
       // 而 `docs/SELF-HOSTING*.md` 與 PaaS 健康檢查靠的是 ADR-0089 的純文字契約——搬到這裡而非廢除，
@@ -232,8 +237,10 @@ const PROFILE_KEY = "cinder:lane-profile";
 export class RelayRoom {
   private readonly ctx: DurableObjectState;
   private readonly env: Env;
+  /** DO 內建 SQLite 的同步執行器；政策確定後要用它重建 store（ADR-0366 P1 #7）。 */
+  private readonly exec: SqlExec;
   private core: RelayCore;
-  private readonly store: SqlMessageStore;
+  private store: SqlMessageStore;
   /** 本次喚醒是否已從 attachment 重建 RelayCore 狀態。 */
   private hydrated = false;
   /** 本 DO 實例綁定的政策；由路由方在首次請求時釘住（ADR-0366）。 */
@@ -248,6 +255,7 @@ export class RelayRoom {
     const sql = ctx.storage.sql;
     const exec = (query: string, ...bindings: (string | number | null)[]): Record<string, unknown>[] =>
       sql.exec(query, ...bindings).toArray() as Record<string, unknown>[];
+    this.exec = exec;
     this.store = new SqlMessageStore(exec, storeOptions(env.MAX_TTL_DAYS));
     // 先以嚴格政策組起來：休眠喚醒後可能**沒有 fetch**（`webSocketMessage` 直接進來），
     // 那時還沒讀到 storage，預設必須是**收得最緊**的那一邊。
@@ -272,6 +280,9 @@ export class RelayRoom {
    * 與 `node-relay.ts` 用同一組常數，兩座宿主不可能各走各的。
    */
   private buildCore(profile: RelayProfile): RelayCore {
+    // store 與 core 必須用**同一個** profile 組起來——拆開就會出現
+    // 「core 是車道、store 還套著嚴格配額」這種只在第 6 份牌組才看得出來的錯。
+    this.store = new SqlMessageStore(this.exec, storeOptions(this.env.MAX_TTL_DAYS, profile));
     return new RelayCore({
       store: this.store,
       ...guardFor(profile),

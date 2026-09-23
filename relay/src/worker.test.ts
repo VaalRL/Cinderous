@@ -835,3 +835,35 @@ describe("統一節點：選配靜態資產（ADR-0354）", () => {
     expect(seen).toEqual([]); // 資產沒碰到這個請求
   });
 });
+
+describe("NIP-11 依路徑回該車道的文件（ADR-0366 P1 #6）", () => {
+  const docAt = async (path: string): Promise<Record<string, unknown>> => {
+    const res = await worker.fetch(
+      new Request(`https://${HOST}${path}`, { headers: { Accept: "application/nostr+json" } }),
+      {} as Env,
+    );
+    return JSON.parse((res as unknown as { body: string }).body) as Record<string, unknown>;
+  };
+
+  it("嚴格平面：要求 AUTH、具名訂閱", async () => {
+    const doc = await docAt("/");
+    expect((doc.limitation as Record<string, unknown>).auth_required).toBe(true);
+    expect(doc.cinder_subscription_scope).toBe("named");
+  });
+
+  it("第三方車道：不要求 AUTH、接受標籤訂閱", async () => {
+    const doc = await docAt("/app/elementalist");
+    expect((doc.limitation as Record<string, unknown>).auth_required).toBe(false);
+    expect(doc.cinder_subscription_scope).toBe("tagged");
+  });
+
+  it("🔴 認不得的路徑給嚴格版——問錯路徑不該拿到比較寬鬆的描述", async () => {
+    expect((await docAt("/nope")).cinder_subscription_scope).toBe("named");
+  });
+
+  it("兩種路徑都報得出時鐘窗", async () => {
+    for (const p of ["/", "/app/x"]) {
+      expect((await docAt(p)).cinder_max_past_skew_sec, p).toBeGreaterThan(0);
+    }
+  });
+});

@@ -1,6 +1,7 @@
+import { readFileSync } from "node:fs";
 import { TIMESTAMP_JITTER_SECONDS } from "@cinderous/core";
 import { describe, expect, it } from "vitest";
-import { ABUSE_GUARD, MAX_EVENTS_PER_MINUTE, MAX_PAST_SKEW_SEC, TTL_CAP_DAYS, acceptFileEvents, eventsPerMinuteFrom, firstHost, guardFor, storeOptions, ttlSecondsFromDays } from "./host-config.js";
+import { ABUSE_GUARD, APP_ADDRESSABLE_PER_AUTHOR, MAX_EVENTS_PER_MINUTE, MAX_PAST_SKEW_SEC, TTL_CAP_DAYS, acceptFileEvents, eventsPerMinuteFrom, firstHost, guardFor, storeOptions, ttlSecondsFromDays } from "./host-config.js";
 
 // 宿主組裝設定（ADR-0235 H1）。H1 的教訓是「組裝層沒人測」——防護在 core 裡寫對了也測了，
 // 但 worker 從未把參數傳進去。這裡把常數與衍生邏輯的**不變量**釘死，兩座宿主不可能各走各的。
@@ -111,5 +112,50 @@ describe("車道政策（ADR-0366 §決策 5）", () => {
     );
     // 而且那份共同部分就是 ABUSE_GUARD 本身（兩座宿主的單一真實來源）。
     expect(strip(guardFor("app") as Record<string, unknown>)).toEqual({ ...ABUSE_GUARD });
+  });
+});
+
+describe("store 選項依車道（ADR-0366 P1 #7）", () => {
+  it("嚴格平面不帶可尋址配額覆寫（維持 ADR-0071 的 5）", () => {
+    expect(storeOptions(undefined).addressablePerAuthor).toBeUndefined();
+  });
+
+  it("第三方車道放寬可尋址配額，但仍然有界", () => {
+    const opts = storeOptions(undefined, "app");
+    expect(opts.addressablePerAuthor).toBe(APP_ADDRESSABLE_PER_AUTHOR);
+    expect(opts.addressablePerAuthor).toBeGreaterThan(5);
+    expect(Number.isFinite(opts.addressablePerAuthor)).toBe(true);
+  });
+
+  it("每收件人上限與 TTL 不因車道改變", () => {
+    const strict = storeOptions("90");
+    const app = storeOptions("90", "app");
+    expect(app.maxPerRecipient).toBe(strict.maxPerRecipient);
+    expect(app.maxTtlSeconds).toBe(strict.maxTtlSeconds);
+  });
+});
+
+describe("node-relay 是單一 profile 且恆為嚴格（ADR-0366 §決策 8 ／ P1 #10）", () => {
+  /**
+   * node-relay 的原始碼，**去掉註解**。
+   *
+   * 註解要查得出這條規則的理由（那份說明本身就會提到 `APP_LANE_GUARD`），
+   * 所以比對的必須是程式碼——不然這支測試會被自己要求寫的那段說明咬到。
+   */
+  const SRC = readFileSync(new URL("./node-relay.ts", import.meta.url), "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/(^|[^:])\/\/.*$/gm, "$1");
+
+  it("🔴 程式碼不得帶進車道政策——自架站升版不該默默變成公共站", () => {
+    // 這條的症狀是「沒有症狀」：站照常跑，只是訂閱規則悄悄放寬了。
+    // 與 `wrangler-vars.test.ts` 同一種做法——把「已知風險」變成會變紅的東西。
+    expect(SRC).not.toContain("APP_LANE_GUARD");
+    expect(SRC).not.toContain("publicLane");
+    expect(SRC).not.toMatch(/guardFor\((?!"strict")/);
+  });
+
+  it("政策取自 host-config 的 SSOT，而不是另抄一份常數", () => {
+    expect(SRC).toContain('guardFor("strict")');
+    expect(SRC).not.toContain("...ABUSE_GUARD");
   });
 });

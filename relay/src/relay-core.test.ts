@@ -1058,3 +1058,41 @@ describe("ADR-0366 §決策 5：第三方車道的三道閘", () => {
     });
   });
 });
+
+describe("ADR-0366 P1 #9：車道與訊息平面的配額**結構性**分離", () => {
+  it("🔴 速率桶是每個 RelayCore 實例自己的——車道灌爆不影響訊息平面", () => {
+    // 這不需要新程式碼：`routeForPath` 讓兩者落在不同的 DO，而每顆 DO 有自己的
+    // RelayCore（自己的 `rate` Map）與自己的 SQLite。本測試把那個性質釘住，
+    // 因為它是「放寬車道規則」之所以安全的一半理由（另一半是儲存分離，見下）。
+    const sk = generateSecretKey();
+    const mk = () => {
+      const core = new RelayCore({ maxEventsPerMinute: 1, now: () => 1700000000 });
+      return core;
+    };
+    const lane = mk();
+    const plane = mk();
+    const e1 = finalizeEvent({ kind: 20000, created_at: 1700000000, tags: [], content: "a" }, sk);
+    const e2 = finalizeEvent({ kind: 20000, created_at: 1700000000, tags: [], content: "b" }, sk);
+
+    lane.connect("c");
+    expect(lane.handle("c", EVENT(e1))[0]?.message[2]).toBe(true);
+    expect(String(lane.handle("c", EVENT(e2))[0]?.message[3])).toContain("rate-limited");
+
+    // 同一把金鑰在另一個實例上桶是空的——兩條車道互不相干。
+    plane.connect("c");
+    expect(plane.handle("c", EVENT(e2))[0]?.message[2]).toBe(true);
+  });
+
+  it("每收件人 FIFO 也是每個 store 自己的——遊戲禮物擠不掉真人的離線訊息", () => {
+    const laneStore = new MessageStore({ maxPerRecipient: 1 });
+    const planeStore = new MessageStore({ maxPerRecipient: 1 });
+    const wrap = (id: string, to: string): NostrEvent =>
+      ({ id, pubkey: "x", created_at: 1000, kind: 1059, tags: [["p", to]], content: "", sig: "" }) as NostrEvent;
+
+    laneStore.put(wrap("gift1", "alice"), 1000);
+    laneStore.put(wrap("gift2", "alice"), 1000); // 擠掉 gift1——但只在車道那顆 store 裡
+    planeStore.put(wrap("chat", "alice"), 1000);
+
+    expect(planeStore.query({ "#p": ["alice"] } as never, 1000).map((e) => e.id)).toEqual(["chat"]);
+  });
+});

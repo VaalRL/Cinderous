@@ -29,6 +29,58 @@ export type SqlExec = (query: string, ...bindings: (string | number | null)[]) =
 /** 把值陣列轉成 `IN (?,?,…)` 佔位字串。 */
 const placeholders = (values: readonly unknown[]): string => values.map(() => "?").join(",");
 
+/**
+ * 從 filter 取出**非 `#p`** 的標籤條件（ADR-0366 P1 #5）。
+ *
+ * `#p` 不在此列：它有自己的 `recipient` 欄與索引（也是配額與 NIP-62 清除的鍵），
+ * 走既有那條路比多存一份重複的標籤列划算。
+ */
+function tagFiltersOf(filter: RelayFilter): { name: string; values: readonly string[] }[] {
+  const out: { name: string; values: readonly string[] }[] = [];
+  for (const key in filter) {
+    if (key.charCodeAt(0) !== 35 /* '#' */ || key === "#p") continue;
+    const values = filter[key as `#${string}`];
+    if (values) out.push({ name: key.slice(1), values });
+  }
+  return out;
+}
+
+/**
+ * 把標籤條件組成 SQL 的 `EXISTS(json_each(...))` 子句（ADR-0366 P1 #5）。
+ *
+ * ## 為什麼一定要下推，而不是留在 JS 端
+ *
+ * 修正前，`#t`／`#d`／`#w` 這類標籤 filter **只在 `matchFilter` 判**，而那發生在
+ * `ORDER BY created_at DESC LIMIT ?` **之後**。於是「一萬顆同 kind 事件裡找某個標籤」
+ * 會先取最新的 N 顆、再過濾 → **匹配不到就回空陣列**，而目標明明還在庫裡。
+ * 那不是效能問題，是**正確性**問題：查詢回報「沒有」，但答案是「有，只是不在最新 N 顆裡」。
+ *
+ * 記憶體版（{@link MessageStore}）一直都是「先 `matchFilter` 再 limit」＝正確；
+ * 兩個實作共用同一份 `OfflineStore` 契約，分歧會讓記憶體版寫的測試保證不了產線的 SQL 版。
+ *
+ * ## 為什麼是 `json_each` 而不是另建標籤索引表
+ *
+ * 索引表要在 `put`／`putAddressable`／`enforceCap`／`prune`／`vanish`／取代 這六條路徑上
+ * 同步刪乾淨，漏一條就是 ADR-0065 最在意的那種孤兒列。`json_each` 是**掃描**，但它掃的是
+ * **已經被 kind／pubkey／since／expiration 索引縮小過**的候選集，而每顆 DO 的資料受 7 天 TTL
+ * 有界。⇒ 先把正確性補上、把代價維持有界；真的量到慢再談索引表（列為後續）。
+ */
+function pushTagClauses(
+  table: string,
+  filter: RelayFilter,
+  where: string[],
+  bind: (string | number)[],
+): void {
+  for (const { name, values } of tagFiltersOf(filter)) {
+    where.push(
+      `EXISTS (SELECT 1 FROM json_each(${table}.json, '$.tags') AS tg
+               WHERE json_extract(tg.value, '$[0]') = ?
+                 AND json_extract(tg.value, '$[1]') IN (${placeholders(values)}))`,
+    );
+    bind.push(name, ...values);
+  }
+}
+
 /** 附加一條 WHERE 子句與其繫結值。 */
 const push2 = (where: string[], bind: (string | number)[], clause: string, values: readonly (string | number)[]): void => {
   where.push(clause);
@@ -147,9 +199,9 @@ export class SqlMessageStore implements OfflineStore {
     if (json.length > ADDRESSABLE_MAX_BYTES) return false;
     if (!existing[0]) {
       const count = this.sql(`SELECT COUNT(*) AS n FROM addressable WHERE kind = ? AND pubkey = ?`, event.kind, event.pubkey);
-      if (((count[0]?.n as number) ?? 0) >= ADDRESSABLE_MAX_PER_AUTHOR) return false;
+      if (((count[0]?.n as number) ?? 0) >= (this.opts.addressablePerAuthor ?? ADDRESSABLE_MAX_PER_AUTHOR)) return false;
     }
-    const eff = effectiveExpiration(event, nowSec, ADDRESSABLE_TTL_SECONDS);
+    const eff = effectiveExpiration(event, nowSec, this.opts.addressableTtlSeconds ?? ADDRESSABLE_TTL_SECONDS);
     if (eff <= nowSec) return false;
     this.sql(
       `INSERT OR REPLACE INTO addressable (kind, pubkey, d, id, created_at, expiration, json) VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -194,6 +246,8 @@ export class SqlMessageStore implements OfflineStore {
     if ((pValues && pValues.length === 0) || (authors && authors.length === 0) || (ids && ids.length === 0)) {
       return [];
     }
+    // 標籤同理：`{"#t":[]}` 匹配不到任何東西（`matchFilter` 語意），連 DB 都不用打。
+    if (tagFiltersOf(filter).some((t) => t.values.length === 0)) return [];
 
     const where: string[] = [];
     const bind: (string | number)[] = [];
@@ -207,6 +261,7 @@ export class SqlMessageStore implements OfflineStore {
     if (kinds && kinds.length > 0) push(`kind IN (${placeholders(kinds)})`, kinds);
     if (filter.since !== undefined) push(`created_at >= ?`, [filter.since]);
     if (filter.until !== undefined) push(`created_at <= ?`, [filter.until]);
+    pushTagClauses("offline_msgs", filter, where, bind);
     where.push(`(expiration IS NULL OR expiration > ?)`);
     bind.push(nowSec);
 
@@ -224,6 +279,7 @@ export class SqlMessageStore implements OfflineStore {
       if (authors && authors.length > 0) push2(aWhere, aBind, `pubkey IN (${placeholders(authors)})`, authors);
       if (ids && ids.length > 0) push2(aWhere, aBind, `id IN (${placeholders(ids)})`, ids);
       if (kinds && kinds.length > 0) push2(aWhere, aBind, `kind IN (${placeholders(kinds)})`, kinds);
+      pushTagClauses("addressable", filter, aWhere, aBind);
       rows = rows.concat(
         this.sql(
           `SELECT json FROM addressable WHERE ${aWhere.join(" AND ")} ORDER BY created_at DESC LIMIT ?`,

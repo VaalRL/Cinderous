@@ -23,6 +23,19 @@ export interface MessageStoreOptions {
    * 有標籤者也不得超過此上限——任何一列的壽命都有界，孤兒資料在數學上不可能（ADR-0065）。
    */
   maxTtlSeconds?: number;
+  /**
+   * 每 (pubkey, kind) 的可尋址位址數上限；預設 {@link ADDRESSABLE_MAX_PER_AUTHOR}（5）。
+   *
+   * 5 是為 ADR-0071 的「每人 5 台裝置」訂的——那個數字描述的是**裝置數**，
+   * 不是「一個人能發布幾份可尋址資料」。第三方車道上一位玩家可能同時有多份牌組與
+   * 多個 epoch 的世界快照，套 5 會在第 6 份就被拒（ADR-0366 P1 #7）。
+   */
+  addressablePerAuthor?: number;
+  /**
+   * 可尋址事件的壽命上限（秒）；預設 {@link ADDRESSABLE_TTL_SECONDS}（30 天）。
+   * 自架的世界站可以拉長——挑戰窗的長度因此是**可調的營運參數**，不是協定限制。
+   */
+  addressableTtlSeconds?: number;
 }
 
 /** 預設留言壽命上限：7 天（對齊 client 端 gift wrap 的預設 TTL）。 */
@@ -214,9 +227,9 @@ export class MessageStore implements OfflineStore {
     if (!existing) {
       let count = 0;
       for (const k of this.addressable.keys()) if (k.startsWith(prefix)) count++;
-      if (count >= ADDRESSABLE_MAX_PER_AUTHOR) return false;
+      if (count >= (this.opts.addressablePerAuthor ?? ADDRESSABLE_MAX_PER_AUTHOR)) return false;
     }
-    const eff = effectiveExpiration(event, nowSec, ADDRESSABLE_TTL_SECONDS);
+    const eff = effectiveExpiration(event, nowSec, this.opts.addressableTtlSeconds ?? ADDRESSABLE_TTL_SECONDS);
     if (eff <= nowSec) return false;
     if (existing) this.effExp.delete(existing.id);
     this.addressable.set(key, event);

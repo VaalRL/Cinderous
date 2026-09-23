@@ -130,8 +130,34 @@ export function firstHost(raw: string | undefined): string | undefined {
   return first ? first : undefined;
 }
 
-/** store 選項（每收件人上限固定；TTL 由 env 決定）。 */
-export function storeOptions(maxTtlDaysRaw: string | undefined): MessageStoreOptions {
+/**
+ * 第三方車道的可尋址位址配額（ADR-0366 P1 #7）。
+ *
+ * 預設的 5 是 ADR-0071 為「每人 5 台裝置」訂的，那描述的是**裝置數**——第三方車道上
+ * 一位玩家可能同時有多份牌組與多個 epoch 的世界快照，套 5 會在第 6 份就被拒。
+ *
+ * ⚠ 64 是**有根據的猜測，待實測校準**（同 ADR-0006 對容量的處理方式）：它必須夠大
+ * 才擋不到正常用法，又必須有界才擋得住「一個作者塞爆這顆 DO」。最壞情況是
+ * 64 × {@link ADDRESSABLE_MAX_BYTES}（256KB）＝ 16MB／作者／kind——實際 payload
+ * 遠小於此（一份牌組約 2KB），但這個數字該被量過再定案。
+ */
+export const APP_ADDRESSABLE_PER_AUTHOR = 64;
+
+/**
+ * store 選項（每收件人上限固定；TTL 由 env 決定；可尋址配額依車道，ADR-0366 P1 #7）。
+ *
+ * 🔵 可尋址 **TTL 不隨車道改變**（維持 30 天）：`putAddressable` 每次更新都會刷新到期時間，
+ * 所以「活躍即永久」本來就成立，遊戲不需要更長的預設。真要拉長的是**自架的世界站**
+ * （挑戰窗長度），那條路走 store 選項本身即可（P1 #8 把旋鈕做出來了），不需要動預設。
+ */
+export function storeOptions(
+  maxTtlDaysRaw: string | undefined,
+  profile: RelayProfile = "strict",
+): MessageStoreOptions {
   const ttl = ttlSecondsFromDays(maxTtlDaysRaw);
-  return { maxPerRecipient: MAX_PER_RECIPIENT, ...(ttl !== undefined ? { maxTtlSeconds: ttl } : {}) };
+  return {
+    maxPerRecipient: MAX_PER_RECIPIENT,
+    ...(ttl !== undefined ? { maxTtlSeconds: ttl } : {}),
+    ...(profile === "app" ? { addressablePerAuthor: APP_ADDRESSABLE_PER_AUTHOR } : {}),
+  };
 }

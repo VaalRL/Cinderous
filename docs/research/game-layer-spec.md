@@ -312,13 +312,15 @@ NIP-11 只能描述、不能發現。陌生 relay 的發現標準是 **NIP-66（
 
 ### P1 — 不改會壞資料、難查、或規格算不出來
 
+> 🔵 **2026-09-23：P1 已實作**（`relay/src/*`）。#9 的結論與原本預期不同，見該列。
+
 | # | 變更 | 檔案 | 為什麼 |
 | --- | --- | --- | --- |
-| 5 | **tag filter 下推 SQL**（`t`／`d`／`g`／`r`／`w` 建索引） | `sql-message-store.ts:189-238` | 現行先 `ORDER BY created_at DESC LIMIT 1024` 才在 JS 端過濾 ⇒ 事件量一過 1024 就**回空集合**。這是正確性 bug，不是效能問題 |
+| 5 | **tag filter 下推 SQL** | `sql-message-store.ts` | 現行先 `ORDER BY created_at DESC LIMIT` 才在 JS 端過濾 ⇒ 目標被較新事件淹沒就**回空集合**。這是正確性 bug。⚠ 實作用 `EXISTS(json_each(...))` **而非另建標籤索引表**：索引表要在 put／putAddressable／enforceCap／prune／vanish／取代 六條路徑同步刪乾淨，漏一條就是 ADR-0065 最在意的孤兒列；`json_each` 是掃描，但掃的是已被 kind／pubkey／since 索引縮小過、且受 TTL 有界的候選集。**真的量到慢再談索引表** |
 | 6 | 🆕 **NIP-11 揭露時鐘窗**（`max_past_skew` / `max_future_skew`），與 per-path `limitation` | `nip11.ts` | **§4.3 的 `settle_lag` 必須 ≥ 該站的過去窗**。世界若掛在別人的站上，客戶端現在無從得知那個值 ⇒ 結算時點算不出來 |
 | 7 | **可尋址配額 per-lane**：`ADDRESSABLE_MAX_PER_AUTHOR = 5` 可設定 | `message-store.ts:106` | 一個玩家發 30 個 epoch 的快照就要 30 個 `d` 位址；牌組同理。5 是為 ADR-0071「每人 5 台裝置」訂的，對遊戲不適用 |
-| 8 | **可尋址 TTL per-lane**：`ADDRESSABLE_TTL_SECONDS` 目前寫死 30 天 | `message-store.ts:108` | 世界快照與牌組的壽命由遊戲決定 |
-| 9 | **速率限制與每收件人配額分桶** per-lane | `relay-core.ts:537-541`、`message-store.ts:326` | 遊戲流量不該與聊天共用同一個 120/min 桶；遊戲贈禮不該把真人的離線訊息擠出 500 則 FIFO |
+| 8 | **可尋址 TTL per-lane**：`ADDRESSABLE_TTL_SECONDS` 目前寫死 30 天 | `message-store.ts:108` | 旋鈕做出來了，但**預設不變**：`putAddressable` 每次更新都刷新到期時間 ⇒「活躍即永久」本來就成立。真正要拉長的是自架世界站的挑戰窗，那用選項本身即可 |
+| 9 | ~~速率限制與每收件人配額分桶 per-lane~~ **⇒ 不需要程式碼，已由 #1 結構性滿足** | （只補測試） | `rate` 是每個 `RelayCore` 實例自己的 Map，`store` 包的是**該 DO 自己的** SQLite ⇒ 車道與訊息平面落在不同 DO 的那一刻，兩者的速率桶與 FIFO 就已經是分開的。原本以為要加設定，實際要加的只有把這個性質釘住的測試 |
 | 10 | **`node-relay.ts` 對齊**：明示單一 profile 且**預設嚴格** | `node-relay.ts`、`host-config.ts` | 它只認 `/healthz`、無路徑路由。自架站不該因升版默默變成公共站。ADR-0235 H1 的「組裝層沒人測」原樣適用 |
 
 ### P2 — 規格需要，但可後補

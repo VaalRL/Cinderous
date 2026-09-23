@@ -222,3 +222,27 @@ describe("檔案塊獨立配額桶（ADR-0162）", () => {
     expect(kept2).toEqual(["c2", "c3", "f2", "f3", "f4"]);
   });
 });
+
+describe("可尋址配額與 TTL 可設定（ADR-0366 P1 #7／#8）", () => {
+  const addr = (pubkey: string, d: string, kind = 31081): NostrEvent =>
+    ({ id: `${pubkey}-${d}`, pubkey, created_at: 1000, kind, tags: [["d", d]], content: "x", sig: "" }) as NostrEvent;
+
+  it("預設仍是 5（ADR-0071 不受影響）", () => {
+    const s = new MessageStore();
+    for (let i = 0; i < 5; i++) expect(s.putAddressable(addr("a", `d${i}`), 1000)).toBe(true);
+    expect(s.putAddressable(addr("a", "d5"), 1000)).toBe(false);
+  });
+
+  it("🔴 配額可放寬——第三方車道的牌組與快照不該在第 6 份被拒", () => {
+    const s = new MessageStore({ addressablePerAuthor: 64 });
+    for (let i = 0; i < 64; i++) expect(s.putAddressable(addr("a", `d${i}`), 1000), `第 ${i}`).toBe(true);
+    expect(s.putAddressable(addr("a", "d64"), 1000)).toBe(false); // 仍然有界
+  });
+
+  it("TTL 可拉長——自架世界站的挑戰窗是營運參數，不是協定限制", () => {
+    const s = new MessageStore({ addressableTtlSeconds: 90 * 86_400 });
+    s.putAddressable(addr("a", "d"), 1000);
+    // 預設 30 天會在此刻已過期；拉長到 90 天則仍查得到。
+    expect(s.query({ authors: ["a"], kinds: [31081] } as never, 1000 + 60 * 86_400)).toHaveLength(1);
+  });
+});
