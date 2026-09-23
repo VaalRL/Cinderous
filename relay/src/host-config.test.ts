@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { TIMESTAMP_JITTER_SECONDS } from "@cinderous/core";
 import { describe, expect, it } from "vitest";
-import { ABUSE_GUARD, APP_ADDRESSABLE_PER_AUTHOR, MAX_EVENTS_PER_MINUTE, MAX_MESSAGES_PER_MINUTE, messagesPerMinuteFrom, MAX_PAST_SKEW_SEC, APP_ADDRESSABLE_BYTES_PER_AUTHOR, APP_ADDRESSABLE_MAX_BYTES, MAX_POW_DIFFICULTY, PUBLIC_LANE_ADDRESSABLE_BYTES_PER_AUTHOR, PUBLIC_LANE_ADDRESSABLE_PER_AUTHOR, STRICT_ADDRESSABLE_BYTES_PER_AUTHOR, TTL_CAP_DAYS, knownLanes, acceptFileEvents, eventsPerMinuteFrom, firstHost, guardFor, powForLane, storeOptions, ttlSecondsFromDays } from "./host-config.js";
+import { ABUSE_GUARD, APP_ADDRESSABLE_PER_AUTHOR, MAX_EVENTS_PER_MINUTE, MAX_MESSAGES_PER_MINUTE, messagesPerMinuteFrom, MAX_PAST_SKEW_SEC, APP_ADDRESSABLE_BYTES_PER_AUTHOR, APP_ADDRESSABLE_MAX_BYTES, MAX_POW_DIFFICULTY, PUBLIC_LANE_ADDRESSABLE_BYTES_PER_AUTHOR, PUBLIC_LANE_ADDRESSABLE_PER_AUTHOR, PUBLIC_LANE_RETENTION_SECONDS, STRICT_ADDRESSABLE_BYTES_PER_AUTHOR, TTL_CAP_DAYS, knownLanes, acceptFileEvents, eventsPerMinuteFrom, firstHost, guardFor, powForLane, storeOptions, ttlSecondsFromDays } from "./host-config.js";
 
 // 宿主組裝設定（ADR-0235 H1）。H1 的教訓是「組裝層沒人測」——防護在 core 裡寫對了也測了，
 // 但 worker 從未把參數傳進去。這裡把常數與衍生邏輯的**不變量**釘死，兩座宿主不可能各走各的。
@@ -132,11 +132,13 @@ describe("store 選項依車道（ADR-0366 P1 #7）", () => {
     expect(Number.isFinite(opts.addressablePerAuthor)).toBe(true);
   });
 
-  it("每收件人上限與 TTL 不因車道改變", () => {
+  it("每收件人上限不因車道改變；TTL 只有公用分片會縮短（ADR-0367 §決策 1）", () => {
     const strict = storeOptions("90");
-    const app = storeOptions("90", "app");
-    expect(app.maxPerRecipient).toBe(strict.maxPerRecipient);
-    expect(app.maxTtlSeconds).toBe(strict.maxTtlSeconds);
+    const known = storeOptions("90", "app", true);
+    expect(known.maxPerRecipient).toBe(strict.maxPerRecipient);
+    expect(known.maxTtlSeconds).toBe(strict.maxTtlSeconds);
+    // 公用分片（陌生應用）改為見習保存——名單上的車道不受影響
+    expect(storeOptions("90", "app", false).maxTtlSeconds).toBe(PUBLIC_LANE_RETENTION_SECONDS);
   });
 });
 
@@ -291,5 +293,38 @@ describe("可尋址的兩道容量閘（ADR-0366 §容量二）", () => {
     );
     // 嚴格平面：ADR-0071 的 5 台裝置 × 256KB 必須放得下
     expect(STRICT_ADDRESSABLE_BYTES_PER_AUTHOR).toBeGreaterThan(5 * 262_144);
+  });
+});
+
+describe("公用分片的短保存（ADR-0367 §決策 1）", () => {
+  it("🔴 只有公用分片縮短：名單上的車道與嚴格平面一個字都不動", () => {
+    const publicLane = storeOptions(undefined, "app", false);
+    expect(publicLane.addressableTtlSeconds).toBe(PUBLIC_LANE_RETENTION_SECONDS);
+    expect(publicLane.maxTtlSeconds).toBe(PUBLIC_LANE_RETENTION_SECONDS);
+
+    // 名單上的車道：維持預設（可尋址 30 天由 message-store 預設、留言由 env）
+    const known = storeOptions(undefined, "app", true);
+    expect(known.addressableTtlSeconds).toBeUndefined();
+    expect(known.maxTtlSeconds).toBeUndefined();
+
+    // 嚴格平面：ADR-0071 的契約不動
+    const strict = storeOptions("90", "strict");
+    expect(strict.addressableTtlSeconds).toBeUndefined();
+    expect(strict.maxTtlSeconds).toBe(90 * 86_400);
+  });
+
+  it("站方把 TTL 設得比見習期還短時，取比較短的那個——站方上限恆為權威", () => {
+    // `MAX_TTL_DAYS` 不可能小於一天，用秒數直接驗邏輯：公用分片取 min(站方, 見習期)
+    expect(storeOptions("1", "app", false).maxTtlSeconds).toBe(
+      Math.min(86_400, PUBLIC_LANE_RETENTION_SECONDS),
+    );
+  });
+
+  it("見習期要短到讓穩態水位有界，但不要短到正常瀏覽都來不及", () => {
+    expect(PUBLIC_LANE_RETENTION_SECONDS).toBe(2 * 60 * 60);
+    // 穩態 ≈ 寫入速率 × 見習期。以車道單顆 32KB × 每連線 240 則/分計：
+    const bytesPerMinute = MAX_MESSAGES_PER_MINUTE * APP_ADDRESSABLE_MAX_BYTES;
+    const steadyState = (bytesPerMinute * PUBLIC_LANE_RETENTION_SECONDS) / 60;
+    expect(steadyState).toBeLessThan(1024 ** 3); // 一條連線的穩態水位 < 1GB
   });
 });

@@ -183,9 +183,15 @@ export async function mintTurnResponse(
  * `authRequired: true` 是**寫死**的——worker 的 `RelayCore` 就是 `requireAuth: true`
  * （見 `RelayRoom` 建構子），拿一個獨立的旗標去描述它遲早會說謊。
  */
-export function relayInfoFrom(env: Env, profile: RelayProfile = "strict"): Record<string, unknown> {
+export function relayInfoFrom(
+  env: Env,
+  profile: RelayProfile = "strict",
+  /** 本路徑是不是名單上的已知租戶（ADR-0366 §裁示）：公用分片的保存期短得多（ADR-0367）。 */
+  knownLane = false,
+): Record<string, unknown> {
   return buildRelayInfo({
     profile,
+    knownLane,
     name: env.RELAY_NAME,
     description: env.RELAY_DESCRIPTION,
     pubkey: env.RELAY_PUBKEY,
@@ -229,8 +235,13 @@ export default {
       if (wantsRelayInfo(request.headers.get("Accept"))) {
         // 依路徑回該車道的文件（ADR-0366）：一份文件描述不了兩種政策。
         // 認不得的路徑仍給嚴格版——探測器問錯路徑不該拿到比較寬鬆的描述。
-        const profile = routeForPath(url.pathname)?.profile ?? "strict";
-        return new Response(JSON.stringify(relayInfoFrom(env, profile)), { status: 200, headers: NIP11_HEADERS });
+        const infoRoute = routeForPath(url.pathname, knownLanes(env.APP_LANES));
+        const profile = infoRoute?.profile ?? "strict";
+        const known = infoRoute?.profile === "app" && infoRoute.known;
+        return new Response(JSON.stringify(relayInfoFrom(env, profile, known)), {
+          status: 200,
+          headers: NIP11_HEADERS,
+        });
       }
       // 健康檢查落點（ADR-0354）：**兩種模式都回純文字**。統一節點模式下 `/` 會變成網頁版首頁，
       // 而 `docs/SELF-HOSTING*.md` 與 PaaS 健康檢查靠的是 ADR-0089 的純文字契約——搬到這裡而非廢除，

@@ -11,7 +11,7 @@
 // NIP-59 抖動窗」），兩座宿主就不可能各走各的。
 
 import { TIMESTAMP_JITTER_SECONDS } from "@cinderous/core";
-import type { MessageStoreOptions } from "./message-store.js";
+import { DEFAULT_MAX_TTL_SECONDS, type MessageStoreOptions } from "./message-store.js";
 import type { RelayCoreOptions } from "./relay-core.js";
 
 /** 每收件人離線留言上限（防單一收件人塞爆免費額度；PRD §8）。 */
@@ -259,6 +259,27 @@ export const APP_ADDRESSABLE_BYTES_PER_AUTHOR = 8 * 1024 * 1024;
 export const PUBLIC_LANE_ADDRESSABLE_BYTES_PER_AUTHOR = 2 * 1024 * 1024;
 
 /**
+ * **公用分片**的保存期（秒；ADR-0367 §決策 1）：見習保存。
+ *
+ * 🔴 為什麼是「保存」而不是「進門等待」：等待對攻擊者免費且可平行（開一千個身分
+ * 一起等就抵銷了），要讓等待構成成本必須數得出「他」是誰——而身分不用錢。
+ * 把等待加在**保存**那一端，換金鑰就再也沒有用：每一把新金鑰都從頭蹲一次。
+ *
+ * 穩態儲存量因此是 `寫入速率 × 見習期` 而不是 `寫入速率 × 30 天`：
+ * 以車道單顆 {@link APP_ADDRESSABLE_MAX_BYTES} × 每連線 {@link MAX_MESSAGES_PER_MINUTE}
+ * 計，一條連線的穩態水位約 900MB 而不是數百 GB。
+ *
+ * 🔵 **只套在公用分片**：名單上的車道（我們知道其用法）與嚴格平面（ADR-0071 的
+ * 「活躍即永久」契約）一個字都不動。這種規則設錯的症狀是「安靜地掉資料」，
+ * 爆炸半徑因此刻意只落在陌生應用的資料上。
+ *
+ * ⚠ 代價：陌生應用「發完就離線」的資料會在兩小時後消失（活躍即刷新——
+ * `putAddressable` 每次更新都重算到期時間）。這必須讓對方知道 ⇒ NIP-11 的
+ * `retention` 與 `cinder_addressable_ttl_sec` 會如實回報這個值。
+ */
+export const PUBLIC_LANE_RETENTION_SECONDS = 2 * 60 * 60;
+
+/**
  * 站方的已知租戶名單（`APP_LANES`，逗號分隔；ADR-0366 §裁示）。
  *
  * 🔴 **它不是白名單**：不在名單上的車道照常服務——錨點同時是公用 relay。
@@ -291,7 +312,12 @@ export function storeOptions(
   /** 這顆 DO 服務的是名單上的已知租戶嗎（ADR-0366 §裁示）；預設否＝公用配額。 */
   knownLane = false,
 ): MessageStoreOptions {
-  const ttl = ttlSecondsFromDays(maxTtlDaysRaw);
+  const configured = ttlSecondsFromDays(maxTtlDaysRaw);
+  const publicLane = profile === "app" && !knownLane;
+  // 公用分片取「站方上限」與「見習期」之中比較短的那個——站方上限恆為權威（ADR-0160）。
+  const ttl = publicLane
+    ? Math.min(configured ?? DEFAULT_MAX_TTL_SECONDS, PUBLIC_LANE_RETENTION_SECONDS)
+    : configured;
   const addressable = knownLane ? APP_ADDRESSABLE_PER_AUTHOR : PUBLIC_LANE_ADDRESSABLE_PER_AUTHOR;
   const bytesPerAuthor =
     profile !== "app"
@@ -306,5 +332,6 @@ export function storeOptions(
     ...(profile === "app"
       ? { addressablePerAuthor: addressable, addressableMaxBytes: APP_ADDRESSABLE_MAX_BYTES }
       : {}),
+    ...(publicLane ? { addressableTtlSeconds: PUBLIC_LANE_RETENTION_SECONDS } : {}),
   };
 }

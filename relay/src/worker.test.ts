@@ -14,7 +14,11 @@ import type { DatabaseSync as DatabaseSyncType } from "node:sqlite";
 import { buildAuthEvent, buildHttpAuthEvent, finalizeEvent, minePow, generateSecretKey, getPublicKey, httpAuthHeader, type NostrEvent, type SecretKey } from "@cinderous/core";
 import { beforeAll, describe, expect, it } from "vitest";
 import worker, { mintTurnResponse, turnPreflightResponse, RelayRoom, type Env } from "./worker.js";
-import { MAX_MESSAGES_PER_MINUTE, PUBLIC_LANE_ADDRESSABLE_PER_AUTHOR } from "./host-config.js";
+import {
+  MAX_MESSAGES_PER_MINUTE,
+  PUBLIC_LANE_ADDRESSABLE_PER_AUTHOR,
+  PUBLIC_LANE_RETENTION_SECONDS,
+} from "./host-config.js";
 import { namedLaneName } from "./shard.js";
 import { leadingZeroBits } from "./relay-core.js";
 
@@ -1095,5 +1099,31 @@ describe("已知租戶名單（ADR-0366 §裁示）", () => {
     expect(await accepted("testgame", PUBLIC_LANE_ADDRESSABLE_PER_AUTHOR + 1)).toBe(
       PUBLIC_LANE_ADDRESSABLE_PER_AUTHOR + 1,
     );
+  });
+});
+
+describe("NIP-11 依路徑回報真實保存期（ADR-0367 §後果）", () => {
+  const doc = async (path: string, lanes?: string): Promise<Record<string, unknown>> => {
+    const env = { ...(lanes === undefined ? {} : { APP_LANES: lanes }) } as unknown as Env;
+    const res = (await worker.fetch(
+      new Request(`https://${HOST}${path}`, { headers: { Accept: "application/nostr+json" } }),
+      env,
+    )) as unknown as { body: string };
+    return JSON.parse(res.body) as Record<string, unknown>;
+  };
+
+  it("公用分片誠實回報見習期；名單上的車道回報正常保存期", async () => {
+    expect((await doc("/app/stranger", "lwd")).retention).toEqual([
+      { time: PUBLIC_LANE_RETENTION_SECONDS },
+    ]);
+    expect((await doc("/app/lwd", "lwd")).retention).toEqual([{ time: 7 * 86_400 }]);
+    expect((await doc("/")).retention).toEqual([{ time: 7 * 86_400 }]);
+  });
+
+  it("可尋址壽命也照路徑回報——客戶端原本只能猜", async () => {
+    expect((await doc("/app/stranger", "lwd")).cinder_addressable_ttl_sec).toBe(
+      PUBLIC_LANE_RETENTION_SECONDS,
+    );
+    expect((await doc("/app/lwd", "lwd")).cinder_addressable_ttl_sec).toBe(30 * 86_400);
   });
 });
