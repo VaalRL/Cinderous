@@ -1,5 +1,5 @@
 import { verifyHttpAuth } from "@cinderous/core";
-import { acceptFileEvents, firstHost, guardFor, powForLane, type RelayProfile, storeOptions } from "./host-config.js";
+import { acceptFileEvents, firstHost, guardFor, knownLanes, powForLane, type RelayProfile, storeOptions } from "./host-config.js";
 import { buildRelayInfo, NIP11_HEADERS, wantsRelayInfo } from "./nip11.js";
 import { RELAY_WORKER_VERSION } from "./version.js";
 import { RelayCore, type ConnSnapshot, type Outbound } from "./relay-core.js";
@@ -36,6 +36,16 @@ export interface Env {
    * （恆為 0，見 `host-config.powForLane`）。
    */
   APP_LANE_POW?: string;
+  /**
+   * 站方的**已知租戶名單**（逗號分隔的車道 id；ADR-0366 §裁示）。
+   *
+   * 🔴 **不是白名單**：沒列的車道照常服務——錨點同時是公用 relay。名單決定的是
+   * 「這條車道有沒有自己的 DO」，因而決定它的可尋址配額（列了 64、沒列 16）。
+   * 未設＝沒有已知租戶，所有車道共用雜湊分片。
+   *
+   * ⚠ 加進來或拿掉＝換一顆 DO，該車道舊 DO 裡的資料不會跟著搬（等 TTL 到期）。
+   */
+  APP_LANES?: string;
   /**
    * 公共 TURN 保底（ADR-0243）：Cloudflare TURN 的 Key ID。與 `TURN_API_TOKEN` 一起設定後，
    * `GET /turn` 會向 Cloudflare 換發**短期**憑證回給客戶端（餵進 `buildRtcConfig` 的 turnServers）。
@@ -239,7 +249,7 @@ export default {
     // 🔴 **認不得的路徑直接拒絕**（ADR-0366 §決策 4）。原本是「其他一律回退舊全域」，
     // 那讓 `/s/zz` 這種算錯分片的客戶端靜默落進別的平面；而一旦有了寬鬆車道，
     // 任何 catch-all 都是一條把流量靜默送進錯誤政策的路。兩邊正面列舉、其餘 404。
-    const route = routeForPath(url.pathname);
+    const route = routeForPath(url.pathname, knownLanes(env.APP_LANES));
     if (!route) return new Response("unknown relay path", { status: 404 });
     // 車道的成本護欄（ADR-0366 §容量）：以 IP 計數的升級限速，在碰 DO 之前就擋掉。
     // `CF-Connecting-IP` 由 Cloudflare 填寫、客戶端偽造不了；**缺了就不限**——
@@ -265,6 +275,13 @@ export default {
  */
 /** DO storage 裡記住本實例綁定的政策（ADR-0366）。 */
 const PROFILE_KEY = "cinder:lane-profile";
+/**
+ * DO storage 裡記住本實例服務的是不是名單上的已知租戶（ADR-0366 §裁示）。
+ *
+ * 為什麼要存：休眠喚醒後可能**沒有 fetch**（`webSocketMessage` 直接進來），那時算不出
+ * 車道 id；而配額必須與這顆 DO 先前用的那個一致，否則同一份儲存會被兩種配額讀寫過。
+ */
+const KNOWN_LANE_KEY = "cinder:lane-known";
 
 export class RelayRoom {
   private readonly ctx: DurableObjectState;
@@ -279,6 +296,8 @@ export class RelayRoom {
   private profile: RelayProfile = "strict";
   /** 政策是否已寫進 storage（釘住後不得再改，見 `fetch`）。 */
   private profilePinned = false;
+  /** 本 DO 服務的是名單上的已知租戶嗎（ADR-0366 §裁示）；預設否＝公用配額。 */
+  private knownLane = false;
 
   constructor(ctx: DurableObjectState, env: Env) {
     this.ctx = ctx;
@@ -295,6 +314,7 @@ export class RelayRoom {
     ctx.blockConcurrencyWhile(async () => {
       // 還原本實例綁定的政策（ADR-0366）。DO 名與政策是一對一的，所以這裡讀到什麼就是什麼。
       const stored = await ctx.storage.get<RelayProfile>(PROFILE_KEY);
+      this.knownLane = (await ctx.storage.get<boolean>(KNOWN_LANE_KEY)) === true;
       if (stored !== undefined) {
         this.profile = stored;
         this.profilePinned = true;
@@ -314,7 +334,10 @@ export class RelayRoom {
   private buildCore(profile: RelayProfile): RelayCore {
     // store 與 core 必須用**同一個** profile 組起來——拆開就會出現
     // 「core 是車道、store 還套著嚴格配額」這種只在第 6 份牌組才看得出來的錯。
-    this.store = new SqlMessageStore(this.exec, storeOptions(this.env.MAX_TTL_DAYS, profile));
+    this.store = new SqlMessageStore(
+      this.exec,
+      storeOptions(this.env.MAX_TTL_DAYS, profile, this.knownLane),
+    );
     const pow = powForLane(profile, this.env.APP_LANE_POW);
     return new RelayCore({
       store: this.store,
@@ -333,16 +356,23 @@ export class RelayRoom {
   async fetch(request: Request): Promise<Response> {
     // 政策由**本次請求的路徑**決定，用的是與 worker 路由同一個 `routeForPath`（SSOT）。
     // 認不得的路徑在 worker 就被 404 擋掉了；真的漏進來就當嚴格（fail-closed）。
-    const wanted: RelayProfile = routeForPath(new URL(request.url).pathname)?.profile ?? "strict";
-    if (wanted !== this.profile || !this.profilePinned) {
+    const route = routeForPath(new URL(request.url).pathname, knownLanes(this.env.APP_LANES));
+    const wanted: RelayProfile = route?.profile ?? "strict";
+    // 已知租戶有自己的 DO（`app:<id>`），所以這個旗標對一顆 DO 而言是恆定的；
+    // 第一次請求時釘住，與政策同一個時機。
+    const wantedKnown = route?.profile === "app" && route.known;
+    if (wanted !== this.profile || !this.profilePinned || wantedKnown !== this.knownLane) {
       // 🔴 一顆 DO 只服務一種政策。釘住之後還收到不同政策的請求，代表路由壞了
       // （或有人在試）——**拒絕，不要切換**。切換等於讓同一份儲存被兩套規則讀寫過。
       if (this.profilePinned) return new Response("lane profile mismatch", { status: 409 });
+      this.knownLane = wantedKnown;
       if (wanted !== this.profile) {
         this.profile = wanted;
-        this.core = this.buildCore(wanted);
       }
+      // 配額也會變，所以 core 與 store 一起重組（兩者必須同一組設定）。
+      this.core = this.buildCore(wanted);
       await this.ctx.storage.put(PROFILE_KEY, wanted);
+      await this.ctx.storage.put(KNOWN_LANE_KEY, wantedKnown);
       this.profilePinned = true;
     }
     const pair = new WebSocketPair();

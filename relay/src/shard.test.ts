@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   APP_LANE_SHARDS,
   appLaneName,
+  namedLaneName,
   LEGACY_GLOBAL_NAME,
   messageShardName,
   PRESENCE_LAYER_NAME,
@@ -72,6 +73,29 @@ describe("分片路由計算（ADR-0241）", () => {
       expect(route?.doName).toBe(appLaneName("elementalist"));
       expect(doOf("/app/nagd/")).toBe(appLaneName("nagd")); // 容忍尾斜線
       expect(routeForPath("/app/LWD")).toMatchObject({ laneId: "lwd" }); // 小寫正規化
+    });
+
+    it("名單上的車道走自己的 DO；不在名單上的照常服務，只是共用雜湊分片（ADR-0366 §裁示）", () => {
+      const known = new Set(["lwd", "elementalist"]);
+      const mine = routeForPath("/app/lwd", known);
+      expect(mine).toMatchObject({ profile: "app", laneId: "lwd", known: true });
+      expect(mine?.doName).toBe(namedLaneName("lwd"));
+      // 🔴 名單**不是門禁**：沒列的照樣連得上，這座站同時是公用 relay
+      const stranger = routeForPath("/app/someoneelse", known);
+      expect(stranger).toMatchObject({ profile: "app", laneId: "someoneelse", known: false });
+      expect(stranger?.doName).toBe(appLaneName("someoneelse"));
+      // 沒有名單＝全部共用分片（今日行為）
+      expect(routeForPath("/app/lwd")?.doName).toBe(appLaneName("lwd"));
+    });
+
+    it("🔴 具名車道的 DO 名撞不到雜湊分片，也撞不到嚴格平面", () => {
+      // 車道 id 不含冒號（LANE_ID 的形狀），所以 `app:<id>` 這個命名空間是乾淨的。
+      // 若具名車道叫 `app-<id>`，一條叫做 "3" 的車道就會與分片 3 共用 DO。
+      expect(namedLaneName("3")).not.toBe("app-3");
+      for (let i = 0; i < APP_LANE_SHARDS; i++) {
+        expect(namedLaneName(String(i))).not.toBe(`app-${i}`);
+      }
+      expect(namedLaneName("lwd")).not.toBe(LEGACY_GLOBAL_NAME);
     });
 
     it("車道 id 形狀不合法即拒絕（不清乾淨後放行——那會讓兩個字串映到同一條車道）", () => {

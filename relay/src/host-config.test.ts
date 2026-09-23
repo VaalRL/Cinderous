@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { TIMESTAMP_JITTER_SECONDS } from "@cinderous/core";
 import { describe, expect, it } from "vitest";
-import { ABUSE_GUARD, APP_ADDRESSABLE_PER_AUTHOR, MAX_EVENTS_PER_MINUTE, MAX_MESSAGES_PER_MINUTE, messagesPerMinuteFrom, MAX_PAST_SKEW_SEC, MAX_POW_DIFFICULTY, TTL_CAP_DAYS, acceptFileEvents, eventsPerMinuteFrom, firstHost, guardFor, powForLane, storeOptions, ttlSecondsFromDays } from "./host-config.js";
+import { ABUSE_GUARD, APP_ADDRESSABLE_PER_AUTHOR, MAX_EVENTS_PER_MINUTE, MAX_MESSAGES_PER_MINUTE, messagesPerMinuteFrom, MAX_PAST_SKEW_SEC, MAX_POW_DIFFICULTY, PUBLIC_LANE_ADDRESSABLE_PER_AUTHOR, TTL_CAP_DAYS, knownLanes, acceptFileEvents, eventsPerMinuteFrom, firstHost, guardFor, powForLane, storeOptions, ttlSecondsFromDays } from "./host-config.js";
 
 // 宿主組裝設定（ADR-0235 H1）。H1 的教訓是「組裝層沒人測」——防護在 core 裡寫對了也測了，
 // 但 worker 從未把參數傳進去。這裡把常數與衍生邏輯的**不變量**釘死，兩座宿主不可能各走各的。
@@ -121,7 +121,8 @@ describe("store 選項依車道（ADR-0366 P1 #7）", () => {
   });
 
   it("第三方車道放寬可尋址配額，但仍然有界", () => {
-    const opts = storeOptions(undefined, "app");
+    // 名單上的已知租戶拿到量身訂的那個；公用車道的較保守版本見下面的 §裁示 describe。
+    const opts = storeOptions(undefined, "app", true);
     expect(opts.addressablePerAuthor).toBe(APP_ADDRESSABLE_PER_AUTHOR);
     expect(opts.addressablePerAuthor).toBeGreaterThan(5);
     expect(Number.isFinite(opts.addressablePerAuthor)).toBe(true);
@@ -215,6 +216,40 @@ describe("訊息速率上限（ADR-0366 §容量）", () => {
   it("兩種 profile 都吃同一個上限——它是濫用防護，不是車道政策", () => {
     for (const profile of ["strict", "app"] as const) {
       expect(guardFor(profile).maxMessagesPerMinute, profile).toBe(MAX_MESSAGES_PER_MINUTE);
+    }
+  });
+});
+
+describe("已知租戶名單（ADR-0366 §裁示）", () => {
+  it("逗號分隔、去空白、小寫；未設或空字串＝沒有已知租戶", () => {
+    expect([...knownLanes("lwd, Elementalist ,, nagd")]).toEqual(["lwd", "elementalist", "nagd"]);
+    expect(knownLanes(undefined).size).toBe(0);
+    expect(knownLanes("   ").size).toBe(0);
+  });
+
+  it("名單上的車道拿到量身訂的配額，公用車道拿到較保守的那個", () => {
+    expect(storeOptions(undefined, "app", true).addressablePerAuthor).toBe(
+      APP_ADDRESSABLE_PER_AUTHOR,
+    );
+    expect(storeOptions(undefined, "app", false).addressablePerAuthor).toBe(
+      PUBLIC_LANE_ADDRESSABLE_PER_AUTHOR,
+    );
+    // 🔴 預設是公用配額：漏傳參數時給出的是**比較小**的那個，而不是把 64 送給陌生人
+    expect(storeOptions(undefined, "app").addressablePerAuthor).toBe(
+      PUBLIC_LANE_ADDRESSABLE_PER_AUTHOR,
+    );
+  });
+
+  it("公用配額必須小於已知租戶配額，且仍大於嚴格平面的裝置數配額", () => {
+    expect(PUBLIC_LANE_ADDRESSABLE_PER_AUTHOR).toBeLessThan(APP_ADDRESSABLE_PER_AUTHOR);
+    // 嚴格平面不設此選項（沿用 message-store 的 5）——公用車道不該比它還緊，
+    // 否則「車道比較寬鬆」這個前提在儲存面就不成立了。
+    expect(PUBLIC_LANE_ADDRESSABLE_PER_AUTHOR).toBeGreaterThan(5);
+  });
+
+  it("嚴格平面不受名單影響", () => {
+    for (const known of [true, false]) {
+      expect(storeOptions(undefined, "strict", known).addressablePerAuthor).toBeUndefined();
     }
   });
 });

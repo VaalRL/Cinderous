@@ -214,6 +214,39 @@ export function firstHost(raw: string | undefined): string | undefined {
 export const APP_ADDRESSABLE_PER_AUTHOR = 64;
 
 /**
+ * **公用**車道（不在 `APP_LANES` 名單上）的可尋址位址配額（ADR-0366 §裁示）。
+ *
+ * 錨點對所有車道開放，所以這顆共用分片上跑的是我們**不知道其形狀**的應用。
+ * 64 是替本專案四款遊戲的用法（多份牌組、多個 epoch 快照）量身訂的數字，
+ * 沒有理由預設送給不認識的應用；16 對一般可尋址用途（名單、設定、個人檔案）
+ * 綽綽有餘，而且把「一個作者塞爆共用分片」的上界壓低四倍。
+ *
+ * ⚠ 這不是門禁也不是防禦：車道 id 自報，陌生人把自己叫做 `lwd` 就會落進那顆 DO
+ * 並拿到 64。它是**誠實的預設值**，真正的成本界線是升級限速與每連線訊息上限。
+ */
+export const PUBLIC_LANE_ADDRESSABLE_PER_AUTHOR = 16;
+
+/**
+ * 站方的已知租戶名單（`APP_LANES`，逗號分隔；ADR-0366 §裁示）。
+ *
+ * 🔴 **它不是白名單**：不在名單上的車道照常服務——錨點同時是公用 relay。
+ * 名單決定的是「這條車道有沒有自己的 DO」，也因此決定它的可尋址配額。
+ * 未設／空字串＝沒有已知租戶，所有車道共用雜湊分片（車道剛上線時的行為）。
+ *
+ * ⚠ **把一條車道加進名單或移出名單，等於換一顆 DO**：它先前存在舊 DO 裡的
+ * 可尋址事件與離線留言不會跟著搬，會留在原處直到 TTL 到期。名單要在上線前定好，
+ * 之後的變更請當成該車道的一次冷啟動。
+ */
+export function knownLanes(raw: string | undefined): ReadonlySet<string> {
+  return new Set(
+    (raw ?? "")
+      .split(",")
+      .map((id) => id.trim().toLowerCase())
+      .filter((id) => id.length > 0),
+  );
+}
+
+/**
  * store 選項（每收件人上限固定；TTL 由 env 決定；可尋址配額依車道，ADR-0366 P1 #7）。
  *
  * 🔵 可尋址 **TTL 不隨車道改變**（維持 30 天）：`putAddressable` 每次更新都會刷新到期時間，
@@ -223,11 +256,14 @@ export const APP_ADDRESSABLE_PER_AUTHOR = 64;
 export function storeOptions(
   maxTtlDaysRaw: string | undefined,
   profile: RelayProfile = "strict",
+  /** 這顆 DO 服務的是名單上的已知租戶嗎（ADR-0366 §裁示）；預設否＝公用配額。 */
+  knownLane = false,
 ): MessageStoreOptions {
   const ttl = ttlSecondsFromDays(maxTtlDaysRaw);
+  const addressable = knownLane ? APP_ADDRESSABLE_PER_AUTHOR : PUBLIC_LANE_ADDRESSABLE_PER_AUTHOR;
   return {
     maxPerRecipient: MAX_PER_RECIPIENT,
     ...(ttl !== undefined ? { maxTtlSeconds: ttl } : {}),
-    ...(profile === "app" ? { addressablePerAuthor: APP_ADDRESSABLE_PER_AUTHOR } : {}),
+    ...(profile === "app" ? { addressablePerAuthor: addressable } : {}),
   };
 }

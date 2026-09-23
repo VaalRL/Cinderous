@@ -14,7 +14,9 @@ import type { DatabaseSync as DatabaseSyncType } from "node:sqlite";
 import { buildAuthEvent, buildHttpAuthEvent, finalizeEvent, minePow, generateSecretKey, getPublicKey, httpAuthHeader, type NostrEvent, type SecretKey } from "@cinderous/core";
 import { beforeAll, describe, expect, it } from "vitest";
 import worker, { mintTurnResponse, turnPreflightResponse, RelayRoom, type Env } from "./worker.js";
-import { MAX_MESSAGES_PER_MINUTE } from "./host-config.js";
+import { MAX_MESSAGES_PER_MINUTE, PUBLIC_LANE_ADDRESSABLE_PER_AUTHOR } from "./host-config.js";
+import { namedLaneName } from "./shard.js";
+import { leadingZeroBits } from "./relay-core.js";
 
 const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as {
   DatabaseSync: typeof DatabaseSyncType;
@@ -871,12 +873,36 @@ describe("NIP-11 依路徑回該車道的文件（ADR-0366 P1 #6）", () => {
 });
 
 describe("車道 PoW（ADR-0366 P2 #11）", () => {
-  const publish = async (env: Env, lane: "strict" | "app", difficulty: number) => {
+  /**
+   * 「沒挖礦」不能只寫 `minePow(..., 0)`：那是一顆**隨機** id，而隨機 id 有 1/256 的
+   * 機率本來就帶 8 個前導零 ⇒ 該測試會偶發地變綠。實測抓到過一次。
+   * 這裡明確要求「低於門檻」，讓「未挖礦」這件事是確定的。
+   */
+  const belowDifficulty = (sk: SecretKey, difficulty: number): NostrEvent => {
+    for (let nonce = 0; ; nonce += 1) {
+      const e = finalizeEvent(
+        { kind: 1078, created_at: nowSec(), tags: [["t", "g"], ["n", String(nonce)]], content: "x" },
+        sk,
+      );
+      if (leadingZeroBits(e.id) < difficulty) return e;
+    }
+  };
+
+  const publish = async (
+    env: Env,
+    lane: "strict" | "app",
+    difficulty: number,
+    /** 要送一顆**達不到**這個難度的事件（測「未挖礦被拒」）。 */
+    below?: number,
+  ) => {
     const state = new FakeState();
     const room = newRoom(state, env);
     const ws = await open(room, state, lane);
     const sk = generateSecretKey();
-    const e = minePow({ kind: 1078, created_at: nowSec(), tags: [["t", "g"]], content: "x" }, sk, difficulty);
+    const e =
+      below === undefined
+        ? minePow({ kind: 1078, created_at: nowSec(), tags: [["t", "g"]], content: "x" }, sk, difficulty)
+        : belowDifficulty(sk, below);
     return send(room, ws, ["EVENT", e])[0] as [string, string, boolean, string];
   };
 
@@ -886,7 +912,7 @@ describe("車道 PoW（ADR-0366 P2 #11）", () => {
 
   it("設了就生效：未挖礦的事件被拒、挖過的收下", async () => {
     const env = { APP_LANE_POW: "8" } as Env;
-    const rejected = await publish(env, "app", 0);
+    const rejected = await publish(env, "app", 0, 8);
     expect(rejected[2]).toBe(false);
     expect(rejected[3]).toContain("pow");
     expect((await publish(env, "app", 8))[2]).toBe(true);
@@ -992,5 +1018,82 @@ describe("車道的成本護欄（ADR-0366 §容量）", () => {
     expect((out[0] as string[])[0]).toBe("NOTICE");
     expect(String((out[0] as string[])[1])).toMatch(/rate-limited/);
     expect(ws.closed).toBe(true);
+  });
+});
+
+describe("已知租戶名單（ADR-0366 §裁示）", () => {
+  /** 回傳 [DO 名, HTTP 狀態]。 */
+  const route = async (path: string, lanes?: string): Promise<[string, number]> => {
+    let doName = "";
+    const env = {
+      ...(lanes === undefined ? {} : { APP_LANES: lanes }),
+      RELAY_ROOM: {
+        idFromName: (n: string) => {
+          doName = n;
+          return {} as never;
+        },
+        get: () => ({ fetch: () => new Response(null, { status: 101 }) }),
+      },
+    } as unknown as Env;
+    const res = await worker.fetch(
+      new Request(`https://${HOST}${path}`, { headers: { Upgrade: "websocket" } }),
+      env,
+    );
+    return [doName, res.status];
+  };
+
+  it("名單上的車道有自己的 DO", async () => {
+    const [doName, status] = await route("/app/lwd", "lwd, elementalist");
+    expect(doName).toBe(namedLaneName("lwd"));
+    expect(status).toBe(101);
+  });
+
+  it("🔴 不在名單上的照常服務，只是共用雜湊分片——錨點同時是公用 relay", async () => {
+    const [doName, status] = await route("/app/someoneelse", "lwd, elementalist");
+    expect(status).toBe(101);
+    expect(doName).toMatch(/^app-[0-7]$/);
+    expect(doName).not.toBe(namedLaneName("someoneelse"));
+  });
+
+  it("沒設名單＝沒有已知租戶，全部共用分片（車道剛上線時的行為）", async () => {
+    const [doName, status] = await route("/app/lwd");
+    expect(status).toBe(101);
+    expect(doName).toMatch(/^app-[0-7]$/);
+  });
+
+  it("配額跟著名單走：已知租戶 64、公用車道 16，且休眠後仍然一致", async () => {
+    /** 對某顆 DO 連續發 n 筆可尋址事件（各自不同 `d`），回傳被接受的筆數。 */
+    const accepted = async (lanes: string | undefined, n: number): Promise<number> => {
+      const state = new FakeState();
+      const env = (lanes === undefined ? {} : { APP_LANES: lanes }) as unknown as Env;
+      const room = newRoom(state, env);
+      const ws = await open(room, state, "app");
+      ws.drain();
+      const sk = generateSecretKey();
+      let ok = 0;
+      for (let i = 0; i < n; i += 1) {
+        const event = finalizeEvent(
+          {
+            kind: 31081,
+            created_at: nowSec(),
+            tags: [["d", `deck-${i}`]],
+            content: "{}",
+          },
+          sk,
+        );
+        const out = send(room, ws, ["EVENT", event]) as [string, string, boolean, string][];
+        if (out.find((m) => m[0] === "OK")?.[2] === true) ok += 1;
+      }
+      return ok;
+    };
+
+    // 公用車道：第 17 筆被拒
+    expect(await accepted(undefined, PUBLIC_LANE_ADDRESSABLE_PER_AUTHOR + 1)).toBe(
+      PUBLIC_LANE_ADDRESSABLE_PER_AUTHOR,
+    );
+    // 名單上的車道（DO 名不同，這裡以 `/app/testgame` 進來）：同樣筆數全收
+    expect(await accepted("testgame", PUBLIC_LANE_ADDRESSABLE_PER_AUTHOR + 1)).toBe(
+      PUBLIC_LANE_ADDRESSABLE_PER_AUTHOR + 1,
+    );
   });
 });

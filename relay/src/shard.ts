@@ -64,7 +64,30 @@ export function appLaneName(laneId: string): string {
  */
 export type RelayRoute =
   | { profile: "strict"; doName: string }
-  | { profile: "app"; doName: string; laneId: string };
+  | {
+      profile: "app";
+      doName: string;
+      laneId: string;
+      /**
+       * 這條車道在站方的**已知租戶名單**（`APP_LANES`）上嗎（ADR-0366 §裁示）。
+       *
+       * 🔴 **名單不是門禁**：沒列的照樣連得上——錨點同時是公用 relay。名單決定的是
+       * **落在哪顆 DO**（因而決定儲存配額）：列了就有自己的 DO，沒列的共用雜湊分片。
+       * 它也**不是憑證**：車道 id 是自報的，陌生人打 `/app/lwd` 一樣會落進那顆 DO
+       * （§決策 1）。買到的是「我們知道形狀的流量」與「陌生流量」不共用一顆 DO 的血條。
+       */
+      known: boolean;
+    };
+
+/**
+ * 已知租戶的專屬 DO 名（ADR-0366 §裁示）。
+ *
+ * 用冒號而不是 `app-<id>`：後者會讓一條叫做 `3` 的車道與雜湊分片 `app-3` 共用 DO，
+ * 而 `LANE_ID` 不允許冒號 ⇒ 這個命名空間乾淨、撞不到。
+ */
+export function namedLaneName(laneId: string): string {
+  return `app:${laneId}`;
+}
 
 /**
  * 由請求 URL 路徑決定路由（ADR-0366 §決策 2／4）。**認不得就回 `undefined`，宿主拒絕連線。**
@@ -72,7 +95,8 @@ export type RelayRoute =
  *  - `/s/<prefix>`（單 hex nibble）→ `shard-<prefix>`（訊息片，嚴格）
  *  - `/presence` → presence 層（嚴格）
  *  - `/`（含空字串）→ 舊全域（嚴格；ADR-0241 遷移期回退，最低版本閘前的舊客戶端仍走這裡）
- *  - `/app/<laneId>` → `app-<hash%8>`（第三方車道，寬鬆）
+ *  - `/app/<laneId>` → 在 `knownLanes` 名單上＝ `app:<laneId>`（自己的 DO），
+ *    否則 `app-<hash%8>`（共用分片）。**兩者都服務**——名單不是門禁（§裁示）
  *  - **其他一律 `undefined`**
  *
  * 🔴 **刻意不設預設值。** 原本是「認不得的路徑一律落到 `global`」，那讓
@@ -81,7 +105,10 @@ export type RelayRoute =
  * 與「拒絕連線」的失誤（功能壞掉、當場看得見）代價完全不對稱。
  * 兩邊都正面列舉、其餘拒絕，就沒有預設值可以掉進去。
  */
-export function routeForPath(pathname: string): RelayRoute | undefined {
+export function routeForPath(
+  pathname: string,
+  knownLanes?: ReadonlySet<string>,
+): RelayRoute | undefined {
   const path = pathname.replace(/\/+$/, ""); // 容忍尾斜線
   if (path === "") return { profile: "strict", doName: LEGACY_GLOBAL_NAME };
 
@@ -95,7 +122,13 @@ export function routeForPath(pathname: string): RelayRoute | undefined {
     const laneId = lane[1].toLowerCase();
     // 形狀不合法就拒絕，不是「清乾淨後放行」——放行等於讓兩個不同的字串映到同一條車道。
     if (!LANE_ID.test(laneId)) return undefined;
-    return { profile: "app", doName: appLaneName(laneId), laneId };
+    const known = knownLanes?.has(laneId) === true;
+    return {
+      profile: "app",
+      doName: known ? namedLaneName(laneId) : appLaneName(laneId),
+      laneId,
+      known,
+    };
   }
 
   return undefined;
