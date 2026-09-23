@@ -1122,3 +1122,54 @@ describe("NIP-13 難度量測是轉引，不是各抄一份（ADR-0366 P2 #11）
     if (out?.message[2] === false) expect(String(out.message[3])).toContain("pow");
   });
 });
+
+describe("RelayCore — 每連線訊息速率上限（ADR-0366 §容量）", () => {
+  /** 進站訊息是中繼站的計費單位，而 REQ／CLOSE 不是事件——per-pubkey 的事件限速看不到它們。 */
+  const core = (perMinute: number, now: () => number) =>
+    new RelayCore({ maxMessagesPerMinute: perMinute, now });
+
+  it("超過上限：回 NOTICE 並要求宿主關閉該連線", () => {
+    let clock = 1_700_000_000;
+    const relay = core(3, () => clock);
+    relay.connect("c1");
+    for (let i = 0; i < 3; i += 1) {
+      expect(relay.handle("c1", REQ(`s${i}`, { kinds: [20000] }))[0]?.close).toBeUndefined();
+    }
+    const out = relay.handle("c1", REQ("s3", { kinds: [20000] }));
+    expect(out).toHaveLength(1);
+    expect(out[0]?.to).toBe("c1");
+    expect(out[0]?.message[0]).toBe("NOTICE");
+    expect(String(out[0]?.message[1])).toMatch(/rate-limited/);
+    // 🔴 關閉是重點：不關的話，同一條連線可以繼續燒額度，而擋在升級處的 IP 限速
+    // 只看得到「新連線」。兩道一起才有界。
+    expect(out[0]?.close).toBe(true);
+  });
+
+  it("各連線各算各的——一條被擋不影響另一條", () => {
+    let clock = 1_700_000_000;
+    const relay = core(1, () => clock);
+    relay.connect("a");
+    relay.connect("b");
+    relay.handle("a", REQ("s1", { kinds: [20000] }));
+    expect(relay.handle("a", REQ("s2", { kinds: [20000] }))[0]?.close).toBe(true);
+    expect(relay.handle("b", REQ("s1", { kinds: [20000] }))[0]?.close).toBeUndefined();
+  });
+
+  it("過了一分鐘就重置（固定窗，與事件限速同一套演算法）", () => {
+    let clock = 1_700_000_000;
+    const relay = core(1, () => clock);
+    relay.connect("c1");
+    relay.handle("c1", REQ("s1", { kinds: [20000] }));
+    expect(relay.handle("c1", REQ("s2", { kinds: [20000] }))[0]?.close).toBe(true);
+    clock += 60;
+    expect(relay.handle("c1", REQ("s3", { kinds: [20000] }))[0]?.close).toBeUndefined();
+  });
+
+  it("未設定＝不限制（自架站與測試維持原行為）", () => {
+    const relay = new RelayCore();
+    relay.connect("c1");
+    for (let i = 0; i < 50; i += 1) {
+      expect(relay.handle("c1", REQ(`s${i}`, { kinds: [20000] }))[0]?.close).toBeUndefined();
+    }
+  });
+});

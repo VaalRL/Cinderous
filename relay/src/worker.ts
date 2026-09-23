@@ -54,6 +54,21 @@ export interface Env {
    * 它是成本乘數，不是閘門。
    */
   TURN_LIMIT?: { limit(opts: { key: string }): Promise<{ success: boolean }> };
+  /**
+   * 第三方車道的**升級**速率限制（ADR-0366 §容量）：以 **IP** 計數，超過即 429，
+   * 而且在碰到 DO 之前就擋掉。**未綁定＝不限速**（本地開發與自架站無此 binding）。
+   *
+   * 🔴 為什麼是 IP 而不是 pubkey：車道不要求 AUTH，pubkey 由發送方自選、換一把是
+   * 微秒級的事（ADR-0342 §3.1 同一個結論）。要限速就得綁比較貴的東西。
+   *
+   * 🔴 為什麼只擋升級不夠、要和 `maxMessagesPerMinute` 一起看：一條已經建立的連線
+   * 可以持續灌訊息而完全不需要再升級。核心那一道超限就關連線，關了要回來就得再升級
+   * ——兩道接起來，每個 IP 的**持續**成本才是有界的。
+   *
+   * ⚠ 嚴格平面刻意不套：那裡是本專案自己的使用者、且要求 NIP-42，而行動網路的
+   * 共用 IP 會讓一整群人共用同一個桶。
+   */
+  APP_LANE_LIMIT?: { limit(opts: { key: string }): Promise<{ success: boolean }> };
   // ── NIP-11 Relay Information Document（ADR-0260／0089／0092）─────────────────
   /** 站名／描述／營運者公鑰（hex）／聯絡方式；未設＝該欄不出現在文件裡。 */
   RELAY_NAME?: string;
@@ -226,6 +241,15 @@ export default {
     // 任何 catch-all 都是一條把流量靜默送進錯誤政策的路。兩邊正面列舉、其餘 404。
     const route = routeForPath(url.pathname);
     if (!route) return new Response("unknown relay path", { status: 404 });
+    // 車道的成本護欄（ADR-0366 §容量）：以 IP 計數的升級限速，在碰 DO 之前就擋掉。
+    // `CF-Connecting-IP` 由 Cloudflare 填寫、客戶端偽造不了；**缺了就不限**——
+    // 那代表根本不在 CF 後面，此時退回單一 key 會讓所有人共用一個額度，
+    // 第一個濫用者就把全站擋死（那比不限還糟）。
+    const clientIp = request.headers.get("CF-Connecting-IP");
+    if (route.profile === "app" && env.APP_LANE_LIMIT && clientIp) {
+      const { success } = await env.APP_LANE_LIMIT.limit({ key: clientIp });
+      if (!success) return new Response("rate limited", { status: 429 });
+    }
     // 原始 request 原封不動轉給 DO——DO 對**同一個路徑**跑**同一個** `routeForPath` 算出政策，
     // 所以兩邊不可能不一致。刻意不用標頭傳遞：那要 clone request，而「`Upgrade` 標頭在
     // clone 之後還在不在」是平台細節，賭它不如不賭。
@@ -378,9 +402,18 @@ export class RelayRoom {
   }
 
   private dispatch(outbound: Outbound[]): void {
-    for (const { to, message } of outbound) {
+    for (const { to, message, close } of outbound) {
       const [ws] = this.ctx.getWebSockets(to); // 以 connId tag 找回該連線
       ws?.send(JSON.stringify(message));
+      if (!close) continue;
+      // 超限即關（ADR-0366 §容量）：訊息一旦抵達那次請求就已經付掉了，只回一則
+      // NOTICE 擋不住成本。關掉之後要回來就得重新升級，而那一關有 IP 限速。
+      this.core.disconnect(to); // 伺服端主動關閉不保證會觸發 webSocketClose
+      try {
+        ws?.close(1008, "rate-limited");
+      } catch {
+        /* 已關閉 */
+      }
     }
   }
 }

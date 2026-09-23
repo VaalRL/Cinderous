@@ -23,6 +23,19 @@ export const MAX_SUBSCRIPTIONS = 16;
 /** 每 pubkey 每分鐘事件上限（ADR-0235 H1）。真實用量遠低於此（自適應心跳 60/300s）。 */
 export const MAX_EVENTS_PER_MINUTE = 120;
 
+/**
+ * 每連線每分鐘**進站訊息**上限（ADR-0366 §容量）。超過即 NOTICE ＋ 關閉連線。
+ *
+ * 🔴 為什麼不能只有上面那一條：`MAX_EVENTS_PER_MINUTE` 只數 EVENT，而 Cloudflare 的
+ * 計費單位是**進站訊息**。一組 `REQ` ＋ `CLOSE` 就是兩次請求，開了又關可以無限重複，
+ * 完全不經過事件限速——健康探針正是這個形狀，實測下來它比整場對局還貴。
+ *
+ * 240 是「遠高於任何正常客戶端、又擋得住灌水」的一條線：必須**大於**
+ * {@link MAX_EVENTS_PER_MINUTE}，否則發事件的人會先撞到這一條，
+ * 那等於把事件上限偷偷改小（檔案分塊上傳就是連續的 EVENT）。此不變量由測試釘死。
+ */
+export const MAX_MESSAGES_PER_MINUTE = 240;
+
 /** AUTH 事件最大年齡（秒；ADR-0235 H2）：NIP-42 建議，限制側錄簽名的可用時間。 */
 export const AUTH_MAX_AGE_SEC = 600;
 
@@ -53,6 +66,7 @@ export const ABUSE_GUARD = {
   maxSubscriptions: MAX_SUBSCRIPTIONS,
   authMaxAgeSec: AUTH_MAX_AGE_SEC,
   maxEventsPerMinute: MAX_EVENTS_PER_MINUTE,
+  maxMessagesPerMinute: MAX_MESSAGES_PER_MINUTE,
   maxFutureSkewSec: MAX_FUTURE_SKEW_SEC,
   maxPastSkewSec: MAX_PAST_SKEW_SEC,
   replayWindowSec: REPLAY_WINDOW_SEC,
@@ -155,6 +169,24 @@ export function eventsPerMinuteFrom(raw: string | undefined): number | undefined
   const n = Number(raw);
   if (!Number.isFinite(n)) return MAX_EVENTS_PER_MINUTE;
   return n >= 1 ? Math.floor(n) : undefined;
+}
+
+/**
+ * 由 `MAX_MESSAGES_PER_MINUTE` 原始字串算出每連線訊息上限（node 自架可覆寫）。
+ * 未設／壞值 → 預設 {@link MAX_MESSAGES_PER_MINUTE}；<1 視為關閉（undefined）。
+ *
+ * 🔴 **永遠不低於事件上限的兩倍**：自架者把 `MAX_EVENTS_PER_MINUTE` 調高之後，
+ * 若訊息上限還夾在 240，他調的那個數字就是假的——而症狀是「事件被擋，
+ * 但訊息說 rate-limited」，兩種完全不同的診斷。
+ */
+export function messagesPerMinuteFrom(
+  raw: string | undefined,
+  eventsPerMinute: number | undefined,
+): number | undefined {
+  const n = raw === undefined ? NaN : Number(raw);
+  const base = !Number.isFinite(n) ? MAX_MESSAGES_PER_MINUTE : n >= 1 ? Math.floor(n) : undefined;
+  if (base === undefined) return undefined;
+  return eventsPerMinute === undefined ? base : Math.max(base, eventsPerMinute * 2);
 }
 
 /**

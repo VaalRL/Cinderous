@@ -51,6 +51,51 @@ describe("wrangler vars 兩份同步（ADR-0354）", () => {
   });
 });
 
+describe("速率限制 binding 兩份同步（ADR-0366 §容量）", () => {
+  /** 讀出某個前綴底下所有 `[[…ratelimits]]` 的 name → "limit/period"。 */
+  function limitsOf(prefix: string): Record<string, string> {
+    const lines = TOML.split("\n");
+    const out: Record<string, string> = {};
+    let name = "";
+    for (let i = 0; i < lines.length; i += 1) {
+      const line = lines[i]!.split("#")[0]!.trim();
+      if (line === `[[${prefix}ratelimits]]`) {
+        name = "";
+        continue;
+      }
+      const n = /^name\s*=\s*"([^"]*)"$/.exec(line);
+      if (n) name = n[1]!;
+      if (line === `[${prefix}ratelimits.simple]` && name) {
+        const limit = /^limit\s*=\s*(\d+)$/.exec(lines[i + 1]!.trim())?.[1];
+        const period = /^period\s*=\s*(\d+)$/.exec(lines[i + 2]!.trim())?.[1];
+        out[name] = `${limit}/${period}`;
+      }
+    }
+    return out;
+  }
+
+  const top = limitsOf("");
+  const unified = limitsOf("env.unified.");
+
+  it("讀得出兩份——讀不到就是這支測試自己壞了", () => {
+    expect(Object.keys(top).length).toBeGreaterThan(0);
+    expect(Object.keys(unified).length).toBeGreaterThan(0);
+  });
+
+  it("🔴 車道升級限速必須存在——它是車道成本唯一擋在 DO 之前的那道", () => {
+    // 沒有它的話，`worker.ts` 那段 `env.APP_LANE_LIMIT &&` 會靜默跳過，
+    // 而症狀是「一切正常，只是帳單在漲」。
+    expect(top["APP_LANE_LIMIT"]).toBeDefined();
+  });
+
+  it("🔴 頂層有的每一個 binding，統一模式也要有同樣的額度", () => {
+    const drift = Object.entries(top)
+      .filter(([k, v]) => unified[k] !== v)
+      .map(([k, v]) => `${k}：頂層 ${v} ≠ unified ${unified[k]}`);
+    expect(drift, drift.join("\n")).toEqual([]);
+  });
+});
+
 describe("贊助管道（ADR-0089）", () => {
   it("設定的是完整的 https 網址，不是裸 ID", () => {
     // 客戶端的 `parseDonations` 走 `safeWebUrl`，裸 ID 會被整個丟掉——設了等於沒設。

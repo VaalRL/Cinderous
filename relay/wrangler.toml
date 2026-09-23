@@ -43,6 +43,20 @@ namespace_id = "1001"
 limit = 20
 period = 60
 
+# 第三方車道的升級速率限制（ADR-0366 §容量）：以 **IP** 計數。
+# 車道不要求 NIP-42，pubkey 由發送方自選 ⇒ 限速只能綁比較貴的東西（同 ADR-0342 §3.1）。
+# 30/60s 對正常客戶端綽綽有餘（一個客戶端整場對局只升級一兩次；additive 池最多幾條），
+# 但讓「開了又關」的連線灌水變得不划算。與核心的每連線訊息上限（240/分）配成一對：
+# 一條連線超限就被關，要回來得重新升級，而升級這一關就是這裡。
+# ⚠ 同樣是 per-location 計數且最終一致——成本乘數，不是閘門。
+[[ratelimits]]
+name = "APP_LANE_LIMIT"
+namespace_id = "1002"
+
+[ratelimits.simple]
+limit = 30
+period = 60
+
 # ── 統一節點模式（ADR-0354，選配）───────────────────────────────────────────────
 # 預設（上面那份設定）＝**純 relay**：只轉發密文，不送任何程式碼給瀏覽器——攻擊面最小，
 # 官方錨點站恆用此模式。下面的 `unified` 環境則讓**同一座 Worker 同時是網頁版**：
@@ -94,4 +108,12 @@ namespace_id = "1001"
 
 [env.unified.ratelimits.simple]
 limit = 20
+period = 60
+
+[[env.unified.ratelimits]]
+name = "APP_LANE_LIMIT"
+namespace_id = "1002"
+
+[env.unified.ratelimits.simple]
+limit = 30
 period = 60

@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { TIMESTAMP_JITTER_SECONDS } from "@cinderous/core";
 import { describe, expect, it } from "vitest";
-import { ABUSE_GUARD, APP_ADDRESSABLE_PER_AUTHOR, MAX_EVENTS_PER_MINUTE, MAX_PAST_SKEW_SEC, MAX_POW_DIFFICULTY, TTL_CAP_DAYS, acceptFileEvents, eventsPerMinuteFrom, firstHost, guardFor, powForLane, storeOptions, ttlSecondsFromDays } from "./host-config.js";
+import { ABUSE_GUARD, APP_ADDRESSABLE_PER_AUTHOR, MAX_EVENTS_PER_MINUTE, MAX_MESSAGES_PER_MINUTE, messagesPerMinuteFrom, MAX_PAST_SKEW_SEC, MAX_POW_DIFFICULTY, TTL_CAP_DAYS, acceptFileEvents, eventsPerMinuteFrom, firstHost, guardFor, powForLane, storeOptions, ttlSecondsFromDays } from "./host-config.js";
 
 // 宿主組裝設定（ADR-0235 H1）。H1 的教訓是「組裝層沒人測」——防護在 core 裡寫對了也測了，
 // 但 worker 從未把參數傳進去。這裡把常數與衍生邏輯的**不變量**釘死，兩座宿主不可能各走各的。
@@ -187,5 +187,34 @@ describe("PoW 難度依車道（ADR-0366 P2 #11）", () => {
   it("guardFor 本身不帶 PoW——env 的讀取留在宿主（同 eventsPerMinuteFrom 的做法）", () => {
     expect((guardFor("app") as Record<string, unknown>).minPowDifficulty).toBeUndefined();
     expect((guardFor("strict") as Record<string, unknown>).minPowDifficulty).toBeUndefined();
+  });
+});
+
+describe("訊息速率上限（ADR-0366 §容量）", () => {
+  it("🔴 必須大於事件上限，否則等於偷偷把事件上限改小", () => {
+    // 檔案分塊上傳是連續的 EVENT（ADR-0162）；訊息上限若低於事件上限，
+    // 發事件的人會先撞到訊息上限並被關線——而那條的訊息會寫「rate-limited」，
+    // 與「事件太多」是兩種完全不同的診斷。
+    expect(MAX_MESSAGES_PER_MINUTE).toBeGreaterThan(MAX_EVENTS_PER_MINUTE);
+  });
+
+  it("自架站把事件上限調高時，訊息上限跟著抬——否則等於沒調到", () => {
+    // `MAX_EVENTS_PER_MINUTE=1000` 的自架者如果還被 240 則訊息夾住，
+    // 他調的那個數字就是假的，而且症狀是「事件被擋，訊息卻說 rate-limited」。
+    expect(messagesPerMinuteFrom(undefined, 1000)).toBeGreaterThanOrEqual(1000);
+    expect(messagesPerMinuteFrom(undefined, undefined)).toBe(MAX_MESSAGES_PER_MINUTE);
+    expect(messagesPerMinuteFrom(undefined, MAX_EVENTS_PER_MINUTE)).toBe(MAX_MESSAGES_PER_MINUTE);
+    // 明示覆寫仍受同一條規則約束
+    expect(messagesPerMinuteFrom("300", 1000)).toBeGreaterThanOrEqual(1000);
+    expect(messagesPerMinuteFrom("600", undefined)).toBe(600);
+    // <1＝關掉（與事件上限同一套語意）
+    expect(messagesPerMinuteFrom("0", 1000)).toBeUndefined();
+    expect(messagesPerMinuteFrom("亂寫", undefined)).toBe(MAX_MESSAGES_PER_MINUTE);
+  });
+
+  it("兩種 profile 都吃同一個上限——它是濫用防護，不是車道政策", () => {
+    for (const profile of ["strict", "app"] as const) {
+      expect(guardFor(profile).maxMessagesPerMinute, profile).toBe(MAX_MESSAGES_PER_MINUTE);
+    }
   });
 });

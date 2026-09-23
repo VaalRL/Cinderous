@@ -74,6 +74,15 @@ export { leadingZeroBits } from "@cinderous/core";
 export interface Outbound {
   to: string;
   message: RelayMessage;
+  /**
+   * 送出這則之後**關閉該連線**（ADR-0366 §容量）。
+   *
+   * 為什麼需要：進站訊息就是中繼站的計費單位，訊息一旦抵達，那次請求已經付掉了
+   * ——只回一則 NOTICE 擋不住成本，對方可以在同一條連線上繼續灌。關掉它，濫用者
+   * 就得重新升級連線，而升級那一關有以 IP 計數的速率限制（`worker.ts`）。
+   * 兩道一起才把「每個 IP 的持續成本」壓成有界。
+   */
+  close?: true;
 }
 
 /** 某連線的可序列化狀態快照（供 DO 休眠後還原；ADR-0059）。 */
@@ -134,6 +143,17 @@ export interface RelayCoreOptions {
    * 無限灌事件。以 pubkey（而非連線）計數——否則換條連線就繞過去了。
    */
   maxEventsPerMinute?: number;
+  /**
+   * 每連線每分鐘可送進來的**訊息**數上限（ADR-0366 §容量）。超過即 NOTICE ＋ 關閉連線。
+   *
+   * 🔴 為什麼不能只靠 {@link maxEventsPerMinute}：那一項只數 EVENT，而**進站訊息才是
+   * 計費單位**。`REQ`／`CLOSE` 一來一回就是兩次請求，開了又關可以無限重複，
+   * 完全不經過事件限速——健康探針正是這個形狀，而它是實測下來最貴的一項。
+   *
+   * 以連線（而非 pubkey）計數，是因為要擋的東西發生在認證之前、也可能根本不發事件。
+   * 換連線確實能繞過，那正是為什麼宿主端要再有一道以 IP 為鍵的升級限速。
+   */
+  maxMessagesPerMinute?: number;
   /**
    * 企業封閉模式（ADR-0044）：僅允許名單內 pubkey（hex）發布事件的 allowlist。
    * 未設＝開放中繼（現況）。設定後非名單成員的任何事件（含心跳）一律拒收，
@@ -199,6 +219,8 @@ export class RelayCore {
   private readonly seenIds = new Map<string, number>();
   /** pubkey → 該時間窗內的發布數與窗起點（ADR-0235 H1 速率限制）。 */
   private readonly rate = new Map<string, { windowStart: number; count: number }>();
+  /** connId → 該時間窗內的進站訊息數與窗起點（ADR-0366 §容量）。 */
+  private readonly connRate = new Map<string, { windowStart: number; count: number }>();
   /** 企業封閉模式的發布 allowlist（hex pubkey）；undefined＝開放（ADR-0044）。 */
   private readonly allowed: Set<string> | undefined;
   /** 企業政策的事件類型 allowlist（kind）；undefined＝不限制（ADR-0048）。 */
@@ -258,6 +280,7 @@ export class RelayCore {
     this.subs.delete(connId);
     this.authState.delete(connId);
     this.connHost.delete(connId);
+    this.connRate.delete(connId);
   }
 
   /**
@@ -306,6 +329,17 @@ export class RelayCore {
    */
   handle(connId: string, raw: string): Outbound[] {
     try {
+      // 🔴 最前面：這一關要在 JSON.parse **與**長度檢查之前，因為它擋的不是內容而是**次數**。
+      const perMinute = this.opts.maxMessagesPerMinute;
+      if (perMinute !== undefined && !this.allowConnRate(connId, this.now(), perMinute)) {
+        return [
+          {
+            to: connId,
+            message: ["NOTICE", "rate-limited: 訊息過於頻繁，連線將關閉（ADR-0366）"],
+            close: true,
+          },
+        ];
+      }
       return this.dispatch(connId, raw);
     } catch {
       // 不回傳例外細節（不給探測訊號）；宿主連線維持存活。
@@ -660,6 +694,22 @@ export class RelayCore {
    * 累積式演算法在這種環境下只是假象。固定窗即使被休眠重置，也仍然把「單次爆量」
    * 壓在上限以內，而那正是要防的東西。
    */
+  /**
+   * 每連線的固定窗計數（ADR-0366 §容量）。與 {@link allowRate} 同一套演算法與同一個理由：
+   * DO 會休眠、記憶體會被清空，滑動窗在這種環境下只是假象；固定窗即使被休眠重置，
+   * 也仍然把**單次爆量**壓在上限以內，而那正是要防的東西。
+   */
+  private allowConnRate(connId: string, nowSec: number, perMinute: number): boolean {
+    const entry = this.connRate.get(connId);
+    if (!entry || nowSec - entry.windowStart >= 60) {
+      this.connRate.set(connId, { windowStart: nowSec, count: 1 });
+      return true;
+    }
+    if (entry.count >= perMinute) return false;
+    entry.count += 1;
+    return true;
+  }
+
   private allowRate(pubkey: string, nowSec: number, perMinute: number): boolean {
     const entry = this.rate.get(pubkey);
     if (!entry || nowSec - entry.windowStart >= 60) {

@@ -6,7 +6,7 @@ import { createServer } from "node:http";
 import { createRequire } from "node:module";
 import type { DatabaseSync as DatabaseSyncType } from "node:sqlite";
 import { WebSocketServer, type WebSocket } from "ws";
-import { acceptFileEvents, eventsPerMinuteFrom, firstHost, guardFor, storeOptions } from "./host-config.js";
+import { acceptFileEvents, eventsPerMinuteFrom, firstHost, guardFor, messagesPerMinuteFrom, storeOptions } from "./host-config.js";
 import { buildRelayInfo, NIP11_HEADERS, wantsRelayInfo } from "./nip11.js";
 import { RelayCore, type Outbound, type RelayCoreOptions } from "./relay-core.js";
 import { type SqlExec, SqlMessageStore } from "./sql-message-store.js";
@@ -42,6 +42,10 @@ const coreOptions: RelayCoreOptions = { store, ...guardFor("strict"), requireAut
 const rate = eventsPerMinuteFrom(process.env.MAX_EVENTS_PER_MINUTE);
 if (rate === undefined) delete coreOptions.maxEventsPerMinute;
 else coreOptions.maxEventsPerMinute = rate;
+// 訊息上限跟著事件上限走（ADR-0366 §容量）：調高事件上限的自架站不該被訊息上限偷偷夾住。
+const msgRate = messagesPerMinuteFrom(process.env.MAX_MESSAGES_PER_MINUTE, rate);
+if (msgRate === undefined) delete coreOptions.maxMessagesPerMinute;
+else coreOptions.maxMessagesPerMinute = msgRate;
 if (acceptFileEvents(process.env.MAX_FILE_MB)) coreOptions.acceptFileEvents = true;
 const core = new RelayCore(coreOptions);
 
@@ -67,7 +71,12 @@ const relayInfo = buildRelayInfo({
 const sockets = new Map<string, WebSocket>();
 let counter = 0;
 const dispatch = (out: Outbound[]): void => {
-  for (const { to, message } of out) sockets.get(to)?.send(JSON.stringify(message));
+  for (const { to, message, close } of out) {
+    const ws = sockets.get(to);
+    ws?.send(JSON.stringify(message));
+    // 超限即關（ADR-0366 §容量）：與 Cloudflare 宿主同一個行為，否則自架站少一道護欄。
+    if (close) ws?.close(1008, "rate-limited");
+  }
 };
 
 // 掛在 HTTP 伺服器上：一般請求回 200（讓 PaaS/容器健康檢查通過，比照 Cloudflare worker），

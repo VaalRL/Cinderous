@@ -14,6 +14,7 @@ import type { DatabaseSync as DatabaseSyncType } from "node:sqlite";
 import { buildAuthEvent, buildHttpAuthEvent, finalizeEvent, minePow, generateSecretKey, getPublicKey, httpAuthHeader, type NostrEvent, type SecretKey } from "@cinderous/core";
 import { beforeAll, describe, expect, it } from "vitest";
 import worker, { mintTurnResponse, turnPreflightResponse, RelayRoom, type Env } from "./worker.js";
+import { MAX_MESSAGES_PER_MINUTE } from "./host-config.js";
 
 const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as {
   DatabaseSync: typeof DatabaseSyncType;
@@ -903,5 +904,93 @@ describe("車道 PoW（ADR-0366 P2 #11）", () => {
     const e = finalizeEvent({ kind: 1078, created_at: nowSec(), tags: [], content: "x" }, sk);
     const ok = send(room, ws, ["EVENT", e])[0] as [string, string, boolean, string];
     expect(ok[2]).toBe(true); // 沒有 PoW 也收得下
+  });
+});
+
+describe("車道的成本護欄（ADR-0366 §容量）", () => {
+  /** 以 IP 為鍵的升級速率限制替身；記下每次被問到的 key。 */
+  const limiter = (allow: boolean) => {
+    const keys: string[] = [];
+    return {
+      keys,
+      binding: {
+        limit: (opts: { key: string }) => {
+          keys.push(opts.key);
+          return Promise.resolve({ success: allow });
+        },
+      },
+    };
+  };
+
+  /** 送一次升級請求；回傳 [狀態碼, 是否碰到 DO]。 */
+  const upgrade = async (path: string, env: Partial<Env>, ip?: string): Promise<[number, boolean]> => {
+    let touchedDo = false;
+    const full = {
+      ...env,
+      RELAY_ROOM: {
+        idFromName: () => {
+          touchedDo = true;
+          return {} as never;
+        },
+        get: () => ({ fetch: () => new Response(null, { status: 101 }) }),
+      },
+    } as unknown as Env;
+    const headers: Record<string, string> = { Upgrade: "websocket" };
+    if (ip !== undefined) headers["CF-Connecting-IP"] = ip;
+    const res = await worker.fetch(new Request(`https://${HOST}${path}`, { headers }), full);
+    return [res.status, touchedDo];
+  };
+
+  it("車道升級超過 IP 限額：429，且**根本不碰 DO**", async () => {
+    const { binding, keys } = limiter(false);
+    const [status, touchedDo] = await upgrade("/app/testgame", { APP_LANE_LIMIT: binding }, "203.0.113.7");
+    expect(status).toBe(429);
+    expect(touchedDo).toBe(false);
+    expect(keys).toEqual(["203.0.113.7"]); // 以 IP 計數，不是 pubkey——換一把金鑰是微秒級的事
+  });
+
+  it("額度內照常升級", async () => {
+    const { binding } = limiter(true);
+    const [status, touchedDo] = await upgrade("/app/testgame", { APP_LANE_LIMIT: binding }, "203.0.113.7");
+    expect(status).toBe(101);
+    expect(touchedDo).toBe(true);
+  });
+
+  it("🔴 嚴格平面不受此限制——那裡是本專案自己的使用者，且要求 NIP-42", async () => {
+    const { binding, keys } = limiter(false);
+    for (const path of ["/", "/s/a", "/presence"]) {
+      const [status] = await upgrade(path, { APP_LANE_LIMIT: binding }, "203.0.113.7");
+      expect(status, path).toBe(101);
+    }
+    expect(keys).toEqual([]);
+  });
+
+  it("沒有 CF-Connecting-IP 就不限——不是把所有人塞進同一個桶", async () => {
+    // 該標頭由 Cloudflare 填寫、客戶端偽造不了；缺了代表根本不在 CF 後面，
+    // 此時用單一 key 會讓**所有人共用一個額度**，第一個濫用者就把全站擋死。
+    const { binding, keys } = limiter(false);
+    const [status] = await upgrade("/app/testgame", { APP_LANE_LIMIT: binding });
+    expect(status).toBe(101);
+    expect(keys).toEqual([]);
+  });
+
+  it("沒綁定＝不限速（本地開發與自架站不該因此壞掉）", async () => {
+    const [status] = await upgrade("/app/testgame", {}, "203.0.113.7");
+    expect(status).toBe(101);
+  });
+
+  it("每連線訊息上限觸發時，宿主送出 NOTICE 之後真的把連線關掉", async () => {
+    // 用 CLOSE 灌：它不佔訂閱數上限，測的就是「訊息次數」本身。
+    const state = new FakeState();
+    const room = newRoom(state);
+    const ws = await open(room, state, "app");
+    for (let i = 0; i < MAX_MESSAGES_PER_MINUTE; i += 1) {
+      send(room, ws, ["CLOSE", "s1"]);
+      expect(ws.closed, `第 ${i + 1} 則就被關掉了`).toBe(false);
+    }
+    const out = send(room, ws, ["CLOSE", "s1"]);
+    expect((out[0] as string[])[0]).toBe("NOTICE");
+    expect(String((out[0] as string[])[1])).toMatch(/rate-limited/);
+    expect(ws.closed).toBe(true);
   });
 });
