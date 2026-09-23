@@ -280,6 +280,23 @@ export const PUBLIC_LANE_ADDRESSABLE_BYTES_PER_AUTHOR = 2 * 1024 * 1024;
 export const PUBLIC_LANE_RETENTION_SECONDS = 2 * 60 * 60;
 
 /**
+ * **整顆 DO** 的可尋址容量天花板（ADR-0367 §決策 2）。
+ *
+ * 見習保存讓水位不會一直漲，天花板保證**極端情況也不撐爆**——兩者互補：
+ * 前者管「平均」，後者管「最壞」。超過時車道淘汰**最快到期**者，
+ * 而見習中的資料天然排在最前面（§決策 1 的直接結果，不是巧合）。
+ *
+ * 🔴 **嚴格平面只拒收、不淘汰**（{@link storeOptions} 只對車道打開淘汰）：
+ * 那裡的資料是使用者的加密雲端快照，ADR-0071 承諾「活躍即永久」——
+ * 刪別人的備份不可逆，而拒收看得見（回 `OK false`，營運者查得到）。
+ *
+ * ⚠ **這個數字待實測校準**（同 ADR-0006 對容量的處理）：它必須夠大才不會擋到正常用量
+ * （嚴格平面 128MB ≈ 100 位使用者的雲端快照），又必須小到單顆 DO 不會撞上平台上限。
+ * 帳號層級的總量是「天花板 × DO 數」，ADR-0006 的免費額度天花板不因此解除。
+ */
+export const DO_ADDRESSABLE_MAX_BYTES = 128 * 1024 * 1024;
+
+/**
  * 站方的已知租戶名單（`APP_LANES`，逗號分隔；ADR-0366 §裁示）。
  *
  * 🔴 **它不是白名單**：不在名單上的車道照常服務——錨點同時是公用 relay。
@@ -328,6 +345,9 @@ export function storeOptions(
   return {
     maxPerRecipient: MAX_PER_RECIPIENT,
     addressableBytesPerAuthor: bytesPerAuthor,
+    addressableMaxTotalBytes: DO_ADDRESSABLE_MAX_BYTES,
+    // 車道淘汰、嚴格平面拒收（ADR-0367 §決策 2）：刪別人的加密備份不可逆。
+    ...(profile === "app" ? { addressableCeilingEvicts: true } : {}),
     ...(ttl !== undefined ? { maxTtlSeconds: ttl } : {}),
     ...(profile === "app"
       ? { addressablePerAuthor: addressable, addressableMaxBytes: APP_ADDRESSABLE_MAX_BYTES }

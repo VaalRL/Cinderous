@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { TIMESTAMP_JITTER_SECONDS } from "@cinderous/core";
 import { describe, expect, it } from "vitest";
-import { ABUSE_GUARD, APP_ADDRESSABLE_PER_AUTHOR, MAX_EVENTS_PER_MINUTE, MAX_MESSAGES_PER_MINUTE, messagesPerMinuteFrom, MAX_PAST_SKEW_SEC, APP_ADDRESSABLE_BYTES_PER_AUTHOR, APP_ADDRESSABLE_MAX_BYTES, MAX_POW_DIFFICULTY, PUBLIC_LANE_ADDRESSABLE_BYTES_PER_AUTHOR, PUBLIC_LANE_ADDRESSABLE_PER_AUTHOR, PUBLIC_LANE_RETENTION_SECONDS, STRICT_ADDRESSABLE_BYTES_PER_AUTHOR, TTL_CAP_DAYS, knownLanes, acceptFileEvents, eventsPerMinuteFrom, firstHost, guardFor, powForLane, storeOptions, ttlSecondsFromDays } from "./host-config.js";
+import { ABUSE_GUARD, APP_ADDRESSABLE_PER_AUTHOR, MAX_EVENTS_PER_MINUTE, MAX_MESSAGES_PER_MINUTE, messagesPerMinuteFrom, MAX_PAST_SKEW_SEC, APP_ADDRESSABLE_BYTES_PER_AUTHOR, APP_ADDRESSABLE_MAX_BYTES, DO_ADDRESSABLE_MAX_BYTES, MAX_POW_DIFFICULTY, PUBLIC_LANE_ADDRESSABLE_BYTES_PER_AUTHOR, PUBLIC_LANE_ADDRESSABLE_PER_AUTHOR, PUBLIC_LANE_RETENTION_SECONDS, STRICT_ADDRESSABLE_BYTES_PER_AUTHOR, TTL_CAP_DAYS, knownLanes, acceptFileEvents, eventsPerMinuteFrom, firstHost, guardFor, powForLane, storeOptions, ttlSecondsFromDays } from "./host-config.js";
 
 // 宿主組裝設定（ADR-0235 H1）。H1 的教訓是「組裝層沒人測」——防護在 core 裡寫對了也測了，
 // 但 worker 從未把參數傳進去。這裡把常數與衍生邏輯的**不變量**釘死，兩座宿主不可能各走各的。
@@ -44,6 +44,7 @@ describe("host-config：TTL 天數 → 秒（ADR-0160）", () => {
     const base = {
       maxPerRecipient: 500,
       addressableBytesPerAuthor: STRICT_ADDRESSABLE_BYTES_PER_AUTHOR,
+      addressableMaxTotalBytes: DO_ADDRESSABLE_MAX_BYTES,
     };
     expect(storeOptions(undefined)).toEqual(base);
     expect(storeOptions("90")).toEqual({ ...base, maxTtlSeconds: 90 * 86_400 });
@@ -326,5 +327,25 @@ describe("公用分片的短保存（ADR-0367 §決策 1）", () => {
     const bytesPerMinute = MAX_MESSAGES_PER_MINUTE * APP_ADDRESSABLE_MAX_BYTES;
     const steadyState = (bytesPerMinute * PUBLIC_LANE_RETENTION_SECONDS) / 60;
     expect(steadyState).toBeLessThan(1024 ** 3); // 一條連線的穩態水位 < 1GB
+  });
+});
+
+describe("DO 容量天花板（ADR-0367 §決策 2）", () => {
+  it("三種情境都有天花板，但只有車道會淘汰", () => {
+    for (const opts of [
+      storeOptions(undefined, "app", true),
+      storeOptions(undefined, "app", false),
+      storeOptions(undefined, "strict"),
+    ]) {
+      expect(opts.addressableMaxTotalBytes).toBe(DO_ADDRESSABLE_MAX_BYTES);
+    }
+    expect(storeOptions(undefined, "app", true).addressableCeilingEvicts).toBe(true);
+    expect(storeOptions(undefined, "app", false).addressableCeilingEvicts).toBe(true);
+    // 🔴 嚴格平面不淘汰：刪別人的加密備份不可逆，拒收看得見
+    expect(storeOptions(undefined, "strict").addressableCeilingEvicts).toBeUndefined();
+  });
+
+  it("天花板必須遠大於單一作者的總量預算，否則一個人就能佔滿整顆 DO", () => {
+    expect(DO_ADDRESSABLE_MAX_BYTES).toBeGreaterThanOrEqual(8 * STRICT_ADDRESSABLE_BYTES_PER_AUTHOR);
   });
 });

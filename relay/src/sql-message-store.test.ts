@@ -454,3 +454,66 @@ describe("SQL 版的可尋址容量閘與記憶體版一致（ADR-0366 §容量�
     ]);
   });
 });
+
+describe("SQL 版的 DO 天花板與記憶體版一致（ADR-0367 §決策 2）", () => {
+  const sized2 = (pubkey: string, d: string, bytes: number, expiresAt: number): NostrEvent =>
+    ({
+      id: `${pubkey}-${d}`,
+      pubkey,
+      created_at: 1000,
+      kind: 31081,
+      tags: [["d", d], ["expiration", String(expiresAt)]],
+      content: "x".repeat(bytes),
+      sig: "",
+    }) as NostrEvent;
+
+  const writes: NostrEvent[] = [
+    sized2("a", "soon", 200, 2000),
+    sized2("a", "later", 200, 5000),
+    sized2("a", "latest", 200, 9000),
+    sized2("a", "new", 200, 9000), // 觸發淘汰
+    sized2("b", "huge", 5_000, 9000), // 單顆就超過 → 拒收
+  ];
+
+  /** 容量用實際序列化長度算：取「最大的 n 筆」（四顆事件的 `d` 長度不同）。 */
+  const roomFor = (n: number): number =>
+    writes
+      .slice(0, 4)
+      .map((e) => JSON.stringify(e).length)
+      .sort((a, b) => b - a)
+      .slice(0, n)
+      .reduce((sum, len) => sum + len, 0);
+
+  it("淘汰模式：兩個實作對同一串寫入給出同一串答案與同一批倖存者", () => {
+    const opts = {
+      addressableMaxTotalBytes: roomFor(3),
+      addressableCeilingEvicts: true,
+      addressablePerAuthor: 64,
+    };
+    const sql = new SqlMessageStore(nodeSqlExec(), opts);
+    const mem = new MessageStore(opts);
+    const sqlR = writes.map((e) => sql.putAddressable(e, 1000));
+    const memR = writes.map((e) => mem.putAddressable(e, 1000));
+    expect(sqlR).toEqual(memR);
+    expect(sqlR).toEqual([true, true, true, true, false]);
+
+    const survivors = (s: SqlMessageStore | MessageStore): string[] =>
+      s
+        .query(f({ kinds: [31081], authors: ["a", "b"] }), 1000)
+        .map((e) => e.tags.find((t) => t[0] === "d")?.[1] ?? "")
+        .sort();
+    expect(survivors(sql)).toEqual(survivors(mem));
+    expect(survivors(sql)).toEqual(["later", "latest", "new"]);
+  });
+
+  it("拒收模式：兩個實作都不動既有資料", () => {
+    const opts = { addressableMaxTotalBytes: roomFor(3), addressablePerAuthor: 64 };
+    const sql = new SqlMessageStore(nodeSqlExec(), opts);
+    const mem = new MessageStore(opts);
+    // ⚠ 每個 store 只跑一次——再跑一次是在已經有資料的 store 上寫，答案當然不同。
+    const sqlResults = writes.map((e) => sql.putAddressable(e, 1000));
+    const memResults = writes.map((e) => mem.putAddressable(e, 1000));
+    expect(sqlResults).toEqual(memResults);
+    expect(sqlResults).toEqual([true, true, true, false, false]);
+  });
+});

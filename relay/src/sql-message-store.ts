@@ -182,7 +182,7 @@ export class SqlMessageStore implements OfflineStore {
   putAddressable(event: NostrEvent, nowSec: number): boolean {
     const d = dTagOf(event); // 可取代事件無 `d` → 空字串 → 每 (kind,pubkey) 只留一顆
     const existing = this.sql(
-      `SELECT id, created_at FROM addressable WHERE kind = ? AND pubkey = ? AND d = ?`,
+      `SELECT id, created_at, LENGTH(json) AS len FROM addressable WHERE kind = ? AND pubkey = ? AND d = ?`,
       event.kind,
       event.pubkey,
       d,
@@ -218,6 +218,9 @@ export class SqlMessageStore implements OfflineStore {
     }
     const eff = effectiveExpiration(event, nowSec, this.opts.addressableTtlSeconds ?? ADDRESSABLE_TTL_SECONDS);
     if (eff <= nowSec) return false;
+    if (!this.fitsAddressableCeiling(json.length, (prev?.len as number | undefined) ?? 0)) {
+      return false;
+    }
     this.sql(
       `INSERT OR REPLACE INTO addressable (kind, pubkey, d, id, created_at, expiration, json) VALUES (?, ?, ?, ?, ?, ?, ?)`,
       event.kind,
@@ -229,6 +232,38 @@ export class SqlMessageStore implements OfflineStore {
       json,
     );
     return true;
+  }
+
+  /**
+   * 這顆 DO 還放得下這筆可尋址事件嗎（ADR-0367 §決策 2）。行為與記憶體版逐字對齊：
+   * 車道淘汰**最快到期**者直到騰出空間；嚴格平面直接拒收。
+   *
+   * `replacedLen` 是**即將被取代**的那一列的長度——它會被換掉，不該算進已用空間。
+   */
+  private fitsAddressableCeiling(size: number, replacedLen: number): boolean {
+    const max = this.opts.addressableMaxTotalBytes;
+    if (max === undefined) return true;
+    if (size > max) return false; // 單顆就超過：淘汰也救不了，別把整顆 DO 清空
+    const total =
+      (this.sql(`SELECT COALESCE(SUM(LENGTH(json)), 0) AS n FROM addressable`)[0]?.n as number) ?? 0;
+    let used = total - replacedLen;
+    if (used + size <= max) return true;
+    if (this.opts.addressableCeilingEvicts !== true) return false;
+    // 依到期時間由近而遠淘汰。一次取一批（而非逐列查），避免極端情況下打上百次查詢。
+    const victims = this.sql(
+      `SELECT kind, pubkey, d, LENGTH(json) AS len FROM addressable ORDER BY expiration ASC LIMIT 256`,
+    );
+    for (const row of victims) {
+      if (used + size <= max) break;
+      this.sql(
+        `DELETE FROM addressable WHERE kind = ? AND pubkey = ? AND d = ?`,
+        row.kind as number,
+        row.pubkey as string,
+        row.d as string,
+      );
+      used -= (row.len as number) ?? 0;
+    }
+    return used + size <= max;
   }
 
   /**

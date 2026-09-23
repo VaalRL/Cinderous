@@ -55,6 +55,21 @@ export interface MessageStoreOptions {
    * 乘上 {@link addressableMaxBytes}。這一條擋的是「單一身分無限累積」。
    */
   addressableBytesPerAuthor?: number;
+  /**
+   * **整顆 DO** 的可尋址總位元組天花板（ADR-0367 §決策 2）；未設＝不限制。
+   *
+   * 每作者總量擋不住換金鑰（pubkey 不用錢），所以還需要一道與身分無關的上限。
+   * 超過時的行為由 {@link addressableCeilingEvicts} 決定。
+   */
+  addressableMaxTotalBytes?: number;
+  /**
+   * 達到天花板時**淘汰最快到期者**（true）或**拒收新寫入**（false，預設）。
+   *
+   * 🔴 嚴格平面一律 false：那裡的資料是使用者的加密雲端快照，ADR-0071 承諾
+   * 「活躍即永久」——刪別人的備份不可逆，而拒收看得見。車道才用淘汰，
+   * 而且「最快到期優先」讓見習中的資料天然排最前面（ADR-0367 §決策 1）。
+   */
+  addressableCeilingEvicts?: boolean;
 }
 
 /** 預設留言壽命上限：7 天（對齊 client 端 gift wrap 的預設 TTL）。 */
@@ -261,10 +276,39 @@ export class MessageStore implements OfflineStore {
     }
     const eff = effectiveExpiration(event, nowSec, this.opts.addressableTtlSeconds ?? ADDRESSABLE_TTL_SECONDS);
     if (eff <= nowSec) return false;
+    if (!this.fitsAddressableCeiling(key, size)) return false;
     if (existing) this.effExp.delete(existing.id);
     this.addressable.set(key, event);
     this.effExp.set(event.id, eff);
     return true;
+  }
+
+  /**
+   * 這顆 DO 還放得下這筆可尋址事件嗎（ADR-0367 §決策 2）。
+   * 放不下時：車道淘汰**最快到期**者直到騰出空間；嚴格平面直接回 false（拒收）。
+   */
+  private fitsAddressableCeiling(key: string, size: number): boolean {
+    const max = this.opts.addressableMaxTotalBytes;
+    if (max === undefined) return true;
+    if (size > max) return false; // 單顆就超過：淘汰也救不了，別把整顆 DO 清空
+    let used = 0;
+    for (const [k, e] of this.addressable) {
+      if (k === key) continue; // 取代既有位址：舊的那筆會被換掉，不計
+      used += JSON.stringify(e).length;
+    }
+    if (used + size <= max) return true;
+    if (this.opts.addressableCeilingEvicts !== true) return false;
+    // 依到期時間由近而遠淘汰，直到騰得出空間
+    const byExpiry = [...this.addressable.entries()]
+      .filter(([k]) => k !== key)
+      .sort((a, b) => (this.effExp.get(a[1].id) ?? 0) - (this.effExp.get(b[1].id) ?? 0));
+    for (const [k, e] of byExpiry) {
+      if (used + size <= max) break;
+      used -= JSON.stringify(e).length;
+      this.addressable.delete(k);
+      this.effExp.delete(e.id);
+    }
+    return used + size <= max;
   }
 
   /** 寫入一筆留言；若已過期則拒絕並回 false。 */
