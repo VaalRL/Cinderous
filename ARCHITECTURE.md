@@ -73,7 +73,7 @@
 
 ## 5. 事件契約（Nostr Kind 對照）
 
-> 內容一律 NIP-44 加密；私訊以 NIP-17（kind 14 → kind 13 seal → kind 1059 Gift Wrap）隱藏收發雙方。中繼站要求 **NIP-42 AUTH ＋ 具名訂閱**（帶 `#p`／`authors`，ADR-0057／0123）；AUTH 另驗 `relay` tag 指向本站與事件新鮮度（ADR-0235，擋中間人轉發挑戰）。持久化事件可要求 NIP-13 PoW（`minPow`，**生產仍未強制——客戶端無挖礦實作，啟用會讓現有安裝無法發訊息**）。
+> 內容一律 NIP-44 加密；私訊以 NIP-17（kind 14 → kind 13 seal → kind 1059 Gift Wrap）隱藏收發雙方。中繼站要求 **NIP-42 AUTH ＋ 具名訂閱**（帶 `#p`／`authors`，ADR-0057／0123）；AUTH 另驗 `relay` tag 指向本站與事件新鮮度（ADR-0235，擋中間人轉發挑戰）。持久化事件可要求 NIP-13 PoW（`minPow`）。**訊息平面仍未強制**——現有安裝沒有挖礦實作，啟用會讓它們發不出訊息；core 自 ADR-0366 起提供 `minePow`（與中繼端共用同一個 `leadingZeroBits`），但那是**新的**，現有安裝不會有它。第三方車道另有 `APP_LANE_POW` 旋鈕，**預設同樣為 0**（ADR-0366 P2）。
 >
 > **濫用防護（ADR-0235，產線已啟用）**：解析層驗事件結構（`tags` 必為字串陣列的陣列——畸形結構可通過驗簽卻讓中繼拋例外）；單則訊息 384KB、單顆事件 256KB、tag 128 個、`p` tag 16 個；每 pubkey 120 事件/分；每連線 16 個訂閱；查詢一律有 `LIMIT`（1024）且條件下推 SQL。**時鐘窗是非對稱的**——未來 15 分、過去 `TIMESTAMP_JITTER_SECONDS + 1h`，因為 NIP-59 刻意把外層 `created_at` 往前推最多 2 天（對稱窗會擋掉幾乎每一則 Gift Wrap）；重放去重只涵蓋近 1 小時（封裝事件由收件端以 `rumor.id` 去重，真正要擋的是裸心跳被重放偽造在線）。
 

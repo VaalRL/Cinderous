@@ -1,5 +1,5 @@
 import { verifyHttpAuth } from "@cinderous/core";
-import { acceptFileEvents, firstHost, guardFor, type RelayProfile, storeOptions } from "./host-config.js";
+import { acceptFileEvents, firstHost, guardFor, powForLane, type RelayProfile, storeOptions } from "./host-config.js";
 import { buildRelayInfo, NIP11_HEADERS, wantsRelayInfo } from "./nip11.js";
 import { RELAY_WORKER_VERSION } from "./version.js";
 import { RelayCore, type ConnSnapshot, type Outbound } from "./relay-core.js";
@@ -28,6 +28,14 @@ export interface Env {
    * 值目前僅作開關（實際上限由名冊政策 relayFilesMaxMb ≤16 控制）。
    */
   MAX_FILE_MB?: string;
+  /**
+   * 第三方車道的 NIP-13 PoW 難度（ADR-0366 P2 #11）。未設＝0（不要求）。
+   *
+   * 🔴 打開之前**必須先確認該車道的客戶端會挖礦**（core 的 `minePow`）——否則它們的
+   * 持久化事件會全部被拒，而客戶端那邊看到的只是 `OK false`。嚴格平面不受此變數影響
+   * （恆為 0，見 `host-config.powForLane`）。
+   */
+  APP_LANE_POW?: string;
   /**
    * 公共 TURN 保底（ADR-0243）：Cloudflare TURN 的 Key ID。與 `TURN_API_TOKEN` 一起設定後，
    * `GET /turn` 會向 Cloudflare 換發**短期**憑證回給客戶端（餵進 `buildRtcConfig` 的 turnServers）。
@@ -283,9 +291,11 @@ export class RelayRoom {
     // store 與 core 必須用**同一個** profile 組起來——拆開就會出現
     // 「core 是車道、store 還套著嚴格配額」這種只在第 6 份牌組才看得出來的錯。
     this.store = new SqlMessageStore(this.exec, storeOptions(this.env.MAX_TTL_DAYS, profile));
+    const pow = powForLane(profile, this.env.APP_LANE_POW);
     return new RelayCore({
       store: this.store,
       ...guardFor(profile),
+      ...(pow > 0 ? { minPowDifficulty: pow } : {}),
       ...(acceptFileEvents(this.env.MAX_FILE_MB) ? { acceptFileEvents: true } : {}),
     });
   }

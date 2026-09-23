@@ -11,7 +11,7 @@
 
 import { createRequire } from "node:module";
 import type { DatabaseSync as DatabaseSyncType } from "node:sqlite";
-import { buildAuthEvent, buildHttpAuthEvent, finalizeEvent, generateSecretKey, getPublicKey, httpAuthHeader, type NostrEvent, type SecretKey } from "@cinderous/core";
+import { buildAuthEvent, buildHttpAuthEvent, finalizeEvent, minePow, generateSecretKey, getPublicKey, httpAuthHeader, type NostrEvent, type SecretKey } from "@cinderous/core";
 import { beforeAll, describe, expect, it } from "vitest";
 import worker, { mintTurnResponse, turnPreflightResponse, RelayRoom, type Env } from "./worker.js";
 
@@ -122,6 +122,7 @@ beforeAll(() => {
   };
 });
 
+const nowSec = (): number => Math.floor(Date.now() / 1000);
 const HOST = "cinder-relay.example";
 const RELAY_URL = `wss://${HOST}`;
 
@@ -865,5 +866,42 @@ describe("NIP-11 依路徑回該車道的文件（ADR-0366 P1 #6）", () => {
     for (const p of ["/", "/app/x"]) {
       expect((await docAt(p)).cinder_max_past_skew_sec, p).toBeGreaterThan(0);
     }
+  });
+});
+
+describe("車道 PoW（ADR-0366 P2 #11）", () => {
+  const publish = async (env: Env, lane: "strict" | "app", difficulty: number) => {
+    const state = new FakeState();
+    const room = newRoom(state, env);
+    const ws = await open(room, state, lane);
+    const sk = generateSecretKey();
+    const e = minePow({ kind: 1078, created_at: nowSec(), tags: [["t", "g"]], content: "x" }, sk, difficulty);
+    return send(room, ws, ["EVENT", e])[0] as [string, string, boolean, string];
+  };
+
+  it("未設 APP_LANE_POW → 車道照收未挖礦的持久化事件（預設不打開）", async () => {
+    expect((await publish({} as Env, "app", 0))[2]).toBe(true);
+  });
+
+  it("設了就生效：未挖礦的事件被拒、挖過的收下", async () => {
+    const env = { APP_LANE_POW: "8" } as Env;
+    const rejected = await publish(env, "app", 0);
+    expect(rejected[2]).toBe(false);
+    expect(rejected[3]).toContain("pow");
+    expect((await publish(env, "app", 8))[2]).toBe(true);
+  });
+
+  it("🔴 同一個變數對嚴格平面無效——自架者設錯不會鎖死自己的訊息平面", async () => {
+    const env = { APP_LANE_POW: "8" } as Env;
+    const state = new FakeState();
+    const room = newRoom(state, env);
+    const ws = await open(room, state); // 嚴格
+    // 嚴格平面要 AUTH，先認證再發一顆沒挖過的持久化事件。
+    const sk = generateSecretKey();
+    const challenge = (ws.drain()[0] as [string, string])[1];
+    send(room, ws, ["AUTH", buildAuthEvent(challenge, RELAY_URL, sk)]);
+    const e = finalizeEvent({ kind: 1078, created_at: nowSec(), tags: [], content: "x" }, sk);
+    const ok = send(room, ws, ["EVENT", e])[0] as [string, string, boolean, string];
+    expect(ok[2]).toBe(true); // 沒有 PoW 也收得下
   });
 });

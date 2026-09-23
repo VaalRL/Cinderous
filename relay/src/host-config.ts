@@ -79,6 +79,23 @@ export const APP_LANE_GUARD = {
   requireAuth: false,
 } as const satisfies Partial<RelayCoreOptions>;
 
+/**
+ * PoW 難度上限（ADR-0366 P2 #11）。
+ *
+ * 期望嘗試次數是 `2^difficulty`，所以這個數字實質上是「還挖得動嗎」的界線：
+ * 2^32 已經是分鐘級，再往上設就不是防濫用而是拒絕服務——而且是**對誠實使用者**的。
+ */
+export const MAX_POW_DIFFICULTY = 32;
+
+/**
+ * 由環境變數算出 PoW 難度（ADR-0366 P2 #11）。未設／壞值／負數 → 0（不要求）。
+ */
+export function powFrom(raw: string | undefined): number {
+  const n = Number(raw ?? 0);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  return Math.min(Math.floor(n), MAX_POW_DIFFICULTY);
+}
+
 /** 路由出來的政策代號（`shard.ts` 的 `RelayRoute.profile`）。 */
 export type RelayProfile = "strict" | "app";
 
@@ -90,6 +107,27 @@ export type RelayProfile = "strict" | "app";
  */
 export function guardFor(profile: RelayProfile): Partial<RelayCoreOptions> {
   return profile === "app" ? { ...APP_LANE_GUARD } : { requireAuth: true, ...ABUSE_GUARD };
+}
+
+/**
+ * 本車道的 PoW 難度（ADR-0366 P2 #11）。
+ *
+ * 🔴 **嚴格平面恆為 0，而且不是設定，是事實**：本專案沒有任何挖礦實作，
+ * 客戶端發不出帶 PoW 的事件（ARCHITECTURE §5：「啟用會讓現有安裝無法發訊息」）。
+ * core 的 `minePow` 是這一批才加的，現有安裝不會有它。
+ *
+ * 🔴 **第三方車道預設也是 0**，原因與原本的預期不同：ADR-0366 §決策 7 寫「第三方客戶端
+ * 現在才在寫 ⇒ 第一天就要求即無相容性包袱」——但實際查下來，《元素使》的
+ * `claude/project-initialization-status-sqvfqh` **已經有能跑的 `packages/nostr`**，
+ * 而它發布的可尋址牌組事件是持久化事件 ⇒ 今天打開就會弄壞一個正在運作的客戶端。
+ * ⇒ 旋鈕做好、預設關閉，由 `APP_LANE_POW` 在下游備妥挖礦後開啟。
+ *
+ * ⚠ 打開之前要知道它**打不到**哪裡：PoW 只檢查**持久化**事件（`relay-core` 的
+ * `if (!isEphemeral(kind))`）。大廳心跳與信令是 ephemeral ⇒ 不受影響——這正好是對的
+ * （它們不佔儲存），但也意味著 PoW 擋不住大廳灌水，那條要靠 IP 限速。
+ */
+export function powForLane(profile: RelayProfile, appLanePowRaw: string | undefined): number {
+  return profile === "app" ? powFrom(appLanePowRaw) : 0;
 }
 
 /**

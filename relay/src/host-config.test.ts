@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { TIMESTAMP_JITTER_SECONDS } from "@cinderous/core";
 import { describe, expect, it } from "vitest";
-import { ABUSE_GUARD, APP_ADDRESSABLE_PER_AUTHOR, MAX_EVENTS_PER_MINUTE, MAX_PAST_SKEW_SEC, TTL_CAP_DAYS, acceptFileEvents, eventsPerMinuteFrom, firstHost, guardFor, storeOptions, ttlSecondsFromDays } from "./host-config.js";
+import { ABUSE_GUARD, APP_ADDRESSABLE_PER_AUTHOR, MAX_EVENTS_PER_MINUTE, MAX_PAST_SKEW_SEC, MAX_POW_DIFFICULTY, TTL_CAP_DAYS, acceptFileEvents, eventsPerMinuteFrom, firstHost, guardFor, powForLane, storeOptions, ttlSecondsFromDays } from "./host-config.js";
 
 // 宿主組裝設定（ADR-0235 H1）。H1 的教訓是「組裝層沒人測」——防護在 core 裡寫對了也測了，
 // 但 worker 從未把參數傳進去。這裡把常數與衍生邏輯的**不變量**釘死，兩座宿主不可能各走各的。
@@ -157,5 +157,35 @@ describe("node-relay 是單一 profile 且恆為嚴格（ADR-0366 §決策 8 ／
   it("政策取自 host-config 的 SSOT，而不是另抄一份常數", () => {
     expect(SRC).toContain('guardFor("strict")');
     expect(SRC).not.toContain("...ABUSE_GUARD");
+  });
+});
+
+describe("PoW 難度依車道（ADR-0366 P2 #11）", () => {
+  it("🔴 嚴格平面恆為 0——那不是設定，是事實（本專案的現有安裝不會挖礦）", () => {
+    expect(powForLane("strict", "20")).toBe(0);
+    expect(powForLane("strict", undefined)).toBe(0);
+  });
+
+  it("🔴 第三方車道**預設也是 0**——《元素使》已有能跑的客戶端，今天打開會弄壞它", () => {
+    expect(powForLane("app", undefined)).toBe(0);
+    expect(powForLane("app", "")).toBe(0);
+    expect(powForLane("app", "0")).toBe(0);
+  });
+
+  it("設定後生效，且夾在可挖得動的範圍內", () => {
+    expect(powForLane("app", "16")).toBe(16);
+    expect(powForLane("app", "999")).toBe(MAX_POW_DIFFICULTY);
+    expect(powForLane("app", "8.9")).toBe(8);
+  });
+
+  it("壞值當成不要求，而不是當成很高（fail-open 在這裡才是對的）", () => {
+    // 設錯一個字就把整條車道鎖死，比「防護沒開」難查得多——而防護沒開是看得出來的。
+    expect(powForLane("app", "abc")).toBe(0);
+    expect(powForLane("app", "-5")).toBe(0);
+  });
+
+  it("guardFor 本身不帶 PoW——env 的讀取留在宿主（同 eventsPerMinuteFrom 的做法）", () => {
+    expect((guardFor("app") as Record<string, unknown>).minPowDifficulty).toBeUndefined();
+    expect((guardFor("strict") as Record<string, unknown>).minPowDifficulty).toBeUndefined();
   });
 });

@@ -2,6 +2,7 @@ import {
   AUTH_KIND,
   authChallengeOf,
   authRelayMatches,
+  leadingZeroBits,
   VANISH_KIND,
   vanishTargetsRelay,
   verifyEvent,
@@ -64,21 +65,10 @@ export function isEphemeral(kind: number): boolean {
   return kind >= EPHEMERAL_MIN && kind <= EPHEMERAL_MAX;
 }
 
-/** NIP-13：event id（hex）開頭的零位元數（工作量證明難度）。 */
-export function leadingZeroBits(hex: string): number {
-  let bits = 0;
-  for (const ch of hex) {
-    const nibble = Number.parseInt(ch, 16);
-    if (Number.isNaN(nibble)) break;
-    if (nibble === 0) {
-      bits += 4;
-      continue;
-    }
-    bits += Math.clz32(nibble) - 28;
-    break;
-  }
-  return bits;
-}
+// NIP-13 難度量測改由 core 供應並**轉引**（ADR-0366 P2 #11），與 `shard.ts` 對
+// `shardPrefix` 的處理同一個做法：挖礦端（core `minePow`）與驗證端（本檔）對難度的
+// 定義只要差一位元，症狀就是「客戶端算得很辛苦、中繼照樣拒收」，而且是安靜的。
+export { leadingZeroBits } from "@cinderous/core";
 
 /** 要送往某連線的一則訊息。 */
 export interface Outbound {

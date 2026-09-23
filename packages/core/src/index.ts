@@ -54,6 +54,7 @@ export * from "./hybrid-kem.js"; // 後量子 EK（ADR-0365；公告開關 EK_PQ
 export * from "./pairing.js";
 export * from "./at-rest.js";
 export * from "./passlock-web.js";
+export * from "./pow.js";
 export * from "./snapshot.js";
 export * from "./happy-eyeballs.js";
 export * from "./sync.js";
