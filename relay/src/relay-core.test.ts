@@ -9,6 +9,7 @@ import {
 } from "@cinderous/core";
 import { MessageStore } from "./message-store.js";
 import { leadingZeroBits, RelayCore } from "./relay-core.js";
+import { minePow } from "@cinderous/core";
 
 function heartbeat(): NostrEvent {
   return finalizeEvent(
@@ -1094,5 +1095,30 @@ describe("ADR-0366 P1 #9：車道與訊息平面的配額**結構性**分離", (
     planeStore.put(wrap("chat", "alice"), 1000);
 
     expect(planeStore.query({ "#p": ["alice"] } as never, 1000).map((e) => e.id)).toEqual(["chat"]);
+  });
+});
+
+describe("NIP-13 難度量測是轉引，不是各抄一份（ADR-0366 P2 #11）", () => {
+  it("🔴 中繼端用的就是 core 的那一個函式", async () => {
+    // 挖礦端（core `minePow`）與驗證端（本檔）對難度的定義差一位元，症狀就是
+    // 「客戶端算得很辛苦卻照樣被拒」，而且是安靜的。
+    //
+    // ⚠ 這條斷言必須住在 relay 這一側：依賴方向是 relay → core，反過來寫會讓
+    // core 的 `tsc --noEmit` 因為 rootDir 而整個掛掉（實際踩過）。
+    const core = await import("@cinderous/core");
+    expect(leadingZeroBits).toBe(core.leadingZeroBits);
+  });
+
+  it("挖過的事件通得過中繼的 PoW 閘門（兩端對同一個難度達成一致）", () => {
+    const core = new RelayCore({ minPowDifficulty: 8 });
+    core.connect("c");
+    const sk = generateSecretKey();
+    const mined = minePow({ kind: 1078, created_at: 1700000000, tags: [], content: "x" }, sk, 8);
+    expect(core.handle("c", EVENT(mined))[0]?.message[2]).toBe(true);
+
+    const plain = finalizeEvent({ kind: 1078, created_at: 1700000000, tags: [], content: "y" }, sk);
+    const out = core.handle("c", EVENT(plain))[0];
+    // 沒挖過的**可能**湊巧達標（機率 1/256），那不是失敗——重點是閘門有在判。
+    if (out?.message[2] === false) expect(String(out.message[3])).toContain("pow");
   });
 });

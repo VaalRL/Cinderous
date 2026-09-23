@@ -14,12 +14,6 @@ describe("NIP-13 難度量測", () => {
     expect(leadingZeroBits("00" + "f".repeat(62))).toBe(8);
     expect(leadingZeroBits("000f" + "f".repeat(60))).toBe(12);
   });
-
-  it("🔴 與中繼端是同一個函式（轉引，不是各抄一份）", async () => {
-    // 挖礦端與驗證端對難度的定義差一位元，症狀就是「算得很辛苦卻照樣被拒」，而且安靜。
-    const relay = await import("../../../relay/src/relay-core.js");
-    expect(relay.leadingZeroBits).toBe(leadingZeroBits);
-  });
 });
 
 describe("minePow", () => {
