@@ -297,6 +297,18 @@ export const PUBLIC_LANE_RETENTION_SECONDS = 2 * 60 * 60;
 export const DO_ADDRESSABLE_MAX_BYTES = 128 * 1024 * 1024;
 
 /**
+ * **整顆 DO** 的離線留言容量天花板（ADR-0367 §決策 2）。
+ *
+ * 🔴 為什麼 FIFO 不夠：`MAX_PER_RECIPIENT` 是每**收件人** 500 則，而收件人可以亂編；
+ * 更早的一個缺口是**沒有 `p` 標籤的事件全落在同一個「無收件人」桶，而 FIFO 根本不對
+ * 它執行** ⇒ 那個桶只被 TTL 壓著，而遊戲的房間／世界事件正是這個形狀。
+ *
+ * ⚠ 不要用 `MAX_PER_RECIPIENT` 去補那個桶：一場對決約 20 顆持久化事件，500 只夠 25 場
+ * ⇒ 熱門車道的房間歷史會被默默丟掉，而那是比塞爆更難查的故障。
+ */
+export const DO_OFFLINE_MAX_BYTES = 128 * 1024 * 1024;
+
+/**
  * 站方的已知租戶名單（`APP_LANES`，逗號分隔；ADR-0366 §裁示）。
  *
  * 🔴 **它不是白名單**：不在名單上的車道照常服務——錨點同時是公用 relay。
@@ -346,8 +358,9 @@ export function storeOptions(
     maxPerRecipient: MAX_PER_RECIPIENT,
     addressableBytesPerAuthor: bytesPerAuthor,
     addressableMaxTotalBytes: DO_ADDRESSABLE_MAX_BYTES,
+    offlineMaxTotalBytes: DO_OFFLINE_MAX_BYTES,
     // 車道淘汰、嚴格平面拒收（ADR-0367 §決策 2）：刪別人的加密備份不可逆。
-    ...(profile === "app" ? { addressableCeilingEvicts: true } : {}),
+    ...(profile === "app" ? { ceilingEvicts: true } : {}),
     ...(ttl !== undefined ? { maxTtlSeconds: ttl } : {}),
     ...(profile === "app"
       ? { addressablePerAuthor: addressable, addressableMaxBytes: APP_ADDRESSABLE_MAX_BYTES }

@@ -160,6 +160,8 @@ export class SqlMessageStore implements OfflineStore {
     const effExp = effectiveExpiration(event, nowSec, this.opts.maxTtlSeconds);
     const recipients = recipientsOf(event);
     const targets = recipients.length > 0 ? recipients : [""];
+    // 天花板照「列」算：每位收件人各一列（無 `p` 者一列，`recipient = ''`）。
+    if (!this.fitsOfflineCeiling(JSON.stringify(event).length * targets.length)) return false;
     const json = JSON.stringify(event);
     for (const recipient of targets) {
       this.sql(
@@ -235,6 +237,36 @@ export class SqlMessageStore implements OfflineStore {
   }
 
   /**
+   * 這顆 DO 還放得下這筆離線留言嗎（ADR-0367 §決策 2）。行為與記憶體版逐字對齊。
+   *
+   * 🔴 為什麼 FIFO 不夠：`enforceCap` 只對**真正的收件人**執行，而沒有 `p` 標籤的事件
+   * 落在 `recipient = ''` ⇒ 那個桶原本只被 TTL 壓著，而遊戲的房間事件正是這個形狀。
+   */
+  private fitsOfflineCeiling(size: number): boolean {
+    const max = this.opts.offlineMaxTotalBytes;
+    if (max === undefined) return true;
+    if (size > max) return false;
+    const total =
+      (this.sql(`SELECT COALESCE(SUM(LENGTH(json)), 0) AS n FROM offline_msgs`)[0]?.n as number) ?? 0;
+    let used = total;
+    if (used + size <= max) return true;
+    if (this.opts.ceilingEvicts !== true) return false;
+    const victims = this.sql(
+      `SELECT id, recipient, LENGTH(json) AS len FROM offline_msgs ORDER BY expiration ASC LIMIT 256`,
+    );
+    for (const row of victims) {
+      if (used + size <= max) break;
+      this.sql(
+        `DELETE FROM offline_msgs WHERE id = ? AND recipient = ?`,
+        row.id as string,
+        row.recipient as string,
+      );
+      used -= (row.len as number) ?? 0;
+    }
+    return used + size <= max;
+  }
+
+  /**
    * 這顆 DO 還放得下這筆可尋址事件嗎（ADR-0367 §決策 2）。行為與記憶體版逐字對齊：
    * 車道淘汰**最快到期**者直到騰出空間；嚴格平面直接拒收。
    *
@@ -248,7 +280,7 @@ export class SqlMessageStore implements OfflineStore {
       (this.sql(`SELECT COALESCE(SUM(LENGTH(json)), 0) AS n FROM addressable`)[0]?.n as number) ?? 0;
     let used = total - replacedLen;
     if (used + size <= max) return true;
-    if (this.opts.addressableCeilingEvicts !== true) return false;
+    if (this.opts.ceilingEvicts !== true) return false;
     // 依到期時間由近而遠淘汰。一次取一批（而非逐列查），避免極端情況下打上百次查詢。
     const victims = this.sql(
       `SELECT kind, pubkey, d, LENGTH(json) AS len FROM addressable ORDER BY expiration ASC LIMIT 256`,

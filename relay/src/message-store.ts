@@ -63,13 +63,24 @@ export interface MessageStoreOptions {
    */
   addressableMaxTotalBytes?: number;
   /**
-   * 達到天花板時**淘汰最快到期者**（true）或**拒收新寫入**（false，預設）。
+   * 達到天花板時**淘汰最快到期者**（true）或**拒收新寫入**（false，預設）。兩張表共用。
    *
    * 🔴 嚴格平面一律 false：那裡的資料是使用者的加密雲端快照，ADR-0071 承諾
    * 「活躍即永久」——刪別人的備份不可逆，而拒收看得見。車道才用淘汰，
    * 而且「最快到期優先」讓見習中的資料天然排最前面（ADR-0367 §決策 1）。
    */
-  addressableCeilingEvicts?: boolean;
+  ceilingEvicts?: boolean;
+  /**
+   * **整顆 DO** 的離線留言總位元組天花板（ADR-0367 §決策 2）；未設＝不限制。
+   *
+   * 🔴 為什麼 FIFO 不夠：`maxPerRecipient` 是每**收件人** 500 則，而收件人可以亂編；
+   * 更早的一個缺口是**沒有 `p` 標籤的事件落在同一個「無收件人」桶裡，而 FIFO 根本
+   * 不對它執行** ⇒ 那個桶只被 TTL 壓著。遊戲的房間／世界事件正是這個形狀。
+   *
+   * ⚠ 不要改用 `maxPerRecipient` 去補那個桶：一場對決約 20 顆持久化事件，500 只夠
+   * 25 場 ⇒ 熱門車道的房間歷史會被默默丟掉。位元組天花板＋依到期淘汰才是對的形狀。
+   */
+  offlineMaxTotalBytes?: number;
 }
 
 /** 預設留言壽命上限：7 天（對齊 client 端 gift wrap 的預設 TTL）。 */
@@ -283,6 +294,53 @@ export class MessageStore implements OfflineStore {
     return true;
   }
 
+  /** 目前離線留言佔用的位元組（每位收件人各算一份，與 SQL 版的「一列」對齊）。 */
+  private offlineBytes(): number {
+    let used = 0;
+    for (const e of this.noRecipient) used += JSON.stringify(e).length;
+    for (const bucket of this.byRecipient.values()) {
+      for (const e of bucket) used += JSON.stringify(e).length;
+    }
+    return used;
+  }
+
+  /**
+   * 這顆 DO 還放得下這筆離線留言嗎（ADR-0367 §決策 2）。
+   * 放不下時：車道淘汰**最快到期**者；嚴格平面直接拒收。
+   */
+  private fitsOfflineCeiling(size: number): boolean {
+    const max = this.opts.offlineMaxTotalBytes;
+    if (max === undefined) return true;
+    if (size > max) return false;
+    let used = this.offlineBytes();
+    if (used + size <= max) return true;
+    if (this.opts.ceilingEvicts !== true) return false;
+    const victims = [...this.effExp.entries()].sort((a, b) => a[1] - b[1]).map(([id]) => id);
+    for (const id of victims) {
+      if (used + size <= max) break;
+      used -= this.dropOffline(id);
+    }
+    return used + size <= max;
+  }
+
+  /** 從所有桶移除某個 id，回傳釋放的位元組。 */
+  private dropOffline(id: string): number {
+    let freed = 0;
+    const keep = (e: NostrEvent): boolean => {
+      if (e.id !== id) return true;
+      freed += JSON.stringify(e).length;
+      return false;
+    };
+    this.noRecipient = this.noRecipient.filter(keep);
+    for (const [recipient, bucket] of this.byRecipient) {
+      const next = bucket.filter(keep);
+      if (next.length === 0) this.byRecipient.delete(recipient);
+      else this.byRecipient.set(recipient, next);
+    }
+    if (freed > 0) this.effExp.delete(id);
+    return freed;
+  }
+
   /**
    * 這顆 DO 還放得下這筆可尋址事件嗎（ADR-0367 §決策 2）。
    * 放不下時：車道淘汰**最快到期**者直到騰出空間；嚴格平面直接回 false（拒收）。
@@ -297,7 +355,7 @@ export class MessageStore implements OfflineStore {
       used += JSON.stringify(e).length;
     }
     if (used + size <= max) return true;
-    if (this.opts.addressableCeilingEvicts !== true) return false;
+    if (this.opts.ceilingEvicts !== true) return false;
     // 依到期時間由近而遠淘汰，直到騰得出空間
     const byExpiry = [...this.addressable.entries()]
       .filter(([k]) => k !== key)
@@ -314,8 +372,11 @@ export class MessageStore implements OfflineStore {
   /** 寫入一筆留言；若已過期則拒絕並回 false。 */
   put(event: NostrEvent, nowSec: number): boolean {
     if (this.isExpired(event, nowSec)) return false;
-    this.effExp.set(event.id, effectiveExpiration(event, nowSec, this.opts.maxTtlSeconds));
     const recipients = recipientsOf(event);
+    // 一則事件在每位收件人底下各存一份（SQL 版就是各一列），天花板要照這個算。
+    const copies = Math.max(1, recipients.length);
+    if (!this.fitsOfflineCeiling(JSON.stringify(event).length * copies)) return false;
+    this.effExp.set(event.id, effectiveExpiration(event, nowSec, this.opts.maxTtlSeconds));
     if (recipients.length === 0) {
       this.noRecipient.push(event);
       return true;

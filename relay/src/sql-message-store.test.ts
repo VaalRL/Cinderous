@@ -487,7 +487,7 @@ describe("SQL 版的 DO 天花板與記憶體版一致（ADR-0367 §決策 2）"
   it("淘汰模式：兩個實作對同一串寫入給出同一串答案與同一批倖存者", () => {
     const opts = {
       addressableMaxTotalBytes: roomFor(3),
-      addressableCeilingEvicts: true,
+      ceilingEvicts: true,
       addressablePerAuthor: 64,
     };
     const sql = new SqlMessageStore(nodeSqlExec(), opts);
@@ -515,5 +515,45 @@ describe("SQL 版的 DO 天花板與記憶體版一致（ADR-0367 §決策 2）"
     const memResults = writes.map((e) => mem.putAddressable(e, 1000));
     expect(sqlResults).toEqual(memResults);
     expect(sqlResults).toEqual([true, true, true, false, false]);
+  });
+});
+
+describe("SQL 版的離線留言天花板與記憶體版一致（ADR-0367 §決策 2）", () => {
+  const roomEvent = (id: string, bytes: number, expiresAt: number): NostrEvent =>
+    ({
+      id,
+      pubkey: "a",
+      created_at: 1000,
+      kind: 1078,
+      tags: [["t", "lwd"], ["expiration", String(expiresAt)]],
+      content: "x".repeat(bytes),
+      sig: "",
+    }) as NostrEvent;
+
+  const four = [
+    roomEvent("soon", 200, 2000),
+    roomEvent("later", 200, 5000),
+    roomEvent("latest", 200, 9000),
+    roomEvent("fresh", 200, 9000),
+  ];
+  const roomFor = (n: number): number =>
+    four
+      .map((e) => JSON.stringify(e).length)
+      .sort((a, b) => b - a)
+      .slice(0, n)
+      .reduce((sum, len) => sum + len, 0);
+
+  it("兩個實作的答案與倖存者名單一致（淘汰模式）", () => {
+    const opts = { offlineMaxTotalBytes: roomFor(3), ceilingEvicts: true };
+    const sql = new SqlMessageStore(nodeSqlExec(), opts);
+    const mem = new MessageStore(opts);
+    expect(four.map((e) => sql.put(e, 1000))).toEqual(four.map((e) => mem.put(e, 1000)));
+    const kept = (s: SqlMessageStore | MessageStore): string[] =>
+      s
+        .query(f({ kinds: [1078] }), 1000)
+        .map((e) => e.id)
+        .sort();
+    expect(kept(sql)).toEqual(kept(mem));
+    expect(kept(sql)).toEqual(["fresh", "later", "latest"]);
   });
 });

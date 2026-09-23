@@ -338,7 +338,7 @@ describe("整顆 DO 的可尋址容量天花板（ADR-0367 §決策 2）", () =>
     ];
     const s = new MessageStore({
       addressableMaxTotalBytes: roomFor(3, four),
-      addressableCeilingEvicts: true,
+      ceilingEvicts: true,
       addressablePerAuthor: 64,
     });
     // 到期時間一筆比一筆晚；第四筆放不下 → 淘汰最快到期的那筆（soon）
@@ -367,7 +367,7 @@ describe("整顆 DO 的可尋址容量天花板（ADR-0367 §決策 2）", () =>
   it("單顆就超過天花板：淘汰也救不了，直接拒收（不會把整顆 DO 清空）", () => {
     const s = new MessageStore({
       addressableMaxTotalBytes: roomFor(2, [sized2("a", "keep", 200, 2000)]),
-      addressableCeilingEvicts: true,
+      ceilingEvicts: true,
       addressablePerAuthor: 64,
     });
     expect(s.putAddressable(sized2("a", "keep", 200, 2000), 1000)).toBe(true);
@@ -378,5 +378,58 @@ describe("整顆 DO 的可尋址容量天花板（ADR-0367 §決策 2）", () =>
   it("未設＝不限制（自架站與現有部署維持原行為）", () => {
     const s = new MessageStore({ addressablePerAuthor: 64 });
     for (let i = 0; i < 20; i++) expect(s.putAddressable(sized2("a", `d${i}`, 5_000), 1000)).toBe(true);
+  });
+});
+
+describe("離線留言的 DO 天花板（ADR-0367 §決策 2）", () => {
+  /** 沒有 `p` 標籤的事件——遊戲的房間／世界事件正是這個形狀。 */
+  const roomEvent = (id: string, bytes: number, expiresAt: number): NostrEvent =>
+    ({
+      id,
+      pubkey: "a",
+      created_at: 1000,
+      kind: 1078,
+      tags: [["t", "lwd"], ["expiration", String(expiresAt)]],
+      content: "x".repeat(bytes),
+      sig: "",
+    }) as NostrEvent;
+
+  const four = [
+    roomEvent("soon", 200, 2000),
+    roomEvent("later", 200, 5000),
+    roomEvent("latest", 200, 9000),
+    roomEvent("fresh", 200, 9000),
+  ];
+  const roomFor = (n: number): number =>
+    four
+      .map((e) => JSON.stringify(e).length)
+      .sort((a, b) => b - a)
+      .slice(0, n)
+      .reduce((sum, len) => sum + len, 0);
+
+  it("🔴 沒有 `p` 標籤的事件也受天花板約束——那個桶原本沒有任何上限", () => {
+    // `enforceCap` 只對真正的收件人執行，而 `p`-less 事件落在 `recipient = ''`
+    // ⇒ 它原本只被 TTL 壓著。遊戲的房間事件全都是這個形狀。
+    const s = new MessageStore({ offlineMaxTotalBytes: roomFor(3), ceilingEvicts: true });
+    for (const e of four) expect(s.put(e, 1000)).toBe(true);
+    const kept = s
+      .query({ kinds: [1078] } as never, 1000)
+      .map((e) => e.id)
+      .sort();
+    expect(kept).toEqual(["fresh", "later", "latest"]); // soon 被淘汰
+  });
+
+  it("嚴格平面只拒收、不淘汰", () => {
+    const s = new MessageStore({ offlineMaxTotalBytes: roomFor(3) });
+    expect(s.put(four[0]!, 1000)).toBe(true);
+    expect(s.put(four[1]!, 1000)).toBe(true);
+    expect(s.put(four[2]!, 1000)).toBe(true);
+    expect(s.put(four[3]!, 1000)).toBe(false);
+    expect(s.query({ kinds: [1078] } as never, 1000)).toHaveLength(3);
+  });
+
+  it("未設＝不限制", () => {
+    const s = new MessageStore();
+    for (const e of four) expect(s.put(e, 1000)).toBe(true);
   });
 });
