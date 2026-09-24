@@ -16,7 +16,8 @@
 
 import type { Locale } from "@cinderous/i18n";
 import { type Copy } from "./copy.js";
-import { alternates, DEFAULT_LOCALE, routeUrl, SITE_ORIGIN, type Route } from "./routes.js";
+import { devDocsFor } from "./devdocs/content.js";
+import { alternates, DEFAULT_LOCALE, routeUrl, SITE_ORIGIN, withLocale, type Route } from "./routes.js";
 
 /** 品牌名；title 統一以 `｜Cinderous` 收尾（首頁除外，避免重複）。 */
 export const BRAND = "Cinderous";
@@ -56,7 +57,7 @@ export interface PageMeta {
 export function pageMeta(route: Route, c: Copy): PageMeta {
   const canonical = routeUrl(route);
   const zh = route.locale === "zh-Hant";
-  const byView: Record<Route["view"], { title: string; description: string }> = {
+  const byView: Record<Exclude<Route["view"], "developers">, { title: string; description: string }> = {
     home: {
       title: zh
         ? `${BRAND} — 開源、端對端加密的去中心化即時通訊`
@@ -108,7 +109,17 @@ export function pageMeta(route: Route, c: Copy): PageMeta {
         : "Common questions about Cinderous: what it is, who can read your messages, whether it needs a phone number, how it differs from Signal, whether it is really free, who runs the servers, and device migration.",
     },
   };
-  const { title, description } = byView[route.view];
+  // 開發者文件（ADR-0368）：每一頁的標題與描述來自文件內容本身，與可見內容同源。
+  const devPage = route.view === "developers" ? devDocsFor(route.locale).pages[route.doc ?? "overview"] : undefined;
+  const { title, description } = devPage
+    ? {
+        title:
+          route.doc === undefined
+            ? `${devPage.title}｜${BRAND}`
+            : `${devPage.title}｜${devDocsFor(route.locale).navTitle}｜${BRAND}`,
+        description: devPage.description,
+      }
+    : byView[route.view as Exclude<Route["view"], "developers">];
   // 文案缺漏時退回目錄值，確保永遠有非空的 description（空 description 比沒有更糟）。
   return { title, description: description || c.hero_subtitle, canonical, lang: route.locale };
 }
@@ -189,7 +200,7 @@ export function headTags(route: Route, c: Copy, repoUrl: string): string {
     lines.push(`<link rel="alternate" hreflang="${escapeAttr(hreflangOf(alt.locale))}" href="${escapeAttr(alt.url)}" />`);
   }
   lines.push(
-    `<link rel="alternate" hreflang="x-default" href="${escapeAttr(routeUrl({ view: route.view, locale: DEFAULT_LOCALE }))}" />`,
+    `<link rel="alternate" hreflang="x-default" href="${escapeAttr(routeUrl(withLocale(route, DEFAULT_LOCALE)))}" />`,
     `<meta property="og:type" content="website" />`,
     `<meta property="og:site_name" content="${BRAND}" />`,
     `<meta property="og:title" content="${escapeAttr(meta.title)}" />`,
@@ -245,7 +256,7 @@ export function sitemapXml(routes: Route[]): string {
         `    <loc>${escapeAttr(routeUrl(route))}</loc>`,
         alts,
         `    <xhtml:link rel="alternate" hreflang="x-default" href="${escapeAttr(
-          routeUrl({ view: route.view, locale: DEFAULT_LOCALE }),
+          routeUrl(withLocale(route, DEFAULT_LOCALE)),
         )}"/>`,
         `    <changefreq>weekly</changefreq>`,
         `    <priority>${route.view === "home" ? "1.0" : "0.8"}</priority>`,

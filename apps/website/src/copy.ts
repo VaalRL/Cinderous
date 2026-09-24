@@ -71,6 +71,8 @@ export interface Copy {
   nav_enterprise: string;
   nav_roadmap: string;
   nav_faq: string;
+  /** 頁尾的開發者文件連結（ADR-0368）。 */
+  footer_developers: string;
   nav_download: string;
   /** 深淺色切換鈕的無障礙標籤。 */
   nav_theme_toggle: string;
@@ -408,6 +410,7 @@ const zhHant: Copy = {
   nav_enterprise: "企業版",
   nav_roadmap: "藍圖",
   nav_faq: "常見問題",
+  footer_developers: "開發者文件",
   nav_download: "下載",
   nav_theme_toggle: "切換深色／淺色主題",
   nav_transparency: "透明度",
@@ -792,6 +795,7 @@ const en: Copy = {
   nav_enterprise: "Enterprise",
   nav_roadmap: "Roadmap",
   nav_faq: "FAQ",
+  footer_developers: "Developer docs",
   nav_download: "Download",
   nav_theme_toggle: "Toggle dark / light theme",
   nav_transparency: "Transparency",

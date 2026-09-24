@@ -13,9 +13,19 @@
 // 現在每個 (view, locale) 組合都有真實 URL，建置時各自產出一份靜態 HTML。
 
 import type { Locale } from "@cinderous/i18n";
+import { DEV_DOC_SLUGS, isDevDocSlug, type DevDocSlug } from "./devdocs/structure.js";
 
 /** 官網的頁面。 */
-export type View = "home" | "tech" | "compare" | "node" | "selfhost" | "enterprise" | "roadmap" | "faq";
+export type View =
+  | "home"
+  | "tech"
+  | "compare"
+  | "node"
+  | "selfhost"
+  | "enterprise"
+  | "roadmap"
+  | "faq"
+  | "developers";
 
 export const VIEWS: readonly View[] = [
   "home",
@@ -28,6 +38,8 @@ export const VIEWS: readonly View[] = [
   "enterprise",
   "roadmap",
   "faq",
+  // ADR-0368：第三方開發文件。中繼站拒絕連線時的 NOTICE 就指向這裡（`relay/src/host-config.ts`）。
+  "developers",
 ] as const;
 
 /** 官網支援的語言；`en` 為預設（根路徑），其餘走 `/<locale>/` 前綴。 */
@@ -42,14 +54,23 @@ export const DEFAULT_LOCALE: Locale = "en";
 export interface Route {
   view: View;
   locale: Locale;
+  /** 開發者文件的子頁（ADR-0368）；只對 `developers` 有意義，省略＝總覽頁。 */
+  doc?: DevDocSlug;
+}
+
+/** 同一頁的另一個語言版本——保留子頁，否則中英對照會指向各自的總覽。 */
+export function withLocale(route: Route, locale: Locale): Route {
+  return route.doc === undefined ? { view: route.view, locale } : { view: route.view, locale, doc: route.doc };
 }
 
 /**
  * 站台來源（含協定，無尾斜線）與部署基底路徑（前後皆有斜線）。
  *
  * ⚠️ 綁自訂網域時要一起改的地方：本檔的 `SITE_ORIGIN`／`BASE_PATH`、`vite.config.ts` 的
- * `base`、以及 **`apps/desktop/src/update-check.ts` 與 `threat-db.ts` 的 endpoint**
- * ——後兩者是硬編碼的，漏改會讓新版 app 指向舊網址（ADR-0235 SEO-6）。
+ * `base`、**`apps/desktop/src/update-check.ts` 與 `threat-db.ts` 的 endpoint**
+ * ——後兩者是硬編碼的，漏改會讓新版 app 指向舊網址（ADR-0235 SEO-6）——
+ * 以及 **`relay/src/host-config.ts` 的 `DEVELOPER_DOCS_URL`**（中繼拒絕連線時指向的文件，
+ * ADR-0368；`developers-url.test.ts` 會比對，改了這裡那支測試會紅）。
  */
 export const SITE_ORIGIN = "https://vaalrl.github.io";
 export const BASE_PATH = "/Cinderous/";
@@ -63,7 +84,8 @@ function viewSegment(view: View): string {
 export function routeSlug(route: Route): string {
   const localePart = route.locale === DEFAULT_LOCALE ? "" : route.locale;
   const viewPart = viewSegment(route.view);
-  return [localePart, viewPart].filter(Boolean).join("/");
+  const docPart = route.view === "developers" ? (route.doc ?? "") : "";
+  return [localePart, viewPart, docPart].filter(Boolean).join("/");
 }
 
 /** 路由 → 站內絕對路徑（含 base，目錄式尾斜線，供 `<a href>` 與 canonical 使用）。 */
@@ -94,15 +116,21 @@ export function parseRoute(pathname: string, base: string = BASE_PATH): Route {
   }
   const seg = parts[0] ?? "";
   const view = (VIEWS as readonly string[]).includes(seg) ? (seg as View) : "home";
+  // 開發者文件的子頁（ADR-0368）；認不得的子頁退回總覽。其他頁面不看第二段。
+  const doc = parts[1];
+  if (view === "developers" && doc !== undefined && isDevDocSlug(doc)) return { view, locale, doc };
   return { view, locale };
 }
 
 /** 所有需要預渲染／列入 sitemap 的路由（語言 × 頁面）。 */
 export function allRoutes(): Route[] {
-  return LOCALES.flatMap((locale) => VIEWS.map((view) => ({ view, locale })));
+  return LOCALES.flatMap((locale) => [
+    ...VIEWS.map((view): Route => ({ view, locale })),
+    ...DEV_DOC_SLUGS.map((doc): Route => ({ view: "developers", locale, doc })),
+  ]);
 }
 
 /** 同一頁面的其他語言版本（hreflang alternate 用）。 */
 export function alternates(route: Route): { locale: Locale; url: string }[] {
-  return LOCALES.map((locale) => ({ locale, url: routeUrl({ view: route.view, locale }) }));
+  return LOCALES.map((locale) => ({ locale, url: routeUrl(withLocale(route, locale)) }));
 }

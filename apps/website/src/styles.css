@@ -177,6 +177,46 @@ tbody tr:last-child th[scope="row"] { border-bottom: none; }
 .nf__lead { max-width: 520px; }
 .nf__inner .btn { margin-top: 10px; }
 
+/* 開發者文件（ADR-0368）：仿 Material for MkDocs——左導覽、內文、右目錄。 */
+.docs { padding: 36px 0 60px; }
+.docs__wrap { max-width: 1240px; margin: 0 auto; padding: 0 22px; display: grid; grid-template-columns: 220px minmax(0, 1fr) 200px; gap: 40px; align-items: start; }
+.docs__nav, .docs__toc { position: sticky; top: 76px; max-height: calc(100vh - 96px); overflow-y: auto; font-size: 14px; }
+.docs__nav ul, .docs__toc ul { list-style: none; margin: 0 0 14px; padding: 0; }
+.docs__nav li a, .docs__toc li a { display: block; padding: 4px 10px; border-radius: 8px; color: var(--muted); text-decoration: none; }
+.docs__nav li a:hover, .docs__toc li a:hover { color: var(--ink); }
+.docs__nav li a.on { color: var(--accent); background: color-mix(in srgb, var(--accent) 9%, transparent); font-weight: 700; }
+.docs__navtitle { margin: 0 0 8px; font-weight: 800; color: var(--ink); }
+.docs__navsec { margin: 14px 0 4px; padding: 0 10px; font-size: 12px; font-weight: 700; letter-spacing: 0.6px; text-transform: uppercase; color: var(--muted); }
+.docs__toc { border-left: 1px solid var(--border); padding-left: 14px; }
+.docs__main { min-width: 0; }
+.docs__main h1 { font-size: 34px; margin: 0 0 10px; letter-spacing: -0.5px; }
+.docs__lead { color: var(--muted); font-size: 17px; margin: 0 0 18px; }
+.docs__main h2 { font-size: 23px; margin: 34px 0 10px; scroll-margin-top: 80px; }
+.docs__main p, .docs__main li { font-size: 15.5px; line-height: 1.7; }
+.docs__main a { color: var(--accent); }
+.docs__anchor { float: left; margin-left: -1em; width: 1em; opacity: 0; text-decoration: none; color: var(--muted) !important; }
+.docs__main h2:hover .docs__anchor { opacity: 1; }
+.docs__main code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 0.88em; padding: 1px 5px; border-radius: 5px; background: var(--surface); }
+.docs__main pre.code { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; overflow-x: auto; }
+.docs__main pre.code code { padding: 0; background: none; font-size: 13.5px; line-height: 1.6; }
+.docs__note { border-left: 3px solid var(--accent); background: color-mix(in srgb, var(--accent) 7%, transparent); padding: 10px 14px; border-radius: 0 10px 10px 0; }
+.docs__table { overflow-x: auto; margin: 10px 0 16px; }
+.docs__table .cmp { width: 100%; }
+.docs__pager { display: flex; justify-content: space-between; gap: 14px; margin-top: 44px; padding-top: 20px; border-top: 1px solid var(--border); }
+.docs__pager a { display: flex; flex-direction: column; gap: 2px; padding: 10px 14px; border: 1px solid var(--border); border-radius: 12px; text-decoration: none; color: var(--ink); font-weight: 700; }
+.docs__pager a span { font-size: 12px; font-weight: 600; color: var(--muted); }
+.docs__next { margin-left: auto; text-align: right; }
+.footer__inner .nav__link { color: var(--muted); }
+@media (max-width: 1080px) {
+  .docs__wrap { grid-template-columns: 200px minmax(0, 1fr); }
+  .docs__toc { display: none; }
+}
+@media (max-width: 760px) {
+  .docs__wrap { grid-template-columns: minmax(0, 1fr); gap: 20px; padding: 0 16px; }
+  .docs__nav { position: static; max-height: none; border-bottom: 1px solid var(--border); padding-bottom: 8px; }
+  .docs__main h1 { font-size: 28px; }
+}
+
 @media (max-width: 860px) {
   .grid--4 { grid-template-columns: repeat(2, 1fr); }
 }

@@ -10,6 +10,7 @@ import {
 import { MessageStore } from "./message-store.js";
 import { leadingZeroBits, RelayCore } from "./relay-core.js";
 import { minePow } from "@cinderous/core";
+import { guardFor } from "./host-config.js";
 
 function heartbeat(): NostrEvent {
   return finalizeEvent(
@@ -995,8 +996,8 @@ describe("ADR-0366 §決策 5：第三方車道的三道閘", () => {
     });
 
     it("被拒時說得出這條車道接受什麼（ADR-0123：沉默的空回應會讓人跑去別處找 bug）", () => {
-      expect(closedReason(authed({ publicLane: true }).core.handle("c", REQ("s", {})))).toContain("標籤");
-      expect(closedReason(authed({}).core.handle("c", REQ("s", {})))).not.toContain("標籤");
+      expect(closedReason(authed({ publicLane: true }).core.handle("c", REQ("s", {})))).toContain("tag filter");
+      expect(closedReason(authed({}).core.handle("c", REQ("s", {})))).not.toContain("tag filter");
     });
   });
 
@@ -1171,5 +1172,84 @@ describe("RelayCore — 每連線訊息速率上限（ADR-0366 §容量）", () 
     for (let i = 0; i < 50; i += 1) {
       expect(relay.handle("c1", REQ(`s${i}`, { kinds: [20000] }))[0]?.close).toBeUndefined();
     }
+  });
+});
+
+describe("車道用**上線時的真實設定**：範圍檢查與可選 AUTH（ADR-0369）", () => {
+  // 🔴 這組存在的理由：上面「閘一」的測試都是 `requireAuth: true ＋ publicLane`，而上線的車道是
+  // `guardFor("app")`＝`requireAuth: false`。範圍檢查原本包在 `requireAuth` 條件裡，
+  // 於是車道上**完全不檢查**——那組測試全綠，產線卻是消防水管。一律用真實設定。
+  const lane = () => {
+    const core = new RelayCore({ store: new MessageStore(), ...guardFor("app"), authChallenge: () => "ch" });
+    const connectOut = core.connect("c");
+    return { core, connectOut };
+  };
+  const closedReason = (out: { message: unknown[] }[]) =>
+    out.find((o) => o.message[0] === "CLOSED")?.message[2] as string | undefined;
+  const eose = (out: { message: unknown[] }[]) => out.some((o) => o.message[0] === "EOSE");
+  const authAs = (core: RelayCore, sk: ReturnType<typeof generateSecretKey>) =>
+    core.handle("c", JSON.stringify(["AUTH", buildAuthEvent("ch", "wss://relay.example", sk)]));
+
+  it("🔴 裸 filter 被擋——不論有沒有 AUTH", () => {
+    const { core } = lane();
+    expect(closedReason(core.handle("c", REQ("s", { kinds: [20000] })))).toContain("restricted");
+    expect(closedReason(core.handle("c", REQ("s2", {})))).toContain("restricted");
+  });
+
+  it("標籤 filter 不需要 AUTH 就能訂閱（不處理 AUTH 的客戶端仍可用）", () => {
+    const { core } = lane();
+    expect(eose(core.handle("c", REQ("s", { kinds: [20078], "#t": ["nagd"] })))).toBe(true);
+    expect(eose(core.handle("c", REQ("s2", { kinds: [31081], "#d": ["deck"] })))).toBe(true);
+  });
+
+  it("🔴 `#p` 指向別人被擋——不論有沒有 AUTH", () => {
+    const { core } = lane();
+    const other = getPublicKey(generateSecretKey());
+    expect(closedReason(core.handle("c", REQ("s", { kinds: [20078], "#p": [other] })))).toContain("restricted");
+    authAs(core, generateSecretKey());
+    expect(closedReason(core.handle("c", REQ("s2", { kinds: [20078], "#p": [other] })))).toContain("restricted");
+  });
+
+  it("車道連線一開始就收到 AUTH 挑戰（可選，不強制）", () => {
+    const { connectOut } = lane();
+    expect(connectOut).toContainEqual({ to: "c", message: ["AUTH", "ch"] });
+  });
+
+  it("做了 AUTH 就能用 `#p` 讀自己的指名信令", () => {
+    const { core } = lane();
+    const sk = generateSecretKey();
+    const ok = authAs(core, sk);
+    expect(ok).toContainEqual({ to: "c", message: expect.arrayContaining(["OK", true]) });
+    expect(eose(core.handle("c", REQ("s", { kinds: [20078], "#p": [getPublicKey(sk)] })))).toBe(true);
+  });
+
+  it("沒做 AUTH 就用 `#p`：拒絕原因要講出「先 AUTH」，而不是籠統的 restricted", () => {
+    const { core } = lane();
+    const me = getPublicKey(generateSecretKey());
+    const reason = closedReason(core.handle("c", REQ("s", { kinds: [20078], "#p": [me] })));
+    expect(reason).toContain("restricted");
+    expect(reason).toContain("AUTH");
+  });
+
+  it("🔴 AUTH 仍然**不是**發事件的前提——車道的寫入維持開放", () => {
+    const { core } = lane();
+    const ev = finalizeEvent(
+      { kind: 1078, created_at: Math.floor(Date.now() / 1000), tags: [["t", "nagd"]], content: "" },
+      generateSecretKey(),
+    );
+    expect(core.handle("c", EVENT(ev))).toContainEqual({ to: "c", message: ["OK", ev.id, true, ""] });
+  });
+
+  it("拒絕原因以英文說明車道接受什麼（讀者是第三方開發者）", () => {
+    const { core } = lane();
+    const reason = closedReason(core.handle("c", REQ("s", {})));
+    expect(reason).toContain("tag");
+    expect(reason).toContain("authors");
+  });
+
+  it("嚴格平面不變：仍是 AUTH 前拒絕、範圍訊息仍為原文", () => {
+    const core = new RelayCore({ store: new MessageStore(), ...guardFor("strict"), authChallenge: () => "ch" });
+    core.connect("c");
+    expect(closedReason(core.handle("c", REQ("s", { kinds: [20000] })))).toContain("auth-required");
   });
 });
