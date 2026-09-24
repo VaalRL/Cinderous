@@ -9,6 +9,7 @@ import {
   routeUrl,
   VIEWS,
 } from "./routes.js";
+import { DEV_DOC_SLUGS } from "./devdocs/structure.js";
 
 describe("官網路由（ADR-0235 SEO-1／SEO-3）", () => {
   it("預設語言（en）走根路徑，不產生前綴（避免重複內容）", () => {
@@ -55,7 +56,8 @@ describe("官網路由（ADR-0235 SEO-1／SEO-3）", () => {
 
   it("allRoutes 涵蓋語言 × 頁面全部組合，且無重複 URL", () => {
     const routes = allRoutes();
-    expect(routes).toHaveLength(2 * VIEWS.length);
+    // 開發者文件的每一個子頁也是一條獨立路由（ADR-0368）。
+    expect(routes).toHaveLength(2 * (VIEWS.length + DEV_DOC_SLUGS.length));
     const urls = routes.map((r) => routeUrl(r));
     expect(new Set(urls).size).toBe(urls.length);
   });
@@ -70,5 +72,27 @@ describe("官網路由（ADR-0235 SEO-1／SEO-3）", () => {
   it("BASE_PATH 前後都有斜線（拼接 URL 的前提）", () => {
     expect(BASE_PATH.startsWith("/")).toBe(true);
     expect(BASE_PATH.endsWith("/")).toBe(true);
+  });
+
+  it("開發者文件：總覽是 /developers/，子頁是 /developers/<slug>/（ADR-0368）", () => {
+    expect(routeHref({ view: "developers", locale: "en" })).toBe("/Cinderous/developers/");
+    expect(routeHref({ view: "developers", locale: "en", doc: "quick-start" })).toBe("/Cinderous/developers/quick-start/");
+    expect(routeHref({ view: "developers", locale: "zh-Hant", doc: "errors" })).toBe("/Cinderous/zh-Hant/developers/errors/");
+    expect(parseRoute("/Cinderous/zh-Hant/developers/errors/")).toEqual({ view: "developers", locale: "zh-Hant", doc: "errors" });
+  });
+
+  it("開發者文件：認不得的子頁退回總覽，不 crash", () => {
+    expect(parseRoute("/Cinderous/developers/nope/")).toEqual({ view: "developers", locale: "en" });
+  });
+
+  it("子頁只屬於開發者文件——其他頁面帶了多餘的路徑段就忽略", () => {
+    expect(parseRoute("/Cinderous/tech/quick-start/")).toEqual({ view: "tech", locale: "en" });
+  });
+
+  it("alternates 保留子頁：中英對照指向**同一頁**，不是各自的總覽", () => {
+    const alts = alternates({ view: "developers", locale: "en", doc: "limits" });
+    expect(alts.find((a) => a.locale === "zh-Hant")?.url).toBe(
+      "https://vaalrl.github.io/Cinderous/zh-Hant/developers/limits/",
+    );
   });
 });

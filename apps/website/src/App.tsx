@@ -4,13 +4,14 @@ import type { Theme } from "@cinderous/theme";
 import { CinderMark } from "./Brand.js";
 import { useCopy } from "./copy.js";
 import { Compare } from "./pages/Compare.js";
+import { Developers } from "./pages/Developers.js"; // ADR-0368：第三方開發文件
 import { Enterprise } from "./pages/Enterprise.js";
 import { Faq } from "./pages/Faq.js";
 import { Home } from "./pages/Home.js";
 import { Node } from "./pages/Node.js";
 import { SelfHost } from "./pages/SelfHost.js"; // ADR-0357：自架完整教學
 import { Roadmap } from "./pages/Roadmap.js";
-import { parseRoute, routeHref, type Route, type View } from "./routes.js";
+import { parseRoute, routeHref, withLocale, type Route, type View } from "./routes.js";
 import { Tech } from "./pages/Tech.js";
 // 透明度頁暫時下架（保留 pages/Transparency.tsx 與 tr_* 文案，還原＝復原此 import＋nav＋路由）
 // import { Transparency } from "./pages/Transparency.js";
@@ -131,7 +132,7 @@ export function App({ route: initialRoute }: { route: Route }): JSX.Element {
   // 語言切換也是**一條真實連結**（ADR-0235 SEO-3）：換 URL 而非換 state，
   // 否則 hreflang 指向的頁面根本不存在。
   const otherLocale = locale === "zh-Hant" ? "en" : "zh-Hant";
-  const localeHref = routeHref({ view, locale: otherLocale });
+  const localeHref = routeHref(withLocale(route, otherLocale));
 
   return (
     <>
@@ -195,6 +196,8 @@ export function App({ route: initialRoute }: { route: Route }): JSX.Element {
         <Roadmap c={c} />
       ) : view === "faq" ? (
         <Faq c={c} />
+      ) : view === "developers" ? (
+        <Developers locale={locale} doc={route.doc} onNavigate={navigate} />
       ) : (
         <Node c={c} onGuide={() => navigate({ view: "selfhost", locale })} />
       )}
@@ -204,6 +207,8 @@ export function App({ route: initialRoute }: { route: Route }): JSX.Element {
           {/* ADR-0247：頁尾吉祥物——身體吃站台 --accent（橘紅火焰調），與品牌一致。 */}
           <CinderMascot size={34} />
           <span>{c.footer_privacy}</span>
+          {/* ADR-0368：開發者文件放頁尾而非主導覽——受眾是第三方開發者，不是一般使用者。 */}
+          <NavLink route={{ view: "developers", locale }} current={view} label={c.footer_developers} onNavigate={navigate} />
         </div>
       </footer>
     </>
