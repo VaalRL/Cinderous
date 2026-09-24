@@ -105,3 +105,17 @@ describe("贊助管道（ADR-0089）", () => {
     }
   });
 });
+
+describe("已知租戶名單（ADR-0366 §裁示）", () => {
+  // 🔴 名單上的車道各有自己的 DO：**移除任何一個＝把它換到共用分片**，舊 DO 裡的資料不會跟著搬，
+  // 對該遊戲而言就是資料消失、保存期從 30 天掉到 2 小時。所以「四款自家遊戲都在名單上」要釘住，
+  // 要拿掉某一款必須先改這支測試——那一刻就會想起這段註解。
+  const GAME_LANES = ["lwd", "elementalist", "nagd", "soleague"];
+
+  it("四款自家遊戲都在名單上（頂層與統一模式）", () => {
+    for (const section of ["vars", "env.unified.vars"]) {
+      const lanes = (varsOf(section).APP_LANES ?? "").split(",").map((s) => s.trim());
+      for (const id of GAME_LANES) expect(lanes, `${section} 缺 ${id}`).toContain(id);
+    }
+  });
+});
