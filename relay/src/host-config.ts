@@ -36,6 +36,16 @@ export const MAX_EVENTS_PER_MINUTE = 120;
  */
 export const MAX_MESSAGES_PER_MINUTE = 240;
 
+/**
+ * 第三方開發文件的網址（ADR-0368）：連線被拒時，`NOTICE` 與關閉原因都指向這裡。
+ *
+ * 英文版是官網的預設語言、走根路徑（ADR-0246），第三方開發者也以英文讀者為主。
+ * ⚠ 官網換網域時要一起改（`apps/website/src/routes.ts` 的清單有列）；兩邊由
+ * `apps/website/src/developers-url.test.ts` 比對，漂移就會變紅。
+ * 自架站可用環境變數 `DEVELOPER_DOCS_URL` 覆寫。
+ */
+export const DEVELOPER_DOCS_URL = "https://vaalrl.github.io/Cinderous/developers/";
+
 /** AUTH 事件最大年齡（秒；ADR-0235 H2）：NIP-42 建議，限制側錄簽名的可用時間。 */
 export const AUTH_MAX_AGE_SEC = 600;
 

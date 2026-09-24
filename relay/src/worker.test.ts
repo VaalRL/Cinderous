@@ -15,6 +15,7 @@ import { buildAuthEvent, buildHttpAuthEvent, finalizeEvent, minePow, generateSec
 import { beforeAll, describe, expect, it } from "vitest";
 import worker, { mintTurnResponse, turnPreflightResponse, RelayRoom, type Env } from "./worker.js";
 import {
+  DEVELOPER_DOCS_URL,
   MAX_MESSAGES_PER_MINUTE,
   PUBLIC_LANE_ADDRESSABLE_PER_AUTHOR,
   PUBLIC_LANE_RETENTION_SECONDS,
@@ -43,8 +44,17 @@ class FakeWs {
   send(s: string): void {
     this.sent.push(s);
   }
-  close(): void {
+  /** 非休眠式接受（worker 自己回說明並關閉時用；ADR-0368）。 */
+  accepted = false;
+  accept(): void {
+    this.accepted = true;
+  }
+  closeCode: number | undefined;
+  closeReason: string | undefined;
+  close(code?: number, reason?: string): void {
     this.closed = true;
+    this.closeCode = code;
+    this.closeReason = reason;
   }
   /** 取出並清空目前收到的訊息（已解析）。 */
   drain(): unknown[] {
@@ -56,11 +66,14 @@ class FakeWs {
 
 /** `new WebSocketPair()` 的假替身：[client, server]。 */
 class FakeWebSocketPair {
+  /** 最近一次建立的那一組——worker 自己回絕時，測試要從這裡拿伺服端看它送了什麼（ADR-0368）。 */
+  static last: FakeWebSocketPair | undefined;
   0: FakeWs;
   1: FakeWs;
   constructor() {
     this[0] = new FakeWs();
     this[1] = new FakeWs();
+    FakeWebSocketPair.last = this;
   }
 }
 
@@ -434,12 +447,113 @@ describe("第三方車道路由（ADR-0366 worker fetch）", () => {
     }
   });
 
-  it("🔴 認不得的路徑回 404，且**根本不碰 DO**", async () => {
+  it("🔴 認不得的路徑**根本不碰 DO**（ADR-0366 §決策 4；ADR-0368 只改了拒絕時說什麼）", async () => {
     for (const p of ["/s/zz", "/s/ab", "/nope", "/app"]) {
-      const [doName, , status] = await route(p);
-      expect(status, p).toBe(404);
+      const [doName] = await route(p);
       expect(doName, p).toBe(""); // idFromName 沒被呼叫
     }
+  });
+});
+
+describe("拒絕連線時說明原因並指向開發者文件（ADR-0368）", () => {
+  /** 送一次升級；回傳 [狀態碼, 是否碰到 DO, worker 自建那組的伺服端]。 */
+  const reject = async (
+    path: string,
+    env: Partial<Env> = {},
+    ip?: string,
+  ): Promise<{ status: number; touchedDo: boolean; server: FakeWs | undefined }> => {
+    let touchedDo = false;
+    FakeWebSocketPair.last = undefined;
+    const full = {
+      ...env,
+      RELAY_ROOM: {
+        idFromName: () => {
+          touchedDo = true;
+          return {} as never;
+        },
+        get: () => ({ fetch: () => new Response(null, { status: 101 }) }),
+      },
+    } as unknown as Env;
+    const headers: Record<string, string> = { Upgrade: "websocket" };
+    if (ip !== undefined) headers["CF-Connecting-IP"] = ip;
+    const res = await worker.fetch(new Request(`https://${HOST}${path}`, { headers }), full);
+    return { status: res.status, touchedDo, server: FakeWebSocketPair.last?.[1] };
+  };
+  const noticeOf = (ws: FakeWs | undefined): string => {
+    const msg = JSON.parse(ws?.sent[0] ?? "[]") as unknown[];
+    expect(msg[0]).toBe("NOTICE");
+    return msg[1] as string;
+  };
+  const bytes = (s: string | undefined): number => new TextEncoder().encode(s ?? "").length;
+
+  it("🔴 錯誤路徑：接受、送一則 NOTICE、以 1008 關閉——且**仍然不碰任何 DO**", async () => {
+    for (const p of ["/s/zz", "/nope", "/relay"]) {
+      const { status, touchedDo, server } = await reject(p);
+      expect(touchedDo, p).toBe(false);
+      expect(status, p).toBe(101);
+      expect(server?.accepted, p).toBe(true);
+      expect(server?.sent, p).toHaveLength(1);
+      const notice = noticeOf(server);
+      expect(notice, p).toContain(DEVELOPER_DOCS_URL);
+      expect(notice, p).toContain(`wss://${HOST}/app/<your-app-id>`);
+      expect(server?.closed, p).toBe(true);
+      expect(server?.closeCode, p).toBe(1008);
+    }
+  });
+
+  it("關閉原因也帶文件網址——瀏覽器的 `WebSocket` 只看得到這個，看不到 NOTICE 以外的東西", async () => {
+    const { server } = await reject("/nope");
+    expect(server?.closeReason).toContain(DEVELOPER_DOCS_URL);
+    expect(bytes(server?.closeReason)).toBeLessThanOrEqual(123); // WebSocket 規格的上限
+  });
+
+  it("車道 id 不合法：說明合法的形狀，而不是籠統的「路徑錯了」", async () => {
+    for (const p of ["/app", "/app/", "/app/_x", "/app/a%20b", "/APP/lwd"]) {
+      const { touchedDo, server } = await reject(p);
+      expect(touchedDo, p).toBe(false);
+      const notice = noticeOf(server);
+      expect(notice, p).toContain("invalid app lane");
+      expect(notice, p).toContain("a-z 0-9");
+      expect(notice, p).toContain(DEVELOPER_DOCS_URL);
+    }
+  });
+
+  it("🔴 不回顯對方送來的路徑——中繼站不該變成反射任意字串的地方", async () => {
+    const { server } = await reject("/zzz-probe-marker");
+    expect(noticeOf(server)).not.toContain("zzz-probe-marker");
+    expect(server?.closeReason).not.toContain("zzz-probe-marker");
+  });
+
+  it("車道限速：同一個形狀，以 `rate-limited:` 開頭，**不碰 DO**", async () => {
+    const limiter = { limit: () => Promise.resolve({ success: false }) };
+    const { status, touchedDo, server } = await reject("/app/testgame", { APP_LANE_LIMIT: limiter }, "203.0.113.7");
+    expect(touchedDo).toBe(false);
+    expect(status).toBe(101);
+    const notice = noticeOf(server);
+    expect(notice.startsWith("rate-limited:")).toBe(true);
+    expect(notice).toContain(DEVELOPER_DOCS_URL);
+    expect(server?.closeCode).toBe(1008);
+  });
+
+  it("自架站可用 DEVELOPER_DOCS_URL 換成自己的說明頁", async () => {
+    const own = "https://relay.example.org/help";
+    const { server } = await reject("/nope", { DEVELOPER_DOCS_URL: own });
+    expect(noticeOf(server)).toContain(own);
+    expect(noticeOf(server)).not.toContain(DEVELOPER_DOCS_URL);
+    expect(server?.closeReason).toContain(own);
+  });
+
+  it("網址太長塞不進 123 bytes：關閉原因退回短句，網址仍在 NOTICE 裡", async () => {
+    const own = `https://relay.example.org/${"x".repeat(150)}`;
+    const { server } = await reject("/nope", { DEVELOPER_DOCS_URL: own });
+    expect(noticeOf(server)).toContain(own);
+    expect(bytes(server?.closeReason)).toBeLessThanOrEqual(123);
+    expect(server?.closeReason).toContain("unknown relay path");
+  });
+
+  it("非升級的 HTTP 請求不受影響：錯誤路徑的一般 GET 照舊回純文字 200（ADR-0089 契約）", async () => {
+    const res = await worker.fetch(new Request(`https://${HOST}/nope`), {} as Env);
+    expect(res.status).toBe(200);
   });
 });
 
@@ -907,7 +1021,9 @@ describe("車道 PoW（ADR-0366 P2 #11）", () => {
       below === undefined
         ? minePow({ kind: 1078, created_at: nowSec(), tags: [["t", "g"]], content: "x" }, sk, difficulty)
         : belowDifficulty(sk, below);
-    return send(room, ws, ["EVENT", e])[0] as [string, string, boolean, string];
+    // 車道連線一開始就有（可選的）AUTH 挑戰排在前面（ADR-0369），故以型別找出那則 OK。
+    const out = send(room, ws, ["EVENT", e]) as [string, string, boolean, string][];
+    return out.find((m) => m[0] === "OK") ?? out[0]!;
   };
 
   it("未設 APP_LANE_POW → 車道照收未挖礦的持久化事件（預設不打開）", async () => {
@@ -971,10 +1087,9 @@ describe("車道的成本護欄（ADR-0366 §容量）", () => {
     return [res.status, touchedDo];
   };
 
-  it("車道升級超過 IP 限額：429，且**根本不碰 DO**", async () => {
+  it("車道升級超過 IP 限額：被擋下，且**根本不碰 DO**（回絕的形狀見 ADR-0368 那組測試）", async () => {
     const { binding, keys } = limiter(false);
-    const [status, touchedDo] = await upgrade("/app/testgame", { APP_LANE_LIMIT: binding }, "203.0.113.7");
-    expect(status).toBe(429);
+    const [, touchedDo] = await upgrade("/app/testgame", { APP_LANE_LIMIT: binding }, "203.0.113.7");
     expect(touchedDo).toBe(false);
     expect(keys).toEqual(["203.0.113.7"]); // 以 IP 計數，不是 pubkey——換一把金鑰是微秒級的事
   });

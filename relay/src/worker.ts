@@ -1,5 +1,14 @@
 import { verifyHttpAuth } from "@cinderous/core";
-import { acceptFileEvents, firstHost, guardFor, knownLanes, powForLane, type RelayProfile, storeOptions } from "./host-config.js";
+import {
+  acceptFileEvents,
+  DEVELOPER_DOCS_URL,
+  firstHost,
+  guardFor,
+  knownLanes,
+  powForLane,
+  type RelayProfile,
+  storeOptions,
+} from "./host-config.js";
 import { buildRelayInfo, NIP11_HEADERS, wantsRelayInfo } from "./nip11.js";
 import { RELAY_WORKER_VERSION } from "./version.js";
 import { RelayCore, type ConnSnapshot, type Outbound } from "./relay-core.js";
@@ -46,6 +55,11 @@ export interface Env {
    * ⚠ 加進來或拿掉＝換一顆 DO，該車道舊 DO 裡的資料不會跟著搬（等 TTL 到期）。
    */
   APP_LANES?: string;
+  /**
+   * 連線被拒時指向的開發文件網址（ADR-0368）。未設＝官網開發者頁
+   * （`host-config.DEVELOPER_DOCS_URL`）。自架站若有自己的說明頁可換掉。
+   */
+  DEVELOPER_DOCS_URL?: string;
   /**
    * 公共 TURN 保底（ADR-0243）：Cloudflare TURN 的 Key ID。與 `TURN_API_TOKEN` 一起設定後，
    * `GET /turn` 會向 Cloudflare 換發**短期**憑證回給客戶端（餵進 `buildRtcConfig` 的 turnServers）。
@@ -216,6 +230,48 @@ export function relayInfoFrom(
 /** NIP-40 過期留言的清理間隔（C2）：DO alarm 每小時 prune 一次。 */
 const PRUNE_INTERVAL_MS = 60 * 60 * 1000;
 
+/** 升級請求被拒的原因（ADR-0368）。 */
+export type RejectKind = "unknown-path" | "bad-lane" | "rate-limited";
+
+/** WebSocket 規格的關閉原因上限（UTF-8 bytes）。 */
+const CLOSE_REASON_MAX_BYTES = 123;
+
+/**
+ * 拒絕一次 WebSocket 升級，但**說得出為什麼**（ADR-0368）。
+ *
+ * 🔴 為什麼不直接回 404／429：瀏覽器的 `WebSocket` 不暴露握手的狀態碼與內容，
+ * 對方只拿到一個沒有訊息的 `error` 與 close 1006——和「中繼站掛了」一模一樣。
+ * 所以在 Worker 內接受、送一則 `NOTICE`、以 1008 關閉，關閉原因也帶文件網址。
+ *
+ * 🔴 **不碰任何 DO、不套任何政策**：這條連線從頭到尾只存在於這次 Worker 呼叫裡，
+ * ADR-0366 §決策 4「認不得的連線不落在任何 DO」原樣成立；成本與原本的 404 同為一次請求。
+ *
+ * 刻意**不回顯**對方送來的路徑：對方自己知道打了什麼，回顯只會讓中繼站反射任意字串。
+ */
+export function rejectUpgrade(kind: RejectKind, host: string, env: Pick<Env, "DEVELOPER_DOCS_URL">): Response {
+  const docs = env.DEVELOPER_DOCS_URL?.trim() || DEVELOPER_DOCS_URL;
+  const lane = `wss://${host}/app/<your-app-id>`;
+  const [short, notice] =
+    kind === "rate-limited"
+      ? ["rate-limited", `rate-limited: too many new connections to app lanes from your IP; retry in a minute. Docs: ${docs}`]
+      : kind === "bad-lane"
+        ? [
+            "invalid app lane",
+            `invalid app lane: connect to ${lane}, where the id is 1-64 characters of a-z 0-9 . _ - ` +
+              `and starts with a letter or digit (the "/app/" prefix is lowercase). Docs: ${docs}`,
+          ]
+        : ["unknown relay path", `unknown relay path. Third-party apps connect to ${lane}. Docs: ${docs}`];
+  const withDocs = `${short}; docs: ${docs}`;
+  const reason = new TextEncoder().encode(withDocs).length <= CLOSE_REASON_MAX_BYTES ? withDocs : short;
+
+  const pair = new WebSocketPair();
+  const server = pair[1];
+  server.accept();
+  server.send(JSON.stringify(["NOTICE", notice]));
+  server.close(1008, reason);
+  return new Response(null, { status: 101, webSocket: pair[0] });
+}
+
 /** Worker 進入點：WebSocket 升級後交給單一 Durable Object 房間以共享連線狀態。 */
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -259,9 +315,12 @@ export default {
     //
     // 🔴 **認不得的路徑直接拒絕**（ADR-0366 §決策 4）。原本是「其他一律回退舊全域」，
     // 那讓 `/s/zz` 這種算錯分片的客戶端靜默落進別的平面；而一旦有了寬鬆車道，
-    // 任何 catch-all 都是一條把流量靜默送進錯誤政策的路。兩邊正面列舉、其餘 404。
+    // 任何 catch-all 都是一條把流量靜默送進錯誤政策的路。兩邊正面列舉、其餘拒絕（拒絕的形狀見 ADR-0368）。
     const route = routeForPath(url.pathname, knownLanes(env.APP_LANES));
-    if (!route) return new Response("unknown relay path", { status: 404 });
+    // 拒絕時要說得出為什麼（ADR-0368）：404 對瀏覽器與 Nostr 函式庫是看不見的。
+    if (!route) {
+      return rejectUpgrade(/^\/app(\/|$)/i.test(url.pathname) ? "bad-lane" : "unknown-path", url.host, env);
+    }
     // 車道的成本護欄（ADR-0366 §容量）：以 IP 計數的升級限速，在碰 DO 之前就擋掉。
     // `CF-Connecting-IP` 由 Cloudflare 填寫、客戶端偽造不了；**缺了就不限**——
     // 那代表根本不在 CF 後面，此時退回單一 key 會讓所有人共用一個額度，
@@ -269,7 +328,7 @@ export default {
     const clientIp = request.headers.get("CF-Connecting-IP");
     if (route.profile === "app" && env.APP_LANE_LIMIT && clientIp) {
       const { success } = await env.APP_LANE_LIMIT.limit({ key: clientIp });
-      if (!success) return new Response("rate limited", { status: 429 });
+      if (!success) return rejectUpgrade("rate-limited", url.host, env);
     }
     // 原始 request 原封不動轉給 DO——DO 對**同一個路徑**跑**同一個** `routeForPath` 算出政策，
     // 所以兩邊不可能不一致。刻意不用標頭傳遞：那要 clone request，而「`Upgrade` 標頭在
@@ -366,7 +425,7 @@ export class RelayRoom {
 
   async fetch(request: Request): Promise<Response> {
     // 政策由**本次請求的路徑**決定，用的是與 worker 路由同一個 `routeForPath`（SSOT）。
-    // 認不得的路徑在 worker 就被 404 擋掉了；真的漏進來就當嚴格（fail-closed）。
+    // 認不得的路徑在 worker 就被擋掉了（ADR-0368，不碰 DO）；真的漏進來就當嚴格（fail-closed）。
     const route = routeForPath(new URL(request.url).pathname, knownLanes(this.env.APP_LANES));
     const wanted: RelayProfile = route?.profile ?? "strict";
     // 已知租戶有自己的 DO（`app:<id>`），所以這個旗標對一顆 DO 而言是恆定的；
