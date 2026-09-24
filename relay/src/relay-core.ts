@@ -265,7 +265,9 @@ export class RelayCore {
     if (!this.subs.has(connId)) this.subs.set(connId, new Map());
     // 主機先記（ADR-0260）：無 AUTH 的站也要能判斷 NIP-62 的目標是不是自己。
     if (relayHost) this.connHost.set(connId, relayHost);
-    if (!this.requireAuth) return [];
+    // 車道也發挑戰，但**不強制**（ADR-0369）：`#p` 只能是自己，而「自己」只有 AUTH 證明得了；
+    // 不發挑戰的話，車道上的 `#p` 訂閱就一條也過不了。不處理 AUTH 的客戶端會直接忽略它。
+    if (!this.requireAuth && !this.opts.publicLane) return [];
     // 已有挑戰（含已認證）者只重發、不重置——避免重複呼叫把認證狀態洗掉。
     const existing = this.authState.get(connId);
     if (existing) return [{ to: connId, message: ["AUTH", existing.challenge] }];
@@ -365,9 +367,12 @@ export class RelayCore {
         if (this.requireAuth && !this.isAuthed(connId)) {
           return this.authRequired(connId, ["CLOSED", msg.subId, "auth-required: 請先認證（NIP-42）"]);
         }
-        if (this.requireAuth && !this.scoped(connId, msg.filters)) {
+        // 🔴 車道**不要求** AUTH，但範圍檢查照做（ADR-0369）。原本這裡只有 `requireAuth`，
+        // 於是 `requireAuth: false` 的車道完全不檢查——ADR-0366 §決策 5 說要擋的裸 filter 與
+        // 別人的 `#p` 全部放行，而只用 `requireAuth: true` 組的測試看不出來。
+        if ((this.requireAuth || this.opts.publicLane) && !this.scoped(connId, msg.filters)) {
           // 訊息要**說得出原因**（ADR-0123）：沉默的空回應會讓實作者以為「這個中繼沒有資料」，
-          // 然後跑去別的地方找 bug。
+          // 然後跑去別的地方找 bug。車道的讀者是第三方開發者，故用英文。
           return [
             {
               to: connId,
@@ -375,7 +380,7 @@ export class RelayCore {
                 "CLOSED",
                 msg.subId,
                 this.opts.publicLane
-                  ? "restricted: 訂閱必須指定標籤、#p（自己）或 authors（ADR-0366）"
+                  ? "restricted: app lanes need a tag filter (e.g. #t, #d), authors, or #p set to yourself after NIP-42 AUTH (ADR-0366)"
                   : "restricted: 訂閱必須指定 #p（自己）或 authors（ADR-0123）",
               ],
             },
