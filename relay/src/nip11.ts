@@ -16,8 +16,21 @@
 // 依 `Accept: application/nostr+json` 分支；**不帶此 header 時維持原純文字 200**——PaaS／
 // 容器健康檢查（ADR-0075）與既有探測都靠那個 200，改掉會讓部署中的站看起來像掛了。
 
-import { MAX_EVENTS_PER_MINUTE, MAX_PER_RECIPIENT, MAX_SUBSCRIPTIONS, ttlSecondsFromDays } from "./host-config.js";
-import { ADDRESSABLE_MAX_BYTES, DEFAULT_MAX_TTL_SECONDS, MAX_QUERY_ROWS } from "./message-store.js";
+import {
+  MAX_EVENTS_PER_MINUTE,
+  MAX_FUTURE_SKEW_SEC,
+  MAX_PAST_SKEW_SEC,
+  MAX_PER_RECIPIENT,
+  MAX_SUBSCRIPTIONS,
+  type RelayProfile,
+  storeOptions,
+} from "./host-config.js";
+import {
+  ADDRESSABLE_MAX_BYTES,
+  ADDRESSABLE_TTL_SECONDS,
+  DEFAULT_MAX_TTL_SECONDS,
+  MAX_QUERY_ROWS,
+} from "./message-store.js";
 
 /** NIP-11 的 media type；只有帶這個 `Accept` 的請求才拿到 JSON。 */
 export const NIP11_MEDIA_TYPE = "application/nostr+json";
@@ -58,6 +71,17 @@ export interface Nip11Config {
   acceptsFiles?: boolean | undefined;
   /** 是否要求 NIP-42 AUTH。 */
   authRequired?: boolean | undefined;
+  /**
+   * 本路徑的政策（ADR-0366）：`strict`＝Cinderous 訊息平面，`app`＝第三方車道。
+   * 未設＝`strict`。同一座 Worker 會依請求路徑回不同的文件——一份文件描述不了兩種政策。
+   */
+  profile?: RelayProfile | undefined;
+  /**
+   * 本路徑是不是名單上的已知租戶（ADR-0366 §裁示）。公用分片的保存期短得多
+   * （ADR-0367 §決策 1），而**不揭露就是不誠實**——對方無從得知「發完就走的資料
+   * 兩小時後會消失」。未設＝否（公用分片），與 `storeOptions` 的預設同一側。
+   */
+  knownLane?: boolean | undefined;
   /** 贊助管道（ADR-0089）。 */
   donations?: CinderDonations | undefined;
   /** 節點自報（ADR-0092）：已簽章的 `CinderNodeDeclaration` 事件（JSON 字串）。 */
@@ -81,7 +105,11 @@ function compact<T extends Record<string, unknown>>(obj: T): Partial<T> {
  * `contact: ""` 的文件比沒有 contact 更糟：它讓「有沒有人可問責」這件事變得模糊。
  */
 export function buildRelayInfo(cfg: Nip11Config = {}): Record<string, unknown> {
-  const ttlSeconds = ttlSecondsFromDays(cfg.maxTtlDays) ?? DEFAULT_MAX_TTL_SECONDS;
+  // 🔴 直接問 `storeOptions`，不自己算一份：文件要說的就是**這座站實際在執行的那組值**。
+  // 兩邊各算各的，遲早會出現「文件說 7 天、實際存 2 小時」——而那種謊言查起來最貴。
+  const store = storeOptions(cfg.maxTtlDays, cfg.profile ?? "strict", cfg.knownLane === true);
+  const ttlSeconds = store.maxTtlSeconds ?? DEFAULT_MAX_TTL_SECONDS;
+  const addressableTtl = store.addressableTtlSeconds ?? ADDRESSABLE_TTL_SECONDS;
   const donations = compact({ ...(cfg.donations ?? {}) });
 
   let nodeAttestation: unknown;
@@ -120,6 +148,25 @@ export function buildRelayInfo(cfg: Nip11Config = {}): Record<string, unknown> {
     cinder_max_events_per_minute: MAX_EVENTS_PER_MINUTE,
     /** 每收件人離線留言上限（PRD §8）。 */
     cinder_max_per_recipient: MAX_PER_RECIPIENT,
+    /**
+     * 時鐘窗（秒；ADR-0235 H1）。**客戶端算得出來才有用**：
+     * 第三方的 epoch 結算要以「過去窗」為下界決定「多久之後這個 epoch 不可能再被塞事件」
+     *（見 `docs/research/game-layer-spec.md` §4.3），而在此之前那個值**沒有任何管道問得到**。
+     * 非 NIP-11 標準欄位，故加前綴。
+     */
+    cinder_max_past_skew_sec: MAX_PAST_SKEW_SEC,
+    cinder_max_future_skew_sec: MAX_FUTURE_SKEW_SEC,
+    /**
+     * 訂閱政策（ADR-0366）：`named`＝必須帶 `#p`（自己）或 `authors`（ADR-0123）；
+     * `tagged`＝另外接受任一標籤 filter。同樣是「連線前就知道」而不是「送出去被拒才知道」。
+     */
+    cinder_subscription_scope: cfg.profile === "app" ? "tagged" : "named",
+    /**
+     * 可尋址事件（NIP-33）的壽命（秒）。**原本完全沒有揭露過**——客戶端只能猜，
+     * 而公用分片的見習保存（ADR-0367）讓這個值從 30 天變成 2 小時，猜錯的代價是
+     * 「我發的牌組不見了」。`retention` 講的是留言，這一欄講的是可尋址事件。
+     */
+    cinder_addressable_ttl_sec: addressableTtl,
     /** 是否接受檔案塊（ADR-0162）：false＝整類拒收，客戶端不必試。 */
     cinder_accepts_files: cfg.acceptsFiles === true,
     /** 營運者自報的贊助管道（ADR-0089）；全空則整個欄位不出現＝無贊助入口。 */

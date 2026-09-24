@@ -2,6 +2,7 @@ import {
   AUTH_KIND,
   authChallengeOf,
   authRelayMatches,
+  leadingZeroBits,
   VANISH_KIND,
   vanishTargetsRelay,
   verifyEvent,
@@ -45,7 +46,7 @@ const MAX_P_TAGS = 16;
 import {
   FILE_EVENT_MAX_BYTES,
   FILE_WRAP_KIND,
-  isAddressableKind,
+  isAuthorOnlyKind,
   isReplaceableOrAddressable,
   recipientsOf,
   type OfflineStore,
@@ -64,26 +65,24 @@ export function isEphemeral(kind: number): boolean {
   return kind >= EPHEMERAL_MIN && kind <= EPHEMERAL_MAX;
 }
 
-/** NIP-13：event id（hex）開頭的零位元數（工作量證明難度）。 */
-export function leadingZeroBits(hex: string): number {
-  let bits = 0;
-  for (const ch of hex) {
-    const nibble = Number.parseInt(ch, 16);
-    if (Number.isNaN(nibble)) break;
-    if (nibble === 0) {
-      bits += 4;
-      continue;
-    }
-    bits += Math.clz32(nibble) - 28;
-    break;
-  }
-  return bits;
-}
+// NIP-13 難度量測改由 core 供應並**轉引**（ADR-0366 P2 #11），與 `shard.ts` 對
+// `shardPrefix` 的處理同一個做法：挖礦端（core `minePow`）與驗證端（本檔）對難度的
+// 定義只要差一位元，症狀就是「客戶端算得很辛苦、中繼照樣拒收」，而且是安靜的。
+export { leadingZeroBits } from "@cinderous/core";
 
 /** 要送往某連線的一則訊息。 */
 export interface Outbound {
   to: string;
   message: RelayMessage;
+  /**
+   * 送出這則之後**關閉該連線**（ADR-0366 §容量）。
+   *
+   * 為什麼需要：進站訊息就是中繼站的計費單位，訊息一旦抵達，那次請求已經付掉了
+   * ——只回一則 NOTICE 擋不住成本，對方可以在同一條連線上繼續灌。關掉它，濫用者
+   * 就得重新升級連線，而升級那一關有以 IP 計數的速率限制（`worker.ts`）。
+   * 兩道一起才把「每個 IP 的持續成本」壓成有界。
+   */
+  close?: true;
 }
 
 /** 某連線的可序列化狀態快照（供 DO 休眠後還原；ADR-0059）。 */
@@ -145,6 +144,17 @@ export interface RelayCoreOptions {
    */
   maxEventsPerMinute?: number;
   /**
+   * 每連線每分鐘可送進來的**訊息**數上限（ADR-0366 §容量）。超過即 NOTICE ＋ 關閉連線。
+   *
+   * 🔴 為什麼不能只靠 {@link maxEventsPerMinute}：那一項只數 EVENT，而**進站訊息才是
+   * 計費單位**。`REQ`／`CLOSE` 一來一回就是兩次請求，開了又關可以無限重複，
+   * 完全不經過事件限速——健康探針正是這個形狀，而它是實測下來最貴的一項。
+   *
+   * 以連線（而非 pubkey）計數，是因為要擋的東西發生在認證之前、也可能根本不發事件。
+   * 換連線確實能繞過，那正是為什麼宿主端要再有一道以 IP 為鍵的升級限速。
+   */
+  maxMessagesPerMinute?: number;
+  /**
    * 企業封閉模式（ADR-0044）：僅允許名單內 pubkey（hex）發布事件的 allowlist。
    * 未設＝開放中繼（現況）。設定後非名單成員的任何事件（含心跳）一律拒收，
    * 使「同一企業只用同一節點、外部客戶不進系統」在內容層成立。
@@ -166,6 +176,14 @@ export interface RelayCoreOptions {
    * 企業模式維持 allowlist、不開此項（ADR-0044）。
    */
   requireAuth?: boolean;
+  /**
+   * 第三方應用車道（ADR-0366）：放寬 `scoped()`，讓「帶任一標籤 filter」也算具名
+   * （大廳、世界、牌組瀏覽都是這個形狀）。**未設＝嚴格**，Cinderous 訊息平面不受影響。
+   *
+   * 🔴 這個旗標**只有在該連線已被路由到獨立 DO 時**才可以開——它不是權限開關，
+   * 是「這顆 DO 裡沒有 Cinderous 資料」這個事實的下游推論。見 `shard.ts` 的 `routeForPath`。
+   */
+  publicLane?: boolean;
   /** 產生 AUTH 挑戰字串（測試可注入以求確定性）；預設 `crypto.randomUUID()`。 */
   authChallenge?: () => string;
   /**
@@ -201,6 +219,8 @@ export class RelayCore {
   private readonly seenIds = new Map<string, number>();
   /** pubkey → 該時間窗內的發布數與窗起點（ADR-0235 H1 速率限制）。 */
   private readonly rate = new Map<string, { windowStart: number; count: number }>();
+  /** connId → 該時間窗內的進站訊息數與窗起點（ADR-0366 §容量）。 */
+  private readonly connRate = new Map<string, { windowStart: number; count: number }>();
   /** 企業封閉模式的發布 allowlist（hex pubkey）；undefined＝開放（ADR-0044）。 */
   private readonly allowed: Set<string> | undefined;
   /** 企業政策的事件類型 allowlist（kind）；undefined＝不限制（ADR-0048）。 */
@@ -260,6 +280,7 @@ export class RelayCore {
     this.subs.delete(connId);
     this.authState.delete(connId);
     this.connHost.delete(connId);
+    this.connRate.delete(connId);
   }
 
   /**
@@ -308,6 +329,17 @@ export class RelayCore {
    */
   handle(connId: string, raw: string): Outbound[] {
     try {
+      // 🔴 最前面：這一關要在 JSON.parse **與**長度檢查之前，因為它擋的不是內容而是**次數**。
+      const perMinute = this.opts.maxMessagesPerMinute;
+      if (perMinute !== undefined && !this.allowConnRate(connId, this.now(), perMinute)) {
+        return [
+          {
+            to: connId,
+            message: ["NOTICE", "rate-limited: 訊息過於頻繁，連線將關閉（ADR-0366）"],
+            close: true,
+          },
+        ];
+      }
       return this.dispatch(connId, raw);
     } catch {
       // 不回傳例外細節（不給探測訊號）；宿主連線維持存活。
@@ -339,7 +371,13 @@ export class RelayCore {
           return [
             {
               to: connId,
-              message: ["CLOSED", msg.subId, "restricted: 訂閱必須指定 #p（自己）或 authors（ADR-0123）"],
+              message: [
+                "CLOSED",
+                msg.subId,
+                this.opts.publicLane
+                  ? "restricted: 訂閱必須指定標籤、#p（自己）或 authors（ADR-0366）"
+                  : "restricted: 訂閱必須指定 #p（自己）或 authors（ADR-0123）",
+              ],
             },
           ];
         }
@@ -431,6 +469,16 @@ export class RelayCore {
         if (!pValues.every((v) => v === self)) return false; // 只能查自己的收件匣（ADR-0057）
         continue;
       }
+      // 第三方車道（ADR-0366 §決策 5）：**任一個**非 `#p` 的標籤 filter 也算具名。
+      //
+      // 為什麼這對車道是安全的、對訊息平面不是：這兩者是**物理上不同的 DO**
+      //（`routeForPath` 在選 DO 之前就分流了），車道那顆 DO 的儲存裡從頭到尾
+      // 沒有任何一顆 Cinderous 事件 ⇒ 放寬它讀不到任何本來讀不到的東西。
+      //
+      // ⚠ 仍然擋掉裸的 `{"kinds":[…]}` 與 `{}`——那是 ADR-0123 的消防水管，
+      // 換到哪條車道都還是消防水管（只是被沖的人不同）。`#p` 的「只能是自己」
+      // 也**刻意保留**：遊戲的指名信令本來就只讀自己的收件匣，放寬它零收益。
+      if (this.opts.publicLane && hasTagScope(filter)) continue;
       const authors = filter.authors;
       // 該擋的是 `authors` **不存在**（＝不過濾作者＝全站）。
       //
@@ -469,8 +517,9 @@ export class RelayCore {
       for (const filter of filters) {
         for (const event of this.opts.store.query(filter, nowSec)) {
           if (seen.has(event.id)) continue;
-          // ADR-0071：快照（可尋址密文）只回給作者本人（requireAuth 時）——不論 filter 形狀。
-          if (this.requireAuth && isAddressableKind(event.kind) && event.pubkey !== self) continue;
+          // ADR-0071：快照只回給作者本人（requireAuth 時）——不論 filter 形狀。
+          // ADR-0366 §決策 5：閘門收窄到 `SNAPSHOT_KIND`，不再涵蓋整個可尋址區間。
+          if (this.requireAuth && isAuthorOnlyKind(event.kind) && event.pubkey !== self) continue;
           seen.add(event.id);
           out.push({ to: connId, message: ["EVENT", subId, event] });
         }
@@ -580,8 +629,8 @@ export class RelayCore {
     const candidates = new Set<SubEntry>(this.byKind.get(event.kind));
     for (const entry of this.anyKindSubs) candidates.add(entry);
     for (const entry of candidates) {
-      // ADR-0071：快照（可尋址密文）只回給作者本人——requireAuth 時即時扇出也閘門。
-      if (this.requireAuth && isAddressableKind(event.kind) && this.authState.get(entry.connId)?.pubkey !== event.pubkey) {
+      // ADR-0071：快照只回給作者本人——requireAuth 時即時扇出也閘門（ADR-0366 §決策 5 收窄）。
+      if (this.requireAuth && isAuthorOnlyKind(event.kind) && this.authState.get(entry.connId)?.pubkey !== event.pubkey) {
         continue;
       }
       if (entry.filters.some((f) => matchFilter(f, event))) {
@@ -645,6 +694,22 @@ export class RelayCore {
    * 累積式演算法在這種環境下只是假象。固定窗即使被休眠重置，也仍然把「單次爆量」
    * 壓在上限以內，而那正是要防的東西。
    */
+  /**
+   * 每連線的固定窗計數（ADR-0366 §容量）。與 {@link allowRate} 同一套演算法與同一個理由：
+   * DO 會休眠、記憶體會被清空，滑動窗在這種環境下只是假象；固定窗即使被休眠重置，
+   * 也仍然把**單次爆量**壓在上限以內，而那正是要防的東西。
+   */
+  private allowConnRate(connId: string, nowSec: number, perMinute: number): boolean {
+    const entry = this.connRate.get(connId);
+    if (!entry || nowSec - entry.windowStart >= 60) {
+      this.connRate.set(connId, { windowStart: nowSec, count: 1 });
+      return true;
+    }
+    if (entry.count >= perMinute) return false;
+    entry.count += 1;
+    return true;
+  }
+
   private allowRate(pubkey: string, nowSec: number, perMinute: number): boolean {
     const entry = this.rate.get(pubkey);
     if (!entry || nowSec - entry.windowStart >= 60) {
@@ -670,6 +735,23 @@ export class RelayCore {
     }
     this.anyKindSubs.delete(entry);
   }
+}
+
+/**
+ * filter 是否帶了**非 `#p`** 的標籤條件（ADR-0366 §決策 5 的「具名」放寬）。
+ *
+ * 空陣列不算——`{"#t":[]}` 匹配不到任何東西，放行它等於放行裸 filter 的成本
+ * 而沒有任何收穫（同 ADR-0123 對 `authors: []` 的推理，只是方向相反：
+ * 那裡放行是因為新使用者真的會送出它，這裡沒有任何合法客戶端會送 `#t: []`）。
+ */
+function hasTagScope(filter: RelayFilter): boolean {
+  for (const key in filter) {
+    if (key.charCodeAt(0) !== 35 /* '#' */) continue;
+    if (key === "#p") continue;
+    const values = filter[key as `#${string}`];
+    if (values && values.length > 0) return true;
+  }
+  return false;
 }
 
 function buildEntry(connId: string, subId: string, filters: RelayFilter[]): SubEntry {

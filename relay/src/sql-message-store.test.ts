@@ -3,7 +3,7 @@ import type { DatabaseSync as DatabaseSyncType } from "node:sqlite";
 import type { NostrEvent } from "@cinderous/core";
 import { describe, expect, it } from "vitest";
 import type { RelayFilter } from "./protocol.js";
-import { MAX_QUERY_ROWS } from "./message-store.js";
+import { MAX_QUERY_ROWS, MessageStore } from "./message-store.js";
 import { type SqlExec, SqlMessageStore } from "./sql-message-store.js";
 
 // node:sqlite 太新、vite 的內建模組表尚未收錄 → 靜態 import 會解析失敗（找 "sqlite"）。
@@ -325,5 +325,235 @@ describe("SqlMessageStore — 查詢下推與筆數上限（ADR-0235 C2）", () 
     );
     const s = new SqlMessageStore(db);
     expect(s.query(f({ authors: ["alice"] }), 1000).map((e) => e.id)).toEqual(["old1"]);
+  });
+});
+
+describe("🔴 標籤 filter 必須下推 SQL（ADR-0366 P1 #5）", () => {
+  /** 帶任意標籤的事件。 */
+  const tagged = (id: string, tags: string[][], kind = 1078, createdAt = 1000): NostrEvent =>
+    ({ id, pubkey: "author", created_at: createdAt, kind, tags, content: "", sig: "" }) as NostrEvent;
+
+  it("🔴 目標事件被更新的無關事件淹沒時，仍然查得到（修正前回空集合）", () => {
+    const s = new SqlMessageStore(nodeSqlExec());
+    // 目標最舊。
+    s.put(tagged("target", [["w", "world-1"]], 1078, 1), 1);
+    // 同 kind 的無關事件把它擠出「最新 N 筆」。
+    for (let i = 0; i < 50; i++) s.put(tagged(`noise${i}`, [["w", "other"]], 1078, 100 + i), 1);
+
+    // 修正前：SQL 先 ORDER BY created_at DESC LIMIT 10 拿到 10 筆 noise，
+    // 再於 JS 端跑 matchFilter → 全部不符 → **回空陣列**，而 target 明明存在。
+    expect(s.query(f({ kinds: [1078], "#w": ["world-1"], limit: 10 }), 1).map((e) => e.id)).toEqual([
+      "target",
+    ]);
+  });
+
+  it("多值標籤是 OR，多個標籤之間是 AND（NIP-01 語意在 SQL 端也要成立）", () => {
+    const s = new SqlMessageStore(nodeSqlExec());
+    s.put(tagged("a", [["t", "nagd"], ["g", "chess"]]), 1);
+    s.put(tagged("b", [["t", "nagd"], ["g", "gomoku"]]), 1);
+    s.put(tagged("c", [["t", "lwd"], ["g", "chess"]]), 1);
+
+    const ids = (filter: Partial<RelayFilter>) =>
+      s.query(f(filter), 1).map((e) => e.id).sort();
+    expect(ids({ "#g": ["chess", "gomoku"] })).toEqual(["a", "b", "c"]);
+    expect(ids({ "#t": ["nagd"], "#g": ["chess"] })).toEqual(["a"]);
+    expect(ids({ "#t": ["nagd"] })).toEqual(["a", "b"]);
+  });
+
+  it("空的標籤陣列匹配不到任何東西——連 DB 都不必打", () => {
+    const s = new SqlMessageStore(nodeSqlExec());
+    s.put(tagged("a", [["t", "nagd"]]), 1);
+    expect(s.query(f({ "#t": [] }), 1)).toEqual([]);
+  });
+
+  it("可尋址事件的標籤查詢同樣下推（牌組瀏覽就是這個形狀）", () => {
+    const s = new SqlMessageStore(nodeSqlExec());
+    const deck = (id: string, d: string, topic: string, createdAt: number): NostrEvent =>
+      ({
+        id,
+        pubkey: `author-${id}`,
+        created_at: createdAt,
+        kind: 31081,
+        tags: [["d", d], ["t", topic]],
+        content: "牌組",
+        sig: "",
+      }) as NostrEvent;
+
+    s.putAddressable(deck("mine", "arena", "openetg-deck", 1), 1);
+    for (let i = 0; i < 30; i++) s.putAddressable(deck(`other${i}`, "arena", "別的遊戲", 100 + i), 1);
+
+    expect(
+      s.query(f({ kinds: [31081], "#t": ["openetg-deck"], limit: 5 }), 1).map((e) => e.id),
+    ).toEqual(["mine"]);
+  });
+
+  it("🔴 與記憶體版行為一致——兩個實作共用同一份 OfflineStore 契約", () => {
+    // `MessageStore` 一直都是「先 matchFilter 再 limit」（＝正確）；SQL 版原本相反。
+    // 行為分歧會讓「用記憶體版寫的測試」保證不了產線的 SQL 版（見 sql-message-store.ts 的註解）。
+    const sql = new SqlMessageStore(nodeSqlExec());
+    const mem = new MessageStore();
+    for (const store of [sql, mem]) {
+      store.put(tagged("target", [["w", "world-1"]], 1078, 1), 1);
+      for (let i = 0; i < 20; i++) store.put(tagged(`n${i}`, [["w", "other"]], 1078, 100 + i), 1);
+    }
+    const filter = f({ kinds: [1078], "#w": ["world-1"], limit: 5 });
+    expect(sql.query(filter, 1).map((e) => e.id)).toEqual(mem.query(filter, 1).map((e) => e.id));
+  });
+});
+
+describe("SQL 版的可尋址容量閘與記憶體版一致（ADR-0366 §容量二）", () => {
+  const sized = (pubkey: string, d: string, bytes: number, kind = 31081): NostrEvent => {
+    const id = `${pubkey}-${kind}-${d}`;
+    const shell = JSON.stringify({
+      id,
+      pubkey,
+      created_at: 1000,
+      kind,
+      tags: [["d", d]],
+      content: "",
+      sig: "",
+    }).length;
+    return {
+      id,
+      pubkey,
+      created_at: 1000,
+      kind,
+      tags: [["d", d]],
+      content: "x".repeat(Math.max(0, bytes - shell)),
+      sig: "",
+    } as NostrEvent;
+  };
+
+  const opts = {
+    addressableMaxBytes: 4_096,
+    addressablePerAuthor: 64,
+    addressableBytesPerAuthor: 10_000,
+  };
+
+  it("兩個實作對同一串寫入給出同一串答案", () => {
+    const sql = new SqlMessageStore(nodeSqlExec(), opts);
+    const mem = new MessageStore(opts);
+    const writes: NostrEvent[] = [
+      sized("a", "d1", 4_000, 31081),
+      sized("a", "d2", 4_000, 31082), // 換 kind 仍算進同一個作者
+      sized("a", "d3", 4_000, 31083), // 超過總量 → false
+      sized("a", "big", 8_000, 31081), // 超過單顆上限 → false
+      sized("b", "d1", 4_000, 31081), // 別的作者不受影響
+      { ...sized("a", "d1", 4_000, 31081), id: "a-31081-d1-v2", created_at: 2000 } as NostrEvent, // 取代＝算差額
+    ];
+    const results = (store: SqlMessageStore | MessageStore): boolean[] =>
+      writes.map((e) => store.putAddressable(e, 1000));
+    expect(results(sql)).toEqual(results(mem));
+    expect(results(new SqlMessageStore(nodeSqlExec(), opts))).toEqual([
+      true,
+      true,
+      false,
+      false,
+      true,
+      true,
+    ]);
+  });
+});
+
+describe("SQL 版的 DO 天花板與記憶體版一致（ADR-0367 §決策 2）", () => {
+  const sized2 = (pubkey: string, d: string, bytes: number, expiresAt: number): NostrEvent =>
+    ({
+      id: `${pubkey}-${d}`,
+      pubkey,
+      created_at: 1000,
+      kind: 31081,
+      tags: [["d", d], ["expiration", String(expiresAt)]],
+      content: "x".repeat(bytes),
+      sig: "",
+    }) as NostrEvent;
+
+  const writes: NostrEvent[] = [
+    sized2("a", "soon", 200, 2000),
+    sized2("a", "later", 200, 5000),
+    sized2("a", "latest", 200, 9000),
+    sized2("a", "new", 200, 9000), // 觸發淘汰
+    sized2("b", "huge", 5_000, 9000), // 單顆就超過 → 拒收
+  ];
+
+  /** 容量用實際序列化長度算：取「最大的 n 筆」（四顆事件的 `d` 長度不同）。 */
+  const roomFor = (n: number): number =>
+    writes
+      .slice(0, 4)
+      .map((e) => JSON.stringify(e).length)
+      .sort((a, b) => b - a)
+      .slice(0, n)
+      .reduce((sum, len) => sum + len, 0);
+
+  it("淘汰模式：兩個實作對同一串寫入給出同一串答案與同一批倖存者", () => {
+    const opts = {
+      addressableMaxTotalBytes: roomFor(3),
+      ceilingEvicts: true,
+      addressablePerAuthor: 64,
+    };
+    const sql = new SqlMessageStore(nodeSqlExec(), opts);
+    const mem = new MessageStore(opts);
+    const sqlR = writes.map((e) => sql.putAddressable(e, 1000));
+    const memR = writes.map((e) => mem.putAddressable(e, 1000));
+    expect(sqlR).toEqual(memR);
+    expect(sqlR).toEqual([true, true, true, true, false]);
+
+    const survivors = (s: SqlMessageStore | MessageStore): string[] =>
+      s
+        .query(f({ kinds: [31081], authors: ["a", "b"] }), 1000)
+        .map((e) => e.tags.find((t) => t[0] === "d")?.[1] ?? "")
+        .sort();
+    expect(survivors(sql)).toEqual(survivors(mem));
+    expect(survivors(sql)).toEqual(["later", "latest", "new"]);
+  });
+
+  it("拒收模式：兩個實作都不動既有資料", () => {
+    const opts = { addressableMaxTotalBytes: roomFor(3), addressablePerAuthor: 64 };
+    const sql = new SqlMessageStore(nodeSqlExec(), opts);
+    const mem = new MessageStore(opts);
+    // ⚠ 每個 store 只跑一次——再跑一次是在已經有資料的 store 上寫，答案當然不同。
+    const sqlResults = writes.map((e) => sql.putAddressable(e, 1000));
+    const memResults = writes.map((e) => mem.putAddressable(e, 1000));
+    expect(sqlResults).toEqual(memResults);
+    expect(sqlResults).toEqual([true, true, true, false, false]);
+  });
+});
+
+describe("SQL 版的離線留言天花板與記憶體版一致（ADR-0367 §決策 2）", () => {
+  const roomEvent = (id: string, bytes: number, expiresAt: number): NostrEvent =>
+    ({
+      id,
+      pubkey: "a",
+      created_at: 1000,
+      kind: 1078,
+      tags: [["t", "lwd"], ["expiration", String(expiresAt)]],
+      content: "x".repeat(bytes),
+      sig: "",
+    }) as NostrEvent;
+
+  const four = [
+    roomEvent("soon", 200, 2000),
+    roomEvent("later", 200, 5000),
+    roomEvent("latest", 200, 9000),
+    roomEvent("fresh", 200, 9000),
+  ];
+  const roomFor = (n: number): number =>
+    four
+      .map((e) => JSON.stringify(e).length)
+      .sort((a, b) => b - a)
+      .slice(0, n)
+      .reduce((sum, len) => sum + len, 0);
+
+  it("兩個實作的答案與倖存者名單一致（淘汰模式）", () => {
+    const opts = { offlineMaxTotalBytes: roomFor(3), ceilingEvicts: true };
+    const sql = new SqlMessageStore(nodeSqlExec(), opts);
+    const mem = new MessageStore(opts);
+    expect(four.map((e) => sql.put(e, 1000))).toEqual(four.map((e) => mem.put(e, 1000)));
+    const kept = (s: SqlMessageStore | MessageStore): string[] =>
+      s
+        .query(f({ kinds: [1078] }), 1000)
+        .map((e) => e.id)
+        .sort();
+    expect(kept(sql)).toEqual(kept(mem));
+    expect(kept(sql)).toEqual(["fresh", "later", "latest"]);
   });
 });

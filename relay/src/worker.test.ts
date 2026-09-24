@@ -11,9 +11,16 @@
 
 import { createRequire } from "node:module";
 import type { DatabaseSync as DatabaseSyncType } from "node:sqlite";
-import { buildAuthEvent, buildHttpAuthEvent, finalizeEvent, generateSecretKey, getPublicKey, httpAuthHeader, type NostrEvent, type SecretKey } from "@cinderous/core";
+import { buildAuthEvent, buildHttpAuthEvent, finalizeEvent, minePow, generateSecretKey, getPublicKey, httpAuthHeader, type NostrEvent, type SecretKey } from "@cinderous/core";
 import { beforeAll, describe, expect, it } from "vitest";
 import worker, { mintTurnResponse, turnPreflightResponse, RelayRoom, type Env } from "./worker.js";
+import {
+  MAX_MESSAGES_PER_MINUTE,
+  PUBLIC_LANE_ADDRESSABLE_PER_AUTHOR,
+  PUBLIC_LANE_RETENTION_SECONDS,
+} from "./host-config.js";
+import { namedLaneName } from "./shard.js";
+import { leadingZeroBits } from "./relay-core.js";
 
 const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as {
   DatabaseSync: typeof DatabaseSyncType;
@@ -74,6 +81,9 @@ class FakeState {
     return [];
   }
 
+  /** key-value storage（ADR-0366 用它記住本實例的車道政策）；與 sql 同樣跨「休眠」保留。 */
+  kv = new Map<string, unknown>();
+
   storage = {
     sql: {
       exec: (query: string, ...bindings: (string | number | null)[]) => ({
@@ -83,6 +93,10 @@ class FakeState {
     getAlarm: async (): Promise<number | null> => this.alarm,
     setAlarm: async (t: number): Promise<void> => {
       this.alarm = t;
+    },
+    get: async <T>(key: string): Promise<T | undefined> => this.kv.get(key) as T | undefined,
+    put: async (key: string, value: unknown): Promise<void> => {
+      this.kv.set(key, value);
     },
   };
 
@@ -106,11 +120,16 @@ beforeAll(() => {
   (globalThis as unknown as { Response: unknown }).Response = class {
     constructor(
       public body: unknown,
-      public init: unknown,
+      public init?: { status?: number },
     ) {}
+    /** 真 Response 有；替身漏了會讓「回幾號」這類斷言永遠拿到 undefined。 */
+    get status(): number {
+      return this.init?.status ?? 200;
+    }
   };
 });
 
+const nowSec = (): number => Math.floor(Date.now() / 1000);
 const HOST = "cinder-relay.example";
 const RELAY_URL = `wss://${HOST}`;
 
@@ -118,10 +137,16 @@ function newRoom(state: FakeState, env: Env = {} as Env): RelayRoom {
   return new RelayRoom(state as unknown as DurableObjectState, env);
 }
 
-/** 模擬一次連線升級：回傳伺服端 socket，其 attachment 內含 connId。 */
-function open(room: RelayRoom, state: FakeState): FakeWs {
+/**
+ * 模擬一次連線升級：回傳伺服端 socket，其 attachment 內含 connId。
+ *
+ * `fetch` 自 ADR-0366 起是 async（要把車道政策寫進 storage 釘住），故此 helper 也是。
+ * `lane` 未指定＝嚴格平面，與路由方對 `/`、`/s/<n>`、`/presence` 的判定一致。
+ */
+async function open(room: RelayRoom, state: FakeState, lane: "strict" | "app" = "strict"): Promise<FakeWs> {
   const before = state.sockets.length;
-  room.fetch(new Request(`https://${HOST}/`));
+  // 政策由**路徑**決定（與 worker 路由同一個 `routeForPath`），故這裡也用路徑。
+  await room.fetch(new Request(`https://${HOST}${lane === "app" ? "/app/testgame" : "/"}`));
   return state.sockets[before]!; // 本次新掛上的伺服端連線
 }
 
@@ -158,36 +183,36 @@ const heartbeat = (sk: SecretKey, createdAt = Math.floor(Date.now() / 1000)): No
 // ── 測試 ────────────────────────────────────────────────────────────────────
 
 describe("RelayRoom — 連線與 NIP-42（真實宿主路徑）", () => {
-  it("升級即發出 AUTH 挑戰，並存進 attachment（休眠可還原）", () => {
+  it("升級即發出 AUTH 挑戰，並存進 attachment（休眠可還原）", async () => {
     const state = new FakeState();
     const room = newRoom(state);
-    const ws = open(room, state);
+    const ws = await open(room, state);
     const msgs = ws.drain() as [string, string][];
     expect(msgs[0]?.[0]).toBe("AUTH");
     expect(typeof (ws.attachment as { connId: string }).connId).toBe("string");
   });
 
-  it("正確 challenge + relay tag → 認證成功", () => {
+  it("正確 challenge + relay tag → 認證成功", async () => {
     const state = new FakeState();
     const room = newRoom(state);
-    const ws = open(room, state);
+    const ws = await open(room, state);
     expect(authenticate(room, ws, generateSecretKey())).toBe(true);
   });
 
-  it("🔴 relay tag 指向別站 → 拒絕（宿主有把 request 主機接進 connect）", () => {
+  it("🔴 relay tag 指向別站 → 拒絕（宿主有把 request 主機接進 connect）", async () => {
     const state = new FakeState();
     const room = newRoom(state);
-    const ws = open(room, state);
+    const ws = await open(room, state);
     // challenge 是對的（模擬攻擊者從真中繼轉來的），但 relay tag 指向 evil。
     expect(authenticate(room, ws, generateSecretKey(), "wss://evil.example")).toBe(false);
   });
 });
 
 describe("RelayRoom — 濫用防護確實接上了（ADR-0235 H1 回歸）", () => {
-  it("未來時戳被拒——證明 maxFutureSkewSec 有經 worker 傳進 core", () => {
+  it("未來時戳被拒——證明 maxFutureSkewSec 有經 worker 傳進 core", async () => {
     const state = new FakeState();
     const room = newRoom(state);
-    const ws = open(room, state);
+    const ws = await open(room, state);
     const sk = generateSecretKey();
     authenticate(room, ws, sk);
     const future = heartbeat(sk, Math.floor(Date.now() / 1000) + 3600);
@@ -196,10 +221,10 @@ describe("RelayRoom — 濫用防護確實接上了（ADR-0235 H1 回歸）", ()
     expect(ok[3]).toContain("時間戳");
   });
 
-  it("重放同一事件被拒——證明 replayWindowSec 有接上（修正前 seenIds 永遠是空的）", () => {
+  it("重放同一事件被拒——證明 replayWindowSec 有接上（修正前 seenIds 永遠是空的）", async () => {
     const state = new FakeState();
     const room = newRoom(state);
-    const ws = open(room, state);
+    const ws = await open(room, state);
     const sk = generateSecretKey();
     authenticate(room, ws, sk);
     const beat = heartbeat(sk);
@@ -210,10 +235,10 @@ describe("RelayRoom — 濫用防護確實接上了（ADR-0235 H1 回歸）", ()
     expect(second[3]).toContain("duplicate");
   });
 
-  it("未認證不得發布（requireAuth 有接上）", () => {
+  it("未認證不得發布（requireAuth 有接上）", async () => {
     const state = new FakeState();
     const room = newRoom(state);
-    const ws = open(room, state);
+    const ws = await open(room, state);
     // 未認證的 EVENT：回應含拒絕 OK ＋ 重發的 AUTH 挑戰，故用型別找出那則 OK。
     const out = send(room, ws, ["EVENT", heartbeat(generateSecretKey())]) as [string, string, boolean, string][];
     const ok = out.find((m) => m[0] === "OK");
@@ -223,12 +248,12 @@ describe("RelayRoom — 濫用防護確實接上了（ADR-0235 H1 回歸）", ()
 });
 
 describe("RelayRoom — 收發與扇出", () => {
-  it("認證後訂閱→他人發布→收到扇出（完整往返）", () => {
+  it("認證後訂閱→他人發布→收到扇出（完整往返）", async () => {
     const state = new FakeState();
     const room = newRoom(state);
 
     const watcherSk = generateSecretKey();
-    const watcher = open(room, state);
+    const watcher = await open(room, state);
     authenticate(room, watcher, watcherSk);
     const req = send(room, watcher, ["REQ", "s1", { kinds: [20000], authors: [getPublicKey(generateSecretKey())] }]);
     expect((req[0] as [string, string])[0]).toBe("EOSE");
@@ -238,7 +263,7 @@ describe("RelayRoom — 收發與扇出", () => {
     const senderPk = getPublicKey(senderSk);
     send(room, watcher, ["REQ", "s2", { kinds: [20000], authors: [senderPk] }]);
 
-    const sender = open(room, state);
+    const sender = await open(room, state);
     authenticate(room, sender, senderSk);
     const beat = heartbeat(senderSk);
     send(room, sender, ["EVENT", beat]);
@@ -248,11 +273,11 @@ describe("RelayRoom — 收發與扇出", () => {
     expect(evented?.[2]?.id).toBe(beat.id);
   });
 
-  it("dispatch 只送給目標連線（tag 路由）", () => {
+  it("dispatch 只送給目標連線（tag 路由）", async () => {
     const state = new FakeState();
     const room = newRoom(state);
-    const a = open(room, state);
-    const b = open(room, state);
+    const a = await open(room, state);
+    const b = await open(room, state);
     a.drain();
     b.drain();
     // 對 a 送訊息，b 不應收到任何東西。
@@ -262,10 +287,10 @@ describe("RelayRoom — 收發與扇出", () => {
 });
 
 describe("RelayRoom — 休眠→喚醒還原（ADR-0059 + ADR-0235 H2）", () => {
-  it("認證狀態跨休眠存活：喚醒後的新 RelayRoom 仍認得已認證連線", () => {
+  it("認證狀態跨休眠存活：喚醒後的新 RelayRoom 仍認得已認證連線", async () => {
     const state = new FakeState();
     const room1 = newRoom(state);
-    const ws = open(room1, state);
+    const ws = await open(room1, state);
     authenticate(room1, ws, generateSecretKey());
 
     // 休眠：記憶體中的 RelayRoom 消失，但 storage 與 socket attachment 存活。
@@ -276,10 +301,10 @@ describe("RelayRoom — 休眠→喚醒還原（ADR-0059 + ADR-0235 H2）", () =
     expect(JSON.stringify(out)).not.toContain("auth-required");
   });
 
-  it("🔴 relayHost 跨休眠存活：喚醒後才認證，仍會驗 relay tag", () => {
+  it("🔴 relayHost 跨休眠存活：喚醒後才認證，仍會驗 relay tag", async () => {
     const state = new FakeState();
     const room1 = newRoom(state);
-    const ws = open(room1, state); // 連線建立→challenge 與 relayHost 寫進 attachment
+    const ws = await open(room1, state); // 連線建立→challenge 與 relayHost 寫進 attachment
     const challenge = challengeOf(ws);
 
     // 休眠前尚未認證。喚醒後才送 AUTH——relayHost 必須從 attachment 還原，否則檢查靜默失效。
@@ -290,18 +315,18 @@ describe("RelayRoom — 休眠→喚醒還原（ADR-0059 + ADR-0235 H2）", () =
     expect(ok?.[2]).toBe(false); // relayHost 有還原 → evil 被擋
 
     // 對照：同一喚醒後的 room，正確 relay tag 仍可認證成功。
-    const ws2 = open(room2, state);
+    const ws2 = await open(room2, state);
     expect(authenticate(room2, ws2, generateSecretKey())).toBe(true);
   });
 
-  it("離線留言跨休眠存活（DO SQLite）：喚醒後仍查得到", () => {
+  it("離線留言跨休眠存活（DO SQLite）：喚醒後仍查得到", async () => {
     const state = new FakeState();
     const room1 = newRoom(state);
 
     const recipientSk = generateSecretKey();
     const recipientPk = getPublicKey(recipientSk);
     const senderSk = generateSecretKey();
-    const sender = open(room1, state);
+    const sender = await open(room1, state);
     authenticate(room1, sender, senderSk);
     const dm = finalizeEvent(
       { kind: 1059, created_at: Math.floor(Date.now() / 1000), tags: [["p", recipientPk]], content: "x" },
@@ -311,7 +336,7 @@ describe("RelayRoom — 休眠→喚醒還原（ADR-0059 + ADR-0235 H2）", () =
 
     // 休眠 → 收件人上線拉取。
     const room2 = newRoom(state);
-    const reader = open(room2, state);
+    const reader = await open(room2, state);
     authenticate(room2, reader, recipientSk);
     const out = send(room2, reader, ["REQ", "inbox", { kinds: [1059], "#p": [recipientPk] }]) as [string, string, NostrEvent][];
     const evented = out.find((m) => m[0] === "EVENT");
@@ -369,6 +394,99 @@ describe("NIP-11 端點（ADR-0260 worker fetch）", () => {
   });
 });
 
+
+describe("第三方車道路由（ADR-0366 worker fetch）", () => {
+  /** 回傳 [DO 名, DO 收到的路徑, HTTP 狀態]。 */
+  const route = async (path: string): Promise<[string, string, number]> => {
+    let doName = "";
+    let seenPath = "";
+    const env = {
+      RELAY_ROOM: {
+        idFromName: (n: string) => {
+          doName = n;
+          return {} as never;
+        },
+        get: () => ({
+          fetch: (req: Request) => {
+            seenPath = new URL(req.url).pathname;
+            return new Response(null, { status: 101 });
+          },
+        }),
+      },
+    } as unknown as Env;
+    const res = await worker.fetch(
+      new Request(`https://${HOST}${path}`, { headers: { Upgrade: "websocket" } }),
+      env,
+    );
+    return [doName, seenPath, res.status];
+  };
+
+  it("/app/<laneId> → 車道 DO", async () => {
+    const [doName, , status] = await route("/app/elementalist");
+    expect(doName).toMatch(/^app-[0-7]$/);
+    expect(status).toBe(101);
+  });
+
+  it("🔴 request 原封不動轉給 DO——政策由 DO 自己對同一路徑算，兩邊不可能不一致", async () => {
+    for (const p of ["/", "/s/a", "/presence", "/app/elementalist"]) {
+      const [, seenPath] = await route(p);
+      expect(seenPath, p).toBe(p);
+    }
+  });
+
+  it("🔴 認不得的路徑回 404，且**根本不碰 DO**", async () => {
+    for (const p of ["/s/zz", "/s/ab", "/nope", "/app"]) {
+      const [doName, , status] = await route(p);
+      expect(status, p).toBe(404);
+      expect(doName, p).toBe(""); // idFromName 沒被呼叫
+    }
+  });
+});
+
+describe("RelayRoom — 車道政策釘住（ADR-0366）", () => {
+  it("車道連線放行標籤訂閱；嚴格平面同一個 filter 被擋", async () => {
+    const laneState = new FakeState();
+    const laneRoom = newRoom(laneState);
+    const lane = await open(laneRoom, laneState, "app");
+    // 車道不要求 AUTH，可直接訂閱（ADR-0366 §決策 5 的 requireAuth: false）
+    expect(send(laneRoom, lane, ["REQ", "s", { kinds: [1078], "#w": ["world-1"] }])).toContainEqual([
+      "EOSE",
+      "s",
+    ]);
+
+    const strictState = new FakeState();
+    const strictRoom = newRoom(strictState);
+    const strict = await open(strictRoom, strictState);
+    const out = send(strictRoom, strict, ["REQ", "s", { kinds: [1078], "#w": ["world-1"] }]);
+    // 嚴格平面先要 AUTH；就算認證了也會因為沒有 #p/authors 而被擋（見 relay-core 測試）。
+    expect(JSON.stringify(out)).toContain("auth-required");
+  });
+
+  it("🔴 政策跨休眠存活：喚醒後的新 RelayRoom 仍是車道", async () => {
+    const state = new FakeState();
+    await open(newRoom(state), state, "app");
+    // 休眠＝記憶體清空、storage 保留 ⇒ 新實例從 storage 還原政策
+    const woken = newRoom(state);
+    const ws = await open(woken, state, "app");
+    expect(send(woken, ws, ["REQ", "s", { kinds: [1078], "#w": ["w"] }])).toContainEqual(["EOSE", "s"]);
+  });
+
+  it("🔴 釘住之後收到不同政策 → 409，不切換（同一份儲存不可被兩套規則讀寫）", async () => {
+    const state = new FakeState();
+    const room = newRoom(state);
+    await open(room, state, "app");
+    const res = await room.fetch(new Request(`https://${HOST}/`)); // 同一顆 DO 收到嚴格平面的路徑
+    expect(res.status).toBe(409);
+  });
+
+  it("認不得的路徑漏進 DO 時一律當嚴格（fail-closed 的底線；正常情況 worker 已先 404）", async () => {
+    const state = new FakeState();
+    const room = newRoom(state);
+    await room.fetch(new Request(`https://${HOST}/s/zz`));
+    expect(state.kv.get("cinder:lane-profile")).toBe("strict");
+  });
+});
+
 describe("分片路由（ADR-0241 worker fetch）", () => {
   const routeOf = async (path: string): Promise<string> => {
     let routed = "";
@@ -397,11 +515,11 @@ describe("分片路由（ADR-0241 worker fetch）", () => {
 });
 
 describe("分片血條隔離（ADR-0241）", () => {
-  it("一片收畸形訊息（不拋）不影響另一片：他片的離線留言照樣查得到", () => {
+  it("一片收畸形訊息（不拋）不影響另一片：他片的離線留言照樣查得到", async () => {
     // shard-A：塞畸形訊息（模擬攻擊/崩潰路徑，C1 已保證不拋）——完全獨立的 state/DO。
     const stateA = new FakeState();
     const roomA = newRoom(stateA);
-    const wsA = open(roomA, stateA);
+    const wsA = await open(roomA, stateA);
     wsA.drain();
     expect(() => roomA.webSocketMessage(wsA as unknown as WebSocket, "not json{{{")).not.toThrow();
 
@@ -411,7 +529,7 @@ describe("分片血條隔離（ADR-0241）", () => {
     const recipientSk = generateSecretKey();
     const recipientPk = getPublicKey(recipientSk);
     const senderSk = generateSecretKey();
-    const sender = open(roomB, stateB);
+    const sender = await open(roomB, stateB);
     authenticate(roomB, sender, senderSk);
     const dm = finalizeEvent(
       { kind: 1059, created_at: Math.floor(Date.now() / 1000), tags: [["p", recipientPk]], content: "x" },
@@ -420,7 +538,7 @@ describe("分片血條隔離（ADR-0241）", () => {
     send(roomB, sender, ["EVENT", dm]);
 
     // shard-A 的故障不影響 shard-B：B 的收件人照常拉到留言（血條＝一崩 1/N）。
-    const reader = open(roomB, stateB);
+    const reader = await open(roomB, stateB);
     authenticate(roomB, reader, recipientSk);
     const out = send(roomB, reader, ["REQ", "inbox", { kinds: [1059], "#p": [recipientPk] }]) as [
       string,
@@ -432,10 +550,10 @@ describe("分片血條隔離（ADR-0241）", () => {
 });
 
 describe("RelayRoom — 崩潰韌性（ADR-0235 C1 宿主層）", () => {
-  it("畸形訊息不會讓房間拋例外（單一惡意訊息不打掛全域 DO）", () => {
+  it("畸形訊息不會讓房間拋例外（單一惡意訊息不打掛全域 DO）", async () => {
     const state = new FakeState();
     const room = newRoom(state);
-    const ws = open(room, state);
+    const ws = await open(room, state);
     ws.drain();
     expect(() => room.webSocketMessage(ws as unknown as WebSocket, "not json{{{")).not.toThrow();
     // tags 為物件的畸形事件（能通過驗簽卻讓 tags.find 拋）——解析層擋下，回 NOTICE。
@@ -447,10 +565,10 @@ describe("RelayRoom — 崩潰韌性（ADR-0235 C1 宿主層）", () => {
     ).not.toThrow();
   });
 
-  it("webSocketClose 清掉連線且不拋", () => {
+  it("webSocketClose 清掉連線且不拋", async () => {
     const state = new FakeState();
     const room = newRoom(state);
-    const ws = open(room, state);
+    const ws = await open(room, state);
     expect(() => room.webSocketClose(ws as unknown as WebSocket)).not.toThrow();
     expect(ws.closed).toBe(true);
   });
@@ -723,5 +841,289 @@ describe("統一節點：選配靜態資產（ADR-0354）", () => {
     await worker.fetch(new Request(`https://${HOST}/`, { headers: { Upgrade: "websocket" } }), env);
     expect(routed).toBe("global"); // ADR-0241 舊客戶端回退路徑
     expect(seen).toEqual([]); // 資產沒碰到這個請求
+  });
+});
+
+describe("NIP-11 依路徑回該車道的文件（ADR-0366 P1 #6）", () => {
+  const docAt = async (path: string): Promise<Record<string, unknown>> => {
+    const res = await worker.fetch(
+      new Request(`https://${HOST}${path}`, { headers: { Accept: "application/nostr+json" } }),
+      {} as Env,
+    );
+    return JSON.parse((res as unknown as { body: string }).body) as Record<string, unknown>;
+  };
+
+  it("嚴格平面：要求 AUTH、具名訂閱", async () => {
+    const doc = await docAt("/");
+    expect((doc.limitation as Record<string, unknown>).auth_required).toBe(true);
+    expect(doc.cinder_subscription_scope).toBe("named");
+  });
+
+  it("第三方車道：不要求 AUTH、接受標籤訂閱", async () => {
+    const doc = await docAt("/app/elementalist");
+    expect((doc.limitation as Record<string, unknown>).auth_required).toBe(false);
+    expect(doc.cinder_subscription_scope).toBe("tagged");
+  });
+
+  it("🔴 認不得的路徑給嚴格版——問錯路徑不該拿到比較寬鬆的描述", async () => {
+    expect((await docAt("/nope")).cinder_subscription_scope).toBe("named");
+  });
+
+  it("兩種路徑都報得出時鐘窗", async () => {
+    for (const p of ["/", "/app/x"]) {
+      expect((await docAt(p)).cinder_max_past_skew_sec, p).toBeGreaterThan(0);
+    }
+  });
+});
+
+describe("車道 PoW（ADR-0366 P2 #11）", () => {
+  /**
+   * 「沒挖礦」不能只寫 `minePow(..., 0)`：那是一顆**隨機** id，而隨機 id 有 1/256 的
+   * 機率本來就帶 8 個前導零 ⇒ 該測試會偶發地變綠。實測抓到過一次。
+   * 這裡明確要求「低於門檻」，讓「未挖礦」這件事是確定的。
+   */
+  const belowDifficulty = (sk: SecretKey, difficulty: number): NostrEvent => {
+    for (let nonce = 0; ; nonce += 1) {
+      const e = finalizeEvent(
+        { kind: 1078, created_at: nowSec(), tags: [["t", "g"], ["n", String(nonce)]], content: "x" },
+        sk,
+      );
+      if (leadingZeroBits(e.id) < difficulty) return e;
+    }
+  };
+
+  const publish = async (
+    env: Env,
+    lane: "strict" | "app",
+    difficulty: number,
+    /** 要送一顆**達不到**這個難度的事件（測「未挖礦被拒」）。 */
+    below?: number,
+  ) => {
+    const state = new FakeState();
+    const room = newRoom(state, env);
+    const ws = await open(room, state, lane);
+    const sk = generateSecretKey();
+    const e =
+      below === undefined
+        ? minePow({ kind: 1078, created_at: nowSec(), tags: [["t", "g"]], content: "x" }, sk, difficulty)
+        : belowDifficulty(sk, below);
+    return send(room, ws, ["EVENT", e])[0] as [string, string, boolean, string];
+  };
+
+  it("未設 APP_LANE_POW → 車道照收未挖礦的持久化事件（預設不打開）", async () => {
+    expect((await publish({} as Env, "app", 0))[2]).toBe(true);
+  });
+
+  it("設了就生效：未挖礦的事件被拒、挖過的收下", async () => {
+    const env = { APP_LANE_POW: "8" } as Env;
+    const rejected = await publish(env, "app", 0, 8);
+    expect(rejected[2]).toBe(false);
+    expect(rejected[3]).toContain("pow");
+    expect((await publish(env, "app", 8))[2]).toBe(true);
+  });
+
+  it("🔴 同一個變數對嚴格平面無效——自架者設錯不會鎖死自己的訊息平面", async () => {
+    const env = { APP_LANE_POW: "8" } as Env;
+    const state = new FakeState();
+    const room = newRoom(state, env);
+    const ws = await open(room, state); // 嚴格
+    // 嚴格平面要 AUTH，先認證再發一顆沒挖過的持久化事件。
+    const sk = generateSecretKey();
+    const challenge = (ws.drain()[0] as [string, string])[1];
+    send(room, ws, ["AUTH", buildAuthEvent(challenge, RELAY_URL, sk)]);
+    const e = finalizeEvent({ kind: 1078, created_at: nowSec(), tags: [], content: "x" }, sk);
+    const ok = send(room, ws, ["EVENT", e])[0] as [string, string, boolean, string];
+    expect(ok[2]).toBe(true); // 沒有 PoW 也收得下
+  });
+});
+
+describe("車道的成本護欄（ADR-0366 §容量）", () => {
+  /** 以 IP 為鍵的升級速率限制替身；記下每次被問到的 key。 */
+  const limiter = (allow: boolean) => {
+    const keys: string[] = [];
+    return {
+      keys,
+      binding: {
+        limit: (opts: { key: string }) => {
+          keys.push(opts.key);
+          return Promise.resolve({ success: allow });
+        },
+      },
+    };
+  };
+
+  /** 送一次升級請求；回傳 [狀態碼, 是否碰到 DO]。 */
+  const upgrade = async (path: string, env: Partial<Env>, ip?: string): Promise<[number, boolean]> => {
+    let touchedDo = false;
+    const full = {
+      ...env,
+      RELAY_ROOM: {
+        idFromName: () => {
+          touchedDo = true;
+          return {} as never;
+        },
+        get: () => ({ fetch: () => new Response(null, { status: 101 }) }),
+      },
+    } as unknown as Env;
+    const headers: Record<string, string> = { Upgrade: "websocket" };
+    if (ip !== undefined) headers["CF-Connecting-IP"] = ip;
+    const res = await worker.fetch(new Request(`https://${HOST}${path}`, { headers }), full);
+    return [res.status, touchedDo];
+  };
+
+  it("車道升級超過 IP 限額：429，且**根本不碰 DO**", async () => {
+    const { binding, keys } = limiter(false);
+    const [status, touchedDo] = await upgrade("/app/testgame", { APP_LANE_LIMIT: binding }, "203.0.113.7");
+    expect(status).toBe(429);
+    expect(touchedDo).toBe(false);
+    expect(keys).toEqual(["203.0.113.7"]); // 以 IP 計數，不是 pubkey——換一把金鑰是微秒級的事
+  });
+
+  it("額度內照常升級", async () => {
+    const { binding } = limiter(true);
+    const [status, touchedDo] = await upgrade("/app/testgame", { APP_LANE_LIMIT: binding }, "203.0.113.7");
+    expect(status).toBe(101);
+    expect(touchedDo).toBe(true);
+  });
+
+  it("🔴 嚴格平面不受此限制——那裡是本專案自己的使用者，且要求 NIP-42", async () => {
+    const { binding, keys } = limiter(false);
+    for (const path of ["/", "/s/a", "/presence"]) {
+      const [status] = await upgrade(path, { APP_LANE_LIMIT: binding }, "203.0.113.7");
+      expect(status, path).toBe(101);
+    }
+    expect(keys).toEqual([]);
+  });
+
+  it("沒有 CF-Connecting-IP 就不限——不是把所有人塞進同一個桶", async () => {
+    // 該標頭由 Cloudflare 填寫、客戶端偽造不了；缺了代表根本不在 CF 後面，
+    // 此時用單一 key 會讓**所有人共用一個額度**，第一個濫用者就把全站擋死。
+    const { binding, keys } = limiter(false);
+    const [status] = await upgrade("/app/testgame", { APP_LANE_LIMIT: binding });
+    expect(status).toBe(101);
+    expect(keys).toEqual([]);
+  });
+
+  it("沒綁定＝不限速（本地開發與自架站不該因此壞掉）", async () => {
+    const [status] = await upgrade("/app/testgame", {}, "203.0.113.7");
+    expect(status).toBe(101);
+  });
+
+  it("每連線訊息上限觸發時，宿主送出 NOTICE 之後真的把連線關掉", async () => {
+    // 用 CLOSE 灌：它不佔訂閱數上限，測的就是「訊息次數」本身。
+    const state = new FakeState();
+    const room = newRoom(state);
+    const ws = await open(room, state, "app");
+    for (let i = 0; i < MAX_MESSAGES_PER_MINUTE; i += 1) {
+      send(room, ws, ["CLOSE", "s1"]);
+      expect(ws.closed, `第 ${i + 1} 則就被關掉了`).toBe(false);
+    }
+    const out = send(room, ws, ["CLOSE", "s1"]);
+    expect((out[0] as string[])[0]).toBe("NOTICE");
+    expect(String((out[0] as string[])[1])).toMatch(/rate-limited/);
+    expect(ws.closed).toBe(true);
+  });
+});
+
+describe("已知租戶名單（ADR-0366 §裁示）", () => {
+  /** 回傳 [DO 名, HTTP 狀態]。 */
+  const route = async (path: string, lanes?: string): Promise<[string, number]> => {
+    let doName = "";
+    const env = {
+      ...(lanes === undefined ? {} : { APP_LANES: lanes }),
+      RELAY_ROOM: {
+        idFromName: (n: string) => {
+          doName = n;
+          return {} as never;
+        },
+        get: () => ({ fetch: () => new Response(null, { status: 101 }) }),
+      },
+    } as unknown as Env;
+    const res = await worker.fetch(
+      new Request(`https://${HOST}${path}`, { headers: { Upgrade: "websocket" } }),
+      env,
+    );
+    return [doName, res.status];
+  };
+
+  it("名單上的車道有自己的 DO", async () => {
+    const [doName, status] = await route("/app/lwd", "lwd, elementalist");
+    expect(doName).toBe(namedLaneName("lwd"));
+    expect(status).toBe(101);
+  });
+
+  it("🔴 不在名單上的照常服務，只是共用雜湊分片——錨點同時是公用 relay", async () => {
+    const [doName, status] = await route("/app/someoneelse", "lwd, elementalist");
+    expect(status).toBe(101);
+    expect(doName).toMatch(/^app-[0-7]$/);
+    expect(doName).not.toBe(namedLaneName("someoneelse"));
+  });
+
+  it("沒設名單＝沒有已知租戶，全部共用分片（車道剛上線時的行為）", async () => {
+    const [doName, status] = await route("/app/lwd");
+    expect(status).toBe(101);
+    expect(doName).toMatch(/^app-[0-7]$/);
+  });
+
+  it("配額跟著名單走：已知租戶 64、公用車道 16，且休眠後仍然一致", async () => {
+    /** 對某顆 DO 連續發 n 筆可尋址事件（各自不同 `d`），回傳被接受的筆數。 */
+    const accepted = async (lanes: string | undefined, n: number): Promise<number> => {
+      const state = new FakeState();
+      const env = (lanes === undefined ? {} : { APP_LANES: lanes }) as unknown as Env;
+      const room = newRoom(state, env);
+      const ws = await open(room, state, "app");
+      ws.drain();
+      const sk = generateSecretKey();
+      let ok = 0;
+      for (let i = 0; i < n; i += 1) {
+        const event = finalizeEvent(
+          {
+            kind: 31081,
+            created_at: nowSec(),
+            tags: [["d", `deck-${i}`]],
+            content: "{}",
+          },
+          sk,
+        );
+        const out = send(room, ws, ["EVENT", event]) as [string, string, boolean, string][];
+        if (out.find((m) => m[0] === "OK")?.[2] === true) ok += 1;
+      }
+      return ok;
+    };
+
+    // 公用車道：第 17 筆被拒
+    expect(await accepted(undefined, PUBLIC_LANE_ADDRESSABLE_PER_AUTHOR + 1)).toBe(
+      PUBLIC_LANE_ADDRESSABLE_PER_AUTHOR,
+    );
+    // 名單上的車道（DO 名不同，這裡以 `/app/testgame` 進來）：同樣筆數全收
+    expect(await accepted("testgame", PUBLIC_LANE_ADDRESSABLE_PER_AUTHOR + 1)).toBe(
+      PUBLIC_LANE_ADDRESSABLE_PER_AUTHOR + 1,
+    );
+  });
+});
+
+describe("NIP-11 依路徑回報真實保存期（ADR-0367 §後果）", () => {
+  const doc = async (path: string, lanes?: string): Promise<Record<string, unknown>> => {
+    const env = { ...(lanes === undefined ? {} : { APP_LANES: lanes }) } as unknown as Env;
+    const res = (await worker.fetch(
+      new Request(`https://${HOST}${path}`, { headers: { Accept: "application/nostr+json" } }),
+      env,
+    )) as unknown as { body: string };
+    return JSON.parse(res.body) as Record<string, unknown>;
+  };
+
+  it("公用分片誠實回報見習期；名單上的車道回報正常保存期", async () => {
+    expect((await doc("/app/stranger", "lwd")).retention).toEqual([
+      { time: PUBLIC_LANE_RETENTION_SECONDS },
+    ]);
+    expect((await doc("/app/lwd", "lwd")).retention).toEqual([{ time: 7 * 86_400 }]);
+    expect((await doc("/")).retention).toEqual([{ time: 7 * 86_400 }]);
+  });
+
+  it("可尋址壽命也照路徑回報——客戶端原本只能猜", async () => {
+    expect((await doc("/app/stranger", "lwd")).cinder_addressable_ttl_sec).toBe(
+      PUBLIC_LANE_RETENTION_SECONDS,
+    );
+    expect((await doc("/app/lwd", "lwd")).cinder_addressable_ttl_sec).toBe(30 * 86_400);
   });
 });

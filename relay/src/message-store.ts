@@ -23,6 +23,64 @@ export interface MessageStoreOptions {
    * 有標籤者也不得超過此上限——任何一列的壽命都有界，孤兒資料在數學上不可能（ADR-0065）。
    */
   maxTtlSeconds?: number;
+  /**
+   * 每 (pubkey, kind) 的可尋址位址數上限；預設 {@link ADDRESSABLE_MAX_PER_AUTHOR}（5）。
+   *
+   * 5 是為 ADR-0071 的「每人 5 台裝置」訂的——那個數字描述的是**裝置數**，
+   * 不是「一個人能發布幾份可尋址資料」。第三方車道上一位玩家可能同時有多份牌組與
+   * 多個 epoch 的世界快照，套 5 會在第 6 份就被拒（ADR-0366 P1 #7）。
+   */
+  addressablePerAuthor?: number;
+  /**
+   * 可尋址事件的壽命上限（秒）；預設 {@link ADDRESSABLE_TTL_SECONDS}（30 天）。
+   * 自架的世界站可以拉長——挑戰窗的長度因此是**可調的營運參數**，不是協定限制。
+   */
+  addressableTtlSeconds?: number;
+  /**
+   * 單顆可尋址事件的位元組上限；預設 {@link ADDRESSABLE_MAX_BYTES}（256KB）。
+   *
+   * 256KB 是為 ADR-0071 的**加密雲端快照**訂的。第三方車道上的東西小得多
+   * （一份牌組約 2KB、世界快照數十 KB），沿用 256KB 等於把「每分鐘能塞進多少位元組」
+   * 放大八倍——而那個乘積就是塞爆一顆 DO 需要多久（ADR-0366 §容量二）。
+   */
+  addressableMaxBytes?: number;
+  /**
+   * **每個作者**的可尋址總位元組上限（跨所有 kind）；未設＝不限制。
+   *
+   * 🔴 為什麼需要它：{@link addressablePerAuthor} 的計數範圍是 **(pubkey, kind)**，
+   * 而 NIP-33 的 kind 區間有一萬個、且由發送方自選 ⇒ 「每人每 kind 64 個」實際上是
+   * 「每人 64 萬個」。沒有這一條，可尋址儲存對單一作者是無界的。
+   *
+   * ⚠ 它**擋不住換金鑰的人**（pubkey 不用錢）：真正的速率界線是每連線訊息上限
+   * 乘上 {@link addressableMaxBytes}。這一條擋的是「單一身分無限累積」。
+   */
+  addressableBytesPerAuthor?: number;
+  /**
+   * **整顆 DO** 的可尋址總位元組天花板（ADR-0367 §決策 2）；未設＝不限制。
+   *
+   * 每作者總量擋不住換金鑰（pubkey 不用錢），所以還需要一道與身分無關的上限。
+   * 超過時的行為由 {@link addressableCeilingEvicts} 決定。
+   */
+  addressableMaxTotalBytes?: number;
+  /**
+   * 達到天花板時**淘汰最快到期者**（true）或**拒收新寫入**（false，預設）。兩張表共用。
+   *
+   * 🔴 嚴格平面一律 false：那裡的資料是使用者的加密雲端快照，ADR-0071 承諾
+   * 「活躍即永久」——刪別人的備份不可逆，而拒收看得見。車道才用淘汰，
+   * 而且「最快到期優先」讓見習中的資料天然排最前面（ADR-0367 §決策 1）。
+   */
+  ceilingEvicts?: boolean;
+  /**
+   * **整顆 DO** 的離線留言總位元組天花板（ADR-0367 §決策 2）；未設＝不限制。
+   *
+   * 🔴 為什麼 FIFO 不夠：`maxPerRecipient` 是每**收件人** 500 則，而收件人可以亂編；
+   * 更早的一個缺口是**沒有 `p` 標籤的事件落在同一個「無收件人」桶裡，而 FIFO 根本
+   * 不對它執行** ⇒ 那個桶只被 TTL 壓著。遊戲的房間／世界事件正是這個形狀。
+   *
+   * ⚠ 不要改用 `maxPerRecipient` 去補那個桶：一場對決約 20 顆持久化事件，500 只夠
+   * 25 場 ⇒ 熱門車道的房間歷史會被默默丟掉。位元組天花板＋依到期淘汰才是對的形狀。
+   */
+  offlineMaxTotalBytes?: number;
 }
 
 /** 預設留言壽命上限：7 天（對齊 client 端 gift wrap 的預設 TTL）。 */
@@ -43,6 +101,26 @@ export function queryLimit(requested?: number): number {
 
 /** 檔案塊外層 kind（ADR-0162）；**必須鏡射 core `KIND.FILE_WRAP`**（relay 不依賴 core runtime）。 */
 export const FILE_WRAP_KIND = 1060;
+
+/**
+ * 加密雲端快照 kind（ADR-0071）；**必須鏡射 core `SNAPSHOT_KIND`**（同上，relay 不依賴 core runtime）。
+ *
+ * 為什麼這個常數存在：ADR-0071 的「只回給作者本人」原本是對**整個**可尋址區間
+ * （30000–39999）生效的，而那個區間裡只有這一個 kind 是「加密給自己的私人快照」。
+ * 其餘可尋址事件（第三方應用的公開資料）天生就是要給別人讀的，閘在那裡等於它們
+ * 永遠只有作者看得到。⇒ 閘門收窄到這一個 kind（ADR-0366 §決策 5）。
+ */
+export const SNAPSHOT_KIND = 30078;
+
+/**
+ * 是否為「只有作者本人讀得到」的私人可尋址事件（ADR-0071 ／ ADR-0366 §決策 5）。
+ *
+ * ⚠ **不要**改回 {@link isAddressableKind}——那是 NIP-33 的**儲存語意**（取代規則），
+ * 與「誰讀得到」是兩件事。混用會讓每一個新的可尋址 kind 都默默變成作者專屬。
+ */
+export function isAuthorOnlyKind(kind: number): boolean {
+  return kind === SNAPSHOT_KIND;
+}
 /** 檔案塊每收件人預設配額（≈500MB 密文；企業站自己的儲存自己決策）。 */
 export const DEFAULT_FILE_PER_RECIPIENT = 4000;
 /** 單顆檔案塊事件的大小 sanity 上限（48KB 明文 ×2 膨脹之上留餘裕）。 */
@@ -190,25 +268,115 @@ export class MessageStore implements OfflineStore {
       }
       return true;
     }
-    if (JSON.stringify(event).length > ADDRESSABLE_MAX_BYTES) return false;
+    const size = JSON.stringify(event).length;
+    if (size > (this.opts.addressableMaxBytes ?? ADDRESSABLE_MAX_BYTES)) return false;
     if (!existing) {
       let count = 0;
       for (const k of this.addressable.keys()) if (k.startsWith(prefix)) count++;
-      if (count >= ADDRESSABLE_MAX_PER_AUTHOR) return false;
+      if (count >= (this.opts.addressablePerAuthor ?? ADDRESSABLE_MAX_PER_AUTHOR)) return false;
     }
-    const eff = effectiveExpiration(event, nowSec, ADDRESSABLE_TTL_SECONDS);
+    const budget = this.opts.addressableBytesPerAuthor;
+    if (budget !== undefined) {
+      // 取代既有位址時算的是**差額**：把舊的那顆先扣掉，否則更新到一半就再也更新不了。
+      let used = 0;
+      for (const [k, e] of this.addressable) {
+        if (e.pubkey !== event.pubkey || k === key) continue;
+        used += JSON.stringify(e).length;
+      }
+      if (used + size > budget) return false;
+    }
+    const eff = effectiveExpiration(event, nowSec, this.opts.addressableTtlSeconds ?? ADDRESSABLE_TTL_SECONDS);
     if (eff <= nowSec) return false;
+    if (!this.fitsAddressableCeiling(key, size)) return false;
     if (existing) this.effExp.delete(existing.id);
     this.addressable.set(key, event);
     this.effExp.set(event.id, eff);
     return true;
   }
 
+  /** 目前離線留言佔用的位元組（每位收件人各算一份，與 SQL 版的「一列」對齊）。 */
+  private offlineBytes(): number {
+    let used = 0;
+    for (const e of this.noRecipient) used += JSON.stringify(e).length;
+    for (const bucket of this.byRecipient.values()) {
+      for (const e of bucket) used += JSON.stringify(e).length;
+    }
+    return used;
+  }
+
+  /**
+   * 這顆 DO 還放得下這筆離線留言嗎（ADR-0367 §決策 2）。
+   * 放不下時：車道淘汰**最快到期**者；嚴格平面直接拒收。
+   */
+  private fitsOfflineCeiling(size: number): boolean {
+    const max = this.opts.offlineMaxTotalBytes;
+    if (max === undefined) return true;
+    if (size > max) return false;
+    let used = this.offlineBytes();
+    if (used + size <= max) return true;
+    if (this.opts.ceilingEvicts !== true) return false;
+    const victims = [...this.effExp.entries()].sort((a, b) => a[1] - b[1]).map(([id]) => id);
+    for (const id of victims) {
+      if (used + size <= max) break;
+      used -= this.dropOffline(id);
+    }
+    return used + size <= max;
+  }
+
+  /** 從所有桶移除某個 id，回傳釋放的位元組。 */
+  private dropOffline(id: string): number {
+    let freed = 0;
+    const keep = (e: NostrEvent): boolean => {
+      if (e.id !== id) return true;
+      freed += JSON.stringify(e).length;
+      return false;
+    };
+    this.noRecipient = this.noRecipient.filter(keep);
+    for (const [recipient, bucket] of this.byRecipient) {
+      const next = bucket.filter(keep);
+      if (next.length === 0) this.byRecipient.delete(recipient);
+      else this.byRecipient.set(recipient, next);
+    }
+    if (freed > 0) this.effExp.delete(id);
+    return freed;
+  }
+
+  /**
+   * 這顆 DO 還放得下這筆可尋址事件嗎（ADR-0367 §決策 2）。
+   * 放不下時：車道淘汰**最快到期**者直到騰出空間；嚴格平面直接回 false（拒收）。
+   */
+  private fitsAddressableCeiling(key: string, size: number): boolean {
+    const max = this.opts.addressableMaxTotalBytes;
+    if (max === undefined) return true;
+    if (size > max) return false; // 單顆就超過：淘汰也救不了，別把整顆 DO 清空
+    let used = 0;
+    for (const [k, e] of this.addressable) {
+      if (k === key) continue; // 取代既有位址：舊的那筆會被換掉，不計
+      used += JSON.stringify(e).length;
+    }
+    if (used + size <= max) return true;
+    if (this.opts.ceilingEvicts !== true) return false;
+    // 依到期時間由近而遠淘汰，直到騰得出空間
+    const byExpiry = [...this.addressable.entries()]
+      .filter(([k]) => k !== key)
+      .sort((a, b) => (this.effExp.get(a[1].id) ?? 0) - (this.effExp.get(b[1].id) ?? 0));
+    for (const [k, e] of byExpiry) {
+      if (used + size <= max) break;
+      used -= JSON.stringify(e).length;
+      this.addressable.delete(k);
+      this.effExp.delete(e.id);
+    }
+    return used + size <= max;
+  }
+
   /** 寫入一筆留言；若已過期則拒絕並回 false。 */
   put(event: NostrEvent, nowSec: number): boolean {
     if (this.isExpired(event, nowSec)) return false;
-    this.effExp.set(event.id, effectiveExpiration(event, nowSec, this.opts.maxTtlSeconds));
     const recipients = recipientsOf(event);
+    // 一則事件在每位收件人底下各存一份（SQL 版就是各一列），天花板要照這個算。
+    const copies = Math.max(1, recipients.length);
+    if (!this.fitsOfflineCeiling(JSON.stringify(event).length * copies)) return false;
+    this.effExp.set(event.id, effectiveExpiration(event, nowSec, this.opts.maxTtlSeconds));
     if (recipients.length === 0) {
       this.noRecipient.push(event);
       return true;

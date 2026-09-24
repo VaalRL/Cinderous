@@ -6,7 +6,7 @@ import { createServer } from "node:http";
 import { createRequire } from "node:module";
 import type { DatabaseSync as DatabaseSyncType } from "node:sqlite";
 import { WebSocketServer, type WebSocket } from "ws";
-import { ABUSE_GUARD, acceptFileEvents, eventsPerMinuteFrom, firstHost, storeOptions } from "./host-config.js";
+import { acceptFileEvents, eventsPerMinuteFrom, firstHost, guardFor, messagesPerMinuteFrom, storeOptions } from "./host-config.js";
 import { buildRelayInfo, NIP11_HEADERS, wantsRelayInfo } from "./nip11.js";
 import { RelayCore, type Outbound, type RelayCoreOptions } from "./relay-core.js";
 import { type SqlExec, SqlMessageStore } from "./sql-message-store.js";
@@ -32,10 +32,20 @@ const store = new SqlMessageStore(exec, storeOptions(process.env.MAX_TTL_DAYS));
 // 濫用防護（ADR-0235 H1）由 `host-config` 統一供應——與 Cloudflare 版用同一組常數。
 // 速率上限可用 MAX_EVENTS_PER_MINUTE 覆寫（自架站專屬）：未設＝120、設 0＝關閉。
 // 用 delete 而非指派 undefined（exactOptionalPropertyTypes 不允許顯式 undefined）。
-const coreOptions: RelayCoreOptions = { store, requireAuth, ...ABUSE_GUARD };
+//
+// 🔴 **本宿主是單一 profile，且恆為嚴格**（ADR-0366 §決策 8）。它沒有路徑路由，
+// 所以沒有「哪條連線該套哪套規則」這個問題——也因此**絕不可以**在這裡帶進
+// `APP_LANE_GUARD`／`publicLane`：那會讓自架者升個版就把自己的站默默變成公共站，
+// 而症狀是「沒有症狀」。要跑第三方車道請用 Cloudflare 版（有 DO 隔離）。
+// `requireAuth` 放最後：自架站可用 REQUIRE_AUTH=0 明確關掉，那是他自己的取捨。
+const coreOptions: RelayCoreOptions = { store, ...guardFor("strict"), requireAuth };
 const rate = eventsPerMinuteFrom(process.env.MAX_EVENTS_PER_MINUTE);
 if (rate === undefined) delete coreOptions.maxEventsPerMinute;
 else coreOptions.maxEventsPerMinute = rate;
+// 訊息上限跟著事件上限走（ADR-0366 §容量）：調高事件上限的自架站不該被訊息上限偷偷夾住。
+const msgRate = messagesPerMinuteFrom(process.env.MAX_MESSAGES_PER_MINUTE, rate);
+if (msgRate === undefined) delete coreOptions.maxMessagesPerMinute;
+else coreOptions.maxMessagesPerMinute = msgRate;
 if (acceptFileEvents(process.env.MAX_FILE_MB)) coreOptions.acceptFileEvents = true;
 const core = new RelayCore(coreOptions);
 
@@ -61,7 +71,12 @@ const relayInfo = buildRelayInfo({
 const sockets = new Map<string, WebSocket>();
 let counter = 0;
 const dispatch = (out: Outbound[]): void => {
-  for (const { to, message } of out) sockets.get(to)?.send(JSON.stringify(message));
+  for (const { to, message, close } of out) {
+    const ws = sockets.get(to);
+    ws?.send(JSON.stringify(message));
+    // 超限即關（ADR-0366 §容量）：與 Cloudflare 宿主同一個行為，否則自架站少一道護欄。
+    if (close) ws?.close(1008, "rate-limited");
+  }
 };
 
 // 掛在 HTTP 伺服器上：一般請求回 200（讓 PaaS/容器健康檢查通過，比照 Cloudflare worker），

@@ -222,3 +222,214 @@ describe("檔案塊獨立配額桶（ADR-0162）", () => {
     expect(kept2).toEqual(["c2", "c3", "f2", "f3", "f4"]);
   });
 });
+
+describe("可尋址配額與 TTL 可設定（ADR-0366 P1 #7／#8）", () => {
+  const addr = (pubkey: string, d: string, kind = 31081): NostrEvent =>
+    ({ id: `${pubkey}-${d}`, pubkey, created_at: 1000, kind, tags: [["d", d]], content: "x", sig: "" }) as NostrEvent;
+
+  it("預設仍是 5（ADR-0071 不受影響）", () => {
+    const s = new MessageStore();
+    for (let i = 0; i < 5; i++) expect(s.putAddressable(addr("a", `d${i}`), 1000)).toBe(true);
+    expect(s.putAddressable(addr("a", "d5"), 1000)).toBe(false);
+  });
+
+  it("🔴 配額可放寬——第三方車道的牌組與快照不該在第 6 份被拒", () => {
+    const s = new MessageStore({ addressablePerAuthor: 64 });
+    for (let i = 0; i < 64; i++) expect(s.putAddressable(addr("a", `d${i}`), 1000), `第 ${i}`).toBe(true);
+    expect(s.putAddressable(addr("a", "d64"), 1000)).toBe(false); // 仍然有界
+  });
+
+  it("TTL 可拉長——自架世界站的挑戰窗是營運參數，不是協定限制", () => {
+    const s = new MessageStore({ addressableTtlSeconds: 90 * 86_400 });
+    s.putAddressable(addr("a", "d"), 1000);
+    // 預設 30 天會在此刻已過期；拉長到 90 天則仍查得到。
+    expect(s.query({ authors: ["a"], kinds: [31081] } as never, 1000 + 60 * 86_400)).toHaveLength(1);
+  });
+});
+
+describe("可尋址的兩道容量閘（ADR-0366 §容量二）", () => {
+  /** 產一顆指定大小（序列化後約 bytes）的可尋址事件。 */
+  const sized = (pubkey: string, d: string, bytes: number, kind = 31081): NostrEvent => {
+    const shell = JSON.stringify({
+      id: `${pubkey}-${kind}-${d}`,
+      pubkey,
+      created_at: 1000,
+      kind,
+      tags: [["d", d]],
+      content: "",
+      sig: "",
+    }).length;
+    return {
+      id: `${pubkey}-${kind}-${d}`,
+      pubkey,
+      created_at: 1000,
+      kind,
+      tags: [["d", d]],
+      content: "x".repeat(Math.max(0, bytes - shell)),
+      sig: "",
+    } as NostrEvent;
+  };
+
+  it("單顆上限可調小——車道的牌組只有幾 KB，沒有理由沿用加密快照的 256KB", () => {
+    const s = new MessageStore({ addressableMaxBytes: 4_096, addressablePerAuthor: 64 });
+    expect(s.putAddressable(sized("a", "ok", 4_000), 1000)).toBe(true);
+    expect(s.putAddressable(sized("a", "toobig", 8_000), 1000)).toBe(false);
+  });
+
+  it("🔴 每作者總量上限：跨 kind 也算，因為 kind 是發送方自選的", () => {
+    // 沒有這一條，「每 (pubkey, kind) 64 個」實際上等於「每人一萬 × 64 個」。
+    const s = new MessageStore({
+      addressableMaxBytes: 4_096,
+      addressablePerAuthor: 64,
+      addressableBytesPerAuthor: 10_000,
+    });
+    expect(s.putAddressable(sized("a", "d1", 4_000, 31081), 1000)).toBe(true);
+    expect(s.putAddressable(sized("a", "d2", 4_000, 31082), 1000)).toBe(true); // 換一個 kind 也照算
+    expect(s.putAddressable(sized("a", "d3", 4_000, 31083), 1000)).toBe(false); // 超過總量
+    // 另一個作者不受影響
+    expect(s.putAddressable(sized("b", "d1", 4_000, 31081), 1000)).toBe(true);
+  });
+
+  it("🔴 取代既有位址算的是**差額**，不是全額——否則更新到一半就再也更新不了", () => {
+    const s = new MessageStore({ addressableMaxBytes: 8_192, addressableBytesPerAuthor: 10_000 });
+    expect(s.putAddressable(sized("a", "d1", 8_000), 1000)).toBe(true);
+    // 同一個位址更新成同樣大小：總量沒有變，必須收
+    const again = { ...sized("a", "d1", 8_000), id: "a-31081-d1-v2", created_at: 2000 } as NostrEvent;
+    expect(s.putAddressable(again, 1000)).toBe(true);
+    // 但換一個新位址就會超過
+    expect(s.putAddressable(sized("a", "d2", 8_000), 1000)).toBe(false);
+  });
+
+  it("未設定＝不限制（自架站與現有部署維持原行為）", () => {
+    const s = new MessageStore();
+    expect(s.putAddressable(sized("a", "d1", 200_000), 1000)).toBe(true);
+  });
+});
+
+describe("整顆 DO 的可尋址容量天花板（ADR-0367 §決策 2）", () => {
+  const sized2 = (pubkey: string, d: string, bytes: number, expiresAt?: number): NostrEvent =>
+    ({
+      id: `${pubkey}-${d}`,
+      pubkey,
+      created_at: 1000,
+      kind: 31081,
+      tags: expiresAt === undefined ? [["d", d]] : [["d", d], ["expiration", String(expiresAt)]],
+      content: "x".repeat(bytes),
+      sig: "",
+    }) as NostrEvent;
+
+  /**
+   * 容量用**實際序列化長度**算，不要用猜的——猜錯會變成測試在測自己的算術。
+   * 四顆事件的 `d` 長度不同 ⇒ 大小也不同，所以取「最大的 n 筆」當容量。
+   */
+  const roomFor = (n: number, events: readonly NostrEvent[]): number =>
+    events
+      .map((e) => JSON.stringify(e).length)
+      .sort((a, b) => b - a)
+      .slice(0, n)
+      .reduce((sum, len) => sum + len, 0);
+
+  it("車道：超過天花板就淘汰**最快到期**的，新的寫得進去", () => {
+    const four = [
+      sized2("a", "soon", 200, 2000),
+      sized2("a", "later", 200, 5000),
+      sized2("a", "latest", 200, 9000),
+      sized2("a", "new", 200, 9000),
+    ];
+    const s = new MessageStore({
+      addressableMaxTotalBytes: roomFor(3, four),
+      ceilingEvicts: true,
+      addressablePerAuthor: 64,
+    });
+    // 到期時間一筆比一筆晚；第四筆放不下 → 淘汰最快到期的那筆（soon）
+    for (const e of four) expect(s.putAddressable(e, 1000)).toBe(true);
+    const left = s
+      .query({ authors: ["a"], kinds: [31081] } as never, 1000)
+      .map((e) => e.tags.find((t) => t[0] === "d")?.[1])
+      .sort();
+    expect(left).toEqual(["later", "latest", "new"]);
+  });
+
+  it("🔴 嚴格平面只拒收、不淘汰——刪別人的加密備份不可逆，拒收看得見", () => {
+    const four = ["d1", "d2", "d3", "d4"].map((d) => sized2("a", d, 200));
+    const s = new MessageStore({
+      addressableMaxTotalBytes: roomFor(3, four),
+      addressablePerAuthor: 64,
+    });
+    expect(s.putAddressable(four[0]!, 1000)).toBe(true);
+    expect(s.putAddressable(four[1]!, 1000)).toBe(true);
+    expect(s.putAddressable(four[2]!, 1000)).toBe(true);
+    expect(s.putAddressable(four[3]!, 1000)).toBe(false); // 拒收
+    // 先前的三筆一個都沒少
+    expect(s.query({ authors: ["a"], kinds: [31081] } as never, 1000)).toHaveLength(3);
+  });
+
+  it("單顆就超過天花板：淘汰也救不了，直接拒收（不會把整顆 DO 清空）", () => {
+    const s = new MessageStore({
+      addressableMaxTotalBytes: roomFor(2, [sized2("a", "keep", 200, 2000)]),
+      ceilingEvicts: true,
+      addressablePerAuthor: 64,
+    });
+    expect(s.putAddressable(sized2("a", "keep", 200, 2000), 1000)).toBe(true);
+    expect(s.putAddressable(sized2("b", "huge", 5_000, 9000), 1000)).toBe(false);
+    expect(s.query({ authors: ["a"], kinds: [31081] } as never, 1000)).toHaveLength(1);
+  });
+
+  it("未設＝不限制（自架站與現有部署維持原行為）", () => {
+    const s = new MessageStore({ addressablePerAuthor: 64 });
+    for (let i = 0; i < 20; i++) expect(s.putAddressable(sized2("a", `d${i}`, 5_000), 1000)).toBe(true);
+  });
+});
+
+describe("離線留言的 DO 天花板（ADR-0367 §決策 2）", () => {
+  /** 沒有 `p` 標籤的事件——遊戲的房間／世界事件正是這個形狀。 */
+  const roomEvent = (id: string, bytes: number, expiresAt: number): NostrEvent =>
+    ({
+      id,
+      pubkey: "a",
+      created_at: 1000,
+      kind: 1078,
+      tags: [["t", "lwd"], ["expiration", String(expiresAt)]],
+      content: "x".repeat(bytes),
+      sig: "",
+    }) as NostrEvent;
+
+  const four = [
+    roomEvent("soon", 200, 2000),
+    roomEvent("later", 200, 5000),
+    roomEvent("latest", 200, 9000),
+    roomEvent("fresh", 200, 9000),
+  ];
+  const roomFor = (n: number): number =>
+    four
+      .map((e) => JSON.stringify(e).length)
+      .sort((a, b) => b - a)
+      .slice(0, n)
+      .reduce((sum, len) => sum + len, 0);
+
+  it("🔴 沒有 `p` 標籤的事件也受天花板約束——那個桶原本沒有任何上限", () => {
+    // `enforceCap` 只對真正的收件人執行，而 `p`-less 事件落在 `recipient = ''`
+    // ⇒ 它原本只被 TTL 壓著。遊戲的房間事件全都是這個形狀。
+    const s = new MessageStore({ offlineMaxTotalBytes: roomFor(3), ceilingEvicts: true });
+    for (const e of four) expect(s.put(e, 1000)).toBe(true);
+    const kept = s
+      .query({ kinds: [1078] } as never, 1000)
+      .map((e) => e.id)
+      .sort();
+    expect(kept).toEqual(["fresh", "later", "latest"]); // soon 被淘汰
+  });
+
+  it("嚴格平面只拒收、不淘汰", () => {
+    const s = new MessageStore({ offlineMaxTotalBytes: roomFor(3) });
+    expect(s.put(four[0]!, 1000)).toBe(true);
+    expect(s.put(four[1]!, 1000)).toBe(true);
+    expect(s.put(four[2]!, 1000)).toBe(true);
+    expect(s.put(four[3]!, 1000)).toBe(false);
+    expect(s.query({ kinds: [1078] } as never, 1000)).toHaveLength(3);
+  });
+
+  it("未設＝不限制", () => {
+    const s = new MessageStore();
+    for (const e of four) expect(s.put(e, 1000)).toBe(true);
+  });
+});

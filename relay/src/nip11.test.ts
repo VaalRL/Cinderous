@@ -1,6 +1,10 @@
+import { MAX_FUTURE_SKEW_SEC, MAX_PAST_SKEW_SEC } from "./host-config.js";
+import { TIMESTAMP_JITTER_SECONDS } from "@cinderous/core";
 import { describe, expect, it } from "vitest";
 import { MAX_QUERY_ROWS } from "./message-store.js";
 import { buildRelayInfo, SUPPORTED_NIPS, wantsRelayInfo } from "./nip11.js";
+import { PUBLIC_LANE_RETENTION_SECONDS } from "./host-config.js";
+import { ADDRESSABLE_TTL_SECONDS } from "./message-store.js";
 
 describe("NIP-11 Relay Information Document（ADR-0260）", () => {
   describe("內容協商", () => {
@@ -70,5 +74,46 @@ describe("NIP-11 Relay Information Document（ADR-0260）", () => {
       expect(round.name).toBe("我的節點");
       expect(round.contact).toBe("op@example.com");
     });
+  });
+});
+
+describe("時鐘窗與車道政策（ADR-0366 P1 #6）", () => {
+  it("🔴 揭露時鐘窗——第三方的 epoch 結算以它為下界，在此之前問不到", () => {
+    const doc = buildRelayInfo();
+    expect(doc.cinder_max_past_skew_sec).toBe(MAX_PAST_SKEW_SEC);
+    expect(doc.cinder_max_future_skew_sec).toBe(MAX_FUTURE_SKEW_SEC);
+  });
+
+  it("值與實際生效的常數同源（抄一份就會漂移）", () => {
+    const doc = buildRelayInfo();
+    // 過去窗必須大於 NIP-59 的抖動窗——那條不變量由 host-config.test.ts 釘著，
+    // 這裡確認對外報的就是同一個值，而不是另一個看起來差不多的數字。
+    expect(doc.cinder_max_past_skew_sec).toBeGreaterThan(TIMESTAMP_JITTER_SECONDS);
+  });
+
+  it("訂閱政策隨車道不同：named（嚴格）vs tagged（車道）", () => {
+    expect(buildRelayInfo().cinder_subscription_scope).toBe("named");
+    expect(buildRelayInfo({ profile: "strict" }).cinder_subscription_scope).toBe("named");
+    expect(buildRelayInfo({ profile: "app" }).cinder_subscription_scope).toBe("tagged");
+  });
+});
+
+describe("保存期如實揭露（ADR-0367 §後果）", () => {
+  it("公用分片的 retention 就是見習期，而不是站方的 7 天", () => {
+    // 不揭露就是不誠實：對方無從得知「發完就走的資料兩小時後會消失」。
+    const doc = buildRelayInfo({ profile: "app", knownLane: false });
+    expect(doc.retention).toEqual([{ time: PUBLIC_LANE_RETENTION_SECONDS }]);
+    expect(doc.cinder_addressable_ttl_sec).toBe(PUBLIC_LANE_RETENTION_SECONDS);
+  });
+
+  it("名單上的車道與嚴格平面照實回報原本的保存期", () => {
+    const known = buildRelayInfo({ profile: "app", knownLane: true, maxTtlDays: "90" });
+    expect(known.retention).toEqual([{ time: 90 * 86_400 }]);
+    expect(known.cinder_addressable_ttl_sec).toBe(ADDRESSABLE_TTL_SECONDS);
+
+    const strict = buildRelayInfo();
+    expect(strict.retention).toEqual([{ time: 7 * 86_400 }]);
+    // 可尋址事件的壽命原本完全沒有揭露過——客戶端只能猜
+    expect(strict.cinder_addressable_ttl_sec).toBe(ADDRESSABLE_TTL_SECONDS);
   });
 });

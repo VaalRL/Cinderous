@@ -57,6 +57,7 @@ read ordinary environment variables.
 | `MAX_TTL_DAYS` | `7` | Retention cap for offline messages, in days. A sender's longer expiration tag gets clamped — **the operator's cap is always authoritative** (ADR-0160/0065). | Both |
 | `MAX_FILE_MB` | unset | Set to ≥1 to accept file chunks (`FILE_WRAP` 1060). **Unset means the whole class is rejected**, which is zero storage risk for a public node (ADR-0162/0244). | Both |
 | `MAX_EVENTS_PER_MINUTE` | `120` | Per-pubkey events-per-minute cap; set `0` to disable (ADR-0235 H1). | `node-relay` only |
+| `MAX_MESSAGES_PER_MINUTE` | `240` | Per-**connection** inbound-messages-per-minute cap; the connection is closed when exceeded. Set `0` to disable (ADR-0366 §capacity). Raised automatically to stay at least twice the events cap. | `node-relay` only |
 | `REQUIRE_AUTH` | On | Set `0` to disable NIP-42 auth. **Strongly discouraged** — see the platform guides. | `node-relay` only |
 | `PORT` / `DB_PATH` | `8787` / `cinder-relay.db` | Listen port and SQLite file path. | `node-relay` only |
 | `TURN_KEY_ID` / `TURN_API_TOKEN` / `TURN_TTL_SECONDS` | unset | Public TURN fallback (ADR-0243). Unset means `GET /turn` returns 204 and clients fall back to plain STUN. **Set a usage cap on the Cloudflare side** — TURN is billed by bandwidth. | Worker only |

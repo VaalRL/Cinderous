@@ -29,6 +29,58 @@ export type SqlExec = (query: string, ...bindings: (string | number | null)[]) =
 /** 把值陣列轉成 `IN (?,?,…)` 佔位字串。 */
 const placeholders = (values: readonly unknown[]): string => values.map(() => "?").join(",");
 
+/**
+ * 從 filter 取出**非 `#p`** 的標籤條件（ADR-0366 P1 #5）。
+ *
+ * `#p` 不在此列：它有自己的 `recipient` 欄與索引（也是配額與 NIP-62 清除的鍵），
+ * 走既有那條路比多存一份重複的標籤列划算。
+ */
+function tagFiltersOf(filter: RelayFilter): { name: string; values: readonly string[] }[] {
+  const out: { name: string; values: readonly string[] }[] = [];
+  for (const key in filter) {
+    if (key.charCodeAt(0) !== 35 /* '#' */ || key === "#p") continue;
+    const values = filter[key as `#${string}`];
+    if (values) out.push({ name: key.slice(1), values });
+  }
+  return out;
+}
+
+/**
+ * 把標籤條件組成 SQL 的 `EXISTS(json_each(...))` 子句（ADR-0366 P1 #5）。
+ *
+ * ## 為什麼一定要下推，而不是留在 JS 端
+ *
+ * 修正前，`#t`／`#d`／`#w` 這類標籤 filter **只在 `matchFilter` 判**，而那發生在
+ * `ORDER BY created_at DESC LIMIT ?` **之後**。於是「一萬顆同 kind 事件裡找某個標籤」
+ * 會先取最新的 N 顆、再過濾 → **匹配不到就回空陣列**，而目標明明還在庫裡。
+ * 那不是效能問題，是**正確性**問題：查詢回報「沒有」，但答案是「有，只是不在最新 N 顆裡」。
+ *
+ * 記憶體版（{@link MessageStore}）一直都是「先 `matchFilter` 再 limit」＝正確；
+ * 兩個實作共用同一份 `OfflineStore` 契約，分歧會讓記憶體版寫的測試保證不了產線的 SQL 版。
+ *
+ * ## 為什麼是 `json_each` 而不是另建標籤索引表
+ *
+ * 索引表要在 `put`／`putAddressable`／`enforceCap`／`prune`／`vanish`／取代 這六條路徑上
+ * 同步刪乾淨，漏一條就是 ADR-0065 最在意的那種孤兒列。`json_each` 是**掃描**，但它掃的是
+ * **已經被 kind／pubkey／since／expiration 索引縮小過**的候選集，而每顆 DO 的資料受 7 天 TTL
+ * 有界。⇒ 先把正確性補上、把代價維持有界；真的量到慢再談索引表（列為後續）。
+ */
+function pushTagClauses(
+  table: string,
+  filter: RelayFilter,
+  where: string[],
+  bind: (string | number)[],
+): void {
+  for (const { name, values } of tagFiltersOf(filter)) {
+    where.push(
+      `EXISTS (SELECT 1 FROM json_each(${table}.json, '$.tags') AS tg
+               WHERE json_extract(tg.value, '$[0]') = ?
+                 AND json_extract(tg.value, '$[1]') IN (${placeholders(values)}))`,
+    );
+    bind.push(name, ...values);
+  }
+}
+
 /** 附加一條 WHERE 子句與其繫結值。 */
 const push2 = (where: string[], bind: (string | number)[], clause: string, values: readonly (string | number)[]): void => {
   where.push(clause);
@@ -73,6 +125,9 @@ export class SqlMessageStore implements OfflineStore {
       )`,
     );
     this.sql(`CREATE INDEX IF NOT EXISTS idx_addressable_expiration ON addressable(expiration)`);
+    // 每作者總量查詢用（ADR-0366 §容量二）：主鍵是 (kind, pubkey, d)，前綴是 kind，
+    // 所以 `WHERE pubkey = ?` 走不到主鍵 ⇒ 沒有這個索引就是每次寫入掃全表。
+    this.sql(`CREATE INDEX IF NOT EXISTS idx_addressable_pubkey ON addressable(pubkey)`);
     // ADR-0065 遷移：修正前寫入的無到期列（NULL）補上有界壽命，讓 prune 能收走。
     this.sql(
       `UPDATE offline_msgs SET expiration = created_at + ? WHERE expiration IS NULL`,
@@ -105,6 +160,8 @@ export class SqlMessageStore implements OfflineStore {
     const effExp = effectiveExpiration(event, nowSec, this.opts.maxTtlSeconds);
     const recipients = recipientsOf(event);
     const targets = recipients.length > 0 ? recipients : [""];
+    // 天花板照「列」算：每位收件人各一列（無 `p` 者一列，`recipient = ''`）。
+    if (!this.fitsOfflineCeiling(JSON.stringify(event).length * targets.length)) return false;
     const json = JSON.stringify(event);
     for (const recipient of targets) {
       this.sql(
@@ -127,7 +184,7 @@ export class SqlMessageStore implements OfflineStore {
   putAddressable(event: NostrEvent, nowSec: number): boolean {
     const d = dTagOf(event); // 可取代事件無 `d` → 空字串 → 每 (kind,pubkey) 只留一顆
     const existing = this.sql(
-      `SELECT id, created_at FROM addressable WHERE kind = ? AND pubkey = ? AND d = ?`,
+      `SELECT id, created_at, LENGTH(json) AS len FROM addressable WHERE kind = ? AND pubkey = ? AND d = ?`,
       event.kind,
       event.pubkey,
       d,
@@ -144,13 +201,28 @@ export class SqlMessageStore implements OfflineStore {
       return true;
     }
     const json = JSON.stringify(event);
-    if (json.length > ADDRESSABLE_MAX_BYTES) return false;
+    if (json.length > (this.opts.addressableMaxBytes ?? ADDRESSABLE_MAX_BYTES)) return false;
     if (!existing[0]) {
       const count = this.sql(`SELECT COUNT(*) AS n FROM addressable WHERE kind = ? AND pubkey = ?`, event.kind, event.pubkey);
-      if (((count[0]?.n as number) ?? 0) >= ADDRESSABLE_MAX_PER_AUTHOR) return false;
+      if (((count[0]?.n as number) ?? 0) >= (this.opts.addressablePerAuthor ?? ADDRESSABLE_MAX_PER_AUTHOR)) return false;
     }
-    const eff = effectiveExpiration(event, nowSec, ADDRESSABLE_TTL_SECONDS);
+    const budget = this.opts.addressableBytesPerAuthor;
+    if (budget !== undefined) {
+      // 取代既有位址算**差額**：把要被取代的那一列先排除掉（行為與記憶體版逐字對齊）。
+      const used = this.sql(
+        `SELECT COALESCE(SUM(LENGTH(json)), 0) AS n FROM addressable
+         WHERE pubkey = ? AND NOT (kind = ? AND d = ?)`,
+        event.pubkey,
+        event.kind,
+        d,
+      );
+      if (((used[0]?.n as number) ?? 0) + json.length > budget) return false;
+    }
+    const eff = effectiveExpiration(event, nowSec, this.opts.addressableTtlSeconds ?? ADDRESSABLE_TTL_SECONDS);
     if (eff <= nowSec) return false;
+    if (!this.fitsAddressableCeiling(json.length, (prev?.len as number | undefined) ?? 0)) {
+      return false;
+    }
     this.sql(
       `INSERT OR REPLACE INTO addressable (kind, pubkey, d, id, created_at, expiration, json) VALUES (?, ?, ?, ?, ?, ?, ?)`,
       event.kind,
@@ -162,6 +234,68 @@ export class SqlMessageStore implements OfflineStore {
       json,
     );
     return true;
+  }
+
+  /**
+   * 這顆 DO 還放得下這筆離線留言嗎（ADR-0367 §決策 2）。行為與記憶體版逐字對齊。
+   *
+   * 🔴 為什麼 FIFO 不夠：`enforceCap` 只對**真正的收件人**執行，而沒有 `p` 標籤的事件
+   * 落在 `recipient = ''` ⇒ 那個桶原本只被 TTL 壓著，而遊戲的房間事件正是這個形狀。
+   */
+  private fitsOfflineCeiling(size: number): boolean {
+    const max = this.opts.offlineMaxTotalBytes;
+    if (max === undefined) return true;
+    if (size > max) return false;
+    const total =
+      (this.sql(`SELECT COALESCE(SUM(LENGTH(json)), 0) AS n FROM offline_msgs`)[0]?.n as number) ?? 0;
+    let used = total;
+    if (used + size <= max) return true;
+    if (this.opts.ceilingEvicts !== true) return false;
+    const victims = this.sql(
+      `SELECT id, recipient, LENGTH(json) AS len FROM offline_msgs ORDER BY expiration ASC LIMIT 256`,
+    );
+    for (const row of victims) {
+      if (used + size <= max) break;
+      this.sql(
+        `DELETE FROM offline_msgs WHERE id = ? AND recipient = ?`,
+        row.id as string,
+        row.recipient as string,
+      );
+      used -= (row.len as number) ?? 0;
+    }
+    return used + size <= max;
+  }
+
+  /**
+   * 這顆 DO 還放得下這筆可尋址事件嗎（ADR-0367 §決策 2）。行為與記憶體版逐字對齊：
+   * 車道淘汰**最快到期**者直到騰出空間；嚴格平面直接拒收。
+   *
+   * `replacedLen` 是**即將被取代**的那一列的長度——它會被換掉，不該算進已用空間。
+   */
+  private fitsAddressableCeiling(size: number, replacedLen: number): boolean {
+    const max = this.opts.addressableMaxTotalBytes;
+    if (max === undefined) return true;
+    if (size > max) return false; // 單顆就超過：淘汰也救不了，別把整顆 DO 清空
+    const total =
+      (this.sql(`SELECT COALESCE(SUM(LENGTH(json)), 0) AS n FROM addressable`)[0]?.n as number) ?? 0;
+    let used = total - replacedLen;
+    if (used + size <= max) return true;
+    if (this.opts.ceilingEvicts !== true) return false;
+    // 依到期時間由近而遠淘汰。一次取一批（而非逐列查），避免極端情況下打上百次查詢。
+    const victims = this.sql(
+      `SELECT kind, pubkey, d, LENGTH(json) AS len FROM addressable ORDER BY expiration ASC LIMIT 256`,
+    );
+    for (const row of victims) {
+      if (used + size <= max) break;
+      this.sql(
+        `DELETE FROM addressable WHERE kind = ? AND pubkey = ? AND d = ?`,
+        row.kind as number,
+        row.pubkey as string,
+        row.d as string,
+      );
+      used -= (row.len as number) ?? 0;
+    }
+    return used + size <= max;
   }
 
   /**
@@ -194,6 +328,8 @@ export class SqlMessageStore implements OfflineStore {
     if ((pValues && pValues.length === 0) || (authors && authors.length === 0) || (ids && ids.length === 0)) {
       return [];
     }
+    // 標籤同理：`{"#t":[]}` 匹配不到任何東西（`matchFilter` 語意），連 DB 都不用打。
+    if (tagFiltersOf(filter).some((t) => t.values.length === 0)) return [];
 
     const where: string[] = [];
     const bind: (string | number)[] = [];
@@ -207,6 +343,7 @@ export class SqlMessageStore implements OfflineStore {
     if (kinds && kinds.length > 0) push(`kind IN (${placeholders(kinds)})`, kinds);
     if (filter.since !== undefined) push(`created_at >= ?`, [filter.since]);
     if (filter.until !== undefined) push(`created_at <= ?`, [filter.until]);
+    pushTagClauses("offline_msgs", filter, where, bind);
     where.push(`(expiration IS NULL OR expiration > ?)`);
     bind.push(nowSec);
 
@@ -224,6 +361,7 @@ export class SqlMessageStore implements OfflineStore {
       if (authors && authors.length > 0) push2(aWhere, aBind, `pubkey IN (${placeholders(authors)})`, authors);
       if (ids && ids.length > 0) push2(aWhere, aBind, `id IN (${placeholders(ids)})`, ids);
       if (kinds && kinds.length > 0) push2(aWhere, aBind, `kind IN (${placeholders(kinds)})`, kinds);
+      pushTagClauses("addressable", filter, aWhere, aBind);
       rows = rows.concat(
         this.sql(
           `SELECT json FROM addressable WHERE ${aWhere.join(" AND ")} ORDER BY created_at DESC LIMIT ?`,

@@ -55,6 +55,7 @@
 | `MAX_TTL_DAYS` | `7` | 離線留言保留天數上限。發送端蓋超過此上限的過期章會被截斷——**站方上限恆為權威**（ADR-0160/0065）。 | 兩者 |
 | `MAX_FILE_MB` | 未設 | 設 ≥1 才收檔案塊（`FILE_WRAP` 1060）。**未設＝整類拒收**，公共站零儲存風險（ADR-0162/0244）。 | 兩者 |
 | `MAX_EVENTS_PER_MINUTE` | `120` | 每 pubkey 每分鐘事件上限；設 `0` 關閉（ADR-0235 H1）。 | 僅 `node-relay` |
+| `MAX_MESSAGES_PER_MINUTE` | `240` | 每**連線**每分鐘進站訊息上限，超過即關線；設 `0` 關閉（ADR-0366 §容量）。事件上限調高時它會自動跟著抬（恆 ≥ 兩倍）。 | 僅 `node-relay` |
 | `REQUIRE_AUTH` | 開啟 | 設 `0` 關閉 NIP-42 認證。**強烈不建議**——見各平台文件的說明。 | 僅 `node-relay` |
 | `PORT`／`DB_PATH` | `8787`／`cinder-relay.db` | 監聽埠與 SQLite 檔路徑。 | 僅 `node-relay` |
 | `TURN_KEY_ID`／`TURN_API_TOKEN`／`TURN_TTL_SECONDS` | 未設 | 公共 TURN 保底（ADR-0243）。未設＝`GET /turn` 回 204、客戶端退回純 STUN。**務必在 Cloudflare 端設用量上限封頂**（TURN 按流量計費）。 | 僅 Worker |
