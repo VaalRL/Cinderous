@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { CinderMascot } from "@cinderous/brand";
 import type { Theme } from "@cinderous/theme";
 import { CinderMark } from "./Brand.js";
@@ -19,6 +19,30 @@ export const GITHUB_URL = "https://github.com/VaalRL/Cinderous";
 // 官方網頁版（瀏覽器 app）入口（ADR-0209）：與官網分 origin（ADR-0090/0147），只是一條跨 origin 連結。
 // 暫用 Cloudflare Worker 預設網址；日後綁自訂網域（cinderous.propfolk.com）只改這一行。
 export const WEBAPP_URL = "https://cinderous.cinderous1.workers.dev";
+
+/**
+ * 使用者手動選過的主題／語言記在 localStorage（僅此瀏覽器的便利偏好，不含任何身分或追蹤資料）。
+ * ⚠️ 鍵名與 `index.html` 內的首屏 inline script 共用——改一邊必須同步改另一邊。
+ * 沒選過＝預設（淺色＋英文），**不**跟隨 prefers-color-scheme／navigator.language（ADR-0246）。
+ */
+export const THEME_KEY = "cinderous-site-theme";
+export const LOCALE_KEY = "cinderous-site-locale";
+
+function readStored(key: string): string | null {
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null; // 隱私模式／封鎖網站資料：當作沒選過
+  }
+}
+
+function writeStored(key: string, value: string): void {
+  try {
+    window.localStorage.setItem(key, value);
+  } catch {
+    /* 存不了就只在本次瀏覽生效 */
+  }
+}
 
 function initialTheme(): Theme {
   // ADR-0246：預設改為白日（淺色）。CSS 的 `:root` 底色本就是淺色，故首屏與 hydration 一致、無閃爍；
@@ -70,9 +94,26 @@ export function App({ route: initialRoute }: { route: Route }): JSX.Element {
   // ADR-0246：預設淺色為明確產品決策，不再依系統偏好自動切深色（避免使用者明明要淺色卻因 OS 深色而看到深色）。
   // 深色仍可由右上角 ☾ 手動切換。
 
+  // 首次掛載：還原使用者選過的主題。state 初值刻意維持 "light"（與預渲染 HTML 一致，避免 hydration 不符）；
+  // 首屏顏色已由 index.html 的 inline script 先套上 data-theme，這裡不可先寫回 light 造成閃爍。
+  const restoredTheme = useRef(false);
   useEffect(() => {
+    if (!restoredTheme.current) {
+      restoredTheme.current = true;
+      const stored = readStored(THEME_KEY);
+      if ((stored === "dark" || stored === "light") && stored !== theme) {
+        setTheme(stored);
+        return;
+      }
+    }
     document.documentElement.dataset.theme = theme;
   }, [theme]);
+
+  const toggleTheme = (): void => {
+    const next: Theme = theme === "dark" ? "light" : "dark";
+    writeStored(THEME_KEY, next);
+    setTheme(next);
+  };
 
   // 上一頁／下一頁：真實 URL 帶來的真實歷史（修正前 useState 切頁完全沒有歷史）。
   useEffect(() => {
@@ -117,10 +158,16 @@ export function App({ route: initialRoute }: { route: Route }): JSX.Element {
           <NavLink route={{ view: "enterprise", locale }} current={view} label={c.nav_enterprise} onNavigate={navigate} />
           <NavLink route={{ view: "roadmap", locale }} current={view} label={c.nav_roadmap} onNavigate={navigate} />
           <NavLink route={{ view: "faq", locale }} current={view} label={c.nav_faq} onNavigate={navigate} />
-          <a className="nav__toggle" href={localeHref} hrefLang={otherLocale} rel="alternate">
+          <a
+            className="nav__toggle"
+            href={localeHref}
+            hrefLang={otherLocale}
+            rel="alternate"
+            onClick={() => writeStored(LOCALE_KEY, otherLocale)}
+          >
             {locale === "zh-Hant" ? "EN" : "繁中"}
           </a>
-          <button type="button" className="nav__toggle" aria-label="theme" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
+          <button type="button" className="nav__toggle" aria-label={c.nav_theme_toggle} title={c.nav_theme_toggle} onClick={toggleTheme}>
             {theme === "dark" ? "☀" : "☾"}
           </button>
           <a className="nav__cta" href={`${GITHUB_URL}/releases`} target="_blank" rel="noreferrer">

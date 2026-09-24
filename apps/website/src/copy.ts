@@ -72,6 +72,8 @@ export interface Copy {
   nav_roadmap: string;
   nav_faq: string;
   nav_download: string;
+  /** 深淺色切換鈕的無障礙標籤。 */
+  nav_theme_toggle: string;
   nav_transparency: string;
   /** FAQ 頁（ADR-0235 SEO-4）：標題、引言，與問答清單（同時餵頁面與 FAQPage JSON-LD）。 */
   faq_title: string;
@@ -407,6 +409,7 @@ const zhHant: Copy = {
   nav_roadmap: "藍圖",
   nav_faq: "常見問題",
   nav_download: "下載",
+  nav_theme_toggle: "切換深色／淺色主題",
   nav_transparency: "透明度",
   faq_title: "常見問題",
   faq_intro: "關於 Cinderous 是什麼、如何保護你的隱私，以及與其他通訊軟體有何不同——最常被問到的問題。",
@@ -790,6 +793,7 @@ const en: Copy = {
   nav_roadmap: "Roadmap",
   nav_faq: "FAQ",
   nav_download: "Download",
+  nav_theme_toggle: "Toggle dark / light theme",
   nav_transparency: "Transparency",
   faq_title: "Frequently asked questions",
   faq_intro: "The questions people ask most — what Cinderous is, how it protects your privacy, and how it differs from other messengers.",
