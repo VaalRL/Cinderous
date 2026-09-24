@@ -5,6 +5,32 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1024 1024'%3E%3Crect width='1024' height='1024' rx='230' fill='%230f1f3a'/%3E%3Cpath fill='%23ff7a2f' d='M512 200C380 380 322 500 322 600C322 720 410 800 512 800C614 800 702 720 702 600C702 500 644 380 512 200Z'/%3E%3Cpath fill='%23ffd66b' d='M512 380C448 480 418 550 418 610C418 690 462 740 512 740C562 740 606 690 606 610C606 550 576 480 512 380Z'/%3E%3C/svg%3E" />
     <!--app-head-->
+    <!--
+      首屏偏好（在 CSS／hydrate 之前執行，避免閃爍）：
+      - 主題：使用者選過深色才套 data-theme="dark"；沒選過一律淺色（不跟隨 prefers-color-scheme）。
+      - 語言：使用者選過的語言與本頁不同時，換到同一頁的另一語言版本（取自預渲染的 hreflang alternate）。
+        沒選過＝停在本頁（根路徑為英文），不依 navigator.language 自動轉。爬蟲沒有 localStorage，不受影響。
+      鍵名與 src/App.tsx 的 THEME_KEY／LOCALE_KEY 共用。
+    -->
+    <script>
+      (function () {
+        var theme = null, locale = null;
+        try {
+          theme = localStorage.getItem("cinderous-site-theme");
+          locale = localStorage.getItem("cinderous-site-locale");
+        } catch (e) {}
+        if (theme === "dark") document.documentElement.setAttribute("data-theme", "dark");
+        if ((locale === "en" || locale === "zh-Hant") && locale !== document.documentElement.lang) {
+          var alt = document.querySelector('link[rel="alternate"][hreflang="' + locale + '"]');
+          if (alt) {
+            try {
+              var u = new URL(alt.getAttribute("href"), location.href);
+              if (u.pathname !== location.pathname) location.replace(u.pathname + location.search + location.hash);
+            } catch (e) {}
+          }
+        }
+      })();
+    </script>
     <title>Cinderous — 開源・永久免費・隱私優先</title>
   </head>
   <body>
