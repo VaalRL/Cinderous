@@ -110,12 +110,33 @@ describe("已知租戶名單（ADR-0366 §裁示）", () => {
   // 🔴 名單上的車道各有自己的 DO：**移除任何一個＝把它換到共用分片**，舊 DO 裡的資料不會跟著搬，
   // 對該遊戲而言就是資料消失、保存期從 30 天掉到 2 小時。所以「四款自家遊戲都在名單上」要釘住，
   // 要拿掉某一款必須先改這支測試——那一刻就會想起這段註解。
-  const GAME_LANES = ["lwd", "elementalist", "nagd", "soleague"];
+  // 2026-09-28 加入 dochost（DocHost 電子書閱讀器：劃線、筆記、書籤、閱讀進度的多裝置同步）
+  const GAME_LANES = ["lwd", "elementalist", "nagd", "soleague", "dochost"];
 
-  it("四款自家遊戲都在名單上（頂層與統一模式）", () => {
+  it("自家應用都在名單上（頂層與統一模式）", () => {
     for (const section of ["vars", "env.unified.vars"]) {
       const lanes = (varsOf(section).APP_LANES ?? "").split(",").map((s) => s.trim());
       for (const id of GAME_LANES) expect(lanes, `${section} 缺 ${id}`).toContain(id);
     }
+  });
+});
+
+describe("錨點自己的身分與文件網址（SDK ADR 0019；ADR-0370）", () => {
+  // SDK 的預設值改為中立（不預設文件網址、站名是 "Cinderous SDK relay"）之後，
+  // 錨點要在自己的部署設定裡明確寫出來，行為才與以前相同。
+  const RELAY2 = readFileSync(new URL("../wrangler.relay2.toml", import.meta.url), "utf8");
+
+  it("兩份 vars（頂層、統一模式）都把文件網址指向官網開發者頁、站名是 Cinderous relay", async () => {
+    const { DEVELOPER_DOCS_URL } = await import("./developer-docs.js");
+    for (const section of ["vars", "env.unified.vars"]) {
+      expect(varsOf(section).DEVELOPER_DOCS_URL, section).toBe(DEVELOPER_DOCS_URL);
+      expect(varsOf(section).RELAY_NAME, section).toBe("Cinderous relay");
+    }
+  });
+
+  it("第二座錨點的設定也有（它沒有其他 vars，最容易漏）", async () => {
+    const { DEVELOPER_DOCS_URL } = await import("./developer-docs.js");
+    expect(RELAY2).toContain(`DEVELOPER_DOCS_URL = "${DEVELOPER_DOCS_URL}"`);
+    expect(RELAY2).toContain('RELAY_NAME = "Cinderous relay"');
   });
 });

@@ -267,7 +267,7 @@ Ephemeral 心跳會隨上線人數扇出，請參考 [`docs/adr/0006`](./docs/ad
 ### 加上離線留言（DO SQLite，下一步）
 
 離線留言需要持久化。DO 已是 SQLite-backed（`wrangler.toml` 的 `new_sqlite_classes`）；於 `worker.ts` 把
-`RelayCore` 接上以 DO SQLite 為後備的 `MessageStore`（行為已由 `relay/src/message-store.ts`
+`RelayCore` 接上以 DO SQLite 為後備的 `MessageStore`（行為已由 SDK `@cinderous/client/relay` 的 `message-store`
 定義並測試：NIP-40 過期、每收件人配額、以 `#p` 為索引）。詳見
 [`docs/adr/0005`](./docs/adr/0005-relay-self-built-worker.md)。
 

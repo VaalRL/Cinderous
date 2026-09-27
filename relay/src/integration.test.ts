@@ -12,7 +12,7 @@ import {
   wrapMessage,
 } from "@cinderous/core";
 import { createInMemoryRelayNetwork } from "./in-memory-network.js";
-import { MessageStore } from "./message-store.js";
+import { MessageStore } from "@cinderous/client/relay";
 
 /** 以 RelayCore 為中心，在記憶體中串接多個 RelayClient（無真實網路）。 */
 function makeNetwork(nowSec: number) {
