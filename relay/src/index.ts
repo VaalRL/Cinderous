@@ -6,3 +6,5 @@
 // 以免將 Cloudflare 執行期 API（WebSocketPair 等）帶入瀏覽器環境。
 export * from "@cinderous/client/relay";
 export * from "./in-memory-network.js";
+// 錨點的文件網址是 Cinderous 的事實，不在 SDK（SDK ADR 0019）
+export { DEVELOPER_DOCS_URL } from "./developer-docs.js";

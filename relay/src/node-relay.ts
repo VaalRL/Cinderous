@@ -7,4 +7,5 @@ import { startNodeRelay } from "@cinderous/client/relay/node";
 import { RELAY_WORKER_VERSION } from "./version.js";
 
 setRelayVersion(RELAY_WORKER_VERSION);
-startNodeRelay(process.env);
+// SDK 的預設站名是中立的（SDK ADR 0019）；Cinderous 的自架節點預設仍叫 "Cinderous relay"，環境變數可覆寫
+startNodeRelay({ RELAY_NAME: "Cinderous relay", ...process.env });

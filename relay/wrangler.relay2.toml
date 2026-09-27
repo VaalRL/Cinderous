@@ -18,3 +18,9 @@ class_name = "RelayRoom"
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["RelayRoom"]
+
+[vars]
+# 錨點自己的身分與文件網址（SDK ADR 0019）：SDK 的預設值是中立的（不附文件網址、站名是
+# "Cinderous SDK relay"），錨點在這裡明確寫出來。文件網址與 `src/developer-docs.ts` 一致（測試比對）。
+RELAY_NAME = "Cinderous relay"
+DEVELOPER_DOCS_URL = "https://vaalrl.github.io/Cinderous/developers/"

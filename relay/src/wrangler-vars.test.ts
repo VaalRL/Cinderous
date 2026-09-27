@@ -119,3 +119,23 @@ describe("已知租戶名單（ADR-0366 §裁示）", () => {
     }
   });
 });
+
+describe("錨點自己的身分與文件網址（SDK ADR 0019；ADR-0370）", () => {
+  // SDK 的預設值改為中立（不預設文件網址、站名是 "Cinderous SDK relay"）之後，
+  // 錨點要在自己的部署設定裡明確寫出來，行為才與以前相同。
+  const RELAY2 = readFileSync(new URL("../wrangler.relay2.toml", import.meta.url), "utf8");
+
+  it("兩份 vars（頂層、統一模式）都把文件網址指向官網開發者頁、站名是 Cinderous relay", async () => {
+    const { DEVELOPER_DOCS_URL } = await import("./developer-docs.js");
+    for (const section of ["vars", "env.unified.vars"]) {
+      expect(varsOf(section).DEVELOPER_DOCS_URL, section).toBe(DEVELOPER_DOCS_URL);
+      expect(varsOf(section).RELAY_NAME, section).toBe("Cinderous relay");
+    }
+  });
+
+  it("第二座錨點的設定也有（它沒有其他 vars，最容易漏）", async () => {
+    const { DEVELOPER_DOCS_URL } = await import("./developer-docs.js");
+    expect(RELAY2).toContain(`DEVELOPER_DOCS_URL = "${DEVELOPER_DOCS_URL}"`);
+    expect(RELAY2).toContain('RELAY_NAME = "Cinderous relay"');
+  });
+});
