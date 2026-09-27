@@ -27,7 +27,7 @@
     "genkey:maintainer": "esbuild bootstrap/genkey.ts --bundle --platform=node --format=esm --outfile=dist/genkey.js && node dist/genkey.js"
   },
   "dependencies": {
-    "@cinderous/client": "github:VaalRL/cinderous-sdk-dev#v0.7.0",
+    "@cinderous/client": "github:VaalRL/cinderous-sdk-dev#v0.8.0",
     "@cinderous/core": "workspace:*"
   },
   "devDependencies": {
