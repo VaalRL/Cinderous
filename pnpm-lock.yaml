@@ -219,8 +219,8 @@ importers:
   packages/core:
     dependencies:
       '@cinderous/client':
-        specifier: github:VaalRL/cinderous-sdk-dev#v0.5.0
-        version: git+https://github.com/VaalRL/cinderous-sdk-dev.git#0e4b8cea12f4994092babab0bd70b12860c21907(typescript@5.9.3)
+        specifier: github:VaalRL/cinderous-sdk-dev#v0.7.0
+        version: git+https://github.com/VaalRL/cinderous-sdk-dev.git#dec9616d0ba068e333d02794478178fd25c4f640(typescript@5.9.3)
       '@noble/ciphers':
         specifier: ^2.2.0
         version: 2.2.0
@@ -293,8 +293,8 @@ importers:
   relay:
     dependencies:
       '@cinderous/client':
-        specifier: github:VaalRL/cinderous-sdk-dev#v0.5.0
-        version: git+https://github.com/VaalRL/cinderous-sdk-dev.git#0e4b8cea12f4994092babab0bd70b12860c21907(typescript@5.9.3)
+        specifier: github:VaalRL/cinderous-sdk-dev#v0.7.0
+        version: git+https://github.com/VaalRL/cinderous-sdk-dev.git#dec9616d0ba068e333d02794478178fd25c4f640(typescript@5.9.3)
       '@cinderous/core':
         specifier: workspace:*
         version: link:../packages/core
@@ -442,10 +442,11 @@ packages:
   '@capacitor/core@7.6.8':
     resolution: {integrity: sha512-x1xfxvNcTSnj6OoYaAB0n0a0HRvi5f2YjcVnMLxpMhbHDgGDAzzN9z8cnPCYV+SKTvqGF1hezHm82Op32XaAGg==}
 
-  '@cinderous/client@git+https://github.com/VaalRL/cinderous-sdk-dev.git#0e4b8cea12f4994092babab0bd70b12860c21907':
-    resolution: {commit: 0e4b8cea12f4994092babab0bd70b12860c21907, repo: https://github.com/VaalRL/cinderous-sdk-dev.git, type: git}
-    version: 0.5.0
+  '@cinderous/client@git+https://github.com/VaalRL/cinderous-sdk-dev.git#dec9616d0ba068e333d02794478178fd25c4f640':
+    resolution: {commit: dec9616d0ba068e333d02794478178fd25c4f640, repo: https://github.com/VaalRL/cinderous-sdk-dev.git, type: git}
+    version: 0.7.0
     engines: {node: '>=20'}
+    hasBin: true
 
   '@cloudflare/workers-types@4.20260630.1':
     resolution: {integrity: sha512-yl+c9vwvko9UZ0frmtsHuwOh3BRHvNjLrfelAp5Akpqe1+Ho1UWekr3nmjJ1D64CH0Yb0K0oRMV4i7npOFzsog==}
@@ -2181,10 +2182,11 @@ snapshots:
     dependencies:
       tslib: 2.8.1
 
-  '@cinderous/client@git+https://github.com/VaalRL/cinderous-sdk-dev.git#0e4b8cea12f4994092babab0bd70b12860c21907(typescript@5.9.3)':
+  '@cinderous/client@git+https://github.com/VaalRL/cinderous-sdk-dev.git#dec9616d0ba068e333d02794478178fd25c4f640(typescript@5.9.3)':
     dependencies:
       '@noble/curves': 1.9.7
       '@noble/hashes': 1.8.0
+      '@noble/post-quantum': 0.7.1
       '@scure/base': 1.2.6
       nostr-tools: 2.25.2(typescript@5.9.3)
     optionalDependencies:
