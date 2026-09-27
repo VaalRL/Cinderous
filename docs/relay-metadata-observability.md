@@ -22,7 +22,7 @@ Gift Wrap（NIP-17/59，ADR-0002）已藏掉**訊息內容**（NIP-44）與**寄
 
 | # | relay 可觀測 | 現況為何藏不掉 | 嚴重度 |
 | --- | --- | --- | --- |
-| **M1** | **收件人 pubkey** | kind 1059 的 `p` tag＝收件人真實 pubkey；客戶端以 `#p` 拉自己的收件匣（`relay/src/relay-core.ts` inbox 邏輯）。**relay 知道「誰在收訊、何時收」** | 高（Gift Wrap 補不到的最大洞） |
+| **M1** | **收件人 pubkey** | kind 1059 的 `p` tag＝收件人真實 pubkey；客戶端以 `#p` 拉自己的收件匣（SDK `@cinderous/client/relay` 的 `relay-core` inbox 邏輯，ADR-0370）。**relay 知道「誰在收訊、何時收」** | 高（Gift Wrap 補不到的最大洞） |
 | **M2** | **上線時序 + 真實 pubkey** | 心跳 kind 20000 以真實金鑰明簽廣播（非 Gift Wrap） | 中（時序仍在；**內容已由 ADR-0129 封裝**、jitter/隱身/P2P 卸載由 ADR-0088 處理） |
 | **M7** | **在線訂閱洩漏聯絡人清單** | 收聯絡人在線狀態須訂閱 `{kinds:[20000], authors:[聯絡人清單]}`——這個 REQ 把你的**聯絡人集合**交給 relay | **高**（Gift Wrap 藏訊息層社交圖譜，但這裡直接洩漏聯絡人是誰） |
 | **M3** | **連線 IP** | 對 relay 的 WebSocket 連線來源 | 中 |

@@ -273,7 +273,7 @@ Ephemeral heartbeats fan out as the number of online users grows; please refer t
 ### Adding Offline Messages (DO SQLite, next step)
 
 Offline messages require persistence. The DO is already SQLite-backed (`new_sqlite_classes` in `wrangler.toml`); in `worker.ts` connect
-`RelayCore` to a `MessageStore` backed by DO SQLite (the behavior is already defined and tested by `relay/src/message-store.ts`:
+`RelayCore` to a `MessageStore` backed by DO SQLite (the behavior is already defined and tested by `message-store` in the SDK `@cinderous/client/relay`:
 NIP-40 expiration, per-recipient quota, indexed by `#p`). For details see
 [`docs/adr/0005`](./docs/adr/0005-relay-self-built-worker.md).
 

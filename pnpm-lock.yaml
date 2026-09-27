@@ -218,6 +218,9 @@ importers:
 
   packages/core:
     dependencies:
+      '@cinderous/client':
+        specifier: github:VaalRL/cinderous-sdk-dev#v0.5.0
+        version: git+https://github.com/VaalRL/cinderous-sdk-dev.git#0e4b8cea12f4994092babab0bd70b12860c21907(typescript@5.9.3)
       '@noble/ciphers':
         specifier: ^2.2.0
         version: 2.2.0
@@ -289,6 +292,9 @@ importers:
 
   relay:
     dependencies:
+      '@cinderous/client':
+        specifier: github:VaalRL/cinderous-sdk-dev#v0.5.0
+        version: git+https://github.com/VaalRL/cinderous-sdk-dev.git#0e4b8cea12f4994092babab0bd70b12860c21907(typescript@5.9.3)
       '@cinderous/core':
         specifier: workspace:*
         version: link:../packages/core
@@ -435,6 +441,11 @@ packages:
 
   '@capacitor/core@7.6.8':
     resolution: {integrity: sha512-x1xfxvNcTSnj6OoYaAB0n0a0HRvi5f2YjcVnMLxpMhbHDgGDAzzN9z8cnPCYV+SKTvqGF1hezHm82Op32XaAGg==}
+
+  '@cinderous/client@git+https://github.com/VaalRL/cinderous-sdk-dev.git#0e4b8cea12f4994092babab0bd70b12860c21907':
+    resolution: {commit: 0e4b8cea12f4994092babab0bd70b12860c21907, repo: https://github.com/VaalRL/cinderous-sdk-dev.git, type: git}
+    version: 0.5.0
+    engines: {node: '>=20'}
 
   '@cloudflare/workers-types@4.20260630.1':
     resolution: {integrity: sha512-yl+c9vwvko9UZ0frmtsHuwOh3BRHvNjLrfelAp5Akpqe1+Ho1UWekr3nmjJ1D64CH0Yb0K0oRMV4i7npOFzsog==}
@@ -1562,6 +1573,14 @@ packages:
       typescript:
         optional: true
 
+  nostr-tools@2.25.2:
+    resolution: {integrity: sha512-7JAx+brEPmqGz1yzaK9MOxvis/Nl1B38j9hVsBSRDMRmxk5XSc0+5LlPEYbzeiUyk41RURBDcfuMzmaT754HAg==}
+    peerDependencies:
+      typescript: '>=5.0.0'
+    peerDependenciesMeta:
+      typescript:
+        optional: true
+
   nostr-wasm@0.1.0:
     resolution: {integrity: sha512-78BTryCLcLYv96ONU8Ws3Q1JzjlAt+43pWQhIl86xZmWeegYCNLPml7yQ+gG3vR6V5h4XGj+TxO+SS5dsThQIA==}
 
@@ -1951,6 +1970,18 @@ packages:
       utf-8-validate:
         optional: true
 
+  ws@8.22.0:
+    resolution: {integrity: sha512-Ydggc987+RO0AnWtZ/7Wq9FtNvcrL1b/RO0ud9mWjUPgDrsAAwQSF51sm2hm1XofbU/4jkpGEsLFsZZxU+1DOg==}
+    engines: {node: '>=10.0.0'}
+    peerDependencies:
+      bufferutil: ^4.0.1
+      utf-8-validate: '>=5.0.2'
+    peerDependenciesMeta:
+      bufferutil:
+        optional: true
+      utf-8-validate:
+        optional: true
+
   xml-name-validator@5.0.0:
     resolution: {integrity: sha512-EvGK8EJ3DhaHfbRlETOWAS5pO9MZITeauHKJyb8wyajUfQUenkIg2MvLDTZ4T/TgIcm3HU0TFBgWWboAZ30UHg==}
     engines: {node: '>=18'}
@@ -2149,6 +2180,19 @@ snapshots:
   '@capacitor/core@7.6.8':
     dependencies:
       tslib: 2.8.1
+
+  '@cinderous/client@git+https://github.com/VaalRL/cinderous-sdk-dev.git#0e4b8cea12f4994092babab0bd70b12860c21907(typescript@5.9.3)':
+    dependencies:
+      '@noble/curves': 1.9.7
+      '@noble/hashes': 1.8.0
+      '@scure/base': 1.2.6
+      nostr-tools: 2.25.2(typescript@5.9.3)
+    optionalDependencies:
+      ws: 8.22.0
+    transitivePeerDependencies:
+      - bufferutil
+      - typescript
+      - utf-8-validate
 
   '@cloudflare/workers-types@4.20260630.1': {}
 
@@ -3158,6 +3202,18 @@ snapshots:
     optionalDependencies:
       typescript: 5.9.3
 
+  nostr-tools@2.25.2(typescript@5.9.3):
+    dependencies:
+      '@noble/ciphers': 2.1.1
+      '@noble/curves': 2.0.1
+      '@noble/hashes': 2.0.1
+      '@scure/base': 2.0.0
+      '@scure/bip32': 2.0.1
+      '@scure/bip39': 2.0.1
+      nostr-wasm: 0.1.0
+    optionalDependencies:
+      typescript: 5.9.3
+
   nostr-wasm@0.1.0: {}
 
   nth-check@2.1.1:
@@ -3574,6 +3630,9 @@ snapshots:
       strip-ansi: 6.0.1
 
   ws@8.21.0: {}
+
+  ws@8.22.0:
+    optional: true
 
   xml-name-validator@5.0.0: {}
 

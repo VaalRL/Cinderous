@@ -18,7 +18,9 @@ const KIND_SEAL = 13;
  * **匯出是必要的**：收件箱增量抓取（`since`，ADR-0109）必須退讓這麼多，否則剛發出、
  * 外層時戳卻落在兩天前的訊息會被濾掉而**靜默漏訊**。
  */
-export const TIMESTAMP_JITTER_SECONDS = 2 * 86_400;
+// 倒填上限與中繼共用，唯一來源在 SDK（ADR-0370）
+import { TIMESTAMP_JITTER_SECONDS } from "@cinderous/client/protocol";
+export { TIMESTAMP_JITTER_SECONDS };
 
 // ── 後量子混合式封裝（ADR-0365）──────────────────────────────────────────────
 //

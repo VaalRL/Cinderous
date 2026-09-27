@@ -57,7 +57,7 @@
 | 桌面原生橋 | `apps/desktop/src-tauri/` | Rust：**為引擎提供原生能力**（非重造通訊，ADR-0105）——`encstore`（AES-256-GCM 加密 blob）、`passlock`（Argon2id 本地密碼＋救援）、`keyvault`（OS 金鑰庫）、`partfile`（部位檔的原子寫入／檔名白名單／毀損隔離，ADR-0119）、`inbox`（收檔串流落盤，ADR-0349）、`aikey`（AI 金鑰綁端點，ADR-0235）、`filestream`（送檔端走訪與定位讀取、解包落地，ADR-0355）、`keyaccount`（金鑰庫帳號的信任邊界：前端只能指名身分公鑰與裝置槽）、**`cfdeploy`（ADR-0356）**、IPC。中繼連線/Gift Wrap/WebRTC/狀態機**留在 `packages/engine`（TS）**；原本的 Rust 背景連線與 SQLite（ADR-0019/0020）已於 ADR-0105 退役。<br>🔴 **新的信任邊界（ADR-0356）**：`cfdeploy` 讓桌面二進位**主動連外到 `api.cloudflare.com`**，帶著從 OS 金鑰庫取出的 Cloudflare API token（那把 token 等於使用者整個雲端帳號的控制權）。token 與 HTTP 都不經 webview；`key_*` 指令以 `keyaccount` 擋下前端指名非身分帳號。 |
 | 行動端 | `apps/mobile/` | react-native-web：接**真實中繼**（ADR-0086），重用 `@cinderous/core`/`@cinderous/i18n`/`@cinderous/engine`/`@cinderous/theme`。儲存走加密 localStorage＋OPFS 封存；「記住我」以 Argon2id 包裹 nsec（ADR-0117）。**不做推播（APNs/FCM）**（ADR-0116）。**元件邊界（ADR-0331／0332，2026-08-05）**：`MobileApp.tsx`＝**外殼**，只放比一個 session 活得久的東西（身分登錄、外觀／語言／主色、指向作用中 session 的指標）；`AppSession.tsx`＝**一個身分的全部**（session state、後端生命週期、所有畫面），並由外殼以 `key={pubkey}:{gen}` 掛載 ⇒ **切身分＝元件重掛＝per-identity 狀態結構性歸零**（取代原本手寫的重設清單，ADR-0294 §2 的漏網從此不可能發生）。per-identity 狀態分為 7 個功能簇 hook（`use-*-session.ts`），由 `useIdentitySession()` 聚合。 |
 | 官方網站 | `apps/website/` | 純靜態站（Vite+React；ADR-0090）：開源/永久免費/隱私主張、下載、捐款導流、**簽章式資金透明度**（`funds.json` 前端 `verifyFunds` 對釘死透明度公鑰驗簽＋算 runway，fail-closed）。**與通訊平面硬隔離、零追蹤、無常駐後台**；重用 `@cinderous/core`（驗簽）/`@cinderous/theme`/`@cinderous/i18n`。**每頁真實 URL ＋建置時預渲染**（ADR-0235）：`routes.ts` 定義 (頁面 × 語言) 路由（預設語言走根路徑、英文走 `/en/`），`entry-server.tsx`＋`scripts/prerender.mjs` 於 `vite build` 後把每條路由渲染成實體目錄下的 `index.html`，客戶端 `hydrateRoot` 接手——不執行 JS 的答案引擎也看得到完整內容；`seo.ts` 產出每頁 canonical/hreflang/OG/JSON-LD 與 `robots.txt`/`sitemap.xml`。另發佈 app 查詢用靜態資料檔：`releases.json`（更新偵測，ADR-0228）與 `threat-intel.json`（威脅情報 snapshot，ADR-0231，CI 每日重建；ADR-0235 加絕不封鎖清單與變動量護欄）。 |
-| 中繼站 | `relay/` | Cloudflare Worker + **Durable Object 內建 SQLite**（ADR-0056）：Nostr relay，處理 Ephemeral 轉發與 NIP-40 過期留言；NIP-42 AUTH ＋具名訂閱 ACL（ADR-0057／0123）。`RelayCore` 傳輸無關，可自架於 Node/Deno/Bun/Docker。<br>**統一節點模式（選配，ADR-0354）**：綁上 Static Assets 之後同一座 Worker 同時是網頁版（一個網址）。⚠ 那是**信任降級**——該伺服器同時送出客戶端 JS，被入侵即可換掉程式碼竊取金鑰；官方錨點站不採用。必設 `run_worker_first`，否則資產優先會讓 `/` 回 HTML、Worker 不執行，relay 靜默死掉。健康檢查一律用 `GET /healthz`（純文字 `ok`），不要看 `/`。 |
+| 中繼站 | `relay/` | Cloudflare Worker + **Durable Object 內建 SQLite**（ADR-0056）：Nostr relay，處理 Ephemeral 轉發與 NIP-40 過期留言；NIP-42 AUTH ＋具名訂閱 ACL（ADR-0057／0123）。`RelayCore` 傳輸無關，可自架於 Node/Deno/Bun/Docker。<br>**程式碼住在 Cinderous SDK（ADR-0370）**：`@cinderous/client/relay`（核心、儲存、政策、NIP-11、分片）、`/relay/worker`（Worker＋`RelayRoom`）、`/relay/node`（Node 主機）；共用協定（event／sign／keys／nip42／http-auth／vanish／pow／shard）在 `@cinderous/client/protocol`，`packages/core` 照原名轉出。本目錄是**部署實例**：版號注入（`setRelayVersion`）、`wrangler*.toml`、`bootstrap/` 運維、`in-memory-network`。<br>**統一節點模式（選配，ADR-0354）**：綁上 Static Assets 之後同一座 Worker 同時是網頁版（一個網址）。⚠ 那是**信任降級**——該伺服器同時送出客戶端 JS，被入侵即可換掉程式碼竊取金鑰；官方錨點站不採用。必設 `run_worker_first`，否則資產優先會讓 `/` 回 HTML、Worker 不執行，relay 靜默死掉。健康檢查一律用 `GET /healthz`（純文字 `ok`），不要看 `/`。 |
 | 測試 | `tests/` | 跨層整合測試與共用 fixture。 |
 | 文件 | `docs/` | 設計決策與流程補充。 |
 
@@ -142,11 +142,11 @@
 > 產品需求見 `PRD.md §13`；決策見 `docs/adr/0044`（封閉 allowlist）、`0045`（多身分）、`0046`（成員判定與邊界）。此節記錄模組落點與資料流，隱私鐵則不變。
 
 **中繼端 — 發布 allowlist（封閉節點）**
-- `relay/src/relay-core.ts`：`RelayCoreOptions.allowedAuthors`（hex pubkey 集合）。`handleEvent` 於**驗簽後、寫庫/扇出前**檢查 `event.pubkey ∈ allowlist`；非成員的任何事件（含心跳 20000）回 `OK false "blocked:"`（永久拒絕）。未設＝開放中繼。
+- SDK `@cinderous/client/relay` 的 `RelayCore`（ADR-0370）：`RelayCoreOptions.allowedAuthors`（hex pubkey 集合）。`handleEvent` 於**驗簽後、寫庫/扇出前**檢查 `event.pubkey ∈ allowlist`；非成員的任何事件（含心跳 20000）回 `OK false "blocked:"`（永久拒絕）。未設＝開放中繼。
 - 「外部客戶不進系統」在**內容層**由此成立；讀取層由企業自架於私網/VPN 把關（無 NIP-42 亦足夠，且取到皆 E2E 密文）。
 
 **自架外殼 — 與 Cloudflare 解耦**
-- `RelayCore` 為傳輸無關；`relay/src/worker.ts` 僅注入 Cloudflare `WebSocketPair`。自架＝以 Node/Deno/Bun/Docker 的 WS server 包 `RelayCore`（`relay/src/dev-server.ts`、`in-memory-network.ts` 已示範 Worker 外執行）。
+- `RelayCore` 為傳輸無關；SDK 的 `relay/worker` 僅注入 Cloudflare `WebSocketPair`。自架＝以 Node/Deno/Bun/Docker 的 WS server 包 `RelayCore`（SDK 的 `startNodeRelay`／`startDevRelay`，本庫 `relay/src/node-relay.ts`、`dev-server.ts` 只注入版號後呼叫；`in-memory-network.ts` 示範 Worker 外執行）。
 
 **客戶端 — 多身分與資料隔離**
 - `packages/engine/src/storage/profiles.ts`：全域設定檔登錄（`nb.profiles`＋作用中 pubkey）；首次載入把既有單一身分遷移為 namespace 為空的 legacy 設定檔（向後相容）。（ADR-0074 起隨引擎抽出至 `packages/engine`。）

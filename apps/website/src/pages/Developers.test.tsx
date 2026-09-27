@@ -12,7 +12,7 @@ import {
   MAX_SUBSCRIPTIONS,
   PUBLIC_LANE_ADDRESSABLE_PER_AUTHOR,
   PUBLIC_LANE_RETENTION_SECONDS,
-} from "../../../../relay/src/host-config.js";
+} from "../../../../relay/src/index.js";
 import { devDocsFor, type Block } from "../devdocs/content.js";
 import { DEV_DOC_SLUGS, isDevDocSlug, type DevDocSlug } from "../devdocs/structure.js";
 import { routeHref } from "../routes.js";

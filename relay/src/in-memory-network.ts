@@ -1,5 +1,5 @@
 import { RelayClient, type RelayClientHandlers } from "@cinderous/core";
-import { RelayCore, type RelayCoreOptions } from "./relay-core.js";
+import { RelayCore, type RelayCoreOptions } from "@cinderous/client/relay";
 
 export interface InMemoryRelayNetwork {
   /** 內部的 RelayCore（可檢視/操作）。 */
