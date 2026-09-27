@@ -15,4 +15,4 @@ export {
   type TurnFetch,
   type TurnResult,
   type TurnFallbackResult,
-} from "@cinderous/core";
+} from "@cinderous/client/protocol";
