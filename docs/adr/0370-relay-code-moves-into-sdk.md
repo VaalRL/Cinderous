@@ -76,7 +76,7 @@ SDK 依序做第四步（SDK ADR 0009～0011）時，把 Cinderous 已有、SDK 
   - `file-relay` 的 kind 常數就地定義。
 - `file-relay` 的 kind 常數在 SDK 另有一份，由 `file-relay-kinds.test.ts` 釘住與 App 的 `KIND` 總表一致。
 - `subkey.test.ts` 只留下與 App 私訊層（giftwrap）的整合測試。
-- 相依目前釘在 `#v0.15.1`（v0.10.1 起 `openWrap` 多一道「seal 必須是 kind 13」檢查，SDK ADR 0012；v0.11 起中繼多了可選的存取控制，錨點沒設、行為不變，SDK ADR 0013）。
+- 相依目前釘在 `#v0.16.0`（v0.16.0 修正 Node 主機的 NIP-11 缺 `version`：自架 Docker 節點的一鍵更新比對從此有版號可比，SDK ADR 0018）（v0.10.1 起 `openWrap` 多一道「seal 必須是 kind 13」檢查，SDK ADR 0012；v0.11 起中繼多了可選的存取控制，錨點沒設、行為不變，SDK ADR 0013）。
 
 ## 後果
 
