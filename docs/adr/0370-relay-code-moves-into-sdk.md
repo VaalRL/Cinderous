@@ -58,6 +58,24 @@ Cinderous SDK（`VaalRL/cinderous-sdk-dev`，AGPL-3.0）原本只有客戶端層
   - 桌面版內嵌中繼的 esbuild 打包成功。
   - 打包後的 Node 主機實際啟動成功，`/healthz` 回 `ok`、NIP-11 照常回應。
 
+## 後續：更多共用模組搬進 SDK（同一條分支）
+
+SDK 依序做第四步（SDK ADR 0009～0011）時，把 Cinderous 已有、SDK 也需要的模組搬進 SDK，這裡比照本決策改成照原名轉出：
+
+| SDK 版本 | 搬過去的模組 | SDK 入口 |
+|---|---|---|
+| v0.7.0 | `nip44`、`hybrid-kem`、`nip59`、`signaling` | `@cinderous/client/protocol` |
+| v0.8.0 | `subkey`、`ek-envelope`、`device-directory` | `@cinderous/client/protocol` |
+| v0.10.0 | `snapshot`、`file-relay`、`sync`、`or-set` | `@cinderous/client/sync` |
+
+- 每次轉出前都逐字比對過，只容許三處已記錄的差異：
+  - `ekAnnounceContent` 抽出；
+  - 一個未用參數改名 `_k`；
+  - `file-relay` 的 kind 常數就地定義。
+- `file-relay` 的 kind 常數在 SDK 另有一份，由 `file-relay-kinds.test.ts` 釘住與 App 的 `KIND` 總表一致。
+- `subkey.test.ts` 只留下與 App 私訊層（giftwrap）的整合測試。
+- 相依目前釘在 `#v0.10.0`。
+
 ## 後果
 
 - ＋ 中繼與共用協定各只有一份，App、四款遊戲、中繼看到同一套規則。
