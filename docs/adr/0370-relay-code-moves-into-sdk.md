@@ -67,6 +67,7 @@ SDK 依序做第四步（SDK ADR 0009～0011）時，把 Cinderous 已有、SDK 
 | v0.7.0 | `nip44`、`hybrid-kem`、`nip59`、`signaling` | `@cinderous/client/protocol` |
 | v0.8.0 | `subkey`、`ek-envelope`、`device-directory` | `@cinderous/client/protocol` |
 | v0.10.0 | `snapshot`、`file-relay`、`sync`、`or-set` | `@cinderous/client/sync` |
+| v0.14.0 | `call`、`video-quality` | `@cinderous/client/protocol` |
 
 - 每次轉出前都逐字比對過，只容許三處已記錄的差異：
   - `ekAnnounceContent` 抽出；
@@ -74,7 +75,7 @@ SDK 依序做第四步（SDK ADR 0009～0011）時，把 Cinderous 已有、SDK 
   - `file-relay` 的 kind 常數就地定義。
 - `file-relay` 的 kind 常數在 SDK 另有一份，由 `file-relay-kinds.test.ts` 釘住與 App 的 `KIND` 總表一致。
 - `subkey.test.ts` 只留下與 App 私訊層（giftwrap）的整合測試。
-- 相依目前釘在 `#v0.12.0`（v0.10.1 起 `openWrap` 多一道「seal 必須是 kind 13」檢查，SDK ADR 0012；v0.11 起中繼多了可選的存取控制，錨點沒設、行為不變，SDK ADR 0013）。
+- 相依目前釘在 `#v0.14.0`（v0.10.1 起 `openWrap` 多一道「seal 必須是 kind 13」檢查，SDK ADR 0012；v0.11 起中繼多了可選的存取控制，錨點沒設、行為不變，SDK ADR 0013）。
 
 ## 後果
 
