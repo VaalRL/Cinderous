@@ -672,3 +672,24 @@ describe("檔案車道的儲存層前提（ADR-0371 §決策 5／6）", () => {
     expect(ids).toEqual(["c3", "c4", "f2", "f3", "f4"]);
   });
 });
+
+describe("審查修正（ADR-0371）", () => {
+  const dupP = (id: string): NostrEvent =>
+    ({ id, pubkey: "a", created_at: 1000, kind: 1060, tags: [["p", "r"], ["p", "r"]], content: "x".repeat(500), sig: "" }) as NostrEvent;
+
+  it("🔴 重複的 p 標籤不會讓用量快取多算（否則天花板會誤拒、車道會誤淘汰）", () => {
+    const one = JSON.stringify(dupP("d1")).length;
+    const s = new SqlMessageStore(nodeSqlExec(), { maxPerRecipient: 500, offlineMaxTotalBytes: one * 2 });
+    expect(s.put(dupP("d1"), 1000)).toBe(true);
+    expect(s.put(dupP("d2"), 1000)).toBe(true); // 若 d1 被算成兩份，這裡會被拒
+  });
+
+  it("沒設 maxPerRecipient 時檔案桶照樣受配額限制（與記憶體版一致）", () => {
+    const s = new SqlMessageStore(nodeSqlExec(), { filePerRecipient: 2 });
+    const m = new MessageStore({ filePerRecipient: 2 });
+    for (const store of [s, m]) {
+      for (let i = 0; i < 4; i++) store.put(ev(`f${i}`, { p: ["r"], kind: 1060, createdAt: 1000 + i }), 1000);
+      expect(store.query(f({ "#p": ["r"] }), 1000).map((e) => e.id).sort()).toEqual(["f2", "f3"]);
+    }
+  });
+});

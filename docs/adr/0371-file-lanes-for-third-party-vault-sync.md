@@ -194,5 +194,10 @@ ADR-0244 日後若採用，主平面的公共檔案後備可以沿用本 ADR 做
      （錨點會退回「`MAX_FILE_MB` 全站開關」＝選項 1）。本 ADR 不動該分支。
   3. **可尋址表**同樣有 `SUM(LENGTH(json))` 的天花板查詢（ADR-0367）；目前單顆上限小（車道 32KB），
      尚未量到問題，列為觀察。
-  4. **監看**：兩顆檔案車道 DO 的儲存量、帳號每日列寫入量；逼近免費額度時先收緊 `MAX_FILE_MB`
+  4. **（既有，非本 ADR 引入）DO SQLite 每次查詢最多 100 個綁定參數**（Cloudflare Limits 頁）：
+     `query()` 把 `authors`（`scoped()` 允許到 1024）、`ids`、`kinds`、標籤值都組成 `IN (…)`，
+     超過 100 會讓 `sql.exec()` 拋例外。本地測試用 node:sqlite（上限 32766）看不出來。
+     另立修正：filter 陣列合計上限對齊、或分批查詢；上線前以 `wrangler dev` 對 DO 建構子的遷移路徑
+     （部分索引、`DROP INDEX`、`rowid`）做一次真實冒煙測試。
+  5. **監看**：兩顆檔案車道 DO 的儲存量、帳號每日列寫入量；逼近免費額度時先收緊 `MAX_FILE_MB`
      （配額跟著縮）或把 `FILE_LANE_OFFLINE_MAX_BYTES` 調小。

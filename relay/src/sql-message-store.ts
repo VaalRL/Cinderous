@@ -201,7 +201,8 @@ export class SqlMessageStore implements OfflineStore {
     // ADR-0065：一律存「有效到期時間」（無標籤給預設 TTL、超長標籤截到上限）——每列壽命必有界。
     const effExp = effectiveExpiration(event, nowSec, this.opts.maxTtlSeconds);
     const recipients = recipientsOf(event);
-    const targets = recipients.length > 0 ? recipients : [""];
+    // 去重：重複的 `p` 標籤在表裡只會是一列（主鍵 (id, recipient)），快取也只能算一份。
+    const targets = [...new Set(recipients.length > 0 ? recipients : [""])];
     const json = JSON.stringify(event);
     const size = json.length;
     // 已經存過的那幾列不再計入（`INSERT OR IGNORE` 會略過它們；快取不能把它們算兩次）。
@@ -233,7 +234,8 @@ export class SqlMessageStore implements OfflineStore {
       const count = this.bucketCounts.get(key);
       if (count !== undefined) this.bucketCounts.set(key, count + 1);
     }
-    if (this.opts.maxPerRecipient !== undefined) this.enforceCap(fresh, file);
+    // 無條件呼叫（與記憶體版一致）：聊天桶沒設上限時 `enforceCap` 自己略過，檔案桶恆有上限。
+    this.enforceCap(fresh, file);
     return true;
   }
 
@@ -473,7 +475,7 @@ export class SqlMessageStore implements OfflineStore {
    * NIP-62 清除（ADR-0260）：`pubkey = ?`（他發的）**或** `recipient = ?`（寄給他的
    * ——Gift Wrap 外層是一次性金鑰，`p` 是唯一能定位收件匣的鍵），外加他的可尋址事件。
    *
-   * 兩欄都有索引（`idx_offline_pubkey`／`idx_offline_recipient`），故不是全表掃描。
+   * 兩欄都有索引（`idx_offline_pubkey`／`idx_offline_bucket` 的 recipient 前綴），故不是全表掃描。
    */
   vanish(pubkey: string, _nowSec: number): number {
     const rows = this.sql(
