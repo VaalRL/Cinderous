@@ -93,6 +93,16 @@ export const DEFAULT_MAX_TTL_SECONDS = 7 * 86_400;
  */
 export const MAX_QUERY_ROWS = 1024;
 
+/**
+ * 單次 REQ 回傳的位元組上限（ADR-0371 §決策 6）。
+ *
+ * 🔴 為什麼筆數上限不夠：{@link MAX_QUERY_ROWS} 是為聊天訂的（一則幾 KB）。檔案塊一顆約
+ * 131KB，1024 顆就是 134MB——超過 DO 的 128MB 記憶體上限，DO 會在組回應的途中被重置，
+ * 客戶端重連、再 REQ、再重置。16MB 約 120 顆檔案塊、上萬則聊天，後者碰不到它。
+ * 超過的部分由客戶端依 NIP-01 以 `until` 分頁取回。
+ */
+export const MAX_QUERY_BYTES = 16 * 1024 * 1024;
+
 /** 有效筆數上限：尊重 `filter.limit`（NIP-01），但一律夾在 {@link MAX_QUERY_ROWS} 之內。 */
 export function queryLimit(requested?: number): number {
   if (typeof requested !== "number" || !Number.isFinite(requested) || requested <= 0) return MAX_QUERY_ROWS;
@@ -197,8 +207,13 @@ export interface OfflineStore {
    * `content === ""` ＝刪除既有（purge）。較舊、超額（大小/位址數）或已過期回 false。
    */
   putAddressable(event: NostrEvent, nowSec: number): boolean;
-  /** 查詢符合 filter 且未過期的留言。 */
-  query(filter: RelayFilter, nowSec: number): NostrEvent[];
+  /**
+   * 查詢符合 filter 且未過期的留言。
+   *
+   * `maxBytes`（ADR-0371 §決策 6）：只回**最新**、累計 JSON 大小不超過它的那幾顆；
+   * 一顆都放不下就回空。客戶端要更舊的，照 NIP-01 以 `until` 分頁。未給＝不限。
+   */
+  query(filter: RelayFilter, nowSec: number, maxBytes?: number): NostrEvent[];
   /** 清除所有已過期留言。 */
   prune(nowSec: number): void;
   /**
@@ -396,13 +411,24 @@ export class MessageStore implements OfflineStore {
    * 回傳筆數與 SQL 版一樣有界（ADR-0235 C2）——兩個實作共用同一份 `OfflineStore` 契約，
    * 行為分歧會讓「用記憶體版寫的測試」保證不了產線的 SQL 版。
    */
-  query(filter: RelayFilter, nowSec: number): NostrEvent[] {
+  query(filter: RelayFilter, nowSec: number, maxBytes?: number): NostrEvent[] {
     const candidates = this.candidatesFor(filter);
     const hit = candidates.filter((e) => !this.isExpired(e, nowSec) && matchFilter(filter, e));
     const limit = queryLimit(filter.limit);
-    if (hit.length <= limit) return hit;
+    if (hit.length <= limit && maxBytes === undefined) return hit;
     // 超量時取**最新**的（與 SQL 版的 `ORDER BY created_at DESC LIMIT ?` 一致）。
-    return [...hit].sort((a, b) => b.created_at - a.created_at).slice(0, limit);
+    const newest = [...hit].sort((a, b) => b.created_at - a.created_at).slice(0, limit);
+    if (maxBytes === undefined) return newest;
+    // 位元組預算（ADR-0371 §決策 6）：與 SQL 版同一個規則——由新到舊，放不下就停。
+    const out: NostrEvent[] = [];
+    let spent = 0;
+    for (const e of newest) {
+      const n = JSON.stringify(e).length;
+      if (spent + n > maxBytes) break;
+      spent += n;
+      out.push(e);
+    }
+    return out;
   }
 
   /** 清除所有已過期留言。 */

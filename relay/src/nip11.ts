@@ -69,6 +69,12 @@ export interface Nip11Config {
   maxTtlDays?: string | undefined;
   /** 是否接受檔案塊（`MAX_FILE_MB` 已啟用；ADR-0162）。 */
   acceptsFiles?: boolean | undefined;
+  /**
+   * 本路徑的單檔上限（MB；ADR-0371）。只有 `FILE_LANES` 車道模式下、這條車道收檔案時才有值。
+   * relay 看不到明文、也無法重組檔案 ⇒ 這個上限只能**宣告**，由客戶端遵守；
+   * relay 端真正擋的是每收件人的檔案塊配額（一併宣告）。
+   */
+  maxFileMb?: number | undefined;
   /** 是否要求 NIP-42 AUTH。 */
   authRequired?: boolean | undefined;
   /**
@@ -107,7 +113,7 @@ function compact<T extends Record<string, unknown>>(obj: T): Partial<T> {
 export function buildRelayInfo(cfg: Nip11Config = {}): Record<string, unknown> {
   // 🔴 直接問 `storeOptions`，不自己算一份：文件要說的就是**這座站實際在執行的那組值**。
   // 兩邊各算各的，遲早會出現「文件說 7 天、實際存 2 小時」——而那種謊言查起來最貴。
-  const store = storeOptions(cfg.maxTtlDays, cfg.profile ?? "strict", cfg.knownLane === true);
+  const store = storeOptions(cfg.maxTtlDays, cfg.profile ?? "strict", cfg.knownLane === true, cfg.maxFileMb);
   const ttlSeconds = store.maxTtlSeconds ?? DEFAULT_MAX_TTL_SECONDS;
   const addressableTtl = store.addressableTtlSeconds ?? ADDRESSABLE_TTL_SECONDS;
   const donations = compact({ ...(cfg.donations ?? {}) });
@@ -169,6 +175,13 @@ export function buildRelayInfo(cfg: Nip11Config = {}): Record<string, unknown> {
     cinder_addressable_ttl_sec: addressableTtl,
     /** 是否接受檔案塊（ADR-0162）：false＝整類拒收，客戶端不必試。 */
     cinder_accepts_files: cfg.acceptsFiles === true,
+    /**
+     * 檔案車道（ADR-0371）：單檔上限（MB）與每收件人檔案塊配額（塊數，每塊 48,000 B 明文）。
+     * 未設 `FILE_LANES` 的站（企業自架）不出現這兩欄——那裡 `MAX_FILE_MB` 仍只是開關。
+     */
+    ...(cfg.acceptsFiles === true && cfg.maxFileMb !== undefined
+      ? { cinder_max_file_mb: cfg.maxFileMb, cinder_file_chunks_per_recipient: store.filePerRecipient }
+      : {}),
     /** 營運者自報的贊助管道（ADR-0089）；全空則整個欄位不出現＝無贊助入口。 */
     ...(Object.keys(donations).length > 0 ? { cinder_donations: donations } : {}),
     /** 營運者簽章的節點自報（ADR-0092）；供維護者工具拉取驗簽。 */

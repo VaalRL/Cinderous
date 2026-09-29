@@ -557,3 +557,118 @@ describe("SQL 版的離線留言天花板與記憶體版一致（ADR-0367 §決�
     expect(kept(sql)).toEqual(["fresh", "later", "latest"]);
   });
 });
+
+describe("檔案車道的儲存層前提（ADR-0371 §決策 5／6）", () => {
+  /** 記錄所有 SELECT 語句。 */
+  function spyExec(): { exec: SqlExec; selects: string[] } {
+    const inner = nodeSqlExec();
+    const selects: string[] = [];
+    return {
+      selects,
+      exec: (query, ...bindings) => {
+        if (/^\s*select/i.test(query)) selects.push(query);
+        return inner(query, ...bindings);
+      },
+    };
+  }
+
+  const sized = (id: string, bytes: number, o: { p?: string; kind?: number; createdAt?: number; exp?: number } = {}): NostrEvent =>
+    ({
+      id,
+      pubkey: "a",
+      created_at: o.createdAt ?? 1000,
+      kind: o.kind ?? 1060,
+      tags: [
+        ...(o.p === undefined ? [] : [["p", o.p]]),
+        ...(o.exp === undefined ? [] : [["expiration", String(o.exp)]]),
+      ],
+      content: "x".repeat(bytes),
+      sig: "",
+    }) as NostrEvent;
+  const len = (e: NostrEvent): number => JSON.stringify(e).length;
+
+  it("🔴 查詢有位元組預算：只回最新、累計不超過預算的那幾顆（兩個實作一致）", () => {
+    const events = Array.from({ length: 10 }, (_, i) => sized(`f${i}`, 1000, { p: "r", createdAt: 1000 + i }));
+    const budget = len(events[0]!) * 3 + 10;
+    for (const s of [new SqlMessageStore(nodeSqlExec()), new MessageStore()]) {
+      for (const e of events) s.put(e, 1000);
+      const got = s.query(f({ "#p": ["r"] }), 1000, budget).map((e) => e.id);
+      expect(got.sort()).toEqual(["f7", "f8", "f9"]);
+      // 以 `until` 分頁拿得到更舊的（NIP-01 的標準做法）
+      const older = s.query(f({ "#p": ["r"], until: 1006 }), 1000, budget).map((e) => e.id);
+      expect(older.sort()).toEqual(["f4", "f5", "f6"]);
+      // 預算連一顆都放不下 → 空（呼叫端據此停止，而不是把整顆 DO 撈進記憶體）
+      expect(s.query(f({ "#p": ["r"] }), 1000, 10)).toEqual([]);
+      // 沒給預算＝與過去相同
+      expect(s.query(f({ "#p": ["r"] }), 1000)).toHaveLength(10);
+    }
+  });
+
+  it("🔴 寫入不再每次掃全表算總量、也不再逐列解 JSON 算分桶（快取＋覆蓋索引）", () => {
+    const { exec, selects } = spyExec();
+    const s = new SqlMessageStore(exec, { maxPerRecipient: 500, offlineMaxTotalBytes: 10_000_000 });
+    s.put(sized("w0", 100, { p: "r" }), 1000); // 暖機：第一次允許算一次總量
+    selects.length = 0;
+    for (let i = 1; i < 20; i++) s.put(sized(`w${i}`, 100, { p: "r" }), 1000);
+    expect(selects.filter((q) => /SUM\(/i.test(q))).toEqual([]);
+    expect(selects.filter((q) => /json_extract\(json/i.test(q))).toEqual([]);
+    expect(selects.filter((q) => /LENGTH\(json\)/i.test(q))).toEqual([]);
+  });
+
+  it("重複寫入同一顆不重複計入總量", () => {
+    const a = sized("a", 500, { p: "r" });
+    const b = sized("b", 500, { p: "r" });
+    const s = new SqlMessageStore(nodeSqlExec(), { offlineMaxTotalBytes: len(a) + len(b) });
+    expect(s.put(a, 1000)).toBe(true);
+    expect(s.put(a, 1000)).toBe(true);
+    expect(s.put(b, 1000)).toBe(true); // 若 a 被算了兩次，這裡會被拒
+  });
+
+  it("刪除路徑（分桶修剪／prune／vanish）都會把空間還回來", () => {
+    const one = sized("x0", 500, { p: "r" });
+    const room = len(one) * 2;
+    // 分桶修剪：檔案配額 1 → 第二顆把第一顆擠掉，第三顆仍放得下
+    const trim = new SqlMessageStore(nodeSqlExec(), { maxPerRecipient: 500, filePerRecipient: 1, offlineMaxTotalBytes: room });
+    for (const id of ["t1", "t2", "t3"]) expect(trim.put(sized(id, 500, { p: "r" }), 1000)).toBe(true);
+    // prune：過期的收走之後空間回來
+    const pr = new SqlMessageStore(nodeSqlExec(), { offlineMaxTotalBytes: room });
+    pr.put(sized("p1", 500, { p: "r", exp: 1500 }), 1000);
+    pr.put(sized("p2", 500, { p: "r" }), 1000);
+    expect(pr.put(sized("p3", 500, { p: "r" }), 1000)).toBe(false);
+    pr.prune(2000);
+    expect(pr.put(sized("p3", 500, { p: "r" }), 2000)).toBe(true);
+    // vanish
+    const va = new SqlMessageStore(nodeSqlExec(), { offlineMaxTotalBytes: room });
+    va.put(sized("v1", 500, { p: "gone" }), 1000);
+    va.put(sized("v2", 500, { p: "r" }), 1000);
+    va.vanish("gone", 1000);
+    expect(va.put(sized("v3", 500, { p: "r" }), 1000)).toBe(true);
+  });
+
+  it("升級前寫入的列（沒有 bytes 欄）也算進總量——遷移有回填", () => {
+    const db = nodeSqlExec();
+    db(`CREATE TABLE IF NOT EXISTS offline_msgs (
+      id TEXT NOT NULL, recipient TEXT NOT NULL, expiration INTEGER,
+      created_at INTEGER NOT NULL, json TEXT NOT NULL, PRIMARY KEY (id, recipient))`);
+    const old = sized("old", 500, { p: "r" });
+    db(
+      `INSERT INTO offline_msgs (id, recipient, expiration, created_at, json) VALUES (?, ?, ?, ?, ?)`,
+      "old",
+      "r",
+      9_999_999,
+      1000,
+      JSON.stringify(old),
+    );
+    const s = new SqlMessageStore(db, { offlineMaxTotalBytes: len(old) * 2 });
+    expect(s.put(sized("n1", 500, { p: "r" }), 1000)).toBe(true);
+    expect(s.put(sized("n2", 500, { p: "r" }), 1000)).toBe(false); // old 有算進去
+  });
+
+  it("檔案桶與聊天桶仍各自修剪（改用欄位與索引後語意不變）", () => {
+    const s = new SqlMessageStore(nodeSqlExec(), { maxPerRecipient: 2, filePerRecipient: 3 });
+    for (let i = 0; i < 5; i++) s.put(sized(`c${i}`, 10, { p: "r", kind: 1059, createdAt: 1000 + i }), 1000);
+    for (let i = 0; i < 5; i++) s.put(sized(`f${i}`, 10, { p: "r", kind: 1060, createdAt: 1000 + i }), 1000);
+    const ids = s.query(f({ "#p": ["r"] }), 1000).map((e) => e.id).sort();
+    expect(ids).toEqual(["c3", "c4", "f2", "f3", "f4"]);
+  });
+});

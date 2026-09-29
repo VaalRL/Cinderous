@@ -59,6 +59,7 @@ Service → Variables, set only if needed:
 | `REQUIRE_AUTH` | On | Keep it on. Setting it to `0` disables NIP-42 authentication — anyone could pull other people's encrypted-inbox metadata, and cloud snapshots would lose the "owner-only" gate (ADR-0057/0071), so this is **strongly discouraged**. |
 | `MAX_TTL_DAYS` | `7` | Retention cap for offline messages, in days (ADR-0160). |
 | `MAX_FILE_MB` | unset | Set to ≥1 to accept file chunks; unset means the whole class is rejected (ADR-0162/0244). |
+| `FILE_LANES` | unset | **Don't set it here**: it only takes effect on the Cloudflare Worker (which has third-party lanes). node-relay has no lanes, so setting it rejects file chunks node-wide (ADR-0371). |
 | `MAX_EVENTS_PER_MINUTE` | `120` | Per-pubkey events-per-minute cap; set `0` to disable (ADR-0235 H1). |
 | `MAX_MESSAGES_PER_MINUTE` | `240` | Per-**connection** inbound-messages-per-minute cap; the connection is closed when exceeded. Set `0` to disable (ADR-0366 §capacity). |
 | `RELAY_NAME` / `RELAY_CONTACT` / `RELAY_DESCRIPTION` / `RELAY_PUBKEY` | unset | NIP-11 relay information (ADR-0260). **Set `RELAY_CONTACT` if you want to be listed in the seat pool.** |

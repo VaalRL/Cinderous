@@ -1242,3 +1242,121 @@ describe("NIP-11 依路徑回報真實保存期（ADR-0367 §後果）", () => {
     expect((await doc("/app/lwd", "lwd")).cinder_addressable_ttl_sec).toBe(30 * 86_400);
   });
 });
+
+describe("檔案車道（FILE_LANES，ADR-0371）", () => {
+  const FILE_ENV = { APP_LANES: "testgame,other", FILE_LANES: "testgame", MAX_FILE_MB: "30" } as unknown as Env;
+  const LEGACY_ENV = { APP_LANES: "testgame,other", MAX_FILE_MB: "30" } as unknown as Env;
+
+  /** 在指定路徑升級一條連線。 */
+  const openAt = async (room: RelayRoom, state: FakeState, path: string): Promise<FakeWs> => {
+    const before = state.sockets.length;
+    const res = await room.fetch(new Request(`https://${HOST}${path}`));
+    expect((res as unknown as { status: number }).status).toBe(101);
+    return state.sockets[before]!;
+  };
+
+  const fileChunk = (sk: SecretKey = generateSecretKey(), to = "a".repeat(64)): NostrEvent =>
+    finalizeEvent({ kind: 1060, created_at: nowSec(), tags: [["p", to]], content: "x" }, sk);
+
+  /** 在某路徑送一顆檔案塊，回傳 OK 訊息。嚴格平面會先完成 AUTH。 */
+  const sendFile = async (env: Env, path: string): Promise<[string, string, boolean, string]> => {
+    const state = new FakeState();
+    const room = newRoom(state, env);
+    const ws = await openAt(room, state, path);
+    const sk = generateSecretKey();
+    if (!path.startsWith("/app/")) expect(authenticate(room, ws, sk)).toBe(true);
+    ws.drain();
+    const e = fileChunk(sk);
+    const out = send(room, ws, ["EVENT", e]) as [string, string, boolean, string][];
+    return out.find((m) => m[0] === "OK")!;
+  };
+
+  it("只有名單上的檔案車道收檔案塊", async () => {
+    expect((await sendFile(FILE_ENV, "/app/testgame"))[2]).toBe(true);
+  });
+
+  it("🔴 Cinderous 主訊息平面（舊全域、分片、presence）整類拒收", async () => {
+    for (const path of ["/", "/s/a", "/presence"]) {
+      const ok = await sendFile(FILE_ENV, path);
+      expect(ok[2], path).toBe(false);
+      expect(ok[3], path).toContain("blocked");
+    }
+  });
+
+  it("🔴 其他已知車道與共用分片也拒收——只開給 FILE_LANES 列的那幾條", async () => {
+    expect((await sendFile(FILE_ENV, "/app/other"))[2]).toBe(false);
+    expect((await sendFile(FILE_ENV, "/app/stranger"))[2]).toBe(false);
+  });
+
+  it("🔴 回歸：沒設 FILE_LANES 時 MAX_FILE_MB 仍是全站開關（企業自架行為不變）", async () => {
+    expect((await sendFile(LEGACY_ENV, "/"))[2]).toBe(true);
+    expect((await sendFile(LEGACY_ENV, "/app/stranger"))[2]).toBe(true);
+    expect((await sendFile(LEGACY_ENV, "/app/other"))[2]).toBe(true);
+  });
+
+  it("🔴 車道 id 跨休眠存活：喚醒後沒有 fetch 也還是檔案車道", async () => {
+    const state = new FakeState();
+    const room = newRoom(state, FILE_ENV);
+    const ws = await openAt(room, state, "/app/testgame");
+    ws.drain();
+    const woke = newRoom(state, FILE_ENV); // 模擬休眠後喚醒：記憶體清空、storage 還在
+    await new Promise((r) => setTimeout(r, 0)); // 讓建構子裡的 storage 還原跑完
+    const out = send(woke, ws, ["EVENT", fileChunk()]) as [string, string, boolean, string][];
+    expect(out.find((m) => m[0] === "OK")?.[2]).toBe(true);
+  });
+
+  it("升級前就已釘住政策的 DO（storage 裡沒有車道 id）：下一次連線補記，不回 409", async () => {
+    const state = new FakeState();
+    state.kv.set("cinder:lane-profile", "app");
+    state.kv.set("cinder:lane-known", true);
+    const room = newRoom(state, FILE_ENV);
+    await new Promise((r) => setTimeout(r, 0)); // 讓建構子裡的 storage 還原跑完
+    const ws = await openAt(room, state, "/app/testgame");
+    ws.drain();
+    const out = send(room, ws, ["EVENT", fileChunk()]) as [string, string, boolean, string][];
+    expect(out.find((m) => m[0] === "OK")?.[2]).toBe(true);
+  });
+
+  it("每收件人檔案塊配額由單檔上限推得（MAX_FILE_MB=1 → 2×22＋128＝172 塊）", async () => {
+    const env = { ...FILE_ENV, MAX_FILE_MB: "1" } as unknown as Env;
+    const state = new FakeState();
+    const room = newRoom(state, env);
+    const ws = await openAt(room, state, "/app/testgame");
+    ws.drain();
+    for (let i = 0; i < 180; i += 1) send(room, ws, ["EVENT", fileChunk()]);
+    const n = state.storage.sql.exec("SELECT COUNT(*) AS n FROM offline_msgs WHERE kind = 1060").toArray()[0]!.n;
+    expect(n).toBe(172);
+  });
+
+  describe("NIP-11 如實宣告（客戶端遵守單檔上限；relay 無法重組檔案）", () => {
+    const doc = async (env: Env, path: string): Promise<Record<string, unknown>> => {
+      const res = (await worker.fetch(
+        new Request(`https://${HOST}${path}`, { headers: { Accept: "application/nostr+json" } }),
+        env,
+      )) as unknown as { body: string };
+      return JSON.parse(res.body) as Record<string, unknown>;
+    };
+
+    it("檔案車道：收、單檔上限 30MB、每收件人配額 1440 塊", async () => {
+      const d = await doc(FILE_ENV, "/app/testgame");
+      expect(d.cinder_accepts_files).toBe(true);
+      expect(d.cinder_max_file_mb).toBe(30);
+      expect(d.cinder_file_chunks_per_recipient).toBe(1440);
+    });
+
+    it("🔴 根路徑（主平面）與其他車道：不收、也不宣告上限", async () => {
+      for (const path of ["/", "/app/other", "/app/stranger"]) {
+        const d = await doc(FILE_ENV, path);
+        expect(d.cinder_accepts_files, path).toBe(false);
+        expect(d.cinder_max_file_mb, path).toBeUndefined();
+      }
+    });
+
+    it("回歸：沒設 FILE_LANES 時文件與過去相同（收，但不宣告單檔上限）", async () => {
+      const d = await doc(LEGACY_ENV, "/");
+      expect(d.cinder_accepts_files).toBe(true);
+      expect(d.cinder_max_file_mb).toBeUndefined();
+      expect(d.cinder_file_chunks_per_recipient).toBeUndefined();
+    });
+  });
+});

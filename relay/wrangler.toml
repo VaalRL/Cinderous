@@ -47,6 +47,18 @@ DONATE_BUY_ME_A_COFFEE = "https://buymeacoffee.com/whoami885"
 # 2026-09-29 加入 `cindersync`（CinderSync，Obsidian 筆記庫同步外掛）與 `cinder-coffice`（Cinder Coffice，Obsidian 協同工作區外掛）：車道 id 與外掛 manifest id 相同，兩者先前都沒有存過任何資料，加入沒有冷啟動代價。
 APP_LANES = "lwd,elementalist,nagd,soleague,dochost,cindersync,cinder-coffice"
 
+# 檔案車道（ADR-0371）：2026-09-29 使用者決定，錨點**只在這兩條車道**收檔案塊（kind 1060），
+# 單檔上限 30MB——CinderSync／Cinder Coffice 的 Vault 同步走中繼時，外層就是檔案塊。
+#
+# 🔴 FILE_LANES 一設就是「車道模式」：Cinderous 主訊息平面（`/`、`/s/<n>`、`/presence`）、
+# 共用分片與其他車道**照舊整類拒收** 1060，主平面不受影響。拿掉 FILE_LANES 而留著 MAX_FILE_MB
+# ＝整站開放（ADR-0244 否決的選項 1）——`wrangler-vars.test.ts` 盯著這件事。
+# 列在這裡的車道必須同時在上面的 APP_LANES（有自己的 DO），不在的會被忽略。
+# MAX_FILE_MB 在車道模式下是**單檔上限**（NIP-11 `cinder_max_file_mb` 對外宣告、由客戶端遵守）；
+# relay 端以每收件人 1440 塊與每顆 DO 1GiB 封頂（數字與成本見 ADR-0371）。
+MAX_FILE_MB = "30"
+FILE_LANES = "cindersync,cinder-coffice"
+
 # 取得速率限制（ADR-0342 §3.1）：客戶端每半個 TTL 才取一次（TTL 300 ⇒ 2.5 分鐘一張），
 # 20/60s 對正常使用綽綽有餘；配合短 TTL，濫用者要維持流量就得持續取新憑證。
 # ⚠ per-location 計數且最終一致（Cloudflare 明說不是精確計費系統）——成本乘數，不是閘門。
@@ -118,6 +130,10 @@ TURN_TTL_SECONDS = "300"
 DONATE_BUY_ME_A_COFFEE = "https://buymeacoffee.com/whoami885"
 # 已知租戶名單（ADR-0366 §裁示）——與頂層同步，理由見上面那段註解。
 APP_LANES = "lwd,elementalist,nagd,soleague,dochost,cindersync,cinder-coffice"
+# 檔案車道（ADR-0371，2026-09-29 使用者決定）——與頂層同步：只有這兩條車道收檔案塊、單檔 30MB，
+# 主訊息平面照舊整類拒收。理由見上面那段註解。
+MAX_FILE_MB = "30"
+FILE_LANES = "cindersync,cinder-coffice"
 
 [[env.unified.ratelimits]]
 name = "TURN_LIMIT"

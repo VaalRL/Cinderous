@@ -121,3 +121,32 @@ describe("已知租戶名單（ADR-0366 §裁示）", () => {
     }
   });
 });
+
+describe("錨點的檔案車道（ADR-0371）", () => {
+  // 2026-09-29 使用者決定：錨點只在 cindersync、cinder-coffice 兩條車道收檔案塊，單檔上限 30MB。
+  const FILE_LANE_IDS = ["cindersync", "cinder-coffice"];
+  const list = (raw: string | undefined): string[] =>
+    (raw ?? "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0);
+
+  for (const section of ["vars", "env.unified.vars"]) {
+    it(`${section}：FILE_LANES 就是那兩條、MAX_FILE_MB＝30`, () => {
+      const v = varsOf(section);
+      expect(list(v.FILE_LANES).sort()).toEqual([...FILE_LANE_IDS].sort());
+      expect(v.MAX_FILE_MB).toBe("30");
+    });
+
+    it(`🔴 ${section}：FILE_LANES 的每一條都在 APP_LANES 上（不在的會被忽略＝設了沒用）`, () => {
+      const v = varsOf(section);
+      const app = list(v.APP_LANES);
+      for (const id of list(v.FILE_LANES)) expect(app, `${section}：${id} 不在 APP_LANES`).toContain(id);
+    });
+
+    it(`🔴 ${section}：有 MAX_FILE_MB 就一定要有 FILE_LANES——少了它就是整站開放（ADR-0244 否決的選項 1）`, () => {
+      const v = varsOf(section);
+      if (v.MAX_FILE_MB !== undefined) expect(list(v.FILE_LANES).length).toBeGreaterThan(0);
+    });
+  }
+});
