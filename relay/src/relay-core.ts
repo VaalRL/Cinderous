@@ -47,6 +47,7 @@ import {
   FILE_EVENT_MAX_BYTES,
   FILE_WRAP_KIND,
   isAuthorOnlyKind,
+  MAX_QUERY_BYTES,
   isReplaceableOrAddressable,
   recipientsOf,
   type OfflineStore,
@@ -167,9 +168,14 @@ export interface RelayCoreOptions {
   allowedKinds?: Iterable<number>;
   /**
    * 接受檔案塊事件（FILE_WRAP=1060，ADR-0162）：企業站以 `MAX_FILE_MB` 啟用。
-   * 未設/false＝整類拒收（公共站零儲存風險）。
+   * 未設/false＝整類拒收（公共站零儲存風險）。錨點只在 `FILE_LANES` 列出的車道打開（ADR-0371）。
    */
   acceptFileEvents?: boolean;
+  /**
+   * 一次 REQ 回傳歷史事件的位元組上限（ADR-0371 §決策 6）；預設 {@link MAX_QUERY_BYTES}。
+   * 同一個 REQ 的所有 filter **共用**這份預算——否則多塞幾個 filter 就能繞過。
+   */
+  maxQueryBytes?: number;
   /**
    * NIP-42 AUTH（開放中繼，ADR-0057）：開啟後連線須先回應 AUTH 挑戰才准讀寫；
    * 且帶 `#p` 的訂閱只能查自己的收件匣（認證 pubkey ∈ `#p`）。未設＝開放（現況）。
@@ -519,8 +525,12 @@ export class RelayCore {
       const nowSec = this.now();
       const seen = new Set<string>();
       const self = this.authState.get(connId)?.pubkey;
+      // 位元組預算（ADR-0371 §決策 6）：整個 REQ 共用一份，逐 filter 扣掉已回的量。
+      let budget = this.opts.maxQueryBytes ?? MAX_QUERY_BYTES;
       for (const filter of filters) {
-        for (const event of this.opts.store.query(filter, nowSec)) {
+        if (budget <= 0) break;
+        for (const event of this.opts.store.query(filter, nowSec, budget)) {
+          budget -= JSON.stringify(event).length;
           if (seen.has(event.id)) continue;
           // ADR-0071：快照只回給作者本人（requireAuth 時）——不論 filter 形狀。
           // ADR-0366 §決策 5：閘門收窄到 `SNAPSHOT_KIND`，不再涵蓋整個可尋址區間。

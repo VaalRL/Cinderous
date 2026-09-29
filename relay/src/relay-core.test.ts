@@ -7,7 +7,8 @@ import {
   TIMESTAMP_JITTER_SECONDS,
   type NostrEvent,
 } from "@cinderous/core";
-import { MessageStore } from "./message-store.js";
+import { MAX_QUERY_BYTES, MessageStore } from "./message-store.js";
+import type { RelayFilter } from "./protocol.js";
 import { leadingZeroBits, RelayCore } from "./relay-core.js";
 import { minePow } from "@cinderous/core";
 import { guardFor } from "./host-config.js";
@@ -1251,5 +1252,39 @@ describe("車道用**上線時的真實設定**：範圍檢查與可選 AUTH（A
     const core = new RelayCore({ store: new MessageStore(), ...guardFor("strict"), authChallenge: () => "ch" });
     core.connect("c");
     expect(closedReason(core.handle("c", REQ("s", { kinds: [20000] })))).toContain("auth-required");
+  });
+});
+
+describe("REQ 的位元組預算（ADR-0371 §決策 6）", () => {
+  const sk = generateSecretKey();
+  const author = getPublicKey(sk);
+  const stored = (i: number, kind: number): NostrEvent =>
+    finalizeEvent({ kind, created_at: 1_700_000_000 + i, tags: [["p", "a".repeat(64)]], content: "x".repeat(1000) }, sk);
+
+  it("🔴 一次 REQ 的所有 filter 共用同一份預算——多塞幾個 filter 不能繞過", () => {
+    const store = new MessageStore();
+    const events = [...Array.from({ length: 5 }, (_, i) => stored(i, 1060)), ...Array.from({ length: 5 }, (_, i) => stored(10 + i, 1059))];
+    for (const e of events) store.put(e, 1_700_000_001);
+    const one = JSON.stringify(events[0]).length;
+    const core = new RelayCore({ store, maxQueryBytes: one * 4 + 10, now: () => 1_700_000_001 });
+    core.connect("c");
+    const out = core.handle(
+      "c",
+      JSON.stringify(["REQ", "s", { authors: [author], kinds: [1060] }, { authors: [author], kinds: [1059] }]),
+    );
+    const got = out.filter((o) => o.message[0] === "EVENT");
+    expect(got).toHaveLength(4);
+    expect(out.at(-1)).toEqual({ to: "c", message: ["EOSE", "s"] });
+  });
+
+  it("預設就有上限（MAX_QUERY_BYTES）——宿主不必記得傳", () => {
+    expect(MAX_QUERY_BYTES).toBeLessThanOrEqual(32 * 1024 * 1024);
+    const store = new MessageStore();
+    const seen: (number | undefined)[] = [];
+    const spy = { ...store, query: (f: RelayFilter, now: number, max?: number) => (seen.push(max), store.query(f, now, max)) };
+    const core = new RelayCore({ store: spy as unknown as MessageStore });
+    core.connect("c");
+    core.handle("c", JSON.stringify(["REQ", "s", { authors: [author] }]));
+    expect(seen).toEqual([MAX_QUERY_BYTES]);
   });
 });

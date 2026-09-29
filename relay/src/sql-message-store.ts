@@ -109,7 +109,6 @@ export class SqlMessageStore implements OfflineStore {
         PRIMARY KEY (id, recipient)
       )`,
     );
-    this.sql(`CREATE INDEX IF NOT EXISTS idx_offline_recipient ON offline_msgs(recipient)`);
     this.sql(`CREATE INDEX IF NOT EXISTS idx_offline_expiration ON offline_msgs(expiration)`);
     // 可尋址事件（NIP-33，ADR-0071 快照）：每 (kind, pubkey, d) 一列、新的取代舊的。
     this.sql(
@@ -138,6 +137,9 @@ export class SqlMessageStore implements OfflineStore {
     for (const ddl of [
       `ALTER TABLE offline_msgs ADD COLUMN pubkey TEXT`,
       `ALTER TABLE offline_msgs ADD COLUMN kind INTEGER`,
+      // ADR-0371 §決策 5：每列的位元組數。總量與天花板改讀這一欄（有索引），
+      // 不再 `SUM(LENGTH(json))`——後者要把每一列的 json 從溢位頁讀出來（實測 260MB 約 1.4 秒）。
+      `ALTER TABLE offline_msgs ADD COLUMN bytes INTEGER`,
     ]) {
       try {
         this.sql(ddl);
@@ -151,6 +153,46 @@ export class SqlMessageStore implements OfflineStore {
     );
     this.sql(`CREATE INDEX IF NOT EXISTS idx_offline_pubkey ON offline_msgs(pubkey)`);
     this.sql(`CREATE INDEX IF NOT EXISTS idx_offline_kind ON offline_msgs(kind)`);
+    // ADR-0371 §決策 5：分桶索引——分桶修剪、`#p` 查詢與總量加總都只讀索引，不碰 json。
+    //
+    // 🔴 為什麼要把欄位塞進索引：`kind`／`bytes` 是後來 `ADD COLUMN` 加的，在列裡排在 json
+    // **後面**。一顆檔案塊的 json 約 131KB、落在溢位頁上，讀它後面的欄位就得把整串溢位頁走完
+    // ——修正前每次寫入都對該收件人的每一列這樣做（實測 1500 列約 0.4 秒）。
+    // 它以 `recipient` 開頭，取代原本的 `idx_offline_recipient`（少一個索引＝每次寫入少寫一列）。
+    this.sql(
+      `CREATE INDEX IF NOT EXISTS idx_offline_bucket ON offline_msgs(recipient, kind, created_at, expiration, bytes)`,
+    );
+    this.sql(`DROP INDEX IF EXISTS idx_offline_recipient`);
+    // 回填升級前的列。部分索引只收 `bytes IS NULL` 的列（新列一律有值 ⇒ 它恆為空、不增加寫入），
+    // 讓這條 UPDATE 在每次喚醒時都不必掃全表。
+    this.sql(`CREATE INDEX IF NOT EXISTS idx_offline_bytes_missing ON offline_msgs(id) WHERE bytes IS NULL`);
+    this.sql(`UPDATE offline_msgs SET bytes = LENGTH(json) WHERE bytes IS NULL`);
+  }
+
+  /**
+   * 離線留言目前佔用的位元組（快取；`undefined`＝下次用到時重算一次）。ADR-0371 §決策 5。
+   *
+   * 🔴 為什麼要快取：天花板每次寫入都要問「現在用了多少」。就算改讀索引，`SUM` 仍要掃過
+   * **每一列**的索引項，而 Cloudflare 以「讀取列數」計費（免費層每日 500 萬列）——一顆滿載的
+   * 檔案車道 DO 有數千列，上傳一個 30MB 檔（656 塊）就會把一整天的額度讀光。
+   * 寫入時加、刪除時減；刪除路徑算不出確切數字的（prune、vanish）直接作廢，下次重算。
+   */
+  private offlineUsed: number | undefined;
+  /** 每個（收件人, 桶）目前的列數（快取，理由同上）。鍵見 {@link bucketKey}。 */
+  private readonly bucketCounts = new Map<string, number>();
+
+  /** 作廢所有快取（下次用到時從索引重算）。 */
+  private invalidateUsage(): void {
+    this.offlineUsed = undefined;
+    this.bucketCounts.clear();
+  }
+
+  private usedOfflineBytes(): number {
+    if (this.offlineUsed === undefined) {
+      this.offlineUsed =
+        Number(this.sql(`SELECT COALESCE(SUM(bytes), 0) AS n FROM offline_msgs`)[0]?.n ?? 0) || 0;
+    }
+    return this.offlineUsed;
   }
 
   put(event: NostrEvent, nowSec: number): boolean {
@@ -159,14 +201,22 @@ export class SqlMessageStore implements OfflineStore {
     // ADR-0065：一律存「有效到期時間」（無標籤給預設 TTL、超長標籤截到上限）——每列壽命必有界。
     const effExp = effectiveExpiration(event, nowSec, this.opts.maxTtlSeconds);
     const recipients = recipientsOf(event);
-    const targets = recipients.length > 0 ? recipients : [""];
-    // 天花板照「列」算：每位收件人各一列（無 `p` 者一列，`recipient = ''`）。
-    if (!this.fitsOfflineCeiling(JSON.stringify(event).length * targets.length)) return false;
+    // 去重：重複的 `p` 標籤在表裡只會是一列（主鍵 (id, recipient)），快取也只能算一份。
+    const targets = [...new Set(recipients.length > 0 ? recipients : [""])];
     const json = JSON.stringify(event);
-    for (const recipient of targets) {
+    const size = json.length;
+    // 已經存過的那幾列不再計入（`INSERT OR IGNORE` 會略過它們；快取不能把它們算兩次）。
+    const present = new Set(
+      this.sql(`SELECT recipient FROM offline_msgs WHERE id = ?`, event.id).map((r) => r.recipient as string),
+    );
+    const fresh = targets.filter((r) => !present.has(r));
+    if (fresh.length === 0) return true;
+    // 天花板照「列」算：每位收件人各一列（無 `p` 者一列，`recipient = ''`）。
+    if (!this.fitsOfflineCeiling(size * fresh.length)) return false;
+    for (const recipient of fresh) {
       this.sql(
-        `INSERT OR IGNORE INTO offline_msgs (id, recipient, expiration, created_at, json, pubkey, kind)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT OR IGNORE INTO offline_msgs (id, recipient, expiration, created_at, json, pubkey, kind, bytes)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         event.id,
         recipient,
         effExp,
@@ -174,9 +224,18 @@ export class SqlMessageStore implements OfflineStore {
         json,
         event.pubkey,
         event.kind,
+        size,
       );
     }
-    if (this.opts.maxPerRecipient !== undefined) this.enforceCap(targets);
+    if (this.offlineUsed !== undefined) this.offlineUsed += size * fresh.length;
+    const file = event.kind === FILE_WRAP_KIND;
+    for (const recipient of fresh) {
+      const key = bucketKey(recipient, file);
+      const count = this.bucketCounts.get(key);
+      if (count !== undefined) this.bucketCounts.set(key, count + 1);
+    }
+    // 無條件呼叫（與記憶體版一致）：聊天桶沒設上限時 `enforceCap` 自己略過，檔案桶恆有上限。
+    this.enforceCap(fresh, file);
     return true;
   }
 
@@ -246,23 +305,20 @@ export class SqlMessageStore implements OfflineStore {
     const max = this.opts.offlineMaxTotalBytes;
     if (max === undefined) return true;
     if (size > max) return false;
-    const total =
-      (this.sql(`SELECT COALESCE(SUM(LENGTH(json)), 0) AS n FROM offline_msgs`)[0]?.n as number) ?? 0;
-    let used = total;
+    let used = this.usedOfflineBytes();
     if (used + size <= max) return true;
     if (this.opts.ceilingEvicts !== true) return false;
     const victims = this.sql(
-      `SELECT id, recipient, LENGTH(json) AS len FROM offline_msgs ORDER BY expiration ASC LIMIT 256`,
+      `SELECT rowid AS r, bytes FROM offline_msgs ORDER BY expiration ASC LIMIT 256`,
     );
     for (const row of victims) {
       if (used + size <= max) break;
-      this.sql(
-        `DELETE FROM offline_msgs WHERE id = ? AND recipient = ?`,
-        row.id as string,
-        row.recipient as string,
-      );
-      used -= (row.len as number) ?? 0;
+      this.sql(`DELETE FROM offline_msgs WHERE rowid = ?`, row.r as number);
+      used -= Number(row.bytes ?? 0);
     }
+    // 淘汰會跨收件人、跨桶，逐一記帳不划算（它只在撞到天花板時發生）——總量記下、分桶作廢。
+    this.bucketCounts.clear();
+    this.offlineUsed = used;
     return used + size <= max;
   }
 
@@ -320,7 +376,7 @@ export class SqlMessageStore implements OfflineStore {
    * 儲存層若也擋，會讓「Ephemeral 不入庫」這類**否定斷言**變成恆真的空轉測試。
    * 這裡只負責一件事：**任何查詢的代價都有界**。
    */
-  query(filter: RelayFilter, nowSec: number): NostrEvent[] {
+  query(filter: RelayFilter, nowSec: number, maxBytes?: number): NostrEvent[] {
     const pValues = filter["#p"];
     const { authors, ids, kinds } = filter;
     // 空陣列＝匹配不到任何事件（`matchFilter` 語意）。提前回傳，連 DB 都不用打
@@ -348,11 +404,15 @@ export class SqlMessageStore implements OfflineStore {
     bind.push(nowSec);
 
     const limit = queryLimit(filter.limit);
-    let rows = this.sql(
-      `SELECT json FROM offline_msgs WHERE ${where.join(" AND ")} ORDER BY created_at DESC LIMIT ?`,
-      ...bind,
+    const offline = this.boundedSelect(
+      "offline_msgs",
+      where.join(" AND "),
+      bind,
       limit,
+      "COALESCE(bytes, LENGTH(json))",
+      maxBytes,
     );
+    let rows = offline.rows;
 
     // 快照（可尋址）走 authors+kinds 查詢、不帶 `#p`——它是獨立的表，同樣把條件下推＋LIMIT。
     if (!(pValues && pValues.length > 0)) {
@@ -362,12 +422,9 @@ export class SqlMessageStore implements OfflineStore {
       if (ids && ids.length > 0) push2(aWhere, aBind, `id IN (${placeholders(ids)})`, ids);
       if (kinds && kinds.length > 0) push2(aWhere, aBind, `kind IN (${placeholders(kinds)})`, kinds);
       pushTagClauses("addressable", filter, aWhere, aBind);
+      const remaining = maxBytes === undefined ? undefined : maxBytes - offline.spent;
       rows = rows.concat(
-        this.sql(
-          `SELECT json FROM addressable WHERE ${aWhere.join(" AND ")} ORDER BY created_at DESC LIMIT ?`,
-          ...aBind,
-          limit,
-        ),
+        this.boundedSelect("addressable", aWhere.join(" AND "), aBind, limit, "LENGTH(json)", remaining).rows,
       );
     }
 
@@ -375,7 +432,41 @@ export class SqlMessageStore implements OfflineStore {
     return events.filter((e) => matchFilter(filter, e)).slice(0, limit);
   }
 
+  /**
+   * 取出最新的列，但**累計大小不超過 `budget`**（ADR-0371 §決策 6）。沒給預算＝與過去相同。
+   *
+   * 🔴 為什麼要分兩步：`toArray()` 一次把結果全部搬進記憶體，而 DO 的記憶體上限是 128MB。
+   * 一位收件人名下的檔案塊可能有上千顆、每顆約 131KB——一次 REQ 就是上百 MB，DO 當場重置。
+   * 先只讀大小（分桶索引上就有）算出放得下幾列，再取那幾列的 json。
+   * 排序多一個 `rowid` 當決勝，兩步才保證挑中的是同一批列。
+   */
+  private boundedSelect(
+    table: string,
+    where: string,
+    bind: (string | number)[],
+    limit: number,
+    sizeExpr: string,
+    budget: number | undefined,
+  ): { rows: Record<string, unknown>[]; spent: number } {
+    const order = "ORDER BY created_at DESC, rowid DESC";
+    if (budget === undefined) {
+      return { rows: this.sql(`SELECT json FROM ${table} WHERE ${where} ${order} LIMIT ?`, ...bind, limit), spent: 0 };
+    }
+    const sizes = this.sql(`SELECT ${sizeExpr} AS n FROM ${table} WHERE ${where} ${order} LIMIT ?`, ...bind, limit);
+    let take = 0;
+    let spent = 0;
+    for (const row of sizes) {
+      const n = Number(row.n ?? 0);
+      if (spent + n > budget) break;
+      spent += n;
+      take += 1;
+    }
+    if (take === 0) return { rows: [], spent: 0 };
+    return { rows: this.sql(`SELECT json FROM ${table} WHERE ${where} ${order} LIMIT ?`, ...bind, take), spent };
+  }
+
   prune(nowSec: number): void {
+    this.invalidateUsage();
     this.sql(`DELETE FROM offline_msgs WHERE expiration IS NOT NULL AND expiration <= ?`, nowSec);
     this.sql(`DELETE FROM addressable WHERE expiration <= ?`, nowSec);
   }
@@ -384,7 +475,7 @@ export class SqlMessageStore implements OfflineStore {
    * NIP-62 清除（ADR-0260）：`pubkey = ?`（他發的）**或** `recipient = ?`（寄給他的
    * ——Gift Wrap 外層是一次性金鑰，`p` 是唯一能定位收件匣的鍵），外加他的可尋址事件。
    *
-   * 兩欄都有索引（`idx_offline_pubkey`／`idx_offline_recipient`），故不是全表掃描。
+   * 兩欄都有索引（`idx_offline_pubkey`／`idx_offline_bucket` 的 recipient 前綴），故不是全表掃描。
    */
   vanish(pubkey: string, _nowSec: number): number {
     const rows = this.sql(
@@ -396,28 +487,52 @@ export class SqlMessageStore implements OfflineStore {
     const addr = Number(
       this.sql(`SELECT COUNT(*) AS n FROM addressable WHERE pubkey = ?`, pubkey)[0]?.n ?? 0,
     );
+    this.invalidateUsage();
     this.sql(`DELETE FROM offline_msgs WHERE pubkey = ? OR recipient = ?`, pubkey, pubkey);
     this.sql(`DELETE FROM addressable WHERE pubkey = ?`, pubkey);
     return msgs + addr;
   }
 
-  private enforceCap(recipients: string[]): void {
-    const cap = this.opts.maxPerRecipient;
-    const fileCap = this.opts.filePerRecipient ?? DEFAULT_FILE_PER_RECIPIENT;
+  /**
+   * 分桶修剪（ADR-0162：檔案塊與聊天留言各自計數、各自由舊到新丟棄）。
+   *
+   * 只修剪**這次寫入落到的那一桶**：另一桶的列數沒變，不需要看（修正前兩桶每次都掃）。
+   * 列數走快取，只有超量時才讀出要刪的那幾列——而且只讀 `idx_offline_bucket` 的索引項。
+   */
+  private enforceCap(recipients: string[], file: boolean): void {
+    const limit = file
+      ? (this.opts.filePerRecipient ?? DEFAULT_FILE_PER_RECIPIENT)
+      : this.opts.maxPerRecipient;
+    if (limit === undefined) return;
+    const bucket = file ? `kind = ${FILE_WRAP_KIND}` : `kind != ${FILE_WRAP_KIND}`;
     for (const recipient of recipients) {
-      // ADR-0162：檔案塊（1060）與聊天留言分桶計數（kind 以 json_extract 取，免 schema 遷移）。
-      const trim = (where: string, limit: number): void => {
-        const rows = this.sql(
-          `SELECT id FROM offline_msgs WHERE recipient = ? AND ${where} ORDER BY created_at ASC`,
-          recipient,
+      if (recipient === "") continue; // 無收件人的桶不做 FIFO（由天花板與 TTL 管）
+      const key = bucketKey(recipient, file);
+      let count = this.bucketCounts.get(key);
+      if (count === undefined) {
+        count = Number(
+          this.sql(`SELECT COUNT(*) AS n FROM offline_msgs WHERE recipient = ? AND ${bucket}`, recipient)[0]?.n ?? 0,
         );
-        if (rows.length <= limit) return;
-        for (const row of rows.slice(0, rows.length - limit)) {
-          this.sql(`DELETE FROM offline_msgs WHERE recipient = ? AND id = ?`, recipient, row.id as string);
+      }
+      if (count > limit) {
+        const rows = this.sql(
+          `SELECT rowid AS r, bytes FROM offline_msgs WHERE recipient = ? AND ${bucket}
+           ORDER BY created_at ASC LIMIT ?`,
+          recipient,
+          count - limit,
+        );
+        for (const row of rows) {
+          this.sql(`DELETE FROM offline_msgs WHERE rowid = ?`, row.r as number);
+          if (this.offlineUsed !== undefined) this.offlineUsed -= Number(row.bytes ?? 0);
         }
-      };
-      if (cap !== undefined) trim(`json_extract(json, '$.kind') != ${FILE_WRAP_KIND}`, cap);
-      trim(`json_extract(json, '$.kind') = ${FILE_WRAP_KIND}`, fileCap);
+        count -= rows.length;
+      }
+      this.bucketCounts.set(key, count);
     }
   }
+}
+
+/** 分桶快取的鍵：收件人 ＋ 桶別（檔案塊／其他）。 */
+function bucketKey(recipient: string, file: boolean): string {
+  return `${file ? "f" : "c"}:${recipient}`;
 }

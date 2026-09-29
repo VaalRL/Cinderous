@@ -1,7 +1,8 @@
 import { readFileSync } from "node:fs";
 import { TIMESTAMP_JITTER_SECONDS } from "@cinderous/core";
 import { describe, expect, it } from "vitest";
-import { ABUSE_GUARD, APP_ADDRESSABLE_PER_AUTHOR, MAX_EVENTS_PER_MINUTE, MAX_MESSAGES_PER_MINUTE, messagesPerMinuteFrom, MAX_PAST_SKEW_SEC, APP_ADDRESSABLE_BYTES_PER_AUTHOR, APP_ADDRESSABLE_MAX_BYTES, DO_ADDRESSABLE_MAX_BYTES, DO_OFFLINE_MAX_BYTES, MAX_POW_DIFFICULTY, PUBLIC_LANE_ADDRESSABLE_BYTES_PER_AUTHOR, PUBLIC_LANE_ADDRESSABLE_PER_AUTHOR, PUBLIC_LANE_RETENTION_SECONDS, STRICT_ADDRESSABLE_BYTES_PER_AUTHOR, TTL_CAP_DAYS, knownLanes, acceptFileEvents, eventsPerMinuteFrom, firstHost, guardFor, powForLane, storeOptions, ttlSecondsFromDays } from "./host-config.js";
+import { FILE_EVENT_MAX_BYTES } from "./message-store.js";
+import { ABUSE_GUARD, APP_ADDRESSABLE_PER_AUTHOR, MAX_EVENTS_PER_MINUTE, MAX_MESSAGES_PER_MINUTE, messagesPerMinuteFrom, MAX_PAST_SKEW_SEC, APP_ADDRESSABLE_BYTES_PER_AUTHOR, APP_ADDRESSABLE_MAX_BYTES, DO_ADDRESSABLE_MAX_BYTES, DO_OFFLINE_MAX_BYTES, MAX_POW_DIFFICULTY, PUBLIC_LANE_ADDRESSABLE_BYTES_PER_AUTHOR, PUBLIC_LANE_ADDRESSABLE_PER_AUTHOR, PUBLIC_LANE_RETENTION_SECONDS, STRICT_ADDRESSABLE_BYTES_PER_AUTHOR, TTL_CAP_DAYS, knownLanes, acceptFileEvents, FILE_CHUNK_PLAINTEXT_BYTES, FILE_LANE_OFFLINE_MAX_BYTES, FILE_LANE_QUOTA_SLACK_CHUNKS, fileChunksFor, fileLaneChunksPerRecipient, fileLanes, filePolicyFor, eventsPerMinuteFrom, firstHost, guardFor, powForLane, storeOptions, ttlSecondsFromDays } from "./host-config.js";
 
 // 宿主組裝設定（ADR-0235 H1）。H1 的教訓是「組裝層沒人測」——防護在 core 裡寫對了也測了，
 // 但 worker 從未把參數傳進去。這裡把常數與衍生邏輯的**不變量**釘死，兩座宿主不可能各走各的。
@@ -166,6 +167,13 @@ describe("node-relay 是單一 profile 且恆為嚴格（ADR-0366 §決策 8 ／
   it("政策取自 host-config 的 SSOT，而不是另抄一份常數", () => {
     expect(SRC).toContain('guardFor("strict")');
     expect(SRC).not.toContain("...ABUSE_GUARD");
+  });
+
+  it("🔴 檔案政策走同一個 filePolicyFor（ADR-0371）：沒有車道 ⇒ 設了 FILE_LANES 就整站不收", () => {
+    // node 主機沒有路徑路由，所以永遠以「不是任何車道」去問——車道模式下答案必然是拒收，
+    // 與 Cloudflare 版的主訊息平面一致。直接讀 MAX_FILE_MB 就會繞過 FILE_LANES。
+    expect(SRC).toContain("filePolicyFor(process.env)");
+    expect(SRC).not.toMatch(/acceptFileEvents\(/);
   });
 });
 
@@ -358,5 +366,73 @@ describe("DO 容量天花板（ADR-0367 §決策 2）", () => {
 
   it("天花板必須遠大於單一作者的總量預算，否則一個人就能佔滿整顆 DO", () => {
     expect(DO_ADDRESSABLE_MAX_BYTES).toBeGreaterThanOrEqual(8 * STRICT_ADDRESSABLE_BYTES_PER_AUTHOR);
+  });
+});
+
+describe("檔案車道（FILE_LANES，ADR-0371）", () => {
+  const LANES = "lwd,cindersync,cinder-coffice";
+
+  it("30MB ≈ 656 塊（48,000 B 明文／塊）；配額＝兩個最大檔＋餘裕", () => {
+    expect(FILE_CHUNK_PLAINTEXT_BYTES).toBe(48_000);
+    expect(fileChunksFor(30)).toBe(656);
+    expect(fileLaneChunksPerRecipient(30)).toBe(2 * 656 + FILE_LANE_QUOTA_SLACK_CHUNKS);
+    expect(fileLaneChunksPerRecipient(30)).toBe(1440);
+    // 🔴 至少容得下一個上限檔——否則上傳到一半，FIFO 就把自己的第一塊擠掉了
+    expect(fileLaneChunksPerRecipient(30)).toBeGreaterThanOrEqual(fileChunksFor(30));
+  });
+
+  it("🔴 沒設 FILE_LANES＝與過去完全相同：MAX_FILE_MB 是全站開關，不宣告單檔上限", () => {
+    const env = { MAX_FILE_MB: "30", APP_LANES: LANES };
+    expect(filePolicyFor(env)).toEqual({ accept: true }); // 嚴格平面／共用分片
+    expect(filePolicyFor(env, "cindersync")).toEqual({ accept: true });
+    expect(filePolicyFor({ APP_LANES: LANES }, "cindersync")).toEqual({ accept: false });
+    // 空白字串視同未設（wrangler var 寫成空字串是常見的「關掉」寫法）
+    expect(filePolicyFor({ ...env, FILE_LANES: "  " })).toEqual({ accept: true });
+  });
+
+  it("設了 FILE_LANES：只有名單上的車道收，且宣告單檔上限", () => {
+    const env = { MAX_FILE_MB: "30", APP_LANES: LANES, FILE_LANES: "cindersync, Cinder-Coffice" };
+    expect(filePolicyFor(env, "cindersync")).toEqual({ accept: true, maxFileMb: 30 });
+    expect(filePolicyFor(env, "cinder-coffice")).toEqual({ accept: true, maxFileMb: 30 });
+    // 🔴 主訊息平面（嚴格平面、共用分片都傳 undefined）與其他車道一律整類拒收
+    expect(filePolicyFor(env)).toEqual({ accept: false });
+    expect(filePolicyFor(env, "lwd")).toEqual({ accept: false });
+  });
+
+  it("FILE_LANES 有設但 MAX_FILE_MB 沒設 → 哪裡都不收（MAX_FILE_MB 仍是總開關）", () => {
+    expect(filePolicyFor({ APP_LANES: LANES, FILE_LANES: "cindersync" }, "cindersync")).toEqual({
+      accept: false,
+    });
+  });
+
+  it("🔴 不在 APP_LANES 上的 id 被忽略並回報——它沒有自己的 DO，開了就等於開給共用分片", () => {
+    const env = { MAX_FILE_MB: "30", APP_LANES: "lwd", FILE_LANES: "cindersync,lwd" };
+    expect(fileLanes(env)).toEqual({ active: new Set(["lwd"]), ignored: ["cindersync"] });
+    expect(filePolicyFor(env, "cindersync")).toEqual({ accept: false });
+    expect(filePolicyFor(env, "lwd")).toEqual({ accept: true, maxFileMb: 30 });
+  });
+
+  it("全部 id 都無效 → 仍是車道模式（fail-closed），不會退回全站開放", () => {
+    const env = { MAX_FILE_MB: "30", APP_LANES: "lwd", FILE_LANES: "nope" };
+    expect(filePolicyFor(env)).toEqual({ accept: false });
+    expect(filePolicyFor(env, "lwd")).toEqual({ accept: false });
+  });
+
+  it("store 選項：檔案車道用自己的檔案配額與 DO 天花板；沒給就與過去相同", () => {
+    const lane = storeOptions(undefined, "app", true, 30);
+    expect(lane.filePerRecipient).toBe(1440);
+    expect(lane.offlineMaxTotalBytes).toBe(FILE_LANE_OFFLINE_MAX_BYTES);
+    // 保存期不變（7 天）：Vault 同步的離線容忍度與聊天一致
+    expect(lane.maxTtlSeconds).toBeUndefined();
+    expect(storeOptions(undefined, "app", true)).toEqual(storeOptions(undefined, "app", true, undefined));
+    expect(storeOptions(undefined, "app", true).filePerRecipient).toBeUndefined();
+  });
+
+  it("DO 天花板至少容得下幾位收件人的整份配額（否則一個人的同步就會把別人淘汰）", () => {
+    // 每顆塊事件約 131KB（48,000 B 包兩層 NIP-44）；以 FILE_EVENT_MAX_BYTES 當最壞情況。
+    const perRecipientWorst = fileLaneChunksPerRecipient(30) * FILE_EVENT_MAX_BYTES;
+    expect(FILE_LANE_OFFLINE_MAX_BYTES).toBeGreaterThanOrEqual(3 * perRecipientWorst);
+    // 🔴 兩條檔案車道的天花板加起來必須遠低於 DO SQLite 免費額度（5GB，帳號層級共用）
+    expect(2 * FILE_LANE_OFFLINE_MAX_BYTES).toBeLessThanOrEqual(2.5 * 1024 ** 3);
   });
 });

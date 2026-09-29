@@ -6,7 +6,7 @@ import { createServer } from "node:http";
 import { createRequire } from "node:module";
 import type { DatabaseSync as DatabaseSyncType } from "node:sqlite";
 import { WebSocketServer, type WebSocket } from "ws";
-import { acceptFileEvents, eventsPerMinuteFrom, firstHost, guardFor, messagesPerMinuteFrom, storeOptions } from "./host-config.js";
+import { eventsPerMinuteFrom, filePolicyFor, fileLanesMode, firstHost, guardFor, messagesPerMinuteFrom, storeOptions } from "./host-config.js";
 import { buildRelayInfo, NIP11_HEADERS, wantsRelayInfo } from "./nip11.js";
 import { RelayCore, type Outbound, type RelayCoreOptions } from "./relay-core.js";
 import { type SqlExec, SqlMessageStore } from "./sql-message-store.js";
@@ -46,7 +46,14 @@ else coreOptions.maxEventsPerMinute = rate;
 const msgRate = messagesPerMinuteFrom(process.env.MAX_MESSAGES_PER_MINUTE, rate);
 if (msgRate === undefined) delete coreOptions.maxMessagesPerMinute;
 else coreOptions.maxMessagesPerMinute = msgRate;
-if (acceptFileEvents(process.env.MAX_FILE_MB)) coreOptions.acceptFileEvents = true;
+// 檔案塊（ADR-0162／0371）：與 Cloudflare 版同一個 `filePolicyFor`。本宿主沒有車道，所以永遠以
+// 「不是任何車道」去問——沒設 FILE_LANES 時 MAX_FILE_MB 照舊是全站開關（企業自架不變）；
+// 設了 FILE_LANES 就是車道模式，而這裡沒有車道 ⇒ 整站不收，與 Cloudflare 版的主訊息平面一致。
+const filePolicy = filePolicyFor(process.env);
+if (filePolicy.accept) coreOptions.acceptFileEvents = true;
+if (fileLanesMode(process.env.FILE_LANES)) {
+  console.warn("FILE_LANES 只在 Cloudflare 版（有車道 DO）生效；node 主機沒有車道，設了它就整站不收檔案塊（ADR-0371）");
+}
 const core = new RelayCore(coreOptions);
 
 // NIP-11 文件（ADR-0260）：自架者以環境變數填站名/聯絡/贊助管道；未設的欄位不會出現。
@@ -57,7 +64,7 @@ const relayInfo = buildRelayInfo({
   pubkey: process.env.RELAY_PUBKEY,
   contact: process.env.RELAY_CONTACT,
   maxTtlDays: process.env.MAX_TTL_DAYS,
-  acceptsFiles: acceptFileEvents(process.env.MAX_FILE_MB),
+  acceptsFiles: filePolicy.accept,
   authRequired: requireAuth,
   donations: {
     github_sponsors: process.env.DONATE_GITHUB_SPONSORS,

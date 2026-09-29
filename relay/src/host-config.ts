@@ -171,6 +171,87 @@ export function acceptFileEvents(raw: string | undefined): boolean {
 }
 
 /**
+ * 每顆檔案塊的明文位元組（ADR-0162）。**鏡射** core 的 `FILE_CHUNK_BYTES` 與 SDK 的
+ * `RELAY_FRAME_PAYLOAD_BYTES`——relay 看不到明文，只能用這個數字把「MB」換成「塊數」。
+ * 包兩層 NIP-44 後每顆事件約 131KB（SDK ADR 0009 實測）。
+ */
+export const FILE_CHUNK_PLAINTEXT_BYTES = 48_000;
+
+/** 檔案車道每收件人配額要容得下幾個上限大小的檔案（ADR-0371 §決策 3）。 */
+export const FILE_LANE_QUOTA_FILES = 2;
+
+/** 配額另留的塊數：同步協調訊息、摘要與重送（ADR-0371 §決策 3）。 */
+export const FILE_LANE_QUOTA_SLACK_CHUNKS = 128;
+
+/**
+ * **檔案車道那顆 DO** 的離線留言容量天花板（ADR-0371 §決策 4）。
+ *
+ * 一般 DO 的 {@link DO_OFFLINE_MAX_BYTES}（128MB）裝不下兩位收件人各收一個 30MB 檔
+ * （一個 30MB 檔在中繼上約 86MB）——而車道的天花板是**淘汰**制，裝不下就會默默刪掉
+ * 別人還沒領的塊。1GiB 至少容得下三位收件人的整份最壞配額。
+ *
+ * 🔴 這是帳號層級免費額度的一部分：兩條檔案車道 × 1GiB＝2GiB，DO SQLite 免費 5GB
+ * 是**整個帳號共用**的（主訊息平面也在裡面）。要調大之前先重算 ADR-0371 §成本。
+ */
+export const FILE_LANE_OFFLINE_MAX_BYTES = 1024 * 1024 * 1024;
+
+/** 一個 `maxFileMb` MB（MiB）的檔案要切成幾塊。 */
+export function fileChunksFor(maxFileMb: number): number {
+  return Math.ceil((maxFileMb * 1024 * 1024) / FILE_CHUNK_PLAINTEXT_BYTES);
+}
+
+/** 檔案車道的每收件人檔案塊配額（ADR-0371 §決策 3）：兩個上限檔＋餘裕。 */
+export function fileLaneChunksPerRecipient(maxFileMb: number): number {
+  return FILE_LANE_QUOTA_FILES * fileChunksFor(maxFileMb) + FILE_LANE_QUOTA_SLACK_CHUNKS;
+}
+
+/** 決定檔案政策需要的三個站方設定。 */
+export interface FileLaneEnv {
+  MAX_FILE_MB?: string | undefined;
+  FILE_LANES?: string | undefined;
+  APP_LANES?: string | undefined;
+}
+
+/** `FILE_LANES` 有沒有設（空白字串視同未設）。有設就是「車道模式」，主平面整類拒收。 */
+export function fileLanesMode(raw: string | undefined): boolean {
+  return (raw ?? "").trim() !== "";
+}
+
+/**
+ * `FILE_LANES` 裡真正生效的車道，與被忽略的那些（ADR-0371 §決策 1）。
+ *
+ * 🔴 只有**同時在 `APP_LANES` 上**的才算：不在名單上的車道沒有自己的 DO，
+ * 它落在共用雜湊分片——替它開檔案等於替那顆分片上所有陌生應用開檔案。
+ */
+export function fileLanes(env: FileLaneEnv): { active: ReadonlySet<string>; ignored: string[] } {
+  const app = knownLanes(env.APP_LANES);
+  const active = new Set<string>();
+  const ignored: string[] = [];
+  for (const id of knownLanes(env.FILE_LANES)) (app.has(id) ? active.add(id) : ignored.push(id));
+  return { active, ignored };
+}
+
+/** 一顆 DO 的檔案政策。`maxFileMb` 只在車道模式出現（NIP-11 對外宣告的單檔上限）。 */
+export type FilePolicy = { accept: false } | { accept: true; maxFileMb?: number };
+
+/**
+ * 這顆 DO 收不收檔案塊（kind 1060）——**兩座宿主的單一真實來源**（ADR-0371）。
+ *
+ * - `MAX_FILE_MB` 未設／<1 → 哪裡都不收（總開關，ADR-0162）。
+ * - `FILE_LANES` **未設** → 與過去完全相同：全站收（企業自架相容），不宣告單檔上限。
+ * - `FILE_LANES` **有設** → 只有 `laneId` 在生效名單上的 DO 收，`MAX_FILE_MB` 改當單檔上限；
+ *   Cinderous 主訊息平面（嚴格平面）、共用分片與其他車道一律整類拒收。
+ *
+ * @param laneId 這顆 DO 服務的**名單上車道** id；嚴格平面與共用分片傳 `undefined`。
+ */
+export function filePolicyFor(env: FileLaneEnv, laneId?: string): FilePolicy {
+  if (!acceptFileEvents(env.MAX_FILE_MB)) return { accept: false };
+  if (!fileLanesMode(env.FILE_LANES)) return { accept: true };
+  if (laneId === undefined || !fileLanes(env).active.has(laneId)) return { accept: false };
+  return { accept: true, maxFileMb: Math.floor(Number(env.MAX_FILE_MB)) };
+}
+
+/**
  * 由 `MAX_EVENTS_PER_MINUTE` 原始字串算出速率上限（node 自架可覆寫）。
  * 未設／壞值 → 預設 {@link MAX_EVENTS_PER_MINUTE}；<1 視為關閉（undefined）。
  */
@@ -350,6 +431,11 @@ export function storeOptions(
   profile: RelayProfile = "strict",
   /** 這顆 DO 服務的是名單上的已知租戶嗎（ADR-0366 §裁示）；預設否＝公用配額。 */
   knownLane = false,
+  /**
+   * 檔案車道的單檔上限（MB；ADR-0371）。只有 {@link filePolicyFor} 在車道模式下判定
+   * 「這顆 DO 收檔案」時才給；給了就換成檔案車道的每收件人配額與 DO 天花板。
+   */
+  maxFileMb?: number,
 ): MessageStoreOptions {
   const configured = ttlSecondsFromDays(maxTtlDaysRaw);
   const publicLane = profile === "app" && !knownLane;
@@ -376,5 +462,13 @@ export function storeOptions(
       ? { addressablePerAuthor: addressable, addressableMaxBytes: APP_ADDRESSABLE_MAX_BYTES }
       : {}),
     ...(publicLane ? { addressableTtlSeconds: PUBLIC_LANE_RETENTION_SECONDS } : {}),
+    // 檔案車道（ADR-0371）：保存期**不動**（7 天，Vault 同步的離線容忍度與聊天一致），
+    // 只換「每收件人能放幾塊」與「整顆 DO 能放多少」。
+    ...(maxFileMb !== undefined
+      ? {
+          filePerRecipient: fileLaneChunksPerRecipient(maxFileMb),
+          offlineMaxTotalBytes: FILE_LANE_OFFLINE_MAX_BYTES,
+        }
+      : {}),
   };
 }

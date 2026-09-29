@@ -1,7 +1,8 @@
 import { verifyHttpAuth } from "@cinderous/core";
 import {
-  acceptFileEvents,
   DEVELOPER_DOCS_URL,
+  fileLanes,
+  filePolicyFor,
   firstHost,
   guardFor,
   knownLanes,
@@ -34,9 +35,18 @@ export interface Env {
   MAX_TTL_DAYS?: string;
   /**
    * 接受檔案塊事件（ADR-0162）：≥1 才收 FILE_WRAP(1060)；未設＝整類拒收（公共站預設）。
-   * 值目前僅作開關（實際上限由名冊政策 relayFilesMaxMb ≤16 控制）。
+   * 沒設 `FILE_LANES` 時只是**全站**開關（企業自架；實際上限由名冊政策 relayFilesMaxMb ≤16 控制）；
+   * 設了 `FILE_LANES` 時改當那幾條車道的**單檔上限**（MB，ADR-0371）。
    */
   MAX_FILE_MB?: string;
+  /**
+   * 只在這幾條車道收檔案塊（逗號分隔的車道 id；ADR-0371）。
+   *
+   * 🔴 **設了就是車道模式**：Cinderous 主訊息平面（`/`、`/s/<n>`、`/presence`）、共用分片與
+   * 其他車道一律整類拒收 1060；列在這裡的車道還必須**同時在 `APP_LANES` 上**（有自己的 DO），
+   * 不在的會被忽略。沒設＝與過去完全相同（`MAX_FILE_MB` 是全站開關）。
+   */
+  FILE_LANES?: string;
   /**
    * 第三方車道的 NIP-13 PoW 難度（ADR-0366 P2 #11）。未設＝0（不要求）。
    *
@@ -202,7 +212,11 @@ export function relayInfoFrom(
   profile: RelayProfile = "strict",
   /** 本路徑是不是名單上的已知租戶（ADR-0366 §裁示）：公用分片的保存期短得多（ADR-0367）。 */
   knownLane = false,
+  /** 名單上車道的 id（ADR-0371）：決定這條路徑收不收檔案、單檔上限多少。 */
+  laneId?: string,
 ): Record<string, unknown> {
+  // 與 DO 實際套用的同一個函式（`filePolicyFor`）——文件說的就是這條路徑真正在執行的政策。
+  const files = filePolicyFor(env, profile === "app" && knownLane ? laneId : undefined);
   return buildRelayInfo({
     profile,
     knownLane,
@@ -211,7 +225,8 @@ export function relayInfoFrom(
     pubkey: env.RELAY_PUBKEY,
     contact: env.RELAY_CONTACT,
     maxTtlDays: env.MAX_TTL_DAYS,
-    acceptsFiles: acceptFileEvents(env.MAX_FILE_MB),
+    acceptsFiles: files.accept,
+    maxFileMb: files.accept ? files.maxFileMb : undefined,
     // 與實際生效的政策同源（`guardFor`）——拿獨立旗標描述它遲早會說謊（見本檔案上方註解）。
     authRequired: guardFor(profile).requireAuth === true,
     // ADR-0356：出貨版號。讓任何人（與 App 的「一鍵更新節點」）看得出這座跑的是哪一版，
@@ -294,7 +309,8 @@ export default {
         const infoRoute = routeForPath(url.pathname, knownLanes(env.APP_LANES));
         const profile = infoRoute?.profile ?? "strict";
         const known = infoRoute?.profile === "app" && infoRoute.known;
-        return new Response(JSON.stringify(relayInfoFrom(env, profile, known)), {
+        const laneId = infoRoute?.profile === "app" ? infoRoute.laneId : undefined;
+        return new Response(JSON.stringify(relayInfoFrom(env, profile, known, laneId)), {
           status: 200,
           headers: NIP11_HEADERS,
         });
@@ -352,6 +368,14 @@ const PROFILE_KEY = "cinder:lane-profile";
  * 車道 id；而配額必須與這顆 DO 先前用的那個一致，否則同一份儲存會被兩種配額讀寫過。
  */
 const KNOWN_LANE_KEY = "cinder:lane-known";
+/**
+ * DO storage 裡記住本實例服務的**名單上車道 id**（ADR-0371）。
+ *
+ * 為什麼要存：檔案政策依車道 id 決定（`FILE_LANES`），而休眠喚醒後可能沒有 fetch、算不出路徑。
+ * 只存 id、不存「收不收檔案」：後者由 env 決定，改 `FILE_LANES` 重新部署就要立刻生效，
+ * 存下來反而會把舊決定永久釘在 DO 裡。共用分片服務多條車道，不存（它們一律不收檔案）。
+ */
+const LANE_ID_KEY = "cinder:lane-id";
 
 export class RelayRoom {
   private readonly ctx: DurableObjectState;
@@ -368,6 +392,8 @@ export class RelayRoom {
   private profilePinned = false;
   /** 本 DO 服務的是名單上的已知租戶嗎（ADR-0366 §裁示）；預設否＝公用配額。 */
   private knownLane = false;
+  /** 本 DO 服務的名單上車道 id（ADR-0371）；嚴格平面與共用分片為 undefined。 */
+  private laneId: string | undefined;
 
   constructor(ctx: DurableObjectState, env: Env) {
     this.ctx = ctx;
@@ -381,10 +407,16 @@ export class RelayRoom {
     // 先以嚴格政策組起來：休眠喚醒後可能**沒有 fetch**（`webSocketMessage` 直接進來），
     // 那時還沒讀到 storage，預設必須是**收得最緊**的那一邊。
     this.core = this.buildCore("strict");
+    // FILE_LANES 裡不在 APP_LANES 上的 id 會被忽略（ADR-0371）——設錯要看得見，不是默默不生效。
+    const ignored = fileLanes(env).ignored;
+    if (ignored.length > 0) {
+      console.warn(`FILE_LANES 忽略不在 APP_LANES 上的車道：${ignored.join(", ")}（ADR-0371）`);
+    }
     ctx.blockConcurrencyWhile(async () => {
       // 還原本實例綁定的政策（ADR-0366）。DO 名與政策是一對一的，所以這裡讀到什麼就是什麼。
       const stored = await ctx.storage.get<RelayProfile>(PROFILE_KEY);
       this.knownLane = (await ctx.storage.get<boolean>(KNOWN_LANE_KEY)) === true;
+      this.laneId = await ctx.storage.get<string>(LANE_ID_KEY);
       if (stored !== undefined) {
         this.profile = stored;
         this.profilePinned = true;
@@ -404,16 +436,21 @@ export class RelayRoom {
   private buildCore(profile: RelayProfile): RelayCore {
     // store 與 core 必須用**同一個** profile 組起來——拆開就會出現
     // 「core 是車道、store 還套著嚴格配額」這種只在第 6 份牌組才看得出來的錯。
+    // 檔案政策（ADR-0371）：與 NIP-11 同一個函式。只有名單上的車道 DO 帶得出 laneId。
+    const files = filePolicyFor(
+      this.env,
+      profile === "app" && this.knownLane ? this.laneId : undefined,
+    );
     this.store = new SqlMessageStore(
       this.exec,
-      storeOptions(this.env.MAX_TTL_DAYS, profile, this.knownLane),
+      storeOptions(this.env.MAX_TTL_DAYS, profile, this.knownLane, files.accept ? files.maxFileMb : undefined),
     );
     const pow = powForLane(profile, this.env.APP_LANE_POW);
     return new RelayCore({
       store: this.store,
       ...guardFor(profile),
       ...(pow > 0 ? { minPowDifficulty: pow } : {}),
-      ...(acceptFileEvents(this.env.MAX_FILE_MB) ? { acceptFileEvents: true } : {}),
+      ...(files.accept ? { acceptFileEvents: true } : {}),
     });
   }
 
@@ -431,11 +468,32 @@ export class RelayRoom {
     // 已知租戶有自己的 DO（`app:<id>`），所以這個旗標對一顆 DO 而言是恆定的；
     // 第一次請求時釘住，與政策同一個時機。
     const wantedKnown = route?.profile === "app" && route.known;
-    if (wanted !== this.profile || !this.profilePinned || wantedKnown !== this.knownLane) {
+    // 名單上車道的 id（ADR-0371）。DO 名就是 `app:<id>`，所以它對一顆 DO 而言也是恆定的。
+    const wantedLaneId = route?.profile === "app" && route.known ? route.laneId : undefined;
+    if (
+      this.profilePinned &&
+      wanted === this.profile &&
+      wantedKnown === this.knownLane &&
+      this.laneId === undefined &&
+      wantedLaneId !== undefined
+    ) {
+      // 升級前就釘住的 DO：storage 裡還沒有車道 id。補記即可，不是政策衝突。
+      this.laneId = wantedLaneId;
+      await this.ctx.storage.put(LANE_ID_KEY, wantedLaneId);
+      this.core = this.buildCore(this.profile);
+      this.hydrated = false; // 新的 core 要重新從 attachment 還原既有連線
+    }
+    if (
+      wanted !== this.profile ||
+      !this.profilePinned ||
+      wantedKnown !== this.knownLane ||
+      wantedLaneId !== this.laneId
+    ) {
       // 🔴 一顆 DO 只服務一種政策。釘住之後還收到不同政策的請求，代表路由壞了
       // （或有人在試）——**拒絕，不要切換**。切換等於讓同一份儲存被兩套規則讀寫過。
       if (this.profilePinned) return new Response("lane profile mismatch", { status: 409 });
       this.knownLane = wantedKnown;
+      this.laneId = wantedLaneId;
       if (wanted !== this.profile) {
         this.profile = wanted;
       }
@@ -443,6 +501,7 @@ export class RelayRoom {
       this.core = this.buildCore(wanted);
       await this.ctx.storage.put(PROFILE_KEY, wanted);
       await this.ctx.storage.put(KNOWN_LANE_KEY, wantedKnown);
+      if (wantedLaneId !== undefined) await this.ctx.storage.put(LANE_ID_KEY, wantedLaneId);
       this.profilePinned = true;
     }
     const pair = new WebSocketPair();
