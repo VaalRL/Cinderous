@@ -5,3 +5,15 @@ packages:
   - "apps/mobile"
   - "apps/website"
   - "relay"
+
+# ADR-0374：整棵樹只留一份 @noble／@scure（2.4.0，常數時間保證）。
+# nostr-tools 精確釘住 curves／hashes 2.0.1、ciphers 2.1.1、base 2.0.0，這裡把它壓到與 core 同一份。
+# 六個一起導：只導 @scure/base 會讓 @scure/bip39 2.0.1（import 已移除的 utils）在載入時就拋
+# （Cinderous SDK ADR 0034 Decision 2）。守門測試：packages/core/src/golden/dependency-pins.test.ts
+overrides:
+  '@noble/curves': 2.4.0
+  '@noble/hashes': 2.4.0
+  '@noble/ciphers': 2.4.0
+  '@scure/base': 2.4.0
+  '@scure/bip32': 2.4.0
+  '@scure/bip39': 2.4.0

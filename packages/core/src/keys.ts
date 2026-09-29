@@ -1,5 +1,5 @@
-import { schnorr } from "@noble/curves/secp256k1";
-import { bytesToHex, hexToBytes } from "@noble/hashes/utils";
+import { schnorr } from "@noble/curves/secp256k1.js";
+import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
 import { bech32 } from "@scure/base";
 
 /** 32-byte secp256k1 私鑰。 */
@@ -11,7 +11,7 @@ const BECH32_LIMIT = 1000;
 
 /** 產生一把符合 secp256k1 的隨機私鑰（32 bytes）。 */
 export function generateSecretKey(): SecretKey {
-  return schnorr.utils.randomPrivateKey();
+  return schnorr.utils.randomSecretKey();
 }
 
 /** 由私鑰導出 Nostr 公鑰（BIP-340 x-only，hex）。 */

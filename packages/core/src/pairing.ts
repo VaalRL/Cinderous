@@ -1,5 +1,5 @@
 import { gcm } from "@noble/ciphers/aes.js";
-import { randomBytes } from "@noble/hashes/utils";
+import { randomBytes } from "@noble/hashes/utils.js";
 import { base64 } from "@scure/base";
 
 /**
@@ -68,7 +68,7 @@ export function decryptBundle(key: Uint8Array, blob: Uint8Array): Uint8Array {
 // SAS 綁定（金鑰＋本次連線的雙方 nonce）：剪貼簿竊取者即使拿到載荷，其連線的
 // SAS 與新機顯示的不同（或新機根本連不上一次性房間）→ 使用者拒絕即斷。
 
-import { sha256 } from "@noble/hashes/sha256";
+import { sha256 } from "@noble/hashes/sha2.js";
 
 /** 協定訊框類型。 */
 const FRAME = { HELLO: 1, CHALLENGE: 2, BUNDLE: 3, DONE: 4, REJECT: 5 } as const;
@@ -215,7 +215,7 @@ export async function runPairingTarget(
 
 // ── 配對會合（D4a）：房間金鑰與信令密封 ───────────────────────────────────────
 
-import { utf8ToBytes } from "@noble/hashes/utils";
+import { utf8ToBytes } from "@noble/hashes/utils.js";
 import { getPublicKey, type PubkeyHex, type SecretKey } from "./keys.js";
 
 /** 配對信令 kind（ephemeral 21000–21999；21000＝檔案、21002＝通話、21003＝配對會合）。 */
