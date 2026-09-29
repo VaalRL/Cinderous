@@ -111,7 +111,8 @@ describe("已知租戶名單（ADR-0366 §裁示）", () => {
   // 對該遊戲而言就是資料消失、保存期從 30 天掉到 2 小時。所以「四款自家遊戲都在名單上」要釘住，
   // 要拿掉某一款必須先改這支測試——那一刻就會想起這段註解。
   // 2026-09-28 加入 dochost（DocHost 電子書閱讀器：劃線、筆記、書籤、閱讀進度的多裝置同步）
-  const GAME_LANES = ["lwd", "elementalist", "nagd", "soleague", "dochost"];
+  // 2026-09-29 加入 cindersync、cinder-coffice（兩個 Obsidian 外掛，車道 id＝manifest id）
+  const GAME_LANES = ["lwd", "elementalist", "nagd", "soleague", "dochost", "cindersync", "cinder-coffice"];
 
   it("自家應用都在名單上（頂層與統一模式）", () => {
     for (const section of ["vars", "env.unified.vars"]) {
