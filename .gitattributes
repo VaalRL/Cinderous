@@ -1,2 +1,5 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# NIP-44 官方測試向量：測試會比對檔案的 SHA-256，換行不可被轉換（ADR-0374）
+packages/core/src/golden/nip44.vectors.json -text
