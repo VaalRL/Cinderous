@@ -693,3 +693,180 @@ describe("審查修正（ADR-0371）", () => {
     }
   });
 });
+
+describe("🔴 DO SQLite 每次查詢最多 100 個綁定參數（ADR-0372）", () => {
+  /**
+   * 模擬 Durable Object SQLite 的「每次查詢最多 100 個綁定參數」上限。
+   * node:sqlite 的上限是 32766，不包這一層的話本機測試永遠看不出來。
+   */
+  const DO_MAX_BINDINGS = 100;
+  function limitedExec(): { exec: SqlExec; maxSeen: () => number } {
+    const inner = nodeSqlExec();
+    let max = 0;
+    return {
+      maxSeen: () => max,
+      exec: (query, ...bindings) => {
+        max = Math.max(max, bindings.length);
+        if (bindings.length > DO_MAX_BINDINGS) {
+          throw new Error(`too many SQL variables: ${bindings.length} > ${DO_MAX_BINDINGS}`);
+        }
+        return inner(query, ...bindings);
+      },
+    };
+  }
+
+  const key = (prefix: string, i: number): string => `${prefix}${String(i).padStart(4, "0")}`;
+  /** 作者 a0000…、收件人 r0000…、id e0000…，每顆帶一個 `e` 與一個 `t` 標籤。 */
+  const post = (i: number, kind = 1059): NostrEvent =>
+    ({
+      id: key("e", i),
+      pubkey: key("a", i),
+      created_at: 1000 + i,
+      kind,
+      tags: [["p", key("r", i)], ["e", key("ref", i)], ["t", key("topic", i)]],
+      content: "",
+      sig: "",
+    }) as NostrEvent;
+
+  /** 同一串寫入分別灌進受限的 SQL 版與記憶體版。 */
+  function seeded(n: number): { sql: SqlMessageStore; mem: MessageStore; maxSeen: () => number } {
+    const { exec, maxSeen } = limitedExec();
+    const sql = new SqlMessageStore(exec);
+    const mem = new MessageStore();
+    for (let i = 0; i < n; i++) {
+      sql.put(post(i), 2000);
+      mem.put(post(i), 2000);
+    }
+    return { sql, mem, maxSeen };
+  }
+
+  const range = (n: number, prefix: string): string[] => Array.from({ length: n }, (_, i) => key(prefix, i));
+  const ids = (events: NostrEvent[]): string[] => events.map((e) => e.id);
+  /**
+   * 與記憶體版同一組結果，且 SQL 版依 created_at 由新到舊（修正前的 `ORDER BY` 語意）。
+   * 記憶體版在沒截斷時保留插入順序，所以集合比對、順序另外斷言。
+   */
+  const expectSameAsMemory = (got: string[], mem: MessageStore, filter: RelayFilter): void => {
+    expect([...got].sort()).toEqual(ids(mem.query(filter, 2000)).sort());
+    expect(got).toEqual([...got].sort().reverse()); // id 與 created_at 同序（見 post()）
+  };
+
+  for (const n of [101, 150, 1024]) {
+    it(`authors ${n} 把：查得到、與記憶體版一致`, () => {
+      const { sql, mem } = seeded(Math.min(n, 300));
+      const filter = f({ authors: range(n, "a"), limit: 1000 });
+      const got = ids(sql.query(filter, 2000));
+      expect(got.length).toBe(Math.min(n, 300));
+      expectSameAsMemory(got, mem, filter);
+    });
+  }
+
+  it("ids 150 個：查得到、與記憶體版一致", () => {
+    const { sql, mem } = seeded(200);
+    const filter = f({ ids: range(150, "e") });
+    const got = ids(sql.query(filter, 2000));
+    expect(got.length).toBe(150);
+    expectSameAsMemory(got, mem, filter);
+  });
+
+  it("#p 150 個：查得到、與記憶體版一致", () => {
+    const { sql, mem } = seeded(200);
+    const filter = f({ "#p": range(150, "r") });
+    const got = ids(sql.query(filter, 2000));
+    expect(got.length).toBe(150);
+    expectSameAsMemory(got, mem, filter);
+  });
+
+  it("kinds 150 個：查得到、與記憶體版一致", () => {
+    const { sql, mem } = seeded(20);
+    const filter = f({ kinds: Array.from({ length: 150 }, (_, i) => 1000 + i) });
+    const got = ids(sql.query(filter, 2000));
+    expect(got.length).toBe(20);
+    expectSameAsMemory(got, mem, filter);
+  });
+
+  it("標籤值（#e）150 個：查得到、與記憶體版一致", () => {
+    const { sql, mem } = seeded(200);
+    const filter = f({ "#e": range(150, "ref") });
+    const got = ids(sql.query(filter, 2000));
+    expect(got.length).toBe(150);
+    expectSameAsMemory(got, mem, filter);
+  });
+
+  it("全部欄位一起放大（authors／ids 1024、#p／#e／#t 各 150、kinds 150）＋ limit：語意不變", () => {
+    const { sql, mem, maxSeen } = seeded(300);
+    const filter = f({
+      authors: range(1024, "a"),
+      ids: range(1024, "e"),
+      kinds: [1059, ...Array.from({ length: 149 }, (_, i) => 2000 + i)],
+      "#p": range(150, "r"),
+      "#e": range(150, "ref"),
+      "#t": range(150, "topic"),
+      since: 1010,
+      until: 1200,
+      limit: 25,
+    });
+    const got = ids(sql.query(filter, 2000));
+    // 150 個候選（i < 150）∩ since/until（10..150）→ 取最新 25 顆。
+    expect(got).toEqual(Array.from({ length: 25 }, (_, i) => key("e", 149 - i)));
+    expect(got).toEqual(ids(mem.query(filter, 2000)));
+    expect(maxSeen()).toBeLessThanOrEqual(DO_MAX_BINDINGS);
+  });
+
+  it("位元組預算與 limit 在大 filter 下語意不變（ADR-0371 §決策 6）", () => {
+    const { sql, mem } = seeded(300);
+    const one = JSON.stringify(post(0)).length;
+    const filter = f({ authors: range(300, "a"), limit: 200 });
+    const got = ids(sql.query(filter, 2000, one * 7 + 3));
+    expect(got).toEqual(Array.from({ length: 7 }, (_, i) => key("e", 299 - i)));
+    expect(got).toEqual(ids(mem.query(filter, 2000, one * 7 + 3)));
+  });
+
+  it("可尋址表同樣放得下大 filter（authors 1024 ＋ #d 200）", () => {
+    const { exec } = limitedExec();
+    const s = new SqlMessageStore(exec);
+    const snap = (i: number): NostrEvent =>
+      ({
+        id: key("s", i),
+        pubkey: key("a", i),
+        created_at: 1000 + i,
+        kind: 30078,
+        tags: [["d", key("d", i)]],
+        content: "x",
+        sig: "",
+      }) as NostrEvent;
+    for (let i = 0; i < 200; i++) s.putAddressable(snap(i), 1000);
+    const got = ids(s.query(f({ kinds: [30078], authors: range(1024, "a"), "#d": range(200, "d"), limit: 500 }), 1000));
+    expect(got.length).toBe(200);
+    expect(got[0]).toBe(key("s", 199));
+  });
+
+  it("寫入與刪除路徑（多 p 標籤的 put、vanish、prune、天花板淘汰）都不超過上限", () => {
+    const { exec, maxSeen } = limitedExec();
+    const s = new SqlMessageStore(exec, { maxPerRecipient: 2, offlineMaxTotalBytes: 330_000, ceilingEvicts: true });
+    const wide = {
+      id: "wide",
+      pubkey: "a",
+      created_at: 1000,
+      kind: 1059,
+      tags: range(150, "r").map((r) => ["p", r]),
+      content: "",
+      sig: "",
+    } as NostrEvent;
+    expect(s.put(wide, 1000)).toBe(true);
+    for (let i = 0; i < 20; i++) s.put(post(i), 1000);
+    s.prune(1000);
+    s.vanish("a", 1000);
+    expect(maxSeen()).toBeLessThanOrEqual(DO_MAX_BINDINGS);
+  });
+
+  it("多個不同標籤鍵（40 個）也放得下", () => {
+    const { exec } = limitedExec();
+    const s = new SqlMessageStore(exec);
+    const tags = Array.from({ length: 40 }, (_, i) => [`x${i}`, "v"]);
+    s.put({ id: "many", pubkey: "a", created_at: 1, kind: 1078, tags, content: "", sig: "" } as NostrEvent, 1);
+    const filter: Record<string, unknown> = { authors: range(1024, "a").concat("a") };
+    for (let i = 0; i < 40; i++) filter[`#x${i}`] = ["v", ...range(100, "z")];
+    expect(ids(s.query(filter as RelayFilter, 1))).toEqual(["many"]);
+  });
+});

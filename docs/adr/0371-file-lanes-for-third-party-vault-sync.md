@@ -199,5 +199,7 @@ ADR-0244 日後若採用，主平面的公共檔案後備可以沿用本 ADR 做
      超過 100 會讓 `sql.exec()` 拋例外。本地測試用 node:sqlite（上限 32766）看不出來。
      另立修正：filter 陣列合計上限對齊、或分批查詢；上線前以 `wrangler dev` 對 DO 建構子的遷移路徑
      （部分索引、`DROP INDEX`、`rowid`）做一次真實冒煙測試。
+     → **已由 ADR-0372 處理**（改用 `json_each(?)`，整串值只佔一個綁定參數；實測另發現 WebSocket
+     attachment 16KB 上限，列於 ADR-0372 後續）。
   5. **監看**：兩顆檔案車道 DO 的儲存量、帳號每日列寫入量；逼近免費額度時先收緊 `MAX_FILE_MB`
      （配額跟著縮）或把 `FILE_LANE_OFFLINE_MAX_BYTES` 調小。
