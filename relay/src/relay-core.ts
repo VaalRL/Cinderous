@@ -310,6 +310,21 @@ export class RelayCore {
     };
   }
 
+  /**
+   * 移除某連線的一條訂閱（不送任何訊息；回傳是否真的有這條）。
+   *
+   * 客戶端 `CLOSE` 走這裡；宿主也用它關掉**無法持久化**的訂閱（ADR-0373）——
+   * 留著它的話，它在記憶體裡看起來能用，DO 休眠一次就無聲消失。
+   */
+  dropSubscription(connId: string, subId: string): boolean {
+    const conn = this.subs.get(connId);
+    const entry = conn?.get(subId);
+    if (!entry) return false;
+    this.unindex(entry);
+    conn!.delete(subId);
+    return true;
+  }
+
   /** 從快照還原連線狀態（重建訂閱索引與認證，不觸發任何送出）；休眠喚醒時呼叫（ADR-0059）。 */
   rehydrate(snapshot: ConnSnapshot): void {
     if (!this.subs.has(snapshot.connId)) this.subs.set(snapshot.connId, new Map());
@@ -393,15 +408,9 @@ export class RelayCore {
           ];
         }
         return this.handleReq(connId, msg.subId, msg.filters);
-      case "CLOSE": {
-        const conn = this.subs.get(connId);
-        const entry = conn?.get(msg.subId);
-        if (entry) {
-          this.unindex(entry);
-          conn?.delete(msg.subId);
-        }
+      case "CLOSE":
+        this.dropSubscription(connId, msg.subId);
         return [{ to: connId, message: ["CLOSED", msg.subId, ""] }];
-      }
       case "INVALID":
         return [{ to: connId, message: ["NOTICE", `invalid: ${msg.reason}`] }];
     }
