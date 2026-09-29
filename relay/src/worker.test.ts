@@ -35,7 +35,16 @@ class FakeWs {
   sent: string[] = [];
   closed = false;
   tags: string[] = [];
+  /** serializeAttachment 被呼叫的次數（ADR-0373：沒變就不該重寫）。 */
+  serializeCount = 0;
   serializeAttachment(o: unknown): void {
+    // 與 workerd 相同的上限與行為（ADR-0373）：超過 16,384 bytes 直接拋，attachment 維持原值。
+    // 真實平台量的是 structured clone；實測與 JSON 長度只差幾十 bytes，這裡以 JSON 近似。
+    const size = JSON.stringify(o).length;
+    if (size > 16_384) {
+      throw new Error(`A WebSocket 'attachment' cannot be larger than 16384 bytes.'attachment' was ${size} bytes.`);
+    }
+    this.serializeCount++;
     this.attachment = o;
   }
   deserializeAttachment(): unknown {
@@ -87,7 +96,24 @@ class FakeState {
   alarm: number | null = null;
   private readonly db = new DatabaseSync(":memory:");
 
+  /** 對 `ws_subs` 的寫入次數（INSERT/UPDATE/DELETE；ADR-0373 的寫入成本斷言用）。 */
+  wsSubsWrites = 0;
+  /** 設了就讓 `ws_subs` 的寫入拋錯（模擬 storage 失敗）。 */
+  failWsSubsWrites = false;
+
+  /** 測試直接看溢位表。 */
+  wsSubsRows(): { conn_id: string; sub_id: string }[] {
+    return this.db.prepare(`SELECT conn_id, sub_id FROM ws_subs ORDER BY conn_id, sub_id`).all() as {
+      conn_id: string;
+      sub_id: string;
+    }[];
+  }
+
   private raw(query: string, ...bindings: (string | number | null)[]): Record<string, unknown>[] {
+    if (/ws_subs/.test(query) && /^\s*(insert|update|delete)/i.test(query)) {
+      if (this.failWsSubsWrites) throw new Error("storage write failed (test)");
+      this.wsSubsWrites++;
+    }
     const stmt = this.db.prepare(query);
     if (/^\s*select/i.test(query)) return stmt.all(...bindings) as Record<string, unknown>[];
     stmt.run(...bindings);
@@ -354,6 +380,250 @@ describe("RelayRoom — 休眠→喚醒還原（ADR-0059 + ADR-0235 H2）", () =
     const out = send(room2, reader, ["REQ", "inbox", { kinds: [1059], "#p": [recipientPk] }]) as [string, string, NostrEvent][];
     const evented = out.find((m) => m[0] === "EVENT");
     expect(evented?.[2]?.id).toBe(dm.id);
+  });
+});
+
+/** n 把假的 authors（格式合法的 64 hex；只拿來撐大 filter，不需要對應私鑰）。 */
+function fakeAuthors(n: number): string[] {
+  return Array.from({ length: n }, (_, i) => i.toString(16).padStart(64, "0"));
+}
+
+/** 認證好的觀察者：訂閱 `subId`，authors＝n 把假 key ＋真正會發布的那一把（放最後）。 */
+async function bigWatcher(room: RelayRoom, state: FakeState, n: number, publisherPk: string, subId = "hb") {
+  const ws = await open(room, state);
+  authenticate(room, ws, generateSecretKey());
+  ws.drain();
+  const out = send(room, ws, ["REQ", subId, { kinds: [20000], authors: [...fakeAuthors(n - 1), publisherPk] }]);
+  return { ws, out: out as [string, string, string?][] };
+}
+
+/** 發布者連上、認證、發一顆心跳；回傳那顆事件。 */
+async function publishBeat(room: RelayRoom, state: FakeState, sk: SecretKey): Promise<NostrEvent> {
+  const ws = await open(room, state);
+  authenticate(room, ws, sk);
+  const beat = heartbeat(sk);
+  send(room, ws, ["EVENT", beat]);
+  return beat;
+}
+
+describe("RelayRoom — WebSocket attachment 16KB 上限（ADR-0373）", () => {
+  it("替身與平台一致：超過 16,384 bytes 的 attachment 會拋（否則以下測試全是空轉）", () => {
+    const ws = new FakeWs();
+    expect(() => ws.serializeAttachment({ big: "x".repeat(17_000) })).toThrow(/16384/);
+  });
+
+  it("🔴 260 把 authors：不拋、回 EOSE（修正前 serializeAttachment 未捕捉例外 ⇒ 客戶端什麼都收不到）", async () => {
+    const state = new FakeState();
+    const room = newRoom(state);
+    const ws = await open(room, state);
+    authenticate(room, ws, generateSecretKey());
+    ws.drain();
+    const msg = JSON.stringify(["REQ", "hb", { kinds: [20000], authors: fakeAuthors(260) }]);
+    expect(() => room.webSocketMessage(ws as unknown as WebSocket, msg)).not.toThrow();
+    expect(ws.drain()).toEqual([["EOSE", "hb"]]);
+    expect(JSON.stringify(ws.attachment).length).toBeLessThanOrEqual(16_384);
+  });
+
+  it("🔴 1024 把 authors：休眠→喚醒後仍收得到新事件（訂閱完整還原）", async () => {
+    const state = new FakeState();
+    const room1 = newRoom(state);
+    const pubSk = generateSecretKey();
+    const { ws: watcher, out } = await bigWatcher(room1, state, 1024, getPublicKey(pubSk));
+    expect(out).toEqual([["EOSE", "hb"]]);
+
+    // 休眠：記憶體裡的 RelayRoom 消失，只剩 storage 與 socket attachment。
+    const room2 = newRoom(state);
+    const beat = await publishBeat(room2, state, pubSk);
+    const got = watcher.drain() as [string, string, NostrEvent][];
+    expect(got.find((m) => m[0] === "EVENT" && m[1] === "hb")?.[2]?.id).toBe(beat.id);
+  });
+
+  it("多條訂閱混合：小的留在 attachment、大的溢位，喚醒後兩條都還在", async () => {
+    const state = new FakeState();
+    const room1 = newRoom(state);
+    const pubSk = generateSecretKey();
+    const pubPk = getPublicKey(pubSk);
+    const { ws: watcher } = await bigWatcher(room1, state, 500, pubPk, "big");
+    send(room1, watcher, ["REQ", "small", { kinds: [20000], authors: [pubPk] }]);
+    expect(state.wsSubsRows().map((r) => r.sub_id)).toEqual(["big"]);
+    const att = watcher.attachment as { subs: { subId: string }[]; spilled?: string[] };
+    expect(att.subs.map((s) => s.subId)).toEqual(["small"]);
+    expect(att.spilled).toEqual(["big"]);
+
+    const room2 = newRoom(state);
+    const beat = await publishBeat(room2, state, pubSk);
+    const subs = (watcher.drain() as [string, string, NostrEvent][])
+      .filter((m) => m[0] === "EVENT" && m[2].id === beat.id)
+      .map((m) => m[1])
+      .sort();
+    expect(subs).toEqual(["big", "small"]);
+  });
+
+  it("小訂閱不碰溢位表（ADR-0059 的「喚醒零讀寫」在一般情況下不變）", async () => {
+    const state = new FakeState();
+    const room = newRoom(state);
+    const ws = await open(room, state);
+    authenticate(room, ws, generateSecretKey());
+    send(room, ws, ["REQ", "s", { kinds: [20000], authors: fakeAuthors(50) }]);
+    expect(state.wsSubsWrites).toBe(0);
+    expect(state.wsSubsRows()).toEqual([]);
+  });
+
+  it("💰 不改訂閱的訊息零寫入：心跳 EVENT 不重寫溢位列，也不重做 serializeAttachment——喚醒後亦同", async () => {
+    const state = new FakeState();
+    const room1 = newRoom(state);
+    const sk = generateSecretKey();
+    const ws = await open(room1, state);
+    authenticate(room1, ws, sk);
+    send(room1, ws, ["REQ", "hb", { kinds: [20000], authors: fakeAuthors(1024) }]);
+    const writes = state.wsSubsWrites;
+    const serial = ws.serializeCount;
+    expect(writes).toBe(1);
+
+    send(room1, ws, ["EVENT", heartbeat(sk, nowSec() - 1)]);
+    // 休眠→喚醒後的第一則訊息也不該把溢位列重寫一遍（那會變成每次喚醒一筆寫入）。
+    const room2 = newRoom(state);
+    send(room2, ws, ["EVENT", heartbeat(sk)]);
+    expect(state.wsSubsWrites).toBe(writes);
+    expect(ws.serializeCount).toBe(serial);
+  });
+
+  it("CLOSE 或把大訂閱換成小的 ⇒ 溢位列刪掉", async () => {
+    const state = new FakeState();
+    const room = newRoom(state);
+    const ws = await open(room, state);
+    authenticate(room, ws, generateSecretKey());
+    send(room, ws, ["REQ", "a", { authors: fakeAuthors(400) }]);
+    send(room, ws, ["REQ", "b", { authors: fakeAuthors(400) }]);
+    expect(state.wsSubsRows().map((r) => r.sub_id)).toEqual(["a", "b"]);
+    send(room, ws, ["CLOSE", "a"]);
+    send(room, ws, ["REQ", "b", { authors: fakeAuthors(3) }]);
+    expect(state.wsSubsRows()).toEqual([]);
+    expect((ws.attachment as { spilled?: string[] }).spilled).toBeUndefined();
+  });
+
+  it("連線關閉（webSocketClose／webSocketError）⇒ 溢位列清掉", async () => {
+    const state = new FakeState();
+    const room = newRoom(state);
+    const a = await open(room, state);
+    const b = await open(room, state);
+    authenticate(room, a, generateSecretKey());
+    authenticate(room, b, generateSecretKey());
+    send(room, a, ["REQ", "hb", { authors: fakeAuthors(300) }]);
+    send(room, b, ["REQ", "hb", { authors: fakeAuthors(300) }]);
+    expect(state.wsSubsRows()).toHaveLength(2);
+    room.webSocketClose(a as unknown as WebSocket);
+    // 休眠後才斷線：close handler 要先還原才知道有哪些列要刪。
+    const room2 = newRoom(state);
+    room2.webSocketError(b as unknown as WebSocket);
+    expect(state.wsSubsRows()).toEqual([]);
+  });
+
+  it("🧹 孤兒列（部署重啟時連線消失、webSocketClose 沒跑）在下一次喚醒時清掉", async () => {
+    const state = new FakeState();
+    const room1 = newRoom(state);
+    const ws = await open(room1, state);
+    authenticate(room1, ws, generateSecretKey());
+    send(room1, ws, ["REQ", "hb", { authors: fakeAuthors(300) }]);
+    expect(state.wsSubsRows()).toHaveLength(1);
+
+    state.sockets = []; // DO 重建：所有連線都斷了，沒有任何 handler 被呼叫
+    const room2 = newRoom(state);
+    await open(room2, state); // 任何新連線都會觸發還原
+    expect(state.wsSubsRows()).toEqual([]);
+  });
+
+  it("🧹 alarm 也會清孤兒（之後再也沒有連線進來的 DO）", async () => {
+    const state = new FakeState();
+    const room1 = newRoom(state);
+    const ws = await open(room1, state);
+    authenticate(room1, ws, generateSecretKey());
+    send(room1, ws, ["REQ", "hb", { authors: fakeAuthors(300) }]);
+    state.sockets = [];
+    await newRoom(state).alarm();
+    expect(state.wsSubsRows()).toEqual([]);
+  });
+
+  it("🔴 喚醒時溢位列不見了 ⇒ 回 CLOSED 請客戶端重訂（不假裝還在）", async () => {
+    const state = new FakeState();
+    const room1 = newRoom(state);
+    const pubSk = generateSecretKey();
+    const { ws: watcher } = await bigWatcher(room1, state, 300, getPublicKey(pubSk));
+    state.storage.sql.exec(`DELETE FROM ws_subs`).toArray();
+
+    const room2 = newRoom(state);
+    await publishBeat(room2, state, pubSk);
+    const got = watcher.drain() as [string, string, string][];
+    expect(got.some((m) => m[0] === "EVENT")).toBe(false);
+    const closed = got.find((m) => m[0] === "CLOSED" && m[1] === "hb");
+    expect(closed?.[2]).toMatch(/^error: .*resubscribe/);
+    // attachment 也更正了：不再指著不存在的列。
+    expect((watcher.attachment as { spilled?: string[] }).spilled).toBeUndefined();
+  });
+
+  it("🔴 超過每連線合計上限 ⇒ 那一條回 CLOSED（invalid:）且不回 EOSE；先前的訂閱不受影響", async () => {
+    const state = new FakeState();
+    const room = newRoom(state);
+    const pubSk = generateSecretKey();
+    const pubPk = getPublicKey(pubSk);
+    const ws = await open(room, state);
+    authenticate(room, ws, generateSecretKey());
+    ws.drain();
+    // 每條約 69KB；512KiB 放得下 7 條，第 8 條超過。
+    for (let i = 0; i < 7; i++) {
+      expect(send(room, ws, ["REQ", `s${i}`, { authors: [...fakeAuthors(1023), pubPk] }])).toEqual([["EOSE", `s${i}`]]);
+    }
+    const out = send(room, ws, ["REQ", "s7", { authors: [...fakeAuthors(1023), pubPk] }]) as [string, string, string][];
+    expect(out).toHaveLength(1);
+    expect(out[0]?.[0]).toBe("CLOSED");
+    expect(out[0]?.[1]).toBe("s7");
+    expect(out[0]?.[2]).toMatch(/^invalid: .*ADR-0373/);
+
+    // 被關掉的那條真的不在了；其他 7 條休眠後照樣收得到。
+    const room2 = newRoom(state);
+    const beat = await publishBeat(room2, state, pubSk);
+    const subs = (ws.drain() as [string, string, NostrEvent][])
+      .filter((m) => m[0] === "EVENT" && m[2].id === beat.id)
+      .map((m) => m[1])
+      .sort();
+    expect(subs).toEqual(["s0", "s1", "s2", "s3", "s4", "s5", "s6"]);
+  });
+
+  it("🔴 storage 寫入失敗 ⇒ 不拋、回 CLOSED（error:），訂閱不會留在記憶體裡假裝能用", async () => {
+    const state = new FakeState();
+    const room = newRoom(state);
+    const pubSk = generateSecretKey();
+    const pubPk = getPublicKey(pubSk);
+    const ws = await open(room, state);
+    authenticate(room, ws, generateSecretKey());
+    ws.drain();
+    state.failWsSubsWrites = true;
+    const msg = JSON.stringify(["REQ", "hb", { authors: [...fakeAuthors(300), pubPk] }]);
+    expect(() => room.webSocketMessage(ws as unknown as WebSocket, msg)).not.toThrow();
+    const out = ws.drain() as [string, string, string][];
+    expect(out).toHaveLength(1);
+    expect(out[0]?.slice(0, 2)).toEqual(["CLOSED", "hb"]);
+    expect(out[0]?.[2]).toMatch(/^error: /);
+
+    state.failWsSubsWrites = false;
+    await publishBeat(room, state, pubSk);
+    expect((ws.drain() as unknown[][]).some((m) => m[0] === "EVENT")).toBe(false);
+  });
+
+  it("舊版 attachment（沒有 spilled 欄）照常還原——升級當下已連著的客戶端不受影響", async () => {
+    const state = new FakeState();
+    const room1 = newRoom(state);
+    const pubSk = generateSecretKey();
+    const ws = await open(room1, state);
+    authenticate(room1, ws, generateSecretKey());
+    // 模擬舊版寫下的 attachment：訂閱全在 subs 裡、沒有 spilled。
+    const att = ws.attachment as { subs: unknown[] };
+    ws.attachment = { ...att, subs: [{ subId: "old", filters: [{ kinds: [20000], authors: [getPublicKey(pubSk)] }] }] };
+
+    const room2 = newRoom(state);
+    const beat = await publishBeat(room2, state, pubSk);
+    const got = ws.drain() as [string, string, NostrEvent][];
+    expect(got.find((m) => m[0] === "EVENT" && m[1] === "old")?.[2]?.id).toBe(beat.id);
   });
 });
 

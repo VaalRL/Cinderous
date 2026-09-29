@@ -12,6 +12,7 @@ import {
 } from "./host-config.js";
 import { buildRelayInfo, NIP11_HEADERS, wantsRelayInfo } from "./nip11.js";
 import { RELAY_WORKER_VERSION } from "./version.js";
+import { ConnPersistence, MAX_CONN_SUB_BYTES, type SaveResult } from "./conn-persistence.js";
 import { RelayCore, type ConnSnapshot, type Outbound } from "./relay-core.js";
 import { routeForPath } from "./shard.js";
 import { type SqlExec, SqlMessageStore } from "./sql-message-store.js";
@@ -354,11 +355,6 @@ export default {
   },
 };
 
-/**
- * 持有 RelayCore；以**休眠式 WebSocket**（ADR-0059）收發：DO 可在訊息間休眠、不計 idle
- * duration。休眠會清空記憶體，故每連線的訂閱/認證狀態存在其 WebSocket 的 attachment，
- * 喚醒時從所有存活連線的 attachment 重建 RelayCore。
- */
 /** DO storage 裡記住本實例綁定的政策（ADR-0366）。 */
 const PROFILE_KEY = "cinder:lane-profile";
 /**
@@ -377,6 +373,11 @@ const KNOWN_LANE_KEY = "cinder:lane-known";
  */
 const LANE_ID_KEY = "cinder:lane-id";
 
+/**
+ * 持有 RelayCore；以**休眠式 WebSocket**（ADR-0059）收發：DO 可在訊息間休眠、不計 idle
+ * duration。休眠會清空記憶體，故每連線的訂閱/認證狀態存在其 WebSocket 的 attachment
+ *（放不下 16KB 的大訂閱溢位到 DO SQLite，ADR-0373），喚醒時據此重建 RelayCore。
+ */
 export class RelayRoom {
   private readonly ctx: DurableObjectState;
   private readonly env: Env;
@@ -384,6 +385,8 @@ export class RelayRoom {
   private readonly exec: SqlExec;
   private core: RelayCore;
   private store: SqlMessageStore;
+  /** 每連線狀態的休眠持久化：attachment ＋溢位表（ADR-0373）。 */
+  private readonly conns: ConnPersistence;
   /** 本次喚醒是否已從 attachment 重建 RelayCore 狀態。 */
   private hydrated = false;
   /** 本 DO 實例綁定的政策；由路由方在首次請求時釘住（ADR-0366）。 */
@@ -404,6 +407,7 @@ export class RelayRoom {
       sql.exec(query, ...bindings).toArray() as Record<string, unknown>[];
     this.exec = exec;
     this.store = new SqlMessageStore(exec, storeOptions(env.MAX_TTL_DAYS));
+    this.conns = new ConnPersistence(exec);
     // 先以嚴格政策組起來：休眠喚醒後可能**沒有 fetch**（`webSocketMessage` 直接進來），
     // 那時還沒讀到 storage，預設必須是**收得最緊**的那一邊。
     this.core = this.buildCore("strict");
@@ -456,6 +460,9 @@ export class RelayRoom {
 
   /** DO 定時鬧鐘（C2）：清除已過期留言並重排下一次。 */
   async alarm(): Promise<void> {
+    // 順手還原＋清孤兒溢位列（ADR-0373）：部署重啟時 `webSocketClose` 不保證會跑，
+    // 之後若再也沒有連線進來，孤兒列只有這裡清得到。
+    this.dispatch(this.ensureHydrated());
     this.store.prune(Math.floor(Date.now() / 1000));
     await this.ctx.storage.setAlarm(Date.now() + PRUNE_INTERVAL_MS);
   }
@@ -510,54 +517,92 @@ export class RelayRoom {
     const connId = crypto.randomUUID();
     // 休眠式接受：以 connId 為 tag 供路由；DO 於訊息間可休眠（ADR-0059）。
     this.ctx.acceptWebSocket(server, [connId]);
-    this.ensureHydrated();
+    const restored = this.ensureHydrated();
     // 本次請求打到的主機（ADR-0235 H2）：AUTH 的 `relay` tag 必須指向它。取自 request 而非
     // 設定檔——同一份 Worker 可能同時服務 workers.dev 與自訂網域，寫死任一個都會誤擋另一個。
     const relayHost = hostOf(request);
     const out = this.core.connect(connId, relayHost); // 產生 NIP-42 AUTH 挑戰
-    this.persist(server, connId); // 存回 attachment（含挑戰），休眠後可還原
-    this.dispatch(out);
+    const unsaved = this.persist(server, connId); // 存回 attachment（含挑戰），休眠後可還原
+    this.dispatch([...restored, ...out, ...unsaved]);
     return new Response(null, { status: 101, webSocket: client });
   }
 
   webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): void {
-    this.ensureHydrated();
+    const restored = this.ensureHydrated();
     const connId = connIdOf(ws);
-    if (!connId) return;
+    if (!connId) return this.dispatch(restored);
     const raw = typeof message === "string" ? message : "";
     const out = this.core.handle(connId, raw);
-    this.persist(ws, connId); // 訂閱/認證可能已變，更新 attachment
-    this.dispatch(out);
+    const unsaved = this.persist(ws, connId); // 訂閱/認證可能已變，更新 attachment（沒變則零寫入）
+    // 存不住的訂閱已被關掉：它的 EVENT/EOSE 不送，只送 CLOSED（說明原因）。
+    const closed = new Set(unsaved.map((o) => o.message[1]));
+    const kept = closed.size === 0 ? out : out.filter((o) => !isSubReply(o, connId, closed));
+    this.dispatch([...restored, ...kept, ...unsaved]);
   }
 
   webSocketClose(ws: WebSocket): void {
-    this.ensureHydrated();
+    const restored = this.ensureHydrated();
     const connId = connIdOf(ws);
-    if (connId) this.core.disconnect(connId);
+    if (connId) this.forget(connId);
     try {
       ws.close();
     } catch {
       /* 已關閉 */
     }
+    this.dispatch(restored);
   }
 
   webSocketError(ws: WebSocket): void {
+    const restored = this.ensureHydrated();
     const connId = connIdOf(ws);
-    if (connId) this.core.disconnect(connId);
+    if (connId) this.forget(connId);
+    this.dispatch(restored);
   }
 
-  /** 休眠喚醒後，從所有存活 WebSocket 的 attachment 重建 RelayCore 狀態（ADR-0059）。 */
-  private ensureHydrated(): void {
-    if (this.hydrated) return;
+  /** 連線結束：記憶體與溢位列一起清（ADR-0373）。 */
+  private forget(connId: string): void {
+    this.core.disconnect(connId);
+    this.conns.remove(connId);
+  }
+
+  /**
+   * 休眠喚醒後，從所有存活 WebSocket 的 attachment（＋溢位表）重建 RelayCore 狀態（ADR-0059／0373）。
+   *
+   * 回傳要送出的 `CLOSED`：attachment 記著、storage 卻找不到的訂閱**不能假裝還在**——
+   * 告訴客戶端，它才會重訂。
+   */
+  private ensureHydrated(): Outbound[] {
+    if (this.hydrated) return [];
     this.hydrated = true;
-    for (const ws of this.ctx.getWebSockets()) {
-      const snap = ws.deserializeAttachment() as ConnSnapshot | null;
-      if (snap) this.core.rehydrate(snap);
+    const { snapshots, lost } = this.conns.load(this.ctx.getWebSockets());
+    for (const snap of snapshots) this.core.rehydrate(snap);
+    if (lost.length === 0) return [];
+    console.warn(`喚醒還原：${lost.length} 條溢位訂閱遺失，已通知客戶端重訂（ADR-0373）`);
+    const out: Outbound[] = lost.map(({ connId, subId }) => ({ to: connId, message: ["CLOSED", subId, CLOSED_LOST] }));
+    // 立刻把那些連線的 attachment 更正過來（不再指著不存在的列），不等它下一則訊息。
+    for (const connId of new Set(lost.map((l) => l.connId))) {
+      const [ws] = this.ctx.getWebSockets(connId);
+      if (ws) out.push(...this.persist(ws, connId));
     }
+    return out;
   }
 
-  private persist(ws: WebSocket, connId: string): void {
-    ws.serializeAttachment(this.core.exportConn(connId));
+  /**
+   * 把連線狀態存起來（ADR-0373）。存不住的訂閱**關掉並回 `CLOSED`**——絕不靜默：
+   * 留在記憶體裡的話它看起來能用，DO 休眠一次就無聲消失。
+   */
+  private persist(ws: WebSocket, connId: string): Outbound[] {
+    const first = this.conns.save(ws, this.core.exportConn(connId));
+    if (first.rejected.length === 0) return [];
+    for (const r of first.rejected) this.core.dropSubscription(connId, r.subId);
+    // 再存一次，讓 attachment／溢位表與關掉之後的狀態一致。
+    const second = this.conns.save(ws, this.core.exportConn(connId));
+    for (const r of second.rejected) this.core.dropSubscription(connId, r.subId);
+    const rejected = [...first.rejected, ...second.rejected];
+    console.warn(
+      `關閉無法持久化的訂閱 conn=${connId}：${rejected.map((r) => `${r.subId}(${r.reason})`).join(", ")}（ADR-0373）`,
+    );
+    return rejected.map((r) => ({ to: connId, message: ["CLOSED", r.subId, closedReason(r.reason)] }));
   }
 
   private dispatch(outbound: Outbound[]): void {
@@ -567,7 +612,7 @@ export class RelayRoom {
       if (!close) continue;
       // 超限即關（ADR-0366 §容量）：訊息一旦抵達那次請求就已經付掉了，只回一則
       // NOTICE 擋不住成本。關掉之後要回來就得重新升級，而那一關有 IP 限速。
-      this.core.disconnect(to); // 伺服端主動關閉不保證會觸發 webSocketClose
+      this.forget(to); // 伺服端主動關閉不保證會觸發 webSocketClose
       try {
         ws?.close(1008, "rate-limited");
       } catch {
@@ -575,6 +620,22 @@ export class RelayRoom {
       }
     }
   }
+}
+
+/** 喚醒時找不到溢位列的訂閱（ADR-0373）。客戶端應重送 REQ。 */
+const CLOSED_LOST = "error: subscription was lost when the relay restarted; please resubscribe (ADR-0373)";
+
+/** 無法持久化時回給客戶端的 `CLOSED` 原因（ADR-0373）。前綴依 NIP-01 的機器可讀慣例。 */
+function closedReason(reason: SaveResult["rejected"][number]["reason"]): string {
+  return reason === "too-large"
+    ? `invalid: subscriptions on this connection exceed ${MAX_CONN_SUB_BYTES / 1024} KiB and cannot be kept across relay hibernation (ADR-0373)`
+    : "error: subscription could not be saved on the relay; please resubscribe (ADR-0373)";
+}
+
+/** 這則是不是某連線上、某些訂閱的 EVENT/EOSE 回覆。 */
+function isSubReply(o: Outbound, connId: string, subIds: Set<unknown>): boolean {
+  const kind = o.message[0];
+  return o.to === connId && (kind === "EVENT" || kind === "EOSE") && subIds.has(o.message[1]);
 }
 
 /** 從 WebSocket 的 attachment 取回其 connId。 */
