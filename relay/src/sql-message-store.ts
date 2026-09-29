@@ -26,8 +26,26 @@ import type { RelayFilter } from "./protocol.js";
  */
 export type SqlExec = (query: string, ...bindings: (string | number | null)[]) => Record<string, unknown>[];
 
-/** 把值陣列轉成 `IN (?,?,…)` 佔位字串。 */
-const placeholders = (values: readonly unknown[]): string => values.map(() => "?").join(",");
+/**
+ * 「`column` 是這些值之一」的 SQL 片段——**整個陣列只佔一個綁定參數**（ADR-0372）。
+ *
+ * 🔴 為什麼不是 `IN (?, ?, …)`：Durable Object 的 SQLite 每次查詢**最多 100 個綁定參數**
+ * （Cloudflare 官方 Limits 頁），超過時 `sql.exec()` 直接拋例外。`relay-core.scoped()` 允許
+ * `authors` 到 1024 把，`ids`／`kinds`／標籤值也沒有個別上限 ⇒ 一個 99 把作者的 REQ 就會
+ * 讓查詢失敗、客戶端只收到 NOTICE「內部錯誤」、連 EOSE 都沒有。本機測試用的 node:sqlite
+ * 上限是 32766，所以單元測試永遠看不出來。
+ *
+ * 改成把陣列序列化成**一個** JSON 字串，SQL 端用 `json_each(?)` 展開：值的數量與綁定參數
+ * 脫鉤，查詢語意（IN）、排序、`LIMIT`、位元組預算全部不變，也不需要分批再在應用層合併。
+ * `json_each` 本來就在用（標籤下推，ADR-0366 P1 #5），DO 上已驗證可用。
+ *
+ * 非陣列（惡意／錯誤的 filter）照舊拋例外——與修正前 `values.map` 拋錯的行為一致，
+ * 由 `RelayCore.handle` 的例外圍籬轉成 NOTICE。
+ */
+function inJson(column: string, values: readonly unknown[]): { clause: string; binding: string } {
+  if (!Array.isArray(values)) throw new TypeError("filter 值必須是陣列");
+  return { clause: `${column} IN (SELECT value FROM json_each(?))`, binding: JSON.stringify(values) };
+}
 
 /**
  * 從 filter 取出**非 `#p`** 的標籤條件（ADR-0366 P1 #5）。
@@ -72,19 +90,22 @@ function pushTagClauses(
   bind: (string | number)[],
 ): void {
   for (const { name, values } of tagFiltersOf(filter)) {
+    // 每個標籤鍵固定 2 個綁定參數（名稱＋整串值），與值的數量無關（ADR-0372）。
+    const vals = inJson("json_extract(tg.value, '$[1]')", values);
     where.push(
       `EXISTS (SELECT 1 FROM json_each(${table}.json, '$.tags') AS tg
                WHERE json_extract(tg.value, '$[0]') = ?
-                 AND json_extract(tg.value, '$[1]') IN (${placeholders(values)}))`,
+                 AND ${vals.clause})`,
     );
-    bind.push(name, ...values);
+    bind.push(name, vals.binding);
   }
 }
 
-/** 附加一條 WHERE 子句與其繫結值。 */
-const push2 = (where: string[], bind: (string | number)[], clause: string, values: readonly (string | number)[]): void => {
+/** 附加一條「欄位屬於這串值」的 WHERE 子句——整串值只佔一個綁定參數（ADR-0372）。 */
+const pushIn = (where: string[], bind: (string | number)[], column: string, values: readonly unknown[]): void => {
+  const { clause, binding } = inJson(column, values);
   where.push(clause);
-  bind.push(...values);
+  bind.push(binding);
 };
 
 
@@ -393,10 +414,11 @@ export class SqlMessageStore implements OfflineStore {
       where.push(clause);
       bind.push(...values);
     };
-    if (pValues && pValues.length > 0) push(`recipient IN (${placeholders(pValues)})`, pValues);
-    if (authors && authors.length > 0) push(`pubkey IN (${placeholders(authors)})`, authors);
-    if (ids && ids.length > 0) push(`id IN (${placeholders(ids)})`, ids);
-    if (kinds && kinds.length > 0) push(`kind IN (${placeholders(kinds)})`, kinds);
+    // 綁定參數總數與 filter 陣列的長度無關（ADR-0372）：這裡最多 9 個，加上每個標籤鍵 2 個。
+    if (pValues && pValues.length > 0) pushIn(where, bind, "recipient", pValues);
+    if (authors && authors.length > 0) pushIn(where, bind, "pubkey", authors);
+    if (ids && ids.length > 0) pushIn(where, bind, "id", ids);
+    if (kinds && kinds.length > 0) pushIn(where, bind, "kind", kinds);
     if (filter.since !== undefined) push(`created_at >= ?`, [filter.since]);
     if (filter.until !== undefined) push(`created_at <= ?`, [filter.until]);
     pushTagClauses("offline_msgs", filter, where, bind);
@@ -418,9 +440,9 @@ export class SqlMessageStore implements OfflineStore {
     if (!(pValues && pValues.length > 0)) {
       const aWhere: string[] = [`expiration > ?`];
       const aBind: (string | number)[] = [nowSec];
-      if (authors && authors.length > 0) push2(aWhere, aBind, `pubkey IN (${placeholders(authors)})`, authors);
-      if (ids && ids.length > 0) push2(aWhere, aBind, `id IN (${placeholders(ids)})`, ids);
-      if (kinds && kinds.length > 0) push2(aWhere, aBind, `kind IN (${placeholders(kinds)})`, kinds);
+      if (authors && authors.length > 0) pushIn(aWhere, aBind, "pubkey", authors);
+      if (ids && ids.length > 0) pushIn(aWhere, aBind, "id", ids);
+      if (kinds && kinds.length > 0) pushIn(aWhere, aBind, "kind", kinds);
       pushTagClauses("addressable", filter, aWhere, aBind);
       const remaining = maxBytes === undefined ? undefined : maxBytes - offline.spent;
       rows = rows.concat(
