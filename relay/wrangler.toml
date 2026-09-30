@@ -55,9 +55,30 @@ APP_LANES = "lwd,elementalist,nagd,soleague,dochost,cindersync,cinder-coffice"
 # ＝整站開放（ADR-0244 否決的選項 1）——`wrangler-vars.test.ts` 盯著這件事。
 # 列在這裡的車道必須同時在上面的 APP_LANES（有自己的 DO），不在的會被忽略。
 # MAX_FILE_MB 在車道模式下是**單檔上限**（NIP-11 `cinder_max_file_mb` 對外宣告、由客戶端遵守）；
-# relay 端以每收件人 1440 塊與每顆 DO 1GiB 封頂（數字與成本見 ADR-0371）。
+# relay 端以每收件人 1440 塊與每顆 DO 的離線天花板封頂（ADR-0371；錨點自 ADR-0377 起為 512 MiB，見下一段）。
 MAX_FILE_MB = "30"
 FILE_LANES = "cindersync,cinder-coffice"
+
+# 每顆 DO 的容量天花板（ADR-0377）：`<對象>=<離線 MiB>/<可尋址 MiB>`，對象是類別或單顆 DO 名，單顆優先。
+#   類別：strict＝主訊息平面 global／presence／shard-0..f（滿了拒收）；public＝共用車道分片 app-0..7；
+#         lane＝名單上的車道 app:<id>；file＝FILE_LANES 上的檔案車道（後三者滿了淘汰最快到期者）。
+#
+# 🔴 2026-09-30 使用者決定：錨點是 Cloudflare **免費方案**，DO SQLite 每帳號 5 GB、超過後整帳號同類操作失敗。
+#    所有可能 DO 的天花板加總必須 ≤ 5 GB 的 80%＝4,000,000,000 bytes（host-config `ACCOUNT_STORAGE_BUDGET_BYTES`）。
+#    改動前（每顆 128/128 MiB、檔案車道離線 1 GiB）33 顆 DO 加總 10 GiB，是額度的兩倍。
+#
+# 預算（MiB，離線＋可尋址）：
+#   global 64+64＝128；presence 16+16＝32（只有 ephemeral 心跳）
+#   shard-a／1／f／7（B0 量測 2026-09-30 有活動）4 ×（96+64）＝640；其餘 12 片 12 ×（24+24）＝576
+#   app-0..7（陌生應用，見習保存 2 小時）8 ×（16+16）＝256
+#   lwd／elementalist／nagd／soleague 4 ×（32+32）＝256；dochost 64+512＝576（全狀態可尋址桶，SDK ADR 0036）
+#   cindersync／cinder-coffice 2 ×（512+32）＝1088
+#   合計 3552 MiB＝3,724,541,952 bytes（≈ 3.47 GiB）；餘裕 262.7 MiB。
+#
+# ⚠ APP_LANES 每多一條車道＝多一顆 DO＝多 `lane` 一份（目前 64 MiB）：現在還能再加 4 條，第 5 條要先調降別處。
+#   `wrangler-vars.test.ts` 依本檔算加總，超過預算就變紅並列出每顆 DO 的數字。
+# ⚠ 調低天花板不會搬資料也不會立刻刪：拒收制（strict）只是之後寫不進；淘汰制（其餘）在下一筆寫入時才淘汰到天花板以下。
+DO_CEILINGS_MIB = "strict=24/24,global=64/64,presence=16/16,shard-a=96/64,shard-1=96/64,shard-f=96/64,shard-7=96/64,public=16/16,lane=32/32,app:dochost=64/512,file=512/32"
 
 # 取得速率限制（ADR-0342 §3.1）：客戶端每半個 TTL 才取一次（TTL 300 ⇒ 2.5 分鐘一張），
 # 20/60s 對正常使用綽綽有餘；配合短 TTL，濫用者要維持流量就得持續取新憑證。
@@ -134,6 +155,8 @@ APP_LANES = "lwd,elementalist,nagd,soleague,dochost,cindersync,cinder-coffice"
 # 主訊息平面照舊整類拒收。理由見上面那段註解。
 MAX_FILE_MB = "30"
 FILE_LANES = "cindersync,cinder-coffice"
+# 每顆 DO 的容量天花板（ADR-0377，2026-09-30 使用者決定）——與頂層同步，預算計算見上面那段註解。
+DO_CEILINGS_MIB = "strict=24/24,global=64/64,presence=16/16,shard-a=96/64,shard-1=96/64,shard-f=96/64,shard-7=96/64,public=16/16,lane=32/32,app:dochost=64/512,file=512/32"
 
 [[env.unified.ratelimits]]
 name = "TURN_LIMIT"

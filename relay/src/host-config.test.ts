@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { TIMESTAMP_JITTER_SECONDS } from "@cinderous/core";
 import { describe, expect, it } from "vitest";
 import { FILE_EVENT_MAX_BYTES } from "./message-store.js";
-import { ABUSE_GUARD, APP_ADDRESSABLE_PER_AUTHOR, MAX_EVENTS_PER_MINUTE, MAX_MESSAGES_PER_MINUTE, messagesPerMinuteFrom, MAX_PAST_SKEW_SEC, APP_ADDRESSABLE_BYTES_PER_AUTHOR, APP_ADDRESSABLE_MAX_BYTES, DO_ADDRESSABLE_MAX_BYTES, DO_OFFLINE_MAX_BYTES, MAX_POW_DIFFICULTY, PUBLIC_LANE_ADDRESSABLE_BYTES_PER_AUTHOR, PUBLIC_LANE_ADDRESSABLE_PER_AUTHOR, PUBLIC_LANE_RETENTION_SECONDS, STRICT_ADDRESSABLE_BYTES_PER_AUTHOR, TTL_CAP_DAYS, knownLanes, acceptFileEvents, FILE_CHUNK_PLAINTEXT_BYTES, FILE_LANE_OFFLINE_MAX_BYTES, FILE_LANE_QUOTA_SLACK_CHUNKS, fileChunksFor, fileLaneChunksPerRecipient, fileLanes, filePolicyFor, eventsPerMinuteFrom, firstHost, guardFor, powForLane, storeOptions, ttlSecondsFromDays } from "./host-config.js";
+import { ABUSE_GUARD, APP_ADDRESSABLE_PER_AUTHOR, MAX_EVENTS_PER_MINUTE, MAX_MESSAGES_PER_MINUTE, messagesPerMinuteFrom, MAX_PAST_SKEW_SEC, APP_ADDRESSABLE_BYTES_PER_AUTHOR, APP_ADDRESSABLE_MAX_BYTES, DO_ADDRESSABLE_MAX_BYTES, DO_OFFLINE_MAX_BYTES, MAX_POW_DIFFICULTY, PUBLIC_LANE_ADDRESSABLE_BYTES_PER_AUTHOR, PUBLIC_LANE_ADDRESSABLE_PER_AUTHOR, PUBLIC_LANE_RETENTION_SECONDS, STRICT_ADDRESSABLE_BYTES_PER_AUTHOR, TTL_CAP_DAYS, knownLanes, acceptFileEvents, FILE_CHUNK_PLAINTEXT_BYTES, FILE_LANE_OFFLINE_MAX_BYTES, FILE_LANE_QUOTA_SLACK_CHUNKS, fileChunksFor, fileLaneChunksPerRecipient, fileLanes, filePolicyFor, eventsPerMinuteFrom, firstHost, guardFor, powForLane, storeOptions, ttlSecondsFromDays, ACCOUNT_STORAGE_BUDGET_BYTES, ceilingClassOf, DO_CEILING_MAX_MIB, doCeilingFor, doCeilings, MIB, worstCaseStorage } from "./host-config.js";
 
 // 宿主組裝設定（ADR-0235 H1）。H1 的教訓是「組裝層沒人測」——防護在 core 裡寫對了也測了，
 // 但 worker 從未把參數傳進去。這裡把常數與衍生邏輯的**不變量**釘死，兩座宿主不可能各走各的。
@@ -434,5 +434,117 @@ describe("檔案車道（FILE_LANES，ADR-0371）", () => {
     expect(FILE_LANE_OFFLINE_MAX_BYTES).toBeGreaterThanOrEqual(3 * perRecipientWorst);
     // 🔴 兩條檔案車道的天花板加起來必須遠低於 DO SQLite 免費額度（5GB，帳號層級共用）
     expect(2 * FILE_LANE_OFFLINE_MAX_BYTES).toBeLessThanOrEqual(2.5 * 1024 ** 3);
+  });
+});
+
+describe("每顆 DO 的天花板與帳號儲存預算（ADR-0377）", () => {
+  const LANES = "lwd,dochost,cindersync";
+  const FILES = { APP_LANES: LANES, FILE_LANES: "cindersync", MAX_FILE_MB: "30" };
+
+  it("沒設 DO_CEILINGS_MIB＝與 ADR-0377 之前完全相同（自架站不受影響）", () => {
+    for (const name of ["global", "presence", "shard-a", "app-3", "app:lwd"]) {
+      expect(doCeilingFor({ APP_LANES: LANES }, name)).toEqual({
+        offlineMaxBytes: DO_OFFLINE_MAX_BYTES,
+        addressableMaxBytes: DO_ADDRESSABLE_MAX_BYTES,
+      });
+    }
+    expect(doCeilingFor(FILES, "app:cindersync").offlineMaxBytes).toBe(FILE_LANE_OFFLINE_MAX_BYTES);
+  });
+
+  it("類別：strict／public／lane／file 由 DO 名與檔案政策決定", () => {
+    expect(ceilingClassOf(FILES, "global")).toBe("strict");
+    expect(ceilingClassOf(FILES, "presence")).toBe("strict");
+    expect(ceilingClassOf(FILES, "shard-f")).toBe("strict");
+    expect(ceilingClassOf(FILES, "app-7")).toBe("public");
+    expect(ceilingClassOf(FILES, "app:lwd")).toBe("lane");
+    expect(ceilingClassOf(FILES, "app:cindersync")).toBe("file");
+    // 沒設 FILE_LANES（企業自架的全站模式）不換檔案車道天花板——與 storeOptions 同一個條件
+    expect(ceilingClassOf({ APP_LANES: LANES, MAX_FILE_MB: "30" }, "app:cindersync")).toBe("lane");
+  });
+
+  it("單顆 DO 名優先於類別，類別優先於預設", () => {
+    const env = { ...FILES, DO_CEILINGS_MIB: "strict=24/16, shard-a=96/64, lane=32/32, app:dochost=64/512, file=512/32" };
+    expect(doCeilingFor(env, "shard-a")).toEqual({ offlineMaxBytes: 96 * MIB, addressableMaxBytes: 64 * MIB });
+    expect(doCeilingFor(env, "shard-b")).toEqual({ offlineMaxBytes: 24 * MIB, addressableMaxBytes: 16 * MIB });
+    expect(doCeilingFor(env, "app:dochost")).toEqual({ offlineMaxBytes: 64 * MIB, addressableMaxBytes: 512 * MIB });
+    expect(doCeilingFor(env, "app:lwd")).toEqual({ offlineMaxBytes: 32 * MIB, addressableMaxBytes: 32 * MIB });
+    expect(doCeilingFor(env, "app:cindersync")).toEqual({ offlineMaxBytes: 512 * MIB, addressableMaxBytes: 32 * MIB });
+    // 沒設 public ⇒ 預設
+    expect(doCeilingFor(env, "app-0").offlineMaxBytes).toBe(DO_OFFLINE_MAX_BYTES);
+    expect(doCeilings(env).ignored).toEqual([]);
+  });
+
+  it("🔴 設錯的項目不生效、而且看得見（退回的是比較大的預設值）", () => {
+    const env = {
+      APP_LANES: LANES,
+      DO_CEILINGS_MIB: [
+        "shard-z=1/1", // 不是路由會建立的 DO
+        "app:stranger=1/1", // 不在 APP_LANES 上：沒有自己的 DO
+        "app-8=1/1", // 共用分片只有 0..7
+        "lane=0/32", // 0 不合法
+        "lane=32", // 缺一半
+        `strict=${DO_CEILING_MAX_MIB + 1}/1`, // 超過單顆 DO 實體上限
+        "presence=1.5/1", // 不是整數
+        "global=8/8",
+        "global=9/9", // 重複：第一個生效
+      ].join(","),
+    };
+    const { entries, ignored } = doCeilings(env);
+    expect(ignored).toEqual([
+      "shard-z=1/1",
+      "app:stranger=1/1",
+      "app-8=1/1",
+      "lane=0/32",
+      "lane=32",
+      `strict=${DO_CEILING_MAX_MIB + 1}/1`,
+      "presence=1.5/1",
+      "global=9/9",
+    ]);
+    expect([...entries.keys()]).toEqual(["global"]);
+    expect(doCeilingFor(env, "global").offlineMaxBytes).toBe(8 * MIB);
+  });
+
+  it("storeOptions：給了天花板就取代兩個總量上限（含檔案車道的 1 GiB）；淘汰制／拒收制不變", () => {
+    const c = { offlineMaxBytes: 5 * MIB, addressableMaxBytes: 7 * MIB };
+    const strict = storeOptions(undefined, "strict", false, undefined, c);
+    expect(strict.offlineMaxTotalBytes).toBe(5 * MIB);
+    expect(strict.addressableMaxTotalBytes).toBe(7 * MIB);
+    expect(strict.ceilingEvicts).toBeUndefined();
+    const file = storeOptions(undefined, "app", true, 30, c);
+    expect(file.offlineMaxTotalBytes).toBe(5 * MIB);
+    expect(file.filePerRecipient).toBe(1440);
+    expect(file.ceilingEvicts).toBe(true);
+    // 其餘欄位與不給天花板時相同
+    const { offlineMaxTotalBytes: _a, addressableMaxTotalBytes: _b, ...rest } = file;
+    const { offlineMaxTotalBytes: _c, addressableMaxTotalBytes: _d, ...base } = storeOptions(undefined, "app", true, 30);
+    expect(rest).toEqual(base);
+  });
+
+  it("最壞加總：沒設天花板時的 33 顆 DO＝10 GiB（ADR-0377 之前的錨點，額度的兩倍）", () => {
+    const env = {
+      APP_LANES: "lwd,elementalist,nagd,soleague,dochost,cindersync,cinder-coffice",
+      FILE_LANES: "cindersync,cinder-coffice",
+      MAX_FILE_MB: "30",
+    };
+    const w = worstCaseStorage(env);
+    expect(w.rows).toHaveLength(33);
+    expect(w.totalBytes).toBe(10 * 1024 ** 3);
+    expect(w.totalBytes).toBeGreaterThan(ACCOUNT_STORAGE_BUDGET_BYTES);
+    expect(w.laneCostBytes).toBe(256 * MIB);
+  });
+
+  it("🔴 車道名單會長：每多一條已知租戶車道就多一顆 DO、多 `lane` 一份天花板", () => {
+    const env = { APP_LANES: "a", DO_CEILINGS_MIB: "strict=1/1,public=1/1,lane=10/6" };
+    const one = worstCaseStorage(env);
+    const two = worstCaseStorage({ ...env, APP_LANES: "a,b" });
+    expect(two.rows).toHaveLength(one.rows.length + 1);
+    expect(two.totalBytes - one.totalBytes).toBe(16 * MIB);
+    expect(one.laneCostBytes).toBe(16 * MIB);
+  });
+
+  it("預算是 5 GB 的 80%，而且不論 GB 解讀成 10⁹ 還是 2³⁰ 都不超過", () => {
+    expect(ACCOUNT_STORAGE_BUDGET_BYTES).toBe(4_000_000_000);
+    expect(ACCOUNT_STORAGE_BUDGET_BYTES).toBeLessThanOrEqual(0.8 * 5e9);
+    expect(ACCOUNT_STORAGE_BUDGET_BYTES).toBeLessThanOrEqual(0.8 * 5 * 1024 ** 3);
   });
 });

@@ -11,6 +11,17 @@
 
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
+import {
+  ACCOUNT_STORAGE_BUDGET_BYTES,
+  doCeilingFor,
+  doCeilings,
+  fileLaneChunksPerRecipient,
+  fileLanes,
+  MIB,
+  worstCaseStorage,
+} from "./host-config.js";
+import { FILE_EVENT_MAX_BYTES } from "./message-store.js";
+import { namedLaneName } from "./shard.js";
 
 const TOML = readFileSync(new URL("../wrangler.toml", import.meta.url), "utf8");
 
@@ -147,6 +158,51 @@ describe("錨點的檔案車道（ADR-0371）", () => {
     it(`🔴 ${section}：有 MAX_FILE_MB 就一定要有 FILE_LANES——少了它就是整站開放（ADR-0244 否決的選項 1）`, () => {
       const v = varsOf(section);
       if (v.MAX_FILE_MB !== undefined) expect(list(v.FILE_LANES).length).toBeGreaterThan(0);
+    });
+  }
+});
+
+describe("🔴 帳號儲存預算：所有可能 DO 的天花板加總 ≤ 免費 5 GB 的 80%（ADR-0377）", () => {
+  // 2026-09-30 使用者決定：錨點在 Cloudflare 免費方案，DO SQLite 每帳號 5 GB，超過後整帳號同類操作失敗。
+  const mib = (n: number): string => `${(n / MIB).toFixed(1)} MiB`;
+
+  for (const section of ["vars", "env.unified.vars"]) {
+    it(`${section}：DO_CEILINGS_MIB 有設、每一項都生效`, () => {
+      const v = varsOf(section);
+      expect(v.DO_CEILINGS_MIB, "錨點必須明寫天花板——沒設就是每顆 128/128 MiB、加總 10 GiB").toBeDefined();
+      expect(doCeilings(v).ignored, "這些項目沒有生效（退回較大的預設值），預算不可信").toEqual([]);
+    });
+
+    it(`${section}：最壞加總 ≤ ${ACCOUNT_STORAGE_BUDGET_BYTES.toLocaleString("en-US")} bytes`, () => {
+      const w = worstCaseStorage(varsOf(section));
+      const over = w.totalBytes - ACCOUNT_STORAGE_BUDGET_BYTES;
+      const table = w.rows
+        .map((r) => `  ${r.doName.padEnd(20)} ${r.cls.padEnd(6)} ${mib(r.ceiling.offlineMaxBytes)} + ${mib(r.ceiling.addressableMaxBytes)}`)
+        .join("\n");
+      const advice = [
+        `天花板加總 ${w.totalBytes.toLocaleString("en-US")} bytes（${mib(w.totalBytes)}）超過預算 ${over.toLocaleString("en-US")} bytes。`,
+        `每多一條 APP_LANES 車道就多一顆 DO、多 \`lane\` 一份（目前 ${mib(w.laneCostBytes)}）。`,
+        "請在 wrangler.toml 的 DO_CEILINGS_MIB 調低冷門的 DO（例如 strict、public、lane 類別或單顆 shard-x），",
+        "或拿掉用不到的車道；兩份 vars 都要改，並在 ADR-0377 的分配表記下新數字。",
+        "❌ 不要調大 ACCOUNT_STORAGE_BUDGET_BYTES——它是免費額度的 80%，不是可以協商的數字。",
+        "每顆 DO（離線 + 可尋址）：",
+        table,
+      ].join("\n");
+      expect(w.totalBytes, advice).toBeLessThanOrEqual(ACCOUNT_STORAGE_BUDGET_BYTES);
+    });
+
+    it(`${section}：dochost 有自己加大的可尋址天花板（SDK ADR 0036：全狀態可尋址桶）`, () => {
+      const v = varsOf(section);
+      expect(doCeilingFor(v, "app:dochost").addressableMaxBytes).toBeGreaterThanOrEqual(512 * MIB);
+    });
+
+    it(`${section}：檔案車道的離線天花板至少容得下一位收件人的整份最壞配額`, () => {
+      // 否則一位收件人正常的同步量就會把自己的檔案塊淘汰掉（ADR-0371 §決策 4）。
+      const v = varsOf(section);
+      const worst = fileLaneChunksPerRecipient(Number(v.MAX_FILE_MB)) * FILE_EVENT_MAX_BYTES;
+      for (const id of fileLanes(v).active) {
+        expect(doCeilingFor(v, namedLaneName(id)).offlineMaxBytes, id).toBeGreaterThanOrEqual(worst);
+      }
     });
   }
 });

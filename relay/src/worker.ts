@@ -1,6 +1,8 @@
 import { verifyHttpAuth } from "@cinderous/core";
 import {
   DEVELOPER_DOCS_URL,
+  doCeilingFor,
+  doCeilings,
   fileLanes,
   filePolicyFor,
   firstHost,
@@ -66,6 +68,15 @@ export interface Env {
    * ⚠ 加進來或拿掉＝換一顆 DO，該車道舊 DO 裡的資料不會跟著搬（等 TTL 到期）。
    */
   APP_LANES?: string;
+  /**
+   * 每顆 DO 的容量天花板（ADR-0377）：逗號分隔的 `<對象>=<離線 MiB>/<可尋址 MiB>`，
+   * 對象是類別（`strict`／`public`／`lane`／`file`）或單顆 DO 名（`shard-a`、`app:dochost`）。
+   * 未設＝ADR-0377 之前的預設（每顆 128/128 MiB、檔案車道離線 1 GiB）。
+   *
+   * 🔴 錨點在免費方案上：所有可能 DO 的天花板加總必須 ≤ 帳號 5 GB 的 80%
+   *（`host-config.ACCOUNT_STORAGE_BUDGET_BYTES`），`wrangler-vars.test.ts` 盯著。
+   */
+  DO_CEILINGS_MIB?: string;
   /**
    * 連線被拒時指向的開發文件網址（ADR-0368）。未設＝官網開發者頁
    * （`host-config.DEVELOPER_DOCS_URL`）。自架站若有自己的說明頁可換掉。
@@ -372,6 +383,14 @@ const KNOWN_LANE_KEY = "cinder:lane-known";
  * 存下來反而會把舊決定永久釘在 DO 裡。共用分片服務多條車道，不存（它們一律不收檔案）。
  */
 const LANE_ID_KEY = "cinder:lane-id";
+/**
+ * DO storage 裡記住本實例的 **DO 名**（ADR-0377）。
+ *
+ * 為什麼要存：天花板可以依單顆 DO 設定（`DO_CEILINGS_MIB` 的 `shard-a`、`presence`），而嚴格平面的
+ * `global`／`presence`／`shard-*` 政策完全相同、從 storage 裡的其他鍵分不出來；休眠喚醒後可能
+ * 沒有 fetch、算不出路徑。DO 名由 `idFromName` 決定、一輩子不變，存下來不會過時。
+ */
+const DO_NAME_KEY = "cinder:do-name";
 
 /**
  * 持有 RelayCore；以**休眠式 WebSocket**（ADR-0059）收發：DO 可在訊息間休眠、不計 idle
@@ -397,6 +416,8 @@ export class RelayRoom {
   private knownLane = false;
   /** 本 DO 服務的名單上車道 id（ADR-0371）；嚴格平面與共用分片為 undefined。 */
   private laneId: string | undefined;
+  /** 本實例的 DO 名（ADR-0377）；決定天花板。第一次 fetch 之前（與升級前的 DO）為 undefined＝預設天花板。 */
+  private doName: string | undefined;
 
   constructor(ctx: DurableObjectState, env: Env) {
     this.ctx = ctx;
@@ -416,15 +437,25 @@ export class RelayRoom {
     if (ignored.length > 0) {
       console.warn(`FILE_LANES 忽略不在 APP_LANES 上的車道：${ignored.join(", ")}（ADR-0371）`);
     }
+    // DO_CEILINGS_MIB 設錯的項目不生效、退回較大的預設值（ADR-0377）——一樣要看得見。
+    const badCeilings = doCeilings(env).ignored;
+    if (badCeilings.length > 0) {
+      console.warn(`DO_CEILINGS_MIB 忽略無效的項目：${badCeilings.join(", ")}（ADR-0377）`);
+    }
     ctx.blockConcurrencyWhile(async () => {
       // 還原本實例綁定的政策（ADR-0366）。DO 名與政策是一對一的，所以這裡讀到什麼就是什麼。
       const stored = await ctx.storage.get<RelayProfile>(PROFILE_KEY);
       this.knownLane = (await ctx.storage.get<boolean>(KNOWN_LANE_KEY)) === true;
       this.laneId = await ctx.storage.get<string>(LANE_ID_KEY);
+      this.doName = await ctx.storage.get<string>(DO_NAME_KEY);
       if (stored !== undefined) {
         this.profile = stored;
         this.profilePinned = true;
-        if (stored !== "strict") this.core = this.buildCore(stored);
+        // 知道 DO 名＝天花板可能不是預設值（ADR-0377），嚴格平面也要重組。
+        if (stored !== "strict" || this.doName !== undefined) {
+          this.core = this.buildCore(stored);
+          this.hydrated = false; // 新的 core 要重新從 attachment 還原既有連線
+        }
       }
       // C2：排程 NIP-40 過期清理（DO 休眠仍會被 alarm 喚醒執行）。
       if ((await ctx.storage.getAlarm()) === null) {
@@ -447,7 +478,14 @@ export class RelayRoom {
     );
     this.store = new SqlMessageStore(
       this.exec,
-      storeOptions(this.env.MAX_TTL_DAYS, profile, this.knownLane, files.accept ? files.maxFileMb : undefined),
+      storeOptions(
+        this.env.MAX_TTL_DAYS,
+        profile,
+        this.knownLane,
+        files.accept ? files.maxFileMb : undefined,
+        // 每顆 DO 的天花板（ADR-0377）：與預算測試加總的是同一個函式。
+        this.doName !== undefined ? doCeilingFor(this.env, this.doName) : undefined,
+      ),
     );
     const pow = powForLane(profile, this.env.APP_LANE_POW);
     return new RelayCore({
@@ -477,6 +515,12 @@ export class RelayRoom {
     const wantedKnown = route?.profile === "app" && route.known;
     // 名單上車道的 id（ADR-0371）。DO 名就是 `app:<id>`，所以它對一顆 DO 而言也是恆定的。
     const wantedLaneId = route?.profile === "app" && route.known ? route.laneId : undefined;
+    // DO 名（ADR-0377）：worker 就是用這個名字 `idFromName` 到這裡的，一輩子不變。
+    // 升級前就存在的 DO 沒有這個鍵——第一次連線補記，並在下面換成它自己的天花板。
+    // 先同步設好（不 await），下面第一次釘住政策時組的 core 就已經用上自己的天花板。
+    const newName = route !== undefined && route.doName !== this.doName ? route.doName : undefined;
+    if (newName !== undefined) this.doName = newName;
+    const wasPinned = this.profilePinned;
     if (
       this.profilePinned &&
       wanted === this.profile &&
@@ -510,6 +554,15 @@ export class RelayRoom {
       await this.ctx.storage.put(KNOWN_LANE_KEY, wantedKnown);
       if (wantedLaneId !== undefined) await this.ctx.storage.put(LANE_ID_KEY, wantedLaneId);
       this.profilePinned = true;
+    }
+    if (newName !== undefined) {
+      await this.ctx.storage.put(DO_NAME_KEY, newName);
+      if (wasPinned) {
+        // 升級前就釘住的 DO：天花板換成它自己的（ADR-0377）。與補記車道 id 同一個做法，
+        // 重組後從 attachment 還原既有連線。（第一次釘住的 DO 在上面組 core 時已經用上了。）
+        this.core = this.buildCore(this.profile);
+        this.hydrated = false;
+      }
     }
     const pair = new WebSocketPair();
     const client = pair[0];
