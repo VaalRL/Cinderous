@@ -80,6 +80,8 @@
 > **存不下就說存不下（ADR-0367 §決策 2／ADR-0375）**：嚴格平面每顆 DO 的離線留言與可尋址各有天花板（預設各 128 MB），**只拒收、不淘汰**。離線留言存不下回 `OK false "blocked: ceiling: …"`、事件自帶的 NIP-40 `expiration` 已過回 `OK false "invalid: expired: …"`，兩者都**不扇出**；被拒的事件不記進重放快取（之後重送不會被誤回 `duplicate`）。拒收訊息與 SDK 中繼（v0.31.1）逐字相同。每收件人 FIFO 與車道淘汰是「收下新的、刪掉舊的」，仍回 `OK true`。
 >
 > **帳號儲存預算（ADR-0377）**：每顆 DO 的天花板可由 `DO_CEILINGS_MIB` 依類別（`strict`／`public`／`lane`／`file`）或單顆 DO 名（`shard-a`、`app:dochost`）設定，沒設＝上述預設；DO 以 storage 鍵 `cinder:do-name` 記住自己的名字，休眠喚醒後仍套自己的天花板。錨點在免費方案（DO SQLite 每帳號 5 GB、超過整帳號同類操作失敗），`wrangler-vars.test.ts` 依 `wrangler.toml` 算出路由可能建立的**每一顆** DO（`allDoNames`：舊全域、presence、16 片、8 顆共用分片、名單上每條車道一顆）的天花板加總，必須 ≤ 4,000,000,000 bytes（5 GB 的 80%）；每多一條 `APP_LANES` 車道就多一份 `lane` 天花板。
+>
+> **拒收訊息帶英文詞元（ADR-0376；SDK ADR 0040）**：所有 `OK false`／`CLOSED`／關鍵 `NOTICE` 都是「NIP-01 前綴＋英文詞元＋說明」（`blocked: quota: …`、`blocked: stale: …`、`rate-limited: events: …`、`restricted: scope: …`、`error: resubscribe: …`），句子集中在 `relay/src/reject-messages.ts`、與 SDK 中繼（v0.32.0）逐字相同。🔴 只能在前綴**後面**加詞元：App 外送匣（`classifyOk`）只看前綴。可尋址被拒依原因拆開（`OfflineStore.putAddressableResult`，選用）；重放窗內重複回 **`OK true "duplicate: …"`**（NIP-01）；store 丟例外時事件也不留在重放快取。車道升級被拒的三句 NOTICE 不改（開發者文件逐字列出）。
 
 | 功能 | Kind | 持久化 | 機制 |
 | --- | --- | --- | --- |

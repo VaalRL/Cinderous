@@ -62,7 +62,7 @@ describe("RelayCore — 訂閱與 Ephemeral 轉發", () => {
     const e = heartbeat();
     const out = core.handle("sender", EVENT({ ...e, content: "tampered" }));
     expect(out).toEqual([
-      { to: "sender", message: ["OK", e.id, false, "invalid: 簽章驗證失敗"] },
+      { to: "sender", message: ["OK", e.id, false, "invalid: bad-signature: 簽章驗證失敗"] },
     ]);
   });
 
@@ -205,13 +205,14 @@ describe("RelayCore — 時鐘偏移與重放防護（C2）", () => {
     expect(core.handle("c", EVENT(hb(1000)))[0]?.message[2]).toBe(true);
   });
 
-  it("重放相同事件被去重拒絕", () => {
+  it("重放相同事件被去重：OK true「duplicate:」（NIP-01；ADR-0376），不再轉發", () => {
     const core = new RelayCore({ maxClockSkewSec: 60, now: () => 1000 });
     const e = hb(1000);
     expect(core.handle("c", EVENT(e))[0]?.message[2]).toBe(true);
     const replay = core.handle("c", EVENT(e));
-    expect(replay[0]?.message[2]).toBe(false);
-    expect(String(replay[0]?.message[3])).toContain("duplicate");
+    expect(replay).toHaveLength(1);
+    expect(replay[0]?.message[2]).toBe(true);
+    expect(String(replay[0]?.message[3])).toMatch(/^duplicate: /);
   });
 
   it("未設定 maxClockSkewSec 時不啟用（維持原行為）", () => {
@@ -266,7 +267,7 @@ describe("RelayCore — NIP-42 AUTH（ADR-0057）", () => {
     const core = authCore();
     core.connect("c");
     const out = core.handle("c", REQ("s", { kinds: [1] }));
-    expect(out).toContainEqual({ to: "c", message: ["CLOSED", "s", "auth-required: 請先認證（NIP-42）"] });
+    expect(out).toContainEqual({ to: "c", message: ["CLOSED", "s", "auth-required: nip42: 請先認證（NIP-42）"] });
     expect(out).toContainEqual({ to: "c", message: ["AUTH", "chal-1"] });
   });
 
@@ -276,7 +277,7 @@ describe("RelayCore — NIP-42 AUTH（ADR-0057）", () => {
     const e = heartbeat();
     expect(core.handle("c", EVENT(e))).toContainEqual({
       to: "c",
-      message: ["OK", e.id, false, "auth-required: 請先認證（NIP-42）"],
+      message: ["OK", e.id, false, "auth-required: nip42: 請先認證（NIP-42）"],
     });
   });
 
@@ -315,7 +316,7 @@ describe("RelayCore — NIP-42 AUTH（ADR-0057）", () => {
     const other = getPublicKey(generateSecretKey());
     expect(core.handle("c", REQ("other", { kinds: [1059], "#p": [other] }))).toContainEqual({
       to: "c",
-      message: ["CLOSED", "other", "restricted: 訂閱必須指定 #p（自己）或 authors（ADR-0123）"],
+      message: ["CLOSED", "other", "restricted: scope: 訂閱必須指定 #p（自己）或 authors（ADR-0123）"],
     });
   });
 
@@ -429,7 +430,7 @@ describe("RelayCore — 可尋址快照（NIP-33，ADR-0071）", () => {
     expect(after.filter((o) => o.message[0] === "EVENT")).toHaveLength(0);
   });
 
-  it("配額超限回 OK false（第 6 個 d）", () => {
+  it("配額超限回 OK false「blocked: quota:」（第 6 個 d；ADR-0376）", () => {
     const store = new MessageStore();
     const core = new RelayCore({ store, now: () => 1_700_000_000 });
     core.connect("c");
@@ -441,7 +442,7 @@ describe("RelayCore — 可尋址快照（NIP-33，ADR-0071）", () => {
     const sixth = snapshot(sk, { d: "dev6" });
     expect(core.handle("c", EVENT(sixth))).toContainEqual({
       to: "c",
-      message: ["OK", sixth.id, false, "blocked: 取代事件遭拒（配額/大小/較舊）"],
+      message: ["OK", sixth.id, false, "blocked: quota: 這個作者在這個 kind 的位址數已達上限"],
     });
   });
 
@@ -604,7 +605,7 @@ describe("檔案塊事件（FILE_WRAP=1060，ADR-0162）", () => {
     core.connect("c1");
     const e = fileEvent();
     const out = core.handle("c1", EVENT(e));
-    expect(out).toContainEqual({ to: "c1", message: ["OK", e.id, false, "blocked: 檔案事件未啟用（MAX_FILE_MB）"] });
+    expect(out).toContainEqual({ to: "c1", message: ["OK", e.id, false, "blocked: files-disabled: 檔案事件未啟用（MAX_FILE_MB）"] });
     expect(store.query({ kinds: [1060] }, 1700000001)).toEqual([]);
   });
 
@@ -618,7 +619,7 @@ describe("檔案塊事件（FILE_WRAP=1060，ADR-0162）", () => {
     expect(store.query({ kinds: [1060] }, 1700000001).map((x) => x.id)).toEqual([e.id]);
     const huge = fileEvent("b".repeat(64), "z".repeat(210_000));
     const out2 = core.handle("c1", EVENT(huge));
-    expect(out2).toContainEqual({ to: "c1", message: ["OK", huge.id, false, "blocked: 檔案塊過大"] });
+    expect(out2).toContainEqual({ to: "c1", message: ["OK", huge.id, false, "blocked: too-large: 檔案塊過大"] });
   });
 });
 
@@ -653,7 +654,7 @@ describe("RelayCore — 例外圍籬（ADR-0235 C1）", () => {
     expect(() => {
       out = core.handle("c1", EVENT(e));
     }).not.toThrow();
-    expect(out).toEqual([{ to: "c1", message: ["NOTICE", "error: 內部錯誤，請稍後再試"] }]);
+    expect(out).toEqual([{ to: "c1", message: ["NOTICE", "error: internal: 內部錯誤，請稍後再試"] }]);
   });
 
   it("查詢拋例外時同樣被攔下（REQ 路徑）", () => {
@@ -667,7 +668,7 @@ describe("RelayCore — 例外圍籬（ADR-0235 C1）", () => {
     core.connect("c1");
     const e = finalizeEvent({ kind: 20000, created_at: 1700000000, tags: [], content: "" }, generateSecretKey());
     const out = core.handle("c1", JSON.stringify(["EVENT", { ...e, tags: {} }]));
-    expect(out).toEqual([{ to: "c1", message: ["NOTICE", "invalid: malformed event"] }]);
+    expect(out).toEqual([{ to: "c1", message: ["NOTICE", "invalid: malformed: malformed event"] }]);
   });
 });
 
@@ -687,7 +688,7 @@ describe("RelayCore — 事件大小與 tag 上限（ADR-0235 C3）", () => {
     core.connect("c1");
     const e = ev(Array.from({ length: 64 }, (_, i) => ["p", `${i}`.padStart(64, "0")]));
     const out = core.handle("c1", EVENT(e));
-    expect(out).toContainEqual({ to: "c1", message: ["OK", e.id, false, "blocked: 收件人數超過上限"] });
+    expect(out).toContainEqual({ to: "c1", message: ["OK", e.id, false, "blocked: too-many-recipients: 收件人數超過上限"] });
     expect(store.query({ kinds: [1059] }, 1700000001)).toEqual([]);
   });
 
@@ -696,7 +697,7 @@ describe("RelayCore — 事件大小與 tag 上限（ADR-0235 C3）", () => {
     core.connect("c1");
     const e = ev(Array.from({ length: 300 }, (_, i) => ["e", `${i}`]));
     const out = core.handle("c1", EVENT(e));
-    expect(out).toContainEqual({ to: "c1", message: ["OK", e.id, false, "blocked: tag 數超過上限"] });
+    expect(out).toContainEqual({ to: "c1", message: ["OK", e.id, false, "blocked: too-many-tags: tag 數超過上限"] });
   });
 
   it("事件序列化超過全域大小上限 → OK false", () => {
@@ -704,14 +705,14 @@ describe("RelayCore — 事件大小與 tag 上限（ADR-0235 C3）", () => {
     core.connect("c1");
     const e = ev([["p", "ab"]], "z".repeat(300_000));
     const out = core.handle("c1", EVENT(e));
-    expect(out).toContainEqual({ to: "c1", message: ["OK", e.id, false, "blocked: 事件過大"] });
+    expect(out).toContainEqual({ to: "c1", message: ["OK", e.id, false, "blocked: too-large: 事件過大"] });
   });
 
   it("原始訊息超過上限 → NOTICE，且不進 JSON.parse", () => {
     const core = new RelayCore();
     core.connect("c1");
     const out = core.handle("c1", "x".repeat(500_000));
-    expect(out).toEqual([{ to: "c1", message: ["NOTICE", "invalid: 訊息過大"] }]);
+    expect(out).toEqual([{ to: "c1", message: ["NOTICE", "invalid: too-large: 訊息過大"] }]);
   });
 
   it("正常事件（1 個 p tag）不受影響", () => {
@@ -748,7 +749,7 @@ describe("RelayCore — 速率限制與時鐘窗（ADR-0235 H1）", () => {
     const over = at(NOW - 99);
     expect(core.handle("c1", EVENT(over))).toContainEqual({
       to: "c1",
-      message: ["OK", over.id, false, "rate-limited: 發送過於頻繁，請稍後再試"],
+      message: ["OK", over.id, false, "rate-limited: events: 發送過於頻繁，請稍後再試"],
     });
   });
 
@@ -780,7 +781,7 @@ describe("RelayCore — 速率限制與時鐘窗（ADR-0235 H1）", () => {
     const future = at(NOW + 901);
     expect(core.handle("c1", EVENT(future))).toContainEqual({
       to: "c1",
-      message: ["OK", future.id, false, "invalid: 時間戳超出允許範圍"],
+      message: ["OK", future.id, false, "invalid: clock-skew: 時間戳超出允許範圍"],
     });
     const ok = at(NOW + 60);
     expect(core.handle("c1", EVENT(ok))).toContainEqual({ to: "c1", message: ["OK", ok.id, true, ""] });
@@ -808,7 +809,7 @@ describe("RelayCore — 速率限制與時鐘窗（ADR-0235 H1）", () => {
     expect(core.handle("c1", EVENT(beat))).toContainEqual({ to: "c1", message: ["OK", beat.id, true, ""] });
     expect(core.handle("c1", EVENT(beat))).toContainEqual({
       to: "c1",
-      message: ["OK", beat.id, false, "duplicate: 事件重複"],
+      message: ["OK", beat.id, true, "duplicate: seen: 事件重複"],
     });
   });
 
@@ -929,7 +930,7 @@ describe("RelayCore — Gift Wrap 洪水須以認證身分限速（ADR-0235 H1 �
     const over = wrap();
     expect(core.handle("c1", EVENT(over))).toContainEqual({
       to: "c1",
-      message: ["OK", over.id, false, "rate-limited: 發送過於頻繁，請稍後再試"],
+      message: ["OK", over.id, false, "rate-limited: events: 發送過於頻繁，請稍後再試"],
     });
   });
 

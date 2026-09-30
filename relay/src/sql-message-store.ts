@@ -2,6 +2,9 @@ import type { NostrEvent } from "@cinderous/core";
 import { matchFilter } from "./filters.js";
 import {
   ADDRESSABLE_MAX_BYTES,
+  ADDRESSABLE_PUT_OK,
+  addressableRejected,
+  type AddressablePutResult,
   ADDRESSABLE_MAX_PER_AUTHOR,
   ADDRESSABLE_TTL_SECONDS,
   DEFAULT_FILE_PER_RECIPIENT,
@@ -262,6 +265,11 @@ export class SqlMessageStore implements OfflineStore {
 
   /** 寫入可取代／可尋址事件（取代語意＋配額；ADR-0035／0071）。行為對齊記憶體版。 */
   putAddressable(event: NostrEvent, nowSec: number): boolean {
+    return this.putAddressableResult(event, nowSec).ok;
+  }
+
+  /** 同 {@link putAddressable}，被拒時帶原因（ADR-0376）。原因與記憶體版逐字對齊。 */
+  putAddressableResult(event: NostrEvent, nowSec: number): AddressablePutResult {
     const d = dTagOf(event); // 可取代事件無 `d` → 空字串 → 每 (kind,pubkey) 只留一顆
     const existing = this.sql(
       `SELECT id, created_at, LENGTH(json) AS len FROM addressable WHERE kind = ? AND pubkey = ? AND d = ?`,
@@ -273,18 +281,18 @@ export class SqlMessageStore implements OfflineStore {
     if (prev) {
       // NIP-01 決勝：較新者勝；同時則保留 id 字典序較小者（各中繼站收斂到同一顆）。
       const prevEvent = { id: prev.id as string, created_at: prev.created_at as number } as NostrEvent;
-      if (!shouldReplace(prevEvent, event)) return false;
+      if (!shouldReplace(prevEvent, event)) return addressableRejected("stale");
     }
     if (event.content === "") {
       // purge：關閉備份時「已關閉」必須立即為真（ADR-0071）。
       this.sql(`DELETE FROM addressable WHERE kind = ? AND pubkey = ? AND d = ?`, event.kind, event.pubkey, d);
-      return true;
+      return ADDRESSABLE_PUT_OK;
     }
     const json = JSON.stringify(event);
-    if (json.length > (this.opts.addressableMaxBytes ?? ADDRESSABLE_MAX_BYTES)) return false;
+    if (json.length > (this.opts.addressableMaxBytes ?? ADDRESSABLE_MAX_BYTES)) return addressableRejected("too-large");
     if (!existing[0]) {
       const count = this.sql(`SELECT COUNT(*) AS n FROM addressable WHERE kind = ? AND pubkey = ?`, event.kind, event.pubkey);
-      if (((count[0]?.n as number) ?? 0) >= (this.opts.addressablePerAuthor ?? ADDRESSABLE_MAX_PER_AUTHOR)) return false;
+      if (((count[0]?.n as number) ?? 0) >= (this.opts.addressablePerAuthor ?? ADDRESSABLE_MAX_PER_AUTHOR)) return addressableRejected("address-quota");
     }
     const budget = this.opts.addressableBytesPerAuthor;
     if (budget !== undefined) {
@@ -296,12 +304,12 @@ export class SqlMessageStore implements OfflineStore {
         event.kind,
         d,
       );
-      if (((used[0]?.n as number) ?? 0) + json.length > budget) return false;
+      if (((used[0]?.n as number) ?? 0) + json.length > budget) return addressableRejected("byte-quota");
     }
     const eff = effectiveExpiration(event, nowSec, this.opts.addressableTtlSeconds ?? ADDRESSABLE_TTL_SECONDS);
-    if (eff <= nowSec) return false;
+    if (eff <= nowSec) return addressableRejected("expired");
     if (!this.fitsAddressableCeiling(json.length, (prev?.len as number | undefined) ?? 0)) {
-      return false;
+      return addressableRejected("ceiling");
     }
     this.sql(
       `INSERT OR REPLACE INTO addressable (kind, pubkey, d, id, created_at, expiration, json) VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -313,7 +321,7 @@ export class SqlMessageStore implements OfflineStore {
       eff,
       json,
     );
-    return true;
+    return ADDRESSABLE_PUT_OK;
   }
 
   /**

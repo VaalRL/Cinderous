@@ -260,7 +260,7 @@ describe("RelayRoom — 濫用防護確實接上了（ADR-0235 H1 回歸）", ()
     expect(ok[3]).toContain("時間戳");
   });
 
-  it("重放同一事件被拒——證明 replayWindowSec 有接上（修正前 seenIds 永遠是空的）", async () => {
+  it("重放同一事件不再轉發（OK true duplicate:）——證明 replayWindowSec 有接上（修正前 seenIds 永遠是空的）", async () => {
     const state = new FakeState();
     const room = newRoom(state);
     const ws = await open(room, state);
@@ -269,9 +269,11 @@ describe("RelayRoom — 濫用防護確實接上了（ADR-0235 H1 回歸）", ()
     const beat = heartbeat(sk);
     const [first] = send(room, ws, ["EVENT", beat]) as [["OK", string, boolean, string]];
     expect(first[2]).toBe(true);
-    const [second] = send(room, ws, ["EVENT", beat]) as [["OK", string, boolean, string]];
-    expect(second[2]).toBe(false);
-    expect(second[3]).toContain("duplicate");
+    const replies = send(room, ws, ["EVENT", beat]) as [["OK", string, boolean, string]];
+    expect(replies).toHaveLength(1);
+    const [second] = replies;
+    expect(second[2]).toBe(true); // NIP-01：`OK true "duplicate: …"`（ADR-0376）
+    expect(second[3]).toMatch(/^duplicate: /);
   });
 
   it("未認證不得發布（requireAuth 有接上）", async () => {
@@ -556,7 +558,7 @@ describe("RelayRoom — WebSocket attachment 16KB 上限（ADR-0373）", () => {
     const got = watcher.drain() as [string, string, string][];
     expect(got.some((m) => m[0] === "EVENT")).toBe(false);
     const closed = got.find((m) => m[0] === "CLOSED" && m[1] === "hb");
-    expect(closed?.[2]).toMatch(/^error: .*resubscribe/);
+    expect(closed?.[2]).toMatch(/^error: resubscribe: .*please resubscribe/);
     // attachment 也更正了：不再指著不存在的列。
     expect((watcher.attachment as { spilled?: string[] }).spilled).toBeUndefined();
   });
@@ -577,7 +579,7 @@ describe("RelayRoom — WebSocket attachment 16KB 上限（ADR-0373）", () => {
     expect(out).toHaveLength(1);
     expect(out[0]?.[0]).toBe("CLOSED");
     expect(out[0]?.[1]).toBe("s7");
-    expect(out[0]?.[2]).toMatch(/^invalid: .*ADR-0373/);
+    expect(out[0]?.[2]).toMatch(/^invalid: too-large: .*ADR-0373/);
 
     // 被關掉的那條真的不在了；其他 7 條休眠後照樣收得到。
     const room2 = newRoom(state);
