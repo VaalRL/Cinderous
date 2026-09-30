@@ -77,7 +77,9 @@
 >
 > **濫用防護（ADR-0235，產線已啟用）**：解析層驗事件結構（`tags` 必為字串陣列的陣列——畸形結構可通過驗簽卻讓中繼拋例外）；單則訊息 384KB、單顆事件 256KB、tag 128 個、`p` tag 16 個；每 pubkey 120 事件/分；每連線 16 個訂閱；查詢一律有 `LIMIT`（1024）且條件下推 SQL。**時鐘窗是非對稱的**——未來 15 分、過去 `TIMESTAMP_JITTER_SECONDS + 1h`，因為 NIP-59 刻意把外層 `created_at` 往前推最多 2 天（對稱窗會擋掉幾乎每一則 Gift Wrap）；重放去重只涵蓋近 1 小時（封裝事件由收件端以 `rumor.id` 去重，真正要擋的是裸心跳被重放偽造在線）。
 >
-> **存不下就說存不下（ADR-0367 §決策 2／ADR-0375）**：嚴格平面每顆 DO 的離線留言與可尋址各有 128 MB 天花板，**只拒收、不淘汰**。離線留言存不下回 `OK false "blocked: ceiling: …"`、事件自帶的 NIP-40 `expiration` 已過回 `OK false "invalid: expired: …"`，兩者都**不扇出**；被拒的事件不記進重放快取（之後重送不會被誤回 `duplicate`）。拒收訊息與 SDK 中繼（v0.31.1）逐字相同。每收件人 FIFO 與車道淘汰是「收下新的、刪掉舊的」，仍回 `OK true`。
+> **存不下就說存不下（ADR-0367 §決策 2／ADR-0375）**：嚴格平面每顆 DO 的離線留言與可尋址各有 128 MB 天花板，**只拒收、不淘汰**。離線留言存不下回 `OK false "blocked: ceiling: …"`、事件自帶的 NIP-40 `expiration` 已過回 `OK false "invalid: expired: …"`，兩者都**不扇出**；被拒的事件不記進重放快取（之後重送不會被誤回 `duplicate`）。每收件人 FIFO 與車道淘汰是「收下新的、刪掉舊的」，仍回 `OK true`。
+>
+> **拒收訊息帶英文詞元（ADR-0376；SDK ADR 0040）**：所有 `OK false`／`CLOSED`／關鍵 `NOTICE` 都是「NIP-01 前綴＋英文詞元＋說明」（`blocked: quota: …`、`blocked: stale: …`、`rate-limited: events: …`、`restricted: scope: …`、`error: resubscribe: …`），句子集中在 `relay/src/reject-messages.ts`、與 SDK 中繼（v0.32.0）逐字相同。🔴 只能在前綴**後面**加詞元：App 外送匣（`classifyOk`）只看前綴。可尋址被拒依原因拆開（`OfflineStore.putAddressableResult`，選用）；重放窗內重複回 **`OK true "duplicate: …"`**（NIP-01）；store 丟例外時事件也不留在重放快取。車道升級被拒的三句 NOTICE 不改（開發者文件逐字列出）。
 
 | 功能 | Kind | 持久化 | 機制 |
 | --- | --- | --- | --- |

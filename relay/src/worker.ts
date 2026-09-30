@@ -623,13 +623,13 @@ export class RelayRoom {
 }
 
 /** 喚醒時找不到溢位列的訂閱（ADR-0373）。客戶端應重送 REQ。 */
-const CLOSED_LOST = "error: subscription was lost when the relay restarted; please resubscribe (ADR-0373)";
+const CLOSED_LOST = "error: resubscribe: subscription was lost when the relay restarted; please resubscribe (ADR-0373)";
 
 /** 無法持久化時回給客戶端的 `CLOSED` 原因（ADR-0373）。前綴依 NIP-01 的機器可讀慣例。 */
 function closedReason(reason: SaveResult["rejected"][number]["reason"]): string {
   return reason === "too-large"
-    ? `invalid: subscriptions on this connection exceed ${MAX_CONN_SUB_BYTES / 1024} KiB and cannot be kept across relay hibernation (ADR-0373)`
-    : "error: subscription could not be saved on the relay; please resubscribe (ADR-0373)";
+    ? `invalid: too-large: subscriptions on this connection exceed ${MAX_CONN_SUB_BYTES / 1024} KiB and cannot be kept across relay hibernation (ADR-0373)`
+    : "error: resubscribe: subscription could not be saved on the relay; please resubscribe (ADR-0373)";
 }
 
 /** 這則是不是某連線上、某些訂閱的 EVENT/EOSE 回覆。 */

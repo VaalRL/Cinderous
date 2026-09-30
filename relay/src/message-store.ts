@@ -196,6 +196,23 @@ export const ADDRESSABLE_MAX_PER_AUTHOR = 5;
 export const ADDRESSABLE_TTL_SECONDS = 30 * 86_400;
 
 /**
+ * 可尋址／可取代事件被拒的原因（ADR-0376；與 SDK 相同）：
+ * `stale` 比這個位址現有的舊；`too-large` 單顆超過上限；`address-quota` 這個作者在這個 kind 的位址數滿了；
+ * `byte-quota` 這個作者的可尋址總量滿了；`expired` 自帶的 expiration 已過；`ceiling` 這顆 DO 的可尋址天花板滿了而不淘汰。
+ */
+export type AddressableRejectReason = "stale" | "too-large" | "address-quota" | "byte-quota" | "expired" | "ceiling";
+
+/** {@link OfflineStore.putAddressableResult} 的結果 */
+export type AddressablePutResult = { readonly ok: true } | { readonly ok: false; readonly reason: AddressableRejectReason };
+
+/** 收下（共用同一個物件，免得每次寫入都配置一個） */
+export const ADDRESSABLE_PUT_OK: AddressablePutResult = { ok: true };
+/** 組一個拒收結果（記憶體與 SQL 版共用） */
+export function addressableRejected(reason: AddressableRejectReason): AddressablePutResult {
+  return { ok: false, reason };
+}
+
+/**
  * 離線留言持久層的行為契約（ADR-0056）。記憶體版（{@link MessageStore}）與
  * Worker 端 DO SQLite 版（`SqlMessageStore`）皆實作，`RelayCore` 依此介面接。
  */
@@ -211,6 +228,11 @@ export interface OfflineStore {
    * `content === ""` ＝刪除既有（purge）。較舊、超額（大小/位址數）或已過期回 false。
    */
   putAddressable(event: NostrEvent, nowSec: number): boolean;
+  /**
+   * 與 {@link putAddressable} 相同，但被拒時說出原因（ADR-0376）。`RelayCore` 有這個方法就用它，
+   * 依原因回不同的 `OK false`（`blocked: stale:`、`blocked: quota:`…）；沒有就退回 boolean 與一句通用的拒收。
+   */
+  putAddressableResult?(event: NostrEvent, nowSec: number): AddressablePutResult;
   /**
    * 查詢符合 filter 且未過期的留言。
    *
@@ -275,24 +297,29 @@ export class MessageStore implements OfflineStore {
 
   /** 寫入可取代／可尋址事件（取代語意＋配額；ADR-0035／0071）。可取代事件無 `d` → 每 (kind,pubkey) 一顆。 */
   putAddressable(event: NostrEvent, nowSec: number): boolean {
+    return this.putAddressableResult(event, nowSec).ok;
+  }
+
+  /** 同 {@link putAddressable}，被拒時帶原因（ADR-0376）。 */
+  putAddressableResult(event: NostrEvent, nowSec: number): AddressablePutResult {
     const prefix = `${event.kind}\0${event.pubkey}\0`;
     const key = prefix + dTagOf(event);
     const existing = this.addressable.get(key);
-    if (existing && !shouldReplace(existing, event)) return false; // 較舊（或同時但 id 較大）→ 不取代
+    if (existing && !shouldReplace(existing, event)) return addressableRejected("stale"); // 較舊（或同時但 id 較大）→ 不取代
     if (event.content === "") {
       // purge：關閉備份時「已關閉」必須立即為真（ADR-0071）。
       if (existing) {
         this.addressable.delete(key);
         this.effExp.delete(existing.id);
       }
-      return true;
+      return ADDRESSABLE_PUT_OK;
     }
     const size = JSON.stringify(event).length;
-    if (size > (this.opts.addressableMaxBytes ?? ADDRESSABLE_MAX_BYTES)) return false;
+    if (size > (this.opts.addressableMaxBytes ?? ADDRESSABLE_MAX_BYTES)) return addressableRejected("too-large");
     if (!existing) {
       let count = 0;
       for (const k of this.addressable.keys()) if (k.startsWith(prefix)) count++;
-      if (count >= (this.opts.addressablePerAuthor ?? ADDRESSABLE_MAX_PER_AUTHOR)) return false;
+      if (count >= (this.opts.addressablePerAuthor ?? ADDRESSABLE_MAX_PER_AUTHOR)) return addressableRejected("address-quota");
     }
     const budget = this.opts.addressableBytesPerAuthor;
     if (budget !== undefined) {
@@ -302,15 +329,15 @@ export class MessageStore implements OfflineStore {
         if (e.pubkey !== event.pubkey || k === key) continue;
         used += JSON.stringify(e).length;
       }
-      if (used + size > budget) return false;
+      if (used + size > budget) return addressableRejected("byte-quota");
     }
     const eff = effectiveExpiration(event, nowSec, this.opts.addressableTtlSeconds ?? ADDRESSABLE_TTL_SECONDS);
-    if (eff <= nowSec) return false;
-    if (!this.fitsAddressableCeiling(key, size)) return false;
+    if (eff <= nowSec) return addressableRejected("expired");
+    if (!this.fitsAddressableCeiling(key, size)) return addressableRejected("ceiling");
     if (existing) this.effExp.delete(existing.id);
     this.addressable.set(key, event);
     this.effExp.set(event.id, eff);
-    return true;
+    return ADDRESSABLE_PUT_OK;
   }
 
   /** 目前離線留言佔用的位元組（每位收件人各算一份，與 SQL 版的「一列」對齊）。 */
