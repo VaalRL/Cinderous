@@ -13,6 +13,7 @@
 import { TIMESTAMP_JITTER_SECONDS } from "@cinderous/core";
 import { DEFAULT_MAX_TTL_SECONDS, type MessageStoreOptions } from "./message-store.js";
 import type { RelayCoreOptions } from "./relay-core.js";
+import { allDoNames, APP_LANE_PREFIX } from "./shard.js";
 
 /** 每收件人離線留言上限（防單一收件人塞爆免費額度；PRD §8）。 */
 export const MAX_PER_RECIPIENT = 500;
@@ -192,6 +193,7 @@ export const FILE_LANE_QUOTA_SLACK_CHUNKS = 128;
  *
  * 🔴 這是帳號層級免費額度的一部分：兩條檔案車道 × 1GiB＝2GiB，DO SQLite 免費 5GB
  * 是**整個帳號共用**的（主訊息平面也在裡面）。要調大之前先重算 ADR-0371 §成本。
+ * 錨點以 `DO_CEILINGS_MIB` 的 `file` 覆寫（ADR-0377，512 MiB）；這裡是沒設時的預設。
  */
 export const FILE_LANE_OFFLINE_MAX_BYTES = 1024 * 1024 * 1024;
 
@@ -384,6 +386,7 @@ export const PUBLIC_LANE_RETENTION_SECONDS = 2 * 60 * 60;
  * ⚠ **這個數字待實測校準**（同 ADR-0006 對容量的處理）：它必須夠大才不會擋到正常用量
  * （嚴格平面 128MB ≈ 100 位使用者的雲端快照），又必須小到單顆 DO 不會撞上平台上限。
  * 帳號層級的總量是「天花板 × DO 數」，ADR-0006 的免費額度天花板不因此解除。
+ * 錨點以 `DO_CEILINGS_MIB` 逐類／逐顆覆寫，加總由預算測試守住（ADR-0377）；這裡是沒設時的預設。
  */
 export const DO_ADDRESSABLE_MAX_BYTES = 128 * 1024 * 1024;
 
@@ -398,6 +401,157 @@ export const DO_ADDRESSABLE_MAX_BYTES = 128 * 1024 * 1024;
  * ⇒ 熱門車道的房間歷史會被默默丟掉，而那是比塞爆更難查的故障。
  */
 export const DO_OFFLINE_MAX_BYTES = 128 * 1024 * 1024;
+
+// ── 帳號儲存預算與每顆 DO 的天花板（ADR-0377）─────────────────────────────────────
+
+/** 1 MiB。`DO_CEILINGS_MIB` 的單位。 */
+export const MIB = 1024 * 1024;
+
+/**
+ * 錨點帳號的 DO SQLite 儲存預算（ADR-0377）：Cloudflare 免費方案每帳號 5 GB 的 **80%**。
+ *
+ * 取**十進位** 4,000,000,000 bytes（≈ 3.73 GiB）：Cloudflare 的「5 GB」不論解讀成 5×10⁹ 還是
+ * 5 GiB，4×10⁹ 都不超過它的 80%，取保守的那個。
+ *
+ * 🔴 為什麼要有：免費方案超過額度是**整個帳號**同類操作一起失敗——所有 DO、主訊息平面一起停。
+ * 天花板乘上 DO 數原本加起來約 10 GiB（兩倍於額度），沒有任何東西守著總量。
+ * `wrangler-vars.test.ts` 依 `wrangler.toml` 算出所有可能 DO 的天花板加總，超過這個數字就變紅。
+ *
+ * 剩下的 20% 留給天花板**不計入**的東西：SQLite 索引與頁面開銷、`ws_subs` 溢位表（ADR-0373）、
+ * DO 的 key-value（車道政策）。天花板只算事件 JSON 的長度。
+ */
+export const ACCOUNT_STORAGE_BUDGET_BYTES = 4_000_000_000;
+
+/** 一顆 DO 的兩個容量天花板（位元組）。 */
+export interface DoCeiling {
+  offlineMaxBytes: number;
+  addressableMaxBytes: number;
+}
+
+/**
+ * DO 的天花板類別（ADR-0377）。由 DO 名決定，與路由同一個事實：
+ * - `strict`：Cinderous 主訊息平面（`global`、`presence`、`shard-0..f`）；滿了**拒收**。
+ * - `public`：共用車道分片 `app-0..7`（名單外的陌生應用、見習保存）；滿了淘汰。
+ * - `lane`：名單上的車道 `app:<id>`；滿了淘汰。
+ * - `file`：名單上、又在 `FILE_LANES` 車道模式下收檔案塊的車道；滿了淘汰。
+ */
+export type CeilingClass = "strict" | "public" | "lane" | "file";
+
+/**
+ * 沒設 `DO_CEILINGS_MIB` 時的天花板——**與 ADR-0377 之前完全相同**（自架站行為不變）。
+ * 錨點以 `wrangler.toml` 的 `DO_CEILINGS_MIB` 覆寫。
+ */
+export const DEFAULT_DO_CEILINGS: Readonly<Record<CeilingClass, DoCeiling>> = {
+  strict: { offlineMaxBytes: DO_OFFLINE_MAX_BYTES, addressableMaxBytes: DO_ADDRESSABLE_MAX_BYTES },
+  public: { offlineMaxBytes: DO_OFFLINE_MAX_BYTES, addressableMaxBytes: DO_ADDRESSABLE_MAX_BYTES },
+  lane: { offlineMaxBytes: DO_OFFLINE_MAX_BYTES, addressableMaxBytes: DO_ADDRESSABLE_MAX_BYTES },
+  file: { offlineMaxBytes: FILE_LANE_OFFLINE_MAX_BYTES, addressableMaxBytes: DO_ADDRESSABLE_MAX_BYTES },
+};
+
+/** `DO_CEILINGS_MIB` 單一數值的上限（MiB）：Cloudflare 單顆 SQLite DO 的實體上限是 10 GB。 */
+export const DO_CEILING_MAX_MIB = 8192;
+
+/** 決定天花板需要的站方設定。 */
+export interface CeilingEnv extends FileLaneEnv {
+  DO_CEILINGS_MIB?: string | undefined;
+}
+
+const CEILING_CLASSES: readonly CeilingClass[] = ["strict", "public", "lane", "file"];
+
+/**
+ * 解析 `DO_CEILINGS_MIB`（ADR-0377）：逗號分隔的 `<對象>=<離線 MiB>/<可尋址 MiB>`。
+ *
+ * 對象可以是**類別**（`strict`／`public`／`lane`／`file`，套用到該類的每一顆 DO），
+ * 或**單顆 DO 名**（`global`、`presence`、`shard-a`、`app-3`、`app:dochost`），後者優先。
+ *
+ * 🔴 設錯的項目**不生效**、列在 `ignored`（宿主啟動時 `console.warn`，預算測試要求它為空）：
+ * 形狀不對、數值不是 1–{@link DO_CEILING_MAX_MIB} 的整數、重複、對象不是路由會建立的 DO、
+ * 或 `app:<id>` 不在 `APP_LANES` 上（不在名單上的車道沒有自己的 DO）。
+ * 不生效＝退回類別值或預設值（預設值比錨點的設定大）——所以設錯**一定要看得見**。
+ */
+export function doCeilings(env: CeilingEnv): {
+  entries: ReadonlyMap<string, DoCeiling>;
+  ignored: string[];
+} {
+  const known = knownLanes(env.APP_LANES);
+  const valid = new Set<string>([...CEILING_CLASSES, ...allDoNames(known)]);
+  const entries = new Map<string, DoCeiling>();
+  const ignored: string[] = [];
+  for (const raw of (env.DO_CEILINGS_MIB ?? "").split(",")) {
+    const item = raw.trim();
+    if (item === "") continue;
+    const m = /^([a-z0-9:._-]+)\s*=\s*(\d+)\s*\/\s*(\d+)$/.exec(item.toLowerCase());
+    const target = m?.[1];
+    const offline = Number(m?.[2]);
+    const addressable = Number(m?.[3]);
+    const inRange = (n: number): boolean => Number.isInteger(n) && n >= 1 && n <= DO_CEILING_MAX_MIB;
+    if (!target || !valid.has(target) || entries.has(target) || !inRange(offline) || !inRange(addressable)) {
+      ignored.push(item);
+      continue;
+    }
+    entries.set(target, { offlineMaxBytes: offline * MIB, addressableMaxBytes: addressable * MIB });
+  }
+  return { entries, ignored };
+}
+
+/** 一顆 DO 屬於哪一類天花板（ADR-0377）。DO 名由 {@link routeForPath} 決定。 */
+export function ceilingClassOf(env: CeilingEnv, doName: string): CeilingClass {
+  if (doName.startsWith("app:")) {
+    const files = filePolicyFor(env, doName.slice("app:".length));
+    // 與 `storeOptions` 換檔案車道天花板的條件相同：車道模式下判定收檔案（帶單檔上限）。
+    return files.accept && files.maxFileMb !== undefined ? "file" : "lane";
+  }
+  if (doName.startsWith(APP_LANE_PREFIX)) return "public";
+  return "strict";
+}
+
+/**
+ * 這顆 DO 的天花板（ADR-0377）：單顆 DO 名的設定 → 類別的設定 → 預設值。
+ * **兩處共用**：`RelayRoom` 組 store 時、預算測試加總時——算的就是真正在執行的數字。
+ */
+export function doCeilingFor(env: CeilingEnv, doName: string): DoCeiling {
+  const { entries } = doCeilings(env);
+  const cls = ceilingClassOf(env, doName);
+  return entries.get(doName) ?? entries.get(cls) ?? DEFAULT_DO_CEILINGS[cls];
+}
+
+/** 最壞加總的一列：一顆 DO。 */
+export interface CeilingRow {
+  doName: string;
+  cls: CeilingClass;
+  ceiling: DoCeiling;
+  /** 離線＋可尋址。 */
+  bytes: number;
+}
+
+/**
+ * 依站方設定，**所有可能 DO** 的天花板加總（ADR-0377）——帳號 DO SQLite 用量的政策上界。
+ *
+ * `laneCostBytes` 是「`APP_LANES` 再加一條車道」要多花的預算（`lane` 類別的天花板）：
+ * 名單上的每條車道都有自己的 DO，所以這個數字會隨名單成長，預算必須把它算進去。
+ */
+export function worstCaseStorage(env: CeilingEnv): {
+  rows: CeilingRow[];
+  totalBytes: number;
+  laneCostBytes: number;
+} {
+  const rows = allDoNames(knownLanes(env.APP_LANES)).map((doName) => {
+    const ceiling = doCeilingFor(env, doName);
+    return {
+      doName,
+      cls: ceilingClassOf(env, doName),
+      ceiling,
+      bytes: ceiling.offlineMaxBytes + ceiling.addressableMaxBytes,
+    };
+  });
+  const { entries } = doCeilings(env);
+  const lane = entries.get("lane") ?? DEFAULT_DO_CEILINGS.lane;
+  return {
+    rows,
+    totalBytes: rows.reduce((sum, r) => sum + r.bytes, 0),
+    laneCostBytes: lane.offlineMaxBytes + lane.addressableMaxBytes,
+  };
+}
 
 /**
  * 站方的已知租戶名單（`APP_LANES`，逗號分隔；ADR-0366 §裁示）。
@@ -436,6 +590,12 @@ export function storeOptions(
    * 「這顆 DO 收檔案」時才給；給了就換成檔案車道的每收件人配額與 DO 天花板。
    */
   maxFileMb?: number,
+  /**
+   * 這顆 DO 的容量天花板（ADR-0377，{@link doCeilingFor}）。給了就取代預設的
+   * {@link DO_OFFLINE_MAX_BYTES}／{@link DO_ADDRESSABLE_MAX_BYTES}／{@link FILE_LANE_OFFLINE_MAX_BYTES}；
+   * 不給＝預設值（自架的 node 宿主、尚不知道 DO 名的時候）。淘汰制與拒收制不因此改變。
+   */
+  ceiling?: DoCeiling,
 ): MessageStoreOptions {
   const configured = ttlSecondsFromDays(maxTtlDaysRaw);
   const publicLane = profile === "app" && !knownLane;
@@ -468,6 +628,12 @@ export function storeOptions(
       ? {
           filePerRecipient: fileLaneChunksPerRecipient(maxFileMb),
           offlineMaxTotalBytes: FILE_LANE_OFFLINE_MAX_BYTES,
+        }
+      : {}),
+    ...(ceiling !== undefined
+      ? {
+          offlineMaxTotalBytes: ceiling.offlineMaxBytes,
+          addressableMaxTotalBytes: ceiling.addressableMaxBytes,
         }
       : {}),
   };

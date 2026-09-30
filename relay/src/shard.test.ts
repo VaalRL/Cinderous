@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  allDoNames,
   APP_LANE_SHARDS,
   appLaneName,
   namedLaneName,
@@ -124,5 +125,34 @@ describe("分片路由計算（ADR-0241）", () => {
         expect(strict).not.toContain(`app-${i}`);
       }
     });
+  });
+});
+
+describe("allDoNames：路由可能建立的每一顆 DO（ADR-0377 帳號儲存預算）", () => {
+  const known = new Set(["lwd", "dochost"]);
+
+  it("顆數＝舊全域＋presence＋16 片＋8 顆共用分片＋名單上每條車道一顆", () => {
+    const names = allDoNames(known);
+    expect(names).toHaveLength(2 + 16 + APP_LANE_SHARDS + known.size);
+    expect(new Set(names).size).toBe(names.length);
+    expect(names).toContain(LEGACY_GLOBAL_NAME);
+    expect(names).toContain(PRESENCE_LAYER_NAME);
+    expect(names).toContain(namedLaneName("dochost"));
+  });
+
+  it("🔴 路由出來的 DO 名一定在清單上——少列一顆，預算就少算一顆", () => {
+    const names = new Set(allDoNames(known));
+    const paths = ["", "/", "/presence", ...Array.from({ length: 16 }, (_, i) => `/s/${i.toString(16)}`)];
+    for (const id of ["lwd", "dochost"]) paths.push(`/app/${id}`);
+    for (let i = 0; i < 2000; i++) paths.push(`/app/lane-${i.toString(36)}`);
+    const seen = new Set<string>();
+    for (const p of paths) {
+      const r = routeForPath(p, known);
+      expect(r, p).toBeDefined();
+      expect(names.has(r!.doName), `${p} → ${r!.doName}`).toBe(true);
+      seen.add(r!.doName);
+    }
+    // 反過來：清單上的每一顆都真的有路徑會打到（不是多算）
+    expect([...names].filter((n) => !seen.has(n))).toEqual([]);
   });
 });
