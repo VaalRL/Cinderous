@@ -124,7 +124,7 @@ describe("Outbox 重連補送與逾時", () => {
   });
 });
 
-describe("依中繼詞元分類（ADR-0377；ADR-0376、SDK ADR 0040）", () => {
+describe("依中繼詞元分類（ADR-0378；ADR-0376、SDK ADR 0040）", () => {
   it("blocked: ceiling: ／ blocked: quota: → retry（中繼滿了：稍後重試、改用其他座）", () => {
     expect(classifyOk(false, "blocked: ceiling: 本站離線留言空間已滿，這則未保存也未轉送；請改用其他中繼或稍後再試")).toBe("retry");
     expect(classifyOk(false, "blocked: quota: 這個作者的可尋址資料總量已達上限")).toBe("retry");

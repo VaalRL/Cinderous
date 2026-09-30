@@ -325,7 +325,7 @@ export type RelayConnector = (
 export type CloseableRelayClient = RelayClient & { close?: () => void };
 
 const RECONNECT_MAX_MS = 15_000;
-/** 記住「冗餘送出的主路由」的上限（ADR-0377）：外送匣同時在途只有幾顆，1024 綽綽有餘 */
+/** 記住「冗餘送出的主路由」的上限（ADR-0378）：外送匣同時在途只有幾顆，1024 綽綽有餘 */
 const OK_ROUTE_MAX = 1024;
 
 /** 正規化 relay URL（trim、去尾斜線）；非 ws(s) 或空值回傳 undefined。 */
@@ -749,7 +749,7 @@ export class RelayChatBackend implements ChatBackend {
   private renderTimer: ReturnType<typeof setInterval> | undefined;
   /** 可靠訊息（kind 1059 DM/群訊/群控）的節流外送匣（ADR-0041）。 */
   private readonly outbox: Outbox;
-  /** 事件 id → 冗餘送出時的主路由 URL（ADR-0377：只有主路由的拒收算數） */
+  /** 事件 id → 冗餘送出時的主路由 URL（ADR-0378：只有主路由的拒收算數） */
   private readonly okRoute = new Map<string, { primary: string | undefined }>();
   private pumpTimer: ReturnType<typeof setInterval> | undefined;
 
@@ -836,7 +836,7 @@ export class RelayChatBackend implements ChatBackend {
     this.requests = storage.loadRequests();
     this.groups = storage.loadGroups();
     this.outbox = new Outbox({
-      // 上一次被回「中繼滿了」（`blocked: ceiling:`／`quota:`）的重送也送到健康的引導座（ADR-0377）
+      // 上一次被回「中繼滿了」（`blocked: ceiling:`／`quota:`）的重送也送到健康的引導座（ADR-0378）
       send: (evt, opts) => this.publishAddressed(evt, opts?.elsewhere === true),
       onDrop: (evt, reason) => {
         // 快照發佈失敗（拒收/重試耗盡）→ 清節流記錄讓 30 分後重試（審查修正 #5）。
@@ -1044,7 +1044,7 @@ export class RelayChatBackend implements ChatBackend {
       client = this.connectorFor(url)(
         {
           onEvent: (_sub, event) => this.onEvent(event, url),
-          // 🔴 外部連線也要處理 OK（ADR-0377）：分片模式下寄給別人的訊息走的正是**對方訊息片**這條連線，
+          // 🔴 外部連線也要處理 OK（ADR-0378）：分片模式下寄給別人的訊息走的正是**對方訊息片**這條連線，
           // 冗餘廣播的引導座、單一 relay 模式的聯絡人 hint 也是。少了這一行，那些 OK（收下或拒收）全部被丟掉，
           // 外送匣等 30 秒後把它當成已送達——拒收的訊息不會變紅，收下的也不會標成「已送中繼」。
           onOk: (id, accepted, message) => this.onRelayOk(url, id, accepted, message),
@@ -1079,7 +1079,7 @@ export class RelayChatBackend implements ChatBackend {
   }
 
   /**
-   * 任何一條連線（home、對方訊息片、引導座、presence）收到的 `OK`（ADR-0041／0058；ADR-0377 起外部連線也走這裡）。
+   * 任何一條連線（home、對方訊息片、引導座、presence）收到的 `OK`（ADR-0041／0058；ADR-0378 起外部連線也走這裡）。
    *
    * 同一顆事件可能送到好幾座（冗餘廣播、「中繼滿了」之後改送引導座）：外送匣以第一個「確認」或「永久拒收」為準，
    * 之後的 `OK` 找不到那一筆就忽略；`markSent` 同理（扇出紀錄只消費一次）。沒有排進外送匣的事件（信令、心跳）直接略過。
@@ -1100,7 +1100,7 @@ export class RelayChatBackend implements ChatBackend {
   }
 
   /**
-   * `redundant`：上一次被回「中繼滿了」（ADR-0377）——除了主路由，也送到健康的引導座（與主路由離線時同一套 ADR-0039 有界冗餘）。
+   * `redundant`：上一次被回「中繼滿了」（ADR-0378）——除了主路由，也送到健康的引導座（與主路由離線時同一套 ADR-0039 有界冗餘）。
    * 收件人在引導座上也掛著收件匣，換一座就收得到。
    */
   private publishAddressed(evt: NostrEvent, redundant = false): void {
@@ -1113,13 +1113,13 @@ export class RelayChatBackend implements ChatBackend {
     const primary = url ? this.poolClient(url) : this.homeClient();
     const seats =
       primaryUrl !== undefined && (redundant || this.relayStates.get(primaryUrl) === "offline") ? this.healthySeats(primaryUrl) : [];
-    // 有冗餘座時先記下主路由（在 publish 之前：記憶體測試網路的 OK 是同步回來的），好讓 onRelayOk 分得出誰的拒收算數（ADR-0377）
+    // 有冗餘座時先記下主路由（在 publish 之前：記憶體測試網路的 OK 是同步回來的），好讓 onRelayOk 分得出誰的拒收算數（ADR-0378）
     if (seats.length > 0) this.rememberRoute(evt.id, primaryUrl);
     (primary ?? this.client).publish(evt); // 一律投入主路由（離線則入其重連佇列）
     for (const seat of seats) seat.publish(evt);
   }
 
-  /** 記下某次冗餘送出的主路由（ADR-0377）；有上限，最舊的先丟（丟了只是退回「每一座的回覆都算」的舊行為）。 */
+  /** 記下某次冗餘送出的主路由（ADR-0378）；有上限，最舊的先丟（丟了只是退回「每一座的回覆都算」的舊行為）。 */
   private rememberRoute(eventId: string, primary: string | undefined): void {
     this.okRoute.delete(eventId);
     this.okRoute.set(eventId, { primary });
@@ -1132,7 +1132,7 @@ export class RelayChatBackend implements ChatBackend {
     const seen = new Set<string>(exclude ? [exclude] : []);
     const urls: string[] = [];
     // 分片模式（ADR-0241）的 home 是**我自己的**訊息片，收件人不在那裡掛收件匣——送過去對方收不到，
-    // 卻會回 OK true 讓訊息被標成「已送中繼」（ADR-0377 讓外部連線處理 OK 之後才看得出來）。所以分片模式不把 home 當冗餘座。
+    // 卻會回 OK true 讓訊息被標成「已送中繼」（ADR-0378 讓外部連線處理 OK 之後才看得出來）。所以分片模式不把 home 當冗餘座。
     if (!this.shardingBase && this.homeUrl && !seen.has(this.homeUrl) && this.relayStates.get(this.homeUrl) !== "offline") {
       urls.push(this.homeUrl);
       seen.add(this.homeUrl);

@@ -13,7 +13,7 @@ import type { NostrEvent } from "./event.js";
 export type OkVerdict = "confirmed" | "retry" | "permanent";
 
 /**
- * 「中繼滿了」的詞元（ADR-0377；ADR-0376、SDK ADR 0040）：`blocked: ceiling: …`（這顆 DO 的空間已滿）、
+ * 「中繼滿了」的詞元（ADR-0378；ADR-0376、SDK ADR 0040）：`blocked: ceiling: …`（這顆 DO 的空間已滿）、
  * `blocked: quota: …`（這位作者的配額已滿）。不是這則事件的錯，稍後重試、或改寄其他座都有機會收下。
  */
 const FULL = /^blocked:\s*(ceiling|quota):/;
@@ -36,7 +36,7 @@ export function classifyOk(accepted: boolean, message: string): OkVerdict {
 }
 
 /**
- * 這個拒收重送時要不要**改用其他座**（ADR-0377）：只有「中繼滿了」（`ceiling`／`quota`）才要——
+ * 這個拒收重送時要不要**改用其他座**（ADR-0378）：只有「中繼滿了」（`ceiling`／`quota`）才要——
  * 換一座就有空間。`rate-limited` 只退避、不換座：限速是對寄件人的，把量平移到別座只會連別座一起撞上限。
  */
 export function okRetryElsewhere(message: string): boolean {
@@ -45,7 +45,7 @@ export function okRetryElsewhere(message: string): boolean {
 
 /** {@link OutboxOptions.send} 的第二個參數：重送時的路由提示。 */
 export interface OutboxSendOptions {
-  /** 上一次被回「中繼滿了」：除了原本的目標，也送到其他健康的座（ADR-0377） */
+  /** 上一次被回「中繼滿了」：除了原本的目標，也送到其他健康的座（ADR-0378） */
   elsewhere: true;
 }
 
@@ -75,7 +75,7 @@ interface Entry {
   status: "queued" | "inflight";
   /** queued：最早可送時間；inflight：送出時間。 */
   at: number;
-  /** 上一次被回「中繼滿了」：重送時改用其他座（ADR-0377） */
+  /** 上一次被回「中繼滿了」：重送時改用其他座（ADR-0378） */
   elsewhere?: boolean;
 }
 
