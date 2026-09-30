@@ -1,3 +1,5 @@
+import { createRequire } from "node:module";
+import type { DatabaseSync as DatabaseSyncType } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import {
   buildAuthEvent,
@@ -7,9 +9,10 @@ import {
   TIMESTAMP_JITTER_SECONDS,
   type NostrEvent,
 } from "@cinderous/core";
-import { MAX_QUERY_BYTES, MessageStore } from "./message-store.js";
+import { MAX_QUERY_BYTES, MessageStore, type MessageStoreOptions, type OfflineStore } from "./message-store.js";
+import { SqlMessageStore } from "./sql-message-store.js";
 import type { RelayFilter } from "./protocol.js";
-import { leadingZeroBits, RelayCore } from "./relay-core.js";
+import { EXPIRED_REJECT, leadingZeroBits, OFFLINE_CEILING_REJECT, RelayCore } from "./relay-core.js";
 import { minePow } from "@cinderous/core";
 import { guardFor } from "./host-config.js";
 
@@ -1286,5 +1289,156 @@ describe("REQ 的位元組預算（ADR-0371 §決策 6）", () => {
     core.connect("c");
     core.handle("c", JSON.stringify(["REQ", "s", { authors: [author] }]));
     expect(seen).toEqual([MAX_QUERY_BYTES]);
+  });
+});
+
+// ADR-0375（SDK ADR 0038 P0-R1）：離線留言存不下時，中繼必須說實話。
+//
+// 修正前 `handleEvent` 呼叫 `store.put()` 卻不看回傳值：嚴格平面（不淘汰）的 DO 天花板滿了之後，
+// 每一則新的私訊都回 `OK true`、照常扇出，然後就不見了——寄件端以為送達，收件端永遠收不到。
+describe("RelayCore — 離線留言存不下要回 OK false（ADR-0375；SDK ADR 0038 P0-R1）", () => {
+  const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as {
+    DatabaseSync: typeof DatabaseSyncType;
+  };
+  const sqlStore = (opts: MessageStoreOptions): OfflineStore => {
+    const db = new DatabaseSync(":memory:");
+    return new SqlMessageStore((query, ...bindings) => {
+      const stmt = db.prepare(query);
+      if (/^\s*select/i.test(query)) return stmt.all(...bindings) as Record<string, unknown>[];
+      stmt.run(...bindings);
+      return [];
+    }, opts);
+  };
+  const stores: [string, (opts: MessageStoreOptions) => OfflineStore][] = [
+    ["MessageStore", (opts) => new MessageStore(opts)],
+    ["SqlMessageStore", sqlStore],
+  ];
+  const NOW = 1_700_000_000;
+  const RECIPIENT = "a".repeat(64);
+  const wrapOf = (extraTags: string[][] = [], size = 3000): NostrEvent =>
+    finalizeEvent(
+      { kind: 1059, created_at: NOW, tags: [["p", RECIPIENT], ...extraTags], content: "x".repeat(size) },
+      generateSecretKey(),
+    );
+  const okOf = (out: ReturnType<RelayCore["handle"]>, id: string) =>
+    out.find((o) => o.to === "sender" && o.message[0] === "OK" && o.message[1] === id)?.message;
+
+  for (const [name, make] of stores) {
+    describe(name, () => {
+      it("🔴 嚴格平面（不淘汰）天花板滿了：回 OK false「blocked: ceiling:」、不扇出；回 OK true 的都真的存下了", () => {
+        const store = make({ offlineMaxTotalBytes: 10_000 });
+        const core = new RelayCore({ store, now: () => NOW });
+        core.connect("sender");
+        core.connect("watcher");
+        core.handle("watcher", REQ("s", { "#p": [RECIPIENT] }));
+
+        const accepted: string[] = [];
+        const rejected: string[] = [];
+        for (let i = 0; i < 5; i++) {
+          const e = wrapOf();
+          const out = core.handle("sender", EVENT(e));
+          const ok = okOf(out, e.id);
+          const fannedOut = out.some((o) => o.to === "watcher");
+          if (ok?.[2] === true) {
+            accepted.push(e.id);
+            expect(fannedOut).toBe(true);
+          } else {
+            rejected.push(e.id);
+            expect(ok).toEqual(["OK", e.id, false, OFFLINE_CEILING_REJECT]);
+            expect(fannedOut).toBe(false);
+          }
+        }
+        // 修正前：五顆都回 OK true，只存了兩顆。
+        expect(accepted.length).toBe(2);
+        expect(rejected.length).toBe(3);
+        const stored = store.query({ "#p": [RECIPIENT] } as RelayFilter, NOW).map((e) => e.id);
+        expect(stored.sort()).toEqual([...accepted].sort());
+      });
+
+      it("拒收訊息是 NIP-01 機器可讀前綴＋英文詞元（ADR 0038 決策 2）", () => {
+        expect(OFFLINE_CEILING_REJECT.startsWith("blocked: ceiling: ")).toBe(true);
+        expect(EXPIRED_REJECT.startsWith("invalid: expired: ")).toBe(true);
+      });
+
+      it("事件自帶的 expiration 已經過了：回 OK false「invalid: expired:」、不扇出、不入庫", () => {
+        const store = make({ offlineMaxTotalBytes: 10_000 });
+        const core = new RelayCore({ store, now: () => NOW });
+        core.connect("sender");
+        core.connect("watcher");
+        core.handle("watcher", REQ("s", { "#p": [RECIPIENT] }));
+        const e = wrapOf([["expiration", String(NOW - 1)]], 10);
+        const out = core.handle("sender", EVENT(e));
+        expect(out).toEqual([{ to: "sender", message: ["OK", e.id, false, EXPIRED_REJECT] }]);
+        expect(store.query({ "#p": [RECIPIENT] } as RelayFilter, NOW - 10)).toEqual([]);
+      });
+
+      it("車道（ceilingEvicts）照舊淘汰最快到期者、收下新的：五顆都是 OK true", () => {
+        const store = make({ offlineMaxTotalBytes: 10_000, ceilingEvicts: true });
+        const core = new RelayCore({ store, now: () => NOW });
+        core.connect("sender");
+        for (let i = 0; i < 5; i++) {
+          const e = wrapOf();
+          expect(okOf(core.handle("sender", EVENT(e)), e.id)?.[2]).toBe(true);
+        }
+      });
+
+      it("每收件人 FIFO 擠掉舊的、收下新的——不是存不下，仍回 OK true", () => {
+        const store = make({ maxPerRecipient: 1 });
+        const core = new RelayCore({ store, now: () => NOW });
+        core.connect("sender");
+        const first = wrapOf([], 10);
+        const second = wrapOf([], 10);
+        expect(okOf(core.handle("sender", EVENT(first)), first.id)?.[2]).toBe(true);
+        expect(okOf(core.handle("sender", EVENT(second)), second.id)?.[2]).toBe(true);
+        expect(store.query({ "#p": [RECIPIENT] } as RelayFilter, NOW).map((e) => e.id)).toEqual([second.id]);
+      });
+    });
+  }
+
+  it("🔴 被拒的事件不記進重放快取：空間騰出來後重送同一顆，是收下而不是「duplicate」", () => {
+    let full = true;
+    const stored: string[] = [];
+    const store: OfflineStore = {
+      put: (e) => {
+        if (full) return false;
+        stored.push(e.id);
+        return true;
+      },
+      putAddressable: () => true,
+      query: () => [],
+      prune: () => {},
+      vanish: () => 0,
+    };
+    const core = new RelayCore({ store, now: () => NOW, replayWindowSec: 3600 });
+    core.connect("sender");
+    const e = wrapOf([], 10);
+    expect(okOf(core.handle("sender", EVENT(e)), e.id)).toEqual(["OK", e.id, false, OFFLINE_CEILING_REJECT]);
+    full = false;
+    expect(okOf(core.handle("sender", EVENT(e)), e.id)).toEqual(["OK", e.id, true, ""]);
+    expect(stored).toEqual([e.id]);
+    // 收下之後才是真的重複。
+    expect(okOf(core.handle("sender", EVENT(e)), e.id)?.[3]).toContain("duplicate");
+  });
+
+  it("可尋址被拒同樣不記進重放快取（拒收訊息不變）", () => {
+    let accept = false;
+    const store: OfflineStore = {
+      put: () => true,
+      putAddressable: () => accept,
+      query: () => [],
+      prune: () => {},
+      vanish: () => 0,
+    };
+    const core = new RelayCore({ store, now: () => NOW, replayWindowSec: 3600 });
+    core.connect("sender");
+    const e = finalizeEvent({ kind: 30078, created_at: NOW, tags: [["d", "x"]], content: "" }, generateSecretKey());
+    expect(okOf(core.handle("sender", EVENT(e)), e.id)).toEqual([
+      "OK",
+      e.id,
+      false,
+      "blocked: 取代事件遭拒（配額/大小/較舊）",
+    ]);
+    accept = true;
+    expect(okOf(core.handle("sender", EVENT(e)), e.id)?.[2]).toBe(true);
   });
 });
