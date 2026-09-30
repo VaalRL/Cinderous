@@ -13,21 +13,48 @@ import type { NostrEvent } from "./event.js";
 export type OkVerdict = "confirmed" | "retry" | "permanent";
 
 /**
- * 依 NIP-01 OK 機器可讀前綴分類：
+ * 「中繼滿了」的詞元（ADR-0377；ADR-0376、SDK ADR 0040）：`blocked: ceiling: …`（這顆 DO 的空間已滿）、
+ * `blocked: quota: …`（這位作者的配額已滿）。不是這則事件的錯，稍後重試、或改寄其他座都有機會收下。
+ */
+const FULL = /^blocked:\s*(ceiling|quota):/;
+
+/**
+ * 依 NIP-01 OK 機器可讀前綴（與 Cinderous 中繼的詞元）分類：
  * - accepted 或 `duplicate:` → 已確認（成功）。
+ * - `blocked: ceiling:`／`blocked: quota:` → 暫時性（中繼滿了），退避重試並改用其他座（{@link okRetryElsewhere}）。
  * - `rate-limited`/`error`/未知 → 暫時性，退避重試。
- * - `blocked`/`invalid`/`pow`/`restricted`/`mute` → 永久性，放棄並回報。
+ * - 其他 `blocked`/`invalid`/`pow`/`restricted`/`mute` → 永久性，放棄並回報。
+ *
+ * 🔴 詞元只加在前綴**後面**（ADR-0376）：沒有詞元的舊中繼與第三方中繼，判定與 v0.0.18 完全相同。
  */
 export function classifyOk(accepted: boolean, message: string): OkVerdict {
   const m = message.trim().toLowerCase();
   if (accepted || m.startsWith("duplicate")) return "confirmed";
+  if (FULL.test(m)) return "retry";
   if (/^(blocked|invalid|pow|restricted|mute)\b/.test(m)) return "permanent";
   return "retry";
 }
 
+/**
+ * 這個拒收重送時要不要**改用其他座**（ADR-0377）：只有「中繼滿了」（`ceiling`／`quota`）才要——
+ * 換一座就有空間。`rate-limited` 只退避、不換座：限速是對寄件人的，把量平移到別座只會連別座一起撞上限。
+ */
+export function okRetryElsewhere(message: string): boolean {
+  return FULL.test(message.trim().toLowerCase());
+}
+
+/** {@link OutboxOptions.send} 的第二個參數：重送時的路由提示。 */
+export interface OutboxSendOptions {
+  /** 上一次被回「中繼滿了」：除了原本的目標，也送到其他健康的座（ADR-0377） */
+  elsewhere: true;
+}
+
 export interface OutboxOptions {
-  /** 實際送出（路由/多座發布由呼叫端封裝於此）。 */
-  send: (event: NostrEvent) => void;
+  /**
+   * 實際送出（路由/多座發布由呼叫端封裝於此）。上一次被回「中繼滿了」的重送會帶 `{ elsewhere: true }`，
+   * 其他情況只有一個參數（與 ADR-0041 相同）。
+   */
+  send: (event: NostrEvent, options?: OutboxSendOptions) => void;
   /** 永久失敗或超過重試上限時回報（供 UI 呈現「未送達」）。 */
   onDrop?: (event: NostrEvent, reason: string) => void;
   /** 同時在途（未確認）上限；節流的主要旋鈕。預設 4。 */
@@ -48,13 +75,15 @@ interface Entry {
   status: "queued" | "inflight";
   /** queued：最早可送時間；inflight：送出時間。 */
   at: number;
+  /** 上一次被回「中繼滿了」：重送時改用其他座（ADR-0377） */
+  elsewhere?: boolean;
 }
 
 /** 發送外送匣：enqueue → pump（節流送出）→ onOk（確認/重試）→ onReconnect（補送）。 */
 export class Outbox {
   private readonly entries = new Map<string, Entry>();
   private readonly opts: {
-    send: (event: NostrEvent) => void;
+    send: (event: NostrEvent, options?: OutboxSendOptions) => void;
     onDrop?: ((event: NostrEvent, reason: string) => void) | undefined;
     maxInflight: number;
     maxRetries: number;
@@ -108,7 +137,8 @@ export class Outbox {
       e.status = "inflight";
       e.at = now;
       inflight++;
-      this.opts.send(e.event);
+      if (e.elsewhere) this.opts.send(e.event, { elsewhere: true });
+      else this.opts.send(e.event);
     }
   }
 
@@ -134,6 +164,7 @@ export class Outbox {
       return;
     }
     e.status = "queued";
+    e.elsewhere = okRetryElsewhere(message);
     e.at = this.opts.now() + this.opts.backoffBaseMs * 2 ** (e.attempts - 1);
   }
 
