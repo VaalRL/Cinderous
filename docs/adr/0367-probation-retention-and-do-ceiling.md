@@ -170,3 +170,9 @@ N 秒後一起交件。時間是所有人都有無限多、且同時流逝的資
 NIP-11 的 `retention` 與新增的 `cinder_addressable_ttl_sec` 直接問 `storeOptions`
 拿值——兩邊各算各的遲早會出現「文件說 7 天、實際存 2 小時」，而那種謊言查起來最貴。
 ⚠ 可尋址事件的壽命**原本完全沒有揭露過**（客戶端只能猜 30 天），這次一併補上。
+
+### 五、補記（2026-09-30，ADR-0375）：離線留言那一側的「拒收」原本回的是 `OK true`
+
+§決策 2 的「嚴格平面只拒收、滿了回可診斷的 `OK false`」，可尋址那一側做到了，**離線留言沒有**：`RelayCore` 呼叫 `store.put()` 卻不看回傳值，
+天花板滿了之後每一則新留言都回 `OK true`、照常扇出，然後不見（`wrangler dev` 實測：40 顆全回 `OK true`、只存 34 顆）。
+修正與拒收訊息（`blocked: ceiling: …`、已過期 `invalid: expired: …`，都不扇出）見 [ADR-0375](./0375-offline-store-rejection-says-ok-false.md)；本 ADR 的決策內容不變。

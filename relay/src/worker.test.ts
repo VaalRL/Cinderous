@@ -21,7 +21,7 @@ import {
   PUBLIC_LANE_RETENTION_SECONDS,
 } from "./host-config.js";
 import { namedLaneName } from "./shard.js";
-import { leadingZeroBits } from "./relay-core.js";
+import { leadingZeroBits, OFFLINE_CEILING_REJECT } from "./relay-core.js";
 
 const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as {
   DatabaseSync: typeof DatabaseSyncType;
@@ -1629,4 +1629,50 @@ describe("檔案車道（FILE_LANES，ADR-0371）", () => {
       expect(d.cinder_file_chunks_per_recipient).toBeUndefined();
     });
   });
+});
+
+describe("嚴格平面離線天花板滿了：真的回 OK false、不扇出（ADR-0375；SDK ADR 0038 P0-R1，宿主層）", () => {
+  it("🔴 以真正的 RelayRoom 與 128 MB 天花板：存不下的回「blocked: ceiling:」，回 OK true 的都查得到", async () => {
+    const state = new FakeState();
+    const room = newRoom(state);
+
+    // 收件人之一在線、訂閱自己的收件匣——被拒的那幾顆不應該即時送到他手上。
+    const watcherSk = generateSecretKey();
+    const watcherPk = getPublicKey(watcherSk);
+    const watcher = await open(room, state);
+    authenticate(room, watcher, watcherSk);
+    send(room, watcher, ["REQ", "inbox", { kinds: [1059], "#p": [watcherPk] }]);
+
+    const sender = await open(room, state);
+    authenticate(room, sender, generateSecretKey());
+
+    // 每顆約 240 KB、16 位收件人（上限）＝每顆在天花板裡算約 3.8 MB——三十幾顆就滿。
+    const recipients = [watcherPk, ...Array.from({ length: 15 }, () => getPublicKey(generateSecretKey()))];
+    const accepted: string[] = [];
+    let rejected: [string, string, boolean, string] | undefined;
+    for (let i = 0; i < 40 && !rejected; i++) {
+      const e = finalizeEvent(
+        { kind: 1059, created_at: nowSec(), tags: recipients.map((p) => ["p", p]), content: "x".repeat(240_000) },
+        generateSecretKey(),
+      );
+      const out = send(room, sender, ["EVENT", e]) as [string, string, boolean, string][];
+      const ok = out.find((m) => m[0] === "OK" && m[1] === e.id);
+      const delivered = (watcher.drain() as [string, string, NostrEvent][]).some((m) => m[0] === "EVENT" && m[2]?.id === e.id);
+      if (ok?.[2] === true) {
+        accepted.push(e.id);
+        expect(delivered).toBe(true);
+      } else {
+        rejected = ok;
+        expect(delivered).toBe(false);
+      }
+    }
+    expect(accepted.length).toBeGreaterThan(30);
+    expect(rejected?.[2]).toBe(false);
+    expect(rejected?.[3]).toBe(OFFLINE_CEILING_REJECT);
+
+    // 回 OK true 的每一顆都真的在庫裡（修正前：天花板之後的全部回 OK true 卻不在）。
+    const inbox = send(room, watcher, ["REQ", "check", { kinds: [1059], "#p": [watcherPk], limit: 1000 }]) as [string, string, NostrEvent][];
+    const storedIds = inbox.filter((m) => m[0] === "EVENT").map((m) => m[2].id);
+    expect(storedIds.sort()).toEqual([...accepted].sort());
+  }, 60_000);
 });

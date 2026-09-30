@@ -43,9 +43,29 @@ const MAX_TAGS = 128;
  * 「一則事件 → 15,000 列 INSERT ＋ 15,000 輪 enforceCap」的放大倍率壓回個位數。
  */
 const MAX_P_TAGS = 16;
+
+/**
+ * 離線留言存不下時的拒收訊息（ADR-0375；SDK ADR 0038 P0-R1；ADR-0367 §決策 2 的承諾）。
+ *
+ * 格式是 NIP-01 的機器可讀前綴＋英文詞元＋給人看的說明（SDK ADR 0038 決策 2）：外站只看得懂 `blocked`，
+ * 我們的客戶端多拿一層 `ceiling`。它代表「這顆 DO 的離線留言總量已達天花板，而這個平面不淘汰」——
+ * 這一則**沒有保存、也沒有即時轉送**給任何人，換一座中繼或稍後再送都有用。
+ *
+ * 🔴 這句是中繼與客戶端之間的契約，與 SDK 中繼（`@cinderous/client/relay` v0.31.1）**逐字相同**——
+ * PR #9 把錨點切到 SDK 中繼時，客戶端看到的不變。改字要兩邊一起改。
+ */
+export const OFFLINE_CEILING_REJECT = "blocked: ceiling: 本站離線留言空間已滿，這則未保存也未轉送；請改用其他中繼或稍後再試";
+
+/**
+ * 事件自帶的 NIP-40 `expiration` 已經過了（ADR-0375）。NIP-40：中繼 SHOULD 丟棄已過期的
+ * 發布——以前是默默丟掉卻回 `OK true`；現在照實說，而且同樣不轉送。重送同一顆沒有用（它永遠是過期的）。
+ * 與 SDK 中繼逐字相同。
+ */
+export const EXPIRED_REJECT = "invalid: expired: 事件已過期（NIP-40），未保存也未轉送";
 import {
   FILE_EVENT_MAX_BYTES,
   FILE_WRAP_KIND,
+  getExpiration,
   isAuthorOnlyKind,
   MAX_QUERY_BYTES,
   isReplaceableOrAddressable,
@@ -593,13 +613,22 @@ export class RelayCore {
     // 舊的 `maxClockSkewSec` 同時兼具「時鐘窗」與「去重窗」兩種語意——沿用它作為
     // `replayWindowSec` 的預設值，既有呼叫端行為不變。
     const replayWindow = this.opts.replayWindowSec ?? this.opts.maxClockSkewSec;
+    let markedSeen = false;
     if (replayWindow !== undefined && Math.abs(event.created_at - now) <= replayWindow) {
       if (this.seenIds.has(event.id)) {
         return [{ to: connId, message: ["OK", event.id, false, "duplicate: 事件重複"] }];
       }
       this.seenIds.set(event.id, event.created_at);
+      markedSeen = true;
       if (this.seenIds.size > 4096) this.pruneSeen(now - replayWindow);
     }
+    // 🔴 以下每一種拒收都要把這顆從重放快取拿掉（ADR-0375）：`duplicate` 的意思是
+    // 「本站已經有這顆」。沒收下卻記成見過，客戶端之後重送同一顆（天花板騰出空間、限速窗過了）
+    // 就只會拿到 `duplicate`——而 NIP-01 的客戶端會把它當成已送達，又是一次靜默遺失。
+    const reject = (reason: string): Outbound[] => {
+      if (markedSeen) this.seenIds.delete(event.id);
+      return [{ to: connId, message: ["OK", event.id, false, reason] }];
+    };
 
     // 速率限制（ADR-0235 H1）：以**認證連線的身分**計數，不是事件作者。
     //
@@ -610,24 +639,26 @@ export class RelayCore {
     const perMinute = this.opts.maxEventsPerMinute;
     const rateKey = this.authState.get(connId)?.pubkey ?? event.pubkey;
     if (perMinute !== undefined && !this.allowRate(rateKey, now, perMinute)) {
-      return [{ to: connId, message: ["OK", event.id, false, "rate-limited: 發送過於頻繁，請稍後再試"] }];
+      return reject("rate-limited: 發送過於頻繁，請稍後再試");
     }
 
     // NIP-62 清除請求（ADR-0260）：這是**命令**不是留言——不寫庫、不扇出，執行完就回 OK。
     // 位置在速率限制**之後**（清除是昂貴操作，同樣要受速率桶約束）、寫庫之前（kind 62 落在
     // 一般持久化區間，不攔就會被當成留言存起來）。
     if (event.kind === VANISH_KIND) {
-      return this.handleVanish(connId, event);
+      const result = this.handleVanish(connId, event);
+      if (markedSeen && result[0]?.message[2] === false) this.seenIds.delete(event.id);
+      return result;
     }
 
     // 檔案塊（FILE_WRAP=1060，ADR-0162）：企業限定——`acceptFileEvents` 未啟用整類拒收
     //（公共站零儲存風險）；啟用後仍有單顆大小 sanity 上限。
     if (event.kind === FILE_WRAP_KIND) {
       if (!this.opts.acceptFileEvents) {
-        return [{ to: connId, message: ["OK", event.id, false, "blocked: 檔案事件未啟用（MAX_FILE_MB）"] }];
+        return reject("blocked: 檔案事件未啟用（MAX_FILE_MB）");
       }
       if (JSON.stringify(event).length > FILE_EVENT_MAX_BYTES) {
-        return [{ to: connId, message: ["OK", event.id, false, "blocked: 檔案塊過大"] }];
+        return reject("blocked: 檔案塊過大");
       }
     }
 
@@ -635,17 +666,24 @@ export class RelayCore {
     if (!isEphemeral(event.kind)) {
       const minPow = this.opts.minPowDifficulty ?? 0;
       if (minPow > 0 && leadingZeroBits(event.id) < minPow) {
-        return [{ to: connId, message: ["OK", event.id, false, `pow: 需要難度 ${minPow}`] }];
+        return reject(`pow: 需要難度 ${minPow}`);
       }
       if (isReplaceableOrAddressable(event.kind)) {
         // 取代語意（ADR-0035 可取代／0071 可尋址）：每 (kind, pubkey, d) 只留最新一顆。
         // 沒有這條，relay 清單（10037）這類事件會不斷累積——cron 每小時發一次，
         // 客戶端每次連線就得下載上百份重複。遭拒＝OK false（不扇出）。
         if (this.opts.store && !this.opts.store.putAddressable(event, this.now())) {
-          return [{ to: connId, message: ["OK", event.id, false, "blocked: 取代事件遭拒（配額/大小/較舊）"] }];
+          return reject("blocked: 取代事件遭拒（配額/大小/較舊）");
         }
-      } else {
-        this.opts.store?.put(event, this.now());
+      } else if (this.opts.store) {
+        // 離線留言（ADR-0375）：`put()` 回 false 只有兩種原因——事件自帶的 `expiration`
+        // 已經過了，或這顆 DO 的離線天花板滿了而這個平面不淘汰（嚴格平面，ADR-0367 §決策 2）。
+        // 兩種都回 `OK false`、**不扇出**：NIP-01 的 `false` 就是「沒收下」，轉送一顆沒收下的事件會讓
+        // 在線收件人收到、離線的裝置收不到，寄件端再依 `false` 重送時在線的那台還會收到第二次。
+        // 每收件人 FIFO 與車道淘汰是「收下新的、刪掉舊的」，`put()` 回 true，不走這裡。
+        const expiration = getExpiration(event);
+        if (expiration !== undefined && expiration <= now) return reject(EXPIRED_REJECT);
+        if (!this.opts.store.put(event, this.now())) return reject(OFFLINE_CEILING_REJECT);
       }
     }
 

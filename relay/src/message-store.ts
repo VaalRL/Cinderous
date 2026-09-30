@@ -200,7 +200,11 @@ export const ADDRESSABLE_TTL_SECONDS = 30 * 86_400;
  * Worker 端 DO SQLite 版（`SqlMessageStore`）皆實作，`RelayCore` 依此介面接。
  */
 export interface OfflineStore {
-  /** 寫入一筆留言；已過期則拒絕並回 false。 */
+  /**
+   * 寫入一筆留言。回 false＝**沒有存下**：已過期，或這顆 DO 的離線天花板滿了而不淘汰
+   *（`offlineMaxTotalBytes` 且沒開 `ceilingEvicts`）。`RelayCore` 據此回 `OK false`、不扇出（ADR-0375）。
+   * 每收件人 FIFO 與天花板淘汰是「收下新的、刪掉舊的」，回 true。
+   */
   put(event: NostrEvent, nowSec: number): boolean;
   /**
    * 寫入可尋址事件（ADR-0071）：以 (kind, pubkey, d) 取代舊顆、只留 created_at 最新；
