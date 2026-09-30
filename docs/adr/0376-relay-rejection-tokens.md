@@ -73,4 +73,4 @@ SDK 中繼 v0.32.0 已經做了同一件事（SDK ADR 0040）；本 ADR 把它�
 - 後續行動 / 待辦：
   - **部署**兩座錨點（`npx wrangler@4 deploy`，換帳號記得 `CLOUDFLARE_ACCOUNT_ID`）——須使用者另行同意；可與 ADR-0375 一起部署。
   - PR #9 rebase 時，錨點的 `reject-messages.ts` 由 SDK 提供，逐字相同。
-  - App 端依詞元分類（`ceiling`／`rate-limited` 稍後重試或換座）見 ADR-0377。
+  - App 端依詞元分類（`ceiling`／`rate-limited` 稍後重試或換座）見 ADR-0378。
