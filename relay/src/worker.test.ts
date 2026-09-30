@@ -1678,3 +1678,89 @@ describe("嚴格平面離線天花板滿了：真的回 OK false、不扇出（A
     expect(storedIds.sort()).toEqual([...accepted].sort());
   }, 60_000);
 });
+
+describe("每顆 DO 的天花板依 DO_CEILINGS_MIB（ADR-0377，宿主層）", () => {
+  const ENV = { DO_CEILINGS_MIB: "strict=1/1,shard-a=4/4" } as unknown as Env;
+
+  const openAt = async (room: RelayRoom, state: FakeState, path: string): Promise<FakeWs> => {
+    const before = state.sockets.length;
+    await room.fetch(new Request(`https://${HOST}${path}`));
+    return state.sockets[before]!;
+  };
+
+  /** 一顆約 240 KB 的 Gift Wrap，送給一位收件人；回 OK 的布林值。 */
+  const sendBig = (room: RelayRoom, ws: FakeWs): boolean => {
+    const e = finalizeEvent(
+      { kind: 1059, created_at: nowSec(), tags: [["p", "b".repeat(64)]], content: "x".repeat(240_000) },
+      generateSecretKey(),
+    );
+    const out = send(room, ws, ["EVENT", e]) as [string, string, boolean, string][];
+    return out.find((m) => m[0] === "OK" && m[1] === e.id)?.[2] === true;
+  };
+
+  /** 連續送到被拒為止，回傳收下幾顆（最多 30）。 */
+  const acceptedUntilFull = (room: RelayRoom, ws: FakeWs): number => {
+    let n = 0;
+    while (n < 30 && sendBig(room, ws)) n++;
+    return n;
+  };
+
+  const connect = async (path: string, env: Env = ENV) => {
+    const state = new FakeState();
+    const room = newRoom(state, env);
+    const ws = await openAt(room, state, path);
+    authenticate(room, ws, generateSecretKey());
+    ws.drain();
+    return { state, room, ws };
+  };
+
+  it("類別值：嚴格平面 1 MiB——第 5 顆 240 KB 被拒（拒收制不變）", async () => {
+    const { room, ws } = await connect("/s/b");
+    expect(acceptedUntilFull(room, ws)).toBe(4);
+  });
+
+  it("單顆 DO 名優先：shard-a 4 MiB", async () => {
+    const { room, ws } = await connect("/s/a");
+    expect(acceptedUntilFull(room, ws)).toBe(17);
+  });
+
+  it("沒設 DO_CEILINGS_MIB：與過去相同（128 MiB，30 顆都收）", async () => {
+    const { room, ws } = await connect("/s/b", {} as Env);
+    expect(acceptedUntilFull(room, ws)).toBe(30);
+  });
+
+  it("🔴 DO 名跨休眠存活：喚醒後沒有 fetch，天花板還是這顆 DO 自己的", async () => {
+    const { state, room, ws } = await connect("/s/b");
+    expect(sendBig(room, ws)).toBe(true);
+    expect(state.kv.get("cinder:do-name")).toBe("shard-b");
+    const woke = newRoom(state, ENV); // 記憶體清空、storage 還在
+    await new Promise((r) => setTimeout(r, 0)); // 讓建構子裡的 storage 還原跑完
+    // 已經存了 1 顆，再收 3 顆就滿（若退回預設 128 MiB 會一直收）
+    expect(acceptedUntilFull(woke, ws)).toBe(3);
+  });
+
+  it("升級前就釘住政策的 DO（storage 裡沒有 DO 名）：下一次連線補記並換成自己的天花板，不回 409", async () => {
+    const state = new FakeState();
+    state.kv.set("cinder:lane-profile", "strict");
+    state.kv.set("cinder:lane-known", false);
+    const room = newRoom(state, ENV);
+    await new Promise((r) => setTimeout(r, 0));
+    const ws = await openAt(room, state, "/s/b");
+    expect(ws).toBeDefined();
+    expect(state.kv.get("cinder:do-name")).toBe("shard-b");
+    authenticate(room, ws, generateSecretKey());
+    ws.drain();
+    expect(acceptedUntilFull(room, ws)).toBe(4);
+  });
+
+  it("車道淘汰制不變：共用分片滿了淘汰最舊的、照樣回 OK true", async () => {
+    const env = { DO_CEILINGS_MIB: "public=1/1" } as unknown as Env;
+    const state = new FakeState();
+    const room = newRoom(state, env);
+    const ws = await openAt(room, state, "/app/stranger");
+    ws.drain();
+    for (let i = 0; i < 8; i++) expect(sendBig(room, ws)).toBe(true);
+    const bytes = Number(state.storage.sql.exec("SELECT COALESCE(SUM(bytes), 0) AS n FROM offline_msgs").toArray()[0]!.n);
+    expect(bytes).toBeLessThanOrEqual(1024 * 1024);
+  });
+});
