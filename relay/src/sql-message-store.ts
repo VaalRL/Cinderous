@@ -5,6 +5,7 @@ import {
   ADDRESSABLE_PUT_OK,
   addressableRejected,
   type AddressablePutResult,
+  type OfflinePutResult,
   ADDRESSABLE_MAX_PER_AUTHOR,
   ADDRESSABLE_TTL_SECONDS,
   DEFAULT_FILE_PER_RECIPIENT,
@@ -22,6 +23,18 @@ import {
   shouldReplace,
 } from "./message-store.js";
 import type { RelayFilter } from "./protocol.js";
+import {
+  BORROW_TTL_SECONDS,
+  borrowedExpiration,
+  borrowPerKey,
+  decideCapacity,
+  DROPPED_RECIPIENTS_MAX,
+  type DroppedSummary,
+  mergeDropped,
+  nearFullGrade,
+  overflowBand,
+  pickExcess,
+} from "./capacity.js";
 
 /**
  * 最小同步 SQL 執行介面（ADR-0056）。產線包 Durable Object 的 `ctx.storage.sql.exec()`
@@ -191,6 +204,37 @@ export class SqlMessageStore implements OfflineStore {
     // 讓這條 UPDATE 在每次喚醒時都不必掃全表。
     this.sql(`CREATE INDEX IF NOT EXISTS idx_offline_bytes_missing ON offline_msgs(id) WHERE bytes IS NULL`);
     this.sql(`UPDATE offline_msgs SET bytes = LENGTH(json) WHERE bytes IS NULL`);
+    // SDK ADR 0042：溢位帶的借用標記與丟棄計數。全部是「加欄位（有預設值）／加索引／加表」——
+    // 舊版程式（Cinderous main、SDK v0.33）打開同一顆 DO 照常讀寫：它的 INSERT 不帶 `borrowed`，得到預設 0；
+    // 新表它不認得、不碰。借用列的到期時間本來就寫在 `expiration`（2 小時），回滾後照樣會被 prune 收走。
+    for (const ddl of [
+      `ALTER TABLE offline_msgs ADD COLUMN borrowed INTEGER NOT NULL DEFAULT 0`,
+      `ALTER TABLE addressable ADD COLUMN borrowed INTEGER NOT NULL DEFAULT 0`,
+    ]) {
+      try {
+        this.sql(ddl);
+      } catch {
+        /* 欄位已存在 */
+      }
+    }
+    // 部分索引：只收借用列（通常是零列）⇒ 正常寫入不多寫任何索引項。借用量、借用列淘汰、借用到期的丟棄計數都只讀它。
+    // 欄位要涵蓋那幾條查詢（recipient、pubkey、expiration、bytes、created_at）：不回大表讀排在 json 後面的欄位。
+    this.sql(
+      `CREATE INDEX IF NOT EXISTS idx_offline_borrowed ON offline_msgs(recipient, pubkey, expiration, bytes, created_at) WHERE borrowed = 1`,
+    );
+    this.sql(`CREATE INDEX IF NOT EXISTS idx_addressable_borrowed ON addressable(pubkey, expiration) WHERE borrowed = 1`);
+    // 每位收件人的丟棄計數與水位線（`mark`＝上次讀收件匣時的 offline_msgs 最大 rowid）。
+    this.sql(
+      `CREATE TABLE IF NOT EXISTS inbox_drops (
+        recipient TEXT PRIMARY KEY,
+        count INTEGER NOT NULL DEFAULT 0,
+        since INTEGER,
+        until INTEGER,
+        mark INTEGER NOT NULL DEFAULT 0,
+        updated_at INTEGER NOT NULL
+      )`,
+    );
+    this.sql(`CREATE INDEX IF NOT EXISTS idx_inbox_drops_updated ON inbox_drops(updated_at)`);
   }
 
   /**
@@ -204,11 +248,28 @@ export class SqlMessageStore implements OfflineStore {
   private offlineUsed: number | undefined;
   /** 每個（收件人, 桶）目前的列數（快取，理由同上）。鍵見 {@link bucketKey}。 */
   private readonly bucketCounts = new Map<string, number>();
+  /** 借用列的總量（快取；SDK ADR 0042）。只在天花板滿了才用得到，從部分索引算、很便宜。 */
+  private offlineBorrowed: number | undefined;
+  /**
+   * 每個 key（收件人；沒有收件人的列＝作者）的**正常列**用量（快取；SDK ADR 0042 保底份額）。
+   * 只有設了保底、而且天花板滿了才建（一次掃過分桶索引），之後寫入時加、刪除時減或重算那一個 key。
+   */
+  private ownerNormal: Map<string, number> | undefined;
+  /** 丟棄計數表的列數（快取；上限 `DROPPED_RECIPIENTS_MAX`）。 */
+  private dropRows: number | undefined;
+  /** 誰正在線上收自己的收件匣（`RelayCore` 設定；SDK ADR 0042）。 */
+  private inboxProbe: (recipient: string) => boolean = () => false;
 
   /** 作廢所有快取（下次用到時從索引重算）。 */
   private invalidateUsage(): void {
     this.offlineUsed = undefined;
+    this.offlineBorrowed = undefined;
+    this.ownerNormal = undefined;
     this.bucketCounts.clear();
+  }
+
+  setInboxProbe(probe: (recipient: string) => boolean): void {
+    this.inboxProbe = probe;
   }
 
   private usedOfflineBytes(): number {
@@ -219,9 +280,76 @@ export class SqlMessageStore implements OfflineStore {
     return this.offlineUsed;
   }
 
+  /** 借用列的總量（部分索引 `idx_offline_borrowed`，只掃借用列）。 */
+  private borrowedOfflineBytes(): number {
+    if (this.offlineBorrowed === undefined) {
+      this.offlineBorrowed =
+        Number(this.sql(`SELECT COALESCE(SUM(bytes), 0) AS n FROM offline_msgs WHERE borrowed = 1`)[0]?.n ?? 0) || 0;
+    }
+    return this.offlineBorrowed;
+  }
+
+  /** 某個 key 的借用量（部分索引）。 */
+  private ownerBorrowedBytes(owner: string): number {
+    return (
+      Number(
+        this.sql(
+          `SELECT COALESCE(SUM(bytes), 0) AS n FROM offline_msgs
+           WHERE borrowed = 1 AND (recipient = ? OR (recipient = '' AND pubkey = ?))`,
+          owner,
+          owner,
+        )[0]?.n ?? 0,
+      ) || 0
+    );
+  }
+
+  /**
+   * 每個 key 的正常列用量（SDK ADR 0042）。
+   *
+   * 🔴 刻意不在大表上讀 `borrowed` 欄：它是 `ADD COLUMN` 加的、排在 json 後面，檔案塊的 json 在溢位頁上，
+   * 讀它要把整串溢位頁走完（Cinderous ADR-0371 §決策 5 的教訓）。所以用「分桶索引上的總量 − 部分索引上的借用量」。
+   */
+  private ownerNormalUsage(): Map<string, number> {
+    if (this.ownerNormal !== undefined) return this.ownerNormal;
+    const usage = new Map<string, number>();
+    const add = (rows: Record<string, unknown>[], sign: number): void => {
+      for (const row of rows) {
+        const owner = String(row.o);
+        usage.set(owner, (usage.get(owner) ?? 0) + sign * (Number(row.n ?? 0) || 0));
+      }
+    };
+    add(this.sql(`SELECT recipient AS o, SUM(bytes) AS n FROM offline_msgs WHERE recipient != '' GROUP BY recipient`), 1);
+    add(this.sql(`SELECT pubkey AS o, SUM(bytes) AS n FROM offline_msgs WHERE recipient = '' GROUP BY pubkey`), 1);
+    add(
+      this.sql(
+        `SELECT CASE WHEN recipient = '' THEN pubkey ELSE recipient END AS o, SUM(bytes) AS n
+         FROM offline_msgs WHERE borrowed = 1 GROUP BY o`,
+      ),
+      -1,
+    );
+    this.ownerNormal = usage;
+    return usage;
+  }
+
+  /** 重算某一個 key 的正常列用量（FIFO 刪了它的列之後；只有快取存在時才需要）。 */
+  private refreshOwner(owner: string): void {
+    if (this.ownerNormal === undefined) return;
+    const n = (q: string): number => Number(this.sql(q, owner, owner)[0]?.n ?? 0) || 0;
+    const total = n(`SELECT COALESCE(SUM(bytes), 0) AS n FROM offline_msgs WHERE recipient = ? OR (recipient = '' AND pubkey = ?)`);
+    const borrowed = n(
+      `SELECT COALESCE(SUM(bytes), 0) AS n FROM offline_msgs WHERE borrowed = 1 AND (recipient = ? OR (recipient = '' AND pubkey = ?))`,
+    );
+    this.ownerNormal.set(owner, total - borrowed);
+  }
+
   put(event: NostrEvent, nowSec: number): boolean {
+    return this.putResult(event, nowSec).ok;
+  }
+
+  /** 同 {@link put}，說出結果的細節（SDK ADR 0042）。行為與記憶體版對齊。 */
+  putResult(event: NostrEvent, nowSec: number): OfflinePutResult {
     const exp = getExpiration(event);
-    if (exp !== undefined && exp <= nowSec) return false;
+    if (exp !== undefined && exp <= nowSec) return { ok: false, reason: "expired" };
     // ADR-0065：一律存「有效到期時間」（無標籤給預設 TTL、超長標籤截到上限）——每列壽命必有界。
     const effExp = effectiveExpiration(event, nowSec, this.opts.maxTtlSeconds);
     const recipients = recipientsOf(event);
@@ -234,24 +362,37 @@ export class SqlMessageStore implements OfflineStore {
       this.sql(`SELECT recipient FROM offline_msgs WHERE id = ?`, event.id).map((r) => r.recipient as string),
     );
     const fresh = targets.filter((r) => !present.has(r));
-    if (fresh.length === 0) return true;
-    // 天花板照「列」算：每位收件人各一列（無 `p` 者一列，`recipient = ''`）。
-    if (!this.fitsOfflineCeiling(size * fresh.length)) return false;
+    if (fresh.length === 0) return { ok: true };
+    // 天花板照「列」算：每位收件人各一列（無 `p` 者一列，`recipient = ''`）。保底的 key：收件人，沒有收件人＝作者。
+    const owners = [...new Set(fresh.map((r) => (r === "" ? event.pubkey : r)))];
+    const placed = this.placeOffline(size, fresh.length, owners, nowSec);
+    if (placed === undefined) return { ok: false, reason: "ceiling" };
+    const ttl = this.opts.borrowTtlSeconds ?? BORROW_TTL_SECONDS;
+    const expiration = placed.borrowed ? borrowedExpiration(effExp, nowSec, ttl) : effExp;
     for (const recipient of fresh) {
       this.sql(
-        `INSERT OR IGNORE INTO offline_msgs (id, recipient, expiration, created_at, json, pubkey, kind, bytes)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT OR IGNORE INTO offline_msgs (id, recipient, expiration, created_at, json, pubkey, kind, bytes, borrowed)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         event.id,
         recipient,
-        effExp,
+        expiration,
         event.created_at,
         json,
         event.pubkey,
         event.kind,
         size,
+        placed.borrowed ? 1 : 0,
       );
     }
     if (this.offlineUsed !== undefined) this.offlineUsed += size * fresh.length;
+    if (placed.borrowed) {
+      if (this.offlineBorrowed !== undefined) this.offlineBorrowed += size * fresh.length;
+    } else if (this.ownerNormal !== undefined) {
+      for (const recipient of fresh) {
+        const owner = recipient === "" ? event.pubkey : recipient;
+        this.ownerNormal.set(owner, (this.ownerNormal.get(owner) ?? 0) + size);
+      }
+    }
     const file = event.kind === FILE_WRAP_KIND;
     for (const recipient of fresh) {
       const key = bucketKey(recipient, file);
@@ -259,8 +400,11 @@ export class SqlMessageStore implements OfflineStore {
       if (count !== undefined) this.bucketCounts.set(key, count + 1);
     }
     // 無條件呼叫（與記憶體版一致）：聊天桶沒設上限時 `enforceCap` 自己略過，檔案桶恆有上限。
-    this.enforceCap(fresh, file);
-    return true;
+    this.enforceCap(fresh, file, nowSec);
+    if (placed.borrowed) return { ok: true, borrowedTtlSec: ttl };
+    if (this.opts.nearFullPercent === undefined) return { ok: true };
+    const nearFull = nearFullGrade(this.usedOfflineBytes(), this.opts.offlineMaxTotalBytes, this.opts.nearFullPercent);
+    return nearFull === undefined ? { ok: true } : { ok: true, nearFull };
   }
 
   /** 寫入可取代／可尋址事件（取代語意＋配額；ADR-0035／0071）。行為對齊記憶體版。 */
@@ -268,11 +412,11 @@ export class SqlMessageStore implements OfflineStore {
     return this.putAddressableResult(event, nowSec).ok;
   }
 
-  /** 同 {@link putAddressable}，被拒時帶原因（ADR-0376）。原因與記憶體版逐字對齊。 */
+  /** 同 {@link putAddressable}，被拒時帶原因（SDK ADR 0038 P0-R2）；收下時帶借用與預警（SDK ADR 0042）。原因與記憶體版逐字對齊。 */
   putAddressableResult(event: NostrEvent, nowSec: number): AddressablePutResult {
     const d = dTagOf(event); // 可取代事件無 `d` → 空字串 → 每 (kind,pubkey) 只留一顆
     const existing = this.sql(
-      `SELECT id, created_at, LENGTH(json) AS len FROM addressable WHERE kind = ? AND pubkey = ? AND d = ?`,
+      `SELECT id, created_at, LENGTH(json) AS len, borrowed FROM addressable WHERE kind = ? AND pubkey = ? AND d = ?`,
       event.kind,
       event.pubkey,
       d,
@@ -306,13 +450,14 @@ export class SqlMessageStore implements OfflineStore {
       );
       if (((used[0]?.n as number) ?? 0) + json.length > budget) return addressableRejected("byte-quota");
     }
-    const eff = effectiveExpiration(event, nowSec, this.opts.addressableTtlSeconds ?? ADDRESSABLE_TTL_SECONDS);
+    let eff = effectiveExpiration(event, nowSec, this.opts.addressableTtlSeconds ?? ADDRESSABLE_TTL_SECONDS);
     if (eff <= nowSec) return addressableRejected("expired");
-    if (!this.fitsAddressableCeiling(json.length, (prev?.len as number | undefined) ?? 0)) {
-      return addressableRejected("ceiling");
-    }
+    const placed = this.placeAddressable(event, d, json.length, (prev?.len as number | undefined) ?? 0, Number(prev?.borrowed ?? 0) === 1);
+    if (placed === undefined) return addressableRejected("ceiling");
+    const ttl = this.opts.borrowTtlSeconds ?? BORROW_TTL_SECONDS;
+    if (placed.borrowed) eff = borrowedExpiration(eff, nowSec, ttl);
     this.sql(
-      `INSERT OR REPLACE INTO addressable (kind, pubkey, d, id, created_at, expiration, json) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT OR REPLACE INTO addressable (kind, pubkey, d, id, created_at, expiration, json, borrowed) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       event.kind,
       event.pubkey,
       d,
@@ -320,67 +465,352 @@ export class SqlMessageStore implements OfflineStore {
       event.created_at,
       eff,
       json,
+      placed.borrowed ? 1 : 0,
     );
-    return ADDRESSABLE_PUT_OK;
+    if (placed.borrowed) return { ok: true, borrowedTtlSec: ttl };
+    const nearFull = nearFullGrade(placed.usedAfter, this.opts.addressableMaxTotalBytes, this.opts.nearFullPercent);
+    return nearFull === undefined ? ADDRESSABLE_PUT_OK : { ok: true, nearFull };
   }
 
   /**
-   * 這顆 DO 還放得下這筆離線留言嗎（ADR-0367 §決策 2）。行為與記憶體版逐字對齊。
+   * 這顆 DO 放不放得下這筆離線留言、怎麼放（ADR-0367 §決策 2；SDK ADR 0042 的保底與溢位帶）。行為與記憶體版逐字對齊。
+   * 回 undefined＝拒收；`borrowed`＝放進溢位帶。決策由 `capacity.ts` 的 `decideCapacity` 做，這裡只執行。
    *
    * 🔴 為什麼 FIFO 不夠：`enforceCap` 只對**真正的收件人**執行，而沒有 `p` 標籤的事件
    * 落在 `recipient = ''` ⇒ 那個桶原本只被 TTL 壓著，而遊戲的房間事件正是這個形狀。
    */
-  private fitsOfflineCeiling(size: number): boolean {
+  private placeOffline(size: number, copies: number, owners: readonly string[], nowSec: number): { borrowed: boolean } | undefined {
     const max = this.opts.offlineMaxTotalBytes;
-    if (max === undefined) return true;
-    if (size > max) return false;
+    if (max === undefined) return { borrowed: false };
+    const need = size * copies;
     let used = this.usedOfflineBytes();
-    if (used + size <= max) return true;
-    if (this.opts.ceilingEvicts !== true) return false;
-    const victims = this.sql(
-      `SELECT rowid AS r, bytes FROM offline_msgs ORDER BY expiration ASC LIMIT 256`,
-    );
-    for (const row of victims) {
-      if (used + size <= max) break;
-      this.sql(`DELETE FROM offline_msgs WHERE rowid = ?`, row.r as number);
-      used -= Number(row.bytes ?? 0);
+    const guarantee = this.opts.guaranteeBytes;
+    const band = overflowBand(max, this.opts.overflowRatio);
+    let plan: { r: number; owner: string; bytes: number; recipient: string; created: number }[] = [];
+    const decision = decideCapacity({
+      max,
+      used,
+      need,
+      evicts: this.opts.ceilingEvicts === true,
+      guarantee,
+      band,
+      planeBorrows: true,
+      borrowed: () => this.borrowedOfflineBytes(),
+      withinGuarantee: () => {
+        const usage = this.ownerNormalUsage();
+        return owners.every((o) => (usage.get(o) ?? 0) + size <= guarantee!);
+      },
+      excessAvailable: () => {
+        const usage = this.ownerNormalUsage();
+        const mine = new Set(owners);
+        const over = [...usage].filter(([o, n]) => n > guarantee! && !mine.has(o)).map(([o]) => o);
+        if (over.length === 0) return 0;
+        // 借用列不當候選（稍後整批刪掉）。讀部分索引拿它們的 rowid，不在大表上讀 `borrowed` 欄（見 ownerNormalUsage）。
+        const borrowedRows = new Set(
+          this.sql(`SELECT rowid AS r FROM offline_msgs WHERE borrowed = 1`).map((row) => Number(row.r)),
+        );
+        const list = JSON.stringify(over);
+        const candidates = this.sql(
+          `SELECT rowid AS r, recipient, CASE WHEN recipient = '' THEN pubkey ELSE recipient END AS o, bytes, created_at
+           FROM offline_msgs
+           WHERE recipient IN (SELECT value FROM json_each(?)) OR (recipient = '' AND pubkey IN (SELECT value FROM json_each(?)))
+           ORDER BY expiration ASC, rowid ASC LIMIT ?`,
+          list,
+          list,
+          EXCESS_CANDIDATES + borrowedRows.size,
+        )
+          .filter((row) => !borrowedRows.has(Number(row.r)))
+          .map((row) => ({
+            r: Number(row.r),
+            owner: String(row.o),
+            bytes: Number(row.bytes ?? 0),
+            recipient: String(row.recipient),
+            created: Number(row.created_at),
+          }));
+        const picked = pickExcess(candidates, usage, guarantee!, used - this.borrowedOfflineBytes() + need - max);
+        plan = picked.rows;
+        return picked.freed;
+      },
+      borrowFitsPerKey: () => {
+        const perKey = borrowPerKey(band, this.opts.borrowPerKeyBytes);
+        return owners.every((o) => this.ownerBorrowedBytes(o) + size <= perKey);
+      },
+    });
+    switch (decision.type) {
+      case "fit":
+        return { borrowed: false };
+      case "borrow":
+        return { borrowed: true };
+      case "reject":
+        return undefined;
+      case "reclaim":
+      case "excess": {
+        // 借用列最先淘汰（最快到期優先）。`reclaim` 刪到放得下為止；`excess` 全部刪掉，再刪計畫好的份額外列。
+        const borrowedRows = this.sql(
+          `SELECT rowid AS r, recipient, bytes, created_at FROM offline_msgs WHERE borrowed = 1 ORDER BY expiration ASC, rowid ASC`,
+        );
+        const dropped: DroppedRow[] = [];
+        for (const row of borrowedRows) {
+          if (decision.type === "reclaim" && used + need <= max) break;
+          this.sql(`DELETE FROM offline_msgs WHERE rowid = ?`, Number(row.r));
+          used -= Number(row.bytes ?? 0);
+          if (this.offlineBorrowed !== undefined) this.offlineBorrowed -= Number(row.bytes ?? 0);
+          dropped.push({ r: Number(row.r), recipient: String(row.recipient), created: Number(row.created_at) });
+        }
+        if (decision.type === "excess") {
+          for (const row of plan) {
+            this.sql(`DELETE FROM offline_msgs WHERE rowid = ?`, row.r);
+            used -= row.bytes;
+            this.ownerNormal?.set(row.owner, (this.ownerNormal.get(row.owner) ?? 0) - row.bytes);
+            dropped.push(row);
+          }
+        }
+        this.bucketCounts.clear();
+        this.offlineUsed = used;
+        this.recordDrops(dropped, nowSec);
+        return { borrowed: false };
+      }
+      case "legacy": {
+        // v0.33 原樣：依到期時間由近而遠淘汰（一批最多 256 列），直到騰得出空間
+        const victims = this.sql(
+          `SELECT rowid AS r, recipient, bytes, created_at FROM offline_msgs ORDER BY expiration ASC LIMIT 256`,
+        );
+        const dropped: DroppedRow[] = [];
+        for (const row of victims) {
+          if (used + need <= max) break;
+          this.sql(`DELETE FROM offline_msgs WHERE rowid = ?`, row.r as number);
+          used -= Number(row.bytes ?? 0);
+          dropped.push({ r: Number(row.r), recipient: String(row.recipient), created: Number(row.created_at) });
+        }
+        // 淘汰會跨收件人、跨桶，逐一記帳不划算（它只在撞到天花板時發生）——總量記下、分桶作廢。
+        this.bucketCounts.clear();
+        this.offlineUsed = used;
+        this.offlineBorrowed = undefined;
+        this.ownerNormal = undefined;
+        this.recordDrops(dropped, nowSec);
+        return used + need <= max ? { borrowed: false } : undefined;
+      }
     }
-    // 淘汰會跨收件人、跨桶，逐一記帳不划算（它只在撞到天花板時發生）——總量記下、分桶作廢。
-    this.bucketCounts.clear();
-    this.offlineUsed = used;
-    return used + size <= max;
   }
 
   /**
-   * 這顆 DO 還放得下這筆可尋址事件嗎（ADR-0367 §決策 2）。行為與記憶體版逐字對齊：
-   * 車道淘汰**最快到期**者直到騰出空間；嚴格平面直接拒收。
-   *
-   * `replacedLen` 是**即將被取代**的那一列的長度——它會被換掉，不該算進已用空間。
+   * 可尋址那一側的同一套決策（ADR-0367 §決策 2；SDK ADR 0042）。行為與記憶體版逐字對齊。
+   * `replacedLen`／`replacedBorrowed` 是**即將被取代**的那一列——它會被換掉，不該算進已用空間。
    */
-  private fitsAddressableCeiling(size: number, replacedLen: number): boolean {
+  private placeAddressable(
+    event: NostrEvent,
+    d: string,
+    size: number,
+    replacedLen: number,
+    replacedBorrowed: boolean,
+  ): { borrowed: boolean; usedAfter: number } | undefined {
     const max = this.opts.addressableMaxTotalBytes;
-    if (max === undefined) return true;
-    if (size > max) return false; // 單顆就超過：淘汰也救不了，別把整顆 DO 清空
+    if (max === undefined) return { borrowed: false, usedAfter: 0 };
+    if (size > max) return undefined; // 單顆就超過：淘汰也救不了，別把整顆 DO 清空
     const total =
       (this.sql(`SELECT COALESCE(SUM(LENGTH(json)), 0) AS n FROM addressable`)[0]?.n as number) ?? 0;
     let used = total - replacedLen;
-    if (used + size <= max) return true;
-    if (this.opts.ceilingEvicts !== true) return false;
-    // 依到期時間由近而遠淘汰。一次取一批（而非逐列查），避免極端情況下打上百次查詢。
-    const victims = this.sql(
-      `SELECT kind, pubkey, d, LENGTH(json) AS len FROM addressable ORDER BY expiration ASC LIMIT 256`,
-    );
-    for (const row of victims) {
-      if (used + size <= max) break;
-      this.sql(
-        `DELETE FROM addressable WHERE kind = ? AND pubkey = ? AND d = ?`,
-        row.kind as number,
-        row.pubkey as string,
-        row.d as string,
-      );
-      used -= (row.len as number) ?? 0;
+    const guarantee = this.opts.guaranteeBytes;
+    const band = overflowBand(max, this.opts.overflowRatio);
+    const sameAddress = (row: Record<string, unknown>): boolean =>
+      Number(row.kind) === event.kind && row.pubkey === event.pubkey && row.d === d;
+    let borrowedTotal: number | undefined;
+    const borrowed = (): number =>
+      (borrowedTotal ??=
+        (Number(this.sql(`SELECT COALESCE(SUM(LENGTH(json)), 0) AS n FROM addressable WHERE borrowed = 1`)[0]?.n ?? 0) || 0) -
+        (replacedBorrowed ? replacedLen : 0));
+    let plan: { kind: number; pubkey: string; d: string; owner: string; bytes: number }[] = [];
+    const decision = decideCapacity({
+      max,
+      used,
+      need: size,
+      evicts: this.opts.ceilingEvicts === true,
+      guarantee,
+      band,
+      planeBorrows: this.opts.addressableBorrows !== false,
+      borrowed,
+      withinGuarantee: () => {
+        const mine = this.sql(
+          `SELECT COALESCE(SUM(LENGTH(json)), 0) AS n FROM addressable
+           WHERE pubkey = ? AND borrowed = 0 AND NOT (kind = ? AND d = ?)`,
+          event.pubkey,
+          event.kind,
+          d,
+        );
+        return (Number(mine[0]?.n ?? 0) || 0) + size <= guarantee!;
+      },
+      excessAvailable: () => {
+        const over = this.sql(
+          `SELECT pubkey, SUM(LENGTH(json)) AS n FROM addressable
+           WHERE borrowed = 0 AND pubkey != ? GROUP BY pubkey HAVING SUM(LENGTH(json)) > ?`,
+          event.pubkey,
+          guarantee!,
+        );
+        if (over.length === 0) return 0;
+        const usage = new Map(over.map((row) => [String(row.pubkey), Number(row.n ?? 0)]));
+        const candidates = this.sql(
+          `SELECT kind, pubkey, d, LENGTH(json) AS len FROM addressable
+           WHERE borrowed = 0 AND pubkey IN (SELECT value FROM json_each(?))
+           ORDER BY expiration ASC, rowid ASC LIMIT ?`,
+          JSON.stringify([...usage.keys()]),
+          EXCESS_CANDIDATES,
+        ).map((row) => ({
+          kind: Number(row.kind),
+          pubkey: String(row.pubkey),
+          d: String(row.d),
+          owner: String(row.pubkey),
+          bytes: Number(row.len ?? 0),
+        }));
+        const picked = pickExcess(candidates, usage, guarantee!, used - borrowed() + size - max);
+        plan = picked.rows;
+        return picked.freed;
+      },
+      borrowFitsPerKey: () => {
+        const mine = this.sql(
+          `SELECT COALESCE(SUM(LENGTH(json)), 0) AS n FROM addressable
+           WHERE borrowed = 1 AND pubkey = ? AND NOT (kind = ? AND d = ?)`,
+          event.pubkey,
+          event.kind,
+          d,
+        );
+        return (Number(mine[0]?.n ?? 0) || 0) + size <= borrowPerKey(band, this.opts.borrowPerKeyBytes);
+      },
+    });
+    const drop = (kind: number, pubkey: string, dd: string): void => {
+      this.sql(`DELETE FROM addressable WHERE kind = ? AND pubkey = ? AND d = ?`, kind, pubkey, dd);
+    };
+    switch (decision.type) {
+      case "fit":
+        return { borrowed: false, usedAfter: used + size };
+      case "borrow":
+        return { borrowed: true, usedAfter: used + size };
+      case "reject":
+        return undefined;
+      case "reclaim":
+      case "excess": {
+        const borrowedRows = this.sql(
+          `SELECT kind, pubkey, d, LENGTH(json) AS len FROM addressable WHERE borrowed = 1 ORDER BY expiration ASC, rowid ASC`,
+        );
+        for (const row of borrowedRows) {
+          if (sameAddress(row)) continue; // 即將被取代的那一列，已經不算在用量裡
+          if (decision.type === "reclaim" && used + size <= max) break;
+          drop(Number(row.kind), String(row.pubkey), String(row.d));
+          used -= Number(row.len ?? 0);
+        }
+        if (decision.type === "excess") {
+          for (const row of plan) {
+            drop(row.kind, row.pubkey, row.d);
+            used -= row.bytes;
+          }
+        }
+        return { borrowed: false, usedAfter: used + size };
+      }
+      case "legacy": {
+        // v0.33 原樣：依到期時間由近而遠淘汰。一次取一批（而非逐列查），避免極端情況下打上百次查詢。
+        const victims = this.sql(
+          `SELECT kind, pubkey, d, LENGTH(json) AS len FROM addressable ORDER BY expiration ASC LIMIT 256`,
+        );
+        for (const row of victims) {
+          if (used + size <= max) break;
+          drop(row.kind as number, row.pubkey as string, row.d as string);
+          used -= (row.len as number) ?? 0;
+        }
+        return used + size <= max ? { borrowed: false, usedAfter: used + size } : undefined;
+      }
     }
-    return used + size <= max;
+  }
+
+  /**
+   * 被刪掉的離線列記進丟棄計數（SDK ADR 0042；ADR 0038 M8）。
+   *
+   * 不計：沒開 `countDrops`、沒有收件人的列、收件人正在線上收收件匣（即時收到了）、
+   * rowid 不超過那位收件人上次讀收件匣時的水位線（那時就在庫裡，已經送到過）。
+   */
+  private recordDrops(rows: readonly DroppedRow[], nowSec: number): void {
+    if (this.opts.countDrops !== true || rows.length === 0) return;
+    const byRecipient = new Map<string, DroppedRow[]>();
+    for (const row of rows) {
+      if (row.recipient === "") continue;
+      const list = byRecipient.get(row.recipient);
+      if (list) list.push(row);
+      else byRecipient.set(row.recipient, [row]);
+    }
+    for (const [recipient, list] of byRecipient) {
+      if (this.inboxProbe(recipient)) continue;
+      const prev = this.sql(`SELECT count, since, until, mark FROM inbox_drops WHERE recipient = ?`, recipient)[0];
+      const mark = Number(prev?.mark ?? 0);
+      const counted = list.filter((row) => row.r > mark);
+      if (counted.length === 0) continue;
+      const created = counted.map((row) => row.created);
+      const merged = mergeDropped(
+        prev && Number(prev.count) > 0
+          ? { count: Number(prev.count), since: Number(prev.since), until: Number(prev.until) }
+          : undefined,
+        counted.length,
+        Math.min(...created),
+        Math.max(...created),
+      );
+      this.sql(
+        `INSERT OR REPLACE INTO inbox_drops (recipient, count, since, until, mark, updated_at) VALUES (?, ?, ?, ?, ?, ?)`,
+        recipient,
+        merged.count,
+        merged.since,
+        merged.until,
+        mark,
+        nowSec,
+      );
+      if (prev === undefined) this.noteNewDropRow();
+    }
+  }
+
+  /** 丟棄計數表多了一列：超過上限就刪最久沒更新的（收件人可以亂編，表不能無限長）。 */
+  private noteNewDropRow(): void {
+    // 呼叫時新的那一列已經寫進去了：第一次從表裡數（已含它），之後加一
+    if (this.dropRows === undefined) this.dropRows = Number(this.sql(`SELECT COUNT(*) AS n FROM inbox_drops`)[0]?.n ?? 0);
+    else this.dropRows += 1;
+    if (this.dropRows > DROPPED_RECIPIENTS_MAX) {
+      const extra = this.dropRows - DROPPED_RECIPIENTS_MAX;
+      this.sql(
+        `DELETE FROM inbox_drops WHERE recipient IN (SELECT recipient FROM inbox_drops ORDER BY updated_at ASC LIMIT ?)`,
+        extra,
+      );
+      this.dropRows = DROPPED_RECIPIENTS_MAX;
+    }
+  }
+
+  /** 目前離線表的最大 rowid：丟棄計數的水位線（這之前存的都送到了）。 */
+  private deliveredMark(): number {
+    return Number(this.sql(`SELECT COALESCE(MAX(rowid), 0) AS m FROM offline_msgs`)[0]?.m ?? 0);
+  }
+
+  takeDropped(recipient: string, nowSec: number): DroppedSummary | undefined {
+    if (this.opts.countDrops !== true) return undefined;
+    const prev = this.sql(`SELECT count, since, until FROM inbox_drops WHERE recipient = ?`, recipient)[0];
+    this.sql(
+      `INSERT OR REPLACE INTO inbox_drops (recipient, count, since, until, mark, updated_at) VALUES (?, 0, NULL, NULL, ?, ?)`,
+      recipient,
+      this.deliveredMark(),
+      nowSec,
+    );
+    if (prev === undefined) {
+      this.noteNewDropRow();
+      return undefined;
+    }
+    const count = Number(prev.count ?? 0);
+    return count > 0 ? { count, since: Number(prev.since), until: Number(prev.until) } : undefined;
+  }
+
+  markDelivered(recipient: string, nowSec: number): void {
+    if (this.opts.countDrops !== true) return;
+    const prev = this.sql(`SELECT 1 AS x FROM inbox_drops WHERE recipient = ?`, recipient)[0];
+    this.sql(
+      `INSERT INTO inbox_drops (recipient, count, since, until, mark, updated_at) VALUES (?, 0, NULL, NULL, ?, ?)
+       ON CONFLICT(recipient) DO UPDATE SET mark = excluded.mark, updated_at = excluded.updated_at`,
+      recipient,
+      this.deliveredMark(),
+      nowSec,
+    );
+    if (prev === undefined) this.noteNewDropRow();
   }
 
   /**
@@ -497,8 +927,23 @@ export class SqlMessageStore implements OfflineStore {
 
   prune(nowSec: number): void {
     this.invalidateUsage();
+    // 借用列到期算丟棄（SDK ADR 0042）；一般的保存期到期不算——那是宣告過的契約。只讀部分索引。
+    if (this.opts.countDrops === true) {
+      const expired = this.sql(
+        `SELECT rowid AS r, recipient, created_at FROM offline_msgs
+         WHERE borrowed = 1 AND recipient != '' AND expiration IS NOT NULL AND expiration <= ?`,
+        nowSec,
+      );
+      this.recordDrops(
+        expired.map((row) => ({ r: Number(row.r), recipient: String(row.recipient), created: Number(row.created_at) })),
+        nowSec,
+      );
+    }
     this.sql(`DELETE FROM offline_msgs WHERE expiration IS NOT NULL AND expiration <= ?`, nowSec);
     this.sql(`DELETE FROM addressable WHERE expiration <= ?`, nowSec);
+    // 丟棄計數只留一個保存期：更久沒動的收件人，那些留言本來也會到期
+    this.sql(`DELETE FROM inbox_drops WHERE updated_at <= ?`, nowSec - (this.opts.maxTtlSeconds ?? DEFAULT_MAX_TTL_SECONDS));
+    this.dropRows = undefined;
   }
 
   /**
@@ -520,6 +965,9 @@ export class SqlMessageStore implements OfflineStore {
     this.invalidateUsage();
     this.sql(`DELETE FROM offline_msgs WHERE pubkey = ? OR recipient = ?`, pubkey, pubkey);
     this.sql(`DELETE FROM addressable WHERE pubkey = ?`, pubkey);
+    // 他的丟棄計數（SDK ADR 0042）：清除就是一切
+    this.sql(`DELETE FROM inbox_drops WHERE recipient = ?`, pubkey);
+    this.dropRows = undefined;
     return msgs + addr;
   }
 
@@ -529,7 +977,7 @@ export class SqlMessageStore implements OfflineStore {
    * 只修剪**這次寫入落到的那一桶**：另一桶的列數沒變，不需要看（修正前兩桶每次都掃）。
    * 列數走快取，只有超量時才讀出要刪的那幾列——而且只讀 `idx_offline_bucket` 的索引項。
    */
-  private enforceCap(recipients: string[], file: boolean): void {
+  private enforceCap(recipients: string[], file: boolean, nowSec: number): void {
     const limit = file
       ? (this.opts.filePerRecipient ?? DEFAULT_FILE_PER_RECIPIENT)
       : this.opts.maxPerRecipient;
@@ -546,7 +994,7 @@ export class SqlMessageStore implements OfflineStore {
       }
       if (count > limit) {
         const rows = this.sql(
-          `SELECT rowid AS r, bytes FROM offline_msgs WHERE recipient = ? AND ${bucket}
+          `SELECT rowid AS r, bytes, created_at FROM offline_msgs WHERE recipient = ? AND ${bucket}
            ORDER BY created_at ASC LIMIT ?`,
           recipient,
           count - limit,
@@ -556,6 +1004,15 @@ export class SqlMessageStore implements OfflineStore {
           if (this.offlineUsed !== undefined) this.offlineUsed -= Number(row.bytes ?? 0);
         }
         count -= rows.length;
+        // 刪掉的可能有借用列（分桶索引上看不出來）：借用量作廢、這位收件人的保底用量重算（SDK ADR 0042）
+        if (rows.length > 0) {
+          this.offlineBorrowed = undefined;
+          this.refreshOwner(recipient);
+          this.recordDrops(
+            rows.map((row) => ({ r: Number(row.r), recipient, created: Number(row.created_at) })),
+            nowSec,
+          );
+        }
       }
       this.bucketCounts.set(key, count);
     }
@@ -565,4 +1022,14 @@ export class SqlMessageStore implements OfflineStore {
 /** 分桶快取的鍵：收件人 ＋ 桶別（檔案塊／其他）。 */
 function bucketKey(recipient: string, file: boolean): string {
   return `${file ? "f" : "c"}:${recipient}`;
+}
+
+/** 保底份額淘汰一次最多看幾列候選（每列只讀索引欄位）。 */
+const EXCESS_CANDIDATES = 1024;
+
+/** 被刪掉、要記進丟棄計數的一列。 */
+interface DroppedRow {
+  readonly r: number;
+  readonly recipient: string;
+  readonly created: number;
 }

@@ -402,23 +402,27 @@ export const DO_ADDRESSABLE_MAX_BYTES = 128 * 1024 * 1024;
  */
 export const DO_OFFLINE_MAX_BYTES = 128 * 1024 * 1024;
 
-// ── 帳號儲存預算與每顆 DO 的天花板（ADR-0377）─────────────────────────────────────
+// ── 帳號儲存預算與每顆 DO 的天花板（Cinderous ADR-0377；SDK ADR 0042 移植）────────────────────────
 
 /** 1 MiB。`DO_CEILINGS_MIB` 的單位。 */
 export const MIB = 1024 * 1024;
 
+/** 1 KiB。`DO_GUARANTEE_KIB` 的單位。 */
+export const KIB = 1024;
+
 /**
- * 錨點帳號的 DO SQLite 儲存預算（ADR-0377）：Cloudflare 免費方案每帳號 5 GB 的 **80%**。
+ * Cloudflare 免費方案帳號的 DO SQLite 儲存預算（Cinderous ADR-0377）：每帳號 5 GB 的 **80%**。
  *
  * 取**十進位** 4,000,000,000 bytes（≈ 3.73 GiB）：Cloudflare 的「5 GB」不論解讀成 5×10⁹ 還是
  * 5 GiB，4×10⁹ 都不超過它的 80%，取保守的那個。
  *
  * 🔴 為什麼要有：免費方案超過額度是**整個帳號**同類操作一起失敗——所有 DO、主訊息平面一起停。
  * 天花板乘上 DO 數原本加起來約 10 GiB（兩倍於額度），沒有任何東西守著總量。
- * `wrangler-vars.test.ts` 依 `wrangler.toml` 算出所有可能 DO 的天花板加總，超過這個數字就變紅。
+ * {@link computeCeilingBudget} 依站方設定算出所有可能 DO 的天花板加總（含溢位帶），部署者的守門測試比這個數字。
  *
  * 剩下的 20% 留給天花板**不計入**的東西：SQLite 索引與頁面開銷、`ws_subs` 溢位表（ADR-0373）、
- * DO 的 key-value（車道政策）。天花板只算事件 JSON 的長度。
+ * `inbox_drops` 丟棄計數表（SDK ADR 0042）、DO 的 key-value（車道政策、DO 名）。天花板只算事件 JSON 的長度。
+ * 付費方案（超出只是多付錢）不必守這個數字：`computeCeilingBudget(vars, 自己的預算)`。
  */
 export const ACCOUNT_STORAGE_BUDGET_BYTES = 4_000_000_000;
 
@@ -429,7 +433,7 @@ export interface DoCeiling {
 }
 
 /**
- * DO 的天花板類別（ADR-0377）。由 DO 名決定，與路由同一個事實：
+ * DO 的天花板類別（Cinderous ADR-0377）。由 DO 名決定，與路由同一個事實：
  * - `strict`：Cinderous 主訊息平面（`global`、`presence`、`shard-0..f`）；滿了**拒收**。
  * - `public`：共用車道分片 `app-0..7`（名單外的陌生應用、見習保存）；滿了淘汰。
  * - `lane`：名單上的車道 `app:<id>`；滿了淘汰。
@@ -438,8 +442,8 @@ export interface DoCeiling {
 export type CeilingClass = "strict" | "public" | "lane" | "file";
 
 /**
- * 沒設 `DO_CEILINGS_MIB` 時的天花板——**與 ADR-0377 之前完全相同**（自架站行為不變）。
- * 錨點以 `wrangler.toml` 的 `DO_CEILINGS_MIB` 覆寫。
+ * 沒設 `DO_CEILINGS_MIB` 時的天花板——**與 ADR-0377 之前完全相同**（SDK 中立預設，ADR 0019；自架站行為不變）。
+ * Cinderous 錨點以 `wrangler.toml` 的 `DO_CEILINGS_MIB` 覆寫。
  */
 export const DEFAULT_DO_CEILINGS: Readonly<Record<CeilingClass, DoCeiling>> = {
   strict: { offlineMaxBytes: DO_OFFLINE_MAX_BYTES, addressableMaxBytes: DO_ADDRESSABLE_MAX_BYTES },
@@ -451,30 +455,56 @@ export const DEFAULT_DO_CEILINGS: Readonly<Record<CeilingClass, DoCeiling>> = {
 /** `DO_CEILINGS_MIB` 單一數值的上限（MiB）：Cloudflare 單顆 SQLite DO 的實體上限是 10 GB。 */
 export const DO_CEILING_MAX_MIB = 8192;
 
-/** 決定天花板需要的站方設定。 */
+/**
+ * 容量設定各值的合法範圍（中繼端；SDK ADR 0042）。超出的項目不生效、列進 `ignored`。
+ * 一鍵部署另有更緊的夾限（`deploy/shared` 的 `RELAY_SITE_LIMITS`，ADR 0037 原則 2）。
+ */
+export const DO_CAPACITY_LIMITS = {
+  /** 保底（KiB）：1 KiB–64 MiB */
+  guaranteeKib: { min: 1, max: 65_536 },
+  /** 溢位帶（天花板的百分比） */
+  borrowPercent: { min: 1, max: 100 },
+  /** 預警門檻（百分比）；另一級固定是 95 */
+  nearFullPercent: { min: 50, max: 99 },
+} as const;
+
+/** 決定天花板與容量政策需要的站方設定（SDK ADR 0042）。 */
 export interface CeilingEnv extends FileLaneEnv {
+  /** Cinderous ADR-0377：`<對象>=<離線 MiB>/<可尋址 MiB>`，逗號分隔。 */
   DO_CEILINGS_MIB?: string | undefined;
+  /** 保底（ADR 0038 P2）：`<對象>=<KiB>`，逗號分隔。只在淘汰制（`public`／`lane`／`file`）生效。 */
+  DO_GUARANTEE_KIB?: string | undefined;
+  /** 溢位帶（ADR 0039 B1）：`<對象>=<天花板的百分比>`，逗號分隔。淘汰制的 DO 要同時有保底才生效。 */
+  DO_BORROW_PERCENT?: string | undefined;
+  /** 粗分級預警（ADR 0038 決策 5）：`<對象>=<百分比>`，逗號分隔。 */
+  DO_NEAR_FULL_PERCENT?: string | undefined;
+  /** 丟棄計數（ADR 0038 M8）：開啟的對象，逗號分隔（`strict,lane,app:dochost`）。 */
+  DO_DROP_NOTICES?: string | undefined;
 }
 
 const CEILING_CLASSES: readonly CeilingClass[] = ["strict", "public", "lane", "file"];
 
+/** 容量設定的對象：類別或路由會建立的 DO 名。 */
+function validTargets(env: CeilingEnv): Set<string> {
+  return new Set<string>([...CEILING_CLASSES, ...allDoNames(knownLanes(env.APP_LANES))]);
+}
+
 /**
- * 解析 `DO_CEILINGS_MIB`（ADR-0377）：逗號分隔的 `<對象>=<離線 MiB>/<可尋址 MiB>`。
+ * 解析 `DO_CEILINGS_MIB`（Cinderous ADR-0377）：逗號分隔的 `<對象>=<離線 MiB>/<可尋址 MiB>`。
  *
  * 對象可以是**類別**（`strict`／`public`／`lane`／`file`，套用到該類的每一顆 DO），
  * 或**單顆 DO 名**（`global`、`presence`、`shard-a`、`app-3`、`app:dochost`），後者優先。
  *
- * 🔴 設錯的項目**不生效**、列在 `ignored`（宿主啟動時 `console.warn`，預算測試要求它為空）：
+ * 🔴 設錯的項目**不生效**、列在 `ignored`（宿主啟動時 `console.warn`，預算守門要求它為空）：
  * 形狀不對、數值不是 1–{@link DO_CEILING_MAX_MIB} 的整數、重複、對象不是路由會建立的 DO、
  * 或 `app:<id>` 不在 `APP_LANES` 上（不在名單上的車道沒有自己的 DO）。
- * 不生效＝退回類別值或預設值（預設值比錨點的設定大）——所以設錯**一定要看得見**。
+ * 不生效＝退回類別值或預設值（預設值可能比站方的設定大）——所以設錯**一定要看得見**。
  */
 export function doCeilings(env: CeilingEnv): {
   entries: ReadonlyMap<string, DoCeiling>;
   ignored: string[];
 } {
-  const known = knownLanes(env.APP_LANES);
-  const valid = new Set<string>([...CEILING_CLASSES, ...allDoNames(known)]);
+  const valid = validTargets(env);
   const entries = new Map<string, DoCeiling>();
   const ignored: string[] = [];
   for (const raw of (env.DO_CEILINGS_MIB ?? "").split(",")) {
@@ -494,7 +524,80 @@ export function doCeilings(env: CeilingEnv): {
   return { entries, ignored };
 }
 
-/** 一顆 DO 屬於哪一類天花板（ADR-0377）。DO 名由 {@link routeForPath} 決定。 */
+/**
+ * 解析 `<對象>=<整數>` 形狀的清單（SDK ADR 0042：保底、溢位帶、預警共用）。規則與 {@link doCeilings} 相同：
+ * 形狀不對、超出範圍、重複、對象不存在的項目不生效、列進 `ignored`。
+ */
+function targetNumbers(
+  raw: string | undefined,
+  valid: ReadonlySet<string>,
+  range: { readonly min: number; readonly max: number },
+  allowed: (target: string) => boolean = () => true,
+): { entries: Map<string, number>; ignored: string[] } {
+  const entries = new Map<string, number>();
+  const ignored: string[] = [];
+  for (const part of (raw ?? "").split(",")) {
+    const item = part.trim();
+    if (item === "") continue;
+    const m = /^([a-z0-9:._-]+)\s*=\s*(\d+)$/.exec(item.toLowerCase());
+    const target = m?.[1];
+    const value = Number(m?.[2]);
+    const ok = Number.isInteger(value) && value >= range.min && value <= range.max;
+    if (!target || !valid.has(target) || entries.has(target) || !ok || !allowed(target)) {
+      ignored.push(item);
+      continue;
+    }
+    entries.set(target, value);
+  }
+  return { entries, ignored };
+}
+
+/** 保底只在淘汰制生效：`strict` 類別與嚴格平面的 DO 名設了也沒用（拒收制本來就不刪別人的資料）——設了要看得見。 */
+function evictingTarget(env: CeilingEnv): (target: string) => boolean {
+  return (target) =>
+    target === "strict" ? false : (CEILING_CLASSES as readonly string[]).includes(target) ? true : ceilingClassOf(env, target) !== "strict";
+}
+
+/** 解析五個容量設定（SDK ADR 0042）。 */
+export function doCapacitySettings(env: CeilingEnv): {
+  ceilings: ReadonlyMap<string, DoCeiling>;
+  guaranteeKib: ReadonlyMap<string, number>;
+  borrowPercent: ReadonlyMap<string, number>;
+  nearFullPercent: ReadonlyMap<string, number>;
+  dropNotices: ReadonlySet<string>;
+  /** 沒有生效的項目（`<變數名>: <項目>`） */
+  ignored: string[];
+} {
+  const valid = validTargets(env);
+  const ceilings = doCeilings(env);
+  const guarantee = targetNumbers(env.DO_GUARANTEE_KIB, valid, DO_CAPACITY_LIMITS.guaranteeKib, evictingTarget(env));
+  const borrow = targetNumbers(env.DO_BORROW_PERCENT, valid, DO_CAPACITY_LIMITS.borrowPercent);
+  const nearFull = targetNumbers(env.DO_NEAR_FULL_PERCENT, valid, DO_CAPACITY_LIMITS.nearFullPercent);
+  const dropNotices = new Set<string>();
+  const dropIgnored: string[] = [];
+  for (const part of (env.DO_DROP_NOTICES ?? "").split(",")) {
+    const item = part.trim().toLowerCase();
+    if (item === "") continue;
+    if (!valid.has(item) || dropNotices.has(item)) dropIgnored.push(item);
+    else dropNotices.add(item);
+  }
+  return {
+    ceilings: ceilings.entries,
+    guaranteeKib: guarantee.entries,
+    borrowPercent: borrow.entries,
+    nearFullPercent: nearFull.entries,
+    dropNotices,
+    ignored: [
+      ...ceilings.ignored.map((i) => `DO_CEILINGS_MIB: ${i}`),
+      ...guarantee.ignored.map((i) => `DO_GUARANTEE_KIB: ${i}`),
+      ...borrow.ignored.map((i) => `DO_BORROW_PERCENT: ${i}`),
+      ...nearFull.ignored.map((i) => `DO_NEAR_FULL_PERCENT: ${i}`),
+      ...dropIgnored.map((i) => `DO_DROP_NOTICES: ${i}`),
+    ],
+  };
+}
+
+/** 一顆 DO 屬於哪一類天花板（Cinderous ADR-0377）。DO 名由 `routeForPath` 決定。 */
 export function ceilingClassOf(env: CeilingEnv, doName: string): CeilingClass {
   if (doName.startsWith("app:")) {
     const files = filePolicyFor(env, doName.slice("app:".length));
@@ -506,8 +609,8 @@ export function ceilingClassOf(env: CeilingEnv, doName: string): CeilingClass {
 }
 
 /**
- * 這顆 DO 的天花板（ADR-0377）：單顆 DO 名的設定 → 類別的設定 → 預設值。
- * **兩處共用**：`RelayRoom` 組 store 時、預算測試加總時——算的就是真正在執行的數字。
+ * 這顆 DO 的天花板（Cinderous ADR-0377）：單顆 DO 名的設定 → 類別的設定 → 預設值。
+ * **兩處共用**：`RelayRoom` 組 store 時、預算加總時——算的就是真正在執行的數字。
  */
 export function doCeilingFor(env: CeilingEnv, doName: string): DoCeiling {
   const { entries } = doCeilings(env);
@@ -515,19 +618,78 @@ export function doCeilingFor(env: CeilingEnv, doName: string): DoCeiling {
   return entries.get(doName) ?? entries.get(cls) ?? DEFAULT_DO_CEILINGS[cls];
 }
 
+/** 一顆 DO 的完整容量政策（SDK ADR 0042）：天花板＋保底、溢位帶、預警、丟棄計數。沒設的欄位不出現＝v0.33 行為。 */
+export interface DoCapacity extends DoCeiling {
+  /** 保底（位元組） */
+  guaranteeBytes?: number;
+  /** 溢位帶比例（0–1） */
+  overflowRatio?: number;
+  /** 預警門檻（百分比） */
+  nearFullPercent?: number;
+  /** 丟棄計數 */
+  countDrops?: boolean;
+}
+
+/**
+ * 這顆 DO 的容量政策（SDK ADR 0042）。每一項都是「單顆 DO 名 → 類別 → 沒設」的順序，與 {@link doCeilingFor} 相同。
+ * **兩處共用**：`RelayRoom` 組 store 時、{@link computeCeilingBudget} 加總時。
+ */
+export function doCapacityFor(env: CeilingEnv, doName: string): DoCapacity {
+  const s = doCapacitySettings(env);
+  const cls = ceilingClassOf(env, doName);
+  const pick = <T>(m: ReadonlyMap<string, T>): T | undefined => m.get(doName) ?? m.get(cls);
+  const guaranteeKib = pick(s.guaranteeKib);
+  const borrowPercent = pick(s.borrowPercent);
+  const nearFull = pick(s.nearFullPercent);
+  return {
+    ...doCeilingFor(env, doName),
+    ...(guaranteeKib !== undefined && cls !== "strict" ? { guaranteeBytes: guaranteeKib * KIB } : {}),
+    ...(borrowPercent !== undefined ? { overflowRatio: borrowPercent / 100 } : {}),
+    ...(nearFull !== undefined ? { nearFullPercent: nearFull } : {}),
+    ...(s.dropNotices.has(doName) || s.dropNotices.has(cls) ? { countDrops: true } : {}),
+  };
+}
+
+/**
+ * 溢位帶實際會不會用到（SDK ADR 0042）：拒收制（`strict`）的離線留言會；嚴格平面的可尋址不借用；
+ * 淘汰制要同時有保底才會（沒有保底時淘汰制本來就收下每一則，帶子不生效）。
+ */
+export function borrowingPlanes(cls: CeilingClass, capacity: DoCapacity): { offline: boolean; addressable: boolean } {
+  const r = capacity.overflowRatio ?? 0;
+  if (!(r > 0)) return { offline: false, addressable: false };
+  if (cls === "strict") return { offline: true, addressable: false };
+  const guaranteed = capacity.guaranteeBytes !== undefined;
+  return { offline: guaranteed, addressable: guaranteed };
+}
+
+/** 一顆 DO 的最壞儲存量（位元組）：兩個天花板，會借用的那一側乘上 1 + r。 */
+export function worstCaseBytes(cls: CeilingClass, capacity: DoCapacity): number {
+  const planes = borrowingPlanes(cls, capacity);
+  const r = capacity.overflowRatio ?? 0;
+  const band = (max: number, on: boolean): number => (on ? Math.floor(max * r) : 0);
+  return (
+    capacity.offlineMaxBytes +
+    band(capacity.offlineMaxBytes, planes.offline) +
+    capacity.addressableMaxBytes +
+    band(capacity.addressableMaxBytes, planes.addressable)
+  );
+}
+
 /** 最壞加總的一列：一顆 DO。 */
 export interface CeilingRow {
   doName: string;
   cls: CeilingClass;
   ceiling: DoCeiling;
-  /** 離線＋可尋址。 */
+  /** 容量政策（含天花板） */
+  capacity: DoCapacity;
+  /** 離線＋可尋址，含會用到的溢位帶。 */
   bytes: number;
 }
 
 /**
- * 依站方設定，**所有可能 DO** 的天花板加總（ADR-0377）——帳號 DO SQLite 用量的政策上界。
+ * 依站方設定，**所有可能 DO** 的天花板加總（Cinderous ADR-0377；SDK ADR 0042 把溢位帶算進去）——帳號 DO SQLite 用量的政策上界。
  *
- * `laneCostBytes` 是「`APP_LANES` 再加一條車道」要多花的預算（`lane` 類別的天花板）：
+ * `laneCostBytes` 是「`APP_LANES` 再加一條車道」要多花的預算（`lane` 類別的最壞量）：
  * 名單上的每條車道都有自己的 DO，所以這個數字會隨名單成長，預算必須把它算進去。
  */
 export function worstCaseStorage(env: CeilingEnv): {
@@ -536,20 +698,64 @@ export function worstCaseStorage(env: CeilingEnv): {
   laneCostBytes: number;
 } {
   const rows = allDoNames(knownLanes(env.APP_LANES)).map((doName) => {
-    const ceiling = doCeilingFor(env, doName);
+    const capacity = doCapacityFor(env, doName);
+    const cls = ceilingClassOf(env, doName);
     return {
       doName,
-      cls: ceilingClassOf(env, doName),
-      ceiling,
-      bytes: ceiling.offlineMaxBytes + ceiling.addressableMaxBytes,
+      cls,
+      ceiling: { offlineMaxBytes: capacity.offlineMaxBytes, addressableMaxBytes: capacity.addressableMaxBytes },
+      capacity,
+      bytes: worstCaseBytes(cls, capacity),
     };
   });
-  const { entries } = doCeilings(env);
-  const lane = entries.get("lane") ?? DEFAULT_DO_CEILINGS.lane;
+  // 新車道的成本：`lane` 類別的設定（單顆 DO 名的覆寫不會套到一條還不存在的車道）
+  const s = doCapacitySettings(env);
+  const laneCapacity: DoCapacity = {
+    ...(s.ceilings.get("lane") ?? DEFAULT_DO_CEILINGS.lane),
+    ...(s.guaranteeKib.has("lane") ? { guaranteeBytes: s.guaranteeKib.get("lane")! * KIB } : {}),
+    ...(s.borrowPercent.has("lane") ? { overflowRatio: s.borrowPercent.get("lane")! / 100 } : {}),
+  };
   return {
     rows,
     totalBytes: rows.reduce((sum, r) => sum + r.bytes, 0),
-    laneCostBytes: lane.offlineMaxBytes + lane.addressableMaxBytes,
+    laneCostBytes: worstCaseBytes("lane", laneCapacity),
+  };
+}
+
+/**
+ * 部署者的守門工具（SDK ADR 0042）：給中繼的環境變數（`relaySiteVars` 的結果、`wrangler.toml` 的 `[vars]`），
+ * 算出所有可能 DO 的最壞儲存加總（含溢位帶）並與預算比較。把它放進自己的測試，`APP_LANES` 或天花板一改、超出預算就變紅。
+ *
+ * ```ts
+ * const budget = computeCeilingBudget(vars);
+ * expect(budget.ignored).toEqual([]);          // 設錯＝退回較大的預設值，預算不可信
+ * expect(budget.withinBudget).toBe(true);
+ * ```
+ *
+ * @param budgetBytes 預設 {@link ACCOUNT_STORAGE_BUDGET_BYTES}（免費方案 5 GB 的 80%）
+ */
+export function computeCeilingBudget(
+  vars: CeilingEnv | Readonly<Record<string, string | undefined>>,
+  budgetBytes: number = ACCOUNT_STORAGE_BUDGET_BYTES,
+): {
+  rows: CeilingRow[];
+  totalBytes: number;
+  laneCostBytes: number;
+  budgetBytes: number;
+  withinBudget: boolean;
+  /** 還放得下幾條新車道（每條 `laneCostBytes`）；已經超出是 0 */
+  lanesLeft: number;
+  ignored: string[];
+} {
+  const env = vars as CeilingEnv;
+  const worst = worstCaseStorage(env);
+  const left = budgetBytes - worst.totalBytes;
+  return {
+    ...worst,
+    budgetBytes,
+    withinBudget: left >= 0,
+    lanesLeft: left >= 0 && worst.laneCostBytes > 0 ? Math.floor(left / worst.laneCostBytes) : 0,
+    ignored: doCapacitySettings(env).ignored,
   };
 }
 
@@ -591,11 +797,12 @@ export function storeOptions(
    */
   maxFileMb?: number,
   /**
-   * 這顆 DO 的容量天花板（ADR-0377，{@link doCeilingFor}）。給了就取代預設的
-   * {@link DO_OFFLINE_MAX_BYTES}／{@link DO_ADDRESSABLE_MAX_BYTES}／{@link FILE_LANE_OFFLINE_MAX_BYTES}；
-   * 不給＝預設值（自架的 node 宿主、尚不知道 DO 名的時候）。淘汰制與拒收制不因此改變。
+   * 這顆 DO 的容量政策（Cinderous ADR-0377 的天花板＋SDK ADR 0042 的保底、溢位帶、預警、丟棄計數；{@link doCapacityFor}）。
+   * 給了就取代預設的 {@link DO_OFFLINE_MAX_BYTES}／{@link DO_ADDRESSABLE_MAX_BYTES}／{@link FILE_LANE_OFFLINE_MAX_BYTES}；
+   * 不給＝預設值、沒有保底與溢位帶（自架的 node 宿主、尚不知道 DO 名的時候）。淘汰制與拒收制不因此改變。
+   * 只給 {@link DoCeiling}（Cinderous ADR-0377 的簽名）也可以。
    */
-  ceiling?: DoCeiling,
+  capacity?: DoCeiling | DoCapacity,
 ): MessageStoreOptions {
   const configured = ttlSecondsFromDays(maxTtlDaysRaw);
   const publicLane = profile === "app" && !knownLane;
@@ -630,11 +837,22 @@ export function storeOptions(
           offlineMaxTotalBytes: FILE_LANE_OFFLINE_MAX_BYTES,
         }
       : {}),
-    ...(ceiling !== undefined
-      ? {
-          offlineMaxTotalBytes: ceiling.offlineMaxBytes,
-          addressableMaxTotalBytes: ceiling.addressableMaxBytes,
-        }
-      : {}),
+    ...(capacity !== undefined ? capacityStoreOptions(profile, capacity) : {}),
+  };
+}
+
+/** {@link DoCapacity} → store 選項（SDK ADR 0042）。沒設的欄位不出現。 */
+function capacityStoreOptions(profile: RelayProfile, capacity: DoCeiling | DoCapacity): MessageStoreOptions {
+  const c = capacity as DoCapacity;
+  return {
+    offlineMaxTotalBytes: c.offlineMaxBytes,
+    addressableMaxTotalBytes: c.addressableMaxBytes,
+    // 保底只在淘汰制有意義（拒收制不刪別人的資料）；`doCapacityFor` 已經不給嚴格類別，這裡再守一次
+    ...(c.guaranteeBytes !== undefined && profile === "app" ? { guaranteeBytes: c.guaranteeBytes } : {}),
+    ...(c.overflowRatio !== undefined ? { overflowRatio: c.overflowRatio } : {}),
+    // 嚴格平面的可尋址不借用：雲端快照（30078）「活躍即永久」，不能變成 2 小時（ADR 0039 待決事項 3）
+    ...(c.overflowRatio !== undefined && profile !== "app" ? { addressableBorrows: false } : {}),
+    ...(c.nearFullPercent !== undefined ? { nearFullPercent: c.nearFullPercent } : {}),
+    ...(c.countDrops === true ? { countDrops: true } : {}),
   };
 }

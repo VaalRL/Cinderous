@@ -50,7 +50,10 @@ export { EXPIRED_REJECT, OFFLINE_CEILING_REJECT } from "./reject-messages.js";
 import {
   ADDRESSABLE_REJECT,
   ADDRESSABLE_REJECT_GENERIC,
+  borrowedWarning,
+  droppedNotice,
   EXPIRED_REJECT,
+  nearFullWarning,
   malformedMessage,
   OFFLINE_CEILING_REJECT,
   powRejectMessage,
@@ -221,6 +224,11 @@ interface SubEntry {
   kinds: number[];
   /** 是否有 filter 未限制 kind（可匹配任何 kind）。 */
   anyKind: boolean;
+  /**
+   * 這條訂閱是某人在讀**自己的收件匣**嗎（SDK ADR 0042）：連線已認證為 P、某個 filter 的 `#p` 含 P、而且收的不只 ephemeral。
+   * 是的話記下 P——丟棄計數的通知只送這種訂閱，P 在線上收收件匣時他的留言被刪掉也不算丟棄（他即時收到了）。
+   */
+  inbox?: string;
 }
 
 /**
@@ -255,11 +263,15 @@ export class RelayCore {
   private readonly connHost = new Map<string, string>();
   /** 是否要求 NIP-42 AUTH（開放中繼；ADR-0057）。 */
   private readonly requireAuth: boolean;
+  /** pubkey → 正在讀他自己收件匣的訂閱數（SDK ADR 0042 丟棄計數）。 */
+  private readonly inboxSubs = new Map<string, number>();
 
   constructor(private readonly opts: RelayCoreOptions = {}) {
     this.allowed = opts.allowedAuthors ? new Set(opts.allowedAuthors) : undefined;
     this.allowedKinds = opts.allowedKinds ? new Set(opts.allowedKinds) : undefined;
     this.requireAuth = opts.requireAuth === true;
+    // 丟棄計數：正在線上收自己收件匣的人，他的留言被刪掉不算丟棄（SDK ADR 0042）
+    opts.store?.setInboxProbe?.((recipient) => this.inboxSubs.has(recipient));
   }
 
   private newChallenge(): string {
@@ -536,10 +548,14 @@ export class RelayCore {
     }
 
     const previous = conn.get(subId);
-    if (previous) this.unindex(previous);
+    if (previous) this.unindex(previous, false);
     const entry = buildEntry(connId, subId, filters);
     conn.set(subId, entry);
     this.index(entry);
+    // 同一個 id 換成不是收件匣的訂閱：原本那條收件匣訂閱就此結束（SDK ADR 0042）
+    if (previous?.inbox !== undefined && !this.inboxSubs.has(previous.inbox)) {
+      this.opts.store?.markDelivered?.(previous.inbox, this.now());
+    }
 
     const out: Outbound[] = [];
     if (this.opts.store) {
@@ -559,6 +575,12 @@ export class RelayCore {
           seen.add(event.id);
           out.push({ to: connId, message: ["EVENT", subId, event] });
         }
+      }
+      // 丟棄計數（SDK ADR 0042；ADR 0038 M8）：收件人讀自己的收件匣時，在 EOSE 之前告訴他有幾則在送到之前被刪掉了。
+      // 取出即歸零，並記下水位線（這之前存的都算送到了）。只給已認證的本人；只有數量與時間範圍。
+      if (entry.inbox !== undefined) {
+        const dropped = this.opts.store.takeDropped?.(entry.inbox, nowSec);
+        if (dropped !== undefined) out.push({ to: connId, message: ["NOTICE", droppedNotice(dropped)] });
       }
     }
     out.push({ to: connId, message: ["EOSE", subId] });
@@ -668,6 +690,8 @@ export class RelayCore {
     }
 
     // Ephemeral 純轉發、不寫 D1；其餘（持久化）需通過 PoW 並寫入持久層。
+    /** `OK true` 的說明：借用或接近天花板時帶 `warning:`（SDK ADR 0042），其他情況是空字串（與 v0.33 相同）。 */
+    let note = "";
     if (!isEphemeral(event.kind)) {
       const minPow = this.opts.minPowDifficulty ?? 0;
       if (minPow > 0 && leadingZeroBits(event.id) < minPow) {
@@ -683,6 +707,7 @@ export class RelayCore {
         if (store?.putAddressableResult) {
           const result = store.putAddressableResult(event, this.now());
           if (!result.ok) return reject(ADDRESSABLE_REJECT[result.reason]);
+          note = okNote(result);
         } else if (store && !store.putAddressable(event, this.now())) {
           return reject(ADDRESSABLE_REJECT_GENERIC);
         }
@@ -694,11 +719,19 @@ export class RelayCore {
         // 每收件人 FIFO 與車道淘汰是「收下新的、刪掉舊的」，`put()` 回 true，不走這裡。
         const expiration = getExpiration(event);
         if (expiration !== undefined && expiration <= now) return reject(EXPIRED_REJECT);
-        if (!this.opts.store.put(event, this.now())) return reject(OFFLINE_CEILING_REJECT);
+        const store = this.opts.store;
+        if (store.putResult) {
+          // SDK ADR 0042：收下時可能是借用（溢位帶）或接近天花板——`OK true` 帶 `warning:` 說清楚，照常扇出（收下了）。
+          const result = store.putResult(event, this.now());
+          if (!result.ok) return reject(result.reason === "expired" ? EXPIRED_REJECT : OFFLINE_CEILING_REJECT);
+          note = okNote(result);
+        } else if (!store.put(event, this.now())) {
+          return reject(OFFLINE_CEILING_REJECT);
+        }
       }
     }
 
-    const out: Outbound[] = [{ to: connId, message: ["OK", event.id, true, ""] }];
+    const out: Outbound[] = [{ to: connId, message: ["OK", event.id, true, note] }];
     const candidates = new Set<SubEntry>(this.byKind.get(event.kind));
     for (const entry of this.anyKindSubs) candidates.add(entry);
     for (const entry of candidates) {
@@ -742,6 +775,11 @@ export class RelayCore {
   }
 
   private index(entry: SubEntry): void {
+    const self = this.authState.get(entry.connId)?.pubkey;
+    if (self !== undefined && readsOwnInbox(entry.filters, self)) {
+      entry.inbox = self;
+      this.inboxSubs.set(self, (this.inboxSubs.get(self) ?? 0) + 1);
+    }
     for (const kind of entry.kinds) {
       let set = this.byKind.get(kind);
       if (!set) {
@@ -798,7 +836,19 @@ export class RelayCore {
     return true;
   }
 
-  private unindex(entry: SubEntry): void {
+  /**
+   * 從索引拿掉一條訂閱。`delivered`：這條訂閱就此結束（CLOSE、斷線）——它若是收件匣訂閱、又是那人最後一條，
+   * 記下「到這裡為止的留言都即時送到了」（SDK ADR 0042 丟棄計數的水位線）。同一個 id 換新訂閱時傳 false。
+   */
+  private unindex(entry: SubEntry, delivered = true): void {
+    if (entry.inbox !== undefined) {
+      const left = (this.inboxSubs.get(entry.inbox) ?? 1) - 1;
+      if (left > 0) this.inboxSubs.set(entry.inbox, left);
+      else {
+        this.inboxSubs.delete(entry.inbox);
+        if (delivered) this.opts.store?.markDelivered?.(entry.inbox, this.now());
+      }
+    }
     for (const kind of entry.kinds) {
       const set = this.byKind.get(kind);
       if (set) {
@@ -825,6 +875,23 @@ function hasTagScope(filter: RelayFilter): boolean {
     if (values && values.length > 0) return true;
   }
   return false;
+}
+
+/**
+ * 這組 filter 是 `self` 在讀自己的收件匣嗎（SDK ADR 0042）：某個 filter 的 `#p` 含 `self`，而且那個 filter 不只收 ephemeral
+ *（通話信令這類只收 ephemeral 的訂閱不會讀到離線留言，不該拿走丟棄計數）。
+ */
+function readsOwnInbox(filters: RelayFilter[], self: string): boolean {
+  return filters.some(
+    (f) => f["#p"]?.includes(self) === true && (f.kinds === undefined || f.kinds.length === 0 || f.kinds.some((k) => !isEphemeral(k))),
+  );
+}
+
+/** `OK true` 的說明文字（SDK ADR 0042）：借用優先於接近天花板；都不是就是空字串。 */
+function okNote(result: { readonly borrowedTtlSec?: number; readonly nearFull?: number }): string {
+  if (result.borrowedTtlSec !== undefined) return borrowedWarning(result.borrowedTtlSec);
+  if (result.nearFull !== undefined) return nearFullWarning(result.nearFull);
+  return "";
 }
 
 function buildEntry(connId: string, subId: string, filters: RelayFilter[]): SubEntry {

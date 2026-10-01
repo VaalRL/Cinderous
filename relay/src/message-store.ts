@@ -1,6 +1,18 @@
 import type { NostrEvent } from "@cinderous/core";
 import { matchFilter } from "./filters.js";
 import type { RelayFilter } from "./protocol.js";
+import {
+  BORROW_TTL_SECONDS,
+  borrowedExpiration,
+  borrowPerKey,
+  decideCapacity,
+  DROPPED_RECIPIENTS_MAX,
+  type DroppedSummary,
+  mergeDropped,
+  nearFullGrade,
+  overflowBand,
+  pickExcess,
+} from "./capacity.js";
 
 /** 讀取事件的 NIP-40 過期時間（unix 秒）；無或非法時回 undefined。 */
 export function getExpiration(event: NostrEvent): number | undefined {
@@ -81,7 +93,43 @@ export interface MessageStoreOptions {
    * 25 場 ⇒ 熱門車道的房間歷史會被默默丟掉。位元組天花板＋依到期淘汰才是對的形狀。
    */
   offlineMaxTotalBytes?: number;
+  /**
+   * **保底份額**（SDK ADR 0042；ADR 0038 P2）：共用 DO 內每個 key 的保底位元組。key＝可尋址的作者；
+   * 離線留言的收件人（沒有 `p` 的列以作者計）。保底內的資料**不會因為別人寫入而被淘汰**；天花板滿了先淘汰超出保底的部分，
+   * 沒有可淘汰的就拒收（`blocked: ceiling:`）。未設＝沒有保底（v0.33 行為）。
+   *
+   * 只在淘汰制（{@link ceilingEvicts}）生效：拒收制本來就不刪別人的資料。決策見 `capacity.ts`。
+   */
+  guaranteeBytes?: number;
+  /**
+   * **溢位帶**比例 r（SDK ADR 0042；ADR 0039 B1）：天花板 C 之上再收 C × r 的「借用」，保存 {@link borrowTtlSeconds}、永遠最先被淘汰，
+   * 回 `OK true "warning: borrowed: …"`。未設或 0＝沒有溢位帶。淘汰制要同時設 {@link guaranteeBytes} 才生效。
+   */
+  overflowRatio?: number;
+  /** 借用列的保存秒數；預設 `BORROW_TTL_SECONDS`（2 小時）。 */
+  borrowTtlSeconds?: number;
+  /** 溢位帶內每個 key 最多借多少位元組；預設帶子的 1/16。 */
+  borrowPerKeyBytes?: number;
+  /**
+   * 可尋址事件能不能借用；預設可以。嚴格平面設 false（雲端快照 30078 等「活躍即永久」的備份不能變成 2 小時，ADR 0039 待決事項 3）。
+   */
+  addressableBorrows?: boolean;
+  /**
+   * **粗分級預警**（SDK ADR 0042；ADR 0038 P2 決策 5）：寫入後用量達天花板的這個百分比以上（以及 95％ 以上）時，
+   * `OK true` 帶 `warning: near-full: <級>: …`。只有兩級、不公開精確用量。未設＝不預警。
+   */
+  nearFullPercent?: number;
+  /**
+   * **丟棄計數**（SDK ADR 0042；ADR 0038 M8）：因 FIFO、天花板淘汰、借用到期而刪掉寄給某位收件人的留言時，按收件人累計；
+   * 收件人下次訂閱自己的收件匣時由中繼送一則 `NOTICE "warning: dropped: …"`。未設＝不計（v0.33 行為）。
+   */
+  countDrops?: boolean;
 }
+
+/** {@link OfflineStore.putResult} 的結果（SDK ADR 0042）：收下時可能是借用（`borrowedTtlSec`）或接近天花板（`nearFull`）。 */
+export type OfflinePutResult =
+  | { readonly ok: true; readonly borrowedTtlSec?: number; readonly nearFull?: number }
+  | { readonly ok: false; readonly reason: "expired" | "ceiling" };
 
 /** 預設留言壽命上限：7 天（對齊 client 端 gift wrap 的預設 TTL）。 */
 export const DEFAULT_MAX_TTL_SECONDS = 7 * 86_400;
@@ -202,8 +250,10 @@ export const ADDRESSABLE_TTL_SECONDS = 30 * 86_400;
  */
 export type AddressableRejectReason = "stale" | "too-large" | "address-quota" | "byte-quota" | "expired" | "ceiling";
 
-/** {@link OfflineStore.putAddressableResult} 的結果 */
-export type AddressablePutResult = { readonly ok: true } | { readonly ok: false; readonly reason: AddressableRejectReason };
+/** {@link OfflineStore.putAddressableResult} 的結果；收下時可能是借用或接近天花板（SDK ADR 0042） */
+export type AddressablePutResult =
+  | { readonly ok: true; readonly borrowedTtlSec?: number; readonly nearFull?: number }
+  | { readonly ok: false; readonly reason: AddressableRejectReason };
 
 /** 收下（共用同一個物件，免得每次寫入都配置一個） */
 export const ADDRESSABLE_PUT_OK: AddressablePutResult = { ok: true };
@@ -252,6 +302,22 @@ export interface OfflineStore {
    * 回傳刪除的事件數（去重後），供宿主記錄；呼叫端不得依它做流程判斷。
    */
   vanish(pubkey: string, nowSec: number): number;
+  /**
+   * 與 {@link put} 相同，但說出結果的細節（SDK ADR 0042）：被拒的原因、收下時是不是借用、有沒有接近天花板。
+   * `RelayCore` 有這個方法就用它；選用，v0.33 以前寫的自訂 store 不必改。
+   */
+  putResult?(event: NostrEvent, nowSec: number): OfflinePutResult;
+  /**
+   * 收件人讀自己的收件匣時呼叫（SDK ADR 0042）：取出並**歸零**這位收件人的丟棄計數，並記下「到這裡為止的留言都送到了」
+   * （之後才刪掉的這些不再計入）。沒有被刪的回 undefined。只在 `countDrops` 時有作用。
+   */
+  takeDropped?(recipient: string, nowSec: number): DroppedSummary | undefined;
+  /** 收件人的收件匣訂閱結束時呼叫：記下「到這裡為止的留言都即時送到了」（SDK ADR 0042）。 */
+  markDelivered?(recipient: string, nowSec: number): void;
+  /**
+   * `RelayCore` 告訴 store「誰正在線上收自己的收件匣」（SDK ADR 0042）：這些人的留言被刪掉不算丟棄——他們已經即時收到了。
+   */
+  setInboxProbe?(probe: (recipient: string) => boolean): void;
 }
 
 /** 取事件的收件人（`p` 標籤值）清單；供記憶體與 SQL 版共用。 */
@@ -292,15 +358,30 @@ export class MessageStore implements OfflineStore {
   private readonly effExp = new Map<string, number>();
   /** 可尋址事件（ADR-0071）：`kind\0pubkey\0d` → 最新一顆。 */
   private readonly addressable = new Map<string, NostrEvent>();
+  /** 以借用收下的離線事件 id（溢位帶，SDK ADR 0042）。 */
+  private readonly borrowedIds = new Set<string>();
+  /** 以借用收下的可尋址位址（鍵同 {@link addressable}）。 */
+  private readonly borrowedAddr = new Set<string>();
+  /** 事件 id → 寫入序號：丟棄計數的水位線用（SQL 版用 rowid；SDK ADR 0042）。 */
+  private readonly seq = new Map<string, number>();
+  private nextSeq = 1;
+  /** 收件人 → 丟棄計數與水位線（序號 ≤ `mark` 的留言已經送到了）。 */
+  private readonly drops = new Map<string, { summary?: DroppedSummary; mark: number; updatedAt: number }>();
+  /** 誰正在線上收自己的收件匣（`RelayCore` 設定）。 */
+  private inboxProbe: (recipient: string) => boolean = () => false;
 
   constructor(private readonly opts: MessageStoreOptions = {}) {}
+
+  setInboxProbe(probe: (recipient: string) => boolean): void {
+    this.inboxProbe = probe;
+  }
 
   /** 寫入可取代／可尋址事件（取代語意＋配額；ADR-0035／0071）。可取代事件無 `d` → 每 (kind,pubkey) 一顆。 */
   putAddressable(event: NostrEvent, nowSec: number): boolean {
     return this.putAddressableResult(event, nowSec).ok;
   }
 
-  /** 同 {@link putAddressable}，被拒時帶原因（ADR-0376）。 */
+  /** 同 {@link putAddressable}，被拒時帶原因（SDK ADR 0038 P0-R2）；收下時帶借用與預警（SDK ADR 0042）。 */
   putAddressableResult(event: NostrEvent, nowSec: number): AddressablePutResult {
     const prefix = `${event.kind}\0${event.pubkey}\0`;
     const key = prefix + dTagOf(event);
@@ -310,6 +391,7 @@ export class MessageStore implements OfflineStore {
       // purge：關閉備份時「已關閉」必須立即為真（ADR-0071）。
       if (existing) {
         this.addressable.delete(key);
+        this.borrowedAddr.delete(key);
         this.effExp.delete(existing.id);
       }
       return ADDRESSABLE_PUT_OK;
@@ -331,109 +413,357 @@ export class MessageStore implements OfflineStore {
       }
       if (used + size > budget) return addressableRejected("byte-quota");
     }
-    const eff = effectiveExpiration(event, nowSec, this.opts.addressableTtlSeconds ?? ADDRESSABLE_TTL_SECONDS);
+    let eff = effectiveExpiration(event, nowSec, this.opts.addressableTtlSeconds ?? ADDRESSABLE_TTL_SECONDS);
     if (eff <= nowSec) return addressableRejected("expired");
-    if (!this.fitsAddressableCeiling(key, size)) return addressableRejected("ceiling");
+    const placed = this.placeAddressable(key, event.pubkey, size);
+    if (placed === undefined) return addressableRejected("ceiling");
     if (existing) this.effExp.delete(existing.id);
+    const ttl = this.opts.borrowTtlSeconds ?? BORROW_TTL_SECONDS;
+    if (placed.borrowed) {
+      eff = borrowedExpiration(eff, nowSec, ttl);
+      this.borrowedAddr.add(key);
+    } else {
+      this.borrowedAddr.delete(key);
+    }
     this.addressable.set(key, event);
     this.effExp.set(event.id, eff);
-    return ADDRESSABLE_PUT_OK;
+    if (placed.borrowed) return { ok: true, borrowedTtlSec: ttl };
+    const nearFull = nearFullGrade(this.addressableBytes(), this.opts.addressableMaxTotalBytes, this.opts.nearFullPercent);
+    return nearFull === undefined ? ADDRESSABLE_PUT_OK : { ok: true, nearFull };
+  }
+
+  /** 目前可尋址佔用的位元組（`except` 那個位址不算：它即將被取代）。 */
+  private addressableBytes(except?: string): number {
+    let used = 0;
+    for (const [k, e] of this.addressable) if (k !== except) used += JSON.stringify(e).length;
+    return used;
   }
 
   /** 目前離線留言佔用的位元組（每位收件人各算一份，與 SQL 版的「一列」對齊）。 */
   private offlineBytes(): number {
     let used = 0;
-    for (const e of this.noRecipient) used += JSON.stringify(e).length;
-    for (const bucket of this.byRecipient.values()) {
-      for (const e of bucket) used += JSON.stringify(e).length;
-    }
+    for (const { event } of this.offlineRows()) used += JSON.stringify(event).length;
     return used;
   }
 
-  /**
-   * 這顆 DO 還放得下這筆離線留言嗎（ADR-0367 §決策 2）。
-   * 放不下時：車道淘汰**最快到期**者；嚴格平面直接拒收。
-   */
-  private fitsOfflineCeiling(size: number): boolean {
-    const max = this.opts.offlineMaxTotalBytes;
-    if (max === undefined) return true;
-    if (size > max) return false;
-    let used = this.offlineBytes();
-    if (used + size <= max) return true;
-    if (this.opts.ceilingEvicts !== true) return false;
-    const victims = [...this.effExp.entries()].sort((a, b) => a[1] - b[1]).map(([id]) => id);
-    for (const id of victims) {
-      if (used + size <= max) break;
-      used -= this.dropOffline(id);
-    }
-    return used + size <= max;
+  /** 每一列離線留言（每位收件人一列；無 `p` 者 `recipient = ''`）。 */
+  private offlineRows(): { event: NostrEvent; recipient: string }[] {
+    const rows: { event: NostrEvent; recipient: string }[] = [];
+    for (const event of this.noRecipient) rows.push({ event, recipient: "" });
+    for (const [recipient, bucket] of this.byRecipient) for (const event of bucket) rows.push({ event, recipient });
+    return rows;
   }
 
-  /** 從所有桶移除某個 id，回傳釋放的位元組。 */
-  private dropOffline(id: string): number {
+  /** 保底份額的 key：收件人；沒有收件人的列以作者計（SDK ADR 0042）。 */
+  private static ownerOf(event: NostrEvent, recipient: string): string {
+    return recipient === "" ? event.pubkey : recipient;
+  }
+
+  /** 每個 key 的離線用量（`borrowed` 選正常列或借用列）。 */
+  private offlineUsage(borrowed: boolean): Map<string, number> {
+    const usage = new Map<string, number>();
+    for (const { event, recipient } of this.offlineRows()) {
+      if (this.borrowedIds.has(event.id) !== borrowed) continue;
+      const owner = MessageStore.ownerOf(event, recipient);
+      usage.set(owner, (usage.get(owner) ?? 0) + JSON.stringify(event).length);
+    }
+    return usage;
+  }
+
+  /** 依到期時間由近而遠排好的離線列（`borrowed` 選正常列或借用列）。 */
+  private offlineRowsByExpiry(borrowed: boolean): { event: NostrEvent; recipient: string; owner: string; bytes: number }[] {
+    return this.offlineRows()
+      .filter(({ event }) => this.borrowedIds.has(event.id) === borrowed)
+      .map(({ event, recipient }) => ({
+        event,
+        recipient,
+        owner: MessageStore.ownerOf(event, recipient),
+        bytes: JSON.stringify(event).length,
+      }))
+      .sort((a, b) => (this.effExp.get(a.event.id) ?? 0) - (this.effExp.get(b.event.id) ?? 0));
+  }
+
+  /**
+   * 這顆 DO 放不放得下這筆離線留言、怎麼放（ADR-0367 §決策 2；SDK ADR 0042 的保底與溢位帶）。
+   * 回 undefined＝拒收；`borrowed`＝放進溢位帶。決策與 SQL 版共用 `decideCapacity`。
+   */
+  private placeOffline(size: number, copies: number, owners: readonly string[], nowSec: number): { borrowed: boolean } | undefined {
+    const max = this.opts.offlineMaxTotalBytes;
+    if (max === undefined) return { borrowed: false };
+    const need = size * copies;
+    let used = this.offlineBytes();
+    const guarantee = this.opts.guaranteeBytes;
+    const band = overflowBand(max, this.opts.overflowRatio);
+    let borrowedTotal: number | undefined;
+    let plan: { event: NostrEvent; recipient: string; owner: string; bytes: number }[] = [];
+    const borrowed = (): number => (borrowedTotal ??= [...this.offlineUsage(true).values()].reduce((a, b) => a + b, 0));
+    const decision = decideCapacity({
+      max,
+      used,
+      need,
+      evicts: this.opts.ceilingEvicts === true,
+      guarantee,
+      band,
+      planeBorrows: true,
+      borrowed,
+      withinGuarantee: () => {
+        const usage = this.offlineUsage(false);
+        return owners.every((o) => (usage.get(o) ?? 0) + size <= guarantee!);
+      },
+      excessAvailable: () => {
+        const usage = this.offlineUsage(false);
+        const mine = new Set(owners);
+        const candidates = this.offlineRowsByExpiry(false).filter(
+          (r) => !mine.has(r.owner) && (usage.get(r.owner) ?? 0) > guarantee!,
+        );
+        const picked = pickExcess(candidates, usage, guarantee!, used - borrowed() + need - max);
+        plan = picked.rows;
+        return picked.freed;
+      },
+      borrowFitsPerKey: () => {
+        const usage = this.offlineUsage(true);
+        const perKey = borrowPerKey(band, this.opts.borrowPerKeyBytes);
+        return owners.every((o) => (usage.get(o) ?? 0) + size <= perKey);
+      },
+    });
+    switch (decision.type) {
+      case "fit":
+        return { borrowed: false };
+      case "borrow":
+        return { borrowed: true };
+      case "reject":
+        return undefined;
+      case "reclaim":
+        for (const row of this.offlineRowsByExpiry(true)) {
+          if (used + need <= max) break;
+          used -= this.dropRow(row.event, row.recipient, nowSec);
+        }
+        return { borrowed: false };
+      case "excess":
+        for (const row of this.offlineRowsByExpiry(true)) this.dropRow(row.event, row.recipient, nowSec);
+        for (const row of plan) this.dropRow(row.event, row.recipient, nowSec);
+        return { borrowed: false };
+      case "legacy": {
+        // v0.33 原樣：依到期時間由近而遠淘汰，直到騰得出空間
+        const victims = [...this.effExp.entries()].sort((a, b) => a[1] - b[1]).map(([id]) => id);
+        for (const id of victims) {
+          if (used + need <= max) break;
+          used -= this.dropOffline(id, nowSec);
+        }
+        return used + need <= max ? { borrowed: false } : undefined;
+      }
+    }
+  }
+
+  /**
+   * 可尋址那一側的同一套決策（SDK ADR 0042）。`key` 是即將被取代的位址（不算進用量），`pubkey` 是保底的 key。
+   */
+  private placeAddressable(key: string, pubkey: string, size: number): { borrowed: boolean } | undefined {
+    const max = this.opts.addressableMaxTotalBytes;
+    if (max === undefined) return { borrowed: false };
+    let used = this.addressableBytes(key);
+    const guarantee = this.opts.guaranteeBytes;
+    const band = overflowBand(max, this.opts.overflowRatio);
+    const others = (borrowed: boolean): [string, NostrEvent, number][] =>
+      [...this.addressable.entries()]
+        .filter(([k]) => k !== key && this.borrowedAddr.has(k) === borrowed)
+        .map(([k, e]): [string, NostrEvent, number] => [k, e, JSON.stringify(e).length])
+        .sort((a, b) => (this.effExp.get(a[1].id) ?? 0) - (this.effExp.get(b[1].id) ?? 0));
+    const usageOf = (borrowed: boolean): Map<string, number> => {
+      const usage = new Map<string, number>();
+      for (const [, e, n] of others(borrowed)) usage.set(e.pubkey, (usage.get(e.pubkey) ?? 0) + n);
+      return usage;
+    };
+    let borrowedTotal: number | undefined;
+    const borrowed = (): number => (borrowedTotal ??= others(true).reduce((a, [, , n]) => a + n, 0));
+    let plan: { key: string; owner: string; bytes: number; id: string }[] = [];
+    const decision = decideCapacity({
+      max,
+      used,
+      need: size,
+      evicts: this.opts.ceilingEvicts === true,
+      guarantee,
+      band,
+      planeBorrows: this.opts.addressableBorrows !== false,
+      borrowed,
+      withinGuarantee: () => (usageOf(false).get(pubkey) ?? 0) + size <= guarantee!,
+      excessAvailable: () => {
+        const usage = usageOf(false);
+        const candidates = others(false)
+          .filter(([, e]) => e.pubkey !== pubkey && (usage.get(e.pubkey) ?? 0) > guarantee!)
+          .map(([k, e, n]) => ({ key: k, owner: e.pubkey, bytes: n, id: e.id }));
+        const picked = pickExcess(candidates, usage, guarantee!, used - borrowed() + size - max);
+        plan = picked.rows;
+        return picked.freed;
+      },
+      borrowFitsPerKey: () =>
+        (usageOf(true).get(pubkey) ?? 0) + size <= borrowPerKey(band, this.opts.borrowPerKeyBytes),
+    });
+    const drop = (k: string, id: string): void => {
+      this.addressable.delete(k);
+      this.borrowedAddr.delete(k);
+      this.effExp.delete(id);
+    };
+    switch (decision.type) {
+      case "fit":
+        return { borrowed: false };
+      case "borrow":
+        return { borrowed: true };
+      case "reject":
+        return undefined;
+      case "reclaim":
+        for (const [k, e, n] of others(true)) {
+          if (used + size <= max) break;
+          drop(k, e.id);
+          used -= n;
+        }
+        return { borrowed: false };
+      case "excess":
+        for (const [k, e] of others(true)) drop(k, e.id);
+        for (const row of plan) drop(row.key, row.id);
+        return { borrowed: false };
+      case "legacy": {
+        // v0.33 原樣：依到期時間由近而遠淘汰，直到騰得出空間
+        const byExpiry = [...this.addressable.entries()]
+          .filter(([k]) => k !== key)
+          .sort((a, b) => (this.effExp.get(a[1].id) ?? 0) - (this.effExp.get(b[1].id) ?? 0));
+        for (const [k, e] of byExpiry) {
+          if (used + size <= max) break;
+          used -= JSON.stringify(e).length;
+          drop(k, e.id);
+        }
+        return used + size <= max ? { borrowed: false } : undefined;
+      }
+    }
+  }
+
+  /** 事件還在任何一個離線桶裡嗎。 */
+  private stillStored(id: string): boolean {
+    if (this.noRecipient.some((e) => e.id === id)) return true;
+    for (const bucket of this.byRecipient.values()) if (bucket.some((e) => e.id === id)) return true;
+    return false;
+  }
+
+  /** 忘掉一顆不再存在的離線事件的附帶資料（到期時間、借用、序號）。 */
+  private forgetOffline(id: string): void {
+    this.effExp.delete(id);
+    this.borrowedIds.delete(id);
+    this.seq.delete(id);
+  }
+
+  /** 刪掉一列（某位收件人的那一份），回傳釋放的位元組；記進丟棄計數。 */
+  private dropRow(event: NostrEvent, recipient: string, nowSec: number): number {
     let freed = 0;
     const keep = (e: NostrEvent): boolean => {
-      if (e.id !== id) return true;
-      freed += JSON.stringify(e).length;
+      if (freed > 0 || e.id !== event.id) return true;
+      freed = JSON.stringify(e).length;
       return false;
     };
-    this.noRecipient = this.noRecipient.filter(keep);
+    if (recipient === "") {
+      this.noRecipient = this.noRecipient.filter(keep);
+    } else {
+      const bucket = this.byRecipient.get(recipient);
+      if (bucket) {
+        const next = bucket.filter(keep);
+        if (next.length === 0) this.byRecipient.delete(recipient);
+        else this.byRecipient.set(recipient, next);
+      }
+    }
+    if (freed > 0) {
+      this.noteDropped(recipient, event, nowSec);
+      if (!this.stillStored(event.id)) this.forgetOffline(event.id);
+    }
+    return freed;
+  }
+
+  /** 從所有桶移除某個 id，回傳釋放的位元組（v0.33 的淘汰）。 */
+  private dropOffline(id: string, nowSec: number): number {
+    let freed = 0;
+    const removed: { event: NostrEvent; recipient: string }[] = [];
+    const keep = (recipient: string) => (e: NostrEvent): boolean => {
+      if (e.id !== id) return true;
+      freed += JSON.stringify(e).length;
+      removed.push({ event: e, recipient });
+      return false;
+    };
+    this.noRecipient = this.noRecipient.filter(keep(""));
     for (const [recipient, bucket] of this.byRecipient) {
-      const next = bucket.filter(keep);
+      const next = bucket.filter(keep(recipient));
       if (next.length === 0) this.byRecipient.delete(recipient);
       else this.byRecipient.set(recipient, next);
     }
-    if (freed > 0) this.effExp.delete(id);
+    for (const { event, recipient } of removed) this.noteDropped(recipient, event, nowSec);
+    if (freed > 0) this.forgetOffline(id);
     return freed;
   }
 
   /**
-   * 這顆 DO 還放得下這筆可尋址事件嗎（ADR-0367 §決策 2）。
-   * 放不下時：車道淘汰**最快到期**者直到騰出空間；嚴格平面直接回 false（拒收）。
+   * 寄給 `recipient` 的一則被刪掉了（FIFO、天花板淘汰、借用到期）：記進丟棄計數（SDK ADR 0042）。
+   * 不計：沒開 `countDrops`、沒有收件人、收件人正在線上收收件匣（即時收到了）、在上次送到的水位線以前就存了（送到過）。
    */
-  private fitsAddressableCeiling(key: string, size: number): boolean {
-    const max = this.opts.addressableMaxTotalBytes;
-    if (max === undefined) return true;
-    if (size > max) return false; // 單顆就超過：淘汰也救不了，別把整顆 DO 清空
-    let used = 0;
-    for (const [k, e] of this.addressable) {
-      if (k === key) continue; // 取代既有位址：舊的那筆會被換掉，不計
-      used += JSON.stringify(e).length;
+  private noteDropped(recipient: string, event: NostrEvent, nowSec: number): void {
+    if (this.opts.countDrops !== true || recipient === "" || this.inboxProbe(recipient)) return;
+    const entry = this.drops.get(recipient);
+    if ((this.seq.get(event.id) ?? 0) <= (entry?.mark ?? 0)) return;
+    this.drops.set(recipient, {
+      summary: mergeDropped(entry?.summary, 1, event.created_at, event.created_at),
+      mark: entry?.mark ?? 0,
+      updatedAt: nowSec,
+    });
+    if (this.drops.size > DROPPED_RECIPIENTS_MAX) {
+      let oldest: string | undefined;
+      let at = Infinity;
+      for (const [r, e] of this.drops) if (e.updatedAt < at) [oldest, at] = [r, e.updatedAt];
+      if (oldest !== undefined) this.drops.delete(oldest);
     }
-    if (used + size <= max) return true;
-    if (this.opts.ceilingEvicts !== true) return false;
-    // 依到期時間由近而遠淘汰，直到騰得出空間
-    const byExpiry = [...this.addressable.entries()]
-      .filter(([k]) => k !== key)
-      .sort((a, b) => (this.effExp.get(a[1].id) ?? 0) - (this.effExp.get(b[1].id) ?? 0));
-    for (const [k, e] of byExpiry) {
-      if (used + size <= max) break;
-      used -= JSON.stringify(e).length;
-      this.addressable.delete(k);
-      this.effExp.delete(e.id);
-    }
-    return used + size <= max;
+  }
+
+  takeDropped(recipient: string, nowSec: number): DroppedSummary | undefined {
+    if (this.opts.countDrops !== true) return undefined;
+    const summary = this.drops.get(recipient)?.summary;
+    this.drops.set(recipient, { mark: this.nextSeq - 1, updatedAt: nowSec });
+    return summary !== undefined && summary.count > 0 ? summary : undefined;
+  }
+
+  markDelivered(recipient: string, nowSec: number): void {
+    if (this.opts.countDrops !== true) return;
+    const entry = this.drops.get(recipient);
+    this.drops.set(recipient, { ...(entry?.summary ? { summary: entry.summary } : {}), mark: this.nextSeq - 1, updatedAt: nowSec });
   }
 
   /** 寫入一筆留言；若已過期則拒絕並回 false。 */
   put(event: NostrEvent, nowSec: number): boolean {
-    if (this.isExpired(event, nowSec)) return false;
+    return this.putResult(event, nowSec).ok;
+  }
+
+  /** 同 {@link put}，說出結果的細節（SDK ADR 0042）。 */
+  putResult(event: NostrEvent, nowSec: number): OfflinePutResult {
+    if (this.isExpired(event, nowSec)) return { ok: false, reason: "expired" };
     const recipients = recipientsOf(event);
     // 一則事件在每位收件人底下各存一份（SQL 版就是各一列），天花板要照這個算。
     const copies = Math.max(1, recipients.length);
-    if (!this.fitsOfflineCeiling(JSON.stringify(event).length * copies)) return false;
-    this.effExp.set(event.id, effectiveExpiration(event, nowSec, this.opts.maxTtlSeconds));
+    const owners = [...new Set(recipients.length > 0 ? recipients : [event.pubkey])];
+    const placed = this.placeOffline(JSON.stringify(event).length, copies, owners, nowSec);
+    if (placed === undefined) return { ok: false, reason: "ceiling" };
+    const ttl = this.opts.borrowTtlSeconds ?? BORROW_TTL_SECONDS;
+    const eff = effectiveExpiration(event, nowSec, this.opts.maxTtlSeconds);
+    this.effExp.set(event.id, placed.borrowed ? borrowedExpiration(eff, nowSec, ttl) : eff);
+    if (placed.borrowed) this.borrowedIds.add(event.id);
+    else this.borrowedIds.delete(event.id);
+    this.seq.set(event.id, this.nextSeq++);
     if (recipients.length === 0) {
       this.noRecipient.push(event);
-      return true;
+    } else {
+      for (const recipient of recipients) {
+        const bucket = this.byRecipient.get(recipient) ?? [];
+        bucket.push(event);
+        this.byRecipient.set(recipient, bucket);
+      }
+      this.enforceCap(recipients, nowSec);
     }
-    for (const recipient of recipients) {
-      const bucket = this.byRecipient.get(recipient) ?? [];
-      bucket.push(event);
-      this.byRecipient.set(recipient, bucket);
-    }
-    this.enforceCap(recipients);
-    return true;
+    if (placed.borrowed) return { ok: true, borrowedTtlSec: ttl };
+    const nearFull = nearFullGrade(this.offlineBytes(), this.opts.offlineMaxTotalBytes, this.opts.nearFullPercent);
+    return nearFull === undefined ? { ok: true } : { ok: true, nearFull };
   }
 
   /**
@@ -462,11 +792,15 @@ export class MessageStore implements OfflineStore {
     return out;
   }
 
-  /** 清除所有已過期留言。 */
+  /** 清除所有已過期留言。借用列到期算丟棄（SDK ADR 0042）；一般的保存期到期不算——那是宣告過的契約。 */
   prune(nowSec: number): void {
     const survivors = new Set<string>();
     for (const [recipient, bucket] of this.byRecipient) {
-      const kept = bucket.filter((e) => !this.isExpired(e, nowSec));
+      const kept = bucket.filter((e) => {
+        if (!this.isExpired(e, nowSec)) return true;
+        if (this.borrowedIds.has(e.id)) this.noteDropped(recipient, e, nowSec);
+        return false;
+      });
       if (kept.length > 0) this.byRecipient.set(recipient, kept);
       else this.byRecipient.delete(recipient);
       for (const e of kept) survivors.add(e.id);
@@ -475,13 +809,18 @@ export class MessageStore implements OfflineStore {
     for (const e of this.noRecipient) survivors.add(e.id);
     // 可尋址事件（ADR-0071）：過期即回收（棄用帳號的快照空間自動釋放）
     for (const [key, e] of this.addressable) {
-      if (this.isExpired(e, nowSec)) this.addressable.delete(key);
-      else survivors.add(e.id);
+      if (this.isExpired(e, nowSec)) {
+        this.addressable.delete(key);
+        this.borrowedAddr.delete(key);
+      } else survivors.add(e.id);
     }
     // 同步清 effExp（避免 id → 到期時間的殘留成為另一種孤兒）
     for (const id of this.effExp.keys()) {
-      if (!survivors.has(id)) this.effExp.delete(id);
+      if (!survivors.has(id)) this.forgetOffline(id);
     }
+    // 丟棄計數只留一個保存期：更久沒動的收件人，那些留言本來也會到期（SDK ADR 0042）
+    const keepFor = this.opts.maxTtlSeconds ?? DEFAULT_MAX_TTL_SECONDS;
+    for (const [r, e] of this.drops) if (e.updatedAt <= nowSec - keepFor) this.drops.delete(r);
   }
 
   /** NIP-62 清除（ADR-0260）：刪掉此人發的、寄給他的、以及他的可尋址事件。 */
@@ -513,7 +852,11 @@ export class MessageStore implements OfflineStore {
       if (e.pubkey !== pubkey) continue;
       removed.add(e.id);
       this.addressable.delete(key);
+      this.borrowedAddr.delete(key);
     }
+
+    // 4. 他的丟棄計數（SDK ADR 0042）：清除就是一切。
+    this.drops.delete(pubkey);
 
     // 同一顆事件可能同時存在於多個收件人桶——只有**確定沒有任何一份倖存**時才收 effExp，
     // 否則會讓其他收件人手上那份失去到期時間（`isExpired` 退回 tag，永存縫隙就回來了）。
@@ -521,7 +864,7 @@ export class MessageStore implements OfflineStore {
     for (const bucket of this.byRecipient.values()) for (const e of bucket) survivors.add(e.id);
     for (const e of this.noRecipient) survivors.add(e.id);
     for (const e of this.addressable.values()) survivors.add(e.id);
-    for (const id of removed) if (!survivors.has(id)) this.effExp.delete(id);
+    for (const id of removed) if (!survivors.has(id)) this.forgetOffline(id);
 
     return removed.size;
   }
@@ -548,7 +891,7 @@ export class MessageStore implements OfflineStore {
     return exp !== undefined && exp <= nowSec;
   }
 
-  private enforceCap(recipients: string[]): void {
+  private enforceCap(recipients: string[], nowSec: number): void {
     const cap = this.opts.maxPerRecipient;
     const fileCap = this.opts.filePerRecipient ?? DEFAULT_FILE_PER_RECIPIENT;
     for (const recipient of recipients) {
@@ -557,20 +900,31 @@ export class MessageStore implements OfflineStore {
       // ADR-0162：檔案塊（1060）與聊天留言**分桶計數**——由新到舊各自保留至上限。
       const sorted = [...bucket].sort((a, b) => a.created_at - b.created_at);
       const keptReversed: NostrEvent[] = [];
+      const trimmed: NostrEvent[] = [];
       let chat = 0;
       let file = 0;
       for (let i = sorted.length - 1; i >= 0; i--) {
         const e = sorted[i]!;
         if (e.kind === FILE_WRAP_KIND) {
-          if (file >= fileCap) continue;
+          if (file >= fileCap) {
+            trimmed.push(e);
+            continue;
+          }
           file++;
         } else if (cap !== undefined) {
-          if (chat >= cap) continue;
+          if (chat >= cap) {
+            trimmed.push(e);
+            continue;
+          }
           chat++;
         }
         keptReversed.push(e);
       }
       this.byRecipient.set(recipient, keptReversed.reverse());
+      for (const e of trimmed) {
+        this.noteDropped(recipient, e, nowSec);
+        if (!this.stillStored(e.id)) this.forgetOffline(e.id);
+      }
     }
   }
 }

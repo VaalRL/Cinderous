@@ -13,6 +13,9 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   ACCOUNT_STORAGE_BUDGET_BYTES,
+  computeCeilingBudget,
+  doCapacityFor,
+  doCapacitySettings,
   doCeilingFor,
   doCeilings,
   fileLaneChunksPerRecipient,
@@ -173,11 +176,21 @@ describe("🔴 帳號儲存預算：所有可能 DO 的天花板加總 ≤ 免�
       expect(doCeilings(v).ignored, "這些項目沒有生效（退回較大的預設值），預算不可信").toEqual([]);
     });
 
-    it(`${section}：最壞加總 ≤ ${ACCOUNT_STORAGE_BUDGET_BYTES.toLocaleString("en-US")} bytes`, () => {
-      const w = worstCaseStorage(varsOf(section));
+    it(`${section}：五個容量設定（含 ADR-0379 的預警與丟棄計數）每一項都生效`, () => {
+      // 設錯的項目不生效＝退回較大的預設值或默默關掉，預算與「開了什麼」都不可信（SDK ADR 0042）
+      expect(doCapacitySettings(varsOf(section)).ignored).toEqual([]);
+    });
+
+    it(`${section}：最壞加總 ≤ ${ACCOUNT_STORAGE_BUDGET_BYTES.toLocaleString("en-US")} bytes（含溢位帶；SDK ADR 0042 的 computeCeilingBudget）`, () => {
+      const v = varsOf(section);
+      const budget = computeCeilingBudget(v);
+      expect(budget.ignored).toEqual([]);
+      expect(budget.withinBudget).toBe(true);
+      expect(budget.totalBytes).toBe(worstCaseStorage(v).totalBytes);
+      const w = worstCaseStorage(v);
       const over = w.totalBytes - ACCOUNT_STORAGE_BUDGET_BYTES;
       const table = w.rows
-        .map((r) => `  ${r.doName.padEnd(20)} ${r.cls.padEnd(6)} ${mib(r.ceiling.offlineMaxBytes)} + ${mib(r.ceiling.addressableMaxBytes)}`)
+        .map((r) => `  ${r.doName.padEnd(20)} ${r.cls.padEnd(6)} ${mib(r.ceiling.offlineMaxBytes)} + ${mib(r.ceiling.addressableMaxBytes)}（含溢位帶 ${mib(r.bytes)}）`)
         .join("\n");
       const advice = [
         `天花板加總 ${w.totalBytes.toLocaleString("en-US")} bytes（${mib(w.totalBytes)}）超過預算 ${over.toLocaleString("en-US")} bytes。`,
@@ -203,6 +216,39 @@ describe("🔴 帳號儲存預算：所有可能 DO 的天花板加總 ≤ 免�
       for (const id of fileLanes(v).active) {
         expect(doCeilingFor(v, namedLaneName(id)).offlineMaxBytes, id).toBeGreaterThanOrEqual(worst);
       }
+    });
+  }
+});
+
+describe("容量訊號：開了哪些、哪些先不開（ADR-0379）", () => {
+  // 2026-10-01 使用者核准：開粗分級預警與丟棄計數；溢位帶與保底先不開（理由與前置條件見 ADR-0379）。
+  // 🔴 要開溢位帶或保底，先改這支測試——那一刻就會讀到為什麼不能開。
+  for (const section of ["vars", "env.unified.vars"]) {
+    it(`${section}：預警（80／95）與丟棄計數開在嚴格平面與檔案車道`, () => {
+      const v = varsOf(section);
+      for (const doName of ["global", "presence", "shard-0", "shard-a", "app:cindersync", "app:cinder-coffice"]) {
+        const c = doCapacityFor(v, doName);
+        expect(c.nearFullPercent, doName).toBe(80);
+        expect(c.countDrops, doName).toBe(true);
+      }
+      // 名單上的一般車道：預警開、丟棄計數不開；共用分片兩者都不開
+      expect(doCapacityFor(v, "app:dochost")).toMatchObject({ nearFullPercent: 80 });
+      expect(doCapacityFor(v, "app:dochost").countDrops).toBeUndefined();
+      expect(doCapacityFor(v, "app-0").nearFullPercent).toBeUndefined();
+      expect(doCapacityFor(v, "app-0").countDrops).toBeUndefined();
+    });
+
+    it(`🔴 ${section}：溢位帶與保底都沒設（App v0.0.18 會把 2 小時的借用當成送達）`, () => {
+      const v = varsOf(section);
+      expect(v.DO_BORROW_PERCENT, "溢位帶要等 App 發版認得 warning: borrowed:（ADR-0379）").toBeUndefined();
+      expect(v.DO_GUARANTEE_KIB, "保底要等各客戶端完成 SDK ADR 0038 P1（ADR-0379）").toBeUndefined();
+      const budget = computeCeilingBudget(v);
+      for (const row of budget.rows) {
+        expect(row.capacity.overflowRatio, row.doName).toBeUndefined();
+        expect(row.capacity.guaranteeBytes, row.doName).toBeUndefined();
+      }
+      // 沒有溢位帶：最壞量與 ADR-0377 的表逐位元相同
+      expect(budget.totalBytes).toBe(3_724_541_952);
     });
   }
 });

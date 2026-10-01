@@ -80,6 +80,22 @@ FILE_LANES = "cindersync,cinder-coffice"
 # ⚠ 調低天花板不會搬資料也不會立刻刪：拒收制（strict）只是之後寫不進；淘汰制（其餘）在下一筆寫入時才淘汰到天花板以下。
 DO_CEILINGS_MIB = "strict=24/24,global=64/64,presence=16/16,shard-a=96/64,shard-1=96/64,shard-f=96/64,shard-7=96/64,public=16/16,lane=32/32,app:dochost=64/512,file=512/32"
 
+# 容量訊號（ADR-0379，2026-10-01 使用者核准；SDK v0.34.0 ADR 0042 移植）。對象寫法同 DO_CEILINGS_MIB。
+# ✅ 開啟：
+#   DO_NEAR_FULL_PERCENT 粗分級預警——寫入後這類資料用量達 80%（或 95%）以上時 `OK true "warning: near-full: <級>: …"`。
+#     只有兩級、不給精確百分比；收下了就是收下了（App v0.0.18 只看 OK 的布林，判成送達）。
+#   DO_DROP_NOTICES 丟棄計數——還沒送到就被 FIFO／天花板淘汰刪掉的留言按收件人累計，收件人讀自己的收件匣時
+#     在 EOSE 之前收到一則 `NOTICE "warning: dropped: N: since: until: …"`、送出即歸零（App v0.0.18 不看 NOTICE）。
+#     public（陌生應用、見習保存 2 小時）與 lane（遊戲房間多半沒有收件人、dochost 是可尋址）不開。
+# ❌ 先不開（開之前要先看 ADR-0379 的前置條件）：
+#   DO_BORROW_PERCENT 溢位帶——App v0.0.18 不認得 `warning: borrowed:`，會把只存 2 小時的借用當成送達，
+#     收件人 2 小時內沒上線就無聲消失，比現在看得到的 `blocked: ceiling:` 更糟。等 App 發版認得 borrowed 再開。
+#   DO_GUARANTEE_KIB 保底份額——會把「別人成功後被擠掉」變成「超出保底的人被拒」，要等各客戶端完成 SDK ADR 0038 P1。
+#     （淘汰制的溢位帶要同時有保底才生效，所以車道的溢位帶也一起等。）
+# 兩項都不改變最壞儲存量（溢位帶才會），預算仍是上面那張表的 3,724,541,952 bytes；`wrangler-vars.test.ts` 以全部容量設定重算。
+DO_NEAR_FULL_PERCENT = "strict=80,lane=80,file=80"
+DO_DROP_NOTICES = "strict,file"
+
 # 取得速率限制（ADR-0342 §3.1）：客戶端每半個 TTL 才取一次（TTL 300 ⇒ 2.5 分鐘一張），
 # 20/60s 對正常使用綽綽有餘；配合短 TTL，濫用者要維持流量就得持續取新憑證。
 # ⚠ per-location 計數且最終一致（Cloudflare 明說不是精確計費系統）——成本乘數，不是閘門。
@@ -157,6 +173,9 @@ MAX_FILE_MB = "30"
 FILE_LANES = "cindersync,cinder-coffice"
 # 每顆 DO 的容量天花板（ADR-0377，2026-09-30 使用者決定）——與頂層同步，預算計算見上面那段註解。
 DO_CEILINGS_MIB = "strict=24/24,global=64/64,presence=16/16,shard-a=96/64,shard-1=96/64,shard-f=96/64,shard-7=96/64,public=16/16,lane=32/32,app:dochost=64/512,file=512/32"
+# 容量訊號（ADR-0379）——與頂層同步：開預警與丟棄計數，溢位帶與保底先不開。理由見上面那段註解。
+DO_NEAR_FULL_PERCENT = "strict=80,lane=80,file=80"
+DO_DROP_NOTICES = "strict,file"
 
 [[env.unified.ratelimits]]
 name = "TURN_LIMIT"

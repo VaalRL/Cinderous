@@ -1,8 +1,8 @@
 import { verifyHttpAuth } from "@cinderous/core";
 import {
   DEVELOPER_DOCS_URL,
-  doCeilingFor,
-  doCeilings,
+  doCapacityFor,
+  doCapacitySettings,
   fileLanes,
   filePolicyFor,
   firstHost,
@@ -77,6 +77,20 @@ export interface Env {
    *（`host-config.ACCOUNT_STORAGE_BUDGET_BYTES`），`wrangler-vars.test.ts` 盯著。
    */
   DO_CEILINGS_MIB?: string;
+  /**
+   * 保底份額（SDK ADR 0042；ADR 0038 P2）：`<對象>=<KiB>`。共用 DO 內每位作者（可尋址）／每位收件人（離線）的保底，
+   * 保底內的資料不會被別人擠掉；只在淘汰制（車道）生效。**未設＝沒有保底**（ADR-0379：錨點先不開）。
+   */
+  DO_GUARANTEE_KIB?: string;
+  /**
+   * 溢位帶（SDK ADR 0042；ADR 0039 B1）：`<對象>=<天花板的百分比>`。天花板之上再收這麼多的「借用」，保存 2 小時、最先被淘汰，
+   * 回 `OK true "warning: borrowed: …"`。嚴格平面的可尋址不借用；車道要同時設保底才生效。**未設＝沒有溢位帶**（ADR-0379：錨點先不開）。
+   */
+  DO_BORROW_PERCENT?: string;
+  /** 粗分級預警（SDK ADR 0042）：`<對象>=<百分比>`；寫入後用量達這一級（或 95％）以上時 `OK true` 帶 `warning: near-full:`。未設＝不預警。 */
+  DO_NEAR_FULL_PERCENT?: string;
+  /** 丟棄計數（SDK ADR 0042）：開啟的對象（逗號分隔）。收件人讀收件匣時收到 `NOTICE "warning: dropped: …"`。未設＝不計。 */
+  DO_DROP_NOTICES?: string;
   /**
    * 連線被拒時指向的開發文件網址（ADR-0368）。未設＝官網開發者頁
    * （`host-config.DEVELOPER_DOCS_URL`）。自架站若有自己的說明頁可換掉。
@@ -226,6 +240,8 @@ export function relayInfoFrom(
   knownLane = false,
   /** 名單上車道的 id（ADR-0371）：決定這條路徑收不收檔案、單檔上限多少。 */
   laneId?: string,
+  /** 這條路徑的 DO 名（ADR-0379；SDK ADR 0042）：決定天花板與容量政策；沒給＝預設天花板、沒有保底與溢位帶。 */
+  doName?: string,
 ): Record<string, unknown> {
   // 與 DO 實際套用的同一個函式（`filePolicyFor`）——文件說的就是這條路徑真正在執行的政策。
   const files = filePolicyFor(env, profile === "app" && knownLane ? laneId : undefined);
@@ -241,6 +257,8 @@ export function relayInfoFrom(
     maxFileMb: files.accept ? files.maxFileMb : undefined,
     // 與實際生效的政策同源（`guardFor`）——拿獨立旗標描述它遲早會說謊（見本檔案上方註解）。
     authRequired: guardFor(profile).requireAuth === true,
+    // 與 DO 實際套用的同一個函式（ADR-0379；SDK ADR 0042）：天花板、淘汰或拒收、保底、溢位帶、預警、丟棄計數都是靜態值
+    ...(doName !== undefined ? { capacity: doCapacityFor(env, doName) } : {}),
     // ADR-0356：出貨版號。讓任何人（與 App 的「一鍵更新節點」）看得出這座跑的是哪一版，
     // 也讓 ADR-0241 的跟版義務從「口頭提醒」變成「查得到的事實」。
     version: RELAY_WORKER_VERSION,
@@ -322,7 +340,7 @@ export default {
         const profile = infoRoute?.profile ?? "strict";
         const known = infoRoute?.profile === "app" && infoRoute.known;
         const laneId = infoRoute?.profile === "app" ? infoRoute.laneId : undefined;
-        return new Response(JSON.stringify(relayInfoFrom(env, profile, known, laneId)), {
+        return new Response(JSON.stringify(relayInfoFrom(env, profile, known, laneId, infoRoute?.doName)), {
           status: 200,
           headers: NIP11_HEADERS,
         });
@@ -437,10 +455,10 @@ export class RelayRoom {
     if (ignored.length > 0) {
       console.warn(`FILE_LANES 忽略不在 APP_LANES 上的車道：${ignored.join(", ")}（ADR-0371）`);
     }
-    // DO_CEILINGS_MIB 設錯的項目不生效、退回較大的預設值（ADR-0377）——一樣要看得見。
-    const badCeilings = doCeilings(env).ignored;
-    if (badCeilings.length > 0) {
-      console.warn(`DO_CEILINGS_MIB 忽略無效的項目：${badCeilings.join(", ")}（ADR-0377）`);
+    // 容量設定錯的項目不生效、退回較大的預設值或關閉（ADR-0377；ADR-0379／SDK ADR 0042）——一樣要看得見。
+    const badCapacity = doCapacitySettings(env).ignored;
+    if (badCapacity.length > 0) {
+      console.warn(`容量設定忽略無效的項目：${badCapacity.join(", ")}（SDK ADR 0042）`);
     }
     ctx.blockConcurrencyWhile(async () => {
       // 還原本實例綁定的政策（ADR-0366）。DO 名與政策是一對一的，所以這裡讀到什麼就是什麼。
@@ -483,8 +501,8 @@ export class RelayRoom {
         profile,
         this.knownLane,
         files.accept ? files.maxFileMb : undefined,
-        // 每顆 DO 的天花板（ADR-0377）：與預算測試加總的是同一個函式。
-        this.doName !== undefined ? doCeilingFor(this.env, this.doName) : undefined,
+        // 每顆 DO 的容量政策（ADR-0377；ADR-0379／SDK ADR 0042）：與預算加總、NIP-11 用的是同一個函式。
+        this.doName !== undefined ? doCapacityFor(this.env, this.doName) : undefined,
       ),
     );
     const pow = powForLane(profile, this.env.APP_LANE_POW);

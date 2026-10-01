@@ -4,11 +4,12 @@
  * 每一句都是「NIP-01 前綴＋英文詞元＋說明」：外站與 App v0.0.18 只看前綴（core `classifyOk`），
  * SDK 客戶端（`classifyRelayMessage`）多拿一層詞元。詞元表的單一真實來源是 SDK 的 `protocol/relay-reject.ts`。
  *
- * 🔴 這些句子與 SDK 中繼（`@cinderous/client/relay` v0.32.0 的 `relay/reject-messages.ts`）**逐字相同**：
+ * 🔴 這些句子與 SDK 中繼（`@cinderous/client/relay` v0.32.0／v0.34.0 的 `relay/reject-messages.ts`）**逐字相同**：
  * PR #9 把錨點切到 SDK 中繼時，客戶端看到的不變。改字要兩邊一起改（`reject-messages.test.ts` 釘住每一句）。
  * 🔴 只能在前綴**後面**加詞元，前綴不能改：已上線的 App 以前綴判斷重試或永久失敗。
  */
 
+import type { DroppedSummary } from "./capacity.js";
 import type { AddressableRejectReason } from "./message-store.js";
 
 /** 離線留言存不下（DO 天花板滿了而這個平面不淘汰；SDK ADR 0038 P0-R1）。 */
@@ -81,3 +82,34 @@ export function tooManyConnectionsMessage(max: number): string {
 export function malformedMessage(reason: string): string {
   return `invalid: malformed: ${reason}`;
 }
+
+// ── 收下了、但附帶條件：`OK true "warning: …"` 與 `NOTICE "warning: …"`（SDK ADR 0042；ADR 0040 詞元表）──────
+// NIP-01 允許 `OK true` 帶訊息；不認得的客戶端照舊當成功。`warning` 不是 NIP-01 的標準前綴，但形狀相同（單字＋冒號），
+// 我們的客戶端（`classifyRelayMessage`）依詞元分類；第三方客戶端只看到一段說明。
+
+/** 秒數寫成人讀的長度（`7200` → `2 小時`）。 */
+function humanSeconds(sec: number): string {
+  if (sec % 3600 === 0) return `${sec / 3600} 小時`;
+  if (sec % 60 === 0) return `${sec / 60} 分鐘`;
+  return `${sec} 秒`;
+}
+
+/** 收進溢位帶（ADR 0039 B1）：`warning: borrowed: <秒>: …`。客戶端取秒數（`parseBorrowedWarning`），算即時送達、不算耐久收下。 */
+export function borrowedWarning(ttlSec: number): string {
+  return `warning: borrowed: ${ttlSec}: 本站空間暫時不足，這則只保存 ${humanSeconds(ttlSec)}、會最先被刪除；要長期保存請另存一份到其他中繼`;
+}
+
+/** 接近天花板（ADR 0038 決策 5，粗分級）：`warning: near-full: <級>: …`。級只有站方設定的一級與 95。 */
+export function nearFullWarning(percent: number): string {
+  return `warning: near-full: ${percent}: 本站這一類資料的空間已用 ${percent}% 以上；建議另存一份到其他中繼`;
+}
+
+/**
+ * 丟棄計數（ADR 0038 M8）：收件人讀自己的收件匣時，在 EOSE 之前送一則 `NOTICE`。
+ * `warning: dropped: <則數>: <最早 created_at>: <最晚 created_at>: …`——只有數量與時間範圍，沒有寄件人、沒有內容、沒有事件 id。
+ * 用 `NOTICE` 而不是自訂訊息型別：NIP-01 客戶端對 `NOTICE` 只會記錄或顯示，不認得的訊息型別有的會報錯。
+ */
+export function droppedNotice(d: DroppedSummary): string {
+  return `warning: dropped: ${d.count}: ${d.since}: ${d.until}: 本站因空間不足刪掉了 ${d.count} 則寄給你、還沒送到的留言；可向你的其他裝置或寄件人索取`;
+}
+
