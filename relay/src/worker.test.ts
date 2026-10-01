@@ -1764,3 +1764,170 @@ describe("每顆 DO 的天花板依 DO_CEILINGS_MIB（ADR-0377，宿主層）", 
     expect(bytes).toBeLessThanOrEqual(1024 * 1024);
   });
 });
+
+// ── ADR-0379（SDK ADR 0042 移植）：容量政策、DO 名、溢位帶、NIP-11 ───────────────────────
+// 逐字搬自 SDK tests/relay/worker.test.ts〈容量設定與 DO 名〉（6c36ebd）；只把 openAt 換成本檔的寫法（假 Response 沒有 status）。
+describe("容量設定與 DO 名（ADR-0379；SDK ADR 0042）", () => {
+  const openAt = async (room: RelayRoom, state: FakeState, path: string): Promise<FakeWs> => {
+    const before = state.sockets.length;
+    await room.fetch(new Request(`https://${HOST}${path}`));
+    expect(state.sockets.length).toBe(before + 1);
+    return state.sockets[before]!;
+  };
+  /** 約 200 KB 的禮物包（天花板 4 MiB 放得下 20 顆） */
+  const big = (to: string): NostrEvent =>
+    finalizeEvent({ kind: 1059, created_at: nowSec(), tags: [["p", to]], content: "x".repeat(200_000) }, generateSecretKey());
+  // 溢位帶 100%＝4 MiB，每位收件人最多借帶子的 1/16（256 KiB）＝一顆
+  const ENV = { DO_CEILINGS_MIB: "shard-a=4/4", DO_BORROW_PERCENT: "shard-a=100" } as unknown as Env;
+
+  /** 在 /s/a 對同一位收件人送 22 顆，回傳每顆 OK 的第 3、4 欄：20 顆正常、第 21 顆借用、第 22 顆超過每人借用上限 */
+  const fillShardA = (room: RelayRoom, ws: FakeWs): [boolean, string][] => {
+    const to = "b".repeat(64);
+    return Array.from({ length: 22 }, () => {
+      const e = big(to);
+      const ok = (send(room, ws, ["EVENT", e]) as [string, string, boolean, string][]).find((m) => m[0] === "OK");
+      return [ok![2], ok![3]];
+    });
+  };
+
+  it("🔴 DO 名在第一次連線時記進 storage（cinder:do-name，與 Cinderous 同一個鍵），天花板與溢位帶依它生效", async () => {
+    const state = new FakeState();
+    const room = newRoom(state, ENV);
+    const ws = await openAt(room, state, "/s/a");
+    expect(state.kv.get("cinder:do-name")).toBe("shard-a");
+    expect(authenticate(room, ws, generateSecretKey())).toBe(true);
+    ws.drain();
+    const results = fillShardA(room, ws);
+    expect(results.slice(0, 20)).toEqual(Array(20).fill([true, ""]));
+    expect(results[20]![0]).toBe(true);
+    expect(results[20]![1]).toMatch(/^warning: borrowed: 7200: /);
+    expect(results[21]).toEqual([false, OFFLINE_CEILING_REJECT]);
+  });
+
+  it("休眠喚醒後沒有 fetch：從 storage 讀回 DO 名，天花板照樣生效", async () => {
+    const state = new FakeState();
+    const room = newRoom(state, ENV);
+    const ws = await openAt(room, state, "/s/a");
+    expect(authenticate(room, ws, generateSecretKey())).toBe(true);
+    ws.drain();
+    const woke = newRoom(state, ENV);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(fillShardA(woke, ws)[21]).toEqual([false, OFFLINE_CEILING_REJECT]);
+  });
+
+  it("升級前就釘住政策的 DO（沒有 DO 名）：下一次連線補記，換成自己的天花板", async () => {
+    const state = new FakeState();
+    state.kv.set("cinder:lane-profile", "strict");
+    state.kv.set("cinder:lane-known", false);
+    const room = newRoom(state, ENV);
+    await new Promise((r) => setTimeout(r, 0));
+    const ws = await openAt(room, state, "/s/a");
+    expect(state.kv.get("cinder:do-name")).toBe("shard-a");
+    expect(authenticate(room, ws, generateSecretKey())).toBe(true);
+    ws.drain();
+    expect(fillShardA(room, ws)[21]![0]).toBe(false);
+  });
+
+  it("沒設容量變數：與移植前相同（128 MiB、沒有借用；OK true 的訊息是空字串）", async () => {
+    const state = new FakeState();
+    const room = newRoom(state, {} as Env);
+    const ws = await openAt(room, state, "/s/a");
+    expect(authenticate(room, ws, generateSecretKey())).toBe(true);
+    ws.drain();
+    expect(fillShardA(room, ws)).toEqual(Array(22).fill([true, ""]));
+  });
+
+  it("設錯的項目不生效、啟動時 console.warn（要看得見）", () => {
+    const warned: string[] = [];
+    const original = console.warn;
+    console.warn = (msg: string) => void warned.push(msg);
+    try {
+      newRoom(new FakeState(), { DO_CEILINGS_MIB: "shard-z=1/1", DO_GUARANTEE_KIB: "strict=2048" } as unknown as Env);
+    } finally {
+      console.warn = original;
+    }
+    expect(warned.join("\n")).toContain("DO_CEILINGS_MIB: shard-z=1/1");
+    expect(warned.join("\n")).toContain("DO_GUARANTEE_KIB: strict=2048");
+  });
+
+  it("NIP-11 依路徑宣告那顆 DO 的天花板與政策（只有靜態值）", async () => {
+    const env = {
+      APP_LANES: "dochost",
+      DO_CEILINGS_MIB: "shard-a=1/1,app:dochost=64/512",
+      DO_GUARANTEE_KIB: "lane=2048",
+      DO_BORROW_PERCENT: "strict=25,lane=25",
+      DO_NEAR_FULL_PERCENT: "lane=80",
+      DO_DROP_NOTICES: "strict",
+    } as unknown as Env;
+    const info = async (path: string, e: Env = env): Promise<Record<string, unknown>> =>
+      JSON.parse(
+        ((await worker.fetch(new Request(`https://${HOST}${path}`, { headers: { Accept: "application/nostr+json" } }), e)) as unknown as { body: string }).body,
+      ) as Record<string, unknown>;
+    const shard = await info("/s/a");
+    expect(shard.cinder_ceiling_policy).toBe("reject");
+    expect(shard.cinder_ceiling_bytes).toEqual({ offline: 1024 * 1024, addressable: 1024 * 1024 });
+    expect(shard.cinder_borrow_percent).toBe(25);
+    expect(shard.cinder_borrow_ttl_sec).toBe(7200);
+    expect(shard.cinder_borrow_planes).toEqual(["offline"]); // 嚴格平面的可尋址不借用
+    expect(shard.cinder_drop_notices).toBe(true);
+    expect(shard.cinder_guarantee_bytes).toBeUndefined();
+    const lane = await info("/app/dochost");
+    expect(lane.cinder_ceiling_policy).toBe("evict");
+    expect(lane.cinder_ceiling_bytes).toEqual({ offline: 64 * 1024 * 1024, addressable: 512 * 1024 * 1024 });
+    expect(lane.cinder_guarantee_bytes).toBe(2048 * 1024);
+    expect(lane.cinder_borrow_planes).toEqual(["offline", "addressable"]);
+    expect(lane.cinder_near_full_percent).toEqual([80, 95]);
+    const plain = await info("/s/a", {} as Env);
+    expect(plain.cinder_ceiling_policy).toBe("reject");
+    expect(plain.cinder_ceiling_bytes).toEqual({ offline: 128 * 1024 * 1024, addressable: 128 * 1024 * 1024 });
+    for (const k of ["cinder_borrow_ttl_sec", "cinder_guarantee_bytes", "cinder_near_full_percent", "cinder_drop_notices"]) {
+      expect(plain[k], k).toBeUndefined();
+    }
+  });
+
+  /** 從幾條新連線（每條 100 則，避開每把公鑰每分鐘 120 則）寄 `n` 則給 R */
+  const flood = async (room: RelayRoom, state: FakeState, R: string, n: number): Promise<void> => {
+    for (let sent = 0; sent < n; sent += 100) {
+      const sender = await openAt(room, state, "/s/a");
+      expect(authenticate(room, sender, generateSecretKey())).toBe(true);
+      for (let i = sent; i < Math.min(n, sent + 100); i += 1) {
+        room.webSocketMessage(
+          sender as unknown as WebSocket,
+          JSON.stringify(["EVENT", finalizeEvent({ kind: 1059, created_at: nowSec() - 3000 + i, tags: [["p", R]], content: "x" }, generateSecretKey())]),
+        );
+      }
+      sender.drain();
+    }
+  };
+
+  it("丟棄計數跨休眠：收件人的收件匣訂閱在喚醒後還原，線上時被擠掉的不算；離線時被擠掉的算", async () => {
+    const env = { DO_DROP_NOTICES: "strict" } as unknown as Env;
+    const rsk = generateSecretKey();
+    const R = getPublicKey(rsk);
+
+    // 線上：訂閱著收件匣，DO 休眠又喚醒（訂閱從 attachment 還原），505 則擠掉最舊的 5 則 ⇒ 不算
+    const online = new FakeState();
+    const room = newRoom(online, env);
+    const reader = await openAt(room, online, "/s/a");
+    expect(authenticate(room, reader, rsk)).toBe(true);
+    send(room, reader, ["REQ", "inbox", { kinds: [1059], "#p": [R] }]);
+    const woke = newRoom(online, env);
+    await new Promise((r) => setTimeout(r, 0));
+    await flood(woke, online, R, 505);
+    reader.drain();
+    const seen = send(woke, reader, ["REQ", "again", { kinds: [1059], "#p": [R], limit: 1 }]) as [string, string][];
+    expect(seen.map((m) => m[0])).not.toContain("NOTICE");
+
+    // 對照：收件人不在線上，同樣 505 則 ⇒ 5 則算丟棄，下次讀收件匣時在 EOSE 前收到
+    const offline = new FakeState();
+    const room2 = newRoom(offline, env);
+    await flood(room2, offline, R, 505);
+    const reader2 = await openAt(room2, offline, "/s/a");
+    expect(authenticate(room2, reader2, rsk)).toBe(true);
+    reader2.drain();
+    const out = send(room2, reader2, ["REQ", "inbox", { kinds: [1059], "#p": [R], limit: 1 }]) as [string, string][];
+    const notice = out.find((m) => m[0] === "NOTICE");
+    expect(notice?.[1]).toMatch(/^warning: dropped: 5: /);
+    expect(out.at(-1)?.[0]).toBe("EOSE");
+  }, 120_000);
+});

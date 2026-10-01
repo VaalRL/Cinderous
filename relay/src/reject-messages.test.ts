@@ -1,5 +1,5 @@
 // 拒收訊息加詞元（ADR-0376；SDK ADR 0038 P0-R2、SDK ADR 0040）：
-// 1. 每一句都是「NIP-01 前綴＋英文詞元＋說明」，而且與 SDK 中繼 v0.32.0 逐字相同（PR #9 切換時客戶端看到的不變）；
+// 1. 每一句都是「NIP-01 前綴＋英文詞元＋說明」，而且與 SDK 中繼 v0.32.0（warning 句子：v0.34.0）逐字相同（PR #9 切換時客戶端看到的不變）；
 // 2. 🔴 已上線的 App（v0.0.18）只看前綴：每一句新舊版在 `classifyOk` 的判定必須一樣；
 // 3. 可尋址被拒依原因拆開；`duplicate` 改回 OK true；store 丟例外不留在重放快取。
 import { createRequire } from "node:module";
@@ -10,8 +10,11 @@ import { MessageStore, type MessageStoreOptions, type OfflineStore } from "./mes
 import {
   ADDRESSABLE_REJECT,
   ADDRESSABLE_REJECT_GENERIC,
+  borrowedWarning,
+  droppedNotice,
   EXPIRED_REJECT,
   malformedMessage,
+  nearFullWarning,
   OFFLINE_CEILING_REJECT,
   powRejectMessage,
   REJECT,
@@ -28,7 +31,7 @@ function parse(message: string): { prefix?: string; token?: string } {
   return { prefix: head[1]!, ...(next ? { token: next[1]! } : {}) };
 }
 
-describe("逐字與 SDK 中繼 v0.32.0 相同（`src/relay/reject-messages.ts`）", () => {
+describe("逐字與 SDK 中繼 v0.32.0／v0.34.0 相同（`src/relay/reject-messages.ts`）", () => {
   // 改任何一句都要兩邊一起改（SDK 有契約測試確認每一句的分類）。
   const golden: [string, string][] = [
     [OFFLINE_CEILING_REJECT, "blocked: ceiling: 本站離線留言空間已滿，這則未保存也未轉送；請改用其他中繼或稍後再試"],
@@ -69,6 +72,14 @@ describe("逐字與 SDK 中繼 v0.32.0 相同（`src/relay/reject-messages.ts`�
     [REJECT.internal, "error: internal: 內部錯誤，請稍後再試"],
     [powRejectMessage(8), "pow: difficulty: 需要難度 8"],
     [malformedMessage("malformed event"), "invalid: malformed: malformed event"],
+    // 收下了、附帶條件（ADR-0379；SDK v0.34.0 ADR 0042）：`OK true` 與 `NOTICE` 的 warning 句子
+    [borrowedWarning(7200), "warning: borrowed: 7200: 本站空間暫時不足，這則只保存 2 小時、會最先被刪除；要長期保存請另存一份到其他中繼"],
+    [nearFullWarning(80), "warning: near-full: 80: 本站這一類資料的空間已用 80% 以上；建議另存一份到其他中繼"],
+    [nearFullWarning(95), "warning: near-full: 95: 本站這一類資料的空間已用 95% 以上；建議另存一份到其他中繼"],
+    [
+      droppedNotice({ count: 3, since: 1_790_000_000, until: 1_790_086_400 }),
+      "warning: dropped: 3: 1790000000: 1790086400: 本站因空間不足刪掉了 3 則寄給你、還沒送到的留言；可向你的其他裝置或寄件人索取",
+    ],
   ];
   it.each(golden)("%s", (actual, expected) => {
     expect(actual).toBe(expected);
