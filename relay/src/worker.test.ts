@@ -11,7 +11,7 @@
 
 import { createRequire } from "node:module";
 import type { DatabaseSync as DatabaseSyncType } from "node:sqlite";
-import { buildAuthEvent, buildHttpAuthEvent, finalizeEvent, minePow, generateSecretKey, getPublicKey, httpAuthHeader, type NostrEvent, type SecretKey } from "@cinderous/core";
+import { buildAuthEvent, buildHttpAuthEvent, buildInboxAck, finalizeEvent, minePow, generateSecretKey, getPublicKey, httpAuthHeader, type NostrEvent, type SecretKey } from "@cinderous/core";
 import { beforeAll, describe, expect, it } from "vitest";
 import worker, { mintTurnResponse, turnPreflightResponse, RelayRoom, type Env } from "./worker.js";
 import {
@@ -100,6 +100,12 @@ class FakeState {
   wsSubsWrites = 0;
   /** 設了就讓 `ws_subs` 的寫入拋錯（模擬 storage 失敗）。 */
   failWsSubsWrites = false;
+
+  /** 測試直接看離線留言的到期時間（ADR-0380）。 */
+  expirationOf(id: string): number | null {
+    const row = this.db.prepare(`SELECT expiration FROM offline_msgs WHERE id = ?`).get(id) as { expiration: number | null } | undefined;
+    return row?.expiration ?? null;
+  }
 
   /** 測試直接看溢位表。 */
   wsSubsRows(): { conn_id: string; sub_id: string }[] {
@@ -676,6 +682,39 @@ describe("NIP-11 端點（ADR-0260 worker fetch）", () => {
 
   it("站方 TTL 上限反映在 retention（企業站放寬後客戶端看得到）", async () => {
     expect((await docOf({ MAX_TTL_DAYS: "90" })).retention).toEqual([{ time: 90 * 86_400 }]);
+  });
+
+  it("宣告收件確認（ADR-0380；SDK ADR 0067 §2）", async () => {
+    expect((await docOf()).cinder_inbox_ack).toEqual({ kind: 25190, grace_sec: 7_200 });
+  });
+});
+
+describe("RelayRoom — 收件確認（ADR-0380；SDK ADR 0067）", () => {
+  it("已認證的本人確認收件匣裡的包：那一列降為現在＋2 小時到期；別人確認不了", async () => {
+    const state = new FakeState();
+    const room = newRoom(state);
+    const meSk = generateSecretKey();
+    const me = getPublicKey(meSk);
+    const sender = await open(room, state);
+    expect(authenticate(room, sender, generateSecretKey())).toBe(true);
+    const now = nowSec();
+    const wrap = finalizeEvent(
+      { kind: 1059, created_at: now - 60, tags: [["p", me], ["expiration", String(now + 7 * 86_400)]], content: "密文" },
+      generateSecretKey(),
+    );
+    send(room, sender, ["EVENT", wrap]);
+    expect(state.expirationOf(wrap.id)).toBe(now + 7 * 86_400);
+    // 別人（已認證成自己）拿我的確認重放：不動
+    const replay = send(room, sender, ["EVENT", buildInboxAck([wrap.id], meSk)]) as [string, string, boolean, string][];
+    expect(replay.find((m) => m[0] === "OK")?.[2]).toBe(false);
+    expect(state.expirationOf(wrap.id)).toBe(now + 7 * 86_400);
+    const mine = await open(room, state);
+    expect(authenticate(room, mine, meSk)).toBe(true);
+    const ok = send(room, mine, ["EVENT", buildInboxAck([wrap.id], meSk)]) as [string, string, boolean, string][];
+    expect(ok.find((m) => m[0] === "OK")?.[2]).toBe(true);
+    const exp = state.expirationOf(wrap.id)!;
+    expect(exp).toBeGreaterThan(now);
+    expect(exp).toBeLessThanOrEqual(nowSec() + 7_200);
   });
 });
 

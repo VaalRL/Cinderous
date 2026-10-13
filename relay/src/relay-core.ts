@@ -2,6 +2,8 @@ import {
   AUTH_KIND,
   authChallengeOf,
   authRelayMatches,
+  INBOX_ACK_KIND,
+  inboxAckIdsOf,
   leadingZeroBits,
   VANISH_KIND,
   vanishTargetsRelay,
@@ -188,6 +190,12 @@ export interface RelayCoreOptions {
    * 未設/false＝整類拒收（公共站零儲存風險）。錨點只在 `FILE_LANES` 列出的車道打開（ADR-0371）。
    */
   acceptFileEvents?: boolean;
+  /**
+   * 收件確認的寬限（秒；ADR-0380，移植 SDK ADR 0067）。給了（而且 store 有 `ackInbox`）就處理 kind 25190：
+   * 已認證的本人確認自己收件匣裡的列 → 降為「現在＋寬限」到期；不存、不扇出。沒給＝當一般瞬時事件（舊行為）。
+   * 宿主以 `inboxAckGraceFor` 算（比照未註冊應用的保存期、不超過站方保存上限），並在 NIP-11 宣告同一個值。
+   */
+  inboxAckGraceSec?: number;
   /**
    * 一次 REQ 回傳歷史事件的位元組上限（ADR-0371 §決策 6）；預設 {@link MAX_QUERY_BYTES}。
    * 同一個 REQ 的所有 filter **共用**這份預算——否則多塞幾個 filter 就能繞過。
@@ -676,6 +684,23 @@ export class RelayCore {
     if (event.kind === VANISH_KIND) {
       const result = this.handleVanish(connId, event);
       return result[0]?.message[2] === false ? reject(String(result[0].message[3])) : result;
+    }
+
+    // 收件確認（ADR-0380；SDK ADR 0067）：同樣是**命令**——不存、不扇出。位置與 NIP-62 相同（速率限制之後）。
+    if (event.kind === INBOX_ACK_KIND && this.opts.inboxAckGraceSec !== undefined && this.opts.store?.ackInbox) {
+      const self = this.authState.get(connId)?.pubkey;
+      if (self === undefined) {
+        // 車道不強制 AUTH，但「自己的收件匣」只有 AUTH 證明得了（同 ADR-0369 的 `#p`）
+        const out = reject(REJECT.authRequired);
+        const state = this.authState.get(connId);
+        if (state) out.push({ to: connId, message: ["AUTH", state.challenge] });
+        return out;
+      }
+      if (self !== event.pubkey) return reject(REJECT.ackSelfOnly);
+      const ids = inboxAckIdsOf(event);
+      if (ids === null) return reject(REJECT.ackMalformed);
+      this.opts.store.ackInbox(self, ids, now + this.opts.inboxAckGraceSec, now);
+      return [{ to: connId, message: ["OK", event.id, true, ""] }];
     }
 
     // 檔案塊（FILE_WRAP=1060，ADR-0162）：企業限定——`acceptFileEvents` 未啟用整類拒收
