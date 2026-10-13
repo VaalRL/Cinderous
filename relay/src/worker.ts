@@ -7,6 +7,7 @@ import {
   filePolicyFor,
   firstHost,
   guardFor,
+  inboxAckGraceFor,
   knownLanes,
   powForLane,
   type RelayProfile,
@@ -494,20 +495,20 @@ export class RelayRoom {
       this.env,
       profile === "app" && this.knownLane ? this.laneId : undefined,
     );
-    this.store = new SqlMessageStore(
-      this.exec,
-      storeOptions(
-        this.env.MAX_TTL_DAYS,
-        profile,
-        this.knownLane,
-        files.accept ? files.maxFileMb : undefined,
-        // 每顆 DO 的容量政策（ADR-0377；ADR-0379／SDK ADR 0042）：與預算加總、NIP-11 用的是同一個函式。
-        this.doName !== undefined ? doCapacityFor(this.env, this.doName) : undefined,
-      ),
+    const storeOpts = storeOptions(
+      this.env.MAX_TTL_DAYS,
+      profile,
+      this.knownLane,
+      files.accept ? files.maxFileMb : undefined,
+      // 每顆 DO 的容量政策（ADR-0377；ADR-0379／SDK ADR 0042）：與預算加總、NIP-11 用的是同一個函式。
+      this.doName !== undefined ? doCapacityFor(this.env, this.doName) : undefined,
     );
+    this.store = new SqlMessageStore(this.exec, storeOpts);
     const pow = powForLane(profile, this.env.APP_LANE_POW);
     return new RelayCore({
       store: this.store,
+      // 收件確認（ADR-0380；SDK ADR 0067）：寬限與 NIP-11 宣告同一個函式
+      inboxAckGraceSec: inboxAckGraceFor(storeOpts),
       ...guardFor(profile),
       ...(pow > 0 ? { minPowDifficulty: pow } : {}),
       ...(files.accept ? { acceptFileEvents: true } : {}),

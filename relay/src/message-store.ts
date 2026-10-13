@@ -303,6 +303,11 @@ export interface OfflineStore {
    */
   vanish(pubkey: string, nowSec: number): number;
   /**
+   * 收件確認（ADR-0380；SDK ADR 0067）：把 `recipient` 收件匣裡、`ids` 中的列降為 `expiresAt` 到期，回傳降了幾列。
+   * 只提早、不延後；寄給多位收件人的事件不動（記憶體版的到期時間是每顆事件一份，降了會連累別人）。選用。
+   */
+  ackInbox?(recipient: string, ids: readonly string[], expiresAt: number, nowSec: number): number;
+  /**
    * 與 {@link put} 相同，但說出結果的細節（SDK ADR 0042）：被拒的原因、收下時是不是借用、有沒有接近天花板。
    * `RelayCore` 有這個方法就用它；選用，v0.33 以前寫的自訂 store 不必改。
    */
@@ -729,6 +734,23 @@ export class MessageStore implements OfflineStore {
     if (this.opts.countDrops !== true) return;
     const entry = this.drops.get(recipient);
     this.drops.set(recipient, { ...(entry?.summary ? { summary: entry.summary } : {}), mark: this.nextSeq - 1, updatedAt: nowSec });
+  }
+
+  ackInbox(recipient: string, ids: readonly string[], expiresAt: number, nowSec: number): number {
+    const bucket = this.byRecipient.get(recipient);
+    if (!bucket) return 0;
+    const wanted = new Set(ids);
+    let lowered = 0;
+    for (const event of bucket) {
+      if (!wanted.has(event.id) || this.isExpired(event, nowSec)) continue;
+      const others = recipientsOf(event);
+      if (others.length !== 1 || others[0] !== recipient) continue;
+      const exp = this.effExp.get(event.id) ?? getExpiration(event);
+      if (exp !== undefined && exp <= expiresAt) continue;
+      this.effExp.set(event.id, expiresAt);
+      lowered += 1;
+    }
+    return lowered;
   }
 
   /** 寫入一筆留言；若已過期則拒絕並回 false。 */

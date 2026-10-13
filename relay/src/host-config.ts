@@ -373,6 +373,17 @@ export const PUBLIC_LANE_ADDRESSABLE_BYTES_PER_AUTHOR = 2 * 1024 * 1024;
 export const PUBLIC_LANE_RETENTION_SECONDS = 2 * 60 * 60;
 
 /**
+ * 收件確認的寬限（秒；ADR-0380，移植 SDK ADR 0067）：收件人確認處理完之後，那幾列在中繼上再留多久。
+ *
+ * 比照未註冊應用的保存期（使用者 2026-10-11 裁示），直接用 {@link PUBLIC_LANE_RETENTION_SECONDS}、不另設常數；
+ * 這顆 DO 的保存上限更短時取保存上限（ADR-0160：站方上限恆為權威）。不另開設定項。
+ * 宿主把它傳給 `RelayCore` 的 `inboxAckGraceSec`，NIP-11 的 `cinder_inbox_ack.grace_sec` 宣告同一個值。
+ */
+export function inboxAckGraceFor(store: Pick<MessageStoreOptions, "maxTtlSeconds">): number {
+  return Math.min(store.maxTtlSeconds ?? DEFAULT_MAX_TTL_SECONDS, PUBLIC_LANE_RETENTION_SECONDS);
+}
+
+/**
  * **整顆 DO** 的可尋址容量天花板（ADR-0367 §決策 2）。
  *
  * 見習保存讓水位不會一直漲，天花板保證**極端情況也不撐爆**——兩者互補：

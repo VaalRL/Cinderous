@@ -16,9 +16,11 @@
 // 依 `Accept: application/nostr+json` 分支；**不帶此 header 時維持原純文字 200**——PaaS／
 // 容器健康檢查（ADR-0075）與既有探測都靠那個 200，改掉會讓部署中的站看起來像掛了。
 
+import { INBOX_ACK_KIND } from "@cinderous/core";
 import { BORROW_TTL_SECONDS, NEAR_FULL_TOP_PERCENT, overflowBand } from "./capacity.js";
 import {
   type DoCapacity,
+  inboxAckGraceFor,
   MAX_EVENTS_PER_MINUTE,
   MAX_FUTURE_SKEW_SEC,
   MAX_PAST_SKEW_SEC,
@@ -79,6 +81,11 @@ export interface Nip11Config {
   maxFileMb?: number | undefined;
   /** 是否要求 NIP-42 AUTH。 */
   authRequired?: boolean | undefined;
+  /**
+   * 這座站處理收件確認嗎（ADR-0380；SDK ADR 0067）。未設＝處理（兩個宿主預設都開）；`false`＝不宣告
+   *（Node 版 `REQUIRE_AUTH=0`：不發 AUTH 挑戰，就沒有人證明得了「自己的收件匣」）。
+   */
+  inboxAck?: boolean | undefined;
   /**
    * 本路徑的政策（ADR-0366）：`strict`＝Cinderous 訊息平面，`app`＝第三方車道。
    * 未設＝`strict`。同一座 Worker 會依請求路徑回不同的文件——一份文件描述不了兩種政策。
@@ -217,6 +224,11 @@ export function buildRelayInfo(cfg: Nip11Config = {}): Record<string, unknown> {
             store.nearFullPercent < NEAR_FULL_TOP_PERCENT ? [store.nearFullPercent, NEAR_FULL_TOP_PERCENT] : [store.nearFullPercent],
         }
       : {}),
+    /**
+     * 收件確認（ADR-0380；SDK ADR 0067 §2）：收件人處理完可以送這個 kind，中繼把那幾列降為「現在＋`grace_sec`」到期。
+     * 客戶端只對宣告了的中繼送。
+     */
+    ...(cfg.inboxAck !== false ? { cinder_inbox_ack: { kind: INBOX_ACK_KIND, grace_sec: inboxAckGraceFor(store) } } : {}),
     /** 丟棄計數（SDK ADR 0042）：讀自己的收件匣時會收到 `NOTICE "warning: dropped: …"`。 */
     ...(store.countDrops === true ? { cinder_drop_notices: true } : {}),
     /** 是否接受檔案塊（ADR-0162）：false＝整類拒收，客戶端不必試。 */

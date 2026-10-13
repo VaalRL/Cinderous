@@ -952,6 +952,22 @@ export class SqlMessageStore implements OfflineStore {
    *
    * 兩欄都有索引（`idx_offline_pubkey`／`idx_offline_bucket` 的 recipient 前綴），故不是全表掃描。
    */
+  /**
+   * 收件確認（ADR-0380；SDK ADR 0067）：同 {@link OfflineStore.ackInbox}。走主鍵 `(id, recipient)`，不讀 json。
+   * 「只寄給一人」以**庫裡還有沒有同 id、別的收件人的列**判斷（讀 json 的標籤要走溢位頁，檔案塊一顆約 131KB）。
+   */
+  ackInbox(recipient: string, ids: readonly string[], expiresAt: number, nowSec: number): number {
+    if (ids.length === 0) return 0;
+    const set = inJson("id", ids);
+    const where = `recipient = ? AND ${set.clause}
+       AND (expiration IS NULL OR expiration > ?) AND (expiration IS NULL OR expiration > ?)
+       AND NOT EXISTS (SELECT 1 FROM offline_msgs o2 WHERE o2.id = offline_msgs.id AND o2.recipient != ?)`;
+    const binds = [recipient, set.binding, expiresAt, nowSec, recipient];
+    const n = Number(this.sql(`SELECT COUNT(*) AS n FROM offline_msgs WHERE ${where}`, ...binds)[0]?.n ?? 0);
+    if (n > 0) this.sql(`UPDATE offline_msgs SET expiration = ? WHERE ${where}`, expiresAt, ...binds);
+    return n;
+  }
+
   vanish(pubkey: string, _nowSec: number): number {
     const rows = this.sql(
       `SELECT COUNT(DISTINCT id) AS n FROM offline_msgs WHERE pubkey = ? OR recipient = ?`,

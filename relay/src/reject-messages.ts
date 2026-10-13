@@ -61,6 +61,10 @@ export const REJECT = {
     "restricted: scope: app lanes need a tag filter (e.g. #t, #d), authors, or #p set to yourself after NIP-42 AUTH (ADR-0366)",
   notOnWhitelist: "restricted: not-allowed: 不在這座站的白名單上",
   vanishSelfOnly: "restricted: self-only: 只能清除自己的資料（NIP-62）",
+  /** 收件確認（ADR-0380；SDK ADR 0067）：簽章者不是 AUTH 身分 */
+  ackSelfOnly: "restricted: self-only: 只能確認自己的收件匣（SDK ADR 0067）",
+  /** 收件確認格式不對（id 不是 64 位小寫 hex、空的、超過 500 個） */
+  ackMalformed: "invalid: malformed: 收件確認格式不對（SDK ADR 0067）",
   authNoChallenge: "auth-failed: no-challenge: 尚未發出挑戰",
   authBadEvent: "auth-failed: bad-auth: 認證事件無效或挑戰不符",
   authRelayTag: "auth-failed: relay-tag: relay tag 未指向本站",

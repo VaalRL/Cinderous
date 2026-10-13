@@ -6,6 +6,7 @@ export * from "./constants.js";
 export * from "./keys.js";
 export * from "./event.js";
 export * from "./sign.js";
+export * from "./inbox-ack.js";
 export * from "./tracker.js";
 export * from "./ephemeral.js";
 export * from "./heartbeat.js";

@@ -65,6 +65,8 @@ describe("逐字與 SDK 中繼 v0.32.0／v0.34.0 相同（`src/relay/reject-mess
       "restricted: scope: app lanes need a tag filter (e.g. #t, #d), authors, or #p set to yourself after NIP-42 AUTH (ADR-0366)",
     ],
     [REJECT.vanishSelfOnly, "restricted: self-only: 只能清除自己的資料（NIP-62）"],
+    [REJECT.ackSelfOnly, "restricted: self-only: 只能確認自己的收件匣（SDK ADR 0067）"],
+    [REJECT.ackMalformed, "invalid: malformed: 收件確認格式不對（SDK ADR 0067）"],
     [REJECT.authNoChallenge, "auth-failed: no-challenge: 尚未發出挑戰"],
     [REJECT.authBadEvent, "auth-failed: bad-auth: 認證事件無效或挑戰不符"],
     [REJECT.authRelayTag, "auth-failed: relay-tag: relay tag 未指向本站"],
