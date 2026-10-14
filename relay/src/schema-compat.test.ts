@@ -79,6 +79,15 @@ const SDK_0042_ADDITIONS = [
   `CREATE INDEX idx_inbox_drops_updated ON inbox_drops(updated_at)`,
 ];
 
+/**
+ * SDK ADR 0085（SDK v0.60.0；Cinderous ADR-0386 移植）：檔案塊整批淘汰的批次欄位與部分索引——**逐字**（與 SDK 的 `SDK_0085_ADDITIONS` 相同）。
+ * 相容遷移：可為 NULL 的欄位（舊版的 INSERT 不帶它＝NULL＝不參與整批淘汰）與只收 `batch IS NOT NULL` 的部分索引；回滾照常讀寫。
+ */
+const SDK_0085_ADDITIONS = [
+  `ALTER TABLE offline_msgs ADD COLUMN batch INTEGER`,
+  `CREATE INDEX idx_offline_batch ON offline_msgs(recipient, batch, bytes, created_at) WHERE batch IS NOT NULL`,
+];
+
 function openDb(): { db: DatabaseSyncType; exec: SqlExec } {
   const db = new DatabaseSync(":memory:");
   const exec: SqlExec = (query, ...bindings) => {
@@ -146,7 +155,7 @@ describe("DO SQLite：從移植前（22e3860c）的 schema 升上來（ADR-0379�
 
   it("🔴 從零建的 schema＝移植前的＋SDK ADR 0042 的相容遷移（逐字；與 SDK 中繼從零建的相同，PR #9 切換不必再遷移）", () => {
     const expected = openDb();
-    for (const ddl of [...CINDEROUS_MAIN_SCHEMA, ...SDK_0042_ADDITIONS]) expected.exec(ddl);
+    for (const ddl of [...CINDEROUS_MAIN_SCHEMA, ...SDK_0042_ADDITIONS, ...SDK_0085_ADDITIONS]) expected.exec(ddl);
     const fresh = openDb();
     openLikeRoom(fresh.exec);
     expect(schemaOf(fresh.db)).toEqual(schemaOf(expected.db));

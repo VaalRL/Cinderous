@@ -366,6 +366,14 @@ export function dedupById(events: NostrEvent[]): NostrEvent[] {
  * 事件與不帶 `#p` 的查詢走全掃備援。Worker 端接 D1 時應比照以
  * `p_tag`/`expiration` 建索引。
  */
+/**
+ * 檔案塊的批次（SDK ADR 0085）：`expiration` 標籤的值。同一次送出的所有檔案塊共用同一個值（SDK vault 傳輸層、Cinderous 傳檔都是迴圈外算一次）。
+ * 不是檔案塊、或沒有 `expiration` 標籤 → undefined（不參與整批淘汰）。
+ */
+export function batchOf(event: NostrEvent): number | undefined {
+  return event.kind === FILE_WRAP_KIND ? getExpiration(event) : undefined;
+}
+
 export class MessageStore implements OfflineStore {
   /** 收件人 pubkey → 該收件人的留言。 */
   private readonly byRecipient = new Map<string, NostrEvent[]>();
@@ -550,22 +558,30 @@ export class MessageStore implements OfflineStore {
         return { borrowed: true };
       case "reject":
         return undefined;
-      case "reclaim":
+      case "reclaim": {
+        const gone: { event: NostrEvent; recipient: string }[] = [];
         for (const row of this.offlineRowsByExpiry(true)) {
           if (used + need <= max) break;
           used -= this.dropRow(row.event, row.recipient, nowSec);
+          gone.push(row);
         }
+        this.dropBatchMates(gone, nowSec); // 整批淘汰（SDK ADR 0085）
         return { borrowed: false };
-      case "excess":
-        for (const row of this.offlineRowsByExpiry(true)) this.dropRow(row.event, row.recipient, nowSec);
-        for (const row of plan) this.dropRow(row.event, row.recipient, nowSec);
+      }
+      case "excess": {
+        const gone = [...this.offlineRowsByExpiry(true), ...plan];
+        for (const row of gone) this.dropRow(row.event, row.recipient, nowSec);
+        this.dropBatchMates(gone, nowSec);
         return { borrowed: false };
+      }
       case "legacy": {
         // v0.33 原樣：依到期時間由近而遠淘汰，直到騰得出空間
         const victims = [...this.effExp.entries()].sort((a, b) => a[1] - b[1]).map(([id]) => id);
         for (const id of victims) {
           if (used + need <= max) break;
-          used -= this.dropOffline(id, nowSec);
+          const gone: { event: NostrEvent; recipient: string }[] = [];
+          used -= this.dropOffline(id, nowSec, gone);
+          used -= this.dropBatchMates(gone, nowSec);
         }
         return used + need <= max ? { borrowed: false } : undefined;
       }
@@ -693,8 +709,30 @@ export class MessageStore implements OfflineStore {
     return freed;
   }
 
-  /** 從所有桶移除某個 id，回傳釋放的位元組（v0.33 的淘汰）。 */
-  private dropOffline(id: string, nowSec: number): number {
+  /**
+   * 整批淘汰（SDK ADR 0085）：中繼自己刪掉的檔案塊，同一收件人、同一個 `expiration` 標籤（＝同一次送出）的其餘檔案塊一起刪，
+   * 回傳釋放的位元組。只刪一部分會切出永遠收不齊的孤兒：佔空間到過期、每次補拉都被整批再下載。
+   * 批次靠中繼本來就看得到的值判斷（不加任何元資料）；同一秒送給同一人的另一則可能被一起刪（ADR 0085 已知取捨）。
+   */
+  private dropBatchMates(dropped: readonly { event: NostrEvent; recipient: string }[], nowSec: number): number {
+    const batches = new Map<string, Set<number>>();
+    for (const { event, recipient } of dropped) {
+      const batch = batchOf(event);
+      if (batch === undefined || recipient === "") continue;
+      const set = batches.get(recipient) ?? new Set<number>();
+      set.add(batch);
+      batches.set(recipient, set);
+    }
+    let freed = 0;
+    for (const [recipient, set] of batches) {
+      const mates = (this.byRecipient.get(recipient) ?? []).filter((e) => set.has(batchOf(e) ?? NaN));
+      for (const e of mates) freed += this.dropRow(e, recipient, nowSec);
+    }
+    return freed;
+  }
+
+  /** 從所有桶移除某個 id，回傳釋放的位元組（v0.33 的淘汰）。`removed` 給了就把移除的列放進去。 */
+  private dropOffline(id: string, nowSec: number, removedOut?: { event: NostrEvent; recipient: string }[]): number {
     let freed = 0;
     const removed: { event: NostrEvent; recipient: string }[] = [];
     const keep = (recipient: string) => (e: NostrEvent): boolean => {
@@ -711,6 +749,7 @@ export class MessageStore implements OfflineStore {
     }
     for (const { event, recipient } of removed) this.noteDropped(recipient, event, nowSec);
     if (freed > 0) this.forgetOffline(id);
+    removedOut?.push(...removed);
     return freed;
   }
 
@@ -829,16 +868,23 @@ export class MessageStore implements OfflineStore {
   /** 清除所有已過期留言。借用列到期算丟棄（SDK ADR 0042）；一般的保存期到期不算——那是宣告過的契約。 */
   prune(nowSec: number): void {
     const survivors = new Set<string>();
+    // 借用列到期（2 小時）：同一批正常存放的也一起刪（SDK ADR 0085），否則借用的那幾塊一走就剩下收不齊的
+    const borrowedGone: { event: NostrEvent; recipient: string }[] = [];
     for (const [recipient, bucket] of this.byRecipient) {
       const kept = bucket.filter((e) => {
         if (!this.isExpired(e, nowSec)) return true;
-        if (this.borrowedIds.has(e.id)) this.noteDropped(recipient, e, nowSec);
+        if (this.borrowedIds.has(e.id)) {
+          this.noteDropped(recipient, e, nowSec);
+          borrowedGone.push({ event: e, recipient });
+        }
         return false;
       });
       if (kept.length > 0) this.byRecipient.set(recipient, kept);
       else this.byRecipient.delete(recipient);
       for (const e of kept) survivors.add(e.id);
     }
+    this.dropBatchMates(borrowedGone, nowSec);
+    for (const bucket of this.byRecipient.values()) for (const e of bucket) survivors.add(e.id);
     this.noRecipient = this.noRecipient.filter((e) => !this.isExpired(e, nowSec));
     for (const e of this.noRecipient) survivors.add(e.id);
     // 可尋址事件（ADR-0071）：過期即回收（棄用帳號的快照空間自動釋放）
@@ -959,6 +1005,7 @@ export class MessageStore implements OfflineStore {
         this.noteDropped(recipient, e, nowSec);
         if (!this.stillStored(e.id)) this.forgetOffline(e.id);
       }
+      this.dropBatchMates(trimmed.map((event) => ({ event, recipient })), nowSec); // 整批淘汰（SDK ADR 0085）
     }
   }
 }
