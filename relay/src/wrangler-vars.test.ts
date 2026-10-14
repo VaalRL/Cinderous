@@ -238,17 +238,22 @@ describe("容量訊號：開了哪些、哪些先不開（ADR-0379）", () => {
       expect(doCapacityFor(v, "app-0").countDrops).toBeUndefined();
     });
 
-    it(`🔴 ${section}：溢位帶與保底都沒設（App v0.0.18 會把 2 小時的借用當成送達）`, () => {
+    it(`🔴 ${section}：保底與溢位帶只開在檔案車道（ADR-0381；App v0.0.18 會把 2 小時的借用當成送達）`, () => {
       const v = varsOf(section);
-      expect(v.DO_BORROW_PERCENT, "溢位帶要等 App 發版認得 warning: borrowed:（ADR-0379）").toBeUndefined();
-      expect(v.DO_GUARANTEE_KIB, "保底要等各客戶端完成 SDK ADR 0038 P1（ADR-0379）").toBeUndefined();
       const budget = computeCeilingBudget(v);
       for (const row of budget.rows) {
-        expect(row.capacity.overflowRatio, row.doName).toBeUndefined();
-        expect(row.capacity.guaranteeBytes, row.doName).toBeUndefined();
+        if (row.cls === "file") {
+          expect(row.capacity.guaranteeBytes, row.doName).toBe(64 * MIB);
+          expect(row.capacity.overflowRatio, row.doName).toBe(0.2);
+        } else {
+          expect(row.capacity.overflowRatio, `${row.doName}：嚴格平面要等 App 認得 warning: borrowed:（ADR-0379）`).toBeUndefined();
+          expect(row.capacity.guaranteeBytes, `${row.doName}：其他車道要等客戶端完成 SDK ADR 0038 P1（ADR-0379）`).toBeUndefined();
+        }
       }
-      // 沒有溢位帶：最壞量與 ADR-0377 的表逐位元相同
-      expect(budget.totalBytes).toBe(3_724_541_952);
+      expect(budget.rows.filter((r) => r.cls === "file").map((r) => r.doName).sort()).toEqual(["app:cinder-coffice", "app:cindersync"]);
+      // ADR-0377 的表＋兩條檔案車道 (512＋32 MiB) × 20%（逐列取整）
+      expect(budget.totalBytes).toBe(3_724_541_952 + 2 * (Math.floor(512 * MIB * 0.2) + Math.floor(32 * MIB * 0.2)));
+      expect(budget.totalBytes).toBe(3_952_712_088);
     });
   }
 });
