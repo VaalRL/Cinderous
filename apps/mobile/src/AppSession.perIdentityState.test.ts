@@ -177,8 +177,11 @@ describe("per-identity state 範圍隔離（P4／ADR-0294 §2）", () => {
 
     it("🔴 已無人呼叫的 `reset()` 不得留著（死程式碼會讓下一個人以為那條路還在用）", () => {
       for (const c of IDENTITY_CLUSTERS) {
-        const hook = readFileSync(new URL(`./${c.file}`, import.meta.url), "utf8");
-        if (!/reset\s*[:(]/.test(hook)) continue; // 沒有 reset 的簇（歸零全交給重掛）
+        // 排除註解（ADR-0332：「掃程式碼、排除註解」）——檔頭說明裡提到 `reset()` 不算提供
+        const hook = readFileSync(new URL(`./${c.file}`, import.meta.url), "utf8")
+          .replace(/\/\*[\s\S]*?\*\//g, "")
+          .replace(/(^|\s)\/\/.*$/gm, "$1");
+        if (!/\breset\s*[:(]/.test(hook)) continue; // 沒有 reset 的簇（歸零全交給重掛）
         expect(SRC, `${c.file} 提供了 reset() 卻沒人呼叫`).toContain(`${c.holder}.reset(`);
       }
     });
