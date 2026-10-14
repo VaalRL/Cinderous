@@ -83,6 +83,8 @@
 >
 > **收件確認（ADR-0380；SDK ADR 0067 移植）**：收件人處理完自己收件匣裡的包後送 kind 25190（本人簽、content 是外層 id，最多 500 個）；中繼只在連線已 AUTH 且簽章者＝AUTH 身分時處理，把**只寄給他一人**的那幾列降為「現在＋2 小時」到期（`inboxAckGraceFor`：未註冊應用的保存期與站方保存上限取小），不存、不扇出；NIP-11 宣告 `cinder_inbox_ack: { kind, grace_sec }`，客戶端只對宣告了的中繼送。
 >
+> **認證前送出（ADR-0385）**：錨點連上就發 NIP-42 挑戰，認證前的 EVENT 一律回 `auth-required`。core `RelayClient`（所有連線共用）把認證前送出的事件記著，被這樣拒收就不往上報、認證成功後（先重掛訂閱）自動重送——心跳、直連信令、輸入中這些沒有外送匣的即時事件才不會在剛連上時消失。
+>
 > **容量訊號（ADR-0379；SDK v0.34.0 ADR 0042 移植）**：中繼的容量政策與 SDK 逐字相同——保底份額（`DO_GUARANTEE_KIB`，只在淘汰制）、溢位帶（`DO_BORROW_PERCENT`，天花板之上借用 2 小時、`OK true "warning: borrowed: …"`）、粗分級預警（`DO_NEAR_FULL_PERCENT`，`OK true "warning: near-full: <級>: …"`，只有門檻與 95 兩級）、丟棄計數（`DO_DROP_NOTICES`：還沒送到就被 FIFO／淘汰刪掉的留言按收件人累計，本人讀收件匣時在 EOSE 前收到 `NOTICE "warning: dropped: N: since: until: …"`、送出即歸零），全部預設關閉；NIP-11 一律多 `cinder_ceiling_policy`／`cinder_ceiling_bytes`，其餘設了才出現。帳號預算改用 `computeCeilingBudget`（含溢位帶）。**錨點開預警與丟棄計數；保底（每位收件人 64 MiB）與溢位帶（20%）只開在檔案車道**（ADR-0381，客戶端都是 SDK ≥ v0.33）；嚴格平面與其他車道的溢位帶與保底要等客戶端接得住（App v0.0.18 只看 `OK` 的布林，會把借用當成送達）。DO SQLite 多 `borrowed` 欄、兩個只收借用列的部分索引與 `inbox_drops` 表（每次喚醒冪等遷移，舊程式可回滾）。
 >
 > **拒收訊息帶英文詞元（ADR-0376；SDK ADR 0040）**：所有 `OK false`／`CLOSED`／關鍵 `NOTICE` 都是「NIP-01 前綴＋英文詞元＋說明」（`blocked: quota: …`、`blocked: stale: …`、`rate-limited: events: …`、`restricted: scope: …`、`error: resubscribe: …`），句子集中在 `relay/src/reject-messages.ts`、與 SDK 中繼（v0.32.0）逐字相同。🔴 只能在前綴**後面**加詞元：App 外送匣（`classifyOk`）只看前綴。可尋址被拒依原因拆開（`OfflineStore.putAddressableResult`，選用）；重放窗內重複回 **`OK true "duplicate: …"`**（NIP-01）；store 丟例外時事件也不留在重放快取。車道升級被拒的三句 NOTICE 不改（開發者文件逐字列出）。
@@ -93,7 +95,7 @@
 | 好友上線/離線 | 20000（**無內容存活信標**，ADR-0129） | 否（Ephemeral） | **自適應心跳**：活躍 60s／閒置 300s（ADR-0109；±抖動模糊時序，ADR-0088 (d)）；在線判定讀對方**自報節奏**（ADR-0119）。**ADR-0129：心跳降為無內容信標，只證明「在線」＋節奏**——`s/m/np` 移出明文，改走封裝（見下列）。P2P 卸載（ADR-0088 (e)）：資料通道已開時走 P2P 直送；全聯絡人皆有 P2P 時抑制 relay 信標。**真隱身（ADR-0240）**：既不廣播自己、**也不訂閱聯絡人心跳**（`authors:[聯絡人]` 不上中繼＝聯絡人集合不外流，ADR-0237 Tier 1）；仍收 P2P presence（正在對話者）。是唯一不被 IP 關聯打穿的客戶端手段（送更少） |
 | 在線狀態內容（狀態/自訂文字/音樂，✅ ADR-0129） | 21004（**NIP-59 包封**）／P2P 資料通道 | 否（Ephemeral） | `{s,m,np}`（狀態／「我在發呆」／正在聽的音樂）改走**封裝**：P2P 的聯絡人走資料通道；**在線✕無P2P** 的聯絡人收 kind 21004 封裝事件，**只在改變時與對方剛上線時發**。relay 只看到臨時作者＋收件人，**內容全密文**——不再明文洩漏你的狀態文字與音樂 |
 | 正在輸入中（✅ F5 卸載） | 20001 或 P2P DataChannel | 否（Ephemeral） | 對話視窗觸發；**P2P 通道已開時走 Data Channel 卸載中繼**，否則走 kind 20001 中繼轉發（ADR-0006 F5） |
-| WebRTC SDP 交換 | 21000-21999（NIP-59 包封） | 否（Ephemeral） | 信令交換，純記憶體轉發，避免洩漏「誰呼叫誰」。雙方同時發起直連時公鑰較大的一方讓步（收回自己的 offer、接受對方的；ADR-0384） |
+| WebRTC SDP 交換 | 21000-21999（NIP-59 包封） | 否（Ephemeral） | 信令交換，純記憶體轉發，避免洩漏「誰呼叫誰」。雙方同時發起直連時公鑰較大的一方讓步（ADR-0384）；offer 一律在新連線上接受，卡住超過 10 秒的協商換新連線重談；信令失敗不在對話裡報錯 |
 | 震動（Nudge） | — | — | WebRTC Data Channel；P2P 不可用時降級走中繼 |
 | 檔案傳輸（✅ A4；F3/C4 二進位） | — | — | WebRTC Data Channel，不受 JSON 大小限制；對稱 NAT 經 TURN 保底。桌面前端已接（`WebRtcTransfer`：附件/拖放、進度、下載），信令走 kind 21000（ADR-0017）。分塊改**二進位框架**（去 base64 ~33%，ADR-0029） |
 | 檔案合集／續傳／校驗（✅ ADR-0355） | — | — | 一批檔案超過 8 個或含資料夾時折疊成**單一 tar 合集**（不壓縮，可定位⇒續傳與隨機存取天然成立）；收端在 `file-begin` 後回 `file-resume{have,v}` 告知斷點（同時是能力回執，只回給 `v>=2`）；送完最後一塊送 `file-end{sha}`，收端比對整檔 SHA-256 才交付。合集內的檔案**原封不動**⇒ ADR-0273 的 EXIF 清除在合集裡不生效，送出前先確認 |
