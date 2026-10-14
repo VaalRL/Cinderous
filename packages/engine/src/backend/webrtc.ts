@@ -20,6 +20,7 @@ import {
   type SecretKey,
   type Signal,
   FileSourceUnavailableError,
+  getPublicKey,
 } from "@cinderous/core";
 import { IcePathTracker, type IcePath } from "./ice-path.js";
 
@@ -103,6 +104,10 @@ interface PeerConn {
   peerUnderstandsV2: boolean;
   /** 是否已有一個檔案正在送（非同步管線需要防重入才不會兩檔交錯）。 */
   sending: boolean;
+  /** 自己的 offer 正在產生、還沒設成本地描述（ADR-0384：判斷 offer 有沒有撞在一起）。 */
+  makingOffer: boolean;
+  /** 不讓步的一方略過了對方那顆撞車的 offer（ADR-0384）：那顆 offer 帶來的候選套不上是預期的。 */
+  ignoredOffer: boolean;
 }
 
 /** 續傳協商的等待上限：超過就當對方沒有斷點，從頭送。 */
@@ -335,6 +340,8 @@ export class WebRtcTransfer {
       resumeWaiters: new Map(),
       peerUnderstandsV2: false,
       sending: false,
+      makingOffer: false,
+      ignoredOffer: false,
       candBatch: new CandidateBatch(),
       candTimer: undefined,
       // 判定有變才會進來（tracker 自己去重）；只在通道仍開著時上報，避免斷線後的殘響。
@@ -378,13 +385,44 @@ export class WebRtcTransfer {
     peer.started = true;
     const dc = peer.pc.createDataChannel("buddy");
     this.attachChannel(peerPk, peer, dc);
+    peer.makingOffer = true;
     try {
       const offer = await peer.pc.createOffer();
+      // ADR-0384：產生 offer 的空檔裡已經接受了對方的 offer（我是讓步的一方，自己的通道已拆）→ 這顆不送了
+      if (peer.pc.signalingState !== "stable" || peer.dc !== dc) return;
       await peer.pc.setLocalDescription(offer);
       this.handlers.publishSignal(createSignal({ type: "offer", sdp: offer.sdp ?? "" }, this.ownSk, peerPk));
     } catch (e) {
       this.handlers.onError(peerPk, `建立 offer 失敗：${String(e)}`);
+    } finally {
+      peer.makingOffer = false;
     }
+  }
+
+  /**
+   * 雙方同時發起直連時誰讓步（ADR-0384，WebRTC「perfect negotiation」）：公鑰較大的一方讓步——
+   * 收回自己的 offer、接受對方的；較小的一方略過對方的 offer、等自己那顆的 answer。兩端算出的結果必然相反。
+   */
+  private isPolite(peerPk: PubkeyHex): boolean {
+    this.ownPk ??= getPublicKey(this.ownSk);
+    return this.ownPk > peerPk;
+  }
+  private ownPk: PubkeyHex | undefined;
+
+  /** 讓步的一方收回自己的 offer（ADR-0384）：自己建的通道沒談成，先拆掉（不回報「直連中斷」），改用對方 offer 帶來的通道。 */
+  private async rollbackOwnOffer(peer: PeerConn): Promise<void> {
+    const own = peer.dc;
+    if (own) {
+      own.onopen = own.onclose = own.onerror = own.onmessage = null;
+      try {
+        own.close();
+      } catch {
+        /* 忽略 */
+      }
+      delete peer.dc;
+    }
+    if (peer.pc.signalingState === "have-local-offer") await peer.pc.setLocalDescription({ type: "rollback" });
+    peer.hasRemote = false;
   }
 
   private attachChannel(peerPk: PubkeyHex, peer: PeerConn, dc: RTCDataChannel): void {
@@ -416,8 +454,16 @@ export class WebRtcTransfer {
       sdpMid: c.sdpMid ?? null,
       sdpMLineIndex: c.sdpMLineIndex ?? null,
     };
-    if (peer.hasRemote) await peer.pc.addIceCandidate(init);
-    else peer.pendingCandidates.push(init);
+    if (!peer.hasRemote) {
+      peer.pendingCandidates.push(init);
+      return;
+    }
+    try {
+      await peer.pc.addIceCandidate(init);
+    } catch (e) {
+      // ADR-0384：略過的那顆 offer 帶來的候選套不上是預期的，不報錯
+      if (!peer.ignoredOffer) throw e;
+    }
   }
 
   private async applySignal(peerPk: PubkeyHex, peer: PeerConn, signal: Signal): Promise<void> {
@@ -427,6 +473,11 @@ export class WebRtcTransfer {
       } else if (signal.type === "candidates") {
         for (const c of signal.candidates) await this.addIce(peer, c);
       } else if (signal.type === "offer") {
+        // ADR-0384：兩顆 offer 撞在一起——不讓步的一方略過對方的，讓步的一方收回自己的
+        const collision = peer.makingOffer || peer.pc.signalingState !== "stable";
+        peer.ignoredOffer = collision && !this.isPolite(peerPk);
+        if (peer.ignoredOffer) return;
+        if (collision) await this.rollbackOwnOffer(peer);
         await peer.pc.setRemoteDescription({ type: "offer", sdp: signal.sdp });
         peer.hasRemote = true;
         for (const c of peer.pendingCandidates) await peer.pc.addIceCandidate(c);
@@ -435,6 +486,8 @@ export class WebRtcTransfer {
         await peer.pc.setLocalDescription(answer);
         this.handlers.publishSignal(createSignal({ type: "answer", sdp: answer.sdp ?? "" }, this.ownSk, peerPk));
       } else {
+        // 已經不在等 answer（收回了自己的 offer、或重開 App 後收到舊的）→ 過期，安靜略過（ADR-0384）
+        if (peer.pc.signalingState !== "have-local-offer") return;
         await peer.pc.setRemoteDescription({ type: "answer", sdp: signal.sdp });
         peer.hasRemote = true;
         for (const c of peer.pendingCandidates) await peer.pc.addIceCandidate(c);
