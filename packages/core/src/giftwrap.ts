@@ -22,8 +22,8 @@ export const DEFAULT_TTL_SECONDS = 7 * DAY_SECONDS;
  * 收件人標記（ADR-0107）：寫在 **rumor 內層**，供**自封副本**抵達自己的其他裝置時，
  * 判斷這則訊息原本是發給誰的（否則無從歸檔到正確對話）。
  *
- * **不可用 `p` tag**：`mentionedPubkeys()` 會把 rumor 內所有 `p` tag 當成 @提及
- * （見 `mention.ts`），用了會讓每則訊息都「提及」收件人。
+ * 1:1 文字訊息另外帶標準的 `["p", 收件人]`（NIP-17 以它決定對話歸屬，第三方客戶端才歸得了檔；ADR-0382 §8）。
+ * `to` 仍保留：舊版靠它歸檔自封副本。`mentionedPubkeys()` 會排除等於 `to` 的 `p`，收件人不會被當成 @提及。
  */
 const TO_TAG = "to";
 
@@ -130,11 +130,14 @@ export function wrapMessage(
 ): WrappedMessage {
   const nowSec = opts.now ?? Math.floor(Date.now() / 1000);
   const outerExpiration = opts.expiration ?? opts.disappearAt ?? nowSec + DEFAULT_TTL_SECONDS;
+  // @收件人與標準 `p` 是同一顆標籤，不重複
+  const mentions = (opts.mentions ?? []).filter((pk) => pk !== recipientPk);
   let rumorTags: string[][] = [
     [TO_TAG, recipientPk],
+    ["p", recipientPk], // NIP-17 對話歸屬（ADR-0382 §8）
     ...(opts.disappearAt !== undefined ? [["expiration", String(opts.disappearAt)]] : []),
     ...(opts.relayHint ? [["relay", opts.relayHint]] : []),
-    ...(opts.mentions && opts.mentions.length > 0 ? mentionTags(opts.mentions) : []),
+    ...(mentions.length > 0 ? mentionTags(mentions) : []),
     ...(opts.replyTo ? [replyTag(opts.replyTo)] : []),
     ...(opts.replyTo && opts.alsoMain ? [alsoMainTag()] : []),
   ];
