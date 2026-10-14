@@ -3,8 +3,10 @@
 // 修正前：外部連線（`poolClient`）只接了 onEvent／AUTH，沒有 onOk。寄給別片的訊息，中繼的 OK（收下或拒收）
 // 全部被丟掉，外送匣等 30 秒後把它當成「已送達」靜默移除——拒收的訊息不會變紅，收下的也不會標成「已送中繼」。
 import {
+  buildInboxRelayList,
   generateSecretKey,
   getPublicKey,
+  npubEncode,
   nsecEncode,
   shardPath,
   shardPrefix,
@@ -56,7 +58,12 @@ const noConnector = (() => {
   throw new Error("分片模式不應使用注入的 connector");
 }) as unknown as RelayConnector;
 
-function backend(sk: Uint8Array, name: string, connectorFor: (url: string) => RelayConnector, extra: { anchors?: string[] } = {}) {
+function backend(
+  sk: Uint8Array,
+  name: string,
+  connectorFor: (url: string) => RelayConnector,
+  extra: { anchors?: string[]; publicIndexRelays?: string[] } = {},
+) {
   const store = new MemoryStorage();
   store.saveIdentity({ nsec: nsecEncode(sk), name });
   const b = new RelayChatBackend(store, noConnector, name, { shardingBase: BASE, connectorFor, ...extra });
@@ -139,6 +146,53 @@ describe("分片連線也處理 OK（ADR-0378）", () => {
     expect(storeA.loadMessages(bobPk)[0]?.status).toBe("sending");
     vi.advanceTimersByTime(60_000); // 主路由一直滿 → 重試耗盡
     expect(storeA.loadMessages(bobPk)[0]?.status).toBe("failed");
+    a.stop();
+  });
+});
+
+describe("對方 10050 的多座收件中繼與 OK（ADR-0378 × ADR-0382 §6）", () => {
+  const INDEX = "wss://index";
+  const OPEN = "wss://open-inbox";
+  const PAID = "wss://paid-inbox";
+  const PAID2 = "wss://paid-inbox-2";
+  const flush = () => new Promise((r) => setTimeout(r, 0));
+
+  /** 第三方使用者 T：10050 列 `inbox`；付費站只收白名單作者（禮物包外層是一次性金鑰 → 一律拒收） */
+  async function setup(inbox: string[]) {
+    const tSk = generateSecretKey();
+    const tPk = getPublicKey(tSk);
+    const net = farm((host) =>
+      host === INDEX || host === OPEN ? { store: new MessageStore() } : host.startsWith(PAID) ? { allowedAuthors: [tPk] } : undefined,
+    );
+    net.coreFor(INDEX); // 先建好，下面直接把 T 的 10050 寫進去
+    const seed = net.connectorFor("seed")(INDEX)({});
+    seed.publish(buildInboxRelayList(tSk, inbox));
+    const { skA } = crossShardKeys();
+    const { b: a, store } = backend(skA, "Alice", net.connectorFor("a"), { publicIndexRelays: [INDEX] });
+    a.start(noop);
+    a.addContact(npubEncode(tPk)); // 裸 npub → 查到 T 的 10050
+    await flush();
+    return { a, store, tPk };
+  }
+
+  it("排第一的那座拒收、第二座收下 → 已送中繼，不是失敗（第三方的收件中繼地位相同，任一座收下就算）", async () => {
+    const { a, store, tPk } = await setup([PAID, OPEN]);
+    a.sendMessage(tPk, "hi");
+    expect(store.loadMessages(tPk).at(-1)?.status).toBe("sent");
+    a.stop();
+  });
+
+  it("第一座收下、第二座拒收 → 已送中繼", async () => {
+    const { a, store, tPk } = await setup([OPEN, PAID]);
+    a.sendMessage(tPk, "hi");
+    expect(store.loadMessages(tPk).at(-1)?.status).toBe("sent");
+    a.stop();
+  });
+
+  it("每一座都永久拒收 → 才標失敗", async () => {
+    const { a, store, tPk } = await setup([PAID, PAID2]);
+    a.sendMessage(tPk, "hi");
+    expect(store.loadMessages(tPk).at(-1)?.status).toBe("failed");
     a.stop();
   });
 });

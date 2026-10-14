@@ -6,7 +6,7 @@ import { createServer } from "node:http";
 import { createRequire } from "node:module";
 import type { DatabaseSync as DatabaseSyncType } from "node:sqlite";
 import { WebSocketServer, type WebSocket } from "ws";
-import { eventsPerMinuteFrom, filePolicyFor, fileLanesMode, firstHost, guardFor, messagesPerMinuteFrom, storeOptions } from "./host-config.js";
+import { eventsPerMinuteFrom, filePolicyFor, fileLanesMode, firstHost, guardFor, inboxAckGraceFor, messagesPerMinuteFrom, storeOptions } from "./host-config.js";
 import { buildRelayInfo, NIP11_HEADERS, wantsRelayInfo } from "./nip11.js";
 import { RelayCore, type Outbound, type RelayCoreOptions } from "./relay-core.js";
 import { type SqlExec, SqlMessageStore } from "./sql-message-store.js";
@@ -28,7 +28,8 @@ const exec: SqlExec = (query, ...bindings) => {
   stmt.run(...bindings);
   return [];
 };
-const store = new SqlMessageStore(exec, storeOptions(process.env.MAX_TTL_DAYS));
+const storeOpts = storeOptions(process.env.MAX_TTL_DAYS);
+const store = new SqlMessageStore(exec, storeOpts);
 // 濫用防護（ADR-0235 H1）由 `host-config` 統一供應——與 Cloudflare 版用同一組常數。
 // 速率上限可用 MAX_EVENTS_PER_MINUTE 覆寫（自架站專屬）：未設＝120、設 0＝關閉。
 // 用 delete 而非指派 undefined（exactOptionalPropertyTypes 不允許顯式 undefined）。
@@ -54,6 +55,8 @@ if (filePolicy.accept) coreOptions.acceptFileEvents = true;
 if (fileLanesMode(process.env.FILE_LANES)) {
   console.warn("FILE_LANES 只在 Cloudflare 版（有車道 DO）生效；node 主機沒有車道，設了它就整站不收檔案塊（ADR-0371）");
 }
+// 收件確認（ADR-0380；SDK ADR 0067）：只有 AUTH 證明得了「自己的收件匣」，REQUIRE_AUTH=0 時不處理也不宣告
+if (requireAuth) coreOptions.inboxAckGraceSec = inboxAckGraceFor(storeOpts);
 const core = new RelayCore(coreOptions);
 
 // NIP-11 文件（ADR-0260）：自架者以環境變數填站名/聯絡/贊助管道；未設的欄位不會出現。
@@ -66,6 +69,7 @@ const relayInfo = buildRelayInfo({
   maxTtlDays: process.env.MAX_TTL_DAYS,
   acceptsFiles: filePolicy.accept,
   authRequired: requireAuth,
+  inboxAck: requireAuth,
   donations: {
     github_sponsors: process.env.DONATE_GITHUB_SPONSORS,
     buy_me_a_coffee: process.env.DONATE_BUY_ME_A_COFFEE,

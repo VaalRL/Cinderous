@@ -12,7 +12,7 @@
 
 import { decryptBundle, encryptBundle } from "./pairing.js";
 import { argon2id } from "@noble/hashes/argon2.js";
-import { bytesToUtf8, randomBytes, utf8ToBytes } from "@noble/hashes/utils.js";
+import { randomBytes, utf8ToBytes } from "@noble/hashes/utils.js";
 import { base64 } from "@scure/base";
 
 /** 與桌面 `passlock.rs` 相同的 Argon2id 參數。 */
@@ -37,8 +37,28 @@ interface Blob {
   data: string;
 }
 
+/** Argon2 版本 0x13（v1.3，RFC 9106；桌面 `passlock.rs` 的 `Version::V0x13`）。 */
+const ARGON2_VERSION = 0x13;
+
+/**
+ * 🔴 **每個會影響輸出的參數都明確傳入，不依賴函式庫預設值**（ADR-0374）。
+ *
+ * `@noble/hashes` 2.4 改了 argon2 的預設值（`t: 3`、`m: 1 GiB`、`maxmem: 1 GiB`；1.x 的
+ * `maxmem` 是 2^32−1）。只要有一個參數靠預設，升級相依就會導出**不同的 KEK** ⇒
+ * 使用者**再也打不開**自己的密碼鎖，而且沒有任何錯誤訊息，只會看起來像「密碼錯」。
+ * `version` 兩版預設都是 0x13，仍寫明，免得下一次改預設時又得重查一遍。
+ * `maxmem` 設成本檔自己的上限（`M_COST_MAX` KiB）：凡是 `unwrapSecret` 會接受的 blob，
+ * 記憶體檢查都不會擋——與 1.x 可解開的範圍相同。
+ */
 function deriveKek(password: string, salt: Uint8Array, m: number, t: number, p: number): Uint8Array {
-  return argon2id(utf8ToBytes(password), salt, { m, t, p, dkLen: KEY_LEN });
+  return argon2id(utf8ToBytes(password), salt, {
+    m,
+    t,
+    p,
+    dkLen: KEY_LEN,
+    version: ARGON2_VERSION,
+    maxmem: M_COST_MAX * 1024,
+  });
 }
 
 /** 以密碼包裹祕密（nsec）。鹽每次隨機——同輸入兩次包裹會產生不同密文。 */
@@ -82,7 +102,7 @@ export function unwrapSecret(password: string, wrapped: string): string | null {
   if (!(blob.p > 0 && blob.p <= P_COST_MAX)) return null;
   try {
     const kek = deriveKek(password, base64.decode(blob.salt), blob.m, blob.t, blob.p);
-    return bytesToUtf8(decryptBundle(kek, base64.decode(blob.data)));
+    return new TextDecoder().decode(decryptBundle(kek, base64.decode(blob.data)));
   } catch {
     return null; // GCM 驗證失敗＝密碼錯或遭竄改
   }

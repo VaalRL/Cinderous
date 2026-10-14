@@ -65,9 +65,15 @@ export function mentionTags(pubkeys: PubkeyHex[]): string[][] {
   return out;
 }
 
-/** 讀出 rumor 內層被提及的公鑰（`p` tag）。 */
+/**
+ * 讀出 rumor 內層被提及的公鑰（`p` tag）。
+ *
+ * 等於 `to`（1:1 的對話對象）的不算：1:1 訊息帶標準的 `["p", 收件人]` 表示對話歸屬（NIP-17，ADR-0382 §8），
+ * 不是「提及了你」。
+ */
 export function mentionedPubkeys(rumor: Rumor): PubkeyHex[] {
-  return rumor.tags.filter((t) => t[0] === "p" && typeof t[1] === "string").map((t) => t[1]!);
+  const peer = rumor.tags.find((t) => t[0] === "to")?.[1];
+  return rumor.tags.filter((t) => t[0] === "p" && typeof t[1] === "string" && t[1] !== peer).map((t) => t[1]!);
 }
 
 /** 該 rumor 是否提及某公鑰。 */

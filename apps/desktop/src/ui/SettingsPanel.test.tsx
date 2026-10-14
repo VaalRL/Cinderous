@@ -621,6 +621,32 @@ describe("FS 自動輪替與停用（ADR-0313／0314）", () => {
   });
 });
 
+describe("公開聯絡方式（ADR-0382）", () => {
+  const reach = (contactable: boolean, publicName: boolean) => ({
+    initialTab: "privacy" as const,
+    publicReach: { contactable, publicName, onToggleContactable: () => {}, onTogglePublicName: () => {} },
+  });
+
+  it("沒提供就不顯示（企業身分、沒有 home）", () => {
+    expect(render({ initialTab: "privacy" as const })).not.toContain('data-testid="public-reach"');
+  });
+
+  it("兩個獨立開關；🔴「收不回」的警語不論開關狀態都在", () => {
+    for (const [c, n] of [[false, false], [true, true]] as const) {
+      const html = render(reach(c, n));
+      expect(html).toContain('data-testid="public-reach-irrevocable"');
+      expect(html).toContain('data-testid="public-reach-contactable"');
+      expect(html).toContain('data-testid="public-reach-name"');
+    }
+  });
+
+  it("勾選狀態跟著目前狀態", () => {
+    const html = render(reach(true, false));
+    expect(html).toMatch(/data-testid="public-reach-contactable"[^>]*checked/);
+    expect(html).not.toMatch(/data-testid="public-reach-name"[^>]*checked/);
+  });
+});
+
 describe("解封失敗的可見性（ADR-0316）", () => {
   const base = { initialTab: "privacy" as const, fs: { enabled: true, onEnable: () => {}, onRotate: () => {} } };
 

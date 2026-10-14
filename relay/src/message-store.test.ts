@@ -132,6 +132,20 @@ describe("可尋址事件（NIP-33，ADR-0071 快照）", () => {
     expect(store.query({ kinds: [30078], authors: [author] }, 2000)).toHaveLength(0);
   });
 
+  it("purge 只限快照（ADR-0382 §7）：NIP-17 10050、NIP-65 10002、NIP-02 kind 3 依規格 content 本來就是空的，照常存、查得到、取代", () => {
+    const store = new MessageStore();
+    const list = (kind: number, createdAt: number, tags: string[][]): NostrEvent =>
+      finalizeEvent({ kind, created_at: createdAt, tags, content: "" }, authorSk);
+    for (const kind of [10050, 10002, 3]) {
+      expect(store.putAddressable(list(kind, 1000, [["relay", "wss://a.example/s/1"]]), 1000)).toBe(true);
+      expect(store.query({ kinds: [kind], authors: [author] }, 1000)).toHaveLength(1);
+      // 較新的一顆（同樣空 content）取代舊的，不是把它刪掉
+      expect(store.putAddressable(list(kind, 2000, [["relay", "wss://b.example/s/1"]]), 2000)).toBe(true);
+      const got = store.query({ kinds: [kind], authors: [author] }, 2000);
+      expect(got.map((e) => e.tags[0]?.[1])).toEqual(["wss://b.example/s/1"]);
+    }
+  });
+
   it("配額：每 (pubkey, kind) 至多 5 個 d；單顆超過 256KB 拒收", () => {
     const store = new MessageStore();
     for (let i = 1; i <= 5; i++) {

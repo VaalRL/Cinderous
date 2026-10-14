@@ -1,10 +1,13 @@
 import { verifyHttpAuth } from "@cinderous/core";
 import {
   DEVELOPER_DOCS_URL,
+  doCapacityFor,
+  doCapacitySettings,
   fileLanes,
   filePolicyFor,
   firstHost,
   guardFor,
+  inboxAckGraceFor,
   knownLanes,
   powForLane,
   type RelayProfile,
@@ -66,6 +69,29 @@ export interface Env {
    * ⚠ 加進來或拿掉＝換一顆 DO，該車道舊 DO 裡的資料不會跟著搬（等 TTL 到期）。
    */
   APP_LANES?: string;
+  /**
+   * 每顆 DO 的容量天花板（ADR-0377）：逗號分隔的 `<對象>=<離線 MiB>/<可尋址 MiB>`，
+   * 對象是類別（`strict`／`public`／`lane`／`file`）或單顆 DO 名（`shard-a`、`app:dochost`）。
+   * 未設＝ADR-0377 之前的預設（每顆 128/128 MiB、檔案車道離線 1 GiB）。
+   *
+   * 🔴 錨點在免費方案上：所有可能 DO 的天花板加總必須 ≤ 帳號 5 GB 的 80%
+   *（`host-config.ACCOUNT_STORAGE_BUDGET_BYTES`），`wrangler-vars.test.ts` 盯著。
+   */
+  DO_CEILINGS_MIB?: string;
+  /**
+   * 保底份額（SDK ADR 0042；ADR 0038 P2）：`<對象>=<KiB>`。共用 DO 內每位作者（可尋址）／每位收件人（離線）的保底，
+   * 保底內的資料不會被別人擠掉；只在淘汰制（車道）生效。**未設＝沒有保底**（ADR-0379：錨點先不開）。
+   */
+  DO_GUARANTEE_KIB?: string;
+  /**
+   * 溢位帶（SDK ADR 0042；ADR 0039 B1）：`<對象>=<天花板的百分比>`。天花板之上再收這麼多的「借用」，保存 2 小時、最先被淘汰，
+   * 回 `OK true "warning: borrowed: …"`。嚴格平面的可尋址不借用；車道要同時設保底才生效。**未設＝沒有溢位帶**（ADR-0379：錨點先不開）。
+   */
+  DO_BORROW_PERCENT?: string;
+  /** 粗分級預警（SDK ADR 0042）：`<對象>=<百分比>`；寫入後用量達這一級（或 95％）以上時 `OK true` 帶 `warning: near-full:`。未設＝不預警。 */
+  DO_NEAR_FULL_PERCENT?: string;
+  /** 丟棄計數（SDK ADR 0042）：開啟的對象（逗號分隔）。收件人讀收件匣時收到 `NOTICE "warning: dropped: …"`。未設＝不計。 */
+  DO_DROP_NOTICES?: string;
   /**
    * 連線被拒時指向的開發文件網址（ADR-0368）。未設＝官網開發者頁
    * （`host-config.DEVELOPER_DOCS_URL`）。自架站若有自己的說明頁可換掉。
@@ -215,6 +241,8 @@ export function relayInfoFrom(
   knownLane = false,
   /** 名單上車道的 id（ADR-0371）：決定這條路徑收不收檔案、單檔上限多少。 */
   laneId?: string,
+  /** 這條路徑的 DO 名（ADR-0379；SDK ADR 0042）：決定天花板與容量政策；沒給＝預設天花板、沒有保底與溢位帶。 */
+  doName?: string,
 ): Record<string, unknown> {
   // 與 DO 實際套用的同一個函式（`filePolicyFor`）——文件說的就是這條路徑真正在執行的政策。
   const files = filePolicyFor(env, profile === "app" && knownLane ? laneId : undefined);
@@ -230,6 +258,8 @@ export function relayInfoFrom(
     maxFileMb: files.accept ? files.maxFileMb : undefined,
     // 與實際生效的政策同源（`guardFor`）——拿獨立旗標描述它遲早會說謊（見本檔案上方註解）。
     authRequired: guardFor(profile).requireAuth === true,
+    // 與 DO 實際套用的同一個函式（ADR-0379；SDK ADR 0042）：天花板、淘汰或拒收、保底、溢位帶、預警、丟棄計數都是靜態值
+    ...(doName !== undefined ? { capacity: doCapacityFor(env, doName) } : {}),
     // ADR-0356：出貨版號。讓任何人（與 App 的「一鍵更新節點」）看得出這座跑的是哪一版，
     // 也讓 ADR-0241 的跟版義務從「口頭提醒」變成「查得到的事實」。
     version: RELAY_WORKER_VERSION,
@@ -311,7 +341,7 @@ export default {
         const profile = infoRoute?.profile ?? "strict";
         const known = infoRoute?.profile === "app" && infoRoute.known;
         const laneId = infoRoute?.profile === "app" ? infoRoute.laneId : undefined;
-        return new Response(JSON.stringify(relayInfoFrom(env, profile, known, laneId)), {
+        return new Response(JSON.stringify(relayInfoFrom(env, profile, known, laneId, infoRoute?.doName)), {
           status: 200,
           headers: NIP11_HEADERS,
         });
@@ -372,6 +402,14 @@ const KNOWN_LANE_KEY = "cinder:lane-known";
  * 存下來反而會把舊決定永久釘在 DO 裡。共用分片服務多條車道，不存（它們一律不收檔案）。
  */
 const LANE_ID_KEY = "cinder:lane-id";
+/**
+ * DO storage 裡記住本實例的 **DO 名**（ADR-0377）。
+ *
+ * 為什麼要存：天花板可以依單顆 DO 設定（`DO_CEILINGS_MIB` 的 `shard-a`、`presence`），而嚴格平面的
+ * `global`／`presence`／`shard-*` 政策完全相同、從 storage 裡的其他鍵分不出來；休眠喚醒後可能
+ * 沒有 fetch、算不出路徑。DO 名由 `idFromName` 決定、一輩子不變，存下來不會過時。
+ */
+const DO_NAME_KEY = "cinder:do-name";
 
 /**
  * 持有 RelayCore；以**休眠式 WebSocket**（ADR-0059）收發：DO 可在訊息間休眠、不計 idle
@@ -397,6 +435,8 @@ export class RelayRoom {
   private knownLane = false;
   /** 本 DO 服務的名單上車道 id（ADR-0371）；嚴格平面與共用分片為 undefined。 */
   private laneId: string | undefined;
+  /** 本實例的 DO 名（ADR-0377）；決定天花板。第一次 fetch 之前（與升級前的 DO）為 undefined＝預設天花板。 */
+  private doName: string | undefined;
 
   constructor(ctx: DurableObjectState, env: Env) {
     this.ctx = ctx;
@@ -416,15 +456,25 @@ export class RelayRoom {
     if (ignored.length > 0) {
       console.warn(`FILE_LANES 忽略不在 APP_LANES 上的車道：${ignored.join(", ")}（ADR-0371）`);
     }
+    // 容量設定錯的項目不生效、退回較大的預設值或關閉（ADR-0377；ADR-0379／SDK ADR 0042）——一樣要看得見。
+    const badCapacity = doCapacitySettings(env).ignored;
+    if (badCapacity.length > 0) {
+      console.warn(`容量設定忽略無效的項目：${badCapacity.join(", ")}（SDK ADR 0042）`);
+    }
     ctx.blockConcurrencyWhile(async () => {
       // 還原本實例綁定的政策（ADR-0366）。DO 名與政策是一對一的，所以這裡讀到什麼就是什麼。
       const stored = await ctx.storage.get<RelayProfile>(PROFILE_KEY);
       this.knownLane = (await ctx.storage.get<boolean>(KNOWN_LANE_KEY)) === true;
       this.laneId = await ctx.storage.get<string>(LANE_ID_KEY);
+      this.doName = await ctx.storage.get<string>(DO_NAME_KEY);
       if (stored !== undefined) {
         this.profile = stored;
         this.profilePinned = true;
-        if (stored !== "strict") this.core = this.buildCore(stored);
+        // 知道 DO 名＝天花板可能不是預設值（ADR-0377），嚴格平面也要重組。
+        if (stored !== "strict" || this.doName !== undefined) {
+          this.core = this.buildCore(stored);
+          this.hydrated = false; // 新的 core 要重新從 attachment 還原既有連線
+        }
       }
       // C2：排程 NIP-40 過期清理（DO 休眠仍會被 alarm 喚醒執行）。
       if ((await ctx.storage.getAlarm()) === null) {
@@ -445,13 +495,20 @@ export class RelayRoom {
       this.env,
       profile === "app" && this.knownLane ? this.laneId : undefined,
     );
-    this.store = new SqlMessageStore(
-      this.exec,
-      storeOptions(this.env.MAX_TTL_DAYS, profile, this.knownLane, files.accept ? files.maxFileMb : undefined),
+    const storeOpts = storeOptions(
+      this.env.MAX_TTL_DAYS,
+      profile,
+      this.knownLane,
+      files.accept ? files.maxFileMb : undefined,
+      // 每顆 DO 的容量政策（ADR-0377；ADR-0379／SDK ADR 0042）：與預算加總、NIP-11 用的是同一個函式。
+      this.doName !== undefined ? doCapacityFor(this.env, this.doName) : undefined,
     );
+    this.store = new SqlMessageStore(this.exec, storeOpts);
     const pow = powForLane(profile, this.env.APP_LANE_POW);
     return new RelayCore({
       store: this.store,
+      // 收件確認（ADR-0380；SDK ADR 0067）：寬限與 NIP-11 宣告同一個函式
+      inboxAckGraceSec: inboxAckGraceFor(storeOpts),
       ...guardFor(profile),
       ...(pow > 0 ? { minPowDifficulty: pow } : {}),
       ...(files.accept ? { acceptFileEvents: true } : {}),
@@ -477,6 +534,12 @@ export class RelayRoom {
     const wantedKnown = route?.profile === "app" && route.known;
     // 名單上車道的 id（ADR-0371）。DO 名就是 `app:<id>`，所以它對一顆 DO 而言也是恆定的。
     const wantedLaneId = route?.profile === "app" && route.known ? route.laneId : undefined;
+    // DO 名（ADR-0377）：worker 就是用這個名字 `idFromName` 到這裡的，一輩子不變。
+    // 升級前就存在的 DO 沒有這個鍵——第一次連線補記，並在下面換成它自己的天花板。
+    // 先同步設好（不 await），下面第一次釘住政策時組的 core 就已經用上自己的天花板。
+    const newName = route !== undefined && route.doName !== this.doName ? route.doName : undefined;
+    if (newName !== undefined) this.doName = newName;
+    const wasPinned = this.profilePinned;
     if (
       this.profilePinned &&
       wanted === this.profile &&
@@ -510,6 +573,15 @@ export class RelayRoom {
       await this.ctx.storage.put(KNOWN_LANE_KEY, wantedKnown);
       if (wantedLaneId !== undefined) await this.ctx.storage.put(LANE_ID_KEY, wantedLaneId);
       this.profilePinned = true;
+    }
+    if (newName !== undefined) {
+      await this.ctx.storage.put(DO_NAME_KEY, newName);
+      if (wasPinned) {
+        // 升級前就釘住的 DO：天花板換成它自己的（ADR-0377）。與補記車道 id 同一個做法，
+        // 重組後從 attachment 還原既有連線。（第一次釘住的 DO 在上面組 core 時已經用上了。）
+        this.core = this.buildCore(this.profile);
+        this.hydrated = false;
+      }
     }
     const pair = new WebSocketPair();
     const client = pair[0];
@@ -623,13 +695,13 @@ export class RelayRoom {
 }
 
 /** 喚醒時找不到溢位列的訂閱（ADR-0373）。客戶端應重送 REQ。 */
-const CLOSED_LOST = "error: subscription was lost when the relay restarted; please resubscribe (ADR-0373)";
+const CLOSED_LOST = "error: resubscribe: subscription was lost when the relay restarted; please resubscribe (ADR-0373)";
 
 /** 無法持久化時回給客戶端的 `CLOSED` 原因（ADR-0373）。前綴依 NIP-01 的機器可讀慣例。 */
 function closedReason(reason: SaveResult["rejected"][number]["reason"]): string {
   return reason === "too-large"
-    ? `invalid: subscriptions on this connection exceed ${MAX_CONN_SUB_BYTES / 1024} KiB and cannot be kept across relay hibernation (ADR-0373)`
-    : "error: subscription could not be saved on the relay; please resubscribe (ADR-0373)";
+    ? `invalid: too-large: subscriptions on this connection exceed ${MAX_CONN_SUB_BYTES / 1024} KiB and cannot be kept across relay hibernation (ADR-0373)`
+    : "error: resubscribe: subscription could not be saved on the relay; please resubscribe (ADR-0373)";
 }
 
 /** 這則是不是某連線上、某些訂閱的 EVENT/EOSE 回覆。 */

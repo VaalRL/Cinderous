@@ -72,5 +72,7 @@
     只保護這台裝置」），且過期刷新無法對抗持續存檔的攻擊者。
   - relay 需新增可尋址取代語意與快照配額（kind、size、d-tag 數）——事件契約變更。
   - 快照不含媒體附件（P2P 傳輸的檔案不回溯）。
+  - 2026-10-14 補註（ADR-0382 §7）：relay 實作曾把「content 空＝purge」套在**所有**可取代／可尋址 kind，
+    連帶刪掉依規格 content 為空的 NIP-17 10050、NIP-65 10002、NIP-02 kind 3；已限縮為只有快照（kind 30078，`isAddressablePurge`）。
 - 後續行動 / 待辦：依 ROADMAP Phase J 施工（J1 relay 端 → J2 發佈端 → J3 還原合併
   → J4 設定 UI＋政策）；完成後更新 ARCHITECTURE.md 與 docs/SECURITY.md 威脅模型。

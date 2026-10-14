@@ -117,3 +117,14 @@ describe("保存期如實揭露（ADR-0367 §後果）", () => {
     expect(strict.cinder_addressable_ttl_sec).toBe(ADDRESSABLE_TTL_SECONDS);
   });
 });
+
+describe("收件確認（ADR-0380；SDK ADR 0067 §2）", () => {
+  it("宣告 kind 與寬限（寬限＝未註冊應用的保存期，不超過站方保存上限）", () => {
+    expect(buildRelayInfo().cinder_inbox_ack).toEqual({ kind: 25190, grace_sec: 7_200 });
+    expect(buildRelayInfo({ profile: "app", knownLane: true }).cinder_inbox_ack).toEqual({ kind: 25190, grace_sec: 7_200 });
+  });
+
+  it("宿主說不處理（Node 版 REQUIRE_AUTH=0）就不宣告", () => {
+    expect("cinder_inbox_ack" in buildRelayInfo({ inboxAck: false })).toBe(false);
+  });
+});

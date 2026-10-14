@@ -5,7 +5,7 @@
 // 成員管理（create/add/remove/leave）為帶內控制訊息（kind 40 rumor），同樣扇出。
 // 無共用群組金鑰：移除成員＝下次扇出略過，即時且免 rekey。
 
-import { bytesToHex, randomBytes } from "@noble/hashes/utils";
+import { bytesToHex, randomBytes } from "@noble/hashes/utils.js";
 import { KIND } from "./constants.js";
 import { getEventHash, type NostrEvent } from "./event.js";
 import type { FileMeta, WrappedMessage } from "./giftwrap.js";

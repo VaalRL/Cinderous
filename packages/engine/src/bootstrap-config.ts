@@ -17,6 +17,20 @@ export const ANCHOR_RELAYS: string[] = [
   // 建議日後再綁一座自架/獨立網域或換平台，進一步降單點（ADR-0039 建議 2–3 座）。
 ];
 
+/**
+ * 公開聯絡方式的索引中繼（ADR-0382 §2）：第三方 Nostr 客戶端拿到陌生 npub 時會去問的站。
+ * 使用者打開「能聯絡我／公開名稱」時另外發一份到這裡（只發布、不訂閱）；查別人時也問這裡（一次性金鑰認證）。
+ *
+ * 2026-10-14 以一次性金鑰實測：purplepag.es 三種都收；user.kindpag.es 不收 10050；
+ * indexer.coracle.social 不收 kind 0——每種事件至少兩座收，被拒的那顆回 `OK false`，無害。
+ * 一般大型中繼（damus 等）不列：同一個 IP 連發幾顆就限流、再發就暫時封鎖。
+ */
+export const PUBLIC_INDEX_RELAYS: string[] = [
+  "wss://purplepag.es",
+  "wss://user.kindpag.es",
+  "wss://indexer.coracle.social",
+];
+
 /** 維護者公鑰（hex，64 字元）；發佈簽章 relay 清單者。留空 = 不學帶內清單。 */
 // 🔄 2026-09-18 輪替（ADR-0358）。舊值 `6efd2603…` 曾在金鑰住在 CI 的期間被釘進來
 // （2026-07-03～07-23，ADR-0239 判定為已曝險），故換掉。

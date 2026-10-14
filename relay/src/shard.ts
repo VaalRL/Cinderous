@@ -5,7 +5,7 @@
 // 供 worker 的 `fetch` 依 URL 選 DO。每個分片與 presence 層都是同一個 `RelayRoom` 類的獨立實例——
 // 分片＝路由、DO 邏輯不變。血條：一片崩只影響其 1/16 使用者。
 
-import { shardPrefix } from "@cinderous/core";
+import { SHARD_COUNT, shardPrefix } from "@cinderous/core";
 
 export { SHARD_COUNT, shardPath, shardPrefix } from "@cinderous/core"; // SSOT re-export
 
@@ -87,6 +87,25 @@ export type RelayRoute =
  */
 export function namedLaneName(laneId: string): string {
   return `app:${laneId}`;
+}
+
+/**
+ * {@link routeForPath} **可能建立的每一顆 DO**（ADR-0377 帳號儲存預算）。
+ *
+ * 帳號的 DO SQLite 總量上界＝「每顆 DO 的天花板」加總，所以這份清單必須與路由一模一樣：
+ * 少列一顆，預算就少算一顆。`shard.test.ts` 以大量路徑反查，確認路由出來的 DO 名都在這裡。
+ *
+ * 顆數：舊全域 1＋presence 1＋訊息分片 {@link SHARD_COUNT}＋共用車道分片 {@link APP_LANE_SHARDS}
+ * ＋名單上的車道每條 1（**隨 `APP_LANES` 增加**）。
+ */
+export function allDoNames(known: ReadonlySet<string>): string[] {
+  return [
+    LEGACY_GLOBAL_NAME,
+    PRESENCE_LAYER_NAME,
+    ...Array.from({ length: SHARD_COUNT }, (_, i) => `shard-${i.toString(16)}`),
+    ...Array.from({ length: APP_LANE_SHARDS }, (_, i) => `${APP_LANE_PREFIX}${i}`),
+    ...[...known].map(namedLaneName),
+  ];
 }
 
 /**
