@@ -202,6 +202,14 @@ export interface PublicReachState {
   publicName: boolean;
 }
 
+/** 某把公鑰公開的名稱與私訊收件中繼（ADR-0382 §6）；查不到時 `name` 為 null、清單為空。 */
+export interface PublicProfile {
+  /** kind 0 的 `name`——對方自稱，不唯一、可被冒用，只能用來確認、不能用來信任 */
+  name: string | null;
+  /** kind 10050 的私訊收件中繼 */
+  inboxRelays: string[];
+}
+
 export interface ChatBackendEvents {
   /** 公開聯絡方式的狀態變動（ADR-0382）：自己切換，或從 home 讀到別台裝置發布的。 */
   onPublicReach?: (state: PublicReachState) => void;
@@ -561,6 +569,8 @@ export interface ChatBackend {
   fsEnabled?(): boolean;
   /** 公開聯絡方式（ADR-0382）的目前狀態。 */
   publicReach?(): PublicReachState;
+  /** 查某把公鑰公開的名稱與收件中繼（ADR-0382 §6）：對方的分片與索引中繼，單次連線。 */
+  lookupPublic?(pubkey: string): Promise<PublicProfile>;
   /**
    * 切換公開聯絡方式（ADR-0382）。只傳要改的那一個；`available` 為 false 時忽略。
    * 打開＝發布公開事件（收不回）；關掉＝發較新的空清單／`{}` 取代。

@@ -49,7 +49,8 @@ function world() {
   const net = storedNet();
   const subscribed = new Set<string>();
   const connFor = (id: string) => (url: string) => (h: RelayClientHandlers) => {
-    const client = net.connect(url, id, h);
+    // 每條連線各自一個 id：記憶體中繼以連線 id 分派，共用 id 會把同一座上的前一條連線頂掉
+    const client = net.connect(url, `${id}-${Math.random()}`, h);
     const subscribe = client.subscribe.bind(client);
     client.subscribe = (subId, filters) => {
       if (filters.length > 0) subscribed.add(url);
