@@ -20,7 +20,7 @@
 import { decryptBundle, encryptBundle } from "./pairing.js";
 import { hkdf } from "@noble/hashes/hkdf.js";
 import { sha256 } from "@noble/hashes/sha2.js";
-import { bytesToUtf8, utf8ToBytes } from "@noble/hashes/utils.js";
+import { utf8ToBytes } from "@noble/hashes/utils.js";
 import { base64 } from "@scure/base";
 
 /** HKDF 的 info（版本化：日後換演算法可平行共存）。 */
@@ -34,7 +34,8 @@ const PREFIX = "c1:";
 
 /** 由 nsec 導出儲存金鑰（32 bytes）。 */
 export function deriveStorageKey(secretKey: Uint8Array): Uint8Array {
-  return hkdf(sha256, secretKey, undefined, INFO, 32);
+  // noble 2.x 的 info 只收 bytes（1.x 會自動 UTF-8 編碼字串）——同樣的位元組 ⇒ 同一把金鑰（ADR-0374）。
+  return hkdf(sha256, secretKey, undefined, utf8ToBytes(INFO), 32);
 }
 
 /** 加密一個儲存值（`c1:` ＋ base64(`nonce || ciphertext`)）。 */
@@ -52,7 +53,7 @@ export function sealValue(key: Uint8Array, plaintext: string): string {
 export function openValue(key: Uint8Array, stored: string): string | null {
   if (!stored.startsWith(PREFIX)) return stored;
   try {
-    return bytesToUtf8(decryptBundle(key, base64.decode(stored.slice(PREFIX.length))));
+    return new TextDecoder().decode(decryptBundle(key, base64.decode(stored.slice(PREFIX.length))));
   } catch {
     return null;
   }
