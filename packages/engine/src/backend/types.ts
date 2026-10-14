@@ -189,7 +189,22 @@ export interface CloudBackupState {
   lastFailReason?: string;
 }
 
+/**
+ * 公開聯絡方式（ADR-0382）的狀態。兩個開關互相獨立、預設關。
+ * 狀態以 home 上**自己發布的** 10050／kind 0 為準（多台裝置看到同一個狀態），開機讀到之前顯示為關。
+ */
+export interface PublicReachState {
+  /** 這個身分能不能用：企業身分、沒有 home（未連中繼）時為 false */
+  available: boolean;
+  /** 「讓知道我 npub 的人能聯絡我」：10050＋10002 已發布且列了中繼 */
+  contactable: boolean;
+  /** 「公開我的名稱」：kind 0 已發布且有 name */
+  publicName: boolean;
+}
+
 export interface ChatBackendEvents {
+  /** 公開聯絡方式的狀態變動（ADR-0382）：自己切換，或從 home 讀到別台裝置發布的。 */
+  onPublicReach?: (state: PublicReachState) => void;
   /** 雲端備份成敗變動（ADR-0071）；UI 據此顯示「上次備份於…」與失敗原因。 */
   onCloudBackup?: (state: CloudBackupState) => void;
   /** 聯絡人清單或其狀態/音樂有更新時觸發。 */
@@ -544,6 +559,13 @@ export interface ChatBackend {
   deviceDirectory?(): { v: number; devices: { pk: string; id?: string; label?: string; at: number }[] } | null;
   /** 前向保密是否已啟用（ADR-0245）：供 UI 顯示開關狀態。 */
   fsEnabled?(): boolean;
+  /** 公開聯絡方式（ADR-0382）的目前狀態。 */
+  publicReach?(): PublicReachState;
+  /**
+   * 切換公開聯絡方式（ADR-0382）。只傳要改的那一個；`available` 為 false 時忽略。
+   * 打開＝發布公開事件（收不回）；關掉＝發較新的空清單／`{}` 取代。
+   */
+  setPublicReach?(change: { contactable?: boolean; publicName?: boolean }): void;
   /**
    * 設定/移除自己的**廣播頭像**（ADR-0154）：`avatar` 為 data URI 縮圖（來源端 128px），
    * 空字串或 undefined＝移除（廣播移除記號，聯絡人端清掉舊圖）。設定即比照改名

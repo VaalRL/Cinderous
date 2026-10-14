@@ -287,6 +287,14 @@ export interface Messages {
   export_empty: string;
   settings_invisible: string;
   settings_invisibleHint: string;
+  publicReach_title: string;
+  publicReach_hint: string;
+  publicReach_irrevocable: string;
+  publicReach_contactable: string;
+  publicReach_contactableHint: string;
+  publicReach_name: string;
+  publicReach_nameHint: string;
+  publicReach_enableConfirm: string;
   /** 前向保密（ADR-0245）。 */
   fs_title: string;
   pair_largeBundleWarn: string;
@@ -1342,6 +1350,14 @@ const zhHant: Messages = {
   export_empty: "沒有可導出的對話。",
   settings_invisible: "隱身",
   settings_invisibleHint: "開啟後你對中繼站完全消失——既不廣播自己的在線狀態，也不向中繼查詢聯絡人是否在線。因此你的聯絡人清單不會離開這台裝置（最強的元資料隱私）。代價：你也看不到聯絡人的在線綠點。訊息收發完全正常。",
+  publicReach_title: "公開聯絡方式",
+  publicReach_hint: "讓使用其他 Nostr 客戶端（例如 Amethyst、0xchat）的人，只憑你的 npub 就能找到你。兩項各自獨立，預設都關；只影響這個身分。",
+  publicReach_irrevocable: "⚠ 打開後會發布到公開的中繼站。之後再關掉，只能讓之後的人查不到；已經被別人或其他中繼站存下的副本收不回。",
+  publicReach_contactable: "讓知道我 npub 的人能聯絡我",
+  publicReach_contactableHint: "公開你在哪座中繼站收私訊（不含任何訊息內容）。陌生人的訊息會進「訊息請求」，由你決定要不要回。",
+  publicReach_name: "公開我的名稱",
+  publicReach_nameHint: "只公開顯示名稱，不公開頭像、狀態或頭銜。名稱可能和別人重複，對方仍應以完整的 npub 確認是你。",
+  publicReach_enableConfirm: "打開後會發布到公開的中繼站；之後關掉，已經被存下的副本也收不回。要繼續嗎？",
   fs_title: "前向保密（實驗性）",
   fs_hint: "啟用後，你送出的**訊息內容**（文字、貼圖、自訂 emoji、檔案名稱、共享行程、訊息回應，群組也包含在內）會加密到一把「會過期的加密子鑰」；金鑰每 7 天自動更換，舊金鑰過期後，就算你的身分私鑰被竊，被側錄的舊密文也解不開。**不涵蓋：收回訊息、群組成員變更、已讀回條、正在輸入中／敲一下、語音視訊通話。**本機歷史不受影響、身分不變。",
   group_tooManyMembers: "群組人數上限為 {max} 人（含你自己）。請先減少一些成員再建立。",
@@ -2284,6 +2300,14 @@ const en: Messages = {
   export_empty: "No conversations to export.",
   settings_invisible: "Invisible",
   settings_invisibleHint: "When on, you vanish from the relay entirely — you neither broadcast your own presence nor ask the relay who's online. So your contact list never leaves this device (the strongest metadata privacy). Trade-off: you can't see contacts' online dots either. Messaging works normally.",
+  publicReach_title: "Public contact",
+  publicReach_hint: "Let people on other Nostr clients (e.g. Amethyst, 0xchat) find you with just your npub. The two options are independent and both off by default; they only affect this identity.",
+  publicReach_irrevocable: "⚠ Turning these on publishes to public relays. Turning them off later only stops new lookups; copies already saved by others or by other relays can't be recalled.",
+  publicReach_contactable: "Let people who know my npub contact me",
+  publicReach_contactableHint: "Publishes which relay you receive direct messages on (no message content). Messages from strangers go to Message requests; you decide whether to reply.",
+  publicReach_name: "Make my name public",
+  publicReach_nameHint: "Only your display name is published — not your avatar, status, or title. Names aren't unique; others should still confirm it's you by your full npub.",
+  publicReach_enableConfirm: "This publishes to public relays; turning it off later can't recall copies already saved. Continue?",
   fs_title: "Forward secrecy (experimental)",
   fs_hint: "Once enabled, the **content you send** — text, stickers, custom emoji, file names, shared events and reactions, in groups too — is encrypted to an expiring subkey; it rotates automatically every 7 days, and once an old key expires, recorded ciphertext stays unreadable even if your identity key is later stolen. **Not covered: unsending, group membership changes, read receipts, typing/nudges, and calls.** Local history and your identity are unaffected.",
   group_tooManyMembers: "Groups are limited to {max} members (including you). Please remove some before creating.",
