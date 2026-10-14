@@ -1,5 +1,28 @@
 [
   {
+    "version": "0.0.19",
+    "date": "2026-10-14",
+    "released": true,
+    "zh": [
+      "🆕 **可選的「公開聯絡方式」（預設關閉）。** 設定→隱私與通知，有兩個各自獨立的開關：「讓知道我 npub 的人能聯絡我」與「公開我的名稱」。打開後，用其他 Nostr App（例如 0xchat、Amethyst）的人，只要知道你的 npub 就能私訊你、看到你的名稱，並和你來回對話。已用 0xchat 實機驗證。",
+      "⚠️ **打開＝公開，而且收不回。** 打開後會把「你在哪座中繼收私訊」（以及你選擇公開的名稱）發布到公開的中繼站；之後關掉只能讓之後的人查不到，已被別人或其他中繼存下的副本收不回。頭像、狀態與頭銜不會公開。陌生人的訊息一律先進「訊息請求」，由你決定要不要回。企業身分不提供這兩個開關。",
+      "🔗 **和其他 Nostr App 互通（一對一文字）。** 你寄出的一對一訊息現在帶有標準的收件人標記，對方的 App 會把它放進正確的對話。回應、收回、檔案、通話與群組仍是 Cinderous 專屬，其他 App 看不懂。",
+      "📇 **只輸入 npub 加好友時，會自動查對方公開的名稱與收件中繼**（對方有公開才查得到）。查詢用一次性金鑰認證，被查的中繼站看不出是誰在查；每分鐘最多 10 次。",
+      "📱 手機版設定頁會顯示目前版本號。",
+      "🛠️ 中繼站端這段期間的改進（收件確認、容量預警、第三方應用車道等）已直接部署，不需要更新 App 也已生效。",
+      "ℹ️ 已知：Android 版是測試版（debug 簽章，能接 USB 偵錯的人可讀取記憶體，請勿用它處理你真正在意的對話）；桌面版未經程式碼簽章，安裝時 Windows SmartScreen 會跳警告。"
+    ],
+    "en": [
+      "🆕 **Optional \"public contact\" (off by default).** Settings → Privacy & notifications has two independent switches: \"Let people who know my npub contact me\" and \"Make my name public\". When on, people using other Nostr apps (e.g. 0xchat, Amethyst) can message you, see your name, and chat back and forth with just your npub. Verified on a real device with 0xchat.",
+      "⚠️ **On means public, and it can't be taken back.** Turning these on publishes which relay you receive direct messages on (and the name you chose to make public) to public relays; turning them off later only stops new lookups — copies already saved by others or other relays can't be recalled. Your avatar, status and title are never published. Messages from strangers always land in Message requests first; you decide whether to reply. Enterprise identities don't get these switches.",
+      "🔗 **Interop with other Nostr apps (one-to-one text).** One-to-one messages you send now carry the standard recipient tag, so other apps file them into the right conversation. Reactions, unsend, files, calls and groups remain Cinderous-only and other apps won't understand them.",
+      "📇 **Adding a contact by bare npub now looks up their public name and inbox relays** (only if they published them). Lookups authenticate with a throwaway key, so the relays queried can't tell who is asking; at most 10 per minute.",
+      "📱 The mobile settings page now shows the app version.",
+      "🛠️ Relay-side improvements from this period (inbox acknowledgements, capacity warnings, third-party app lanes, etc.) were deployed directly and already apply without updating the app.",
+      "ℹ️ Known: the Android build is a test build (debug-signed; anyone with USB debugging access can read its memory — do not use it for conversations you actually care about). The desktop build is not code-signed, so Windows SmartScreen will warn during install."
+    ]
+  },
+  {
     "version": "0.0.18",
     "date": "2026-09-21",
     "released": true,
