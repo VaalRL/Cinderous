@@ -179,6 +179,18 @@ export const SNAPSHOT_KIND = 30078;
 export function isAuthorOnlyKind(kind: number): boolean {
   return kind === SNAPSHOT_KIND;
 }
+
+/**
+ * 這顆可尋址事件是不是「清除」（ADR-0071 purge）：**只有快照**的空 content 才是。
+ *
+ * 關閉雲端備份時「已關閉」必須立即為真，所以快照用空 content 表示「刪掉我這台的那份」。
+ * 但這條約定原本套在**所有**可取代／可尋址 kind 上，而 NIP-17 的 10050、NIP-65 的 10002、
+ * NIP-02 的 kind 3 依規格 content 本來就是空字串——錨點對它們回 `OK true`、實際上卻把它們刪了（ADR-0382 §7）。
+ * 其他 kind 要撤回，用 NIP-09 刪除請求或發一顆較新的取代。
+ */
+export function isAddressablePurge(event: NostrEvent): boolean {
+  return isAuthorOnlyKind(event.kind) && event.content === "";
+}
 /** 檔案塊每收件人預設配額（≈500MB 密文；企業站自己的儲存自己決策）。 */
 export const DEFAULT_FILE_PER_RECIPIENT = 4000;
 /** 單顆檔案塊事件的大小 sanity 上限（48KB 明文 ×2 膨脹之上留餘裕）。 */
@@ -275,7 +287,7 @@ export interface OfflineStore {
   put(event: NostrEvent, nowSec: number): boolean;
   /**
    * 寫入可尋址事件（ADR-0071）：以 (kind, pubkey, d) 取代舊顆、只留 created_at 最新；
-   * `content === ""` ＝刪除既有（purge）。較舊、超額（大小/位址數）或已過期回 false。
+   * 快照的 `content === ""` ＝刪除既有（purge，{@link isAddressablePurge}）。較舊、超額（大小/位址數）或已過期回 false。
    */
   putAddressable(event: NostrEvent, nowSec: number): boolean;
   /**
@@ -392,8 +404,8 @@ export class MessageStore implements OfflineStore {
     const key = prefix + dTagOf(event);
     const existing = this.addressable.get(key);
     if (existing && !shouldReplace(existing, event)) return addressableRejected("stale"); // 較舊（或同時但 id 較大）→ 不取代
-    if (event.content === "") {
-      // purge：關閉備份時「已關閉」必須立即為真（ADR-0071）。
+    if (isAddressablePurge(event)) {
+      // purge：關閉備份時「已關閉」必須立即為真（ADR-0071）；只限快照（ADR-0382 §7）。
       if (existing) {
         this.addressable.delete(key);
         this.borrowedAddr.delete(key);

@@ -15,6 +15,7 @@ import {
   dTagOf,
   effectiveExpiration,
   getExpiration,
+  isAddressablePurge,
   MAX_QUERY_ROWS,
   type MessageStoreOptions,
   type OfflineStore,
@@ -427,8 +428,8 @@ export class SqlMessageStore implements OfflineStore {
       const prevEvent = { id: prev.id as string, created_at: prev.created_at as number } as NostrEvent;
       if (!shouldReplace(prevEvent, event)) return addressableRejected("stale");
     }
-    if (event.content === "") {
-      // purge：關閉備份時「已關閉」必須立即為真（ADR-0071）。
+    if (isAddressablePurge(event)) {
+      // purge：關閉備份時「已關閉」必須立即為真（ADR-0071）；只限快照（ADR-0382 §7）。
       this.sql(`DELETE FROM addressable WHERE kind = ? AND pubkey = ? AND d = ?`, event.kind, event.pubkey, d);
       return ADDRESSABLE_PUT_OK;
     }

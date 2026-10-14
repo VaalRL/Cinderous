@@ -76,6 +76,7 @@ function workload(seed: number, count: number): Op[] {
       });
     } else if (roll < 0.9) {
       const author = pick(PEOPLE);
+      const kind = pick([30_078, 30_100, 10_037]);
       ops.push({
         type: "addr",
         now,
@@ -83,9 +84,11 @@ function workload(seed: number, count: number): Op[] {
           id: hex(i),
           pubkey: author,
           created_at: now - Math.floor(r() * 50),
-          kind: pick([30_078, 30_100, 10_037]),
+          kind,
           tags: [["d", `d${Math.floor(r() * 5)}`]],
-          content: r() < 0.05 ? "" : "y".repeat(50 + Math.floor(r() * 1500)),
+          // 空 content 只給快照：其他 kind 的空 content 在 ADR-0382 §7 之後是普通內容、不再是 purge——
+          // 那是刻意的行為差異，不屬於這裡要比對的容量政策
+          content: kind === 30_078 && r() < 0.05 ? "" : "y".repeat(50 + Math.floor(r() * 1500)),
           sig: "0".repeat(128),
         },
       });
