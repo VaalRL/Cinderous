@@ -87,6 +87,8 @@
 >
 > **容量訊號（ADR-0379；SDK v0.34.0 ADR 0042 移植）**：中繼的容量政策與 SDK 逐字相同——保底份額（`DO_GUARANTEE_KIB`，只在淘汰制）、溢位帶（`DO_BORROW_PERCENT`，天花板之上借用 2 小時、`OK true "warning: borrowed: …"`）、粗分級預警（`DO_NEAR_FULL_PERCENT`，`OK true "warning: near-full: <級>: …"`，只有門檻與 95 兩級）、丟棄計數（`DO_DROP_NOTICES`：還沒送到就被 FIFO／淘汰刪掉的留言按收件人累計，本人讀收件匣時在 EOSE 前收到 `NOTICE "warning: dropped: N: since: until: …"`、送出即歸零），全部預設關閉；NIP-11 一律多 `cinder_ceiling_policy`／`cinder_ceiling_bytes`，其餘設了才出現。帳號預算改用 `computeCeilingBudget`（含溢位帶）。**錨點開預警與丟棄計數；保底（每位收件人 64 MiB）與溢位帶（20%）只開在檔案車道**（ADR-0381，客戶端都是 SDK ≥ v0.33）；嚴格平面與其他車道的溢位帶與保底要等客戶端接得住（App v0.0.18 只看 `OK` 的布林，會把借用當成送達）。DO SQLite 多 `borrowed` 欄、兩個只收借用列的部分索引與 `inbox_drops` 表（每次喚醒冪等遷移，舊程式可回滾）。
 >
+> **檔案塊整批淘汰（ADR-0386；SDK v0.60.0 ADR 0085 移植）**：中繼自己淘汰檔案塊時（每收件人上限、天花板、保底份額外、借用列到期），同一收件人、同一個 `expiration` 標籤的 kind 1060＝同一次送出的一批，整批一起刪、一起計入丟棄計數——不再切出永遠收不齊的孤兒。SQLite 新增可為 NULL 的 `batch` 欄與部分索引（舊版寫入＝NULL＝照舊逐列淘汰）。
+>
 > **拒收訊息帶英文詞元（ADR-0376；SDK ADR 0040）**：所有 `OK false`／`CLOSED`／關鍵 `NOTICE` 都是「NIP-01 前綴＋英文詞元＋說明」（`blocked: quota: …`、`blocked: stale: …`、`rate-limited: events: …`、`restricted: scope: …`、`error: resubscribe: …`），句子集中在 `relay/src/reject-messages.ts`、與 SDK 中繼（v0.32.0）逐字相同。🔴 只能在前綴**後面**加詞元：App 外送匣（`classifyOk`）只看前綴。可尋址被拒依原因拆開（`OfflineStore.putAddressableResult`，選用）；重放窗內重複回 **`OK true "duplicate: …"`**（NIP-01）；store 丟例外時事件也不留在重放快取。車道升級被拒的三句 NOTICE 不改（開發者文件逐字列出）。
 
 | 功能 | Kind | 持久化 | 機制 |

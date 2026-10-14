@@ -12,6 +12,7 @@ import {
   DEFAULT_MAX_TTL_SECONDS,
   dedupById,
   FILE_WRAP_KIND,
+  batchOf,
   dTagOf,
   effectiveExpiration,
   getExpiration,
@@ -224,6 +225,17 @@ export class SqlMessageStore implements OfflineStore {
       `CREATE INDEX IF NOT EXISTS idx_offline_borrowed ON offline_msgs(recipient, pubkey, expiration, bytes, created_at) WHERE borrowed = 1`,
     );
     this.sql(`CREATE INDEX IF NOT EXISTS idx_addressable_borrowed ON addressable(pubkey, expiration) WHERE borrowed = 1`);
+    // SDK ADR 0085：檔案塊的批次（`expiration` 標籤的原始值；借用列的 `expiration` 欄會被改成 2 小時，不能拿它當批次）。
+    // 加欄位（可為 NULL）＋部分索引：舊版程式的 INSERT 不帶它（NULL＝不參與整批淘汰），回滾照常讀寫。
+    // 索引涵蓋整批淘汰要讀的欄位——`batch` 是 ADD COLUMN 加的、排在 json 後面，讀大表就要走完檔案塊的溢位頁。
+    try {
+      this.sql(`ALTER TABLE offline_msgs ADD COLUMN batch INTEGER`);
+    } catch {
+      /* 欄位已存在 */
+    }
+    this.sql(
+      `CREATE INDEX IF NOT EXISTS idx_offline_batch ON offline_msgs(recipient, batch, bytes, created_at) WHERE batch IS NOT NULL`,
+    );
     // 每位收件人的丟棄計數與水位線（`mark`＝上次讀收件匣時的 offline_msgs 最大 rowid）。
     this.sql(
       `CREATE TABLE IF NOT EXISTS inbox_drops (
@@ -372,8 +384,8 @@ export class SqlMessageStore implements OfflineStore {
     const expiration = placed.borrowed ? borrowedExpiration(effExp, nowSec, ttl) : effExp;
     for (const recipient of fresh) {
       this.sql(
-        `INSERT OR IGNORE INTO offline_msgs (id, recipient, expiration, created_at, json, pubkey, kind, bytes, borrowed)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT OR IGNORE INTO offline_msgs (id, recipient, expiration, created_at, json, pubkey, kind, bytes, borrowed, batch)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         event.id,
         recipient,
         expiration,
@@ -383,6 +395,7 @@ export class SqlMessageStore implements OfflineStore {
         event.kind,
         size,
         placed.borrowed ? 1 : 0,
+        batchOf(event) ?? null,
       );
     }
     if (this.offlineUsed !== undefined) this.offlineUsed += size * fresh.length;
@@ -551,6 +564,8 @@ export class SqlMessageStore implements OfflineStore {
           `SELECT rowid AS r, recipient, bytes, created_at FROM offline_msgs WHERE borrowed = 1 ORDER BY expiration ASC, rowid ASC`,
         );
         const dropped: DroppedRow[] = [];
+        // 整批淘汰（SDK ADR 0085）：要刪的列先查批次（只讀索引），刪完再把同批的其餘列一起刪
+        const batches = this.batchesOf([...borrowedRows.map((row) => Number(row.r)), ...plan.map((row) => row.r)]);
         for (const row of borrowedRows) {
           if (decision.type === "reclaim" && used + need <= max) break;
           this.sql(`DELETE FROM offline_msgs WHERE rowid = ?`, Number(row.r));
@@ -569,6 +584,7 @@ export class SqlMessageStore implements OfflineStore {
         this.bucketCounts.clear();
         this.offlineUsed = used;
         this.recordDrops(dropped, nowSec);
+        this.dropBatchMates(dropped.map((row) => batches.get(row.r)), nowSec);
         return { borrowed: false };
       }
       case "legacy": {
@@ -576,12 +592,17 @@ export class SqlMessageStore implements OfflineStore {
         const victims = this.sql(
           `SELECT rowid AS r, recipient, bytes, created_at FROM offline_msgs ORDER BY expiration ASC LIMIT 256`,
         );
+        const batches = this.batchesOf(victims.map((row) => Number(row.r)));
         const dropped: DroppedRow[] = [];
         for (const row of victims) {
           if (used + need <= max) break;
+          if (!this.sql(`SELECT 1 AS x FROM offline_msgs WHERE rowid = ?`, row.r as number).length) continue; // 已隨整批刪掉
           this.sql(`DELETE FROM offline_msgs WHERE rowid = ?`, row.r as number);
           used -= Number(row.bytes ?? 0);
           dropped.push({ r: Number(row.r), recipient: String(row.recipient), created: Number(row.created_at) });
+          // 整批淘汰（SDK ADR 0085）
+          this.offlineUsed = used;
+          used -= this.dropBatchMates([batches.get(Number(row.r))], nowSec);
         }
         // 淘汰會跨收件人、跨桶，逐一記帳不划算（它只在撞到天花板時發生）——總量記下、分桶作廢。
         this.bucketCounts.clear();
@@ -928,6 +949,12 @@ export class SqlMessageStore implements OfflineStore {
 
   prune(nowSec: number): void {
     this.invalidateUsage();
+    // 借用列到期（2 小時）：同一批正常存放的也一起刪（SDK ADR 0085）。先查它們的批次（部分索引），刪完再刪同批
+    const borrowedBatches = this.sql(
+      `SELECT recipient, batch FROM offline_msgs INDEXED BY idx_offline_batch
+       WHERE batch IS NOT NULL AND rowid IN (SELECT rowid FROM offline_msgs WHERE borrowed = 1 AND expiration IS NOT NULL AND expiration <= ?)`,
+      nowSec,
+    ).map((row) => ({ recipient: String(row.recipient), batch: Number(row.batch) }));
     // 借用列到期算丟棄（SDK ADR 0042）；一般的保存期到期不算——那是宣告過的契約。只讀部分索引。
     if (this.opts.countDrops === true) {
       const expired = this.sql(
@@ -941,6 +968,7 @@ export class SqlMessageStore implements OfflineStore {
       );
     }
     this.sql(`DELETE FROM offline_msgs WHERE expiration IS NOT NULL AND expiration <= ?`, nowSec);
+    this.dropBatchMates(borrowedBatches, nowSec);
     this.sql(`DELETE FROM addressable WHERE expiration <= ?`, nowSec);
     // 丟棄計數只留一個保存期：更久沒動的收件人，那些留言本來也會到期
     this.sql(`DELETE FROM inbox_drops WHERE updated_at <= ?`, nowSec - (this.opts.maxTtlSeconds ?? DEFAULT_MAX_TTL_SECONDS));
@@ -988,6 +1016,53 @@ export class SqlMessageStore implements OfflineStore {
     return msgs + addr;
   }
 
+  /** 這幾列的批次（SDK ADR 0085）：只讀部分索引 `idx_offline_batch`（不碰大表的 json 溢位頁）。不是檔案塊的列不在結果裡。 */
+  private batchesOf(rowids: readonly number[]): Map<number, BatchKey> {
+    const out = new Map<number, BatchKey>();
+    if (rowids.length === 0) return out;
+    for (const row of this.sql(
+      `SELECT rowid AS r, recipient, batch FROM offline_msgs INDEXED BY idx_offline_batch
+       WHERE batch IS NOT NULL AND rowid IN (SELECT value FROM json_each(?))`,
+      JSON.stringify(rowids),
+    )) {
+      out.set(Number(row.r), { recipient: String(row.recipient), batch: Number(row.batch) });
+    }
+    return out;
+  }
+
+  /**
+   * 整批淘汰（SDK ADR 0085）：被刪掉的檔案塊所屬的那一批（同收件人、同 `batch`）其餘的列一起刪，回傳釋放的位元組；記進丟棄計數。
+   * 只刪一部分會切出永遠收不齊的孤兒。行為與記憶體版逐字對齊。
+   */
+  private dropBatchMates(keys: readonly (BatchKey | undefined)[], nowSec: number): number {
+    const unique = new Map<string, BatchKey>();
+    for (const k of keys) if (k && k.recipient !== "") unique.set(`${k.recipient}\n${k.batch}`, k);
+    if (unique.size === 0) return 0;
+    let freed = 0;
+    const dropped: DroppedRow[] = [];
+    for (const { recipient, batch } of unique.values()) {
+      const mates = this.sql(
+        `SELECT rowid AS r, bytes, created_at FROM offline_msgs INDEXED BY idx_offline_batch WHERE recipient = ? AND batch = ?`,
+        recipient,
+        batch,
+      );
+      if (mates.length === 0) continue;
+      this.sql(`DELETE FROM offline_msgs WHERE recipient = ? AND batch = ?`, recipient, batch);
+      for (const m of mates) {
+        freed += Number(m.bytes ?? 0);
+        dropped.push({ r: Number(m.r), recipient, created: Number(m.created_at) });
+      }
+    }
+    if (freed > 0) {
+      if (this.offlineUsed !== undefined) this.offlineUsed -= freed;
+      this.offlineBorrowed = undefined;
+      this.ownerNormal = undefined;
+      this.bucketCounts.clear();
+    }
+    this.recordDrops(dropped, nowSec);
+    return freed;
+  }
+
   /**
    * 分桶修剪（ADR-0162：檔案塊與聊天留言各自計數、各自由舊到新丟棄）。
    *
@@ -1016,6 +1091,7 @@ export class SqlMessageStore implements OfflineStore {
           recipient,
           count - limit,
         );
+        const batches = file ? this.batchesOf(rows.map((row) => Number(row.r))) : new Map<number, BatchKey>();
         for (const row of rows) {
           this.sql(`DELETE FROM offline_msgs WHERE rowid = ?`, row.r as number);
           if (this.offlineUsed !== undefined) this.offlineUsed -= Number(row.bytes ?? 0);
@@ -1029,6 +1105,10 @@ export class SqlMessageStore implements OfflineStore {
             rows.map((row) => ({ r: Number(row.r), recipient, created: Number(row.created_at) })),
             nowSec,
           );
+          // 整批淘汰（SDK ADR 0085）：刪到某一批的一部分，那批其餘的一起刪；這一桶的列數重算
+          if (this.dropBatchMates(rows.map((row) => batches.get(Number(row.r))), nowSec) > 0) {
+            count = Number(this.sql(`SELECT COUNT(*) AS n FROM offline_msgs WHERE recipient = ? AND ${bucket}`, recipient)[0]?.n ?? 0);
+          }
         }
       }
       this.bucketCounts.set(key, count);
@@ -1043,6 +1123,12 @@ function bucketKey(recipient: string, file: boolean): string {
 
 /** 保底份額淘汰一次最多看幾列候選（每列只讀索引欄位）。 */
 const EXCESS_CANDIDATES = 1024;
+
+/** 檔案塊的批次鍵（SDK ADR 0085）。 */
+interface BatchKey {
+  readonly recipient: string;
+  readonly batch: number;
+}
 
 /** 被刪掉、要記進丟棄計數的一列。 */
 interface DroppedRow {
