@@ -619,6 +619,13 @@ export class RelayChatBackend implements ChatBackend {
   private readonly indexCloseTimers = new Set<ReturnType<typeof setTimeout>>();
   /** 背景查詢（enrichFromPublic）最近一分鐘的時間點 */
   private enrichTimes: number[] = [];
+  /**
+   * 這個工作階段查到的對方收件中繼（錨點池以外；ADR-0382 §6）。私訊除了寄主要提示那座，**每一座都寄一份**（NIP-17）：
+   * 主要提示只存得下一座，而第三方客戶端預設的收件中繼可能已經停了（0xchat 的 relay.0xchat.com，2026-10-14 實機）。
+   */
+  private readonly publicInbox = new Map<PubkeyHex, string[]>();
+  /** 這個工作階段查過的人：寄私訊前的重查每人一次 */
+  private readonly enrichedThisSession = new Set<PubkeyHex>();
   /** 企業名冊管理者公鑰與最近採用的名冊（ADR-0047）。 */
   private readonly orgAdminPubkey: string | undefined;
   private lastRoster: OrgRosterDoc | null = null;
@@ -1144,6 +1151,28 @@ export class RelayChatBackend implements ChatBackend {
     if (primaryUrl !== undefined && this.relayStates.get(primaryUrl) === "offline") {
       for (const seat of this.healthySeats(primaryUrl)) seat.publish(evt);
     }
+    if (to !== undefined && to !== this.self.pubkey) {
+      // ADR-0382 §6：對方 10050 上的其他收件中繼也各寄一份（同一顆事件，收件端依 id 去重）
+      for (const extra of this.publicInbox.get(to) ?? []) if (extra !== primaryUrl) this.poolClient(extra)?.publish(evt);
+      if (evt.kind === KIND.OFFLINE_DM_GIFT_WRAP) this.ensurePublicRoute(to, evt);
+    }
+  }
+
+  /**
+   * 寄私訊給**沒有提示、或提示在錨點池外**的聯絡人／請求者：這個工作階段第一次寄時重查他的 10050（ADR-0382 §6），
+   * 查到的收件中繼把同一顆事件補寄過去——他可能在我們上次查之後才設好收件中繼，或重開 App 後記憶體裡的清單沒了。
+   * 提示在錨點上的（Cinderous 使用者）不查；不是聯絡人也不是請求者的（群組成員）不查。
+   * 單座中繼模式（自架、企業）沒有錨點池，提示幾乎都是 Cinderous 使用者帶內告知的（ADR-0035）——只查完全沒有提示的。
+   */
+  private ensurePublicRoute(to: PubkeyHex, evt: NostrEvent): void {
+    if (this.enrichedThisSession.has(to)) return;
+    const known = this.contacts.find((c) => c.pubkey === to) ?? this.requests.find((r) => r.pubkey === to);
+    if (!known) return;
+    const hint = normalizeRelayUrl(known.relayUrl);
+    if (hint !== undefined && (!this.shardingBase || this.isAnchorUrl(hint))) return;
+    void this.enrichFromPublic(to).then((inbox) => {
+      for (const url of inbox) this.poolClient(url)?.publish(evt);
+    });
   }
 
   /** 健康的引導座（home + 錨點/清單座，狀態非 offline），排除 `exclude`，去重、上限 K。 */
@@ -1651,32 +1680,39 @@ export class RelayChatBackend implements ChatBackend {
    * 名稱只取代 `npub1abc…` 佔位（ADR-0284 的自報名稱同一個位置；對方的加密個人檔之後照樣覆寫）；
    * 收件中繼只在**沒有任何提示、而且在錨點池外**時採用——使用者給的與帶內學到的（ADR-0035）都優先。
    */
-  private async enrichFromPublic(pubkey: PubkeyHex): Promise<void> {
+  private async enrichFromPublic(pubkey: PubkeyHex): Promise<string[]> {
     // 防洪（ADR-0127 的同一個威脅）：陌生人可用大量 pubkey 來信，每個都會開兩條單次連線。
     // 超過上限就不查——名稱維持 npub，回信退回分片推算；之後再來信或使用者手動加時還有機會。
     const now = Date.now();
     this.enrichTimes = this.enrichTimes.filter((t) => now - t < 60_000);
-    if (this.enrichTimes.length >= PUBLIC_ENRICH_PER_MINUTE) return;
+    if (this.enrichTimes.length >= PUBLIC_ENRICH_PER_MINUTE) return [];
     this.enrichTimes.push(now);
+    this.enrichedThisSession.add(pubkey);
     const found = await this.lookupPublic(pubkey);
+    const inbox = [
+      ...new Set(found.inboxRelays.map((u) => normalizeRelayUrl(u)).filter((u): u is string => u !== undefined && !this.isAnchorUrl(u))),
+    ];
+    if (inbox.length > 0) this.publicInbox.set(pubkey, inbox);
     const known = this.contacts.find((c) => c.pubkey === pubkey) ?? this.requests.find((r) => r.pubkey === pubkey);
-    if (!known) return;
+    if (!known) return inbox;
     let changed = false;
     if (found.name && known.name === shortNpub(npubEncode(pubkey))) {
       this.storage.updateContactName(pubkey, found.name);
       changed = true;
     }
-    const relay = normalizeRelayUrl(found.inboxRelays[0]);
-    if (!known.relayUrl && relay !== undefined && !this.isAnchorUrl(relay)) {
+    const relay = inbox[0];
+    if (!known.relayUrl && relay !== undefined) {
       this.storage.updateContactRelay(pubkey, relay);
       changed = true;
     }
-    if (!changed) return;
-    this.contacts = this.storage.loadContacts();
-    this.requests = this.storage.loadRequests();
-    this.resubscribe();
-    this.emitContacts();
-    this.emitRequests();
+    if (changed) {
+      this.contacts = this.storage.loadContacts();
+      this.requests = this.storage.loadRequests();
+      this.resubscribe();
+      this.emitContacts();
+      this.emitRequests();
+    }
+    return inbox;
   }
 
   /**
@@ -3214,6 +3250,8 @@ export class RelayChatBackend implements ChatBackend {
     this.drainHeldInvites(pubkey); // ADR-0317：你接受的人就能拉你進群——重放他被擋下的邀請
     this.emitRequests();
     this.emitContacts();
+    // ADR-0382 §6：請求建立時查不到收件中繼的（第三方之後才設好），接受時再查一次——接下來就要回信了
+    if (!req.relayUrl) void this.enrichFromPublic(pubkey);
     this.sendProfileTo(pubkey); // ADR-0061：接受了才把自己的暱稱給他
   }
 
