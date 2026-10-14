@@ -407,6 +407,17 @@ describe("RelayCore — 可尋址快照（NIP-33，ADR-0071）", () => {
       sk,
     );
 
+  it("NIP-17 kind 10050（content 空）：OK true 且別人以 authors 查得到——不是被當成 purge（ADR-0382 §7）", () => {
+    const store = new MessageStore();
+    const core = new RelayCore({ store, now: () => 1_700_000_000 });
+    core.connect("c");
+    const sk = generateSecretKey();
+    const inbox = finalizeEvent({ kind: 10050, created_at: 1_700_000_000, tags: [["relay", "wss://a.example/s/1"]], content: "" }, sk);
+    expect(core.handle("c", EVENT(inbox))).toContainEqual({ to: "c", message: ["OK", inbox.id, true, ""] });
+    const got = core.handle("c", REQ("s", { kinds: [10050], authors: [getPublicKey(sk)] })).filter((o) => o.message[0] === "EVENT");
+    expect(got.map((o) => (o.message[2] as NostrEvent).id)).toEqual([inbox.id]);
+  });
+
   it("發佈→取代→purge：REQ 永遠只看到最新一顆；purge 後查無", () => {
     const store = new MessageStore();
     const core = new RelayCore({ store, now: () => 1_700_000_000 });
