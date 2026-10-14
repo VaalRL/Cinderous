@@ -419,6 +419,7 @@ export function webSocketConnector(url: string): RelayConnector {
       });
       ws.addEventListener("close", () => {
         open = false;
+        client.connectionLost(); // ADR-0385：重連後要重新認證，期間送出的事件被拒時才會在認證後重送
         if (stopped) return; // 已清除 hint：不再重連
         onStatus?.("offline");
         const delay = Math.min(1000 * 2 ** attempt, RECONNECT_MAX_MS);

@@ -105,3 +105,98 @@ describe("RelayClient — NIP-42 AUTH（ADR-0057）", () => {
     expect(sent).toEqual([]);
   });
 });
+
+describe("RelayClient — 認證前送出的事件（ADR-0385）", () => {
+  // 錨點一連上就發 AUTH 挑戰，認證完成前收到的 EVENT 一律回 `OK false "auth-required: …"`（2026-10-14 實測）。
+  // 連線一開就把排隊的事件送出去，所以剛連上時送的心跳、直連信令會被拒，而它們沒有外送匣可以重試。
+  function authed() {
+    const sent: unknown[][] = [];
+    const onOk = vi.fn();
+    const sk = generateSecretKey();
+    const client = new RelayClient(
+      { send: (d) => sent.push(JSON.parse(d) as unknown[]) },
+      { authSigner: (c) => buildAuthEvent(c, "wss://r", sk), onOk },
+    );
+    const challengeAndAccept = () => {
+      client.receive(JSON.stringify(["AUTH", "chal-1"]));
+      const auth = sent.filter((m) => m[0] === "AUTH").at(-1)![1] as { id: string };
+      client.receive(JSON.stringify(["OK", auth.id, true, ""]));
+    };
+    const events = () => sent.filter((m) => m[0] === "EVENT").map((m) => (m[1] as { id: string }).id);
+    return { client, onOk, events, challengeAndAccept, sk };
+  }
+
+  it("認證前送出、被回 auth-required → 認證成功後自動重送同一顆；那個拒收不轉給 onOk（不算失敗）", () => {
+    const { client, onOk, events, challengeAndAccept, sk } = authed();
+    const beat = createHeartbeat(sk);
+    client.publish(beat);
+    client.receive(JSON.stringify(["OK", beat.id, false, "auth-required: nip42: 請先認證（NIP-42）"]));
+    expect(onOk).not.toHaveBeenCalled();
+    expect(events()).toEqual([beat.id]);
+    challengeAndAccept();
+    expect(events()).toEqual([beat.id, beat.id]);
+    client.receive(JSON.stringify(["OK", beat.id, true, ""]));
+    expect(onOk).toHaveBeenCalledWith(beat.id, true, "");
+  });
+
+  it("認證後才送的事件被回 auth-required（例如中繼要求重新認證）→ 照常轉給 onOk，不自己重送", () => {
+    const { client, onOk, events, challengeAndAccept, sk } = authed();
+    challengeAndAccept();
+    const beat = createHeartbeat(sk);
+    client.publish(beat);
+    client.receive(JSON.stringify(["OK", beat.id, false, "auth-required: again"]));
+    expect(onOk).toHaveBeenCalledWith(beat.id, false, "auth-required: again");
+    expect(events()).toEqual([beat.id]);
+  });
+
+  it("其他拒收理由照常轉給 onOk；沒有 authSigner 的連線（開放中繼）不攔 auth-required", () => {
+    const { client, onOk, sk } = authed();
+    const beat = createHeartbeat(sk);
+    client.publish(beat);
+    client.receive(JSON.stringify(["OK", beat.id, false, "blocked: nope"]));
+    expect(onOk).toHaveBeenCalledWith(beat.id, false, "blocked: nope");
+
+    const open = vi.fn();
+    const plain = new RelayClient({ send: () => {} }, { onOk: open });
+    const other = createHeartbeat(generateSecretKey());
+    plain.publish(other);
+    plain.receive(JSON.stringify(["OK", other.id, false, "auth-required: x"]));
+    expect(open).toHaveBeenCalledWith(other.id, false, "auth-required: x");
+  });
+
+  it("斷線重連（同一個 client）：認證狀態重來，重連後早於認證送出的事件同樣會在認證後重送", () => {
+    const { client, onOk, events, challengeAndAccept, sk } = authed();
+    challengeAndAccept();
+    client.connectionLost();
+    const beat = createHeartbeat(sk);
+    client.publish(beat);
+    client.receive(JSON.stringify(["OK", beat.id, false, "auth-required: x"]));
+    expect(onOk).not.toHaveBeenCalled();
+    challengeAndAccept();
+    expect(events()).toEqual([beat.id, beat.id]);
+  });
+
+  it("重送在 onAuthenticated 之後（先重掛訂閱，再補送）", () => {
+    const order: string[] = [];
+    const sk = generateSecretKey();
+    const sent: unknown[][] = [];
+    const client = new RelayClient(
+      {
+        send: (d) => {
+          const m = JSON.parse(d) as unknown[];
+          sent.push(m);
+          if (m[0] === "EVENT") order.push("resend");
+        },
+      },
+      { authSigner: (c) => buildAuthEvent(c, "wss://r", sk), onAuthenticated: () => order.push("authenticated") },
+    );
+    const beat = createHeartbeat(sk);
+    client.publish(beat);
+    order.length = 0;
+    client.receive(JSON.stringify(["OK", beat.id, false, "auth-required: x"]));
+    client.receive(JSON.stringify(["AUTH", "c"]));
+    const auth = sent.filter((m) => m[0] === "AUTH").at(-1)![1] as { id: string };
+    client.receive(JSON.stringify(["OK", auth.id, true, ""]));
+    expect(order).toEqual(["authenticated", "resend"]);
+  });
+});

@@ -24,6 +24,9 @@ export interface RelayClientHandlers {
   onAuthenticated?: (client: RelayClient) => void;
 }
 
+/** 認證前送出、等 OK 的事件最多記幾顆（ADR-0385）。 */
+const PRE_AUTH_MAX = 200;
+
 /**
  * 與平台無關的 Nostr relay 客戶端：負責序列化送出與解析分派。
  * 由宿主持有實際 WebSocket，在收到訊息時呼叫 {@link RelayClient.receive}。
@@ -31,6 +34,12 @@ export interface RelayClientHandlers {
 export class RelayClient {
   /** 已送出、待 relay OK 的 NIP-42 AUTH 事件 id（用於辨識 AUTH 的 OK）。 */
   private pendingAuthId: string | undefined;
+  /** 這條連線認證過了沒（ADR-0385）；收到新的挑戰就重來。 */
+  private authenticated = false;
+  /** 認證前送出、還沒收到 OK 的事件（ADR-0385）：被回 `auth-required` 的要在認證後重送。有上限，最舊的先丟。 */
+  private readonly preAuth = new Map<string, NostrEvent>();
+  /** 認證前被拒、等認證完成要重送的事件（ADR-0385）。 */
+  private awaitingAuth: NostrEvent[] = [];
 
   constructor(
     private readonly transport: RelayTransport,
@@ -39,7 +48,20 @@ export class RelayClient {
 
   /** 發布事件至中繼站。 */
   publish(event: NostrEvent): void {
+    // ADR-0385：會回應挑戰的連線在認證前送出的事件先記著——被回 auth-required 就等認證完成再送一次
+    if (this.handlers.authSigner && !this.authenticated) {
+      this.preAuth.set(event.id, event);
+      if (this.preAuth.size > PRE_AUTH_MAX) this.preAuth.delete(this.preAuth.keys().next().value!);
+    }
     this.transport.send(JSON.stringify(["EVENT", event]));
+  }
+
+  /**
+   * 連線斷了（ADR-0385）：同一個 client 會在重連後沿用，下一條連線要重新認證——
+   * 斷線期間排隊、重連一開就送出的事件，同樣可能早於認證被拒。
+   */
+  connectionLost(): void {
+    this.authenticated = false;
   }
 
   /** 以一組 filter 建立訂閱。 */
@@ -78,9 +100,22 @@ export class RelayClient {
           if (id === this.pendingAuthId) {
             // 這是 NIP-42 AUTH 事件的 OK：不當一般發布回應，成功則觸發 onAuthenticated。
             this.pendingAuthId = undefined;
-            if (accepted) this.handlers.onAuthenticated?.(this);
+            if (accepted) {
+              this.authenticated = true;
+              this.preAuth.clear();
+              this.handlers.onAuthenticated?.(this); // 先重掛訂閱
+              for (const event of this.awaitingAuth.splice(0)) this.transport.send(JSON.stringify(["EVENT", event])); // 再補送
+            }
           } else {
-            this.handlers.onOk?.(id, accepted, String(msg[3] ?? ""));
+            const message = String(msg[3] ?? "");
+            const early = this.preAuth.get(id);
+            this.preAuth.delete(id);
+            // ADR-0385：認證前送出而被拒＝時間點的問題，不是事件的問題——等認證完成重送，這個拒收不往上報
+            if (!accepted && early && /^auth-required/i.test(message)) {
+              this.awaitingAuth.push(early);
+              return;
+            }
+            this.handlers.onOk?.(id, accepted, message);
           }
         }
         return;
@@ -90,6 +125,7 @@ export class RelayClient {
       case "AUTH":
         // NIP-42：relay 發挑戰 → 以 authSigner 簽 kind 22242 回應（ADR-0057）。
         if (typeof msg[1] === "string" && this.handlers.authSigner) {
+          this.authenticated = false; // 新的挑戰：之後送出的事件同樣要等這次認證
           const authEvent = this.handlers.authSigner(msg[1]);
           this.pendingAuthId = authEvent.id;
           this.transport.send(JSON.stringify(["AUTH", authEvent]));
