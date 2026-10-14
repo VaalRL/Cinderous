@@ -1,5 +1,26 @@
 [
   {
+    "version": "0.0.20",
+    "date": "2026-10-14",
+    "released": true,
+    "zh": [
+      "🔧 **修正：分到不同中繼錨點的兩個人互相收不到訊息。** 登入時會自動挑一座錨點，所以你和朋友可能落在不同座；之前寄信一律寄到自己那座，對方永遠收不到。現在會照對方分享字串裡寫的錨點寄；只有 npub、不知道對方在哪座時，每座各寄一份，對方回信後就只寄一座。上線狀態也一樣修好了。寄件人要更新到這一版才會生效。",
+      "🔧 **修正：重新整理或剛開 App 時，對方要等好幾分鐘才看到你上線。** 剛連上中繼、還沒完成身分認證時送出的上線信號、直連信令與「正在輸入」會被中繼拒收而消失；現在認證完成後會自動補送。",
+      "🔧 **修正：兩人同時（或先後）打開對話時，對話裡跳出「⚠️ 信令處理失敗」、直連沒建立。** 現在由一方讓步、卡住的協商會換新連線重談；直連失敗本來就會改走中繼，所以不再在對話裡顯示這類錯誤。",
+      "🔧 傳給別人的訊息若被對方的中繼明確拒收，會立刻標成失敗（紅色重試），不再等 30 秒後被當成已送出；被回「中繼滿了」時會改送其他中繼。",
+      "🔒 底層密碼學函式庫升級（@noble/@scure 2.4.0）：簽章改為保證常數時間。訊息格式不變，新舊版互通；已用舊版建立的密碼鎖與聊天紀錄照常解得開。",
+      "ℹ️ 已知：Android 版是測試版（debug 簽章，能接 USB 偵錯的人可讀取記憶體，請勿用它處理你真正在意的對話）；桌面版未經程式碼簽章，安裝時 Windows SmartScreen 會跳警告。和還沒更新的舊版之間，舊版那一側仍可能出現信令錯誤。"
+    ],
+    "en": [
+      "🔧 **Fix: two people on different relay anchors couldn't receive each other's messages.** Sign-up picks an anchor automatically, so you and a friend may land on different ones; previously messages always went to your own anchor and never reached them. Messages now go to the anchor in the other person's share string; with only an npub, a copy goes to each anchor until they reply. Online status is fixed the same way. The sender needs this version for it to take effect.",
+      "🔧 **Fix: after a reload or app start, others took minutes to see you online.** Presence beacons, direct-connection signaling and typing indicators sent before the relay connection finished authenticating were rejected and lost; they are now resent once authentication completes.",
+      "🔧 **Fix: \"⚠️ Signaling failed\" in the chat and no direct connection when both people open the conversation at the same time (or one after the other).** One side now yields, and a stuck negotiation restarts on a fresh connection. A failed direct connection already falls back to the relay, so these errors are no longer shown in the chat.",
+      "🔧 Messages explicitly rejected by the recipient's relay are marked failed right away (red retry) instead of being treated as sent after 30 seconds; when a relay reports it is full, the message is sent to another relay.",
+      "🔒 Cryptography libraries upgraded (@noble/@scure 2.4.0): signing is now guaranteed constant-time. Message formats are unchanged and old and new versions interoperate; passcode locks and chat history created with older versions still unlock as before.",
+      "ℹ️ Known: the Android build is a test build (debug-signed; anyone with USB debugging can read its memory — don't use it for conversations you really care about); the desktop build is not code-signed, so Windows SmartScreen will warn on install. With older versions that haven't updated, the older side may still show signaling errors."
+    ]
+  },
+  {
     "version": "0.0.19",
     "date": "2026-10-14",
     "released": true,
