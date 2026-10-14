@@ -1065,14 +1065,70 @@ export class RelayChatBackend implements ChatBackend {
     return anchors.some((a) => a !== undefined && hostOf(a) === host);
   }
 
-  /** 某 pubkey 的訊息片 URL（ADR-0241）：`<base>/s/<prefix>`。僅分片模式有意義。 */
-  private shardUrlOf(pubkey: string): string {
-    return `${this.shardingBase}${shardPath(pubkey)}`;
+  /** 某 pubkey 的訊息片 URL（ADR-0241）：`<base>/s/<prefix>`。僅分片模式有意義；`base` 預設自己這座（ADR-0383）。 */
+  private shardUrlOf(pubkey: string, base = this.shardingBase): string {
+    return `${base}${shardPath(pubkey)}`;
+  }
+
+  /** 錨點網址所屬那座的分片基底（ADR-0383）：自己這座回 `shardingBase`，別座回 `wss://host`；不是錨點回 undefined。 */
+  private anchorBaseOf(url: string): string | undefined {
+    if (!this.isAnchorUrl(url)) return undefined;
+    if (this.shardingBase !== undefined && hostOf(url) === hostOf(this.shardingBase)) return this.shardingBase;
+    try {
+      return new URL(url).origin;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** 分片模式下所有錨點的分片基底（ADR-0383）：自己這座排第一，同主機只留一個。 */
+  private anchorBases(): string[] {
+    const out: string[] = [];
+    for (const u of [this.shardingBase, this.originalHomeUrl, ...this.bootstrapSeats]) {
+      const base = u === undefined ? undefined : this.anchorBaseOf(u);
+      if (base !== undefined && !out.includes(base)) out.push(base);
+    }
+    return out;
+  }
+
+  /**
+   * 不知道對方在哪座錨點時（只有裸 npub、沒有帶內提示），另外要寄的各座分片（ADR-0383）：
+   * 每座錨點上對方的分片各一份，排除主路由。知道在哪座（提示在錨點上）或提示在錨點池外的不多寄。
+   */
+  private unknownAnchorShards(to: PubkeyHex): string[] {
+    if (!this.shardingBase) return [];
+    const known = this.contacts.find((c) => c.pubkey === to) ?? this.requests.find((r) => r.pubkey === to);
+    if (normalizeRelayUrl(known?.relayUrl) !== undefined) return [];
+    const primary = this.shardUrlOf(to);
+    return this.anchorBases()
+      .map((base) => this.shardUrlOf(to, base))
+      .filter((u) => u !== primary);
   }
 
   /** presence 獨立層 URL（ADR-0241）：`<base>/presence`。非分片模式回 undefined。 */
   private presenceUrl(): string | undefined {
     return this.shardingBase ? `${this.shardingBase}${PRESENCE_PATH}` : undefined;
+  }
+
+  /**
+   * 聯絡人分在別座錨點時，那幾座的 presence 層（ADR-0383）：心跳只發到自己這座，要看別座的人在不在線就得去那座訂。
+   * 只看提示在錨點上的聯絡人——沒有提示的還不知道在哪座，等帶內提示學到再連。
+   */
+  private foreignPresenceUrls(): string[] {
+    if (!this.shardingBase) return [];
+    const out = new Set<string>();
+    for (const c of this.contacts) {
+      const hinted = normalizeRelayUrl(c.relayUrl);
+      const base = hinted === undefined ? undefined : this.anchorBaseOf(hinted);
+      if (base !== undefined && base !== this.shardingBase) out.add(`${base}${PRESENCE_PATH}`);
+    }
+    return [...out];
+  }
+
+  /** 是不是某座錨點的 presence 層（自己這座或 foreignPresenceUrls 的其中一座）。 */
+  private isPresenceUrl(url: string | undefined): boolean {
+    if (!this.shardingBase || url === undefined) return false;
+    return url === this.presenceUrl() || this.foreignPresenceUrls().includes(url);
   }
 
   /**
@@ -1086,7 +1142,8 @@ export class RelayChatBackend implements ChatBackend {
       // 第三方客戶端的使用者不會去讀錨點分片。錨點上的提示（Cinderous 使用者）照舊由公鑰推算分片。
       const hinted = normalizeRelayUrl(contact.relayUrl);
       if (hinted !== undefined && !this.isAnchorUrl(hinted)) return hinted !== this.homeUrl ? hinted : undefined;
-      const url = this.shardUrlOf(contact.pubkey);
+      // ADR-0383：提示在別座錨點（對方被分到另一座）→ 用那座的分片；沒有提示先寄自己這座（其他座見 unknownAnchorShards）
+      const url = this.shardUrlOf(contact.pubkey, (hinted !== undefined ? this.anchorBaseOf(hinted) : undefined) ?? this.shardingBase);
       return url !== this.homeUrl ? url : undefined; // 同片＝home
     }
     const url = normalizeRelayUrl(contact.relayUrl);
@@ -1173,17 +1230,20 @@ export class RelayChatBackend implements ChatBackend {
     const to = evt.tags.find((t) => t[0] === "p")?.[1];
     // ADR-0241：分片模式下**非聯絡人**（陌生人/群成員）也要路由到 `shard(對方)`，故用 pubkey 算，
     // 不只看聯絡人 hint。聯絡人給完整物件（帶 hint）供單一 relay 模式沿用。
-    const contact = to ? this.contacts.find((c) => c.pubkey === to) : undefined;
+    const contact = to ? (this.contacts.find((c) => c.pubkey === to) ?? this.requests.find((r) => r.pubkey === to)) : undefined;
     const url = to ? this.foreignUrlOf(contact ?? { pubkey: to }) : undefined;
     const primaryUrl = url ?? this.homeUrl;
     const primary = url ? this.poolClient(url) : this.homeClient();
     const seats =
       primaryUrl !== undefined && (redundant || this.relayStates.get(primaryUrl) === "offline") ? this.healthySeats(primaryUrl) : [];
     // ADR-0382 §6：對方 10050 上的其他收件中繼也各寄一份（同一顆事件，收件端依 id 去重）
+    // ADR-0383：不知道對方在哪座錨點 → 每座錨點上對方的分片也各寄一份
     const extras =
-      to !== undefined && to !== this.self.pubkey ? (this.publicInbox.get(to) ?? []).filter((u) => u !== primaryUrl) : [];
+      to !== undefined && to !== this.self.pubkey
+        ? [...new Set([...this.unknownAnchorShards(to), ...(this.publicInbox.get(to) ?? [])])].filter((u) => u !== primaryUrl)
+        : [];
     // 有冗餘座時先記下拒收算數的座（在 publish 之前：記憶體測試網路的 OK 是同步回來的），好讓 onRelayOk 分得出誰的拒收算數（ADR-0378）。
-    // 引導座只是冗餘，拒收不算；對方 10050 上的各座與主路由地位相同（排第一只是剛好），全部拒收才算
+    // 引導座只是冗餘，拒收不算；對方 10050 上的各座、各錨點上對方的分片（ADR-0383）與主路由地位相同（排第一只是剛好），全部拒收才算
     if (seats.length > 0 || extras.length > 0) this.rememberRoute(evt.id, [primaryUrl, ...extras]);
     (primary ?? this.client).publish(evt); // 一律投入主路由（離線則入其重連佇列）
     for (const seat of seats) seat.publish(evt);
@@ -1260,7 +1320,7 @@ export class RelayChatBackend implements ChatBackend {
   private subscribeOn(client: RelayClient, url: string | undefined): void {
     // ADR-0241：presence 獨立層——一條連線一次訂閱**全部**聯絡人心跳（`authors:[聯絡人]`），
     // 不必連每個聯絡人的訊息片。真隱身（ADR-0240）照樣不訂（不把聯絡人集合交出去）。訊息片則不再訂心跳。
-    if (this.shardingBase && url !== undefined && url === this.presenceUrl()) {
+    if (this.isPresenceUrl(url)) {
       const all = this.contacts.map((c) => c.pubkey);
       client.subscribe("all", this.invisible || all.length === 0 ? [] : [{ kinds: [KIND.HEARTBEAT], authors: all }]);
       return;
@@ -1388,6 +1448,7 @@ export class RelayChatBackend implements ChatBackend {
     // ADR-0241：分片模式下另連 presence 獨立層（一條連線訂全部聯絡人心跳）。
     const pu = this.presenceUrl();
     if (pu) this.poolClient(pu);
+    for (const url of this.foreignPresenceUrls()) this.poolClient(url); // ADR-0383：別座錨點上的聯絡人
     // 引導座（錨點/清單，ADR-0039）與聯絡人 hint 的外部 relay 都連線並掛訂閱。
     for (const url of this.bootstrapSeats) if (url !== this.homeUrl) this.poolClient(url);
     // 搬家排水（ADR-0066 H3）：舊 home 也連線——subscribeOn 會掛自家收件匣，收訊走既有去重。

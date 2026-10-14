@@ -140,7 +140,8 @@ describe("分片連線也處理 OK（ADR-0378）", () => {
     const net = farm((host) => (host === bobShard ? { store: full } : host === ANCHOR ? { allowedAuthors: [bobPk] } : undefined));
     const { b: a, store: storeA } = backend(skA, "Alice", net.connectorFor("a"), { anchors: [ANCHOR] });
     a.start(noop);
-    a.addContact(backend(skB, "Bob", net.connectorFor("b")).b.selfNpub);
+    // 帶提示的分享字串：知道 Bob 在 BASE 這座，不會多寄到錨點上 Bob 的分片（ADR-0383）——這裡只驗冗餘座
+    a.addContact(backend(skB, "Bob", net.connectorFor("b")).b.selfShareUri);
     a.sendMessage(bobPk, "嗨");
     vi.advanceTimersByTime(1_000); // 第一次重送：主路由仍滿、錨點永久拒收
     expect(storeA.loadMessages(bobPk)[0]?.status).toBe("sending");

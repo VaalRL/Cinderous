@@ -11,7 +11,7 @@
 // 所以這裡不把「比對 convo」留給呼叫端自己記得寫——`draftFor(convo)` 把它包進 API 裡，
 // **拿錯對話的草稿這件事在型別上就做不到**。
 //
-// `reset()` 是純歸零：行程隨後端 `onCalendar` 重新灌入，草稿本來就是 session 內的東西。
+// 沒有 `reset`：換身分時整個 session 重掛（ADR-0332 2c），兩個 state 跟著歸零——行程隨後端 `onCalendar` 重新灌入，草稿本來就是 session 內的東西。
 
 import { useState } from "react";
 import type { StoredCalendarEvent } from "@cinderous/engine";
