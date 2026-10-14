@@ -5,7 +5,7 @@
 import { createRequire } from "node:module";
 import type { DatabaseSync as DatabaseSyncType } from "node:sqlite";
 import { describe, expect, it } from "vitest";
-import { buildAuthEvent, classifyOk, finalizeEvent, generateSecretKey, type NostrEvent } from "@cinderous/core";
+import { buildAuthEvent, finalizeEvent, generateSecretKey, type NostrEvent } from "@cinderous/core";
 import { MessageStore, type MessageStoreOptions, type OfflineStore } from "./message-store.js";
 import {
   ADDRESSABLE_REJECT,
@@ -97,8 +97,22 @@ describe("逐字與 SDK 中繼 v0.32.0／v0.34.0 相同（`src/relay/reject-mess
   });
 });
 
+/**
+ * 已上線的 v0.0.18 App 的外送匣判定（`packages/core/src/outbox.ts@v0.0.18`，凍結）：只看前綴。
+ *
+ * 這組測試守的是「**已出貨**的 App 看新句子，判定跟看舊句子一樣」。原本直接拿 core 現在的 `classifyOk` 當代理——
+ * core 一改分類（ADR-0378：`blocked: ceiling:`／`blocked: quota:` 改為重試），代理就不再是 v0.0.18，測試變成在擋新版的刻意改動。
+ * 新版的分類由 core `outbox.test.ts` 自己守。
+ */
+function classifyOkV0018(accepted: boolean, message: string): "confirmed" | "permanent" | "retry" {
+  const m = message.trim().toLowerCase();
+  if (accepted || m.startsWith("duplicate")) return "confirmed";
+  if (/^(blocked|invalid|pow|restricted|mute)\b/.test(m)) return "permanent";
+  return "retry";
+}
+
 describe("🔴 v0.0.18 相容：已上線 App 的 classifyOk 對每一句的判定，新舊版一樣", () => {
-  // [舊句子, 新句子]：App 的外送匣（core `classifyOk`）只看前綴；詞元加在前綴後面，判定不能變。
+  // [舊句子, 新句子]：已出貨 App 的外送匣只看前綴；詞元加在前綴後面，判定不能變。
   const pairs: [string, string][] = [
     ["blocked: tag 數超過上限", REJECT.tooManyTags],
     ["blocked: 收件人數超過上限", REJECT.tooManyRecipients],
@@ -121,16 +135,16 @@ describe("🔴 v0.0.18 相容：已上線 App 的 classifyOk 對每一句的判�
     ["blocked: 取代事件遭拒（配額/大小/較舊）", ADDRESSABLE_REJECT.ceiling],
   ];
   it.each(pairs)("%s → %s", (old, now) => {
-    expect(classifyOk(false, now)).toBe(classifyOk(false, old));
+    expect(classifyOkV0018(false, now)).toBe(classifyOkV0018(false, old));
   });
 
   it("可尋址「已過期」從 blocked 變成 invalid：App 兩者都判永久失敗", () => {
-    expect(classifyOk(false, ADDRESSABLE_REJECT.expired)).toBe(classifyOk(false, "blocked: 取代事件遭拒（配額/大小/較舊）"));
+    expect(classifyOkV0018(false, ADDRESSABLE_REJECT.expired)).toBe(classifyOkV0018(false, "blocked: 取代事件遭拒（配額/大小/較舊）"));
   });
 
   it("duplicate：舊的 OK false 與新的 OK true，App 都判為已確認", () => {
-    expect(classifyOk(false, "duplicate: 事件重複")).toBe("confirmed");
-    expect(classifyOk(true, REJECT.duplicate)).toBe("confirmed");
+    expect(classifyOkV0018(false, "duplicate: 事件重複")).toBe("confirmed");
+    expect(classifyOkV0018(true, REJECT.duplicate)).toBe("confirmed");
   });
 
   it("App 配對信令只認 /auth-required/ 就重送：新句子照樣命中", () => {

@@ -356,6 +356,8 @@ export type RelayConnector = (
 export type CloseableRelayClient = RelayClient & { close?: () => void };
 
 const RECONNECT_MAX_MS = 15_000;
+/** 記住「冗餘送出的主路由」的上限（ADR-0378）：外送匣同時在途只有幾顆，1024 綽綽有餘 */
+const OK_ROUTE_MAX = 1024;
 
 /** 正規化 relay URL（trim、去尾斜線）；非 ws(s) 或空值回傳 undefined。 */
 /**
@@ -797,6 +799,8 @@ export class RelayChatBackend implements ChatBackend {
   private renderTimer: ReturnType<typeof setInterval> | undefined;
   /** 可靠訊息（kind 1059 DM/群訊/群控）的節流外送匣（ADR-0041）。 */
   private readonly outbox: Outbox;
+  /** 事件 id → 冗餘送出時「拒收算數」的座（ADR-0378：引導座不算；ADR-0382 §6：對方 10050 各座全部拒收才算） */
+  private readonly okRoute = new Map<string, { voters: Set<string | undefined> }>();
   private pumpTimer: ReturnType<typeof setInterval> | undefined;
 
   constructor(
@@ -885,7 +889,8 @@ export class RelayChatBackend implements ChatBackend {
     this.requests = storage.loadRequests();
     this.groups = storage.loadGroups();
     this.outbox = new Outbox({
-      send: (evt) => this.publishAddressed(evt),
+      // 上一次被回「中繼滿了」（`blocked: ceiling:`／`quota:`）的重送也送到健康的引導座（ADR-0378）
+      send: (evt, opts) => this.publishAddressed(evt, opts?.elsewhere === true),
       onDrop: (evt, reason) => {
         // 快照發佈失敗（拒收/重試耗盡）→ 清節流記錄讓 30 分後重試（審查修正 #5）。
         if (evt.kind === SNAPSHOT_KIND) {
@@ -909,12 +914,7 @@ export class RelayChatBackend implements ChatBackend {
     this.client = homeConnector(
       {
         onEvent: (_sub, event) => this.onEvent(event, this.homeUrl),
-        onOk: (id, accepted, message) => {
-          this.outbox.onOk(id, accepted, message);
-          if (accepted) this.markSent(id); // Tier 1（ADR-0058）：relay 接受＝已送中繼
-          // 備份成功也要留痕——只記失敗的話，「從沒成功過」與「剛剛才成功」長得一樣。
-          if (accepted && this.pendingSnapshotIds.delete(id)) this.recordBackup({ ok: true });
-        },
+        onOk: (id, accepted, message) => this.onRelayOk(this.originalHomeUrl, id, accepted, message),
         // NIP-42 AUTH（ADR-0057）：回應挑戰；認證成功後重掛訂閱（解「訂閱早於認證」）。
         authSigner: (challenge) => {
           // A 層健檢（ADR-0275）：收到挑戰＝這座 relay 要求認證＝收件匣不是公開可讀。
@@ -1109,6 +1109,10 @@ export class RelayChatBackend implements ChatBackend {
       client = this.connectorFor(url)(
         {
           onEvent: (_sub, event) => this.onEvent(event, url),
+          // 🔴 外部連線也要處理 OK（ADR-0378）：分片模式下寄給別人的訊息走的正是**對方訊息片**這條連線，
+          // 冗餘廣播的引導座、單一 relay 模式的聯絡人 hint 也是。少了這一行，那些 OK（收下或拒收）全部被丟掉，
+          // 外送匣等 30 秒後把它當成已送達——拒收的訊息不會變紅，收下的也不會標成「已送中繼」。
+          onOk: (id, accepted, message) => this.onRelayOk(url, id, accepted, message),
           // NIP-42 AUTH（ADR-0057）：外部 relay 的挑戰回應 + 認證後重掛該 relay 訂閱。
           authSigner: (challenge) => buildAuthEvent(challenge, url, this.sk),
           onAuthenticated: (client) => this.subscribeOn(client, url),
@@ -1139,7 +1143,33 @@ export class RelayChatBackend implements ChatBackend {
     this.outbox.pump(); // 立即嘗試送出（在併發上限內）；其餘由泵計時器與 OK 回覆續送。
   }
 
-  private publishAddressed(evt: NostrEvent): void {
+  /**
+   * 任何一條連線（home、對方訊息片、引導座、presence）收到的 `OK`（ADR-0041／0058；ADR-0378 起外部連線也走這裡）。
+   *
+   * 同一顆事件可能送到好幾座（冗餘廣播、「中繼滿了」之後改送引導座）：外送匣以第一個「確認」或「永久拒收」為準，
+   * 之後的 `OK` 找不到那一筆就忽略；`markSent` 同理（扇出紀錄只消費一次）。沒有排進外送匣的事件（信令、心跳）直接略過。
+   *
+   * 🔴 冗餘座的**拒收**不算數：只有主路由（收件人的訊息片／home）的拒收會讓外送匣重試或判失敗。冗餘座可能是企業白名單站、
+   * 也可能正好滿了，主路由卻會收下（或離線中、重連後才送達）——拿冗餘座的「永久拒收」把訊息標紅是誤判。冗餘座的**收下**照樣算。
+   */
+  private onRelayOk(url: string | undefined, id: string, accepted: boolean, message: string): void {
+    const route = this.okRoute.get(id);
+    if (route !== undefined) {
+      if (accepted) this.okRoute.delete(id);
+      // 冗餘座的拒收不判；算數的座要**全部**拒收才判。紀錄留著——同一次送出的其他座（冗餘座）可能晚一步才回拒收
+      else if (!route.voters.delete(url) || route.voters.size > 0) return;
+    }
+    this.outbox.onOk(id, accepted, message);
+    if (accepted) this.markSent(id); // Tier 1（ADR-0058）：relay 接受＝已送中繼
+    // 備份成功也要留痕——只記失敗的話，「從沒成功過」與「剛剛才成功」長得一樣。
+    if (accepted && this.pendingSnapshotIds.delete(id)) this.recordBackup({ ok: true });
+  }
+
+  /**
+   * `redundant`：上一次被回「中繼滿了」（ADR-0378）——除了主路由，也送到健康的引導座（與主路由離線時同一套 ADR-0039 有界冗餘）。
+   * 收件人在引導座上也掛著收件匣，換一座就收得到。
+   */
+  private publishAddressed(evt: NostrEvent, redundant = false): void {
     const to = evt.tags.find((t) => t[0] === "p")?.[1];
     // ADR-0241：分片模式下**非聯絡人**（陌生人/群成員）也要路由到 `shard(對方)`，故用 pubkey 算，
     // 不只看聯絡人 hint。聯絡人給完整物件（帶 hint）供單一 relay 模式沿用。
@@ -1147,15 +1177,28 @@ export class RelayChatBackend implements ChatBackend {
     const url = to ? this.foreignUrlOf(contact ?? { pubkey: to }) : undefined;
     const primaryUrl = url ?? this.homeUrl;
     const primary = url ? this.poolClient(url) : this.homeClient();
+    const seats =
+      primaryUrl !== undefined && (redundant || this.relayStates.get(primaryUrl) === "offline") ? this.healthySeats(primaryUrl) : [];
+    // ADR-0382 §6：對方 10050 上的其他收件中繼也各寄一份（同一顆事件，收件端依 id 去重）
+    const extras =
+      to !== undefined && to !== this.self.pubkey ? (this.publicInbox.get(to) ?? []).filter((u) => u !== primaryUrl) : [];
+    // 有冗餘座時先記下拒收算數的座（在 publish 之前：記憶體測試網路的 OK 是同步回來的），好讓 onRelayOk 分得出誰的拒收算數（ADR-0378）。
+    // 引導座只是冗餘，拒收不算；對方 10050 上的各座與主路由地位相同（排第一只是剛好），全部拒收才算
+    if (seats.length > 0 || extras.length > 0) this.rememberRoute(evt.id, [primaryUrl, ...extras]);
     (primary ?? this.client).publish(evt); // 一律投入主路由（離線則入其重連佇列）
-    if (primaryUrl !== undefined && this.relayStates.get(primaryUrl) === "offline") {
-      for (const seat of this.healthySeats(primaryUrl)) seat.publish(evt);
-    }
-    if (to !== undefined && to !== this.self.pubkey) {
-      // ADR-0382 §6：對方 10050 上的其他收件中繼也各寄一份（同一顆事件，收件端依 id 去重）
-      for (const extra of this.publicInbox.get(to) ?? []) if (extra !== primaryUrl) this.poolClient(extra)?.publish(evt);
-      if (evt.kind === KIND.OFFLINE_DM_GIFT_WRAP) this.ensurePublicRoute(to, evt);
-    }
+    for (const seat of seats) seat.publish(evt);
+    for (const extra of extras) this.poolClient(extra)?.publish(evt);
+    if (to !== undefined && to !== this.self.pubkey && evt.kind === KIND.OFFLINE_DM_GIFT_WRAP) this.ensurePublicRoute(to, evt);
+  }
+
+  /**
+   * 記下某次冗餘送出時「拒收算數」的座（ADR-0378；ADR-0382 §6）：任一座收下就算成功，`voters` 全部拒收才判失敗。
+   * 有上限，最舊的先丟（丟了只是退回「每一座的回覆都算」的舊行為）。
+   */
+  private rememberRoute(eventId: string, voters: (string | undefined)[]): void {
+    this.okRoute.delete(eventId);
+    this.okRoute.set(eventId, { voters: new Set(voters) });
+    if (this.okRoute.size > OK_ROUTE_MAX) this.okRoute.delete(this.okRoute.keys().next().value!);
   }
 
   /**
@@ -1180,7 +1223,9 @@ export class RelayChatBackend implements ChatBackend {
     // home 遞補後其 URL 亦在 bootstrapSeats，需去重避免對同一座重複 publish。
     const seen = new Set<string>(exclude ? [exclude] : []);
     const urls: string[] = [];
-    if (this.homeUrl && !seen.has(this.homeUrl) && this.relayStates.get(this.homeUrl) !== "offline") {
+    // 分片模式（ADR-0241）的 home 是**我自己的**訊息片，收件人不在那裡掛收件匣——送過去對方收不到，
+    // 卻會回 OK true 讓訊息被標成「已送中繼」（ADR-0378 讓外部連線處理 OK 之後才看得出來）。所以分片模式不把 home 當冗餘座。
+    if (!this.shardingBase && this.homeUrl && !seen.has(this.homeUrl) && this.relayStates.get(this.homeUrl) !== "offline") {
       urls.push(this.homeUrl);
       seen.add(this.homeUrl);
     }
