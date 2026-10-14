@@ -562,11 +562,13 @@ export function AppSession({
       groupInviteAnyone: backend.groupInviteFromAnyone?.() ?? false, // ADR-0317
       devices: backend.devices?.() ?? [], // ADR-0321
       cloudSync: idCloudSync, // ADR-0327：讀這個身分的登錄項
+      publicReach: backend.publicReach?.() ?? null, // ADR-0382：開機讀到之前是關
     });
     // ── per-identity 重設區 迄 ─────────────────────────────────────────────
     backend.start({
       onContacts: roster.setContacts,
       onGroups: roster.setGroups,
+      onPublicReach: settings.setPublicReach, // ADR-0382
       onCalendar: cal.setEvents,
       // 行程提醒（ADR-0266）：**刻意不看 `document.hidden`**——訊息通知的「正在看就別打擾」
       // 在這裡是錯的：你正盯著這個 App，不代表你知道十分鐘後有會。只受總開關管。
@@ -1995,6 +1997,25 @@ export function AppSession({
                 // ⚠ 兩個確認都用 **fail-closed** 的 `confirmRequired`：拿不到 confirm
                 // 就不做。啟用那顆是 ADR-0306 D1 的驗收條件（揭露不得被跳過）；
                 // 換鑰那顆會讓在途訊息收不到（ADR-0245），兩者都不該 fail-open。
+                // 公開聯絡方式（ADR-0382）：打開＝發布到公開中繼站、收不回，用 fail-closed 的確認；關掉直接做。
+                ...(settings.publicReach?.available && backendRef.current?.setPublicReach
+                  ? {
+                      publicReach: {
+                        contactable: settings.publicReach.contactable,
+                        publicName: settings.publicReach.publicName,
+                        onToggleContactable: () => {
+                          const on = !settings.publicReach?.contactable;
+                          if (on && !confirmRequired("publicReach_enableConfirm")) return;
+                          backendRef.current?.setPublicReach?.({ contactable: on });
+                        },
+                        onTogglePublicName: () => {
+                          const on = !settings.publicReach?.publicName;
+                          if (on && !confirmRequired("publicReach_enableConfirm")) return;
+                          backendRef.current?.setPublicReach?.({ publicName: on });
+                        },
+                      },
+                    }
+                  : {}),
                 ...(backendRef.current?.enableFs
                   ? {
                       fs: {

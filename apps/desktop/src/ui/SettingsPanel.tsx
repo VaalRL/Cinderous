@@ -160,6 +160,16 @@ export interface SettingsPanelProps {
     /** 本裝置解不開的訊息數與最後時間（ADR-0316）；`count` 為 0 時不顯示。 */
     undecryptable?: { count: number; lastAt: number } | undefined;
   };
+  /**
+   * 公開聯絡方式（ADR-0382）：兩個獨立開關。未提供則不顯示（企業身分、沒有 home）。
+   * 打開前的確認由呼叫端負責（發布到公開中繼站、收不回）。
+   */
+  publicReach?: {
+    contactable: boolean;
+    publicName: boolean;
+    onToggleContactable: () => void;
+    onTogglePublicName: () => void;
+  };
   /** 本機 AI 改寫設定（ADR-0060）；未提供則不顯示該區塊。 */
   ollama?: OllamaSettingsValue;
   onOllamaChange?: (next: OllamaSettingsValue) => void;
@@ -1969,6 +1979,36 @@ export function SettingsPanel(props: SettingsPanelProps): JSX.Element {
                 <input type="checkbox" checked={props.invisible ?? false} onChange={props.onToggleInvisible} />
                 <span>{t("settings_invisibleHint")}</span>
               </label>
+            </section>
+          ) : null}
+          {tab === "privacy" && props.publicReach ? (
+            <section className="settings__sec" data-testid="public-reach">
+              <h4>{t("publicReach_title")}</h4>
+              <p className="settings__hint">{t("publicReach_hint")}</p>
+              {/* ADR-0382：公開是收不回的。警語不論開關狀態都在，使用者按下去之前一定讀得到。 */}
+              <p className="settings__hint settings__warn" data-testid="public-reach-irrevocable">
+                {t("publicReach_irrevocable")}
+              </p>
+              <label className="settings__toggle">
+                <input
+                  type="checkbox"
+                  data-testid="public-reach-contactable"
+                  checked={props.publicReach.contactable}
+                  onChange={props.publicReach.onToggleContactable}
+                />
+                <span>{t("publicReach_contactable")}</span>
+              </label>
+              <p className="settings__hint">{t("publicReach_contactableHint")}</p>
+              <label className="settings__toggle">
+                <input
+                  type="checkbox"
+                  data-testid="public-reach-name"
+                  checked={props.publicReach.publicName}
+                  onChange={props.publicReach.onTogglePublicName}
+                />
+                <span>{t("publicReach_name")}</span>
+              </label>
+              <p className="settings__hint">{t("publicReach_nameHint")}</p>
             </section>
           ) : null}
           {tab === "privacy" && props.fs ? (

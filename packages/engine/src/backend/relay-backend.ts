@@ -180,6 +180,13 @@ import {
   pqKeyFromStored,
   type RecipientKeyLike,
   type RecipientLike,
+  buildInboxRelayList,
+  buildOutboxRelayList,
+  buildPublicName,
+  INBOX_RELAY_LIST_KIND,
+  PUBLIC_PROFILE_KIND,
+  readInboxRelayList,
+  readPublicName,
 } from "@cinderous/core";
 import { loadRelayCheck, recordAuthObservation } from "./relay-check.js"; // ADR-0275：A 層健檢
 import { buildRtcConfig } from "./rtc-config.js";
@@ -203,6 +210,7 @@ import type {
   ChatMessage,
   ConnectionState,
   Contact,
+  PublicReachState,
   Self,
   Status,
 } from "./types.js";
@@ -241,6 +249,15 @@ const MAX_PENDING_GROUPS = 32;
 const MAX_HELD_INVITES_PER_PEER = 8;
 const MAX_PENDING_PER_GROUP = 64;
 const nowSec = () => Math.floor(Date.now() / 1000);
+/** 公開聯絡方式（ADR-0382 §2）：超過 7 天就重發——錨點對可取代事件只保存 30 天 */
+const PUBLIC_REACH_REFRESH_SEC = 7 * 86_400;
+/** 索引中繼的單次連線：發完等這麼久（認證＋OK）再關 */
+const PUBLIC_INDEX_LINGER_MS = 30_000;
+/**
+ * 可取代事件的新時間：至少比上一顆晚 1 秒。同一秒內先開後關時，兩顆 `created_at` 相同，
+ * NIP-01 會留 id 較小的那顆——「關」可能輸給「開」。
+ */
+const laterThan = (prev: NostrEvent | undefined): number => Math.max(nowSec(), (prev?.created_at ?? 0) + 1);
 
 const shortNpub = (npub: string) => `${npub.slice(0, 12)}…`;
 
@@ -438,6 +455,11 @@ export interface RelayPoolOptions {
   shardingBase?: string;
   /** 硬編碼錨點 relay（ADR-0039）：恆連保底 + 引導清單來源。 */
   anchors?: string[];
+  /**
+   * 公開聯絡方式的索引中繼（ADR-0382 §2）：第三方客戶端拿到陌生 npub 時常去問的站。
+   * 打開開關時把 kind 0／10002／10050 **另外發一份**到這些站；只發布、不訂閱（不把收件匣與聯絡人交出去）。
+   */
+  publicIndexRelays?: string[];
   /** 維護者公鑰：驗證帶內 relay 清單事件（ADR-0039）；未設則不學清單。 */
   maintainerPubkey?: string;
   /** home 因長期離線自動遞補到健康引導座時通知（ADR-0039）。 */
@@ -576,6 +598,11 @@ export class RelayChatBackend implements ChatBackend {
   /** 引導座（錨點 ∪ 已採用清單，ADR-0039）：恆連保底、冗餘廣播與 home 遞補來源。 */
   private readonly bootstrapSeats = new Set<string>();
   private readonly maintainerPubkey: string | undefined;
+  /** 公開聯絡方式（ADR-0382）：索引中繼、home 上自己最新的 10050／kind 0（狀態以它們為準）、單次連線的關閉計時器 */
+  private readonly publicIndexRelays: string[];
+  private ownInboxList: NostrEvent | undefined;
+  private ownPublicName: NostrEvent | undefined;
+  private readonly indexCloseTimers = new Set<ReturnType<typeof setTimeout>>();
   /** 企業名冊管理者公鑰與最近採用的名冊（ADR-0047）。 */
   private readonly orgAdminPubkey: string | undefined;
   private lastRoster: OrgRosterDoc | null = null;
@@ -766,6 +793,9 @@ export class RelayChatBackend implements ChatBackend {
     this.connectorFor = pool?.connectorFor;
     this.shardingBase = normalizeRelayUrl(pool?.shardingBase); // ADR-0241：設定＝分片模式
     this.maintainerPubkey = pool?.maintainerPubkey;
+    this.publicIndexRelays = [
+      ...new Set((pool?.publicIndexRelays ?? []).map((u) => normalizeRelayUrl(u)).filter((u): u is string => u !== undefined)),
+    ];
     this.orgAdminPubkey = pool?.orgAdminPubkey;
     this.orgJoinToken = pool?.orgJoinToken; // ADR-0156
     this.orgEscrowSelf = pool?.orgEscrow === true; // ADR-0163
@@ -1162,6 +1192,10 @@ export class RelayChatBackend implements ChatBackend {
       // 自己的雲端快照（ADR-0071 J3）：接收合併恆開——換機還原不需任何前置設定。
       sub({ kinds: [SNAPSHOT_KIND], authors: me }, "n/a"),
       sub({ kinds: [DEVICE_DIRECTORY_KIND], authors: me }, "n/a"), // ADR-0322 S1：自己的裝置目錄
+      // 公開聯絡方式（ADR-0382）：開關狀態以 home 上自己發布的 10050／kind 0 為準，別台裝置切換的也讀得到
+      ...(url !== undefined && url === this.originalHomeUrl
+        ? [sub({ kinds: [PUBLIC_PROFILE_KIND, INBOX_RELAY_LIST_KIND], authors: me }, "n/a")]
+        : []),
       sub({ kinds: [EK_ENVELOPE_KIND], authors: me }, "n/a"), // ADR-0322 S2：EK 的 per-device 分發
       sub({ kinds: [SDP_SIGNAL_KIND], "#p": me }, "n/a"),
       sub({ kinds: [CALL_SIGNAL_KIND], "#p": me }, "n/a"),
@@ -1528,6 +1562,81 @@ export class RelayChatBackend implements ChatBackend {
     const announce = buildEkAnnounce(this.sk, my.pk, pq ? { pq } : {});
     this.client.publish(announce);
     for (const c of this.relayPool.values()) c.publish(announce);
+  }
+
+  /**
+   * 公開聯絡方式（ADR-0382）。狀態不存本機：以 home 上自己最新的 10050（有列中繼＝能聯絡我）
+   * 與 kind 0（有 name＝公開名稱）為準——別台裝置切換的，這台讀到就跟著變。開機讀到之前顯示為關。
+   */
+  publicReach(): PublicReachState {
+    const available = this.publicReachAvailable();
+    return {
+      available,
+      contactable: available && this.ownInboxList !== undefined && (readInboxRelayList(this.ownInboxList)?.length ?? 0) > 0,
+      publicName: available && this.ownPublicName !== undefined && readPublicName(this.ownPublicName) !== null,
+    };
+  }
+
+  setPublicReach(change: { contactable?: boolean; publicName?: boolean }): void {
+    if (!this.publicReachAvailable()) return;
+    if (change.contactable !== undefined) this.publishContactable(change.contactable);
+    if (change.publicName !== undefined) this.publishPublicName(change.publicName);
+    this.handlers?.onPublicReach?.(this.publicReach());
+  }
+
+  /** 企業身分鎖定漫遊（ADR-0044／0048）不提供；沒有 home 就沒有可公開的收件中繼。 */
+  private publicReachAvailable(): boolean {
+    return this.originalHomeUrl !== undefined && this.orgAdminPubkey === undefined && !this.orgOwnerFlag;
+  }
+
+  /** 10050 只列 home：Cinderous 只在 home 讀收件匣，列別座＝寄到那裡的信沒人收（ADR-0382 §3）。 */
+  private publishContactable(on: boolean): void {
+    const urls = on && this.originalHomeUrl ? [this.originalHomeUrl] : [];
+    const at = laterThan(this.ownInboxList);
+    const inbox = buildInboxRelayList(this.sk, urls, at);
+    this.ownInboxList = inbox;
+    this.publishPublic([inbox, buildOutboxRelayList(this.sk, urls, at)]);
+  }
+
+  private publishPublicName(on: boolean): void {
+    const event = buildPublicName(this.sk, on ? this.self.name : null, laterThan(this.ownPublicName));
+    this.ownPublicName = event;
+    this.publishPublic([event]);
+  }
+
+  /** 發到 home；索引中繼走單次連線，只發布、不訂閱，發完一段時間後關掉。 */
+  private publishPublic(events: NostrEvent[]): void {
+    const home = this.homeClient() ?? this.client;
+    for (const e of events) home.publish(e);
+    if (!this.connectorFor) return;
+    for (const url of this.publicIndexRelays) {
+      const client: CloseableRelayClient = this.connectorFor(url)({
+        authSigner: (challenge) => buildAuthEvent(challenge, url, this.sk),
+      });
+      for (const e of events) client.publish(e);
+      const timer = setTimeout(() => {
+        this.indexCloseTimers.delete(timer);
+        client.close?.();
+      }, PUBLIC_INDEX_LINGER_MS);
+      this.indexCloseTimers.add(timer);
+    }
+  }
+
+  /** 讀到 home 上自己發布的 10050／kind 0：較新的才採用；開著而且超過 7 天（或列的不是現在的 home）就重發。 */
+  private receiveOwnPublic(event: NostrEvent): void {
+    const isInbox = event.kind === INBOX_RELAY_LIST_KIND;
+    const current = isInbox ? this.ownInboxList : this.ownPublicName;
+    if (current !== undefined && current.created_at >= event.created_at) return;
+    if (isInbox) this.ownInboxList = event;
+    else this.ownPublicName = event;
+    const state = this.publicReach();
+    const stale = event.created_at < nowSec() - PUBLIC_REACH_REFRESH_SEC;
+    if (isInbox && state.contactable) {
+      const listed = readInboxRelayList(event) ?? [];
+      if (stale || listed.length !== 1 || listed[0] !== this.originalHomeUrl) this.publishContactable(true);
+    }
+    if (!isInbox && state.publicName && stale) this.publishPublicName(true);
+    this.handlers?.onPublicReach?.(this.publicReach());
   }
 
   /** 啟用前向保密（ADR-0245，opt-in）：生成第一把 EK、掛 10040 訂閱、發 10040。冪等。 */
@@ -2316,6 +2425,10 @@ export class RelayChatBackend implements ChatBackend {
       if (event.created_at > prev) this.fileWatermark.set(url, event.created_at);
     }
     if (this.seenBefore(event.id)) return;
+    if (event.pubkey === this.self.pubkey && (event.kind === INBOX_RELAY_LIST_KIND || event.kind === PUBLIC_PROFILE_KIND)) {
+      this.receiveOwnPublic(event); // ADR-0382
+      return;
+    }
     if (event.kind === EK_ANNOUNCE_KIND) {
       // ADR-0245：聯絡人的 EK 公告（kind 10040，IK 簽章）→ 學到其當前 EK（供加密給他們）。
       const read = readEkAnnounce(event);
@@ -3463,6 +3576,7 @@ export class RelayChatBackend implements ChatBackend {
     // 清掉「已送過 profile」記號，讓每個聯絡人都重新收到新名字（否則 sendProfileTo 會略過）。
     this.profileSentTo.clear();
     this.broadcastProfile();
+    if (this.publicReach().publicName) this.publishPublicName(true); // ADR-0382：公開的名稱跟著改
   }
 
   sendMessage(to: PubkeyHex, text: string, ttlSeconds?: number, mentions?: PubkeyHex[], replyTo?: string, alsoMain?: boolean): void {
@@ -5068,6 +5182,8 @@ export class RelayChatBackend implements ChatBackend {
   }
 
   stop(): void {
+    for (const timer of this.indexCloseTimers) clearTimeout(timer);
+    this.indexCloseTimers.clear();
     if (this.heartbeatTimer) clearTimeout(this.heartbeatTimer);
     if (this.npSealedTimer !== undefined) clearTimeout(this.npSealedTimer);
     if (this.renderTimer) clearInterval(this.renderTimer);
