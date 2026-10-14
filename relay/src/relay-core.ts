@@ -2,6 +2,8 @@ import {
   AUTH_KIND,
   authChallengeOf,
   authRelayMatches,
+  INBOX_ACK_KIND,
+  inboxAckIdsOf,
   leadingZeroBits,
   VANISH_KIND,
   vanishTargetsRelay,
@@ -43,9 +45,26 @@ const MAX_TAGS = 128;
  * 「一則事件 → 15,000 列 INSERT ＋ 15,000 輪 enforceCap」的放大倍率壓回個位數。
  */
 const MAX_P_TAGS = 16;
+
+// 拒收訊息（ADR-0375／0376；SDK ADR 0038 P0-R1／P0-R2）集中在 `reject-messages.ts`，與 SDK 中繼逐字相同。
+// `OFFLINE_CEILING_REJECT`／`EXPIRED_REJECT` 在 ADR-0375 從這裡匯出，照舊轉出。
+export { EXPIRED_REJECT, OFFLINE_CEILING_REJECT } from "./reject-messages.js";
+import {
+  ADDRESSABLE_REJECT,
+  ADDRESSABLE_REJECT_GENERIC,
+  borrowedWarning,
+  droppedNotice,
+  EXPIRED_REJECT,
+  nearFullWarning,
+  malformedMessage,
+  OFFLINE_CEILING_REJECT,
+  powRejectMessage,
+  REJECT,
+} from "./reject-messages.js";
 import {
   FILE_EVENT_MAX_BYTES,
   FILE_WRAP_KIND,
+  getExpiration,
   isAuthorOnlyKind,
   MAX_QUERY_BYTES,
   isReplaceableOrAddressable,
@@ -172,6 +191,12 @@ export interface RelayCoreOptions {
    */
   acceptFileEvents?: boolean;
   /**
+   * 收件確認的寬限（秒；ADR-0380，移植 SDK ADR 0067）。給了（而且 store 有 `ackInbox`）就處理 kind 25190：
+   * 已認證的本人確認自己收件匣裡的列 → 降為「現在＋寬限」到期；不存、不扇出。沒給＝當一般瞬時事件（舊行為）。
+   * 宿主以 `inboxAckGraceFor` 算（比照未註冊應用的保存期、不超過站方保存上限），並在 NIP-11 宣告同一個值。
+   */
+  inboxAckGraceSec?: number;
+  /**
    * 一次 REQ 回傳歷史事件的位元組上限（ADR-0371 §決策 6）；預設 {@link MAX_QUERY_BYTES}。
    * 同一個 REQ 的所有 filter **共用**這份預算——否則多塞幾個 filter 就能繞過。
    */
@@ -207,6 +232,11 @@ interface SubEntry {
   kinds: number[];
   /** 是否有 filter 未限制 kind（可匹配任何 kind）。 */
   anyKind: boolean;
+  /**
+   * 這條訂閱是某人在讀**自己的收件匣**嗎（SDK ADR 0042）：連線已認證為 P、某個 filter 的 `#p` 含 P、而且收的不只 ephemeral。
+   * 是的話記下 P——丟棄計數的通知只送這種訂閱，P 在線上收收件匣時他的留言被刪掉也不算丟棄（他即時收到了）。
+   */
+  inbox?: string;
 }
 
 /**
@@ -241,11 +271,15 @@ export class RelayCore {
   private readonly connHost = new Map<string, string>();
   /** 是否要求 NIP-42 AUTH（開放中繼；ADR-0057）。 */
   private readonly requireAuth: boolean;
+  /** pubkey → 正在讀他自己收件匣的訂閱數（SDK ADR 0042 丟棄計數）。 */
+  private readonly inboxSubs = new Map<string, number>();
 
   constructor(private readonly opts: RelayCoreOptions = {}) {
     this.allowed = opts.allowedAuthors ? new Set(opts.allowedAuthors) : undefined;
     this.allowedKinds = opts.allowedKinds ? new Set(opts.allowedKinds) : undefined;
     this.requireAuth = opts.requireAuth === true;
+    // 丟棄計數：正在線上收自己收件匣的人，他的留言被刪掉不算丟棄（SDK ADR 0042）
+    opts.store?.setInboxProbe?.((recipient) => this.inboxSubs.has(recipient));
   }
 
   private newChallenge(): string {
@@ -358,7 +392,7 @@ export class RelayCore {
         return [
           {
             to: connId,
-            message: ["NOTICE", "rate-limited: 訊息過於頻繁，連線將關閉（ADR-0366）"],
+            message: ["NOTICE", REJECT.messagesRateLimited],
             close: true,
           },
         ];
@@ -366,14 +400,14 @@ export class RelayCore {
       return this.dispatch(connId, raw);
     } catch {
       // 不回傳例外細節（不給探測訊號）；宿主連線維持存活。
-      return [{ to: connId, message: ["NOTICE", "error: 內部錯誤，請稍後再試"] }];
+      return [{ to: connId, message: ["NOTICE", REJECT.internal] }];
     }
   }
 
   private dispatch(connId: string, raw: string): Outbound[] {
     // 最便宜的一道閘（ADR-0235 C3）：在 JSON.parse 之前擋掉超大訊息。
     if (raw.length > MAX_MESSAGE_BYTES) {
-      return [{ to: connId, message: ["NOTICE", "invalid: 訊息過大"] }];
+      return [{ to: connId, message: ["NOTICE", REJECT.messageTooLarge] }];
     }
     const msg = parseClientMessage(raw);
     switch (msg.type) {
@@ -381,12 +415,12 @@ export class RelayCore {
         return this.handleAuth(connId, msg.event);
       case "EVENT":
         if (this.requireAuth && !this.isAuthed(connId)) {
-          return this.authRequired(connId, ["OK", msg.event.id, false, "auth-required: 請先認證（NIP-42）"]);
+          return this.authRequired(connId, ["OK", msg.event.id, false, REJECT.authRequired]);
         }
         return this.handleEvent(connId, msg.event);
       case "REQ":
         if (this.requireAuth && !this.isAuthed(connId)) {
-          return this.authRequired(connId, ["CLOSED", msg.subId, "auth-required: 請先認證（NIP-42）"]);
+          return this.authRequired(connId, ["CLOSED", msg.subId, REJECT.authRequired]);
         }
         // 🔴 車道**不要求** AUTH，但範圍檢查照做（ADR-0369）。原本這裡只有 `requireAuth`，
         // 於是 `requireAuth: false` 的車道完全不檢查——ADR-0366 §決策 5 說要擋的裸 filter 與
@@ -400,9 +434,7 @@ export class RelayCore {
               message: [
                 "CLOSED",
                 msg.subId,
-                this.opts.publicLane
-                  ? "restricted: app lanes need a tag filter (e.g. #t, #d), authors, or #p set to yourself after NIP-42 AUTH (ADR-0366)"
-                  : "restricted: 訂閱必須指定 #p（自己）或 authors（ADR-0123）",
+                this.opts.publicLane ? REJECT.scopeLane : REJECT.scopeStrict,
               ],
             },
           ];
@@ -412,7 +444,7 @@ export class RelayCore {
         this.dropSubscription(connId, msg.subId);
         return [{ to: connId, message: ["CLOSED", msg.subId, ""] }];
       case "INVALID":
-        return [{ to: connId, message: ["NOTICE", `invalid: ${msg.reason}`] }];
+        return [{ to: connId, message: ["NOTICE", malformedMessage(msg.reason)] }];
     }
   }
 
@@ -428,17 +460,17 @@ export class RelayCore {
   private handleAuth(connId: string, event: NostrEvent): Outbound[] {
     const state = this.authState.get(connId);
     if (!state) {
-      return [{ to: connId, message: ["OK", event.id, false, "auth-failed: 尚未發出挑戰"] }];
+      return [{ to: connId, message: ["OK", event.id, false, REJECT.authNoChallenge] }];
     }
     if (event.kind !== AUTH_KIND || !verifyEvent(event) || authChallengeOf(event) !== state.challenge) {
-      return [{ to: connId, message: ["OK", event.id, false, "auth-failed: 認證事件無效或挑戰不符"] }];
+      return [{ to: connId, message: ["OK", event.id, false, REJECT.authBadEvent] }];
     }
     if (state.relayHost !== undefined && !authRelayMatches(event, state.relayHost)) {
-      return [{ to: connId, message: ["OK", event.id, false, "auth-failed: relay tag 未指向本站"] }];
+      return [{ to: connId, message: ["OK", event.id, false, REJECT.authRelayTag] }];
     }
     const maxAge = this.opts.authMaxAgeSec;
     if (maxAge !== undefined && Math.abs(this.now() - event.created_at) > maxAge) {
-      return [{ to: connId, message: ["OK", event.id, false, "auth-failed: 認證事件已過期"] }];
+      return [{ to: connId, message: ["OK", event.id, false, REJECT.authTooOld] }];
     }
     state.pubkey = event.pubkey;
     return [{ to: connId, message: ["OK", event.id, true, ""] }];
@@ -520,14 +552,18 @@ export class RelayCore {
 
     const cap = this.opts.maxSubscriptions;
     if (cap !== undefined && !conn.has(subId) && conn.size >= cap) {
-      return [{ to: connId, message: ["CLOSED", subId, "rate-limited: 訂閱數已達上限"] }];
+      return [{ to: connId, message: ["CLOSED", subId, REJECT.subscriptionsLimit] }];
     }
 
     const previous = conn.get(subId);
-    if (previous) this.unindex(previous);
+    if (previous) this.unindex(previous, false);
     const entry = buildEntry(connId, subId, filters);
     conn.set(subId, entry);
     this.index(entry);
+    // 同一個 id 換成不是收件匣的訂閱：原本那條收件匣訂閱就此結束（SDK ADR 0042）
+    if (previous?.inbox !== undefined && !this.inboxSubs.has(previous.inbox)) {
+      this.opts.store?.markDelivered?.(previous.inbox, this.now());
+    }
 
     const out: Outbound[] = [];
     if (this.opts.store) {
@@ -548,6 +584,12 @@ export class RelayCore {
           out.push({ to: connId, message: ["EVENT", subId, event] });
         }
       }
+      // 丟棄計數（SDK ADR 0042；ADR 0038 M8）：收件人讀自己的收件匣時，在 EOSE 之前告訴他有幾則在送到之前被刪掉了。
+      // 取出即歸零，並記下水位線（這之前存的都算送到了）。只給已認證的本人；只有數量與時間範圍。
+      if (entry.inbox !== undefined) {
+        const dropped = this.opts.store.takeDropped?.(entry.inbox, nowSec);
+        if (dropped !== undefined) out.push({ to: connId, message: ["NOTICE", droppedNotice(dropped)] });
+      }
     }
     out.push({ to: connId, message: ["EOSE", subId] });
     return out;
@@ -557,27 +599,27 @@ export class RelayCore {
     // 資源上限（ADR-0235 C3）擺在**驗簽之前**——這些檢查比 Schnorr 驗證便宜一個數量級，
     // 讓灌大量垃圾的攻擊者付不出放大效果。
     if (event.tags.length > MAX_TAGS) {
-      return [{ to: connId, message: ["OK", event.id, false, "blocked: tag 數超過上限"] }];
+      return [{ to: connId, message: ["OK", event.id, false, REJECT.tooManyTags] }];
     }
     if (recipientsOf(event).length > MAX_P_TAGS) {
-      return [{ to: connId, message: ["OK", event.id, false, "blocked: 收件人數超過上限"] }];
+      return [{ to: connId, message: ["OK", event.id, false, REJECT.tooManyRecipients] }];
     }
     if (JSON.stringify(event).length > MAX_EVENT_BYTES) {
-      return [{ to: connId, message: ["OK", event.id, false, "blocked: 事件過大"] }];
+      return [{ to: connId, message: ["OK", event.id, false, REJECT.eventTooLarge] }];
     }
 
     if (!verifyEvent(event)) {
-      return [{ to: connId, message: ["OK", event.id, false, "invalid: 簽章驗證失敗"] }];
+      return [{ to: connId, message: ["OK", event.id, false, REJECT.badSignature] }];
     }
 
     // 企業封閉模式（ADR-0044）：非 allowlist 成員一律拒收（含心跳），永久性拒絕。
     if (this.allowed && !this.allowed.has(event.pubkey)) {
-      return [{ to: connId, message: ["OK", event.id, false, "blocked: 非本企業成員（allowlist）"] }];
+      return [{ to: connId, message: ["OK", event.id, false, REJECT.notAllowed] }];
     }
 
     // 企業政策（ADR-0048）：kind 不在允許名單一律拒收（停用檔案/通話等）。
     if (this.allowedKinds && !this.allowedKinds.has(event.kind)) {
-      return [{ to: connId, message: ["OK", event.id, false, "blocked: 此事件類型已被政策停用"] }];
+      return [{ to: connId, message: ["OK", event.id, false, REJECT.kindDisabled] }];
     }
 
     // 時鐘窗（非對稱，ADR-0235 H1）＋重放去重（近期事件才進快取）。
@@ -588,19 +630,42 @@ export class RelayCore {
       (future !== undefined && event.created_at - now > future) ||
       (past !== undefined && now - event.created_at > past)
     ) {
-      return [{ to: connId, message: ["OK", event.id, false, "invalid: 時間戳超出允許範圍"] }];
+      return [{ to: connId, message: ["OK", event.id, false, REJECT.clockSkew] }];
     }
     // 舊的 `maxClockSkewSec` 同時兼具「時鐘窗」與「去重窗」兩種語意——沿用它作為
     // `replayWindowSec` 的預設值，既有呼叫端行為不變。
     const replayWindow = this.opts.replayWindowSec ?? this.opts.maxClockSkewSec;
+    let markedSeen = false;
     if (replayWindow !== undefined && Math.abs(event.created_at - now) <= replayWindow) {
       if (this.seenIds.has(event.id)) {
-        return [{ to: connId, message: ["OK", event.id, false, "duplicate: 事件重複"] }];
+        // NIP-01 的範例是 `OK true "duplicate: …"`（ADR-0376；SDK ADR 0038 決策 3）：本站已經有這顆。
+        // ADR-0375 起被拒的事件不留在重放快取，所以留在這裡的都是真的收下過（或已轉發過的 Ephemeral）。
+        // 不再扇出、不再寫庫——第一次已經做過了。App v0.0.18 的外送匣兩種都判「已確認」。
+        return [{ to: connId, message: ["OK", event.id, true, REJECT.duplicate] }];
       }
       this.seenIds.set(event.id, event.created_at);
+      markedSeen = true;
       if (this.seenIds.size > 4096) this.pruneSeen(now - replayWindow);
     }
+    // 🔴 以下每一種拒收都要把這顆從重放快取拿掉（ADR-0375）：`duplicate` 的意思是
+    // 「本站已經有這顆」。沒收下卻記成見過，客戶端之後重送同一顆（天花板騰出空間、限速窗過了）
+    // 就只會拿到 `duplicate`——而 NIP-01 的客戶端會把它當成已送達，又是一次靜默遺失。
+    const reject = (reason: string): Outbound[] => {
+      if (markedSeen) this.seenIds.delete(event.id);
+      return [{ to: connId, message: ["OK", event.id, false, reason] }];
+    };
 
+    // 🔴 store 丟例外（SQLite 滿了、DO 被重設）也一樣（ADR-0376）：外層圍籬回 `NOTICE error:`，這顆不能留在快取裡。
+    try {
+      return this.admit(connId, event, now, reject);
+    } catch (error) {
+      if (markedSeen) this.seenIds.delete(event.id);
+      throw error;
+    }
+  }
+
+  /** 通過驗簽、時鐘窗與重放檢查之後：限速、政策、寫庫，收下才扇出。拒收一律經過 `reject`。 */
+  private admit(connId: string, event: NostrEvent, now: number, reject: (reason: string) => Outbound[]): Outbound[] {
     // 速率限制（ADR-0235 H1）：以**認證連線的身分**計數，不是事件作者。
     //
     // 🔴 為什麼不能用 `event.pubkey`：Gift Wrap（kind 1059）的外層作者是一次性臨時金鑰，
@@ -610,46 +675,88 @@ export class RelayCore {
     const perMinute = this.opts.maxEventsPerMinute;
     const rateKey = this.authState.get(connId)?.pubkey ?? event.pubkey;
     if (perMinute !== undefined && !this.allowRate(rateKey, now, perMinute)) {
-      return [{ to: connId, message: ["OK", event.id, false, "rate-limited: 發送過於頻繁，請稍後再試"] }];
+      return reject(REJECT.eventsRateLimited);
     }
 
     // NIP-62 清除請求（ADR-0260）：這是**命令**不是留言——不寫庫、不扇出，執行完就回 OK。
     // 位置在速率限制**之後**（清除是昂貴操作，同樣要受速率桶約束）、寫庫之前（kind 62 落在
     // 一般持久化區間，不攔就會被當成留言存起來）。
     if (event.kind === VANISH_KIND) {
-      return this.handleVanish(connId, event);
+      const result = this.handleVanish(connId, event);
+      return result[0]?.message[2] === false ? reject(String(result[0].message[3])) : result;
+    }
+
+    // 收件確認（ADR-0380；SDK ADR 0067）：同樣是**命令**——不存、不扇出。位置與 NIP-62 相同（速率限制之後）。
+    if (event.kind === INBOX_ACK_KIND && this.opts.inboxAckGraceSec !== undefined && this.opts.store?.ackInbox) {
+      const self = this.authState.get(connId)?.pubkey;
+      if (self === undefined) {
+        // 車道不強制 AUTH，但「自己的收件匣」只有 AUTH 證明得了（同 ADR-0369 的 `#p`）
+        const out = reject(REJECT.authRequired);
+        const state = this.authState.get(connId);
+        if (state) out.push({ to: connId, message: ["AUTH", state.challenge] });
+        return out;
+      }
+      if (self !== event.pubkey) return reject(REJECT.ackSelfOnly);
+      const ids = inboxAckIdsOf(event);
+      if (ids === null) return reject(REJECT.ackMalformed);
+      this.opts.store.ackInbox(self, ids, now + this.opts.inboxAckGraceSec, now);
+      return [{ to: connId, message: ["OK", event.id, true, ""] }];
     }
 
     // 檔案塊（FILE_WRAP=1060，ADR-0162）：企業限定——`acceptFileEvents` 未啟用整類拒收
     //（公共站零儲存風險）；啟用後仍有單顆大小 sanity 上限。
     if (event.kind === FILE_WRAP_KIND) {
       if (!this.opts.acceptFileEvents) {
-        return [{ to: connId, message: ["OK", event.id, false, "blocked: 檔案事件未啟用（MAX_FILE_MB）"] }];
+        return reject(REJECT.filesDisabled);
       }
       if (JSON.stringify(event).length > FILE_EVENT_MAX_BYTES) {
-        return [{ to: connId, message: ["OK", event.id, false, "blocked: 檔案塊過大"] }];
+        return reject(REJECT.fileChunkTooLarge);
       }
     }
 
     // Ephemeral 純轉發、不寫 D1；其餘（持久化）需通過 PoW 並寫入持久層。
+    /** `OK true` 的說明：借用或接近天花板時帶 `warning:`（SDK ADR 0042），其他情況是空字串（與 v0.33 相同）。 */
+    let note = "";
     if (!isEphemeral(event.kind)) {
       const minPow = this.opts.minPowDifficulty ?? 0;
       if (minPow > 0 && leadingZeroBits(event.id) < minPow) {
-        return [{ to: connId, message: ["OK", event.id, false, `pow: 需要難度 ${minPow}`] }];
+        return reject(powRejectMessage(minPow));
       }
       if (isReplaceableOrAddressable(event.kind)) {
         // 取代語意（ADR-0035 可取代／0071 可尋址）：每 (kind, pubkey, d) 只留最新一顆。
         // 沒有這條，relay 清單（10037）這類事件會不斷累積——cron 每小時發一次，
         // 客戶端每次連線就得下載上百份重複。遭拒＝OK false（不扇出）。
-        if (this.opts.store && !this.opts.store.putAddressable(event, this.now())) {
-          return [{ to: connId, message: ["OK", event.id, false, "blocked: 取代事件遭拒（配額/大小/較舊）"] }];
+        // 被拒的原因拆開回報（ADR-0376）：較舊、太大、位址數、總量、已過期、DO 天花板。
+        // 只實作 boolean 的 store 說不出原因，回舊的那一句。
+        const store = this.opts.store;
+        if (store?.putAddressableResult) {
+          const result = store.putAddressableResult(event, this.now());
+          if (!result.ok) return reject(ADDRESSABLE_REJECT[result.reason]);
+          note = okNote(result);
+        } else if (store && !store.putAddressable(event, this.now())) {
+          return reject(ADDRESSABLE_REJECT_GENERIC);
         }
-      } else {
-        this.opts.store?.put(event, this.now());
+      } else if (this.opts.store) {
+        // 離線留言（ADR-0375）：`put()` 回 false 只有兩種原因——事件自帶的 `expiration`
+        // 已經過了，或這顆 DO 的離線天花板滿了而這個平面不淘汰（嚴格平面，ADR-0367 §決策 2）。
+        // 兩種都回 `OK false`、**不扇出**：NIP-01 的 `false` 就是「沒收下」，轉送一顆沒收下的事件會讓
+        // 在線收件人收到、離線的裝置收不到，寄件端再依 `false` 重送時在線的那台還會收到第二次。
+        // 每收件人 FIFO 與車道淘汰是「收下新的、刪掉舊的」，`put()` 回 true，不走這裡。
+        const expiration = getExpiration(event);
+        if (expiration !== undefined && expiration <= now) return reject(EXPIRED_REJECT);
+        const store = this.opts.store;
+        if (store.putResult) {
+          // SDK ADR 0042：收下時可能是借用（溢位帶）或接近天花板——`OK true` 帶 `warning:` 說清楚，照常扇出（收下了）。
+          const result = store.putResult(event, this.now());
+          if (!result.ok) return reject(result.reason === "expired" ? EXPIRED_REJECT : OFFLINE_CEILING_REJECT);
+          note = okNote(result);
+        } else if (!store.put(event, this.now())) {
+          return reject(OFFLINE_CEILING_REJECT);
+        }
       }
     }
 
-    const out: Outbound[] = [{ to: connId, message: ["OK", event.id, true, ""] }];
+    const out: Outbound[] = [{ to: connId, message: ["OK", event.id, true, note] }];
     const candidates = new Set<SubEntry>(this.byKind.get(event.kind));
     for (const entry of this.anyKindSubs) candidates.add(entry);
     for (const entry of candidates) {
@@ -683,16 +790,21 @@ export class RelayCore {
   private handleVanish(connId: string, event: NostrEvent): Outbound[] {
     const state = this.authState.get(connId);
     if (this.requireAuth && state?.pubkey !== event.pubkey) {
-      return [{ to: connId, message: ["OK", event.id, false, "restricted: 只能清除自己的資料（NIP-62）"] }];
+      return [{ to: connId, message: ["OK", event.id, false, REJECT.vanishSelfOnly] }];
     }
     if (!vanishTargetsRelay(event, this.connHost.get(connId))) {
-      return [{ to: connId, message: ["OK", event.id, false, "invalid: relay tag 未指向本站（NIP-62）"] }];
+      return [{ to: connId, message: ["OK", event.id, false, REJECT.vanishRelayTag] }];
     }
     this.opts.store?.vanish(event.pubkey, this.now());
     return [{ to: connId, message: ["OK", event.id, true, ""] }];
   }
 
   private index(entry: SubEntry): void {
+    const self = this.authState.get(entry.connId)?.pubkey;
+    if (self !== undefined && readsOwnInbox(entry.filters, self)) {
+      entry.inbox = self;
+      this.inboxSubs.set(self, (this.inboxSubs.get(self) ?? 0) + 1);
+    }
     for (const kind of entry.kinds) {
       let set = this.byKind.get(kind);
       if (!set) {
@@ -749,7 +861,19 @@ export class RelayCore {
     return true;
   }
 
-  private unindex(entry: SubEntry): void {
+  /**
+   * 從索引拿掉一條訂閱。`delivered`：這條訂閱就此結束（CLOSE、斷線）——它若是收件匣訂閱、又是那人最後一條，
+   * 記下「到這裡為止的留言都即時送到了」（SDK ADR 0042 丟棄計數的水位線）。同一個 id 換新訂閱時傳 false。
+   */
+  private unindex(entry: SubEntry, delivered = true): void {
+    if (entry.inbox !== undefined) {
+      const left = (this.inboxSubs.get(entry.inbox) ?? 1) - 1;
+      if (left > 0) this.inboxSubs.set(entry.inbox, left);
+      else {
+        this.inboxSubs.delete(entry.inbox);
+        if (delivered) this.opts.store?.markDelivered?.(entry.inbox, this.now());
+      }
+    }
     for (const kind of entry.kinds) {
       const set = this.byKind.get(kind);
       if (set) {
@@ -776,6 +900,23 @@ function hasTagScope(filter: RelayFilter): boolean {
     if (values && values.length > 0) return true;
   }
   return false;
+}
+
+/**
+ * 這組 filter 是 `self` 在讀自己的收件匣嗎（SDK ADR 0042）：某個 filter 的 `#p` 含 `self`，而且那個 filter 不只收 ephemeral
+ *（通話信令這類只收 ephemeral 的訂閱不會讀到離線留言，不該拿走丟棄計數）。
+ */
+function readsOwnInbox(filters: RelayFilter[], self: string): boolean {
+  return filters.some(
+    (f) => f["#p"]?.includes(self) === true && (f.kinds === undefined || f.kinds.length === 0 || f.kinds.some((k) => !isEphemeral(k))),
+  );
+}
+
+/** `OK true` 的說明文字（SDK ADR 0042）：借用優先於接近天花板；都不是就是空字串。 */
+function okNote(result: { readonly borrowedTtlSec?: number; readonly nearFull?: number }): string {
+  if (result.borrowedTtlSec !== undefined) return borrowedWarning(result.borrowedTtlSec);
+  if (result.nearFull !== undefined) return nearFullWarning(result.nearFull);
+  return "";
 }
 
 function buildEntry(connId: string, subId: string, filters: RelayFilter[]): SubEntry {

@@ -16,7 +16,11 @@
 // 依 `Accept: application/nostr+json` 分支；**不帶此 header 時維持原純文字 200**——PaaS／
 // 容器健康檢查（ADR-0075）與既有探測都靠那個 200，改掉會讓部署中的站看起來像掛了。
 
+import { INBOX_ACK_KIND } from "@cinderous/core";
+import { BORROW_TTL_SECONDS, NEAR_FULL_TOP_PERCENT, overflowBand } from "./capacity.js";
 import {
+  type DoCapacity,
+  inboxAckGraceFor,
   MAX_EVENTS_PER_MINUTE,
   MAX_FUTURE_SKEW_SEC,
   MAX_PAST_SKEW_SEC,
@@ -78,6 +82,11 @@ export interface Nip11Config {
   /** 是否要求 NIP-42 AUTH。 */
   authRequired?: boolean | undefined;
   /**
+   * 這座站處理收件確認嗎（ADR-0380；SDK ADR 0067）。未設＝處理（兩個宿主預設都開）；`false`＝不宣告
+   *（Node 版 `REQUIRE_AUTH=0`：不發 AUTH 挑戰，就沒有人證明得了「自己的收件匣」）。
+   */
+  inboxAck?: boolean | undefined;
+  /**
    * 本路徑的政策（ADR-0366）：`strict`＝Cinderous 訊息平面，`app`＝第三方車道。
    * 未設＝`strict`。同一座 Worker 會依請求路徑回不同的文件——一份文件描述不了兩種政策。
    */
@@ -88,6 +97,11 @@ export interface Nip11Config {
    * 兩小時後會消失」。未設＝否（公用分片），與 `storeOptions` 的預設同一側。
    */
   knownLane?: boolean | undefined;
+  /**
+   * 這條路徑那顆 DO 的容量政策（Cinderous ADR-0377；SDK ADR 0042；`doCapacityFor`）。沒給＝預設天花板、沒有保底與溢位帶。
+   * 只宣告**靜態**上限與政策，不宣告即時用量（ADR 0038 M6）。
+   */
+  capacity?: DoCapacity | undefined;
   /** 贊助管道（ADR-0089）。 */
   donations?: CinderDonations | undefined;
   /** 節點自報（ADR-0092）：已簽章的 `CinderNodeDeclaration` 事件（JSON 字串）。 */
@@ -113,7 +127,15 @@ function compact<T extends Record<string, unknown>>(obj: T): Partial<T> {
 export function buildRelayInfo(cfg: Nip11Config = {}): Record<string, unknown> {
   // 🔴 直接問 `storeOptions`，不自己算一份：文件要說的就是**這座站實際在執行的那組值**。
   // 兩邊各算各的，遲早會出現「文件說 7 天、實際存 2 小時」——而那種謊言查起來最貴。
-  const store = storeOptions(cfg.maxTtlDays, cfg.profile ?? "strict", cfg.knownLane === true, cfg.maxFileMb);
+  const store = storeOptions(cfg.maxTtlDays, cfg.profile ?? "strict", cfg.knownLane === true, cfg.maxFileMb, cfg.capacity);
+  // 溢位帶實際生效的平面（與 store 的決策同一個條件，`capacity.ts`）：拒收制，或淘汰制又有保底；嚴格平面的可尋址不借用
+  const evicts = store.ceilingEvicts === true;
+  const borrowsAt = (max: number | undefined, plane: boolean): boolean =>
+    plane && overflowBand(max, store.overflowRatio) > 0 && (!evicts || store.guaranteeBytes !== undefined);
+  const borrowPlanes = [
+    ...(borrowsAt(store.offlineMaxTotalBytes, true) ? ["offline"] : []),
+    ...(borrowsAt(store.addressableMaxTotalBytes, store.addressableBorrows !== false) ? ["addressable"] : []),
+  ];
   const ttlSeconds = store.maxTtlSeconds ?? DEFAULT_MAX_TTL_SECONDS;
   const addressableTtl = store.addressableTtlSeconds ?? ADDRESSABLE_TTL_SECONDS;
   const donations = compact({ ...(cfg.donations ?? {}) });
@@ -173,6 +195,42 @@ export function buildRelayInfo(cfg: Nip11Config = {}): Record<string, unknown> {
      * 「我發的牌組不見了」。`retention` 講的是留言，這一欄講的是可尋址事件。
      */
     cinder_addressable_ttl_sec: addressableTtl,
+    /**
+     * 容量天花板與滿了之後的政策（SDK ADR 0042；ADR 0038 M6）：`evict`＝淘汰最快到期的（車道），`reject`＝拒收（嚴格平面）。
+     * 只有靜態上限；即時用量不公開（`warning: near-full:` 只給寫入者粗分級）。讓客戶端**連線前**就知道這座是淘汰制。
+     */
+    cinder_ceiling_policy: evicts ? "evict" : "reject",
+    cinder_ceiling_bytes: compact({
+      offline: store.offlineMaxTotalBytes,
+      addressable: store.addressableMaxTotalBytes,
+    }),
+    /** 保底份額（SDK ADR 0042）：每位作者／收件人在這顆 DO 內不會被別人擠掉的量。只有設了才出現。 */
+    ...(store.guaranteeBytes !== undefined && evicts ? { cinder_guarantee_bytes: store.guaranteeBytes } : {}),
+    /**
+     * 溢位帶（SDK ADR 0042；ADR 0039）：天花板之上的借用，保存 `cinder_borrow_ttl_sec` 秒、最先被淘汰。
+     * 中繼不能改事件的 NIP-40 `expiration`（有簽章），借用的保存期只能在這裡與 `OK true "warning: borrowed: …"` 說。
+     */
+    ...(borrowPlanes.length > 0
+      ? {
+          cinder_borrow_ttl_sec: store.borrowTtlSeconds ?? BORROW_TTL_SECONDS,
+          cinder_borrow_percent: Math.round((store.overflowRatio ?? 0) * 100),
+          cinder_borrow_planes: borrowPlanes,
+        }
+      : {}),
+    /** 粗分級預警的兩級（SDK ADR 0042）：寫入後達這些百分比以上時 `OK true` 帶 `warning: near-full:`。 */
+    ...(store.nearFullPercent !== undefined
+      ? {
+          cinder_near_full_percent:
+            store.nearFullPercent < NEAR_FULL_TOP_PERCENT ? [store.nearFullPercent, NEAR_FULL_TOP_PERCENT] : [store.nearFullPercent],
+        }
+      : {}),
+    /**
+     * 收件確認（ADR-0380；SDK ADR 0067 §2）：收件人處理完可以送這個 kind，中繼把那幾列降為「現在＋`grace_sec`」到期。
+     * 客戶端只對宣告了的中繼送。
+     */
+    ...(cfg.inboxAck !== false ? { cinder_inbox_ack: { kind: INBOX_ACK_KIND, grace_sec: inboxAckGraceFor(store) } } : {}),
+    /** 丟棄計數（SDK ADR 0042）：讀自己的收件匣時會收到 `NOTICE "warning: dropped: …"`。 */
+    ...(store.countDrops === true ? { cinder_drop_notices: true } : {}),
     /** 是否接受檔案塊（ADR-0162）：false＝整類拒收，客戶端不必試。 */
     cinder_accepts_files: cfg.acceptsFiles === true,
     /**

@@ -165,6 +165,19 @@ describe("SQL 可尋址事件（NIP-33，ADR-0071 快照）", () => {
     expect(got).toHaveLength(0);
   });
 
+  it("purge 只限快照（ADR-0382 §7）：10050／10002／kind 3 的空 content 照常存、查得到、取代", () => {
+    const s = new SqlMessageStore(nodeSqlExec());
+    const list = (kind: number, createdAt: number, relay: string): NostrEvent =>
+      ({ id: `list-${kind}-${createdAt}`, pubkey: "author", created_at: createdAt, kind, tags: [["relay", relay]], content: "", sig: "" }) as NostrEvent;
+    for (const kind of [10050, 10002, 3]) {
+      expect(s.putAddressable(list(kind, 1000, "wss://a.example/s/1"), 1000)).toBe(true);
+      expect(s.query(f({ kinds: [kind], authors: ["author"] }), 1000)).toHaveLength(1);
+      expect(s.putAddressable(list(kind, 2000, "wss://b.example/s/1"), 2000)).toBe(true);
+      const got = s.query(f({ kinds: [kind], authors: ["author"] }), 2000);
+      expect(got.map((e) => e.tags[0]?.[1])).toEqual(["wss://b.example/s/1"]);
+    }
+  });
+
   it("配額：每 (pubkey,kind) 至多 5 個 d、單顆 256KB；30 天到期 prune 收走", () => {
     const MONTH = 30 * 86_400;
     const s = new SqlMessageStore(nodeSqlExec());

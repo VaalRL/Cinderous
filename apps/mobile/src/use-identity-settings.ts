@@ -1,12 +1,13 @@
 // 設定頁上的「身分層開關」這一簇（ADR-0331／Phase P4 階段 1，第 3 簇）。
 //
-// 5 個 state：前向保密開關／解封失敗計數／入群邀請閘門／觀測到的裝置／雲端備份模式。
+// 6 個 state：前向保密開關／解封失敗計數／入群邀請閘門／觀測到的裝置／雲端備份模式／公開聯絡方式。
 // 它們的共同點不是「都在設定頁」——是**都屬於這個身分**：
 //
 //   - `fsEnabled`／`fsFailures`：EK 屬於身分（ADR-0245／0316）。
 //   - `groupInviteAnyone`：每個身分各自的隱私決定（ADR-0317）。
 //   - `devices`：裝置觀測存在該身分的加密儲存（ADR-0321）。
 //   - `cloudSync`：「**這個身分**的資料要不要離開裝置」（ADR-0327 才剛把它從裝置層改過來）。
+//   - `publicReach`：這個身分要不要公開讓人找到（ADR-0382）；狀態以該身分 home 上自己發布的事件為準。
 //
 // ## 這一簇的 reset 是「重讀」，不是「歸零」
 //
@@ -19,7 +20,7 @@
 // 故 `reset()` **要求**傳入種子，沒有無參數版本。
 
 import { useState } from "react";
-import type { CloudSyncMode } from "@cinderous/engine";
+import type { CloudSyncMode, PublicReachState } from "@cinderous/engine";
 
 /** 觀測到的裝置（ADR-0321）：只取設定頁用得到的欄位，其餘由後端型別帶過。 */
 export type ObservedDevice = { id: string; firstSeen: number; source: string; inDirectory?: boolean };
@@ -37,6 +38,8 @@ export interface IdentitySettingsSeed {
   groupInviteAnyone: boolean;
   devices: ObservedDevice[];
   cloudSync: CloudSyncMode;
+  /** `backend.publicReach()`；後端不支援時 null */
+  publicReach: PublicReachState | null;
 }
 
 export interface IdentitySettings {
@@ -45,6 +48,7 @@ export interface IdentitySettings {
   groupInviteAnyone: boolean;
   devices: ObservedDevice[];
   cloudSync: CloudSyncMode;
+  publicReach: PublicReachState | null;
 
   setFsEnabled(v: boolean): void;
   /** 後端 `onFsUndecryptable`：又有一則解不開。 */
@@ -53,6 +57,8 @@ export interface IdentitySettings {
   /** 後端 `onDevices`，以及移除／忘記裝置之後的重讀。 */
   setDevices(list: ObservedDevice[]): void;
   setCloudSync(mode: CloudSyncMode): void;
+  /** 後端 `onPublicReach`：自己切換，或從 home 讀到別台裝置發布的。 */
+  setPublicReach(state: PublicReachState | null): void;
 
   /**
    * 切身分：以**新身分的值**重讀。
@@ -68,6 +74,7 @@ export function useIdentitySettings(): IdentitySettings {
   const [groupInviteAnyone, setGroupInviteAnyone] = useState(false);
   const [devices, setDevices] = useState<ObservedDevice[]>([]);
   const [cloudSync, setCloudSync] = useState<CloudSyncMode>("off");
+  const [publicReach, setPublicReach] = useState<PublicReachState | null>(null);
 
   return {
     fsEnabled,
@@ -75,17 +82,20 @@ export function useIdentitySettings(): IdentitySettings {
     groupInviteAnyone,
     devices,
     cloudSync,
+    publicReach,
     setFsEnabled,
     setFsFailures,
     setGroupInviteAnyone,
     setDevices,
     setCloudSync,
+    setPublicReach,
     reset: (seed) => {
       setFsEnabled(seed.fsEnabled);
       setFsFailures(seed.fsFailures);
       setGroupInviteAnyone(seed.groupInviteAnyone);
       setDevices(seed.devices);
       setCloudSync(seed.cloudSync);
+      setPublicReach(seed.publicReach);
     },
   };
 }

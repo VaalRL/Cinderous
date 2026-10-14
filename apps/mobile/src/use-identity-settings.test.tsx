@@ -24,6 +24,7 @@ const seed = (over: Partial<IdentitySettingsSeed> = {}): IdentitySettingsSeed =>
   groupInviteAnyone: false,
   devices: [],
   cloudSync: "off",
+  publicReach: null,
   ...over,
 });
 
@@ -72,6 +73,17 @@ describe("身分層開關簇（ADR-0331）", () => {
     expect(h.get().groupInviteAnyone).toBe(true);
     act(() => h.get().reset(seed({ groupInviteAnyone: false })));
     expect(h.get().groupInviteAnyone).toBe(false);
+  });
+
+  it("🔴 公開聯絡方式隨身分重讀——公開了的身分切到別的身分，不能顯示成也公開了（ADR-0382）", () => {
+    const h = hook();
+    const on = { available: true, contactable: true, publicName: true };
+    act(() => h.get().reset(seed({ publicReach: on })));
+    expect(h.get().publicReach).toEqual(on);
+    act(() => h.get().reset(seed()));
+    expect(h.get().publicReach).toBeNull();
+    act(() => h.get().setPublicReach({ available: true, contactable: false, publicName: true })); // 後端 onPublicReach
+    expect(h.get().publicReach?.publicName).toBe(true);
   });
 
   it("互動改動即時反映（設定頁切開關）", () => {

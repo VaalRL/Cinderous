@@ -1,3 +1,5 @@
+import { createRequire } from "node:module";
+import type { DatabaseSync as DatabaseSyncType } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import {
   buildAuthEvent,
@@ -7,9 +9,10 @@ import {
   TIMESTAMP_JITTER_SECONDS,
   type NostrEvent,
 } from "@cinderous/core";
-import { MAX_QUERY_BYTES, MessageStore } from "./message-store.js";
+import { MAX_QUERY_BYTES, MessageStore, type MessageStoreOptions, type OfflineStore } from "./message-store.js";
+import { SqlMessageStore } from "./sql-message-store.js";
 import type { RelayFilter } from "./protocol.js";
-import { leadingZeroBits, RelayCore } from "./relay-core.js";
+import { EXPIRED_REJECT, leadingZeroBits, OFFLINE_CEILING_REJECT, RelayCore } from "./relay-core.js";
 import { minePow } from "@cinderous/core";
 import { guardFor } from "./host-config.js";
 
@@ -59,7 +62,7 @@ describe("RelayCore — 訂閱與 Ephemeral 轉發", () => {
     const e = heartbeat();
     const out = core.handle("sender", EVENT({ ...e, content: "tampered" }));
     expect(out).toEqual([
-      { to: "sender", message: ["OK", e.id, false, "invalid: 簽章驗證失敗"] },
+      { to: "sender", message: ["OK", e.id, false, "invalid: bad-signature: 簽章驗證失敗"] },
     ]);
   });
 
@@ -202,13 +205,14 @@ describe("RelayCore — 時鐘偏移與重放防護（C2）", () => {
     expect(core.handle("c", EVENT(hb(1000)))[0]?.message[2]).toBe(true);
   });
 
-  it("重放相同事件被去重拒絕", () => {
+  it("重放相同事件被去重：OK true「duplicate:」（NIP-01；ADR-0376），不再轉發", () => {
     const core = new RelayCore({ maxClockSkewSec: 60, now: () => 1000 });
     const e = hb(1000);
     expect(core.handle("c", EVENT(e))[0]?.message[2]).toBe(true);
     const replay = core.handle("c", EVENT(e));
-    expect(replay[0]?.message[2]).toBe(false);
-    expect(String(replay[0]?.message[3])).toContain("duplicate");
+    expect(replay).toHaveLength(1);
+    expect(replay[0]?.message[2]).toBe(true);
+    expect(String(replay[0]?.message[3])).toMatch(/^duplicate: /);
   });
 
   it("未設定 maxClockSkewSec 時不啟用（維持原行為）", () => {
@@ -263,7 +267,7 @@ describe("RelayCore — NIP-42 AUTH（ADR-0057）", () => {
     const core = authCore();
     core.connect("c");
     const out = core.handle("c", REQ("s", { kinds: [1] }));
-    expect(out).toContainEqual({ to: "c", message: ["CLOSED", "s", "auth-required: 請先認證（NIP-42）"] });
+    expect(out).toContainEqual({ to: "c", message: ["CLOSED", "s", "auth-required: nip42: 請先認證（NIP-42）"] });
     expect(out).toContainEqual({ to: "c", message: ["AUTH", "chal-1"] });
   });
 
@@ -273,7 +277,7 @@ describe("RelayCore — NIP-42 AUTH（ADR-0057）", () => {
     const e = heartbeat();
     expect(core.handle("c", EVENT(e))).toContainEqual({
       to: "c",
-      message: ["OK", e.id, false, "auth-required: 請先認證（NIP-42）"],
+      message: ["OK", e.id, false, "auth-required: nip42: 請先認證（NIP-42）"],
     });
   });
 
@@ -312,7 +316,7 @@ describe("RelayCore — NIP-42 AUTH（ADR-0057）", () => {
     const other = getPublicKey(generateSecretKey());
     expect(core.handle("c", REQ("other", { kinds: [1059], "#p": [other] }))).toContainEqual({
       to: "c",
-      message: ["CLOSED", "other", "restricted: 訂閱必須指定 #p（自己）或 authors（ADR-0123）"],
+      message: ["CLOSED", "other", "restricted: scope: 訂閱必須指定 #p（自己）或 authors（ADR-0123）"],
     });
   });
 
@@ -403,6 +407,17 @@ describe("RelayCore — 可尋址快照（NIP-33，ADR-0071）", () => {
       sk,
     );
 
+  it("NIP-17 kind 10050（content 空）：OK true 且別人以 authors 查得到——不是被當成 purge（ADR-0382 §7）", () => {
+    const store = new MessageStore();
+    const core = new RelayCore({ store, now: () => 1_700_000_000 });
+    core.connect("c");
+    const sk = generateSecretKey();
+    const inbox = finalizeEvent({ kind: 10050, created_at: 1_700_000_000, tags: [["relay", "wss://a.example/s/1"]], content: "" }, sk);
+    expect(core.handle("c", EVENT(inbox))).toContainEqual({ to: "c", message: ["OK", inbox.id, true, ""] });
+    const got = core.handle("c", REQ("s", { kinds: [10050], authors: [getPublicKey(sk)] })).filter((o) => o.message[0] === "EVENT");
+    expect(got.map((o) => (o.message[2] as NostrEvent).id)).toEqual([inbox.id]);
+  });
+
   it("發佈→取代→purge：REQ 永遠只看到最新一顆；purge 後查無", () => {
     const store = new MessageStore();
     const core = new RelayCore({ store, now: () => 1_700_000_000 });
@@ -426,7 +441,7 @@ describe("RelayCore — 可尋址快照（NIP-33，ADR-0071）", () => {
     expect(after.filter((o) => o.message[0] === "EVENT")).toHaveLength(0);
   });
 
-  it("配額超限回 OK false（第 6 個 d）", () => {
+  it("配額超限回 OK false「blocked: quota:」（第 6 個 d；ADR-0376）", () => {
     const store = new MessageStore();
     const core = new RelayCore({ store, now: () => 1_700_000_000 });
     core.connect("c");
@@ -438,7 +453,7 @@ describe("RelayCore — 可尋址快照（NIP-33，ADR-0071）", () => {
     const sixth = snapshot(sk, { d: "dev6" });
     expect(core.handle("c", EVENT(sixth))).toContainEqual({
       to: "c",
-      message: ["OK", sixth.id, false, "blocked: 取代事件遭拒（配額/大小/較舊）"],
+      message: ["OK", sixth.id, false, "blocked: quota: 這個作者在這個 kind 的位址數已達上限"],
     });
   });
 
@@ -601,7 +616,7 @@ describe("檔案塊事件（FILE_WRAP=1060，ADR-0162）", () => {
     core.connect("c1");
     const e = fileEvent();
     const out = core.handle("c1", EVENT(e));
-    expect(out).toContainEqual({ to: "c1", message: ["OK", e.id, false, "blocked: 檔案事件未啟用（MAX_FILE_MB）"] });
+    expect(out).toContainEqual({ to: "c1", message: ["OK", e.id, false, "blocked: files-disabled: 檔案事件未啟用（MAX_FILE_MB）"] });
     expect(store.query({ kinds: [1060] }, 1700000001)).toEqual([]);
   });
 
@@ -615,7 +630,7 @@ describe("檔案塊事件（FILE_WRAP=1060，ADR-0162）", () => {
     expect(store.query({ kinds: [1060] }, 1700000001).map((x) => x.id)).toEqual([e.id]);
     const huge = fileEvent("b".repeat(64), "z".repeat(210_000));
     const out2 = core.handle("c1", EVENT(huge));
-    expect(out2).toContainEqual({ to: "c1", message: ["OK", huge.id, false, "blocked: 檔案塊過大"] });
+    expect(out2).toContainEqual({ to: "c1", message: ["OK", huge.id, false, "blocked: too-large: 檔案塊過大"] });
   });
 });
 
@@ -650,7 +665,7 @@ describe("RelayCore — 例外圍籬（ADR-0235 C1）", () => {
     expect(() => {
       out = core.handle("c1", EVENT(e));
     }).not.toThrow();
-    expect(out).toEqual([{ to: "c1", message: ["NOTICE", "error: 內部錯誤，請稍後再試"] }]);
+    expect(out).toEqual([{ to: "c1", message: ["NOTICE", "error: internal: 內部錯誤，請稍後再試"] }]);
   });
 
   it("查詢拋例外時同樣被攔下（REQ 路徑）", () => {
@@ -664,7 +679,7 @@ describe("RelayCore — 例外圍籬（ADR-0235 C1）", () => {
     core.connect("c1");
     const e = finalizeEvent({ kind: 20000, created_at: 1700000000, tags: [], content: "" }, generateSecretKey());
     const out = core.handle("c1", JSON.stringify(["EVENT", { ...e, tags: {} }]));
-    expect(out).toEqual([{ to: "c1", message: ["NOTICE", "invalid: malformed event"] }]);
+    expect(out).toEqual([{ to: "c1", message: ["NOTICE", "invalid: malformed: malformed event"] }]);
   });
 });
 
@@ -684,7 +699,7 @@ describe("RelayCore — 事件大小與 tag 上限（ADR-0235 C3）", () => {
     core.connect("c1");
     const e = ev(Array.from({ length: 64 }, (_, i) => ["p", `${i}`.padStart(64, "0")]));
     const out = core.handle("c1", EVENT(e));
-    expect(out).toContainEqual({ to: "c1", message: ["OK", e.id, false, "blocked: 收件人數超過上限"] });
+    expect(out).toContainEqual({ to: "c1", message: ["OK", e.id, false, "blocked: too-many-recipients: 收件人數超過上限"] });
     expect(store.query({ kinds: [1059] }, 1700000001)).toEqual([]);
   });
 
@@ -693,7 +708,7 @@ describe("RelayCore — 事件大小與 tag 上限（ADR-0235 C3）", () => {
     core.connect("c1");
     const e = ev(Array.from({ length: 300 }, (_, i) => ["e", `${i}`]));
     const out = core.handle("c1", EVENT(e));
-    expect(out).toContainEqual({ to: "c1", message: ["OK", e.id, false, "blocked: tag 數超過上限"] });
+    expect(out).toContainEqual({ to: "c1", message: ["OK", e.id, false, "blocked: too-many-tags: tag 數超過上限"] });
   });
 
   it("事件序列化超過全域大小上限 → OK false", () => {
@@ -701,14 +716,14 @@ describe("RelayCore — 事件大小與 tag 上限（ADR-0235 C3）", () => {
     core.connect("c1");
     const e = ev([["p", "ab"]], "z".repeat(300_000));
     const out = core.handle("c1", EVENT(e));
-    expect(out).toContainEqual({ to: "c1", message: ["OK", e.id, false, "blocked: 事件過大"] });
+    expect(out).toContainEqual({ to: "c1", message: ["OK", e.id, false, "blocked: too-large: 事件過大"] });
   });
 
   it("原始訊息超過上限 → NOTICE，且不進 JSON.parse", () => {
     const core = new RelayCore();
     core.connect("c1");
     const out = core.handle("c1", "x".repeat(500_000));
-    expect(out).toEqual([{ to: "c1", message: ["NOTICE", "invalid: 訊息過大"] }]);
+    expect(out).toEqual([{ to: "c1", message: ["NOTICE", "invalid: too-large: 訊息過大"] }]);
   });
 
   it("正常事件（1 個 p tag）不受影響", () => {
@@ -745,7 +760,7 @@ describe("RelayCore — 速率限制與時鐘窗（ADR-0235 H1）", () => {
     const over = at(NOW - 99);
     expect(core.handle("c1", EVENT(over))).toContainEqual({
       to: "c1",
-      message: ["OK", over.id, false, "rate-limited: 發送過於頻繁，請稍後再試"],
+      message: ["OK", over.id, false, "rate-limited: events: 發送過於頻繁，請稍後再試"],
     });
   });
 
@@ -777,7 +792,7 @@ describe("RelayCore — 速率限制與時鐘窗（ADR-0235 H1）", () => {
     const future = at(NOW + 901);
     expect(core.handle("c1", EVENT(future))).toContainEqual({
       to: "c1",
-      message: ["OK", future.id, false, "invalid: 時間戳超出允許範圍"],
+      message: ["OK", future.id, false, "invalid: clock-skew: 時間戳超出允許範圍"],
     });
     const ok = at(NOW + 60);
     expect(core.handle("c1", EVENT(ok))).toContainEqual({ to: "c1", message: ["OK", ok.id, true, ""] });
@@ -805,7 +820,7 @@ describe("RelayCore — 速率限制與時鐘窗（ADR-0235 H1）", () => {
     expect(core.handle("c1", EVENT(beat))).toContainEqual({ to: "c1", message: ["OK", beat.id, true, ""] });
     expect(core.handle("c1", EVENT(beat))).toContainEqual({
       to: "c1",
-      message: ["OK", beat.id, false, "duplicate: 事件重複"],
+      message: ["OK", beat.id, true, "duplicate: seen: 事件重複"],
     });
   });
 
@@ -926,7 +941,7 @@ describe("RelayCore — Gift Wrap 洪水須以認證身分限速（ADR-0235 H1 �
     const over = wrap();
     expect(core.handle("c1", EVENT(over))).toContainEqual({
       to: "c1",
-      message: ["OK", over.id, false, "rate-limited: 發送過於頻繁，請稍後再試"],
+      message: ["OK", over.id, false, "rate-limited: events: 發送過於頻繁，請稍後再試"],
     });
   });
 
@@ -1286,5 +1301,156 @@ describe("REQ 的位元組預算（ADR-0371 §決策 6）", () => {
     core.connect("c");
     core.handle("c", JSON.stringify(["REQ", "s", { authors: [author] }]));
     expect(seen).toEqual([MAX_QUERY_BYTES]);
+  });
+});
+
+// ADR-0375（SDK ADR 0038 P0-R1）：離線留言存不下時，中繼必須說實話。
+//
+// 修正前 `handleEvent` 呼叫 `store.put()` 卻不看回傳值：嚴格平面（不淘汰）的 DO 天花板滿了之後，
+// 每一則新的私訊都回 `OK true`、照常扇出，然後就不見了——寄件端以為送達，收件端永遠收不到。
+describe("RelayCore — 離線留言存不下要回 OK false（ADR-0375；SDK ADR 0038 P0-R1）", () => {
+  const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as {
+    DatabaseSync: typeof DatabaseSyncType;
+  };
+  const sqlStore = (opts: MessageStoreOptions): OfflineStore => {
+    const db = new DatabaseSync(":memory:");
+    return new SqlMessageStore((query, ...bindings) => {
+      const stmt = db.prepare(query);
+      if (/^\s*select/i.test(query)) return stmt.all(...bindings) as Record<string, unknown>[];
+      stmt.run(...bindings);
+      return [];
+    }, opts);
+  };
+  const stores: [string, (opts: MessageStoreOptions) => OfflineStore][] = [
+    ["MessageStore", (opts) => new MessageStore(opts)],
+    ["SqlMessageStore", sqlStore],
+  ];
+  const NOW = 1_700_000_000;
+  const RECIPIENT = "a".repeat(64);
+  const wrapOf = (extraTags: string[][] = [], size = 3000): NostrEvent =>
+    finalizeEvent(
+      { kind: 1059, created_at: NOW, tags: [["p", RECIPIENT], ...extraTags], content: "x".repeat(size) },
+      generateSecretKey(),
+    );
+  const okOf = (out: ReturnType<RelayCore["handle"]>, id: string) =>
+    out.find((o) => o.to === "sender" && o.message[0] === "OK" && o.message[1] === id)?.message;
+
+  for (const [name, make] of stores) {
+    describe(name, () => {
+      it("🔴 嚴格平面（不淘汰）天花板滿了：回 OK false「blocked: ceiling:」、不扇出；回 OK true 的都真的存下了", () => {
+        const store = make({ offlineMaxTotalBytes: 10_000 });
+        const core = new RelayCore({ store, now: () => NOW });
+        core.connect("sender");
+        core.connect("watcher");
+        core.handle("watcher", REQ("s", { "#p": [RECIPIENT] }));
+
+        const accepted: string[] = [];
+        const rejected: string[] = [];
+        for (let i = 0; i < 5; i++) {
+          const e = wrapOf();
+          const out = core.handle("sender", EVENT(e));
+          const ok = okOf(out, e.id);
+          const fannedOut = out.some((o) => o.to === "watcher");
+          if (ok?.[2] === true) {
+            accepted.push(e.id);
+            expect(fannedOut).toBe(true);
+          } else {
+            rejected.push(e.id);
+            expect(ok).toEqual(["OK", e.id, false, OFFLINE_CEILING_REJECT]);
+            expect(fannedOut).toBe(false);
+          }
+        }
+        // 修正前：五顆都回 OK true，只存了兩顆。
+        expect(accepted.length).toBe(2);
+        expect(rejected.length).toBe(3);
+        const stored = store.query({ "#p": [RECIPIENT] } as RelayFilter, NOW).map((e) => e.id);
+        expect(stored.sort()).toEqual([...accepted].sort());
+      });
+
+      it("拒收訊息是 NIP-01 機器可讀前綴＋英文詞元（ADR 0038 決策 2）", () => {
+        expect(OFFLINE_CEILING_REJECT.startsWith("blocked: ceiling: ")).toBe(true);
+        expect(EXPIRED_REJECT.startsWith("invalid: expired: ")).toBe(true);
+      });
+
+      it("事件自帶的 expiration 已經過了：回 OK false「invalid: expired:」、不扇出、不入庫", () => {
+        const store = make({ offlineMaxTotalBytes: 10_000 });
+        const core = new RelayCore({ store, now: () => NOW });
+        core.connect("sender");
+        core.connect("watcher");
+        core.handle("watcher", REQ("s", { "#p": [RECIPIENT] }));
+        const e = wrapOf([["expiration", String(NOW - 1)]], 10);
+        const out = core.handle("sender", EVENT(e));
+        expect(out).toEqual([{ to: "sender", message: ["OK", e.id, false, EXPIRED_REJECT] }]);
+        expect(store.query({ "#p": [RECIPIENT] } as RelayFilter, NOW - 10)).toEqual([]);
+      });
+
+      it("車道（ceilingEvicts）照舊淘汰最快到期者、收下新的：五顆都是 OK true", () => {
+        const store = make({ offlineMaxTotalBytes: 10_000, ceilingEvicts: true });
+        const core = new RelayCore({ store, now: () => NOW });
+        core.connect("sender");
+        for (let i = 0; i < 5; i++) {
+          const e = wrapOf();
+          expect(okOf(core.handle("sender", EVENT(e)), e.id)?.[2]).toBe(true);
+        }
+      });
+
+      it("每收件人 FIFO 擠掉舊的、收下新的——不是存不下，仍回 OK true", () => {
+        const store = make({ maxPerRecipient: 1 });
+        const core = new RelayCore({ store, now: () => NOW });
+        core.connect("sender");
+        const first = wrapOf([], 10);
+        const second = wrapOf([], 10);
+        expect(okOf(core.handle("sender", EVENT(first)), first.id)?.[2]).toBe(true);
+        expect(okOf(core.handle("sender", EVENT(second)), second.id)?.[2]).toBe(true);
+        expect(store.query({ "#p": [RECIPIENT] } as RelayFilter, NOW).map((e) => e.id)).toEqual([second.id]);
+      });
+    });
+  }
+
+  it("🔴 被拒的事件不記進重放快取：空間騰出來後重送同一顆，是收下而不是「duplicate」", () => {
+    let full = true;
+    const stored: string[] = [];
+    const store: OfflineStore = {
+      put: (e) => {
+        if (full) return false;
+        stored.push(e.id);
+        return true;
+      },
+      putAddressable: () => true,
+      query: () => [],
+      prune: () => {},
+      vanish: () => 0,
+    };
+    const core = new RelayCore({ store, now: () => NOW, replayWindowSec: 3600 });
+    core.connect("sender");
+    const e = wrapOf([], 10);
+    expect(okOf(core.handle("sender", EVENT(e)), e.id)).toEqual(["OK", e.id, false, OFFLINE_CEILING_REJECT]);
+    full = false;
+    expect(okOf(core.handle("sender", EVENT(e)), e.id)).toEqual(["OK", e.id, true, ""]);
+    expect(stored).toEqual([e.id]);
+    // 收下之後才是真的重複。
+    expect(okOf(core.handle("sender", EVENT(e)), e.id)?.[3]).toContain("duplicate");
+  });
+
+  it("可尋址被拒同樣不記進重放快取（拒收訊息不變）", () => {
+    let accept = false;
+    const store: OfflineStore = {
+      put: () => true,
+      putAddressable: () => accept,
+      query: () => [],
+      prune: () => {},
+      vanish: () => 0,
+    };
+    const core = new RelayCore({ store, now: () => NOW, replayWindowSec: 3600 });
+    core.connect("sender");
+    const e = finalizeEvent({ kind: 30078, created_at: NOW, tags: [["d", "x"]], content: "" }, generateSecretKey());
+    expect(okOf(core.handle("sender", EVENT(e)), e.id)).toEqual([
+      "OK",
+      e.id,
+      false,
+      "blocked: 取代事件遭拒（配額/大小/較舊）",
+    ]);
+    accept = true;
+    expect(okOf(core.handle("sender", EVENT(e)), e.id)?.[2]).toBe(true);
   });
 });
