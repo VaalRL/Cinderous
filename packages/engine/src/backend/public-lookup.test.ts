@@ -67,12 +67,12 @@ function cinderous(net: Net, id: string, sk = generateSecretKey(), seen?: { url:
 }
 
 /** 第三方客戶端的使用者：在索引中繼發布名稱與收件中繼 */
-function thirdParty(net: Net, name = "Tess") {
+function thirdParty(net: Net, name = "Tess", inbox: string[] | null = [THEIRS]) {
   const sk = generateSecretKey();
-  const seed = net.connect(INDEX, `seed-${name}`);
+  const seed = net.connect(INDEX, `seed-${name}-${Math.random()}`);
   seed.publish(buildPublicName(sk, name));
-  seed.publish(buildInboxRelayList(sk, [THEIRS]));
-  return { sk, pk: getPublicKey(sk) };
+  if (inbox) seed.publish(buildInboxRelayList(sk, inbox));
+  return { sk, pk: getPublicKey(sk), publishInbox: (urls: string[]) => seed.publish(buildInboxRelayList(sk, urls)) };
 }
 
 /** 到某座中繼查寄給某人的 1059（測試用中繼不認證、不檢查範圍） */
@@ -186,6 +186,71 @@ describe("公開聯絡方式的查詢端（ADR-0382 §6）", () => {
     await flush();
     expect(store.loadRequests()).toHaveLength(15);
     expect(seen.filter((c) => c.url === INDEX)).toHaveLength(10);
+  });
+
+  it("對方 10050 列了多座：每一座都寄一份——第一座停了也收得到（NIP-17；0xchat 預設的 relay.0xchat.com 已停）", async () => {
+    const net = storedNet();
+    const { b } = cinderous(net, "me");
+    b.start(noop);
+    const DEAD = "wss://dead.example";
+    const t = thirdParty(net, "Tess", [DEAD, THEIRS]);
+    b.addContact(npubEncode(t.pk));
+    await flush();
+    const before = inboxAt(net, THEIRS, t.pk).length;
+    b.sendMessage(t.pk, "hi");
+    expect(inboxAt(net, THEIRS, t.pk).length - before).toBe(1);
+  });
+
+  it("請求建立時對方還沒發 10050；接受時再查一次，回信寄得到", async () => {
+    const net = storedNet();
+    const { b, store } = cinderous(net, "me");
+    b.start(noop);
+    const t = thirdParty(net, "Tess", null);
+    net.connect(`${BASE}${shardPath(b.self.pubkey)}`, "tp").publish(wrapMessage("hello", t.sk, b.self.pubkey).events[0]!);
+    await flush();
+    expect(store.loadRequests().find((r) => r.pubkey === t.pk)?.relayUrl).toBeUndefined();
+    t.publishInbox([THEIRS]); // 對方之後才設好收件中繼
+    b.acceptRequest(t.pk);
+    await flush();
+    const before = inboxAt(net, THEIRS, t.pk).length;
+    b.sendMessage(t.pk, "hi back");
+    expect(inboxAt(net, THEIRS, t.pk).length - before).toBe(1);
+  });
+
+  it("沒有提示的聯絡人（例如重開 App 後）：這次第一封私訊觸發重查，查到就把同一顆補寄過去", async () => {
+    const net = storedNet();
+    const t = thirdParty(net, "Tess", null);
+    const first = cinderous(net, "me");
+    first.b.start(noop);
+    first.b.addContact(npubEncode(t.pk)); // 當時查不到 10050
+    await flush();
+    first.b.stop();
+    t.publishInbox([THEIRS]);
+    const again = new RelayChatBackend(first.store, noConnector, "me", {
+      shardingBase: BASE,
+      connectorFor: (url) => (h) => net.connect(url, `again-${Math.random()}`, h),
+      publicIndexRelays: [INDEX],
+    });
+    running.push(again);
+    again.start(noop);
+    const before = inboxAt(net, THEIRS, t.pk).length;
+    again.sendMessage(t.pk, "after restart");
+    await flush();
+    const got = inboxAt(net, THEIRS, t.pk);
+    expect(got.length - before).toBe(1);
+  });
+
+  it("提示在錨點上的聯絡人（Cinderous 使用者）：寄信不觸發查詢", async () => {
+    const net = storedNet();
+    const seen: { url: string; h: RelayClientHandlers }[] = [];
+    const { b } = cinderous(net, "me", generateSecretKey(), seen);
+    b.start(noop);
+    const friend = getPublicKey(generateSecretKey());
+    b.addContact(`${npubEncode(friend)}@${BASE}${shardPath(friend)}`);
+    seen.length = 0;
+    b.sendMessage(friend, "hi");
+    await flush();
+    expect(seen.filter((c) => c.url === INDEX)).toHaveLength(0);
   });
 
   it("聯絡人的路由提示若是錨點上的網址（Cinderous 使用者），照舊由公鑰推算分片", () => {
