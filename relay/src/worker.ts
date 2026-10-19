@@ -276,8 +276,17 @@ export function relayInfoFrom(
 /** NIP-40 過期留言的清理間隔（C2）：DO alarm 每小時 prune 一次。 */
 const PRUNE_INTERVAL_MS = 60 * 60 * 1000;
 
-/** 升級請求被拒的原因（ADR-0368）。 */
-export type RejectKind = "unknown-path" | "bad-lane" | "rate-limited";
+/**
+ * 升級請求被拒的原因（ADR-0368）。`over-quota`／`unavailable`（ADR-0387；SDK ADR 0097）：路徑沒錯，是這座中繼的
+ * DO 起不來——寫入額度用完，或其他暫時的錯誤；客戶端該稍後再試或改用別座。
+ */
+export type RejectKind = "unknown-path" | "bad-lane" | "rate-limited" | "over-quota" | "unavailable";
+
+/** DO 拋出的錯誤是不是寫入（或讀取）額度用完（ADR-0387）：Cloudflare 的訊息是「Exceeded allowed rows written…」 */
+export function doFailureKind(error: unknown): "over-quota" | "unavailable" {
+  const message = error instanceof Error ? error.message : String(error);
+  return /exceeded allowed rows (written|read)|free tier|quota/i.test(message) ? "over-quota" : "unavailable";
+}
 
 /** WebSocket 規格的關閉原因上限（UTF-8 bytes）。 */
 const CLOSE_REASON_MAX_BYTES = 123;
@@ -297,6 +306,23 @@ const CLOSE_REASON_MAX_BYTES = 123;
 export function rejectUpgrade(kind: RejectKind, host: string, env: Pick<Env, "DEVELOPER_DOCS_URL">): Response {
   const docs = env.DEVELOPER_DOCS_URL?.trim() || DEVELOPER_DOCS_URL;
   const lane = `wss://${host}/app/<your-app-id>`;
+  const pair = new WebSocketPair();
+  const server = pair[1];
+  // 中繼暫時不能用（ADR-0387；與 SDK 中繼逐字相同）：不是用法錯了，不附開發者文件；以 1013 Try Again Later 關閉
+  if (kind === "over-quota" || kind === "unavailable") {
+    const [brief, text] =
+      kind === "over-quota"
+        ? [
+            "over quota",
+            "over quota: this relay has used up its storage write allowance for today and cannot open connections " +
+              "until it resets (around 00:00 UTC). Use another relay meanwhile.",
+          ]
+        : ["temporarily unavailable", "temporarily unavailable: this relay could not open its storage. Retry in a few minutes or use another relay."];
+    server.accept();
+    server.send(JSON.stringify(["NOTICE", text]));
+    server.close(1013, brief);
+    return new Response(null, { status: 101, webSocket: pair[0] });
+  }
   const [short, notice] =
     kind === "rate-limited"
       ? ["rate-limited", `rate-limited: too many new connections to app lanes from your IP; retry in a minute. Docs: ${docs}`]
@@ -310,8 +336,6 @@ export function rejectUpgrade(kind: RejectKind, host: string, env: Pick<Env, "DE
   const withDocs = `${short}; docs: ${docs}`;
   const reason = new TextEncoder().encode(withDocs).length <= CLOSE_REASON_MAX_BYTES ? withDocs : short;
 
-  const pair = new WebSocketPair();
-  const server = pair[1];
   server.accept();
   server.send(JSON.stringify(["NOTICE", notice]));
   server.close(1008, reason);
@@ -381,7 +405,19 @@ export default {
     // 所以兩邊不可能不一致。刻意不用標頭傳遞：那要 clone request，而「`Upgrade` 標頭在
     // clone 之後還在不在」是平台細節，賭它不如不賭。
     const stub = env.RELAY_ROOM.get(env.RELAY_ROOM.idFromName(route.doName));
-    return stub.fetch(request);
+    // DO 起不來（ADR-0387）：寫入額度用完時 Cloudflare 讓 DO 拋錯，沒接住就是 1101／500，客戶端分不出原因
+    // （2026-10-19 錨點 1 整座如此）。接住、照 ADR-0368 的形狀說明原因並以 1013 關閉；內部錯誤只進日誌
+    try {
+      const res = await stub.fetch(request);
+      if (res.status >= 500 && !res.webSocket) {
+        console.error("relay: DO responded", res.status);
+        return rejectUpgrade("unavailable", url.host, env);
+      }
+      return res;
+    } catch (error) {
+      console.error("relay: DO failed", error);
+      return rejectUpgrade(doFailureKind(error), url.host, env);
+    }
   },
 };
 

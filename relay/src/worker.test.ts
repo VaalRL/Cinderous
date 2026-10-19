@@ -1970,3 +1970,45 @@ describe("容量設定與 DO 名（ADR-0379；SDK ADR 0042）", () => {
     expect(out.at(-1)?.[0]).toBe("EOSE");
   }, 120_000);
 });
+
+describe("DO 起不來時說明原因（ADR-0387；額度用完不再只回 1101）", () => {
+  /** 讓 DO 的 fetch 拋錯或回某個回應，送一次升級 */
+  const upgradeWith = async (doFetch: () => Promise<Response>): Promise<{ status: number; server: FakeWs | undefined }> => {
+    FakeWebSocketPair.last = undefined;
+    const env = { RELAY_ROOM: { idFromName: () => ({}) as never, get: () => ({ fetch: doFetch }) } } as unknown as Env;
+    const res = await worker.fetch(new Request(`https://${HOST}/`, { headers: { Upgrade: "websocket" } }), env);
+    return { status: res.status, server: FakeWebSocketPair.last?.[1] };
+  };
+  const noticeOf = (ws: FakeWs | undefined): string => {
+    const msg = JSON.parse(ws?.sent[0] ?? "[]") as unknown[];
+    expect(msg[0]).toBe("NOTICE");
+    return msg[1] as string;
+  };
+
+  it("🔴 寫入額度用完（Cloudflare 的錯誤訊息）：接受、NOTICE 說明額度與恢復時間、以 1013 關閉", async () => {
+    const { status, server } = await upgradeWith(() => Promise.reject(new Error("Exceeded allowed rows written in Durable Objects free tier.")));
+    expect(status).toBe(101);
+    expect(server?.accepted).toBe(true);
+    const notice = noticeOf(server);
+    expect(notice).toMatch(/^over quota: /);
+    expect(notice).toContain("00:00 UTC");
+    expect(server?.closeCode).toBe(1013);
+    expect(server?.closeReason).toBe("over quota");
+  });
+
+  it("🔴 其他錯誤：說明暫時無法使用、請稍後或改用別座，以 1013 關閉；不洩漏內部錯誤訊息", async () => {
+    const { server } = await upgradeWith(() => Promise.reject(new Error("internal: sqlite busy at /secret/path")));
+    const notice = noticeOf(server);
+    expect(notice).toMatch(/^temporarily unavailable: /);
+    expect(notice).not.toContain("secret");
+    expect(server?.closeCode).toBe(1013);
+  });
+
+  it("DO 回 5xx（沒有 WebSocket）也一樣說明；正常的 101 原樣轉回", async () => {
+    const { server } = await upgradeWith(() => Promise.resolve(new Response("boom", { status: 500 })));
+    expect(noticeOf(server)).toMatch(/^temporarily unavailable: /);
+    const ok = await upgradeWith(() => Promise.resolve(new Response(null, { status: 101 })));
+    expect(ok.status).toBe(101);
+    expect(ok.server).toBeUndefined();
+  });
+});
