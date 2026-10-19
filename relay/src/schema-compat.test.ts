@@ -88,6 +88,13 @@ const SDK_0085_ADDITIONS = [
   `CREATE INDEX idx_offline_batch ON offline_msgs(recipient, batch, bytes, created_at) WHERE batch IS NOT NULL`,
 ];
 
+/**
+ * ADR-0388（SDK ADR 0098）：拿掉 `idx_offline_kind`——`#p` 查詢走分桶索引、`authors` 查詢走 pubkey 索引，
+ * 它只會在 `authors+kinds` 時被查詢規劃器誤選（kind 的選擇性遠低於 pubkey），卻讓每次寫入與刪除各多寫一列。
+ * 舊版程式打開時 `CREATE INDEX IF NOT EXISTS` 會把它建回來（等冪、回滾照常），新版再拿掉。
+ */
+const ADR_0388_REMOVALS = [`DROP INDEX idx_offline_kind`];
+
 function openDb(): { db: DatabaseSyncType; exec: SqlExec } {
   const db = new DatabaseSync(":memory:");
   const exec: SqlExec = (query, ...bindings) => {
@@ -155,7 +162,9 @@ describe("DO SQLite：從移植前（22e3860c）的 schema 升上來（ADR-0379�
 
   it("🔴 從零建的 schema＝移植前的＋SDK ADR 0042 的相容遷移（逐字；與 SDK 中繼從零建的相同，PR #9 切換不必再遷移）", () => {
     const expected = openDb();
-    for (const ddl of [...CINDEROUS_MAIN_SCHEMA, ...SDK_0042_ADDITIONS, ...SDK_0085_ADDITIONS]) expected.exec(ddl);
+    for (const ddl of [...CINDEROUS_MAIN_SCHEMA, ...SDK_0042_ADDITIONS, ...SDK_0085_ADDITIONS, ...ADR_0388_REMOVALS]) {
+      expected.exec(ddl);
+    }
     const fresh = openDb();
     openLikeRoom(fresh.exec);
     expect(schemaOf(fresh.db)).toEqual(schemaOf(expected.db));
@@ -175,5 +184,36 @@ describe("DO SQLite：從移植前（22e3860c）的 schema 升上來（ADR-0379�
     expect(store.query({ "#p": [ALICE] }, NOW)).toHaveLength(3);
     expect(store.query({ kinds: [30_078], authors: ["b".repeat(64)] }, NOW)).toHaveLength(1);
     expect(store.putResult!(chunk(4), NOW)).toMatchObject({ ok: false, reason: "ceiling" });
+  });
+});
+
+describe("離線留言查詢的索引（ADR-0388；SDK ADR 0098）", () => {
+  /** 記下 `query()` 對 offline_msgs 下的 SELECT，再用同樣的綁定值看查詢計畫。 */
+  function plansOf(filter: Parameters<SqlMessageStore["query"]>[0]): string[] {
+    const { db, exec } = openDb();
+    const seen: { query: string; bindings: unknown[] }[] = [];
+    const store = new SqlMessageStore((query, ...bindings) => {
+      if (/FROM offline_msgs/.test(query) && /^\s*select/i.test(query)) seen.push({ query, bindings });
+      return exec(query, ...bindings);
+    });
+    seen.length = 0;
+    store.query(filter, NOW);
+    expect(seen.length).toBeGreaterThan(0);
+    return seen.map(({ query, bindings }) =>
+      JSON.stringify(db.prepare(`EXPLAIN QUERY PLAN ${query}`).all(...(bindings as never[]))),
+    );
+  }
+
+  it("🔴 `#p`（＋kinds＋since）走分桶索引", () => {
+    for (const plan of plansOf({ "#p": [ALICE], kinds: [FILE_WRAP_KIND, 1], since: NOW - 60 })) {
+      expect(plan).toContain("idx_offline_bucket");
+    }
+  });
+
+  it("🔴 `authors`＋kinds 走 pubkey 索引（修正前被規劃器誤選成選擇性很低的 idx_offline_kind）", () => {
+    for (const plan of plansOf({ authors: ["b".repeat(64)], kinds: [30_078] })) {
+      expect(plan).toContain("idx_offline_pubkey");
+      expect(plan).not.toContain("idx_offline_kind");
+    }
   });
 });

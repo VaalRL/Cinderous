@@ -191,7 +191,10 @@ export class SqlMessageStore implements OfflineStore {
        WHERE pubkey IS NULL OR kind IS NULL`,
     );
     this.sql(`CREATE INDEX IF NOT EXISTS idx_offline_pubkey ON offline_msgs(pubkey)`);
-    this.sql(`CREATE INDEX IF NOT EXISTS idx_offline_kind ON offline_msgs(kind)`);
+    // ADR-0388：`idx_offline_kind` 拿掉了。`#p` 查詢走分桶索引、`authors` 查詢走 pubkey 索引；它只會在
+    // `authors+kinds` 時被規劃器誤選（kind 的選擇性遠低於 pubkey），卻讓每次寫入與刪除各多寫一列（DO 依寫入列數計費）。
+    // 舊版程式打開時會把它建回來（`IF NOT EXISTS`，回滾照常），這裡再拿掉。
+    this.sql(`DROP INDEX IF EXISTS idx_offline_kind`);
     // ADR-0371 §決策 5：分桶索引——分桶修剪、`#p` 查詢與總量加總都只讀索引，不碰 json。
     //
     // 🔴 為什麼要把欄位塞進索引：`kind`／`bytes` 是後來 `ADD COLUMN` 加的，在列裡排在 json
