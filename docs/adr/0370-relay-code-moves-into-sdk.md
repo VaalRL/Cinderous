@@ -1,6 +1,6 @@
 # 0370. 中繼程式碼與共用協定搬進 Cinderous SDK，`relay/` 成為部署實例
 
-- 狀態：已接受（**分支 `claude/relay-on-sdk` 已完成，合併與部署暫緩**，見〈落地時程〉）
+- 狀態：已接受（**分支 `claude/relay-on-sdk` 已完成，合併與部署暫緩**，見〈落地時程〉）；2026-10-19 相依由 `#v0.18.0` 升到 `#v0.68.3`（含 SDK ADR 0097 額度用完時說明原因、0098 拿掉 `idx_offline_kind`，對應 ADR-0387／0388；新增的 Worker 設定全部可選，錨點沒設、沿用預設）
 - 日期：2026-09-27
 - 相關文件：Cinderous SDK ADR 0006（PRD 矛盾拍板）、ADR 0007（中繼與共用協定搬進 SDK）；
   本庫 ADR-0005（自建 Worker relay）、ADR-0056（DO SQLite）、ADR-0075（容器化自架）、ADR-0241（分片）、
