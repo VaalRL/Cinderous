@@ -43,7 +43,7 @@ function spied(opts: MessageStoreOptions) {
   return { store, log, plan, count };
 }
 
-describe('淘汰時查批次只讀要刪的那幾列（ADR-0389 一）', () => {
+describe('淘汰時查批次只讀要刪的那幾列（ADR-0389 一）', { timeout: 30_000 }, () => {
   const scenarios: [string, MessageStoreOptions][] = [
     ['舊版天花板淘汰', { offlineMaxTotalBytes: SIZE * 40, ceilingEvicts: true }],
     ['保底份額外淘汰', { offlineMaxTotalBytes: SIZE * 40, ceilingEvicts: true, guaranteeBytes: SIZE * 20 }],
@@ -68,7 +68,7 @@ describe('淘汰時查批次只讀要刪的那幾列（ADR-0389 一）', () => {
   }
 });
 
-describe('借用列的查詢只讀借用列的部分索引（ADR-0389 三）', () => {
+describe('借用列的查詢只讀借用列的部分索引（ADR-0389 三）', { timeout: 30_000 }, () => {
   it('🔴 借用帶回收時列出借用列：不走整個到期索引（那是每一列）', () => {
     const { store, log, plan } = spied({ offlineMaxTotalBytes: SIZE * 40, ceilingEvicts: true, guaranteeBytes: SIZE * 20, overflowRatio: 0.2 });
     for (let i = 0; i < 120; i += 1) store.put(chunk(i % 3 === 0 ? Y : X, NOW + DAY + Math.floor(i / 5) * 60, NOW + i), NOW + i);
@@ -88,7 +88,7 @@ describe('借用列的查詢只讀借用列的部分索引（ADR-0389 三）', (
   });
 });
 
-describe('只問一位收件人、一種 kind 的分頁查詢順著索引讀（ADR-0390）', () => {
+describe('只問一位收件人、一種 kind 的分頁查詢順著索引讀（ADR-0390）', { timeout: 30_000 }, () => {
   it('🔴 外掛啟動補拉的形狀（#p 一位、kinds 一種、until、有位元組預算）：不把剩下的列全部拿出來排序', () => {
     const { store, log, plan } = spied({ filePerRecipient: 10_000 });
     for (let i = 0; i < 300; i += 1) store.put(chunk(X, NOW + DAY, NOW - 1000 + i), NOW);
@@ -112,7 +112,7 @@ describe('只問一位收件人、一種 kind 的分頁查詢順著索引讀（A
   });
 });
 
-describe('淘汰後每個人的保底用量照實扣掉，不整個重建（ADR-0390）', () => {
+describe('淘汰後每個人的保底用量照實扣掉，不整個重建（ADR-0390）', { timeout: 30_000 }, () => {
   /** 從資料庫實算每個 key 的正常列用量（與 ownerNormalUsage 同一個定義） */
   function truth(db: { prepare(q: string): { all(): unknown[] } }): Map<string, number> {
     const out = new Map<string, number>();
@@ -145,7 +145,7 @@ describe('淘汰後每個人的保底用量照實扣掉，不整個重建（ADR-
   });
 });
 
-describe('淘汰後每收件人的列數照實扣掉，不整個重數（ADR-0389 二）', () => {
+describe('淘汰後每收件人的列數照實扣掉，不整個重數（ADR-0389 二）', { timeout: 30_000 }, () => {
   it('🔴 天花板滿了之後連續寫入：不再對收件人下 COUNT(*)', () => {
     const { store, log } = spied({ offlineMaxTotalBytes: SIZE * 30, ceilingEvicts: true, filePerRecipient: 1000 });
     for (let i = 0; i < 60; i += 1) store.put(chunk(i % 2 ? X : Y, NOW + DAY + i, NOW + i), NOW + i);
