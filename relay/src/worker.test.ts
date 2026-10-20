@@ -12,7 +12,7 @@
 import { createRequire } from "node:module";
 import type { DatabaseSync as DatabaseSyncType } from "node:sqlite";
 import { buildAuthEvent, buildHttpAuthEvent, buildInboxAck, finalizeEvent, minePow, generateSecretKey, getPublicKey, httpAuthHeader, type NostrEvent, type SecretKey } from "@cinderous/core";
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import worker, { mintTurnResponse, turnPreflightResponse, RelayRoom, type Env } from "./worker.js";
 import {
   DEVELOPER_DOCS_URL,
@@ -2112,5 +2112,45 @@ describe("主平面的反覆重連限速（ADR-0391）", () => {
     const roomLane = newRoom(lane, { RECONNECT_GUARD: "2/600/600" } as Env);
     for (let i = 0; i < 3; i += 1) await upgradeDo(roomLane, IP, "/app/testgame");
     expect(lane.sockets).toHaveLength(3);
+  });
+});
+
+describe("診斷沒認證就斷線的連線（ADR-0392）", () => {
+  const openStrict = async (room: RelayRoom, state: FakeState): Promise<FakeWs> => {
+    const before = state.sockets.length;
+    await room.fetch(new Request(`https://${HOST}/s/b`));
+    return state.sockets[before]!;
+  };
+
+  it("🔴 DIAG_UNAUTH_LOG=1：沒認證就斷線印一行（動詞、kind、回覆、關閉碼），不含 filter 的公鑰", async () => {
+    const logs: string[] = [];
+    const spy = vi.spyOn(console, "log").mockImplementation((...args: unknown[]) => void logs.push(args.join(" ")));
+    try {
+      const state = new FakeState();
+      const room = newRoom(state, { DIAG_UNAUTH_LOG: "1" } as Env);
+      const ws = await openStrict(room, state);
+      room.webSocketMessage(ws as unknown as WebSocket, JSON.stringify(["REQ", "s", { kinds: [10050], authors: ["b".repeat(64)] }]));
+      room.webSocketClose(ws as unknown as WebSocket, 1006);
+      const line = logs.find((l) => l.startsWith("unauth-diag"));
+      expect(line).toMatch(/^unauth-diag in=REQ kinds=10050 out=.*CLOSED:auth-required.* code=1006$/);
+      expect(line).not.toContain("b".repeat(16));
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("預設（沒設 DIAG_UNAUTH_LOG）什麼都不印", async () => {
+    const logs: string[] = [];
+    const spy = vi.spyOn(console, "log").mockImplementation((...args: unknown[]) => void logs.push(args.join(" ")));
+    try {
+      const state = new FakeState();
+      const room = newRoom(state);
+      const ws = await openStrict(room, state);
+      room.webSocketMessage(ws as unknown as WebSocket, JSON.stringify(["REQ", "s", { kinds: [1] }]));
+      room.webSocketClose(ws as unknown as WebSocket, 1006);
+      expect(logs.filter((l) => l.startsWith("unauth-diag"))).toEqual([]);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
