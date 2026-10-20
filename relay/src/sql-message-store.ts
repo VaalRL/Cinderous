@@ -563,14 +563,27 @@ export class SqlMessageStore implements OfflineStore {
       case "reclaim":
       case "excess": {
         // 借用列最先淘汰（最快到期優先）。`reclaim` 刪到放得下為止；`excess` 全部刪掉，再刪計畫好的份額外列。
+        // 🔴 指定部分索引（ADR-0389）：不指定時規劃器為了省掉排序，改走整個到期索引——那是每一列，
+        // 塞滿的檔案車道每次讀約 4,300 列；借用列通常只有幾十到幾百列，讀出來再排序便宜得多。
         const borrowedRows = this.sql(
-          `SELECT rowid AS r, recipient, bytes, created_at FROM offline_msgs WHERE borrowed = 1 ORDER BY expiration ASC, rowid ASC`,
+          `SELECT rowid AS r, recipient, bytes, created_at FROM offline_msgs INDEXED BY idx_offline_borrowed
+           WHERE borrowed = 1 ORDER BY expiration ASC, rowid ASC`,
         );
         const dropped: DroppedRow[] = [];
-        // 整批淘汰（SDK ADR 0085）：要刪的列先查批次（只讀索引），刪完再把同批的其餘列一起刪
-        const batches = this.batchesOf([...borrowedRows.map((row) => Number(row.r)), ...plan.map((row) => row.r)]);
+        // 先決定要刪哪幾列借用列（reclaim 刪到放得下為止），只查那幾列與計畫列的批次與桶別（ADR-0389：不掃整個索引）
+        const borrowedVictims: typeof borrowedRows = [];
+        let room = used;
         for (const row of borrowedRows) {
-          if (decision.type === "reclaim" && used + need <= max) break;
+          if (decision.type === "reclaim" && room + need <= max) break;
+          borrowedVictims.push(row);
+          room -= Number(row.bytes ?? 0);
+        }
+        const info = this.describeRows([
+          ...borrowedVictims.map((row) => Number(row.r)),
+          ...(decision.type === "excess" ? plan.map((row) => row.r) : []),
+        ]);
+        const batches = batchKeysOf(info);
+        for (const row of borrowedVictims) {
           this.sql(`DELETE FROM offline_msgs WHERE rowid = ?`, Number(row.r));
           used -= Number(row.bytes ?? 0);
           if (this.offlineBorrowed !== undefined) this.offlineBorrowed -= Number(row.bytes ?? 0);
@@ -584,7 +597,8 @@ export class SqlMessageStore implements OfflineStore {
             dropped.push(row);
           }
         }
-        this.bucketCounts.clear();
+        // 刪掉的列照實從各桶扣掉（ADR-0389：原本整個清掉，下一次寫入要重數上千列）
+        this.forgetRows(dropped.map((row) => info.get(row.r)));
         this.offlineUsed = used;
         this.recordDrops(dropped, nowSec);
         this.dropBatchMates(dropped.map((row) => batches.get(row.r)), nowSec);
@@ -595,7 +609,8 @@ export class SqlMessageStore implements OfflineStore {
         const victims = this.sql(
           `SELECT rowid AS r, recipient, bytes, created_at FROM offline_msgs ORDER BY expiration ASC LIMIT 256`,
         );
-        const batches = this.batchesOf(victims.map((row) => Number(row.r)));
+        const info = this.describeRows(victims.map((row) => Number(row.r)));
+        const batches = batchKeysOf(info);
         const dropped: DroppedRow[] = [];
         for (const row of victims) {
           if (used + need <= max) break;
@@ -603,12 +618,12 @@ export class SqlMessageStore implements OfflineStore {
           this.sql(`DELETE FROM offline_msgs WHERE rowid = ?`, row.r as number);
           used -= Number(row.bytes ?? 0);
           dropped.push({ r: Number(row.r), recipient: String(row.recipient), created: Number(row.created_at) });
+          this.forgetRows([info.get(Number(row.r))]);
           // 整批淘汰（SDK ADR 0085）
           this.offlineUsed = used;
           used -= this.dropBatchMates([batches.get(Number(row.r))], nowSec);
         }
-        // 淘汰會跨收件人、跨桶，逐一記帳不划算（它只在撞到天花板時發生）——總量記下、分桶作廢。
-        this.bucketCounts.clear();
+        // 分桶列數已逐列扣掉（ADR-0389）；保底與借用的快取照舊作廢
         this.offlineUsed = used;
         this.offlineBorrowed = undefined;
         this.ownerNormal = undefined;
@@ -952,10 +967,14 @@ export class SqlMessageStore implements OfflineStore {
 
   prune(nowSec: number): void {
     this.invalidateUsage();
-    // 借用列到期（2 小時）：同一批正常存放的也一起刪（SDK ADR 0085）。先查它們的批次（部分索引），刪完再刪同批
+    // 借用列到期（2 小時）：同一批正常存放的也一起刪（SDK ADR 0085）。先查它們的批次，刪完再刪同批。
+    // 🔴 從借用列的部分索引找出到期的那幾列、再以 rowid 查批次（ADR-0389）：原本指定 idx_offline_batch，
+    // 規劃器只能把整個批次索引掃一遍（每顆檔案塊都在裡面），每小時約 4,200 列。
     const borrowedBatches = this.sql(
-      `SELECT recipient, batch FROM offline_msgs INDEXED BY idx_offline_batch
-       WHERE batch IS NOT NULL AND rowid IN (SELECT rowid FROM offline_msgs WHERE borrowed = 1 AND expiration IS NOT NULL AND expiration <= ?)`,
+      `SELECT recipient, batch FROM offline_msgs
+       WHERE rowid IN (SELECT rowid FROM offline_msgs INDEXED BY idx_offline_borrowed
+                       WHERE borrowed = 1 AND expiration IS NOT NULL AND expiration <= ?)
+         AND batch IS NOT NULL`,
       nowSec,
     ).map((row) => ({ recipient: String(row.recipient), batch: Number(row.batch) }));
     // 借用列到期算丟棄（SDK ADR 0042）；一般的保存期到期不算——那是宣告過的契約。只讀部分索引。
@@ -1019,18 +1038,38 @@ export class SqlMessageStore implements OfflineStore {
     return msgs + addr;
   }
 
-  /** 這幾列的批次（SDK ADR 0085）：只讀部分索引 `idx_offline_batch`（不碰大表的 json 溢位頁）。不是檔案塊的列不在結果裡。 */
-  private batchesOf(rowids: readonly number[]): Map<number, BatchKey> {
-    const out = new Map<number, BatchKey>();
+  /**
+   * 這幾列的收件人、批次（SDK ADR 0085）與桶別：**以 rowid 逐列查**，只讀要刪的那幾列（ADR-0389）。
+   *
+   * 🔴 原本寫成 `INDEXED BY idx_offline_batch ... rowid IN (...)`，想「只讀索引、不碰 json 溢位頁」，
+   * 但部分索引不是以 rowid 排序——SQLite 只能把整個索引掃一遍（每顆檔案塊都在裡面），
+   * 塞滿的檔案車道每次淘汰讀約 4,400 列，2026-10-19 一小時把錨點 1 的讀取額度用完。
+   * 改成 rowid 查詢：要讀這幾列在大表上的欄位（`batch`／`kind` 在 json 後面，要走溢位頁），但只有這幾列。
+   */
+  private describeRows(rowids: readonly number[]): Map<number, RowInfo> {
+    const out = new Map<number, RowInfo>();
     if (rowids.length === 0) return out;
     for (const row of this.sql(
-      `SELECT rowid AS r, recipient, batch FROM offline_msgs INDEXED BY idx_offline_batch
-       WHERE batch IS NOT NULL AND rowid IN (SELECT value FROM json_each(?))`,
+      `SELECT rowid AS r, recipient, batch, kind FROM offline_msgs WHERE rowid IN (SELECT value FROM json_each(?))`,
       JSON.stringify(rowids),
     )) {
-      out.set(Number(row.r), { recipient: String(row.recipient), batch: Number(row.batch) });
+      out.set(Number(row.r), {
+        recipient: String(row.recipient),
+        file: Number(row.kind) === FILE_WRAP_KIND,
+        ...(row.batch === null || row.batch === undefined ? {} : { batch: Number(row.batch) }),
+      });
     }
     return out;
+  }
+
+  /** 這幾列被刪掉了：從各自那一桶的列數快取扣掉（沒快取的桶下次照舊重數）。ADR-0389 */
+  private forgetRows(rows: readonly (RowInfo | undefined)[]): void {
+    for (const row of rows) {
+      if (row === undefined) continue;
+      const key = bucketKey(row.recipient, row.file);
+      const count = this.bucketCounts.get(key);
+      if (count !== undefined) this.bucketCounts.set(key, Math.max(0, count - 1));
+    }
   }
 
   /**
@@ -1051,6 +1090,10 @@ export class SqlMessageStore implements OfflineStore {
       );
       if (mates.length === 0) continue;
       this.sql(`DELETE FROM offline_msgs WHERE recipient = ? AND batch = ?`, recipient, batch);
+      // 有批次的列一定是這位收件人的檔案塊（ADR-0389：照實扣掉，不清整個快取）
+      const key = bucketKey(recipient, true);
+      const count = this.bucketCounts.get(key);
+      if (count !== undefined) this.bucketCounts.set(key, Math.max(0, count - mates.length));
       for (const m of mates) {
         freed += Number(m.bytes ?? 0);
         dropped.push({ r: Number(m.r), recipient, created: Number(m.created_at) });
@@ -1060,7 +1103,6 @@ export class SqlMessageStore implements OfflineStore {
       if (this.offlineUsed !== undefined) this.offlineUsed -= freed;
       this.offlineBorrowed = undefined;
       this.ownerNormal = undefined;
-      this.bucketCounts.clear();
     }
     this.recordDrops(dropped, nowSec);
     return freed;
@@ -1094,7 +1136,7 @@ export class SqlMessageStore implements OfflineStore {
           recipient,
           count - limit,
         );
-        const batches = file ? this.batchesOf(rows.map((row) => Number(row.r))) : new Map<number, BatchKey>();
+        const batches = file ? batchKeysOf(this.describeRows(rows.map((row) => Number(row.r)))) : new Map<number, BatchKey>();
         for (const row of rows) {
           this.sql(`DELETE FROM offline_msgs WHERE rowid = ?`, row.r as number);
           if (this.offlineUsed !== undefined) this.offlineUsed -= Number(row.bytes ?? 0);
@@ -1108,10 +1150,10 @@ export class SqlMessageStore implements OfflineStore {
             rows.map((row) => ({ r: Number(row.r), recipient, created: Number(row.created_at) })),
             nowSec,
           );
-          // 整批淘汰（SDK ADR 0085）：刪到某一批的一部分，那批其餘的一起刪；這一桶的列數重算
-          if (this.dropBatchMates(rows.map((row) => batches.get(Number(row.r))), nowSec) > 0) {
-            count = Number(this.sql(`SELECT COUNT(*) AS n FROM offline_msgs WHERE recipient = ? AND ${bucket}`, recipient)[0]?.n ?? 0);
-          }
+          // 整批淘汰（SDK ADR 0085）：刪到某一批的一部分，那批其餘的一起刪；dropBatchMates 會從快取扣掉（ADR-0389，不再重數）
+          this.bucketCounts.set(key, count);
+          this.dropBatchMates(rows.map((row) => batches.get(Number(row.r))), nowSec);
+          count = this.bucketCounts.get(key) ?? count;
         }
       }
       this.bucketCounts.set(key, count);
@@ -1126,6 +1168,21 @@ function bucketKey(recipient: string, file: boolean): string {
 
 /** 保底份額淘汰一次最多看幾列候選（每列只讀索引欄位）。 */
 const EXCESS_CANDIDATES = 1024;
+
+/** 一列的收件人、桶別與批次（ADR-0389 的 `describeRows`）。 */
+interface RowInfo {
+  recipient: string;
+  /** kind 1060（檔案塊那一桶） */
+  file: boolean;
+  batch?: number;
+}
+
+/** `describeRows` 的結果裡有批次的那些列 → 批次鍵（SDK ADR 0085）。 */
+function batchKeysOf(info: ReadonlyMap<number, RowInfo>): Map<number, BatchKey> {
+  const out = new Map<number, BatchKey>();
+  for (const [r, row] of info) if (row.batch !== undefined) out.set(r, { recipient: row.recipient, batch: row.batch });
+  return out;
+}
 
 /** 檔案塊的批次鍵（SDK ADR 0085）。 */
 interface BatchKey {
