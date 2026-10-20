@@ -1412,7 +1412,7 @@ describe("車道的成本護欄（ADR-0366 §容量）", () => {
     expect(touchedDo).toBe(true);
   });
 
-  it("🔴 嚴格平面不受此限制——那裡是本專案自己的使用者，且要求 NIP-42", async () => {
+  it("🔴 嚴格平面不套車道這一道——它另有比較寬的 STRICT_UPGRADE_LIMIT（ADR-0391）", async () => {
     const { binding, keys } = limiter(false);
     for (const path of ["/", "/s/a", "/presence"]) {
       const [status] = await upgrade(path, { APP_LANE_LIMIT: binding }, "203.0.113.7");
@@ -2010,5 +2010,107 @@ describe("DO 起不來時說明原因（ADR-0387；額度用完不再只回 1101
     const ok = await upgradeWith(() => Promise.resolve(new Response(null, { status: 101 })));
     expect(ok.status).toBe(101);
     expect(ok.server).toBeUndefined();
+  });
+});
+
+describe("主平面的反覆重連限速（ADR-0391）", () => {
+  const IP = "203.0.113.7";
+  const limiter = (allow: boolean) => {
+    const keys: string[] = [];
+    return {
+      keys,
+      binding: {
+        limit: (opts: { key: string }) => {
+          keys.push(opts.key);
+          return Promise.resolve({ success: allow });
+        },
+      },
+    };
+  };
+  /** 經 worker 送一次升級；回傳 [狀態碼, 是否碰到 DO, worker 自建那組的伺服端] */
+  const viaWorker = async (path: string, env: Partial<Env>, ip?: string) => {
+    let touchedDo = false;
+    FakeWebSocketPair.last = undefined;
+    const full = {
+      ...env,
+      RELAY_ROOM: {
+        idFromName: () => {
+          touchedDo = true;
+          return {} as never;
+        },
+        get: () => ({ fetch: () => new Response(null, { status: 101 }) }),
+      },
+    } as unknown as Env;
+    const headers: Record<string, string> = { Upgrade: "websocket" };
+    if (ip !== undefined) headers["CF-Connecting-IP"] = ip;
+    const res = await worker.fetch(new Request(`https://${HOST}${path}`, { headers }), full);
+    // 上面先設成 undefined，TS 會把它收窄掉；這裡讀的是 worker 剛建立的那一組
+    return { status: res.status, touchedDo, server: (FakeWebSocketPair.last as FakeWebSocketPair | undefined)?.[1] };
+  };
+  const noticeOf = (ws: FakeWs | undefined): string => (JSON.parse(ws?.sent[0] ?? "[]") as unknown[])[1] as string;
+
+  it("🔴 Worker 一道：以「IP＋路徑」計數，超過就說明原因並以 1013 關閉，**不碰 DO**", async () => {
+    // 鍵用 DO 名而不是原始路徑：`/s/B` 這類大小寫變化就繞不過去
+    for (const [path, doName] of [["/", "global"], ["/s/b", "shard-b"], ["/s/B", "shard-b"], ["/presence", "presence"]] as const) {
+      const { binding, keys } = limiter(false);
+      const { status, touchedDo, server } = await viaWorker(path, { STRICT_UPGRADE_LIMIT: binding }, IP);
+      expect(touchedDo, path).toBe(false);
+      expect(status, path).toBe(101);
+      expect(keys, path).toEqual([`${IP} ${doName}`]);
+      expect(noticeOf(server).startsWith("rate-limited:"), path).toBe(true);
+      expect(noticeOf(server), path).toContain("reconnect");
+      expect(server?.closeCode, path).toBe(1013);
+    }
+  });
+
+  it("額度內照常升級；車道不套這一道（車道有自己的 APP_LANE_LIMIT）", async () => {
+    const ok = limiter(true);
+    expect(await viaWorker("/s/b", { STRICT_UPGRADE_LIMIT: ok.binding }, IP)).toMatchObject({ status: 101, touchedDo: true });
+    const deny = limiter(false);
+    expect(await viaWorker("/app/testgame", { STRICT_UPGRADE_LIMIT: deny.binding }, IP)).toMatchObject({ status: 101, touchedDo: true });
+    expect(deny.keys).toEqual([]);
+  });
+
+  it("沒有 CF-Connecting-IP 或沒有綁定就不限——不把所有人塞進同一個桶", async () => {
+    const deny = limiter(false);
+    expect(await viaWorker("/s/b", { STRICT_UPGRADE_LIMIT: deny.binding })).toMatchObject({ status: 101, touchedDo: true });
+    expect(deny.keys).toEqual([]);
+    expect(await viaWorker("/s/b", {}, IP)).toMatchObject({ status: 101, touchedDo: true });
+  });
+
+  const upgradeDo = (room: RelayRoom, ip: string, path = "/s/b") =>
+    room.fetch(new Request(`https://${HOST}${path}`, { headers: { Upgrade: "websocket", "CF-Connecting-IP": ip } }));
+
+  it("🔴 DO 一道：同一個 IP 10 分鐘內第 21 次在 acceptWebSocket 之前回絕（不掛連線、不寫儲存）；別的 IP 照常", async () => {
+    const state = new FakeState();
+    const room = newRoom(state);
+    for (let i = 0; i < 20; i += 1) await upgradeDo(room, IP);
+    expect(state.sockets).toHaveLength(20);
+    const kvBefore = JSON.stringify([...state.kv]);
+    FakeWebSocketPair.last = undefined;
+    const res = await upgradeDo(room, IP);
+    expect(res.status).toBe(101);
+    expect(state.sockets).toHaveLength(20);
+    expect(JSON.stringify([...state.kv])).toBe(kvBefore);
+    const server = (FakeWebSocketPair.last as FakeWebSocketPair | undefined)?.[1];
+    expect(noticeOf(server).startsWith("rate-limited:")).toBe(true);
+    expect(server?.closeCode).toBe(1013);
+    await upgradeDo(room, "198.51.100.9");
+    expect(state.sockets).toHaveLength(21);
+  });
+
+  it("DO 一道可以用 RECONNECT_GUARD 調整或關掉；車道的 DO 不套", async () => {
+    const off = new FakeState();
+    const roomOff = newRoom(off, { RECONNECT_GUARD: "off" } as Env);
+    for (let i = 0; i < 25; i += 1) await upgradeDo(roomOff, IP);
+    expect(off.sockets).toHaveLength(25);
+    const tight = new FakeState();
+    const roomTight = newRoom(tight, { RECONNECT_GUARD: "2/600/600" } as Env);
+    for (let i = 0; i < 3; i += 1) await upgradeDo(roomTight, IP);
+    expect(tight.sockets).toHaveLength(2);
+    const lane = new FakeState();
+    const roomLane = newRoom(lane, { RECONNECT_GUARD: "2/600/600" } as Env);
+    for (let i = 0; i < 3; i += 1) await upgradeDo(roomLane, IP, "/app/testgame");
+    expect(lane.sockets).toHaveLength(3);
   });
 });
