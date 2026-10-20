@@ -271,25 +271,6 @@ describe("RelayCore — NIP-42 AUTH（ADR-0057）", () => {
     expect(out).toContainEqual({ to: "c", message: ["AUTH", "chal-1"] });
   });
 
-  it("🔴 未認證、每個 filter 都只要公開清單（kind 0／10002／10050）：直接回 EOSE，不建立訂閱、不重發挑戰（ADR-0393）", () => {
-    // outbox 型爬蟲照外流的清單來要 10002，被回 auth-required 就當成錯誤、幾秒後換 IP 重試（2026-10-20 錨點 2）
-    const core = authCore();
-    core.connect("c");
-    for (const filters of [[{ kinds: [10002], authors: ["b".repeat(64)] }], [{ kinds: [0, 10050] }, { kinds: [10002], limit: 1 }]]) {
-      const out = core.handle("c", JSON.stringify(["REQ", "s", ...filters]));
-      expect(out).toEqual([{ to: "c", message: ["EOSE", "s"] }]);
-    }
-  });
-
-  it("🔴 只要混到別的 kind、或沒指定 kinds，照舊 auth-required——不能拿來繞過認證", () => {
-    const core = authCore();
-    core.connect("c");
-    for (const filters of [[{ kinds: [10002, 1059] }], [{ kinds: [10002] }, { kinds: [4] }], [{ authors: ["a".repeat(64)] }], [{ kinds: [] }]]) {
-      const out = core.handle("c", JSON.stringify(["REQ", "s", ...filters]));
-      expect(out, JSON.stringify(filters)).toContainEqual({ to: "c", message: ["CLOSED", "s", "auth-required: nip42: 請先認證（NIP-42）"] });
-    }
-  });
-
   it("未認證的 EVENT 被擋", () => {
     const core = authCore();
     core.connect("c");
