@@ -20,6 +20,7 @@ import { RelayCore, type ConnSnapshot, type Outbound } from "./relay-core.js";
 import { routeForPath } from "./shard.js";
 import { type SqlExec, SqlMessageStore } from "./sql-message-store.js";
 import { ReconnectGuard, reconnectGuardFrom } from "./reconnect-guard";
+import { UnauthDiag, unauthDiagEnabled } from "./unauth-diag";
 
 export interface Env {
   RELAY_ROOM: DurableObjectNamespace;
@@ -142,6 +143,11 @@ export interface Env {
    * 只在記憶體計數、不寫儲存。
    */
   RECONNECT_GUARD?: string;
+  /**
+   * 診斷「沒認證就斷線」的主平面連線（ADR-0392）：`1`＝每條印一行摘要到 console（動詞、kind、回覆、存活秒數、關閉碼；
+   * 不記內容、公鑰、IP）。**預設關閉**；只在要查的時候以 `--var DIAG_UNAUTH_LOG:1` 部署，看完重新部署關掉。
+   */
+  DIAG_UNAUTH_LOG?: string;
   // ── NIP-11 Relay Information Document（ADR-0260／0089／0092）─────────────────
   /** 站名／描述／營運者公鑰（hex）／聯絡方式；未設＝該欄不出現在文件裡。 */
   RELAY_NAME?: string;
@@ -578,6 +584,13 @@ export class RelayRoom {
     });
   }
 
+  /** 沒認證就斷線的診斷（ADR-0392）：`DIAG_UNAUTH_LOG=1` 才有，否則 null */
+  #unauthDiag: UnauthDiag | null | undefined;
+  private unauthDiag(): UnauthDiag | null {
+    if (this.#unauthDiag === undefined) this.#unauthDiag = unauthDiagEnabled(this.env.DIAG_UNAUTH_LOG) ? new UnauthDiag() : null;
+    return this.#unauthDiag;
+  }
+
   /** 反覆重連限速（ADR-0391）：第一次用到才依 `RECONNECT_GUARD` 建立；`off` 時為 null */
   #reconnectGuard: ReconnectGuard | null | undefined;
   private reconnectGuard(): ReconnectGuard | null {
@@ -673,6 +686,7 @@ export class RelayRoom {
     // 設定檔——同一份 Worker 可能同時服務 workers.dev 與自訂網域，寫死任一個都會誤擋另一個。
     const relayHost = hostOf(request);
     const out = this.core.connect(connId, relayHost); // 產生 NIP-42 AUTH 挑戰
+    if (wanted !== "app") this.unauthDiag()?.open(connId);
     const unsaved = this.persist(server, connId); // 存回 attachment（含挑戰），休眠後可還原
     this.dispatch([...restored, ...out, ...unsaved]);
     return new Response(null, { status: 101, webSocket: client });
@@ -683,7 +697,13 @@ export class RelayRoom {
     const connId = connIdOf(ws);
     if (!connId) return this.dispatch(restored);
     const raw = typeof message === "string" ? message : "";
+    const diag = this.unauthDiag();
+    diag?.inbound(connId, raw);
     const out = this.core.handle(connId, raw);
+    if (diag) {
+      for (const o of out) if (o.to === connId) diag.outbound(connId, o.message);
+      if (this.core.isAuthenticated(connId)) diag.authed(connId);
+    }
     const unsaved = this.persist(ws, connId); // 訂閱/認證可能已變，更新 attachment（沒變則零寫入）
     // 存不住的訂閱已被關掉：它的 EVENT/EOSE 不送，只送 CLOSED（說明原因）。
     const closed = new Set(unsaved.map((o) => o.message[1]));
@@ -691,10 +711,14 @@ export class RelayRoom {
     this.dispatch([...restored, ...kept, ...unsaved]);
   }
 
-  webSocketClose(ws: WebSocket): void {
+  webSocketClose(ws: WebSocket, code?: number): void {
     const restored = this.ensureHydrated();
     const connId = connIdOf(ws);
-    if (connId) this.forget(connId);
+    if (connId) {
+      const line = this.unauthDiag()?.close(connId, code);
+      if (line) console.log(line);
+      this.forget(connId);
+    }
     try {
       ws.close();
     } catch {
@@ -706,7 +730,11 @@ export class RelayRoom {
   webSocketError(ws: WebSocket): void {
     const restored = this.ensureHydrated();
     const connId = connIdOf(ws);
-    if (connId) this.forget(connId);
+    if (connId) {
+      const line = this.unauthDiag()?.close(connId, undefined);
+      if (line) console.log(line);
+      this.forget(connId);
+    }
     this.dispatch(restored);
   }
 
