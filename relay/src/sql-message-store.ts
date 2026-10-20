@@ -121,6 +121,14 @@ function pushTagClauses(
 
 /** 附加一條「欄位屬於這串值」的 WHERE 子句——整串值只佔一個綁定參數（ADR-0372）。 */
 const pushIn = (where: string[], bind: (string | number)[], column: string, values: readonly unknown[]): void => {
+  // 只有一個值時直接比等號（ADR-0390）：`IN (json_each)` 讓 SQLite 不能順著索引的順序讀，
+  // 分頁查詢（外掛啟動補拉收件匣）每一頁都得把剩下的列全部拿出來排序；`=` 讀夠一頁就停。
+  const only = Array.isArray(values) && values.length === 1 ? values[0] : undefined;
+  if (typeof only === "string" || typeof only === "number") {
+    where.push(`${column} = ?`);
+    bind.push(only);
+    return;
+  }
   const { clause, binding } = inJson(column, values);
   where.push(clause);
   bind.push(binding);
@@ -345,17 +353,6 @@ export class SqlMessageStore implements OfflineStore {
     );
     this.ownerNormal = usage;
     return usage;
-  }
-
-  /** 重算某一個 key 的正常列用量（FIFO 刪了它的列之後；只有快取存在時才需要）。 */
-  private refreshOwner(owner: string): void {
-    if (this.ownerNormal === undefined) return;
-    const n = (q: string): number => Number(this.sql(q, owner, owner)[0]?.n ?? 0) || 0;
-    const total = n(`SELECT COALESCE(SUM(bytes), 0) AS n FROM offline_msgs WHERE recipient = ? OR (recipient = '' AND pubkey = ?)`);
-    const borrowed = n(
-      `SELECT COALESCE(SUM(bytes), 0) AS n FROM offline_msgs WHERE borrowed = 1 AND (recipient = ? OR (recipient = '' AND pubkey = ?))`,
-    );
-    this.ownerNormal.set(owner, total - borrowed);
   }
 
   put(event: NostrEvent, nowSec: number): boolean {
@@ -623,10 +620,9 @@ export class SqlMessageStore implements OfflineStore {
           this.offlineUsed = used;
           used -= this.dropBatchMates([batches.get(Number(row.r))], nowSec);
         }
-        // 分桶列數已逐列扣掉（ADR-0389）；保底與借用的快取照舊作廢
+        // 分桶列數已逐列扣掉（ADR-0389）；借用量與保底用量也照實扣掉（ADR-0390）
+        this.forgetUsage(dropped.map((row) => info.get(row.r)));
         this.offlineUsed = used;
-        this.offlineBorrowed = undefined;
-        this.ownerNormal = undefined;
         this.recordDrops(dropped, nowSec);
         return used + need <= max ? { borrowed: false } : undefined;
       }
@@ -1050,16 +1046,34 @@ export class SqlMessageStore implements OfflineStore {
     const out = new Map<number, RowInfo>();
     if (rowids.length === 0) return out;
     for (const row of this.sql(
-      `SELECT rowid AS r, recipient, batch, kind FROM offline_msgs WHERE rowid IN (SELECT value FROM json_each(?))`,
+      `SELECT rowid AS r, recipient, pubkey, bytes, borrowed, batch, kind FROM offline_msgs WHERE rowid IN (SELECT value FROM json_each(?))`,
       JSON.stringify(rowids),
     )) {
       out.set(Number(row.r), {
         recipient: String(row.recipient),
+        owner: String(row.recipient) !== "" ? String(row.recipient) : String(row.pubkey ?? ""),
+        bytes: Number(row.bytes ?? 0),
+        borrowed: Number(row.borrowed) === 1,
         file: Number(row.kind) === FILE_WRAP_KIND,
         ...(row.batch === null || row.batch === undefined ? {} : { batch: Number(row.batch) }),
       });
     }
     return out;
+  }
+
+  /**
+   * 這幾列被刪掉了：借用量與每個人的正常列用量照實扣掉（ADR-0390）。原本整個作廢，
+   * 下一次要判斷保底時以 `GROUP BY` 掃過整個分桶索引重建（塞滿的檔案車道每次約 4,200 列）。
+   */
+  private forgetUsage(rows: readonly (RowInfo | undefined)[]): void {
+    for (const row of rows) {
+      if (row === undefined) continue;
+      if (row.borrowed) {
+        if (this.offlineBorrowed !== undefined) this.offlineBorrowed -= row.bytes;
+      } else if (this.ownerNormal !== undefined) {
+        this.ownerNormal.set(row.owner, (this.ownerNormal.get(row.owner) ?? 0) - row.bytes);
+      }
+    }
   }
 
   /** 這幾列被刪掉了：從各自那一桶的列數快取扣掉（沒快取的桶下次照舊重數）。ADR-0389 */
@@ -1083,8 +1097,9 @@ export class SqlMessageStore implements OfflineStore {
     let freed = 0;
     const dropped: DroppedRow[] = [];
     for (const { recipient, batch } of unique.values()) {
+      // borrowed／pubkey 不在批次索引上，要讀大表的這幾列（ADR-0390：換來不必整個重建保底用量）
       const mates = this.sql(
-        `SELECT rowid AS r, bytes, created_at FROM offline_msgs INDEXED BY idx_offline_batch WHERE recipient = ? AND batch = ?`,
+        `SELECT rowid AS r, bytes, created_at, borrowed, pubkey FROM offline_msgs INDEXED BY idx_offline_batch WHERE recipient = ? AND batch = ?`,
         recipient,
         batch,
       );
@@ -1098,12 +1113,17 @@ export class SqlMessageStore implements OfflineStore {
         freed += Number(m.bytes ?? 0);
         dropped.push({ r: Number(m.r), recipient, created: Number(m.created_at) });
       }
+      this.forgetUsage(
+        mates.map((m) => ({
+          recipient,
+          owner: recipient,
+          bytes: Number(m.bytes ?? 0),
+          borrowed: Number(m.borrowed) === 1,
+          file: true,
+        })),
+      );
     }
-    if (freed > 0) {
-      if (this.offlineUsed !== undefined) this.offlineUsed -= freed;
-      this.offlineBorrowed = undefined;
-      this.ownerNormal = undefined;
-    }
+    if (freed > 0 && this.offlineUsed !== undefined) this.offlineUsed -= freed;
     this.recordDrops(dropped, nowSec);
     return freed;
   }
@@ -1136,7 +1156,8 @@ export class SqlMessageStore implements OfflineStore {
           recipient,
           count - limit,
         );
-        const batches = file ? batchKeysOf(this.describeRows(rows.map((row) => Number(row.r)))) : new Map<number, BatchKey>();
+        const info = this.describeRows(rows.map((row) => Number(row.r)));
+        const batches = file ? batchKeysOf(info) : new Map<number, BatchKey>();
         for (const row of rows) {
           this.sql(`DELETE FROM offline_msgs WHERE rowid = ?`, row.r as number);
           if (this.offlineUsed !== undefined) this.offlineUsed -= Number(row.bytes ?? 0);
@@ -1144,8 +1165,8 @@ export class SqlMessageStore implements OfflineStore {
         count -= rows.length;
         // 刪掉的可能有借用列（分桶索引上看不出來）：借用量作廢、這位收件人的保底用量重算（SDK ADR 0042）
         if (rows.length > 0) {
-          this.offlineBorrowed = undefined;
-          this.refreshOwner(recipient);
+          // 借用量與這位收件人的保底用量照實扣掉（ADR-0390：原本逐人重算，每次約 1,400 列）
+          this.forgetUsage(rows.map((row) => info.get(Number(row.r))));
           this.recordDrops(
             rows.map((row) => ({ r: Number(row.r), recipient, created: Number(row.created_at) })),
             nowSec,
@@ -1172,6 +1193,10 @@ const EXCESS_CANDIDATES = 1024;
 /** 一列的收件人、桶別與批次（ADR-0389 的 `describeRows`）。 */
 interface RowInfo {
   recipient: string;
+  /** 保底用量的 key：收件人；沒有收件人的列＝作者 */
+  owner: string;
+  bytes: number;
+  borrowed: boolean;
   /** kind 1060（檔案塊那一桶） */
   file: boolean;
   batch?: number;

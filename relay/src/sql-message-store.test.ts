@@ -222,7 +222,7 @@ describe("SqlMessageStore — 查詢下推與筆數上限（ADR-0235 C2）", () 
     selects.length = 0;
 
     expect(s.query(f({ authors: ["alice"] }), 1000).map((e) => e.id)).toEqual(["m1"]);
-    expect(selects.some((q) => /pubkey\s+IN/i.test(q))).toBe(true);
+    expect(selects.some((q) => /pubkey\s+(IN|=)/i.test(q))).toBe(true);
   });
 
   it("kinds 下推到 SQL", () => {
@@ -233,7 +233,7 @@ describe("SqlMessageStore — 查詢下推與筆數上限（ADR-0235 C2）", () 
     selects.length = 0;
 
     expect(s.query(f({ authors: ["author"], kinds: [1060] }), 1000).map((e) => e.id)).toEqual(["o"]);
-    expect(selects.some((q) => /kind\s+IN/i.test(q))).toBe(true);
+    expect(selects.some((q) => /kind\s+(IN|=)/i.test(q))).toBe(true);
   });
 
   it("authors 為空陣列：直接回空，完全不打 DB（最便宜的消防水管 payload）", () => {
@@ -254,7 +254,7 @@ describe("SqlMessageStore — 查詢下推與筆數上限（ADR-0235 C2）", () 
     selects.length = 0;
 
     expect(s.query(f({ ids: ["m2"] }), 1000).map((e) => e.id)).toEqual(["m2"]);
-    expect(selects.some((q) => /\bid\s+IN/i.test(q))).toBe(true);
+    expect(selects.some((q) => /\bid\s+(IN|=)/i.test(q))).toBe(true);
   });
 
   // 「訂閱必須具名」是 relay-core `scoped()` 的職責（ADR-0123），不放在儲存層——儲存層若也
