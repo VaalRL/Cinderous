@@ -102,6 +102,10 @@ describe("速率限制 binding 兩份同步（ADR-0366 §容量）", () => {
     expect(top["APP_LANE_LIMIT"]).toBeDefined();
   });
 
+  it("🔴 主平面升級限速也要存在（ADR-0391）——沒有它，一個不退避的用戶端就能吃掉一半的 DO 請求額度", () => {
+    expect(top["STRICT_UPGRADE_LIMIT"]).toBeDefined();
+  });
+
   it("🔴 頂層有的每一個 binding，統一模式也要有同樣的額度", () => {
     const drift = Object.entries(top)
       .filter(([k, v]) => unified[k] !== v)

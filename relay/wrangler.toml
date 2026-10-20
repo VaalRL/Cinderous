@@ -127,6 +127,18 @@ namespace_id = "1002"
 limit = 30
 period = 60
 
+# 主平面的升級限速（ADR-0391）：以「IP＋DO 名」計數（主平面分 16 片，共用 IP 後面的人分散在不同的桶）。
+# 正常用戶端每個分片一條連線、連上就掛著；每分鐘 4 次只有不退避的用戶端會碰到
+# （2026-10-20：錨點 2 有個來源每 8 秒重連 shard-b 一次，一天約 4.5 萬次 DO 請求）。
+# 長窗口那道在 DO 記憶體裡（RECONNECT_GUARD，預設 20/600/600）。⚠ 同樣是 per-location 計數且最終一致。
+[[ratelimits]]
+name = "STRICT_UPGRADE_LIMIT"
+namespace_id = "1003"
+
+[ratelimits.simple]
+limit = 4
+period = 60
+
 # ── 統一節點模式（ADR-0354，選配）───────────────────────────────────────────────
 # 預設（上面那份設定）＝**純 relay**：只轉發密文，不送任何程式碼給瀏覽器——攻擊面最小，
 # 官方錨點站恆用此模式。下面的 `unified` 環境則讓**同一座 Worker 同時是網頁版**：
@@ -199,4 +211,12 @@ namespace_id = "1002"
 
 [env.unified.ratelimits.simple]
 limit = 30
+period = 60
+
+[[env.unified.ratelimits]]
+name = "STRICT_UPGRADE_LIMIT"
+namespace_id = "1003"
+
+[env.unified.ratelimits.simple]
+limit = 4
 period = 60
