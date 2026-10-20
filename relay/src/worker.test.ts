@@ -2129,10 +2129,10 @@ describe("診斷沒認證就斷線的連線（ADR-0392）", () => {
       const state = new FakeState();
       const room = newRoom(state, { DIAG_UNAUTH_LOG: "1" } as Env);
       const ws = await openStrict(room, state);
-      room.webSocketMessage(ws as unknown as WebSocket, JSON.stringify(["REQ", "s", { kinds: [10050], authors: ["b".repeat(64)] }]));
+      room.webSocketMessage(ws as unknown as WebSocket, JSON.stringify(["REQ", "s", { kinds: [4], authors: ["b".repeat(64)] }]));
       room.webSocketClose(ws as unknown as WebSocket, 1006);
       const line = logs.find((l) => l.startsWith("unauth-diag"));
-      expect(line).toMatch(/^unauth-diag in=REQ kinds=10050 out=.*CLOSED:auth-required.* code=1006$/);
+      expect(line).toMatch(/^unauth-diag in=REQ kinds=4 out=.*CLOSED:auth-required.* code=1006$/);
       expect(line).not.toContain("b".repeat(16));
     } finally {
       spy.mockRestore();

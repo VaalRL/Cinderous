@@ -91,6 +91,23 @@ export function isEphemeral(kind: number): boolean {
 export { leadingZeroBits } from "@cinderous/core";
 
 /** 要送往某連線的一則訊息。 */
+/**
+ * 公開清單類的 kind（ADR-0393）：kind 0（個人檔案）、10002（NIP-65 中繼清單）、10050（NIP-17 收件中繼）。
+ *
+ * 這些資料發佈在公開的索引中繼，不在嚴格平面上給第三方讀。outbox 型爬蟲照外流的清單來要它們，
+ * 被回 `auth-required` 就當成錯誤、幾秒後換 IP 重試（2026-10-20 錨點 2：一天約 1.1 萬條連線）。
+ * 回一個正常的 EOSE（空結果），它就照正常的排程走。
+ */
+export const PUBLIC_LIST_KINDS: ReadonlySet<number> = new Set([0, 10002, 10050]);
+
+/** 每個 filter 都指定了 kinds、而且全部是公開清單類：沒認證也可以安心回 EOSE（不會洩漏任何東西） */
+export function onlyPublicListKinds(filters: readonly RelayFilter[]): boolean {
+  return (
+    filters.length > 0 &&
+    filters.every((f) => Array.isArray(f.kinds) && f.kinds.length > 0 && f.kinds.every((k) => PUBLIC_LIST_KINDS.has(k)))
+  );
+}
+
 export interface Outbound {
   to: string;
   message: RelayMessage;
@@ -425,6 +442,8 @@ export class RelayCore {
         return this.handleEvent(connId, msg.event);
       case "REQ":
         if (this.requireAuth && !this.isAuthed(connId)) {
+          // 沒認證、只要公開清單（ADR-0393）：直接回 EOSE——不查儲存、不建立訂閱、不重發挑戰
+          if (onlyPublicListKinds(msg.filters)) return [{ to: connId, message: ["EOSE", msg.subId] }];
           return this.authRequired(connId, ["CLOSED", msg.subId, REJECT.authRequired]);
         }
         // 🔴 車道**不要求** AUTH，但範圍檢查照做（ADR-0369）。原本這裡只有 `requireAuth`，
