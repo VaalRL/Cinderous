@@ -24,6 +24,7 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
+          check-latest: true
           cache: pnpm
       # `--ignore-scripts`（ADR-0235 C5）：不執行任何相依的 install 生命週期腳本。
       # pnpm 10 預設已封鎖（無 `onlyBuiltDependencies`），這行是把它變成**明示的契約**
@@ -46,6 +47,7 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
+          check-latest: true
           cache: pnpm
       - run: pnpm install --frozen-lockfile --ignore-scripts
       # 硬閘：**會出貨給使用者**的相依必須零已知弱點。這是一個 E2E 加密通訊軟體，
