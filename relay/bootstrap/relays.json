@@ -9,8 +9,8 @@
     },
     {
       "url": "wss://cinder-relay.jt0856.workers.dev",
-      "accepting": false
+      "weight": 2
     }
   ],
-  "updatedAt": 1792618753
+  "updatedAt": 1792643931
 }
