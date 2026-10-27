@@ -155,11 +155,24 @@ describe("NIP-17/59 Gift Wrap 離線私訊", () => {
       expect(selfCopyTarget(rumor)).toBe(bobPk); // 沒有這個，另一台裝置無從歸檔到正確對話
     });
 
-    it("收件人標記走 `to` tag，**不可**用 `p` tag——否則會被誤判為 @提及", () => {
+    it("收件人同時寫在 `to`（自封副本歸檔）與標準 `p`（NIP-17 對話歸屬，ADR-0382 §8）；`p`＝收件人不算 @提及", () => {
       const { rumor } = unwrapMessage(wrapMessage("嗨", aliceSk, bobPk).events[0]!, bobSk);
-      // 未 @任何人時，rumor 不應有任何 p tag（否則 mentionedPubkeys 會把收件人當成被提及者）
+      expect(rumor.tags.filter((t) => t[0] === "p")).toEqual([["p", bobPk]]);
+      expect(selfCopyTarget(rumor)).toBe(bobPk);
+      // 第三方客戶端以 rumor 的 `p`（加上寄件人）決定對話；Cinderous 的提及判斷要把對話對象排除
       expect(mentionedPubkeys(rumor)).toEqual([]);
       expect(isMentioned(rumor, bobPk)).toBe(false);
+    });
+
+    it("1:1 裡 @收件人：`p` 只有一個，不重複", () => {
+      const { rumor } = unwrapMessage(wrapMessage("@Bob 嗨", aliceSk, bobPk, { mentions: [bobPk] }).events[0]!, bobSk);
+      expect(rumor.tags.filter((t) => t[0] === "p")).toEqual([["p", bobPk]]);
+    });
+
+    it("1:1 裡 @第三人：照樣算提及（只排除對話對象）", () => {
+      const carol = getPublicKey(generateSecretKey());
+      const { rumor } = unwrapMessage(wrapMessage("問 @Carol", aliceSk, bobPk, { mentions: [carol] }).events[0]!, bobSk);
+      expect(mentionedPubkeys(rumor)).toEqual([carol]);
     });
 
     it("`to` 標記在加密內層——中繼看不到收件人是誰（社交圖譜仍隱藏）", () => {

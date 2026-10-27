@@ -134,6 +134,7 @@ export function SettingsScreen({
   onRemoveDevice,
   onForgetDevice,
   fs,
+  publicReach,
   cloudSync,
   cloudBackupState,
   onCloudSync,
@@ -241,6 +242,13 @@ export function SettingsScreen({
    * ⚠ 區塊內的「尚未經外部審計」揭露是 ADR-0306 D1 的**驗收條件**，不是提示文字——
    * 拿掉它，這條路就退回成 ADR-0306 §3 說的遮羞布。
    */
+  /** 公開聯絡方式（ADR-0382）：兩個獨立開關；未提供則不顯示（企業身分、沒有 home）。打開前的確認由呼叫端負責。 */
+  publicReach?: {
+    contactable: boolean;
+    publicName: boolean;
+    onToggleContactable: () => void;
+    onTogglePublicName: () => void;
+  };
   fs?: {
     enabled: boolean;
     onEnable: () => void;
@@ -941,6 +949,38 @@ export function SettingsScreen({
             </Text>
           </Pressable>
         </View>
+
+        {/* 公開聯絡方式（ADR-0382）：版面與桌面同構——說明 → 常駐的「收不回」警語 → 兩個開關 */}
+        {publicReach ? (
+          <View style={styles.section} testID="public-reach">
+            <Text style={styles.sectionTitle}>{t("publicReach_title")}</Text>
+            <Text style={styles.label}>{t("publicReach_hint")}</Text>
+            <Text testID="public-reach-irrevocable" style={[styles.label, { color: "#c0392b" }]}>
+              {t("publicReach_irrevocable")}
+            </Text>
+            {(
+              [
+                ["public-reach-contactable", "publicReach_contactable", "publicReach_contactableHint", publicReach.contactable, publicReach.onToggleContactable],
+                ["public-reach-name", "publicReach_name", "publicReach_nameHint", publicReach.publicName, publicReach.onTogglePublicName],
+              ] as const
+            ).map(([testID, label, hint, on, onPress]) => (
+              <View key={testID}>
+                <Pressable
+                  testID={testID}
+                  accessibilityRole="button"
+                  onPress={onPress}
+                  style={[styles.seg, { alignSelf: "flex-start", borderColor: on ? tk.accent : tk.border, backgroundColor: on ? tk.accent : tk.field }]}
+                >
+                  <Text style={[styles.segText, { color: on ? "#ffffff" : tk.ink }]}>
+                    {t(label)}
+                    {on ? " ✓" : ""}
+                  </Text>
+                </Pressable>
+                <Text style={styles.label}>{t(hint)}</Text>
+              </View>
+            ))}
+          </View>
+        ) : null}
 
         {/*
           前向保密（ADR-0245／0306 D1）：實驗性、預設關。

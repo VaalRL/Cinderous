@@ -2476,6 +2476,42 @@ describe("typing／nudge 封裝（ADR-0120）", () => {
   });
 });
 
+describe("1:1 rumor 帶標準 `p`（ADR-0382 §8）", () => {
+  // NIP-17 以 rumor 的 `p` 決定對話歸屬；第三方客戶端寄來的、以及之後 Cinderous 自己送的 1:1 都會帶。
+  // 提及只在群訊判斷（`receiveGroup`），1:1 帶 `p` 不得變成「提及了你」，也不得改變對話歸屬。
+  it("收到帶 `p`＝我 的 1:1：照常歸到寄件人的對話，不標 mentionsMe", () => {
+    const net = createInMemoryRelayNetwork();
+    const sv = new MemoryStorage();
+    const got: ChatMessage[] = [];
+    const me = new RelayChatBackend(sv, (h) => net.connect("me", h), "我");
+    me.start({ ...noop, onMessage: (_pk, m) => got.push(m) });
+    const senderSk = generateSecretKey();
+    const sender = getPublicKey(senderSk);
+    me.addContact(npubEncode(sender));
+    // wrapMessage 的 mentions 會寫 rumor `p`——等同標準 NIP-17 的 `["p", 收件人]`
+    const w = wrapMessage("嗨", senderSk, me.self.pubkey, { mentions: [me.self.pubkey] });
+    net.connect("x").publish(w.events[0]!);
+    expect(got.map((m) => m.text)).toEqual(["嗨"]);
+    expect(got[0]?.mentionsMe).toBeUndefined();
+    expect(sv.loadMessages(sender).map((m) => m.text)).toEqual(["嗨"]);
+    me.stop();
+  });
+
+  it("自封副本帶 `p`＝收件人：仍以 `to` 歸到收件人的對話", () => {
+    const net = createInMemoryRelayNetwork();
+    const sv = new MemoryStorage();
+    const me = new RelayChatBackend(sv, (h) => net.connect("me", h), "我");
+    me.start(noop);
+    const peer = getPublicKey(generateSecretKey());
+    me.addContact(npubEncode(peer));
+    // 我在另一台裝置送給 peer 的訊息（同一把身分金鑰）
+    const w = wrapMessage("從另一台", nsecDecode(me.selfNsec), peer, { mentions: [peer] });
+    net.connect("x").publish(w.selfCopy);
+    expect(sv.loadMessages(peer).map((m) => m.text)).toEqual(["從另一台"]);
+    me.stop();
+  });
+});
+
 describe("訊息請求（ADR-0121）", () => {
   /** 陌生人（我從沒加過）直接對著我的 pubkey 發訊息。 */
   const strangerSends = (text = "哈囉，我是陌生人") => {

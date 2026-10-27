@@ -55,7 +55,8 @@ read ordinary environment variables.
 | Variable | Default | Purpose | Applies to |
 | --- | --- | --- | --- |
 | `MAX_TTL_DAYS` | `7` | Retention cap for offline messages, in days. A sender's longer expiration tag gets clamped — **the operator's cap is always authoritative** (ADR-0160/0065). | Both |
-| `MAX_FILE_MB` | unset | Set to ≥1 to accept file chunks (`FILE_WRAP` 1060). **Unset means the whole class is rejected**, which is zero storage risk for a public node (ADR-0162/0244). | Both |
+| `MAX_FILE_MB` | unset | Set to ≥1 to accept file chunks (`FILE_WRAP` 1060). **Unset means the whole class is rejected**, which is zero storage risk for a public node (ADR-0162/0244). Without `FILE_LANES` it is a **node-wide** switch; with `FILE_LANES` it becomes the **per-file cap** (MB) for those lanes (ADR-0371). | Both |
+| `FILE_LANES` | unset | Accept file chunks only on these third-party lanes (comma-separated lane ids, ADR-0371). **Setting it switches to lane mode**: the Cinderous messaging plane, the shared shards and every other lane reject the whole class. Listed lanes must also be in `APP_LANES` (others are ignored with a warning). Such a lane's NIP-11 advertises `cinder_max_file_mb` and the per-recipient quota `cinder_file_chunks_per_recipient`. **Unset means unchanged behaviour.** `node-relay` has no lanes, so setting it there rejects files node-wide. | Both (only effective on the Worker) |
 | `MAX_EVENTS_PER_MINUTE` | `120` | Per-pubkey events-per-minute cap; set `0` to disable (ADR-0235 H1). | `node-relay` only |
 | `MAX_MESSAGES_PER_MINUTE` | `240` | Per-**connection** inbound-messages-per-minute cap; the connection is closed when exceeded. Set `0` to disable (ADR-0366 §capacity). Raised automatically to stay at least twice the events cap. | `node-relay` only |
 | `REQUIRE_AUTH` | On | Set `0` to disable NIP-42 auth. **Strongly discouraged** — see the platform guides. | `node-relay` only |

@@ -5,6 +5,7 @@
 // 正式行動版把 LocalStorage 換成 RN 安全儲存即可（同一 AppStorage 介面，見 ADR-0053/D2）。
 import {
   ANCHOR_RELAYS,
+  PUBLIC_INDEX_RELAYS,
   type AppStorage,
   type ChatBackend,
   type CloudSyncMode,
@@ -71,6 +72,7 @@ export function createRelayChat(
         connectorFor: webSocketConnector,
         // 錨點恆連保底：不再只綁使用者當下那一座（去重，避免同座重複）。
         anchors: [...new Set([relayUrl, ...ANCHOR_RELAYS])],
+        publicIndexRelays: PUBLIC_INDEX_RELAYS, // ADR-0382 §2：公開聯絡方式（使用者打開才發布）
         ...(MAINTAINER_PUBKEY ? { maintainerPubkey: MAINTAINER_PUBKEY } : {}),
       };
   return new RelayChatBackend(

@@ -30,6 +30,7 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: 22
+          check-latest: true
 
       - name: 抓取來源並重建 snapshot
         # 手動 dispatch 勾 reseed＝跳過變動量護欄重設基準（ADR-0248）；排程一律不帶（inputs 為空即 falsy）。

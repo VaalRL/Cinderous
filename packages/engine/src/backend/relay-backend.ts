@@ -180,6 +180,14 @@ import {
   pqKeyFromStored,
   type RecipientKeyLike,
   type RecipientLike,
+  buildInboxRelayList,
+  buildOutboxRelayList,
+  buildPublicName,
+  INBOX_RELAY_LIST_KIND,
+  PUBLIC_PROFILE_KIND,
+  readInboxRelayList,
+  readPublicName,
+  verifyEvent,
 } from "@cinderous/core";
 import { loadRelayCheck, recordAuthObservation } from "./relay-check.js"; // ADR-0275：A 層健檢
 import { buildRtcConfig } from "./rtc-config.js";
@@ -203,6 +211,8 @@ import type {
   ChatMessage,
   ConnectionState,
   Contact,
+  PublicProfile,
+  PublicReachState,
   Self,
   Status,
 } from "./types.js";
@@ -241,6 +251,27 @@ const MAX_PENDING_GROUPS = 32;
 const MAX_HELD_INVITES_PER_PEER = 8;
 const MAX_PENDING_PER_GROUP = 64;
 const nowSec = () => Math.floor(Date.now() / 1000);
+/** 中繼網址的主機（含連接埠）；不合法回 undefined */
+const hostOf = (url: string): string | undefined => {
+  try {
+    return new URL(url).host.toLowerCase();
+  } catch {
+    return undefined;
+  }
+};
+/** 公開聯絡方式（ADR-0382 §2）：超過 7 天就重發——錨點對可取代事件只保存 30 天 */
+const PUBLIC_REACH_REFRESH_SEC = 7 * 86_400;
+/** 索引中繼的單次連線：發完等這麼久（認證＋OK）再關 */
+const PUBLIC_INDEX_LINGER_MS = 30_000;
+/** 查別人的公開名稱與收件中繼（ADR-0382 §6）：每座等 EOSE，最多等這麼久 */
+const PUBLIC_LOOKUP_TIMEOUT_MS = 5_000;
+/** 背景查詢的上限（每分鐘） */
+const PUBLIC_ENRICH_PER_MINUTE = 10;
+/**
+ * 可取代事件的新時間：至少比上一顆晚 1 秒。同一秒內先開後關時，兩顆 `created_at` 相同，
+ * NIP-01 會留 id 較小的那顆——「關」可能輸給「開」。
+ */
+const laterThan = (prev: NostrEvent | undefined): number => Math.max(nowSec(), (prev?.created_at ?? 0) + 1);
 
 const shortNpub = (npub: string) => `${npub.slice(0, 12)}…`;
 
@@ -325,6 +356,8 @@ export type RelayConnector = (
 export type CloseableRelayClient = RelayClient & { close?: () => void };
 
 const RECONNECT_MAX_MS = 15_000;
+/** 記住「冗餘送出的主路由」的上限（ADR-0378）：外送匣同時在途只有幾顆，1024 綽綽有餘 */
+const OK_ROUTE_MAX = 1024;
 
 /** 正規化 relay URL（trim、去尾斜線）；非 ws(s) 或空值回傳 undefined。 */
 /**
@@ -386,6 +419,7 @@ export function webSocketConnector(url: string): RelayConnector {
       });
       ws.addEventListener("close", () => {
         open = false;
+        client.connectionLost(); // ADR-0385：重連後要重新認證，期間送出的事件被拒時才會在認證後重送
         if (stopped) return; // 已清除 hint：不再重連
         onStatus?.("offline");
         const delay = Math.min(1000 * 2 ** attempt, RECONNECT_MAX_MS);
@@ -438,6 +472,11 @@ export interface RelayPoolOptions {
   shardingBase?: string;
   /** 硬編碼錨點 relay（ADR-0039）：恆連保底 + 引導清單來源。 */
   anchors?: string[];
+  /**
+   * 公開聯絡方式的索引中繼（ADR-0382 §2）：第三方客戶端拿到陌生 npub 時常去問的站。
+   * 打開開關時把 kind 0／10002／10050 **另外發一份**到這些站；只發布、不訂閱（不把收件匣與聯絡人交出去）。
+   */
+  publicIndexRelays?: string[];
   /** 維護者公鑰：驗證帶內 relay 清單事件（ADR-0039）；未設則不學清單。 */
   maintainerPubkey?: string;
   /** home 因長期離線自動遞補到健康引導座時通知（ADR-0039）。 */
@@ -576,6 +615,20 @@ export class RelayChatBackend implements ChatBackend {
   /** 引導座（錨點 ∪ 已採用清單，ADR-0039）：恆連保底、冗餘廣播與 home 遞補來源。 */
   private readonly bootstrapSeats = new Set<string>();
   private readonly maintainerPubkey: string | undefined;
+  /** 公開聯絡方式（ADR-0382）：索引中繼、home 上自己最新的 10050／kind 0（狀態以它們為準）、單次連線的關閉計時器 */
+  private readonly publicIndexRelays: string[];
+  private ownInboxList: NostrEvent | undefined;
+  private ownPublicName: NostrEvent | undefined;
+  private readonly indexCloseTimers = new Set<ReturnType<typeof setTimeout>>();
+  /** 背景查詢（enrichFromPublic）最近一分鐘的時間點 */
+  private enrichTimes: number[] = [];
+  /**
+   * 這個工作階段查到的對方收件中繼（錨點池以外；ADR-0382 §6）。私訊除了寄主要提示那座，**每一座都寄一份**（NIP-17）：
+   * 主要提示只存得下一座，而第三方客戶端預設的收件中繼可能已經停了（0xchat 的 relay.0xchat.com，2026-10-14 實機）。
+   */
+  private readonly publicInbox = new Map<PubkeyHex, string[]>();
+  /** 這個工作階段查過的人：寄私訊前的重查每人一次 */
+  private readonly enrichedThisSession = new Set<PubkeyHex>();
   /** 企業名冊管理者公鑰與最近採用的名冊（ADR-0047）。 */
   private readonly orgAdminPubkey: string | undefined;
   private lastRoster: OrgRosterDoc | null = null;
@@ -747,6 +800,8 @@ export class RelayChatBackend implements ChatBackend {
   private renderTimer: ReturnType<typeof setInterval> | undefined;
   /** 可靠訊息（kind 1059 DM/群訊/群控）的節流外送匣（ADR-0041）。 */
   private readonly outbox: Outbox;
+  /** 事件 id → 冗餘送出時「拒收算數」的座（ADR-0378：引導座不算；ADR-0382 §6：對方 10050 各座全部拒收才算） */
+  private readonly okRoute = new Map<string, { voters: Set<string | undefined> }>();
   private pumpTimer: ReturnType<typeof setInterval> | undefined;
 
   constructor(
@@ -766,6 +821,9 @@ export class RelayChatBackend implements ChatBackend {
     this.connectorFor = pool?.connectorFor;
     this.shardingBase = normalizeRelayUrl(pool?.shardingBase); // ADR-0241：設定＝分片模式
     this.maintainerPubkey = pool?.maintainerPubkey;
+    this.publicIndexRelays = [
+      ...new Set((pool?.publicIndexRelays ?? []).map((u) => normalizeRelayUrl(u)).filter((u): u is string => u !== undefined)),
+    ];
     this.orgAdminPubkey = pool?.orgAdminPubkey;
     this.orgJoinToken = pool?.orgJoinToken; // ADR-0156
     this.orgEscrowSelf = pool?.orgEscrow === true; // ADR-0163
@@ -832,7 +890,8 @@ export class RelayChatBackend implements ChatBackend {
     this.requests = storage.loadRequests();
     this.groups = storage.loadGroups();
     this.outbox = new Outbox({
-      send: (evt) => this.publishAddressed(evt),
+      // 上一次被回「中繼滿了」（`blocked: ceiling:`／`quota:`）的重送也送到健康的引導座（ADR-0378）
+      send: (evt, opts) => this.publishAddressed(evt, opts?.elsewhere === true),
       onDrop: (evt, reason) => {
         // 快照發佈失敗（拒收/重試耗盡）→ 清節流記錄讓 30 分後重試（審查修正 #5）。
         if (evt.kind === SNAPSHOT_KIND) {
@@ -856,12 +915,7 @@ export class RelayChatBackend implements ChatBackend {
     this.client = homeConnector(
       {
         onEvent: (_sub, event) => this.onEvent(event, this.homeUrl),
-        onOk: (id, accepted, message) => {
-          this.outbox.onOk(id, accepted, message);
-          if (accepted) this.markSent(id); // Tier 1（ADR-0058）：relay 接受＝已送中繼
-          // 備份成功也要留痕——只記失敗的話，「從沒成功過」與「剛剛才成功」長得一樣。
-          if (accepted && this.pendingSnapshotIds.delete(id)) this.recordBackup({ ok: true });
-        },
+        onOk: (id, accepted, message) => this.onRelayOk(this.originalHomeUrl, id, accepted, message),
         // NIP-42 AUTH（ADR-0057）：回應挑戰；認證成功後重掛訂閱（解「訂閱早於認證」）。
         authSigner: (challenge) => {
           // A 層健檢（ADR-0275）：收到挑戰＝這座 relay 要求認證＝收件匣不是公開可讀。
@@ -1004,14 +1058,78 @@ export class RelayChatBackend implements ChatBackend {
     this.emitUnread();
   }
 
-  /** 某 pubkey 的訊息片 URL（ADR-0241）：`<base>/s/<prefix>`。僅分片模式有意義。 */
-  private shardUrlOf(pubkey: string): string {
-    return `${this.shardingBase}${shardPath(pubkey)}`;
+  /** 是不是錨點池裡的中繼（同主機）：分片基底、原本的 home、錨點與引導清單座。 */
+  private isAnchorUrl(url: string): boolean {
+    const host = hostOf(url);
+    if (host === undefined) return false;
+    const anchors = [this.shardingBase, this.originalHomeUrl, ...this.bootstrapSeats];
+    return anchors.some((a) => a !== undefined && hostOf(a) === host);
+  }
+
+  /** 某 pubkey 的訊息片 URL（ADR-0241）：`<base>/s/<prefix>`。僅分片模式有意義；`base` 預設自己這座（ADR-0383）。 */
+  private shardUrlOf(pubkey: string, base = this.shardingBase): string {
+    return `${base}${shardPath(pubkey)}`;
+  }
+
+  /** 錨點網址所屬那座的分片基底（ADR-0383）：自己這座回 `shardingBase`，別座回 `wss://host`；不是錨點回 undefined。 */
+  private anchorBaseOf(url: string): string | undefined {
+    if (!this.isAnchorUrl(url)) return undefined;
+    if (this.shardingBase !== undefined && hostOf(url) === hostOf(this.shardingBase)) return this.shardingBase;
+    try {
+      return new URL(url).origin;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** 分片模式下所有錨點的分片基底（ADR-0383）：自己這座排第一，同主機只留一個。 */
+  private anchorBases(): string[] {
+    const out: string[] = [];
+    for (const u of [this.shardingBase, this.originalHomeUrl, ...this.bootstrapSeats]) {
+      const base = u === undefined ? undefined : this.anchorBaseOf(u);
+      if (base !== undefined && !out.includes(base)) out.push(base);
+    }
+    return out;
+  }
+
+  /**
+   * 不知道對方在哪座錨點時（只有裸 npub、沒有帶內提示），另外要寄的各座分片（ADR-0383）：
+   * 每座錨點上對方的分片各一份，排除主路由。知道在哪座（提示在錨點上）或提示在錨點池外的不多寄。
+   */
+  private unknownAnchorShards(to: PubkeyHex): string[] {
+    if (!this.shardingBase) return [];
+    const known = this.contacts.find((c) => c.pubkey === to) ?? this.requests.find((r) => r.pubkey === to);
+    if (normalizeRelayUrl(known?.relayUrl) !== undefined) return [];
+    const primary = this.shardUrlOf(to);
+    return this.anchorBases()
+      .map((base) => this.shardUrlOf(to, base))
+      .filter((u) => u !== primary);
   }
 
   /** presence 獨立層 URL（ADR-0241）：`<base>/presence`。非分片模式回 undefined。 */
   private presenceUrl(): string | undefined {
     return this.shardingBase ? `${this.shardingBase}${PRESENCE_PATH}` : undefined;
+  }
+
+  /**
+   * 聯絡人分在別座錨點時，那幾座的 presence 層（ADR-0383）：心跳只發到自己這座，要看別座的人在不在線就得去那座訂。
+   * 只看提示在錨點上的聯絡人——沒有提示的還不知道在哪座，等帶內提示學到再連。
+   */
+  private foreignPresenceUrls(): string[] {
+    if (!this.shardingBase) return [];
+    const out = new Set<string>();
+    for (const c of this.contacts) {
+      const hinted = normalizeRelayUrl(c.relayUrl);
+      const base = hinted === undefined ? undefined : this.anchorBaseOf(hinted);
+      if (base !== undefined && base !== this.shardingBase) out.add(`${base}${PRESENCE_PATH}`);
+    }
+    return [...out];
+  }
+
+  /** 是不是某座錨點的 presence 層（自己這座或 foreignPresenceUrls 的其中一座）。 */
+  private isPresenceUrl(url: string | undefined): boolean {
+    if (!this.shardingBase || url === undefined) return false;
+    return url === this.presenceUrl() || this.foreignPresenceUrls().includes(url);
   }
 
   /**
@@ -1021,7 +1139,12 @@ export class RelayChatBackend implements ChatBackend {
    */
   private foreignUrlOf(contact: { pubkey: string; relayUrl?: string }): string | undefined {
     if (this.shardingBase) {
-      const url = this.shardUrlOf(contact.pubkey);
+      // ADR-0382 §6：錨點池**以外**的中繼（從對方 10050 查到、或手動 `npub@relay`）優先——
+      // 第三方客戶端的使用者不會去讀錨點分片。錨點上的提示（Cinderous 使用者）照舊由公鑰推算分片。
+      const hinted = normalizeRelayUrl(contact.relayUrl);
+      if (hinted !== undefined && !this.isAnchorUrl(hinted)) return hinted !== this.homeUrl ? hinted : undefined;
+      // ADR-0383：提示在別座錨點（對方被分到另一座）→ 用那座的分片；沒有提示先寄自己這座（其他座見 unknownAnchorShards）
+      const url = this.shardUrlOf(contact.pubkey, (hinted !== undefined ? this.anchorBaseOf(hinted) : undefined) ?? this.shardingBase);
       return url !== this.homeUrl ? url : undefined; // 同片＝home
     }
     const url = normalizeRelayUrl(contact.relayUrl);
@@ -1044,6 +1167,10 @@ export class RelayChatBackend implements ChatBackend {
       client = this.connectorFor(url)(
         {
           onEvent: (_sub, event) => this.onEvent(event, url),
+          // 🔴 外部連線也要處理 OK（ADR-0378）：分片模式下寄給別人的訊息走的正是**對方訊息片**這條連線，
+          // 冗餘廣播的引導座、單一 relay 模式的聯絡人 hint 也是。少了這一行，那些 OK（收下或拒收）全部被丟掉，
+          // 外送匣等 30 秒後把它當成已送達——拒收的訊息不會變紅，收下的也不會標成「已送中繼」。
+          onOk: (id, accepted, message) => this.onRelayOk(url, id, accepted, message),
           // NIP-42 AUTH（ADR-0057）：外部 relay 的挑戰回應 + 認證後重掛該 relay 訂閱。
           authSigner: (challenge) => buildAuthEvent(challenge, url, this.sk),
           onAuthenticated: (client) => this.subscribeOn(client, url),
@@ -1074,18 +1201,82 @@ export class RelayChatBackend implements ChatBackend {
     this.outbox.pump(); // 立即嘗試送出（在併發上限內）；其餘由泵計時器與 OK 回覆續送。
   }
 
-  private publishAddressed(evt: NostrEvent): void {
+  /**
+   * 任何一條連線（home、對方訊息片、引導座、presence）收到的 `OK`（ADR-0041／0058；ADR-0378 起外部連線也走這裡）。
+   *
+   * 同一顆事件可能送到好幾座（冗餘廣播、「中繼滿了」之後改送引導座）：外送匣以第一個「確認」或「永久拒收」為準，
+   * 之後的 `OK` 找不到那一筆就忽略；`markSent` 同理（扇出紀錄只消費一次）。沒有排進外送匣的事件（信令、心跳）直接略過。
+   *
+   * 🔴 冗餘座的**拒收**不算數：只有主路由（收件人的訊息片／home）的拒收會讓外送匣重試或判失敗。冗餘座可能是企業白名單站、
+   * 也可能正好滿了，主路由卻會收下（或離線中、重連後才送達）——拿冗餘座的「永久拒收」把訊息標紅是誤判。冗餘座的**收下**照樣算。
+   */
+  private onRelayOk(url: string | undefined, id: string, accepted: boolean, message: string): void {
+    const route = this.okRoute.get(id);
+    if (route !== undefined) {
+      if (accepted) this.okRoute.delete(id);
+      // 冗餘座的拒收不判；算數的座要**全部**拒收才判。紀錄留著——同一次送出的其他座（冗餘座）可能晚一步才回拒收
+      else if (!route.voters.delete(url) || route.voters.size > 0) return;
+    }
+    this.outbox.onOk(id, accepted, message);
+    if (accepted) this.markSent(id); // Tier 1（ADR-0058）：relay 接受＝已送中繼
+    // 備份成功也要留痕——只記失敗的話，「從沒成功過」與「剛剛才成功」長得一樣。
+    if (accepted && this.pendingSnapshotIds.delete(id)) this.recordBackup({ ok: true });
+  }
+
+  /**
+   * `redundant`：上一次被回「中繼滿了」（ADR-0378）——除了主路由，也送到健康的引導座（與主路由離線時同一套 ADR-0039 有界冗餘）。
+   * 收件人在引導座上也掛著收件匣，換一座就收得到。
+   */
+  private publishAddressed(evt: NostrEvent, redundant = false): void {
     const to = evt.tags.find((t) => t[0] === "p")?.[1];
     // ADR-0241：分片模式下**非聯絡人**（陌生人/群成員）也要路由到 `shard(對方)`，故用 pubkey 算，
     // 不只看聯絡人 hint。聯絡人給完整物件（帶 hint）供單一 relay 模式沿用。
-    const contact = to ? this.contacts.find((c) => c.pubkey === to) : undefined;
+    const contact = to ? (this.contacts.find((c) => c.pubkey === to) ?? this.requests.find((r) => r.pubkey === to)) : undefined;
     const url = to ? this.foreignUrlOf(contact ?? { pubkey: to }) : undefined;
     const primaryUrl = url ?? this.homeUrl;
     const primary = url ? this.poolClient(url) : this.homeClient();
+    const seats =
+      primaryUrl !== undefined && (redundant || this.relayStates.get(primaryUrl) === "offline") ? this.healthySeats(primaryUrl) : [];
+    // ADR-0382 §6：對方 10050 上的其他收件中繼也各寄一份（同一顆事件，收件端依 id 去重）
+    // ADR-0383：不知道對方在哪座錨點 → 每座錨點上對方的分片也各寄一份
+    const extras =
+      to !== undefined && to !== this.self.pubkey
+        ? [...new Set([...this.unknownAnchorShards(to), ...(this.publicInbox.get(to) ?? [])])].filter((u) => u !== primaryUrl)
+        : [];
+    // 有冗餘座時先記下拒收算數的座（在 publish 之前：記憶體測試網路的 OK 是同步回來的），好讓 onRelayOk 分得出誰的拒收算數（ADR-0378）。
+    // 引導座只是冗餘，拒收不算；對方 10050 上的各座、各錨點上對方的分片（ADR-0383）與主路由地位相同（排第一只是剛好），全部拒收才算
+    if (seats.length > 0 || extras.length > 0) this.rememberRoute(evt.id, [primaryUrl, ...extras]);
     (primary ?? this.client).publish(evt); // 一律投入主路由（離線則入其重連佇列）
-    if (primaryUrl !== undefined && this.relayStates.get(primaryUrl) === "offline") {
-      for (const seat of this.healthySeats(primaryUrl)) seat.publish(evt);
-    }
+    for (const seat of seats) seat.publish(evt);
+    for (const extra of extras) this.poolClient(extra)?.publish(evt);
+    if (to !== undefined && to !== this.self.pubkey && evt.kind === KIND.OFFLINE_DM_GIFT_WRAP) this.ensurePublicRoute(to, evt);
+  }
+
+  /**
+   * 記下某次冗餘送出時「拒收算數」的座（ADR-0378；ADR-0382 §6）：任一座收下就算成功，`voters` 全部拒收才判失敗。
+   * 有上限，最舊的先丟（丟了只是退回「每一座的回覆都算」的舊行為）。
+   */
+  private rememberRoute(eventId: string, voters: (string | undefined)[]): void {
+    this.okRoute.delete(eventId);
+    this.okRoute.set(eventId, { voters: new Set(voters) });
+    if (this.okRoute.size > OK_ROUTE_MAX) this.okRoute.delete(this.okRoute.keys().next().value!);
+  }
+
+  /**
+   * 寄私訊給**沒有提示、或提示在錨點池外**的聯絡人／請求者：這個工作階段第一次寄時重查他的 10050（ADR-0382 §6），
+   * 查到的收件中繼把同一顆事件補寄過去——他可能在我們上次查之後才設好收件中繼，或重開 App 後記憶體裡的清單沒了。
+   * 提示在錨點上的（Cinderous 使用者）不查；不是聯絡人也不是請求者的（群組成員）不查。
+   * 單座中繼模式（自架、企業）沒有錨點池，提示幾乎都是 Cinderous 使用者帶內告知的（ADR-0035）——只查完全沒有提示的。
+   */
+  private ensurePublicRoute(to: PubkeyHex, evt: NostrEvent): void {
+    if (this.enrichedThisSession.has(to)) return;
+    const known = this.contacts.find((c) => c.pubkey === to) ?? this.requests.find((r) => r.pubkey === to);
+    if (!known) return;
+    const hint = normalizeRelayUrl(known.relayUrl);
+    if (hint !== undefined && (!this.shardingBase || this.isAnchorUrl(hint))) return;
+    void this.enrichFromPublic(to).then((inbox) => {
+      for (const url of inbox) this.poolClient(url)?.publish(evt);
+    });
   }
 
   /** 健康的引導座（home + 錨點/清單座，狀態非 offline），排除 `exclude`，去重、上限 K。 */
@@ -1093,7 +1284,9 @@ export class RelayChatBackend implements ChatBackend {
     // home 遞補後其 URL 亦在 bootstrapSeats，需去重避免對同一座重複 publish。
     const seen = new Set<string>(exclude ? [exclude] : []);
     const urls: string[] = [];
-    if (this.homeUrl && !seen.has(this.homeUrl) && this.relayStates.get(this.homeUrl) !== "offline") {
+    // 分片模式（ADR-0241）的 home 是**我自己的**訊息片，收件人不在那裡掛收件匣——送過去對方收不到，
+    // 卻會回 OK true 讓訊息被標成「已送中繼」（ADR-0378 讓外部連線處理 OK 之後才看得出來）。所以分片模式不把 home 當冗餘座。
+    if (!this.shardingBase && this.homeUrl && !seen.has(this.homeUrl) && this.relayStates.get(this.homeUrl) !== "offline") {
       urls.push(this.homeUrl);
       seen.add(this.homeUrl);
     }
@@ -1128,7 +1321,7 @@ export class RelayChatBackend implements ChatBackend {
   private subscribeOn(client: RelayClient, url: string | undefined): void {
     // ADR-0241：presence 獨立層——一條連線一次訂閱**全部**聯絡人心跳（`authors:[聯絡人]`），
     // 不必連每個聯絡人的訊息片。真隱身（ADR-0240）照樣不訂（不把聯絡人集合交出去）。訊息片則不再訂心跳。
-    if (this.shardingBase && url !== undefined && url === this.presenceUrl()) {
+    if (this.isPresenceUrl(url)) {
       const all = this.contacts.map((c) => c.pubkey);
       client.subscribe("all", this.invisible || all.length === 0 ? [] : [{ kinds: [KIND.HEARTBEAT], authors: all }]);
       return;
@@ -1162,6 +1355,10 @@ export class RelayChatBackend implements ChatBackend {
       // 自己的雲端快照（ADR-0071 J3）：接收合併恆開——換機還原不需任何前置設定。
       sub({ kinds: [SNAPSHOT_KIND], authors: me }, "n/a"),
       sub({ kinds: [DEVICE_DIRECTORY_KIND], authors: me }, "n/a"), // ADR-0322 S1：自己的裝置目錄
+      // 公開聯絡方式（ADR-0382）：開關狀態以 home 上自己發布的 10050／kind 0 為準，別台裝置切換的也讀得到
+      ...(url !== undefined && url === this.originalHomeUrl
+        ? [sub({ kinds: [PUBLIC_PROFILE_KIND, INBOX_RELAY_LIST_KIND], authors: me }, "n/a")]
+        : []),
       sub({ kinds: [EK_ENVELOPE_KIND], authors: me }, "n/a"), // ADR-0322 S2：EK 的 per-device 分發
       sub({ kinds: [SDP_SIGNAL_KIND], "#p": me }, "n/a"),
       sub({ kinds: [CALL_SIGNAL_KIND], "#p": me }, "n/a"),
@@ -1252,6 +1449,7 @@ export class RelayChatBackend implements ChatBackend {
     // ADR-0241：分片模式下另連 presence 獨立層（一條連線訂全部聯絡人心跳）。
     const pu = this.presenceUrl();
     if (pu) this.poolClient(pu);
+    for (const url of this.foreignPresenceUrls()) this.poolClient(url); // ADR-0383：別座錨點上的聯絡人
     // 引導座（錨點/清單，ADR-0039）與聯絡人 hint 的外部 relay 都連線並掛訂閱。
     for (const url of this.bootstrapSeats) if (url !== this.homeUrl) this.poolClient(url);
     // 搬家排水（ADR-0066 H3）：舊 home 也連線——subscribeOn 會掛自家收件匣，收訊走既有去重。
@@ -1528,6 +1726,175 @@ export class RelayChatBackend implements ChatBackend {
     const announce = buildEkAnnounce(this.sk, my.pk, pq ? { pq } : {});
     this.client.publish(announce);
     for (const c of this.relayPool.values()) c.publish(announce);
+  }
+
+  /**
+   * 查某把公鑰公開的名稱與私訊收件中繼（ADR-0382 §6）。查的地方：對方的分片（Cinderous 使用者發在那裡；
+   * 非分片模式＝自己的 home）與索引中繼（第三方客戶端的使用者多半在那裡）。每座走單次連線、等 EOSE 或逾時，
+   * 查完就關。中繼不可信：只採用**驗簽通過、作者是對方**的事件，同 kind 取最新。
+   */
+  lookupPublic(pubkey: PubkeyHex): Promise<PublicProfile> {
+    const connect = this.connectorFor;
+    const home = this.shardingBase ? this.shardUrlOf(pubkey) : this.homeUrl;
+    const targets = [...new Set([home, ...this.publicIndexRelays].filter((u): u is string => u !== undefined))];
+    if (!connect || targets.length === 0) return Promise.resolve({ name: null, inboxRelays: [] });
+    const filters = [{ kinds: [PUBLIC_PROFILE_KIND, INBOX_RELAY_LIST_KIND], authors: [pubkey] }];
+    const best = new Map<number, NostrEvent>();
+    // 認證用一次性金鑰（同 ADR-0190）：用身分金鑰的話，索引中繼就知道「誰在查誰」——社交圖譜
+    const throwaway = generateSecretKey();
+    return new Promise((resolve) => {
+      const clients: CloseableRelayClient[] = [];
+      let pending = targets.length;
+      let done = false;
+      const finish = (): void => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        for (const c of clients) c.close?.();
+        const inbox = best.get(INBOX_RELAY_LIST_KIND);
+        const profile = best.get(PUBLIC_PROFILE_KIND);
+        resolve({
+          name: profile ? readPublicName(profile) : null,
+          inboxRelays: inbox ? (readInboxRelayList(inbox) ?? []) : [],
+        });
+      };
+      const timer = setTimeout(finish, PUBLIC_LOOKUP_TIMEOUT_MS);
+      for (const url of targets) {
+        let eose = false;
+        const client: CloseableRelayClient = connect(url)({
+          onEvent: (_sub, e) => {
+            if (e.pubkey !== pubkey || !filters[0]!.kinds.includes(e.kind) || !verifyEvent(e)) return;
+            const prev = best.get(e.kind);
+            if (!prev || e.created_at > prev.created_at) best.set(e.kind, e);
+          },
+          onEose: () => {
+            if (eose) return;
+            eose = true;
+            if (--pending === 0) finish();
+          },
+          // 錨點要求先認證：認證前送的 REQ 會被 CLOSED，認證後同一個 subId 再送一次
+          authSigner: (challenge) => buildAuthEvent(challenge, url, throwaway),
+          onAuthenticated: (c) => c.subscribe("lookup", filters),
+        });
+        clients.push(client);
+        client.subscribe("lookup", filters);
+      }
+    });
+  }
+
+  /**
+   * 只拿到裸 npub 的人（加好友、陌生人來信）：背景查他公開的名稱與收件中繼（ADR-0382 §6）。
+   * 名稱只取代 `npub1abc…` 佔位（ADR-0284 的自報名稱同一個位置；對方的加密個人檔之後照樣覆寫）；
+   * 收件中繼只在**沒有任何提示、而且在錨點池外**時採用——使用者給的與帶內學到的（ADR-0035）都優先。
+   */
+  private async enrichFromPublic(pubkey: PubkeyHex): Promise<string[]> {
+    // 防洪（ADR-0127 的同一個威脅）：陌生人可用大量 pubkey 來信，每個都會開兩條單次連線。
+    // 超過上限就不查——名稱維持 npub，回信退回分片推算；之後再來信或使用者手動加時還有機會。
+    const now = Date.now();
+    this.enrichTimes = this.enrichTimes.filter((t) => now - t < 60_000);
+    if (this.enrichTimes.length >= PUBLIC_ENRICH_PER_MINUTE) return [];
+    this.enrichTimes.push(now);
+    this.enrichedThisSession.add(pubkey);
+    const found = await this.lookupPublic(pubkey);
+    const inbox = [
+      ...new Set(found.inboxRelays.map((u) => normalizeRelayUrl(u)).filter((u): u is string => u !== undefined && !this.isAnchorUrl(u))),
+    ];
+    if (inbox.length > 0) this.publicInbox.set(pubkey, inbox);
+    const known = this.contacts.find((c) => c.pubkey === pubkey) ?? this.requests.find((r) => r.pubkey === pubkey);
+    if (!known) return inbox;
+    let changed = false;
+    if (found.name && known.name === shortNpub(npubEncode(pubkey))) {
+      this.storage.updateContactName(pubkey, found.name);
+      changed = true;
+    }
+    const relay = inbox[0];
+    if (!known.relayUrl && relay !== undefined) {
+      this.storage.updateContactRelay(pubkey, relay);
+      changed = true;
+    }
+    if (changed) {
+      this.contacts = this.storage.loadContacts();
+      this.requests = this.storage.loadRequests();
+      this.resubscribe();
+      this.emitContacts();
+      this.emitRequests();
+    }
+    return inbox;
+  }
+
+  /**
+   * 公開聯絡方式（ADR-0382）。狀態不存本機：以 home 上自己最新的 10050（有列中繼＝能聯絡我）
+   * 與 kind 0（有 name＝公開名稱）為準——別台裝置切換的，這台讀到就跟著變。開機讀到之前顯示為關。
+   */
+  publicReach(): PublicReachState {
+    const available = this.publicReachAvailable();
+    return {
+      available,
+      contactable: available && this.ownInboxList !== undefined && (readInboxRelayList(this.ownInboxList)?.length ?? 0) > 0,
+      publicName: available && this.ownPublicName !== undefined && readPublicName(this.ownPublicName) !== null,
+    };
+  }
+
+  setPublicReach(change: { contactable?: boolean; publicName?: boolean }): void {
+    if (!this.publicReachAvailable()) return;
+    if (change.contactable !== undefined) this.publishContactable(change.contactable);
+    if (change.publicName !== undefined) this.publishPublicName(change.publicName);
+    this.handlers?.onPublicReach?.(this.publicReach());
+  }
+
+  /** 企業身分鎖定漫遊（ADR-0044／0048）不提供；沒有 home 就沒有可公開的收件中繼。 */
+  private publicReachAvailable(): boolean {
+    return this.originalHomeUrl !== undefined && this.orgAdminPubkey === undefined && !this.orgOwnerFlag;
+  }
+
+  /** 10050 只列 home：Cinderous 只在 home 讀收件匣，列別座＝寄到那裡的信沒人收（ADR-0382 §3）。 */
+  private publishContactable(on: boolean): void {
+    const urls = on && this.originalHomeUrl ? [this.originalHomeUrl] : [];
+    const at = laterThan(this.ownInboxList);
+    const inbox = buildInboxRelayList(this.sk, urls, at);
+    this.ownInboxList = inbox;
+    this.publishPublic([inbox, buildOutboxRelayList(this.sk, urls, at)]);
+  }
+
+  private publishPublicName(on: boolean): void {
+    const event = buildPublicName(this.sk, on ? this.self.name : null, laterThan(this.ownPublicName));
+    this.ownPublicName = event;
+    this.publishPublic([event]);
+  }
+
+  /** 發到 home；索引中繼走單次連線，只發布、不訂閱，發完一段時間後關掉。 */
+  private publishPublic(events: NostrEvent[]): void {
+    const home = this.homeClient() ?? this.client;
+    for (const e of events) home.publish(e);
+    if (!this.connectorFor) return;
+    for (const url of this.publicIndexRelays) {
+      const client: CloseableRelayClient = this.connectorFor(url)({
+        authSigner: (challenge) => buildAuthEvent(challenge, url, this.sk),
+      });
+      for (const e of events) client.publish(e);
+      const timer = setTimeout(() => {
+        this.indexCloseTimers.delete(timer);
+        client.close?.();
+      }, PUBLIC_INDEX_LINGER_MS);
+      this.indexCloseTimers.add(timer);
+    }
+  }
+
+  /** 讀到 home 上自己發布的 10050／kind 0：較新的才採用；開著而且超過 7 天（或列的不是現在的 home）就重發。 */
+  private receiveOwnPublic(event: NostrEvent): void {
+    const isInbox = event.kind === INBOX_RELAY_LIST_KIND;
+    const current = isInbox ? this.ownInboxList : this.ownPublicName;
+    if (current !== undefined && current.created_at >= event.created_at) return;
+    if (isInbox) this.ownInboxList = event;
+    else this.ownPublicName = event;
+    const state = this.publicReach();
+    const stale = event.created_at < nowSec() - PUBLIC_REACH_REFRESH_SEC;
+    if (isInbox && state.contactable) {
+      const listed = readInboxRelayList(event) ?? [];
+      if (stale || listed.length !== 1 || listed[0] !== this.originalHomeUrl) this.publishContactable(true);
+    }
+    if (!isInbox && state.publicName && stale) this.publishPublicName(true);
+    this.handlers?.onPublicReach?.(this.publicReach());
   }
 
   /** 啟用前向保密（ADR-0245，opt-in）：生成第一把 EK、掛 10040 訂閱、發 10040。冪等。 */
@@ -2316,6 +2683,10 @@ export class RelayChatBackend implements ChatBackend {
       if (event.created_at > prev) this.fileWatermark.set(url, event.created_at);
     }
     if (this.seenBefore(event.id)) return;
+    if (event.pubkey === this.self.pubkey && (event.kind === INBOX_RELAY_LIST_KIND || event.kind === PUBLIC_PROFILE_KIND)) {
+      this.receiveOwnPublic(event); // ADR-0382
+      return;
+    }
     if (event.kind === EK_ANNOUNCE_KIND) {
       // ADR-0245：聯絡人的 EK 公告（kind 10040，IK 簽章）→ 學到其當前 EK（供加密給他們）。
       const read = readEkAnnounce(event);
@@ -2959,6 +3330,7 @@ export class RelayChatBackend implements ChatBackend {
     if (this.requests.some((r) => r.pubkey === pubkey)) return;
     this.storage.addRequest({ pubkey, name: shortNpub(npubEncode(pubkey)) });
     this.requests = this.storage.loadRequests();
+    void this.enrichFromPublic(pubkey); // ADR-0382 §6：第三方來信沒有帶內提示，回信要靠他公開的收件中繼
     // 防洪（ADR-0127）：超過上限 → FIFO 逐出最舊的請求，連同其訊息與封存一起清
     //（走 declineRequest 的同一條清理路徑）。否則陌生人可用大量 pubkey 把請求區與儲存撐爆。
     while (this.requests.length > MAX_REQUESTS) {
@@ -2985,6 +3357,8 @@ export class RelayChatBackend implements ChatBackend {
     this.drainHeldInvites(pubkey); // ADR-0317：你接受的人就能拉你進群——重放他被擋下的邀請
     this.emitRequests();
     this.emitContacts();
+    // ADR-0382 §6：請求建立時查不到收件中繼的（第三方之後才設好），接受時再查一次——接下來就要回信了
+    if (!req.relayUrl) void this.enrichFromPublic(pubkey);
     this.sendProfileTo(pubkey); // ADR-0061：接受了才把自己的暱稱給他
   }
 
@@ -3042,6 +3416,7 @@ export class RelayChatBackend implements ChatBackend {
     this.resubscribe();
     this.emitContacts();
     this.sendProfileTo(pubkey); // ADR-0061：加好友時把自己的顯示名稱送給對方
+    if (!hint) void this.enrichFromPublic(pubkey); // ADR-0382 §6：裸 npub → 查他公開的名稱與收件中繼
   }
 
   removeContact(pubkey: PubkeyHex): void {
@@ -3463,6 +3838,7 @@ export class RelayChatBackend implements ChatBackend {
     // 清掉「已送過 profile」記號，讓每個聯絡人都重新收到新名字（否則 sendProfileTo 會略過）。
     this.profileSentTo.clear();
     this.broadcastProfile();
+    if (this.publicReach().publicName) this.publishPublicName(true); // ADR-0382：公開的名稱跟著改
   }
 
   sendMessage(to: PubkeyHex, text: string, ttlSeconds?: number, mentions?: PubkeyHex[], replyTo?: string, alsoMain?: boolean): void {
@@ -5068,6 +5444,8 @@ export class RelayChatBackend implements ChatBackend {
   }
 
   stop(): void {
+    for (const timer of this.indexCloseTimers) clearTimeout(timer);
+    this.indexCloseTimers.clear();
     if (this.heartbeatTimer) clearTimeout(this.heartbeatTimer);
     if (this.npSealedTimer !== undefined) clearTimeout(this.npSealedTimer);
     if (this.renderTimer) clearInterval(this.renderTimer);

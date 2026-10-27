@@ -1,6 +1,6 @@
 # 0370. 中繼程式碼與共用協定搬進 Cinderous SDK，`relay/` 成為部署實例
 
-- 狀態：已接受（**分支 `claude/relay-on-sdk` 已完成，合併與部署暫緩**，見〈落地時程〉）；2026-10-19 相依由 `#v0.18.0` 升到 `#v0.68.3`（含 SDK ADR 0097 額度用完時說明原因、0098 拿掉 `idx_offline_kind`，對應 ADR-0387／0388；新增的 Worker 設定全部可選，錨點沒設、沿用預設）；2026-10-20 再升到 `#v0.71.0`（SDK ADR 0099–0101 只動 Node 版中繼與部署設定器，錨點的 Cloudflare 版行為不變）
+- 狀態：已接受（**分支 `claude/relay-on-sdk` 已完成，合併與部署暫緩**，見〈落地時程〉）；2026-10-19 相依由 `#v0.18.0` 升到 `#v0.68.3`（含 SDK ADR 0097 額度用完時說明原因、0098 拿掉 `idx_offline_kind`，對應 ADR-0387／0388；新增的 Worker 設定全部可選，錨點沒設、沿用預設）；2026-10-20 再升到 `#v0.71.0`（SDK ADR 0099–0101 只動 Node 版中繼與部署設定器，錨點的 Cloudflare 版行為不變）；2026-10-27 SDK 公開（SDK ADR 0110），相依改成公開 repo `github:VaalRL/cinderous-sdk#v0.77.0`、與 main 合併，見〈與 main 合併〉
 - 日期：2026-09-27
 - 相關文件：Cinderous SDK ADR 0006（PRD 矛盾拍板）、ADR 0007（中繼與共用協定搬進 SDK）；
   本庫 ADR-0005（自建 Worker relay）、ADR-0056（DO SQLite）、ADR-0075（容器化自架）、ADR-0241（分片）、
@@ -42,7 +42,7 @@ Cinderous SDK（`VaalRL/cinderous-sdk-dev`，AGPL-3.0）原本只有客戶端層
 
 ## 落地時程（暫緩合併與部署）
 
-- **本庫是公開 repo，SDK 目前是私有 repo**。產品決定：SDK 等實作完成再公開。
+- **本庫是公開 repo，SDK 當時是私有 repo**。產品決定：SDK 等實作完成再公開。（2026-10-27 已公開為 `VaalRL/cinderous-sdk`，SDK ADR 0110；合併與部署仍要使用者另外同意。）
 - 在那之前：
   - 合併進 main 會讓 clone 本庫的人 `pnpm install` 失敗，自架文件的 Docker 建置也會壞；
   - 只從分支部署，線上錨點跑的程式碼又會和 main 對不上。
@@ -76,11 +76,40 @@ SDK 依序做第四步（SDK ADR 0009～0011）時，把 Cinderous 已有、SDK 
   - `file-relay` 的 kind 常數就地定義。
 - `file-relay` 的 kind 常數在 SDK 另有一份，由 `file-relay-kinds.test.ts` 釘住與 App 的 `KIND` 總表一致。
 - `subkey.test.ts` 只留下與 App 私訊層（giftwrap）的整合測試。
-- 相依目前釘在 `#v0.18.0`（v0.18.0 的協定檔改用 @noble 2.x 並與 nostr-tools 釘同一版，SDK ADR 0020；v0.17.0 起 SDK 的中繼預設值改為中立，錨點在 `wrangler.toml` 自己設 `RELAY_NAME` 與 `DEVELOPER_DOCS_URL`，文件網址常數搬回 `relay/src/developer-docs.ts`，SDK ADR 0019；v0.16.0 修正 Node 主機的 NIP-11 缺 `version`：自架 Docker 節點的一鍵更新比對從此有版號可比，SDK ADR 0018）（v0.10.1 起 `openWrap` 多一道「seal 必須是 kind 13」檢查，SDK ADR 0012；v0.11 起中繼多了可選的存取控制，錨點沒設、行為不變，SDK ADR 0013）。
+- 相依當時釘在 `#v0.18.0`（現在是 `#v0.77.0`，見檔頭與〈與 main 合併〉；v0.18.0 的協定檔改用 @noble 2.x 並與 nostr-tools 釘同一版，SDK ADR 0020；v0.17.0 起 SDK 的中繼預設值改為中立，錨點在 `wrangler.toml` 自己設 `RELAY_NAME` 與 `DEVELOPER_DOCS_URL`，文件網址常數搬回 `relay/src/developer-docs.ts`，SDK ADR 0019；v0.16.0 修正 Node 主機的 NIP-11 缺 `version`：自架 Docker 節點的一鍵更新比對從此有版號可比，SDK ADR 0018）（v0.10.1 起 `openWrap` 多一道「seal 必須是 kind 13」檢查，SDK ADR 0012；v0.11 起中繼多了可選的存取控制，錨點沒設、行為不變，SDK ADR 0013）。
+
+## 與 main 合併（2026-10-27）
+
+使用者 2026-10-27 同意：SDK 公開後先把 ADR-0391、0392 移植到 SDK，再把 main 合併進這條分支。
+
+- **SDK 先補齊**：分支落後 main 119 個 commit。main 這段期間的中繼改動 SDK 都已移植（ADR-0371～0373、0376、0377、0379～0382、0386～0390），
+  只缺 ADR-0391（主平面的反覆重連限速）與 0392（沒認證就斷線的診斷）。這兩份移植成 SDK ADR 0111、發 v0.77.0：
+  - 回絕的句子與錨點逐字相同；
+  - DO 那一道預設開；
+  - Worker 那一道照舊靠本庫 `wrangler.toml` 的 `STRICT_UPGRADE_LIMIT` binding。
+  0393／0394 互相抵銷，不必移植。
+- **相依**：`packages/core`、`relay` 改成公開 repo `github:VaalRL/cinderous-sdk#v0.77.0`，不再需要私有 repo 的權限。
+- **衝突的處理**：
+  - main 改了、這條分支刪掉的 relay 檔案（13 個），維持刪除；
+  - main 新增的中繼模組（`capacity`、`conn-persistence`、`reconnect-guard`、`reject-messages`、`unauth-diag`）與它們的測試也刪掉——SDK 有同名、同數量的測試；
+  - `worker.ts`、`index.ts`、`node-relay.ts` 用這條分支的轉出版本；main 在這些檔加的東西，SDK 都已經有了；
+  - `core` 的 `event`／`keys`／`sign` 用轉出版本；main 的 noble 2.4.0（ADR-0374）保留在 `package.json`，SDK 也釘 2.4.0，整棵樹仍只有一份（`dependency-pins` 測試）；
+  - main 新增的 `core/inbox-ack` 改成照原名轉出 SDK（實作相同，SDK 版另外接受 `NostrSigner`）；`public-reach`（ADR-0382）是 App 自己的功能，留在本庫；
+  - `wrangler.toml` 以 main 為準，加回錨點的 `RELAY_NAME`、`DEVELOPER_DOCS_URL`；`wrangler-vars.test.ts` 兩邊的測試都留下，匯入改成 SDK。
+- **留在本庫的中繼測試**（匯入改成 SDK）：
+  - `reject-messages.test.ts`、`capacity-core.test.ts`：除了 SDK 也有的情境，還檢查**已上線的 App**（v0.0.18 的 `classifyOk`、配對信令）看得懂 SDK 中繼的句子，這是本庫特有的相容性；
+  - 新的 `sdk-switch-compat.test.ts`：拿錨點**最後部署的**儲存程式（5137079c，`fixtures/main-5137079c-stores.mjs`）實際建一次 DO SQLite，確認：
+    - 與 SDK `RelayRoom` 建構子從零建的 schema 逐字相同；
+    - SDK 打開舊庫不丟例外、重跑不變，舊庫的列讀得回來；
+    - 回滾時舊程式打開 SDK 建的庫照常讀寫。
+- **驗證**：
+  - `pnpm -r typecheck`、`pnpm -r test` 全過；
+  - `wrangler deploy --dry-run`（頂層、`wrangler.relay2.toml`）打包成功，帶 `STRICT_UPGRADE_LIMIT`、`RELAY_NAME`，打包內含重連限速與診斷；
+  - 統一模式的 dry-run 要先建置網頁版（`assets.directory`），與這次合併無關。
 
 ## 後果
 
 - ＋ 中繼與共用協定各只有一份，App、四款遊戲、中繼看到同一套規則。
 - ＋ 任何人（SDK 公開後）都能用 SDK 起一座與錨點同一套行為的中繼。
 - － 改協定要先改 SDK、打標籤，本庫再升版；兩邊不能在同一個提交裡一起改。
-- － 本庫的 core、relay 依賴 SDK：SDK 公開之前，CI、Docker 與 Tauri 打包都需要讀取私有 repo 的權限。
+- － 本庫的 core、relay 依賴 SDK：SDK 公開之前，CI、Docker 與 Tauri 打包都需要讀取私有 repo 的權限（2026-10-27 SDK 公開後不再需要；相依改用公開 repo 的 tag）。

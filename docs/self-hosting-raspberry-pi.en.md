@@ -59,6 +59,7 @@ wscat -c ws://localhost:8787
 | `REQUIRE_AUTH` | enabled | Set `REQUIRE_AUTH=0` to disable NIP-42 auth (**not recommended** — turning it off lets anyone pull other people's encrypted inbox metadata, and the cloud snapshot ciphertext (ADR-0071) also loses its "return to the author only" gate; see ADR-0057). |
 | `MAX_TTL_DAYS` | `7` | Retention cap for offline messages, in days (ADR-0160). |
 | `MAX_FILE_MB` | unset | Set to ≥1 to accept file chunks; unset means the whole class is rejected (ADR-0162/0244). |
+| `FILE_LANES` | unset | **Don't set it here**: it only takes effect on the Cloudflare Worker (which has third-party lanes). node-relay has no lanes, so setting it rejects file chunks node-wide (ADR-0371). |
 | `MAX_EVENTS_PER_MINUTE` | `120` | Per-pubkey events-per-minute cap; set `0` to disable (ADR-0235 H1). |
 | `MAX_MESSAGES_PER_MINUTE` | `240` | Per-**connection** inbound-messages-per-minute cap; the connection is closed when exceeded. Set `0` to disable (ADR-0366 §capacity). |
 | `RELAY_NAME` / `RELAY_CONTACT` / `RELAY_DESCRIPTION` / `RELAY_PUBKEY` | unset | NIP-11 relay information (ADR-0260). **Set `RELAY_CONTACT` if you want to be listed in the seat pool.** |

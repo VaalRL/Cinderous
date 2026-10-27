@@ -38,6 +38,7 @@ import { normalizeRelayUrl, RelayChatBackend, shouldMuteOrgNotification, webSock
 import { DEFAULT_NOTIFY_PREFS, type NotifyPrefs, shouldNotify } from "@cinderous/engine";
 import { fetchRelayInfo, type RelayInfo } from "@cinderous/engine";
 import type { CalendarEventInput, RsvpStatus, StoredCalendarEvent } from "@cinderous/engine";
+import type { PublicReachState } from "@cinderous/engine";
 import type { IcePath } from "@cinderous/engine"; // ADR-0344：直連 vs 經 TURN 中繼
 import { formatBytes } from "@cinderous/engine"; // ADR-0344：提示文案與檔案泡泡共用同一個格式
 import { sendsUnstrippedImage } from "@cinderous/engine"; // ADR-0359：大到不能清 EXIF 的圖片先問過
@@ -168,7 +169,7 @@ import {
   withoutLabel,
   withPinned,
 } from "./ui/group-labels.js";
-import { ANCHOR_RELAYS, MAINTAINER_PUBKEY } from "@cinderous/engine";
+import { ANCHOR_RELAYS, MAINTAINER_PUBKEY, PUBLIC_INDEX_RELAYS } from "@cinderous/engine";
 import { initIdle, reduceIdle, type IdleState } from "./ui/idle-status.js";
 import { setBroadcastAvatars } from "./ui/personalize.js";
 import {
@@ -479,6 +480,7 @@ async function buildBackend(p: Profile, nsecOverride?: string, storage?: AppStor
         // 需 connectorFor（上面已提供）建各片/presence 連線。
         ...(shardingEnabled() ? { shardingBase: p.relayUrl } : {}),
         anchors: ANCHOR_RELAYS,
+        publicIndexRelays: PUBLIC_INDEX_RELAYS, // ADR-0382 §2：公開聯絡方式（使用者打開才發布）
         ...(MAINTAINER_PUBKEY ? { maintainerPubkey: MAINTAINER_PUBKEY } : {}),
         onHomeSwitched: (url: string) => {
           try {
@@ -918,6 +920,8 @@ export function App(): JSX.Element {
   });
   // 前向保密（ADR-0245）：opt-in 開關狀態，由後端 fsEnabled() 提供。
   const [fsEnabled, setFsEnabled] = useState<boolean>(false);
+  // 公開聯絡方式（ADR-0382）：狀態以 home 上自己發布的事件為準，後端讀到或切換時經 onPublicReach 更新。
+  const [publicReach, setPublicReach] = useState<PublicReachState | null>(null);
   /** 本裝置解不開的訊息數（ADR-0316）；開機自後端讀一次，之後由 onFsUndecryptable 更新。 */
   const [fsFailures, setFsFailures] = useState<{ count: number; lastAt: number }>({ count: 0, lastAt: 0 });
   /** 入群邀請閘門（ADR-0317）：值在跨裝置同步設定裡，開機自後端讀。 */
@@ -1433,6 +1437,7 @@ export function App(): JSX.Element {
       },
       onConnection: setConn,
       onRelayPool: setRelays,
+      onPublicReach: setPublicReach,
       onPolicy: setPolicy,
       onOrgEscrow: (e) => {
         // ADR-0163：公司帳號成員入職託管的私鑰 → 持久化（依管理者身分），供日後離職接管。
@@ -1689,6 +1694,7 @@ export function App(): JSX.Element {
       onGroups: setGroups,
     });
     setFsEnabled(backend.fsEnabled?.() ?? false); // ADR-0245：讀前向保密開關狀態
+    setPublicReach(backend.publicReach?.() ?? null); // ADR-0382：開機讀到之前是關
     setGroupInviteAnyone(backend.groupInviteFromAnyone?.() ?? false); // ADR-0317：讀入群邀請閘門
     setDevices(backend.devices?.() ?? []); // ADR-0321：讀觀測到的裝置
     // ADR-0164：狀態已於 buildBackend 建構時 seed 進 self（initialStatus），start() 首拍 beat()
@@ -3396,6 +3402,31 @@ export function App(): JSX.Element {
           onToggleReadReceipts={toggleReadReceipts}
           invisible={invisible}
           onToggleInvisible={toggleInvisible}
+          {...(publicReach?.available && activeBackend.setPublicReach
+            ? {
+                publicReach: {
+                  contactable: publicReach.contactable,
+                  publicName: publicReach.publicName,
+                  // ADR-0382：打開＝發布到公開中繼站、收不回，動作當下要確認；關掉直接做。
+                  onToggleContactable: () => {
+                    if (publicReach.contactable) return activeBackend.setPublicReach!({ contactable: false });
+                    void dialog()
+                      .confirm(tRef.current("publicReach_enableConfirm"))
+                      .then((ok) => {
+                        if (ok) activeBackend.setPublicReach!({ contactable: true });
+                      });
+                  },
+                  onTogglePublicName: () => {
+                    if (publicReach.publicName) return activeBackend.setPublicReach!({ publicName: false });
+                    void dialog()
+                      .confirm(tRef.current("publicReach_enableConfirm"))
+                      .then((ok) => {
+                        if (ok) activeBackend.setPublicReach!({ publicName: true });
+                      });
+                  },
+                },
+              }
+            : {})}
           {...(activeBackend.enableFs
             ? {
                 fs: {

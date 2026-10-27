@@ -59,6 +59,7 @@ Cinderous 客戶端連的是 `wss://`（加密 WebSocket）。你**不需要在�
 | `REQUIRE_AUTH` | 開啟 | 保持開啟。設 `0` 會關掉 NIP-42 認證——任何人都能拉他人加密收件匣元資料、雲端快照也失去「只回本人」閘門（ADR-0057/0071），**強烈不建議**。 |
 | `MAX_TTL_DAYS` | `7` | 離線留言保留天數上限（ADR-0160）。 |
 | `MAX_FILE_MB` | 未設 | 設 ≥1 才收檔案塊；未設＝整類拒收（ADR-0162/0244）。 |
+| `FILE_LANES` | 未設 | **這裡不要設**：它只在 Cloudflare 版（有第三方車道）生效；node-relay 沒有車道，設了就整站不收檔案塊（ADR-0371）。 |
 | `MAX_EVENTS_PER_MINUTE` | `120` | 每 pubkey 每分鐘事件上限；設 `0` 關閉（ADR-0235 H1）。 |
 | `MAX_MESSAGES_PER_MINUTE` | `240` | 每**連線**每分鐘進站訊息上限，超過即關線；設 `0` 關閉（ADR-0366 §容量）。 |
 | `RELAY_NAME`／`RELAY_CONTACT`／`RELAY_DESCRIPTION`／`RELAY_PUBKEY` | 未設 | NIP-11 節點資訊（ADR-0260）。**想被選座池收錄就填 `RELAY_CONTACT`**。 |

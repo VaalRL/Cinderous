@@ -598,7 +598,7 @@ const en: DevDocs = {
       title: "Error messages",
       description:
         "Every error the Cinderous relay returns to third-party apps: refused connections with a NOTICE and close reason, CLOSED subscriptions and OK false event rejections, with the fix for each.",
-      lead: "Match on the prefix before the colon. The text after it is a human-readable explanation and may change.",
+      lead: "Match on the prefix before the first colon. Cinderous relays also put a second word — a token such as `quota` or `ceiling` — after the prefix (`blocked: quota: …`); prefix and token are stable, the text after them is a human-readable explanation and may change.",
       sections: [
         {
           id: "connection",
@@ -628,8 +628,10 @@ const en: DevDocs = {
               table: {
                 head: ["Prefix", "Cause"],
                 rows: [
-                  ["`restricted:`", "A filter has no scope, or uses `#p` for someone else, or uses `#p` without AUTH — see [Subscriptions](doc:subscriptions)"],
-                  ["`rate-limited:`", "More than 16 open subscriptions on the connection"],
+                  ["`restricted: scope:`", "A filter has no scope, or uses `#p` for someone else, or uses `#p` without AUTH — see [Subscriptions](doc:subscriptions)"],
+                  ["`rate-limited: subscriptions:`", "More than 16 open subscriptions on the connection"],
+                  ["`error: resubscribe:`", "The relay restarted and lost the subscription — send the same `REQ` again"],
+                  ["`invalid: too-large:`", "The subscriptions on this connection exceed 512 KiB — use fewer or smaller filters"],
                 ],
               },
             },
@@ -643,11 +645,11 @@ const en: DevDocs = {
               table: {
                 head: ["Prefix", "Cause"],
                 rows: [
-                  ["`invalid:`", "Bad signature, or `created_at` outside the accepted window"],
-                  ["`duplicate:`", "The same event id was already received within the last hour"],
-                  ["`blocked:`", "Too many tags, too many `p` tags, too large, or an addressable event refused by a quota"],
-                  ["`rate-limited:`", "More than 120 events per minute for this key"],
-                  ["`pow:`", "Not enough proof of work (only if it is enabled)"],
+                  ["`invalid:`", "Bad signature (`bad-signature`), `created_at` outside the accepted window (`clock-skew`), or the event's own `expiration` has passed (`expired`)"],
+                  ["`duplicate:`", "Sent with **`OK true`**: the relay already has this event (same id within the last hour). Treat it as accepted"],
+                  ["`blocked:`", "Too many tags (`too-many-tags`), too many `p` tags (`too-many-recipients`), too large (`too-large`); for addressable events: older than the stored one (`stale`), over your per-author quota (`quota`), or the relay's storage is full (`ceiling` — try another relay or later)"],
+                  ["`rate-limited: events:`", "More than 120 events per minute for this key"],
+                  ["`pow: difficulty:`", "Not enough proof of work (only if it is enabled)"],
                   ["`auth-failed:`", "The AUTH event was invalid, expired, or named a different relay"],
                 ],
               },
@@ -1224,7 +1226,7 @@ const zhHant: DevDocs = {
       title: "錯誤訊息",
       description:
         "Cinderous 中繼回給第三方應用的所有錯誤：以 NOTICE 與關閉原因說明的拒絕連線、CLOSED 訂閱、OK false 拒收事件，以及各自的修正方式。",
-      lead: "請比對冒號前的前綴。冒號後是給人看的說明，內容可能會改。",
+      lead: "請比對第一個冒號前的前綴。Cinderous 中繼還會在前綴後面多放一個英文詞元（例如 `quota`、`ceiling`：`blocked: quota: …`）；前綴與詞元是穩定的，後面是給人看的說明，內容可能會改。",
       sections: [
         {
           id: "connection",
@@ -1254,8 +1256,10 @@ const zhHant: DevDocs = {
               table: {
                 head: ["前綴", "原因"],
                 rows: [
-                  ["`restricted:`", "filter 沒有指定範圍、`#p` 指向別人，或沒 AUTH 就用 `#p`——見[訂閱](doc:subscriptions)"],
-                  ["`rate-limited:`", "這條連線同時開著的訂閱超過 16 個"],
+                  ["`restricted: scope:`", "filter 沒有指定範圍、`#p` 指向別人，或沒 AUTH 就用 `#p`——見[訂閱](doc:subscriptions)"],
+                  ["`rate-limited: subscriptions:`", "這條連線同時開著的訂閱超過 16 個"],
+                  ["`error: resubscribe:`", "中繼重啟後這個訂閱遺失了——再送一次同一個 `REQ`"],
+                  ["`invalid: too-large:`", "這條連線的訂閱合計超過 512 KiB——減少或縮小 filter"],
                 ],
               },
             },
@@ -1269,11 +1273,11 @@ const zhHant: DevDocs = {
               table: {
                 head: ["前綴", "原因"],
                 rows: [
-                  ["`invalid:`", "簽章錯誤，或 `created_at` 超出容許範圍"],
-                  ["`duplicate:`", "同一個事件 id 在一小時內已經收過"],
-                  ["`blocked:`", "標籤太多、`p` 標籤太多、事件太大，或可尋址事件超過配額"],
-                  ["`rate-limited:`", "這把金鑰每分鐘超過 120 則事件"],
-                  ["`pow:`", "工作量證明不足（只在開啟時出現）"],
+                  ["`invalid:`", "簽章錯誤（`bad-signature`）、`created_at` 超出容許範圍（`clock-skew`），或事件自帶的 `expiration` 已經過了（`expired`）"],
+                  ["`duplicate:`", "以 **`OK true`** 回覆：中繼已經有這顆（一小時內收過同一個 id），當成已收下"],
+                  ["`blocked:`", "標籤太多（`too-many-tags`）、`p` 標籤太多（`too-many-recipients`）、事件太大（`too-large`）；可尋址事件：比現有的舊（`stale`）、超過每位作者的配額（`quota`），或中繼空間已滿（`ceiling`——改寫到別座或稍後再試）"],
+                  ["`rate-limited: events:`", "這把金鑰每分鐘超過 120 則事件"],
+                  ["`pow: difficulty:`", "工作量證明不足（只在開啟時出現）"],
                   ["`auth-failed:`", "AUTH 事件無效、過期，或指向別的中繼"],
                 ],
               },

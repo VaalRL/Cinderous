@@ -53,10 +53,8 @@ export function createPairingSignal(opts: {
   const subscribe = (client: { subscribe: (id: string, filters: never[]) => void }) => {
     client.subscribe("pair", [{ kinds: [PAIR_SIGNAL_KIND], "#p": [room.pk] } as never]);
   };
-  // NIP-42 競態：連線後、認證前送出的事件會被 relay 以 `auth-required` 拒收。
-  // 信令沒有外送匣可靠層（ADR-0041 只保護 kind 1059），故在此自帶「被拒即認證後重送」。
-  const inFlight = new Map<string, NostrEvent>();
-  const awaitingAuth: NostrEvent[] = [];
+  // NIP-42 競態（連線後、認證前送出的事件被 relay 以 `auth-required` 拒收）由 RelayClient 統一處理：
+  // 認證完成後自動重送（ADR-0385；原本只有這裡自帶，聊天的心跳與直連信令一樣會掉）。
   const client = opts.connector({
     onEvent: (_sub, event) => {
       if (event.kind !== PAIR_SIGNAL_KIND || event.pubkey !== room.pk) return;
@@ -64,20 +62,8 @@ export function createPairingSignal(opts: {
       if (!msg || msg.sid === sid) return; // 解不開（非本房）或自己的回音
       opts.onMessage(msg);
     },
-    onOk: (id, accepted, message) => {
-      const evt = inFlight.get(id);
-      if (!evt) return;
-      inFlight.delete(id);
-      if (!accepted && /auth-required/i.test(message)) awaitingAuth.push(evt); // 認證完成後重送
-    },
     authSigner: (challenge) => buildAuthEvent(challenge, opts.relayUrl, room.sk),
-    onAuthenticated: (client) => {
-      subscribe(client); // 認證前的 REQ 會被 CLOSED，此處重掛
-      for (const evt of awaitingAuth.splice(0)) {
-        inFlight.set(evt.id, evt);
-        client.publish(evt);
-      }
-    },
+    onAuthenticated: (client) => subscribe(client), // 認證前的 REQ 會被 CLOSED，此處重掛
   });
   subscribe(client);
   return {
@@ -92,7 +78,6 @@ export function createPairingSignal(opts: {
         },
         room.sk,
       );
-      inFlight.set(evt.id, evt);
       client.publish(evt);
     },
     close() {

@@ -20,6 +20,7 @@ import {
   type SecretKey,
   type Signal,
   FileSourceUnavailableError,
+  getPublicKey,
 } from "@cinderous/core";
 import { IcePathTracker, type IcePath } from "./ice-path.js";
 
@@ -87,7 +88,8 @@ interface PeerConn {
   hasRemote: boolean;
   pendingCandidates: RTCIceCandidateInit[];
   outbox: OutJob[];
-  started: boolean;
+  /** 最近一次送出 offer、接受 offer 或套用 answer 的時間（ADR-0384）；超過 NEGOTIATION_STALE_MS 還沒通就算卡住。 */
+  negotiatedAt: number | undefined;
   candBatch: CandidateBatch;
   candTimer: ReturnType<typeof setTimeout> | undefined;
   /** ICE 路徑追蹤（ADR-0344）：通道開啟時 start、關閉時 reset。 */
@@ -103,7 +105,17 @@ interface PeerConn {
   peerUnderstandsV2: boolean;
   /** 是否已有一個檔案正在送（非同步管線需要防重入才不會兩檔交錯）。 */
   sending: boolean;
+  /** 自己的 offer 正在產生、還沒設成本地描述（ADR-0384：判斷 offer 有沒有撞在一起）。 */
+  makingOffer: boolean;
 }
+
+/**
+ * 協商多久沒談成就算卡住（ADR-0384）：offer 或 answer 是中繼上的即時事件，對方不在線或連線抖一下就掉了，
+ * 那條連線不會自己好。過了這段時間，打開對話會換一條新連線重談，自己等著的 offer 也不再擋住對方的。
+ */
+const NEGOTIATION_STALE_MS = 10_000;
+/** 記住最近處理過的信令事件 id（ADR-0384）：同一顆 offer 重播會讓剛談好的連線被換掉。 */
+const SEEN_SIGNALS_MAX = 256;
 
 /** 續傳協商的等待上限：超過就當對方沒有斷點，從頭送。 */
 const RESUME_WAIT_MS = 400;
@@ -164,10 +176,50 @@ export class WebRtcTransfer {
 
   /** 主動建立與對方的 P2P 通道（開啟對話時呼叫，讓後續狀態/輸入中可走 P2P）。 */
   connect(peerPk: PubkeyHex): void {
-    const peer = this.ensurePeer(peerPk);
-    if (!peer.started && !(peer.dc && peer.dc.readyState === "open")) {
-      void this.startOffer(peerPk, peer);
+    this.ensureNegotiation(peerPk);
+  }
+
+  /**
+   * 通道沒開、也沒有正在進行的協商 → 送 offer（ADR-0384）。之前談過卻沒通（卡住超過 NEGOTIATION_STALE_MS）的，
+   * 換一條新連線再談：舊連線的 DTLS 角色已經定了，在上面重談會和對方的新連線撞角色（實測「Failed to set SSL role」）。
+   */
+  private ensureNegotiation(peerPk: PubkeyHex): void {
+    const existing = this.peers.get(peerPk);
+    if (existing) {
+      if (existing.dc?.readyState === "open" || existing.makingOffer) return;
+      if (existing.negotiatedAt !== undefined && Date.now() - existing.negotiatedAt < NEGOTIATION_STALE_MS) return; // 談判中
     }
+    const used = existing !== undefined && (existing.negotiatedAt !== undefined || existing.dc !== undefined);
+    const peer = used ? this.replacePeer(peerPk, existing) : this.ensurePeer(peerPk);
+    void this.startOffer(peerPk, peer);
+  }
+
+  /** 換一條新連線（ADR-0384）：舊的先卸掉事件處理再關（不回報「直連中斷」，除非它原本是開著的）；待送的檔案帶過去。 */
+  private replacePeer(peerPk: PubkeyHex, old: PeerConn): PeerConn {
+    if (old.candTimer !== undefined) clearTimeout(old.candTimer);
+    old.pathTracker.reset();
+    const wasOpen = old.dc?.readyState === "open";
+    if (old.dc) {
+      old.dc.onopen = old.dc.onclose = old.dc.onerror = old.dc.onmessage = null;
+      try {
+        old.dc.close();
+      } catch {
+        /* 忽略 */
+      }
+    }
+    old.pc.onicecandidate = null;
+    old.pc.onconnectionstatechange = null;
+    old.pc.ondatachannel = null;
+    try {
+      old.pc.close();
+    } catch {
+      /* 忽略 */
+    }
+    this.peers.delete(peerPk);
+    if (wasOpen) this.handlers.onConnectionState?.(peerPk, false);
+    const fresh = this.ensurePeer(peerPk);
+    fresh.outbox = old.outbox;
+    return fresh;
   }
 
   /** 若與對方的 P2P 通道已開，經其送出「正在輸入中」並回傳 true（卸載中繼）；否則 false。 */
@@ -245,8 +297,8 @@ export class WebRtcTransfer {
     peer.outbox.push({ id, file: asFileStream(file), ...(origin !== undefined ? { origin } : {}) });
     if (peer.dc && peer.dc.readyState === "open") {
       this.flush(peerPk, peer);
-    } else if (!peer.started) {
-      void this.startOffer(peerPk, peer);
+    } else {
+      this.ensureNegotiation(peerPk); // 換新連線時待送的檔案會一起帶過去
     }
     return id;
   }
@@ -262,6 +314,10 @@ export class WebRtcTransfer {
     } catch {
       return;
     }
+    // 同一顆信令重播（ADR-0384）：再套一次 offer 會把剛談好的連線換掉
+    if (this.seenSignals.has(event.id)) return;
+    this.seenSignals.add(event.id);
+    if (this.seenSignals.size > SEEN_SIGNALS_MAX) this.seenSignals.delete(this.seenSignals.values().next().value!);
     const peer = this.ensurePeer(sender);
     void this.applySignal(sender, peer, signal);
   }
@@ -331,10 +387,11 @@ export class WebRtcTransfer {
       hasRemote: false,
       pendingCandidates: [],
       outbox: [],
-      started: false,
+      negotiatedAt: undefined,
       resumeWaiters: new Map(),
       peerUnderstandsV2: false,
       sending: false,
+      makingOffer: false,
       candBatch: new CandidateBatch(),
       candTimer: undefined,
       // 判定有變才會進來（tracker 自己去重）；只在通道仍開著時上報，避免斷線後的殘響。
@@ -375,17 +432,34 @@ export class WebRtcTransfer {
   }
 
   private async startOffer(peerPk: PubkeyHex, peer: PeerConn): Promise<void> {
-    peer.started = true;
+    peer.negotiatedAt = Date.now();
     const dc = peer.pc.createDataChannel("buddy");
     this.attachChannel(peerPk, peer, dc);
+    peer.makingOffer = true;
     try {
       const offer = await peer.pc.createOffer();
+      // ADR-0384：產生 offer 的空檔裡已經在新連線上接受了對方的 offer（我是讓步的一方）→ 這顆不送了
+      if (this.peers.get(peerPk) !== peer || peer.pc.signalingState !== "stable") return;
       await peer.pc.setLocalDescription(offer);
       this.handlers.publishSignal(createSignal({ type: "offer", sdp: offer.sdp ?? "" }, this.ownSk, peerPk));
     } catch (e) {
-      this.handlers.onError(peerPk, `建立 offer 失敗：${String(e)}`);
+      // 直連是盡力而為（ADR-0210）：不在對話裡報錯，下次打開對話再談
+      console.debug("[webrtc] 建立 offer 失敗", peerPk, e);
+    } finally {
+      peer.makingOffer = false;
     }
   }
+
+  /**
+   * 雙方同時發起直連時誰讓步（ADR-0384，WebRTC「perfect negotiation」）：公鑰較大的一方讓步——
+   * 放棄自己的 offer、在新連線上接受對方的；較小的一方略過對方的 offer、等自己那顆的 answer。兩端算出的結果必然相反。
+   */
+  private isPolite(peerPk: PubkeyHex): boolean {
+    this.ownPk ??= getPublicKey(this.ownSk);
+    return this.ownPk > peerPk;
+  }
+  private ownPk: PubkeyHex | undefined;
+  private readonly seenSignals = new Set<string>();
 
   private attachChannel(peerPk: PubkeyHex, peer: PeerConn, dc: RTCDataChannel): void {
     peer.dc = dc;
@@ -416,8 +490,27 @@ export class WebRtcTransfer {
       sdpMid: c.sdpMid ?? null,
       sdpMLineIndex: c.sdpMLineIndex ?? null,
     };
-    if (peer.hasRemote) await peer.pc.addIceCandidate(init);
-    else peer.pendingCandidates.push(init);
+    if (!peer.hasRemote) {
+      peer.pendingCandidates.push(init);
+      return;
+    }
+    await this.tryAddIce(peer, init);
+  }
+
+  /** 候選套不上不算錯（ADR-0384）：略過的 offer、換掉的舊連線帶來的候選本來就對不上；真的連不起來由連線狀態回報。 */
+  private async tryAddIce(peer: PeerConn, init: RTCIceCandidateInit): Promise<void> {
+    try {
+      await peer.pc.addIceCandidate(init);
+    } catch (e) {
+      console.debug("[webrtc] 略過套不上的 ICE 候選", e);
+    }
+  }
+
+  /** 套用對方描述之後，把先到的候選補上。 */
+  private async flushPendingCandidates(peer: PeerConn): Promise<void> {
+    const pending = peer.pendingCandidates;
+    peer.pendingCandidates = [];
+    for (const c of pending) await this.tryAddIce(peer, c);
   }
 
   private async applySignal(peerPk: PubkeyHex, peer: PeerConn, signal: Signal): Promise<void> {
@@ -427,21 +520,33 @@ export class WebRtcTransfer {
       } else if (signal.type === "candidates") {
         for (const c of signal.candidates) await this.addIce(peer, c);
       } else if (signal.type === "offer") {
-        await peer.pc.setRemoteDescription({ type: "offer", sdp: signal.sdp });
-        peer.hasRemote = true;
-        for (const c of peer.pendingCandidates) await peer.pc.addIceCandidate(c);
-        peer.pendingCandidates = [];
-        const answer = await peer.pc.createAnswer();
-        await peer.pc.setLocalDescription(answer);
+        // ADR-0384：自己的 offer 還在等 answer（沒過期）時撞上對方的——不讓步的一方略過對方的
+        const waiting = peer.makingOffer || peer.pc.signalingState !== "stable";
+        const fresh = peer.negotiatedAt !== undefined && Date.now() - peer.negotiatedAt < NEGOTIATION_STALE_MS;
+        if (waiting && fresh && !this.isPolite(peerPk)) return;
+        // 一律在新連線上接受 offer：舊連線的 DTLS 角色可能已經定了，和對方的新連線談不攏
+        const target = peer.negotiatedAt !== undefined || peer.dc !== undefined ? this.replacePeer(peerPk, peer) : peer;
+        target.negotiatedAt = Date.now();
+        target.pendingCandidates = peer.pendingCandidates; // 對方新 offer 的候選可能比 offer 先到
+        await target.pc.setRemoteDescription({ type: "offer", sdp: signal.sdp });
+        target.hasRemote = true;
+        await this.flushPendingCandidates(target);
+        const answer = await target.pc.createAnswer();
+        await target.pc.setLocalDescription(answer);
         this.handlers.publishSignal(createSignal({ type: "answer", sdp: answer.sdp ?? "" }, this.ownSk, peerPk));
       } else {
+        // 已經不在等 answer（換了新連線、或重開 App 後收到舊的）→ 過期，安靜略過（ADR-0384）
+        if (peer.pc.signalingState !== "have-local-offer") return;
         await peer.pc.setRemoteDescription({ type: "answer", sdp: signal.sdp });
         peer.hasRemote = true;
-        for (const c of peer.pendingCandidates) await peer.pc.addIceCandidate(c);
-        peer.pendingCandidates = [];
+        peer.negotiatedAt = Date.now();
+        await this.flushPendingCandidates(peer);
       }
     } catch (e) {
-      this.handlers.onError(peerPk, `信令處理失敗：${String(e)}`);
+      // 直連是盡力而為（ADR-0210）：不在對話裡報錯；換一條乾淨的連線，下次打開對話重談
+      console.debug("[webrtc] 信令處理失敗", peerPk, e);
+      const current = this.peers.get(peerPk);
+      if (current) this.replacePeer(peerPk, current);
     }
   }
 
