@@ -12,7 +12,7 @@ WORKDIR /app
 COPY . .
 RUN pnpm install --frozen-lockfile
 RUN pnpm --filter @cinderous/relay build:node-relay
-# 產物：relay/dist/node-relay.js（97KB，已含 @cinderous/core；僅 ws 為外部依賴）
+# 產物：relay/dist/node-relay.js（97KB，已含 SDK 的中繼與 @cinderous/core（ADR-0370）；僅 ws 為外部依賴）
 
 # ── 執行：只帶 bundle 與唯一 runtime 依賴 ws，映像精簡 ─────────────────────────
 FROM node:22-slim AS runtime

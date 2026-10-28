@@ -4,7 +4,7 @@
 // 「中繼那邊也要改」的地方。漂移的症狀是：第三方開發者照著 NOTICE 點過來，拿到 404。
 
 import { describe, expect, it } from "vitest";
-import { DEVELOPER_DOCS_URL } from "../../../relay/src/host-config.js";
+import { DEVELOPER_DOCS_URL } from "../../../relay/src/index.js";
 import { routeUrl } from "./routes.js";
 
 describe("中繼的開發者文件網址（ADR-0368）", () => {

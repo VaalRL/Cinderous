@@ -47,6 +47,11 @@ DONATE_BUY_ME_A_COFFEE = "https://buymeacoffee.com/whoami885"
 # 2026-09-29 加入 `cindersync`（CinderSync，Obsidian 筆記庫同步外掛）與 `cinder-coffice`（Cinder Coffice，Obsidian 協同工作區外掛）：車道 id 與外掛 manifest id 相同，兩者先前都沒有存過任何資料，加入沒有冷啟動代價。
 APP_LANES = "lwd,elementalist,nagd,soleague,dochost,cindersync,cinder-coffice"
 
+# 錨點自己的身分與文件網址（SDK ADR 0019）：SDK 的預設值是中立的（不附文件網址、站名是
+# "Cinderous SDK relay"），錨點在這裡明確寫出來。文件網址與 `src/developer-docs.ts` 一致（測試比對）。
+RELAY_NAME = "Cinderous relay"
+DEVELOPER_DOCS_URL = "https://vaalrl.github.io/Cinderous/developers/"
+
 # 檔案車道（ADR-0371）：2026-09-29 使用者決定，錨點**只在這兩條車道**收檔案塊（kind 1060），
 # 單檔上限 30MB——CinderSync／Cinder Coffice 的 Vault 同步走中繼時，外層就是檔案塊。
 #
@@ -185,6 +190,11 @@ TURN_TTL_SECONDS = "300"
 DONATE_BUY_ME_A_COFFEE = "https://buymeacoffee.com/whoami885"
 # 已知租戶名單（ADR-0366 §裁示）——與頂層同步，理由見上面那段註解。
 APP_LANES = "lwd,elementalist,nagd,soleague,dochost,cindersync,cinder-coffice"
+
+# 錨點自己的身分與文件網址（SDK ADR 0019）：SDK 的預設值是中立的（不附文件網址、站名是
+# "Cinderous SDK relay"），錨點在這裡明確寫出來。文件網址與 `src/developer-docs.ts` 一致（測試比對）。
+RELAY_NAME = "Cinderous relay"
+DEVELOPER_DOCS_URL = "https://vaalrl.github.io/Cinderous/developers/"
 # 檔案車道（ADR-0371，2026-09-29 使用者決定）——與頂層同步：只有這兩條車道收檔案塊、單檔 30MB，
 # 主訊息平面照舊整類拒收。理由見上面那段註解。
 MAX_FILE_MB = "30"

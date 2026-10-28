@@ -10,10 +10,16 @@ import {
   getPublicKey,
   type NostrEvent,
 } from "@cinderous/core";
-import { MessageStore, type MessageStoreOptions, type OfflineStore } from "./message-store.js";
-import { borrowedWarning, droppedNotice, nearFullWarning } from "./reject-messages.js";
-import { RelayCore } from "./relay-core.js";
-import { SqlMessageStore } from "./sql-message-store.js";
+import {
+  MessageStore,
+  type MessageStoreOptions,
+  type OfflineStore,
+  borrowedWarning,
+  droppedNotice,
+  nearFullWarning,
+  RelayCore,
+  SqlMessageStore,
+} from "@cinderous/client/relay";
 
 const { DatabaseSync } = createRequire(import.meta.url)("node:sqlite") as {
   DatabaseSync: typeof DatabaseSyncType;

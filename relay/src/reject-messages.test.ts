@@ -6,8 +6,10 @@ import { createRequire } from "node:module";
 import type { DatabaseSync as DatabaseSyncType } from "node:sqlite";
 import { describe, expect, it } from "vitest";
 import { buildAuthEvent, finalizeEvent, generateSecretKey, type NostrEvent } from "@cinderous/core";
-import { MessageStore, type MessageStoreOptions, type OfflineStore } from "./message-store.js";
 import {
+  MessageStore,
+  type MessageStoreOptions,
+  type OfflineStore,
   ADDRESSABLE_REJECT,
   ADDRESSABLE_REJECT_GENERIC,
   borrowedWarning,
@@ -18,9 +20,9 @@ import {
   OFFLINE_CEILING_REJECT,
   powRejectMessage,
   REJECT,
-} from "./reject-messages.js";
-import { RelayCore } from "./relay-core.js";
-import { SqlMessageStore } from "./sql-message-store.js";
+  RelayCore,
+  SqlMessageStore,
+} from "@cinderous/client/relay";
 
 /** SDK `classifyRelayMessage` 的前兩層（本 repo 還沒有依賴 SDK，這裡只驗形狀） */
 function parse(message: string): { prefix?: string; token?: string } {

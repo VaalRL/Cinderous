@@ -11,8 +11,8 @@
 
 import { WebSocket as NodeWs, WebSocketServer } from "ws";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { MessageStore } from "../src/message-store.js";
-import { RelayCore } from "../src/relay-core.js";
+import { MessageStore } from "@cinderous/client/relay";
+import { RelayCore } from "@cinderous/client/relay";
 import { probeEphemeralNotStored, probeLive, probeRejectsExpired } from "./conformance.js";
 
 /** 起一座真的中繼；回傳 ws:// 網址。 */
