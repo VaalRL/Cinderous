@@ -18,6 +18,7 @@ import {
   webSocketConnector,
 } from "@cinderous/engine";
 import type { MobileIdentity } from "./auth.js";
+import { APP_VERSION } from "./version.js";
 import { createDemoChat } from "./chat.js";
 
 /** 預設生產中繼站（可於 UI 覆寫）。 */
@@ -81,6 +82,7 @@ export function createRelayChat(
     identity.name,
     {
       relayUrl,
+      appVersion: APP_VERSION, // ADR-0397：裝置報告
       ...roaming,
       ...cloud,
       // ADR-0164／0168：本機記住的上次手動狀態，讓 start() 的首次心跳就照這個廣播

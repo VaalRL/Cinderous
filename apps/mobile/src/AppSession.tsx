@@ -59,7 +59,7 @@ import {
 } from "./native/foreground.js";
 import { hasCallSupport } from "./native/call-media.js";
 import { CallScreen } from "./screens/CallScreen.js";
-import { connectionBannerText, type Locale, type MessageKey, translate } from "@cinderous/i18n";
+import { capabilityGapText, connectionBannerText, type Locale, type MessageKey, translate } from "@cinderous/i18n";
 import type { ChatBg, Theme } from "@cinderous/theme";
 import { getChatBg, removeChatBg, setChatBg } from "./personalize.js";
 import { StyleSheet, Text, View } from "react-native-web";
@@ -144,6 +144,8 @@ const shell = StyleSheet.create({ root: { flex: 1 } });
 const bannerStyles = StyleSheet.create({
   connecting: { paddingVertical: 4, paddingHorizontal: 12, backgroundColor: "#b45309" },
   offline: { paddingVertical: 4, paddingHorizontal: 12, backgroundColor: "#b91c1c" },
+  // ADR-0397：自己有裝置跟不上加密方式——比斷線更持久的警示
+  warn: { paddingVertical: 6, paddingHorizontal: 12, backgroundColor: "#7e22ce" },
   text: { color: "#fff", fontSize: 12, fontWeight: "700", textAlign: "center" },
 });
 
@@ -871,6 +873,7 @@ export function AppSession({
       onTyping: (pk) => threads.markTyping(pk), // ADR-0120／0331：計時器與逾時都在對話簇內
       // 與中繼站連線狀態（ADR-0034；行動端於 ADR-0169 補齊）：非 online 時頂端顯示細條。
       onConnection: (state, unavailable) => self.setConnection(state, unavailable),
+      onCapabilityGap: (gap) => self.setCapabilityGap(gap), // ADR-0397
       // 敲一下（ADR-0114）：收到就震動（行動端於 ADR-0168 補齊）。裝置不支援 Vibration API
       // （多數桌面瀏覽器、iOS Safari）時靜默略過——不是錯誤，只是沒有觸覺回饋。
       onNudge: () => {
@@ -1620,6 +1623,16 @@ export function AppSession({
     );
   }
 
+  // 自己有裝置跟不上加密方式（ADR-0397）：常駐到補上為止，排在連線細條之前
+  const capGapText = self.capabilityGap ? capabilityGapText(locale, self.capabilityGap) : undefined;
+  const capGapBanner = capGapText ? (
+    <View style={bannerStyles.warn}>
+      <Text style={bannerStyles.text} testID="capgap-banner">
+        {capGapText}
+      </Text>
+    </View>
+  ) : null;
+
   // 連線狀態細條（ADR-0169）：只在真實 relay 且非 online 時顯示（示範模式無中繼、不顯示）。
   const connBanner =
     relayUrl && self.connection !== "online" ? (
@@ -1745,6 +1758,7 @@ export function AppSession({
     })();
     return (
       <View style={shell.root}>
+        {capGapBanner}
         {connBanner}
         <ConversationScreen
           // ADR-0169 審查修正：以 activeId 作 key，換對話（含從通知直接跳另一對話、screen 不變）
@@ -1822,6 +1836,7 @@ export function AppSession({
   // 主畫面：分頁內容 + 底部分頁列。
   return (
     <View style={shell.root}>
+      {capGapBanner}
       {connBanner}
       {tab === "chats" ? (
         <ChatsListScreen

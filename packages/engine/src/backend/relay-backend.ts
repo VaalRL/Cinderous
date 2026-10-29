@@ -137,6 +137,10 @@ import {
   EK_ANNOUNCE_KIND,
   ekHintOf,
   buildDeviceDirectory,
+  buildDeviceReport,
+  DEVICE_REPORT_KIND,
+  readDeviceReport,
+  type DeviceReport,
   buildEkEnvelope,
   withoutDevice,
   EK_ENVELOPE_KIND,
@@ -210,6 +214,7 @@ import type {
   ChatBackendEvents,
   CloudBackupState,
   ChatMessage,
+  CapabilityGap,
   ConnectionState,
   Contact,
   PublicProfile,
@@ -500,6 +505,8 @@ export function webSocketConnector(url: string): RelayConnector {
  */
 /** 多中繼路由選項（ADR-0034）；未提供 `connectorFor` 時為單 relay 模式。 */
 export interface RelayPoolOptions {
+  /** App 版號（ADR-0397）：寫進裝置報告，讓自己的其他裝置看得到這台跑哪一版。 */
+  appVersion?: string;
   /** 自己的 home relay URL（用於與聯絡人 hint 比對去重、組分享字串）。 */
   relayUrl?: string;
   /**
@@ -663,6 +670,10 @@ export class RelayChatBackend implements ChatBackend {
   /** durable 搬家（ADR-0069 T2/T3）：通知回呼、T2 門檻、T3 延遲、一次性 latch。 */
   private readonly onHomeMigrate: ((newUrl: string, reason: "dead" | "retired") => void) | undefined;
   private readonly homeDeadMs: number;
+  /** App 版號（ADR-0397 裝置報告）。 */
+  private readonly appVersion: string | undefined;
+  /** 自己其他裝置的報告（ADR-0397），以裝置公鑰為鍵；每次開機從中繼重新讀回，不持久化。 */
+  private readonly deviceReports = new Map<string, DeviceReport>();
   private readonly retireDelayFn: (() => number) | undefined;
   private migrateFired = false;
   private retireTimer: ReturnType<typeof setTimeout> | undefined;
@@ -871,6 +882,7 @@ export class RelayChatBackend implements ChatBackend {
     this.cloudSync = pool?.cloudSync;
     this.onHomeMigrate = pool?.onHomeMigrate;
     this.homeDeadMs = pool?.homeDeadMs ?? 24 * 3600_000;
+    this.appVersion = pool?.appVersion;
     this.retireDelayFn = pool?.retireDelayMs;
     this.connectorFor = pool?.connectorFor;
     this.shardingBase = normalizeRelayUrl(pool?.shardingBase); // ADR-0241：設定＝分片模式
@@ -1054,6 +1066,7 @@ export class RelayChatBackend implements ChatBackend {
     this.maybeSendOrgJoin(); // ADR-0156：入職請求（名冊尚未收錄自己時，每次開機重送直到入冊）
     this.broadcastGroups(); // ADR-0068：管理員把自建群組快照廣播給成員（換機自癒）
     this.maybePublishSnapshot(); // ADR-0071：雲端快照（開機檢查；內容有變＋每日至多一次）
+    this.publishDeviceReport(); // ADR-0397：讓自己的其他裝置知道這台跑哪一版、讀得懂什麼
     this.reconcileCloudOff(); // 審查修正 #6：關閉狀態的雲端殘留對帳
     this.pruneCalendarOnStart(); // ADR-0264 §10：清掉過久的過去行程
     this.sweepReminders(); // ADR-0266：App 關著時錯過的提醒，開起來還在寬限窗內就補說一聲
@@ -1408,7 +1421,8 @@ export class RelayChatBackend implements ChatBackend {
       sub({ kinds: [KIND.OFFLINE_DM_GIFT_WRAP], "#p": me }, (u) => this.inboxSince(u)),
       // 自己的雲端快照（ADR-0071 J3）：接收合併恆開——換機還原不需任何前置設定。
       sub({ kinds: [SNAPSHOT_KIND], authors: me }, "n/a"),
-      sub({ kinds: [DEVICE_DIRECTORY_KIND], authors: me }, "n/a"), // ADR-0322 S1：自己的裝置目錄
+      // ADR-0322 S1：自己的裝置目錄；ADR-0397 的裝置報告併在同一個 REQ（不多開訂閱）
+      sub({ kinds: [DEVICE_DIRECTORY_KIND, DEVICE_REPORT_KIND], authors: me }, "n/a"),
       // 公開聯絡方式（ADR-0382）：開關狀態以 home 上自己發布的 10050／kind 0 為準，別台裝置切換的也讀得到
       ...(url !== undefined && url === this.originalHomeUrl
         ? [sub({ kinds: [PUBLIC_PROFILE_KIND, INBOX_RELAY_LIST_KIND], authors: me }, "n/a")]
@@ -1539,6 +1553,7 @@ export class RelayChatBackend implements ChatBackend {
 
   private persistFs(): void {
     this.storage.saveFsState(this.fsState);
+    this.emitCapabilityGap(); // ADR-0397：開關前向保密、或別台同步過來，要求的能力就跟著變
   }
   /** grace 刪除紀律（ADR-0245）：修剪逾 grace 的舊 EK（回收＝FS 真正生效）；有變才寫回。開機/輪替時呼叫。 */
   private pruneFs(): void {
@@ -2217,6 +2232,95 @@ export class RelayChatBackend implements ChatBackend {
   /** 觀測清單 ＋ 目錄狀態合併後發給 UI（ADR-0321／0322 S1）。 */
   private emitDevices(): void {
     this.handlers?.onDevices?.(this.devices());
+    this.emitCapabilityGap(); // ADR-0397：目錄與觀測清單一變，缺口就可能跟著變
+  }
+
+  /**
+   * 這一版讀得懂的機制（ADR-0397）：寫進裝置報告。
+   * 🔴 加一種會改變別人怎麼加密給我的機制時，**這裡與 {@link requiredCapabilities} 要一起改**。
+   */
+  private ownCapabilities(): string[] {
+    return [FS_CAPABILITY, FS_CAPABILITY_PQ];
+  }
+
+  /** 這個身分**正在公告**、所以每台裝置都要讀得懂的機制（ADR-0397）。沒開前向保密＝沒有要求。 */
+  private requiredCapabilities(): string[] {
+    return this.announcedPq() !== undefined ? [FS_CAPABILITY_PQ] : [];
+  }
+
+  /** 發自己的裝置報告（ADR-0397）：開機一次；可尋址、`d`＝裝置 id，中繼只留最新一份。 */
+  private publishDeviceReport(): void {
+    const evt = buildDeviceReport(this.sk, {
+      id: this.deviceIdCached,
+      pk: this.deviceKey.pk,
+      ...(this.appVersion ? { ver: this.appVersion } : {}),
+      caps: this.ownCapabilities(),
+      at: nowSec(),
+    });
+    this.client.publish(evt);
+    for (const c of this.relayPool.values()) c.publish(evt);
+  }
+
+  /** 收到自己某台裝置的報告（ADR-0397）。本機自己的那份略過；同一台只留較新的。 */
+  private receiveDeviceReport(event: NostrEvent): void {
+    const report = readDeviceReport(event, this.sk);
+    if (!report || report.pk === this.deviceKey.pk) return;
+    const prev = this.deviceReports.get(report.pk);
+    if (prev && prev.at > report.at) return;
+    this.deviceReports.set(report.pk, report);
+    this.emitDevices();
+  }
+
+  /**
+   * 自己有沒有裝置跟不上目前的加密方式（ADR-0397）。
+   *
+   * - `devices`：目錄內或觀測到的裝置（排除本機、已移除、久未出現），缺了 `required` 的哪些；
+   *   **沒有報告**的標 `reported: false`——舊版本來就不發報告，而它們正是會永久丟訊的那群。
+   * - `selfMissing`：別台宣告了、本機不認得的機制 ⇒ 這台該更新了。
+   */
+  capabilityGap(): CapabilityGap {
+    const required = this.requiredCapabilities();
+    const own = new Set(this.ownCapabilities());
+    const selfMissing = [...new Set([...this.deviceReports.values()].flatMap((r) => r.caps.filter((c) => !own.has(c))))].sort();
+    if (required.length === 0) return { required, devices: [], selfMissing };
+    const observed = this.storage.loadDevices();
+    const byId = new Map([...this.deviceReports.values()].map((r) => [r.id, r]));
+    const devices: CapabilityGap["devices"] = [];
+    const add = (pk: string | undefined, id: string | undefined, label: string | undefined) => {
+      const report = (pk ? this.deviceReports.get(pk) : undefined) ?? (id ? byId.get(id) : undefined);
+      const missing = required.filter((c) => !report?.caps.includes(c));
+      if (missing.length === 0) return;
+      const devicePk = pk ?? report?.pk;
+      const deviceId = id ?? report?.id;
+      devices.push({
+        ...(devicePk ? { pk: devicePk } : {}),
+        ...(deviceId ? { id: deviceId } : {}),
+        ...(label ? { label } : {}),
+        ...(report?.ver ? { ver: report.ver } : {}),
+        reported: report !== undefined,
+        missing,
+      });
+    };
+    const seenIds = new Set<string>();
+    for (const d of this.deviceDir?.devices ?? []) {
+      if (d.pk === this.deviceKey.pk) continue;
+      const id = d.id ?? this.deviceReports.get(d.pk)?.id;
+      if (id) seenIds.add(id);
+      const obs = id ? observed.find((o) => o.id === id) : undefined;
+      if (obs && (obs.revoked || isDeviceStale(obs))) continue;
+      add(d.pk, id, d.label);
+    }
+    for (const o of observed) {
+      if (o.id === this.deviceIdCached || seenIds.has(o.id) || o.revoked || isDeviceStale(o)) continue;
+      add(undefined, o.id, undefined);
+    }
+    return { required, devices, selfMissing };
+  }
+
+  private emitCapabilityGap(): void {
+    if (!this.handlers?.onCapabilityGap) return;
+    const gap = this.capabilityGap();
+    this.emitIfChanged("capabilityGap", JSON.stringify(gap), () => this.handlers?.onCapabilityGap?.(gap));
   }
 
   /**
@@ -2353,10 +2457,14 @@ export class RelayChatBackend implements ChatBackend {
   }
 
   /** 觀測到的裝置清單（ADR-0321）。 */
-  devices(): (StoredDevice & { inDirectory: boolean; isSelf: boolean; stale: boolean })[] {
+  devices(): (StoredDevice & { inDirectory: boolean; isSelf: boolean; stale: boolean; ver?: string })[] {
     const selfId = this.deviceIdCached;
+    const verById = new Map([...this.deviceReports.values()].flatMap((r) => (r.ver ? [[r.id, r.ver] as const] : [])));
+    // ADR-0397：自報的版號（本機用自己的；別台用它的裝置報告；沒報＝不顯示）
+    const verOf = (id: string) => (id === selfId ? this.appVersion : verById.get(id));
     return this.storage.loadDevices().map((d) => ({
       ...d,
+      ...(verOf(d.id) ? { ver: verOf(d.id)! } : {}),
       isSelf: d.id === selfId,
       // ADR-0322 S1：觀測到但**不在目錄內**＝今天完全看不出來的那種東西。
       // ⚠ 目錄尚未建立時 `deviceIdInDirectory` 回 null＝**未知**，此時一律視為 true
@@ -2761,6 +2869,10 @@ export class RelayChatBackend implements ChatBackend {
     }
     if (event.kind === DEVICE_DIRECTORY_KIND) {
       this.receiveDeviceDirectory(event); // ADR-0322 S1：裝置目錄
+      return;
+    }
+    if (event.kind === DEVICE_REPORT_KIND) {
+      this.receiveDeviceReport(event); // ADR-0397：自己其他裝置的版本與能力
       return;
     }
     if (event.kind === EK_ENVELOPE_KIND) {

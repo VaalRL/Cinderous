@@ -61,6 +61,18 @@ export function shouldMuteOrgNotification(
 /** 使用者可見狀態（避開商標，以中文呈現於 UI）。 */
 export type Status = "online" | "away" | "busy" | "offline";
 
+/**
+ * 自己的裝置跟不上目前加密方式的缺口（ADR-0397）。
+ * - `required`：這個身分正在公告、每台都要讀得懂的機制（沒開前向保密＝空）；
+ * - `devices`：缺了其中哪些的裝置；`reported: false`＝沒發報告（多半是舊版）；
+ * - `selfMissing`：別台宣告了、**本機**不認得的機制 ⇒ 這台該更新。
+ */
+export interface CapabilityGap {
+  required: string[];
+  devices: { pk?: string; id?: string; label?: string; ver?: string; reported: boolean; missing: string[] }[];
+  selfMissing: string[];
+}
+
 /** 與中繼站的連線狀態（供顯示連線/重連中）。 */
 export type ConnectionState = "connecting" | "online" | "offline";
 
@@ -432,6 +444,11 @@ export interface ChatBackendEvents {
   /** 觀測到的裝置清單有變動（ADR-0321）：供 UI 更新「我的裝置」。 */
   onDevices?(list: (StoredDevice & { inDirectory: boolean; isSelf: boolean })[]): void;
   /**
+   * 自己有裝置跟不上目前的加密方式（ADR-0397）：有變化時發。UI 常駐提示直到補上，
+   * 否則那台會**永久**解不開送來的訊息（ADR-0365）。
+   */
+  onCapabilityGap?(gap: CapabilityGap): void;
+  /**
    * 看到一台**從未見過**的裝置（ADR-0321）：顯著提示，不是預設關的小徽章。
    *
    * ⚠ 本機那台不觸發（`source: "local"`）——它就是使用者正在看的這台。
@@ -539,7 +556,7 @@ export interface ChatBackend {
    * `inDirectory: false` ＝**觀測到但不在簽章目錄內**（今天完全看不出來的那種）。
    * `stale: true` ＝久未出現、**已被排除在撤銷判定之外**（ADR-0324）。
    */
-  devices?(): (StoredDevice & { inDirectory: boolean; isSelf: boolean; stale: boolean })[];
+  devices?(): (StoredDevice & { inDirectory: boolean; isSelf: boolean; stale: boolean; ver?: string })[];
   /** 本機裝置公鑰（ADR-0322 S1）。 */
   selfDevicePk?(): string;
   /**

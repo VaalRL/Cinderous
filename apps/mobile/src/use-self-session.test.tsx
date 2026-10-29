@@ -70,6 +70,14 @@ describe("「我自己」簇（ADR-0331）", () => {
     expect(h.get().connection).toBe("connecting");
   });
 
+  it("🔴 切身分：裝置能力缺口（ADR-0397）不沿用上個身分的", () => {
+    const h = hook();
+    act(() => h.get().setCapabilityGap({ required: ["ek-pq-v1"], devices: [{ label: "舊手機", reported: false, missing: ["ek-pq-v1"] }], selfMissing: [] }));
+    expect(h.get().capabilityGap?.devices).toHaveLength(1);
+    act(() => h.get().reset(seed()));
+    expect(h.get().capabilityGap).toBeUndefined();
+  });
+
   it("🔴 中繼額度用完（ADR-0395）：原因撐過重試中的「連線中」，上線或換身分才清掉", () => {
     const h = hook();
     const u = { kind: "over-quota" as const, retryAt: 1, resetsAt: 2 };

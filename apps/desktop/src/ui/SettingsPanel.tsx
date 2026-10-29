@@ -66,7 +66,7 @@ export interface SettingsPanelProps {
    */
   orgPolicy?: OrgPolicy;
   /** 觀測到的裝置（ADR-0321）：提供才顯示「我的裝置」。 */
-  devices?: { id: string; firstSeen: number; source: string; inDirectory?: boolean; revoked?: boolean; stale?: boolean }[];
+  devices?: { id: string; firstSeen: number; source: string; inDirectory?: boolean; revoked?: boolean; stale?: boolean; ver?: string }[];
   /** 撤銷三態（ADR-0322 S2）：**雙軌期間不得讓使用者以為移除會生效**。 */
   revocation?: { state: "unknown" | "dual-track" | "active"; devices?: string[] };
   /** 移除一台裝置（ADR-0322 S3）；未提供則不顯示移除入口。 */
@@ -326,7 +326,7 @@ function DeviceSettings({
   keyTier,
   keyEverPlaintext,
 }: {
-  devices: { id: string; firstSeen: number; source: string; inDirectory?: boolean; revoked?: boolean; stale?: boolean }[];
+  devices: { id: string; firstSeen: number; source: string; inDirectory?: boolean; revoked?: boolean; stale?: boolean; ver?: string }[];
   revocation?: { state: "unknown" | "dual-track" | "active"; devices?: string[] };
   onRemove?: (id: string) => void;
   onForget?: (id: string) => void;
@@ -350,6 +350,7 @@ function DeviceSettings({
             <code>{d.id.slice(0, 8)}</code>
             {d.source === "local" ? ` （${t("devices_thisOne")}）` : ""} · {label(d.source)} ·{" "}
             {t("devices_firstSeen", { when: new Date(d.firstSeen).toLocaleDateString() })}
+            {d.ver ? ` · ${t("devices_version", { ver: d.ver })}` : ""}
             {/* ADR-0322 S1：觀測到卻不在簽章目錄內——今天完全看不出來的那種。 */}
             {d.inDirectory === false ? (
               <span className="settings__warn" data-testid="device-not-in-dir">

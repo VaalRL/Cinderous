@@ -33,7 +33,7 @@
 // 而手寫的那種，正是會被下一個新增欄位的人漏掉的東西。
 
 import { useState } from "react";
-import type { ConnectionState, RelayUnavailable, Status } from "@cinderous/engine";
+import type { CapabilityGap, ConnectionState, RelayUnavailable, Status } from "@cinderous/engine";
 import { nextRelayUnavailable } from "@cinderous/i18n";
 
 /** 切身分時的種子。 */
@@ -61,6 +61,8 @@ export interface SelfSession {
   nowPlaying: string;
   /** 與中繼站的連線（ADR-0034）：非 online 時頂端顯示細條。 */
   connection: ConnectionState;
+  /** 自己有裝置跟不上目前的加密方式（ADR-0397）：頂端常駐提示。 */
+  capabilityGap: CapabilityGap | undefined;
   /** 中繼說「暫時不能用」的原因（ADR-0395）：細條照實說原因與恢復時間。 */
   connectionUnavailable: RelayUnavailable | undefined;
 
@@ -72,6 +74,8 @@ export interface SelfSession {
   setNowPlaying(t: string): void;
   /** 後端 `onConnection`（ADR-0395 起帶原因）。 */
   setConnection(s: ConnectionState, unavailable?: RelayUnavailable): void;
+  /** 後端 `onCapabilityGap`（ADR-0397）。 */
+  setCapabilityGap(g: CapabilityGap): void;
 
   /** 切身分：換成新身分的我。 */
   reset(seed: SelfSeed): void;
@@ -88,6 +92,7 @@ export function useSelfSession(): SelfSession {
   const [nowPlaying, setNowPlaying] = useState("");
   const [connection, setConnectionState] = useState<ConnectionState>("connecting");
   const [connectionUnavailable, setConnectionUnavailable] = useState<RelayUnavailable | undefined>(undefined);
+  const [capabilityGap, setCapabilityGap] = useState<CapabilityGap | undefined>(undefined);
 
   return {
     pubkey,
@@ -99,6 +104,7 @@ export function useSelfSession(): SelfSession {
     statusMessage,
     nowPlaying,
     connection,
+    capabilityGap,
     connectionUnavailable,
     setName,
     setInvisible,
@@ -109,6 +115,7 @@ export function useSelfSession(): SelfSession {
       setConnectionState(s);
       setConnectionUnavailable((prev) => nextRelayUnavailable(prev, s, unavailable));
     },
+    setCapabilityGap,
     reset: (seed) => {
       setPubkey(seed.pubkey);
       setName(seed.name);
@@ -118,6 +125,7 @@ export function useSelfSession(): SelfSession {
       setStatus(seed.status ?? "online");
       setStatusMessage(seed.statusMessage ?? "");
       setNowPlaying(""); // 純易失，不跨身分也不跨 session
+      setCapabilityGap(undefined); // ADR-0397：缺口屬於上一個身分的裝置
       setConnectionUnavailable(undefined); // ADR-0395：原因屬於上一個身分的連線
       setConnectionState("connecting"); // ADR-0169：換身分＝重連，先回連線中，待後端回報 online
     },

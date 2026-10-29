@@ -13,6 +13,7 @@ export * from "./heartbeat.js";
 export * from "./presence.js";
 export * from "./presence-status.js";
 export * from "./presence-signal.js";
+export * from "./device-report.js"; // ADR-0397
 export * from "./typing.js";
 export * from "./nudge.js";
 export * from "./music.js";

@@ -75,6 +75,8 @@ import {
 import { makeThumbnail } from "./ui/thumbnail.js";
 import { needsBytesToSend, sanitizedFileName, sanitizeImage } from "@cinderous/engine"; // ADR-0273：送圖去 EXIF；ADR-0346：其餘走惰性串流
 import { useI18n } from "./i18n.js";
+import { capabilityGapText } from "@cinderous/i18n";
+import { APP_VERSION } from "./version.js";
 import { type Layout, useLayout } from "./layout.js";
 import {
   browserIsRemembered,
@@ -118,6 +120,7 @@ import type {
   ChatBackend,
   ChatFile,
   ChatMessage,
+  CapabilityGap,
   ConnectionState,
   RelayUnavailable,
   Contact,
@@ -463,6 +466,7 @@ async function buildBackend(p: Profile, nsecOverride?: string, storage?: AppStor
   const opts = p.enterprise
     ? {
         relayUrl: p.relayUrl,
+        appVersion: APP_VERSION, // ADR-0397：裝置報告
         ...cloud,
         ...presence,
         ...(p.adminPubkey ? { orgAdminPubkey: p.adminPubkey } : {}),
@@ -471,6 +475,7 @@ async function buildBackend(p: Profile, nsecOverride?: string, storage?: AppStor
       }
     : {
         relayUrl: p.relayUrl,
+        appVersion: APP_VERSION, // ADR-0397：裝置報告
         ...cloud,
         ...presence,
         // 企業主（ADR-0155/0156）：訂自己的名冊找回狀態＋入職自動核准；其餘同個人身分。
@@ -934,6 +939,8 @@ export function App(): JSX.Element {
   // 每對話保留上限（ADR-0094）：0＝無上限（預設）。
   const [retentionCap, setRetentionCapState] = useState<number>(() => readRetentionCap());
   const [storageFull, setStorageFull] = useState<boolean>(false);
+  // ADR-0397：自己有裝置跟不上目前的加密方式（那台會永久解不開送來的訊息）
+  const [capGap, setCapGap] = useState<CapabilityGap | undefined>(undefined);
   /**
    * 雲端備份狀態的重繪觸發器（ADR-0071／0363）。
    *
@@ -1442,6 +1449,7 @@ export function App(): JSX.Element {
         setConn(state);
         setConnUnavailable((prev) => nextRelayUnavailable(prev, state, unavailable));
       },
+      onCapabilityGap: setCapGap, // ADR-0397
       onRelayPool: setRelays,
       onPublicReach: setPublicReach,
       onPolicy: setPolicy,
@@ -2947,6 +2955,15 @@ export function App(): JSX.Element {
         />
       ) : null}
       <div className="deckwrap deckwrap--left">
+        {(() => {
+          // ADR-0397：兩種佈局共用，常駐到補上為止
+          const text = capGap ? capabilityGapText(locale, capGap) : undefined;
+          return text ? (
+            <div className="connbar connbar--warn" role="alert">
+              {text}
+            </div>
+          ) : null;
+        })()}
         {layout === "modern" ? (
           <DeckSidebar
             self={self}
