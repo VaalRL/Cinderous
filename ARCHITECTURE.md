@@ -213,7 +213,7 @@
   **2026-08-03 盤點更正**：~~行動端尚無 FS UI~~ 已不成立——**桌面／瀏覽器／行動端三端皆已具備 FS UI**（行動端 `SettingsScreen` 的 `fs` 區塊，含常駐「未經審計」揭露與換鑰，`FsSettingsUi.test.tsx` 覆蓋）。
   ⚠ **真正的範圍限制在別處**：`fsSendOpt()` 全庫只有一處呼叫（`relay-backend.ts` 的 1:1 文字送出）⇒ **只有 1:1 文字訊息有 FS**；群組、typing/nudge、已讀回條、檔案、通話、reaction、收回**全部維持靜態**（ADR-0245 §200 的 ⏳）。且不知道對方 EK 時**靜默退回身分金鑰**＝該則沒有 FS（僅對已釘選過的聯絡人才發降級警告）。
   per-message 棘輪延後（其入場費見 **ADR-0303**：per-device **session** 而非 per-device 身分）、完整 PCS/群組走 MLS（不自捲）。
-- **（方向已定，實作待排）** 多設備可變狀態 CRDT 化：訊息 id 去重、已讀水位 LWW（ADR-0108）、資產 LWW＋墓碑（ADR-0224）已定；聯絡人/群組/封鎖/設定的合併仍是 add-biased（刪除復活、解封不傳、欄位/設定不同步）。**ADR-0242** 定案輕量系統化——OR-Set＋墓碑（聯絡人/群組/封鎖）＋per-field LWW（暱稱/設定），分階段逐坑觸發。
+- **（✅ 已實作，ADR-0242）** 多設備可變狀態 CRDT 化：訊息 id 去重、已讀水位 LWW（ADR-0108）、資產 LWW＋墓碑（ADR-0224）；聯絡人/群組/封鎖改 OR-Set＋墓碑（實作在 SDK `@cinderous/client/sync`，core `or-set.ts` 照原名轉出；刪除不再復活、解封會傳）、聯絡人欄位 per-field LWW、同步設定與每對話靜音逐鍵 LWW（`core/synced-prefs.ts`）、墓碑 90 天時間回收。狀態文字等其餘設定用同一機制漸進。
 - ~~群組加密方案？~~（已定案 ADR-0027：Gift-Wrap 成對扇出；MLS 延後。顯示名稱走加密個人檔 kind 已實作，ADR-0061。）
 - **（方向已定，實作待排）** 中繼層元資料可連結性：連線都綁真名 → 中繼可歸屬 presence 訂閱（聯絡人集合）與 Gift Wrap 發布（送出邊）。**ADR-0237** 定案分層——Tier 0 強化 P2P 卸載、Tier 1 opt-in 嚴格 presence 模式、**自架為官方解答**；輪替金鑰 presence 因 IP 關聯與 N× 容量而否決，臨時身分連線與傳輸匿名（Tor）延後、與 DO 分片一起評估。
 - **（方向已定，實作待排）** **單一全域 Durable Object 分片**：全網流量路由到單一 DO（`idFromName("global")`）＝單點故障（一崩全崩，ADR-0235 C1）＋擴充天花板。**ADR-0241** 定案按收件人 pubkey 前綴分片（重用 outbox、免 hint、客戶端 URL 選片解 AUTH 早於選 DO）；血條收益無條件；**presence 拆成獨立層**（不進訊息分片→訊息片擴充收益無條件、presence 失效只影響綠點不影響訊息）；與 ADR-0237 Tier 2 多連線綁定。**shard 數＝16、遷移＝切換＋舊留言自然過期**皆已定（不搬資料、過渡期雙讀）；另記一人一片（per-user DO）待實測。
