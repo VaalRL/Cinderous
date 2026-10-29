@@ -93,7 +93,7 @@ body { margin: 0; background: var(--bg-b); color: var(--ink); }
 /* 設定鈕靠右（三欄版 nav bar，ADR-0142）。 */
 .idbar__settings { margin-left: auto; }
 
-/* 經典佈局（ADR-0216）：左固定欄（idbar＋完整 MSN 主視窗）＋右側浮動對話畫布。
+/* 經典佈局（ADR-0216）：左固定欄（idbar＋完整經典即時通主視窗）＋右側浮動對話畫布。
    modern 模式改用 .deck（下方）三欄 Grid，互不影響。 */
 .desktop {
   height: var(--viewport-h);
@@ -497,7 +497,7 @@ button:disabled { opacity: .5; cursor: default; filter: none; }
 .me__name-txt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; }
 .me__mascot { flex: none; align-self: center; line-height: 0; }
 
-/* MSN 風狀態選單（彩色圓點下拉，取代原生 select）。 */
+/* 經典即時通風狀態選單（彩色圓點下拉，取代原生 select）。 */
 .statuspick { position: relative; flex: none; }
 .statuspick__cur {
   display: inline-flex; align-items: center; gap: 5px; font: inherit; font-size: 12px; font-weight: 600;
@@ -517,7 +517,7 @@ button:disabled { opacity: .5; cursor: default; filter: none; }
 .statuspick__opt:hover { background: var(--hover); }
 .statuspick__opt.on { background: var(--hover); font-weight: 700; }
 
-/* 大頭貼狀態外框光暈（MSN 風）。 */
+/* 大頭貼狀態外框光暈（經典即時通風）。 */
 .avatar.ring-online { box-shadow: 0 0 0 2px #36c46b, 0 0 7px #36c46b; }
 .avatar.ring-away { box-shadow: 0 0 0 2px #f2b134, 0 0 7px #f2b134; }
 .avatar.ring-busy { box-shadow: 0 0 0 2px #e5484d, 0 0 6px #e5484d; }

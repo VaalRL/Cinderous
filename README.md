@@ -4,7 +4,7 @@
 
 > **Life is short, connect buddies.**
 
-> 去中心化、無中央資料庫的即時通訊軟體。融合 **Nostr 協議** 與 **WebRTC**，高度還原早期 MSN Messenger 的經典互動體驗（震動、音樂狀態、離線留言），並以「零伺服器維護成本」為營運目標。
+> 去中心化、無中央資料庫的即時通訊軟體。融合 **Nostr 協議** 與 **WebRTC**，高度還原早期桌面即時通訊軟體的經典互動體驗（震動、音樂狀態、離線留言），並以「零伺服器維護成本」為營運目標。
 
 **🔥 官方網站：<https://vaalrl.github.io/Cinderous/>** ｜ **🌐 在瀏覽器開啟（網頁版）：<https://cinderous.cinderous1.workers.dev>** ｜ **💻 下載桌面版：[GitHub Releases](https://github.com/VaalRL/Cinderous/releases)**
 
@@ -60,7 +60,7 @@ Cinderous 透過「狀態信令」與「巨量資料傳輸」雙軌混合網路�
 - WebRTC：真實 P2P（`RTCPeerConnection`／ICE／TURN）語音／視訊通話、資料通道分塊檔案傳輸、雙軌降級與自動改道
 - 多裝置：QR／配對搬家（P2P，AES-256-GCM）、加密雲端備份（opt-in）、備份碼（NIP-49）、多身分並存；**我的裝置清單＋移除裝置**（ADR-0322：簽章裝置目錄、加密子鑰逐台分發）——⚠ 那買到的是**裝置遺失／被偷／舊機沒清**，**不是**身分私鑰外洩的解藥，設定頁如實說明並顯示裝置金鑰的保護等級（ADR-0323）
 
-**即時通體驗（懷舊 MSN 風）**
+**即時通體驗（懷舊即時通風）**
 - 敲一下（Nudge／震動）、正在輸入、正在聽（音樂狀態）、自訂狀態文字、隱身、上線狀態本機還原
 - 表情回應、收回訊息、已讀回條、@提及、內嵌回覆／對話串、限時訊息（閱後即焚）
 - 群組（建立／成員管理）、貼圖（內建＋自製）、對話背景、私人便條（加密）、媒體相簿
@@ -305,3 +305,7 @@ Ephemeral 心跳會隨上線人數扇出，請參考 [`docs/adr/0006`](./docs/ad
 就必須以相同授權公開你的原始碼（AGPL 第 13 條）。此選擇是為了確保所有衍生版本與自架的 relay 都對使用者保持透明、可審計，貫徹本專案的隱私與去中心化精神。
 
 Copyright (C) 2026 Cinderous contributors.
+
+官網使用的 Manrope 字型以 SIL Open Font License 1.1 授權，授權全文見 [`apps/website/src/fonts/OFL.txt`](./apps/website/src/fonts/OFL.txt)。
+
+Cinderous 是獨立的開源專案，與 Microsoft 或其他即時通訊軟體的廠商沒有任何關聯，也未獲其背書。文中提及的產品名稱與商標屬於各自的所有人。

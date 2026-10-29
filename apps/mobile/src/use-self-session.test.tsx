@@ -78,6 +78,19 @@ describe("「我自己」簇（ADR-0331）", () => {
     expect(h.get().capabilityGap).toBeUndefined();
   });
 
+  it("🔴 中繼額度用完（ADR-0395）：原因撐過重試中的「連線中」，上線或換身分才清掉", () => {
+    const h = hook();
+    const u = { kind: "over-quota" as const, retryAt: 1, resetsAt: 2 };
+    act(() => h.get().setConnection("offline", u));
+    act(() => h.get().setConnection("connecting"));
+    expect(h.get().connectionUnavailable).toEqual(u);
+    act(() => h.get().setConnection("online"));
+    expect(h.get().connectionUnavailable).toBeUndefined();
+    act(() => h.get().setConnection("offline", u));
+    act(() => h.get().reset(seed()));
+    expect(h.get().connectionUnavailable).toBeUndefined();
+  });
+
   it("改名只動名稱，其餘不變（ADR-0138）", () => {
     const h = hook();
     act(() => h.get().reset(seed()));

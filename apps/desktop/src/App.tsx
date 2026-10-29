@@ -113,6 +113,7 @@ import {
 import { getDeviceId } from "@cinderous/engine";
 import { DEVICE_KEY_SLOT, openDeviceKey, setDeviceKeyVault, webDeviceKeyVault } from "@cinderous/engine";
 import type { CloudSyncMode } from "@cinderous/engine";
+import { nextRelayUnavailable } from "@cinderous/i18n";
 import type {
   BlockedContact,
   ContactRequest,
@@ -121,6 +122,7 @@ import type {
   ChatMessage,
   CapabilityGap,
   ConnectionState,
+  RelayUnavailable,
   Contact,
   Group,
   OrgInfo,
@@ -626,6 +628,7 @@ export function App(): JSX.Element {
   const [archived, setArchived] = useState<Record<string, number>>({});
   const [historyOf, setHistoryOf] = useState<string | null>(null);
   const [conn, setConn] = useState<ConnectionState>("online");
+  const [connUnavailable, setConnUnavailable] = useState<RelayUnavailable | undefined>(undefined); // ADR-0395
   const [relays, setRelays] = useState<{ url: string; state: ConnectionState; home: boolean; stale: boolean }[]>([]);
   /** 共享行程（ADR-0263）：全部行程；右欄依當前對話篩選。 */
   const [calendar, setCalendar] = useState<StoredCalendarEvent[]>([]);
@@ -1442,7 +1445,10 @@ export function App(): JSX.Element {
           ...(e.groupId ?? e.contact ? { convo: (e.groupId ?? e.contact) as string } : {}),
         });
       },
-      onConnection: setConn,
+      onConnection: (state, unavailable) => {
+        setConn(state);
+        setConnUnavailable((prev) => nextRelayUnavailable(prev, state, unavailable));
+      },
       onCapabilityGap: setCapGap, // ADR-0397
       onRelayPool: setRelays,
       onPublicReach: setPublicReach,
@@ -2997,6 +3003,7 @@ export function App(): JSX.Element {
             unread={unread}
             {...(aiOk && ollama.enabled ? { onSummarize: summarizeUnread } : {})}
             connection={conn}
+            connectionUnavailable={connUnavailable}
             convos={convos}
             contactLabels={Object.fromEntries(contacts.map((c) => [c.pubkey, labelsOf(groupPrefs, c.pubkey)]))}
             onAddContactLabel={(pk, label) => updatePrefs(withLabel(groupPrefs, pk, label))}
