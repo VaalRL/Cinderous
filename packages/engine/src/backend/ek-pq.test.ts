@@ -12,6 +12,7 @@ import { describe, expect, it } from "vitest";
 import { createInMemoryRelayNetwork } from "@cinderous/relay";
 import {
   buildEkAnnounce,
+  buildEkEnvelope,
   EK_ANNOUNCE_KIND,
   decodePqPublicKey,
   EK_PQ_ANNOUNCE,
@@ -338,5 +339,49 @@ describe("輪替與 grace（驗收條件 5）", () => {
     net.connect("y", {}).publish(wrapped.events[0]!);
 
     expect(storeA.loadMessages(b.self.pubkey).map((m) => m.text)).toContain("輪替前就上路的訊息");
+  });
+});
+
+describe("🔴 舊裝置升級後補得回種子（ADR-0403）", () => {
+  /**
+   * B 的第二台裝置：同一個身分，手上那把 EK **沒有種子**——v0.0.15 以前解析分發時會把 `pq` 丟掉，
+   * 升級後存檔裡的那一筆仍然是這個樣子。
+   */
+  const oldDeviceOfB = (net: ReturnType<typeof createInMemoryRelayNetwork>, bSk: Uint8Array, key: { nsec: string; pk: string; at: number }) => {
+    const store = new MemoryStorage();
+    store.saveIdentity({ nsec: nsecEncode(bSk), name: "Bob" });
+    store.saveFsState({ enabled: true, keys: [{ nsec: key.nsec, pk: key.pk, at: key.at }], contactEks: {} });
+    const seen: string[] = [];
+    const b2 = new RelayChatBackend(store, (h) => net.connect("b2", h), "Bob");
+    b2.start({ ...noop, onMessage: (_pk, m) => void seen.push(m.text) });
+    return { b2, store, seen };
+  };
+
+  it("🔴 同一把 EK 再收到帶種子的分發：補上種子，之前解不開的訊息補解出來", () => {
+    const { net, a, b, bSk, bEk, bPqPk, announceFromB } = boot();
+    a.enableFs();
+    b.enableFs();
+    announceFromB(bEk().pk, bPqPk());
+    const full = bEk();
+    const { b2, store, seen } = oldDeviceOfB(net, bSk, full);
+
+    a.sendMessage(b.self.pubkey, "升級前送到的");
+    expect(seen).not.toContain("升級前送到的"); // 沒有種子，解不開
+    expect(store.loadFsState().pending?.length).toBeGreaterThan(0);
+
+    // 新裝置照常重發分發：同一把公鑰，這次帶著種子
+    net.connect("x", {}).publish(buildEkEnvelope(bSk, [b2.selfDevicePk()], [full]));
+
+    expect(store.loadFsState().keys.find((k) => k.pk === full.pk)?.pq).toBe(full.pq);
+    expect(seen).toContain("升級前送到的");
+    b2.stop();
+  });
+
+  it("分發裡同一把 EK 沒有種子：本機已有的種子不被洗掉", () => {
+    const { net, b, bSk, storeB } = boot();
+    b.enableFs();
+    const full = [...storeB.loadFsState().keys].at(-1)!;
+    net.connect("x", {}).publish(buildEkEnvelope(bSk, [b.selfDevicePk()], [{ nsec: full.nsec, pk: full.pk, at: full.at }]));
+    expect(storeB.loadFsState().keys.find((k) => k.pk === full.pk)?.pq).toBe(full.pq);
   });
 });

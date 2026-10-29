@@ -2319,8 +2319,12 @@ export class RelayChatBackend implements ChatBackend {
     const byPk = new Map(this.fsState.keys.map((k) => [k.pk, k]));
     let changed = false;
     for (const k of keys) {
-      if (byPk.has(k.pk)) continue;
-      byPk.set(k.pk, k);
+      // ADR-0403：已經有同一把時，只在**補得上種子**時才動。v0.0.15 以前解析分發時會丟掉 `pq`，
+      // 那台升級後存檔裡仍是沒有種子的同一把；原本「已有就跳過」⇒ 種子要等下一次輪替才會出現，
+      // 這段期間的混合式訊息（以及 ADR-0325 留著待補解的）全部永遠解不開。
+      const had = byPk.get(k.pk);
+      if (had && (had.pq || !k.pq)) continue;
+      byPk.set(k.pk, had ? { ...had, pq: k.pq! } : k);
       changed = true;
     }
     if (!changed) return;
