@@ -12,6 +12,17 @@ describe("連線列文案（ADR-0395）", () => {
     expect(connectionBannerText("en", "offline", u, TPE)).toBe("Disconnected: the relay has used up today's quota. It should be back around 08:00.");
   });
 
+  it("🔴 主機有回應、回答的不是中繼（ADR-0401）：說「最可能」是額度用完，不說死；給恢復時間", () => {
+    const u = { kind: "edge" as const, retryAt: 0, resetsAt: RESET };
+    expect(connectionBannerText("zh-Hant", "offline", u, TPE)).toBe(
+      "已斷線：中繼站的主機有回應，但中繼站沒有。最可能是今天的額度用完了，約 08:00 恢復",
+    );
+    expect(connectionBannerText("en", "offline", u, TPE)).toBe(
+      "Disconnected: the relay's host answered, but the relay didn't. Most likely it has used up today's quota; it should be back around 08:00.",
+    );
+    expect(connectionBannerText("zh-Hant", "connecting", u, TPE)).toContain("最可能");
+  });
+
   it("暫時不能用：說下一次重試的時間", () => {
     const u = { kind: "unavailable" as const, retryAt: Date.UTC(2026, 9, 29, 3, 5, 0) };
     expect(connectionBannerText("zh-Hant", "offline", u, TPE)).toBe("已斷線：中繼站暫時不能用，約 11:05 重試");

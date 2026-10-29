@@ -48,4 +48,22 @@ describe("Tauri 安全設定（ADR-0235 C4）", () => {
     expect(connectSrc).toContain("ipc:");
     expect(connectSrc).toContain("wss:");
   });
+
+  it("connect-src 含 https:：連不上時探測 relay 的 NIP-11，才分得出額度用完與斷網（ADR-0401；SDK ADR 0125）", () => {
+    for (const policy of [csp, conf.app?.security?.devCsp]) {
+      const connectSrc = /connect-src([^;]*)/.exec(String(policy))?.[1] ?? "";
+      expect(connectSrc.split(/\s+/)).toContain("https:");
+    }
+  });
+
+  it("網頁版（Pages 的 _headers、自架的 Caddyfile）的 connect-src 也含 https:", () => {
+    for (const file of ["../public/_headers", "../Caddyfile"]) {
+      // 只看真正的標頭那一行（Caddyfile 的註解也提到 connect-src）
+      const header = readFileSync(new URL(file, import.meta.url), "utf8")
+        .split(/\r?\n/)
+        .find((line) => line.includes("Content-Security-Policy"));
+      const connectSrc = /connect-src([^;]*)/.exec(header ?? "")?.[1] ?? "";
+      expect(connectSrc, file).toMatch(/(^|[\s:])https:(\s|\})/);
+    }
+  });
 });

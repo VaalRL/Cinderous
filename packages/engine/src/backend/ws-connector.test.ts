@@ -66,11 +66,20 @@ function connect(handlers: Parameters<ReturnType<typeof webSocketConnector>>[0] 
   return { states, client };
 }
 
+/** 邊緣探測（SDK ADR 0125）用的 fetch：預設像斷網（兩次都失敗），不碰真的網路 */
+const offlineFetch = () => Promise.reject(new TypeError("Failed to fetch"));
+/** 邊緣代答：一般請求被瀏覽器擋（沒有 CORS 標頭）、不透明請求成功 */
+const edgeFetch = vi.fn((_url: string, init?: { mode?: string }) =>
+  init?.mode === "no-cors" ? Promise.resolve({ type: "opaque", headers: { get: () => null } }) : offlineFetch(),
+);
+
 beforeEach(() => {
   FakeWebSocket.all = [];
   vi.useFakeTimers();
   vi.setSystemTime(Date.UTC(2026, 9, 29, 3, 0, 0)); // 台灣 11:00
   vi.stubGlobal("WebSocket", FakeWebSocket);
+  vi.stubGlobal("fetch", vi.fn(offlineFetch));
+  edgeFetch.mockClear();
 });
 afterEach(() => {
   vi.useRealTimers();
@@ -134,6 +143,67 @@ describe("🔴 中繼額度用完（1013 over quota，ADR-0395）", () => {
       ["online", undefined],
       ["offline", undefined],
     ]);
+  });
+});
+
+describe("🔴 主機有回應、回答的卻不是中繼（Cloudflare 1027 這類，ADR-0401；SDK ADR 0125）", () => {
+  /** 還沒連上就斷（瀏覽器只看得到 1006），兩次 */
+  const failTwice = async () => {
+    latest().closed(1006);
+    await tick();
+    vi.advanceTimersByTime(500);
+    latest().closed(1006);
+    await vi.advanceTimersByTimeAsync(0); // 探測的兩個請求回來
+  };
+
+  it("探測判定邊緣代答：再報一次離線，帶 edge、恢復時間（下一個 00:00 UTC）與 5 分鐘後的重試", async () => {
+    vi.stubGlobal("fetch", edgeFetch);
+    const { states } = connect();
+    await failTwice();
+    expect(edgeFetch.mock.calls.map(([url]) => url)).toEqual(["https://relay.example", "https://relay.example"]);
+    expect(states.at(-1)).toEqual([
+      "offline",
+      { kind: "edge", retryAt: Date.now() + 5 * 60_000, resetsAt: Date.UTC(2026, 9, 30, 0, 0, 0) },
+    ]);
+    // 重連等到那時（不是 1 秒後）
+    const n = FakeWebSocket.all.length;
+    vi.advanceTimersByTime(5 * 60_000 - 1);
+    expect(FakeWebSocket.all).toHaveLength(n);
+    vi.advanceTimersByTime(1);
+    expect(FakeWebSocket.all).toHaveLength(n + 1);
+  });
+
+  it("真的斷網（兩次請求都失敗）：照舊只報離線、不帶原因", async () => {
+    const { states } = connect();
+    await failTwice();
+    expect(vi.mocked(fetch)).toHaveBeenCalledTimes(2);
+    expect(states.at(-1)).toEqual(["offline", undefined]);
+  });
+
+  it("close() 之後探測才回來：不再回報", async () => {
+    let answer: () => void = () => {};
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        (url: string, init?: { mode?: string }) =>
+          new Promise((resolve, reject) => {
+            answer = () => (edgeFetch(url, init) as Promise<unknown>).then(resolve, reject);
+          }),
+      ),
+    );
+    const { states, client } = connect();
+    latest().closed(1006);
+    await tick();
+    vi.advanceTimersByTime(500);
+    latest().closed(1006);
+    await tick();
+    const n = states.length;
+    client.close?.();
+    answer();
+    await vi.advanceTimersByTimeAsync(0);
+    answer();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(states).toHaveLength(n);
   });
 });
 
