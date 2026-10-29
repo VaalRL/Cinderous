@@ -1,4 +1,4 @@
-// 經典佈局聯絡人分區/排序（ADR-0215，MSN 擬真）：純函式、可測。
+// 經典佈局聯絡人分區/排序（ADR-0215，經典即時通擬真）：純函式、可測。
 // 三種模式：依狀態（現有）、依分組（沿用既有標籤、可多屬）、依名稱（A→Z 平列）。
 import type { Contact, Status } from "@cinderous/engine";
 import { contactLabel } from "@cinderous/engine";
@@ -24,7 +24,7 @@ export interface ContactSection {
 }
 
 const STATUS_ORDER: Status[] = ["online", "away", "busy", "offline"];
-/** MSN 語意：away/busy 仍算「線上」（已連線但離開/忙碌）；offline＝顯示為離線。 */
+/** 經典即時通語意：away/busy 仍算「線上」（已連線但離開/忙碌）；offline＝顯示為離線。 */
 const isOnline = (c: Contact): boolean => c.status !== "offline";
 const byName = (a: Contact, b: Contact): number => contactLabel(a).localeCompare(contactLabel(b));
 const byOnlineThenName = (a: Contact, b: Contact): number =>

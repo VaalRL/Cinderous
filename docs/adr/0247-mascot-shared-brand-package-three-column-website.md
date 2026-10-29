@@ -6,7 +6,7 @@
 
 ## 背景與問題
 
-吉祥物 `CinderMascot`（MSN buddy 藍身＋燭火頭，`alert` 態＝有新訊息）原本只存在於**桌面經典佈局**的 `ContactListWindow` 「me」自我狀態列（`me__mascot`）。
+吉祥物 `CinderMascot`（藍色圓身＋燭火頭，`alert` 態＝有新訊息）原本只存在於**桌面經典佈局**的 `ContactListWindow` 「me」自我狀態列（`me__mascot`）。
 
 - **桌面三欄佈局（modern）**改用 `DeckSidebar`／`DeckRight`，不 render `ContactListWindow` → **吉祥物在三欄完全消失**（與其他三欄 parity 缺口同類）。
 - **官網**是獨立套件 `apps/website`，只有 `CinderMark` logo、**沒有吉祥物元件**。
@@ -21,7 +21,7 @@
   - C：複製一份進官網。否決：平行實作、違反 Fix-First/SSOT。
 - **三欄放哪**：左欄自我列（鏡像經典）vs **中欄空狀態**。→ 依使用者裁示採**中欄空狀態**（「挑一個對話」的大隻待機吉祥物）。
 - **官網放哪**：→ 依裁示採 **footer** 與 **404/空狀態**（Hero 副角暫不做）。
-- **官網吉祥物身體色**：釘經典 MSN 藍 vs **跟站台 `--accent`**。→ 採**跟 `--accent`**（官網為橘紅火焰調）；因元件本就讀 `var(--accent)`，**同一顆元件各環境自動上色、免加 prop**。
+- **官網吉祥物身體色**：釘經典藍 vs **跟站台 `--accent`**。→ 採**跟 `--accent`**（官網為橘紅火焰調）；因元件本就讀 `var(--accent)`，**同一顆元件各環境自動上色、免加 prop**。
 
 ## 決策
 
