@@ -561,6 +561,8 @@ button:disabled { opacity: .5; cursor: default; filter: none; }
 .connbar { padding: 4px 10px; font-size: 11px; text-align: center; color: #fff; }
 .connbar--connecting { background: #d9932b; }
 .connbar--offline { background: #c0392b; }
+/* ADR-0397：自己有裝置跟不上加密方式——比斷線更持久的警示，字多所以允許換行 */
+.connbar--warn { background: #8e44ad; text-align: left; line-height: 1.4; }
 
 /* 檔案傳輸 */
 .convo__body { position: relative; }

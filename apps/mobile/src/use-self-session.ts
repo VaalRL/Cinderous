@@ -33,7 +33,7 @@
 // 而手寫的那種，正是會被下一個新增欄位的人漏掉的東西。
 
 import { useState } from "react";
-import type { ConnectionState, Status } from "@cinderous/engine";
+import type { CapabilityGap, ConnectionState, Status } from "@cinderous/engine";
 
 /** 切身分時的種子。 */
 export interface SelfSeed {
@@ -60,6 +60,8 @@ export interface SelfSession {
   nowPlaying: string;
   /** 與中繼站的連線（ADR-0034）：非 online 時頂端顯示細條。 */
   connection: ConnectionState;
+  /** 自己有裝置跟不上目前的加密方式（ADR-0397）：頂端常駐提示。 */
+  capabilityGap: CapabilityGap | undefined;
 
   /** 改名（ADR-0138 的身分改名，同步更新登錄檔由呼叫端負責）。 */
   setName(name: string): void;
@@ -69,6 +71,8 @@ export interface SelfSession {
   setNowPlaying(t: string): void;
   /** 後端 `onConnection`。 */
   setConnection(s: ConnectionState): void;
+  /** 後端 `onCapabilityGap`（ADR-0397）。 */
+  setCapabilityGap(g: CapabilityGap): void;
 
   /** 切身分：換成新身分的我。 */
   reset(seed: SelfSeed): void;
@@ -84,6 +88,7 @@ export function useSelfSession(): SelfSession {
   const [statusMessage, setStatusMessage] = useState("");
   const [nowPlaying, setNowPlaying] = useState("");
   const [connection, setConnection] = useState<ConnectionState>("connecting");
+  const [capabilityGap, setCapabilityGap] = useState<CapabilityGap | undefined>(undefined);
 
   return {
     pubkey,
@@ -95,12 +100,14 @@ export function useSelfSession(): SelfSession {
     statusMessage,
     nowPlaying,
     connection,
+    capabilityGap,
     setName,
     setInvisible,
     setStatus,
     setStatusMessage,
     setNowPlaying,
     setConnection,
+    setCapabilityGap,
     reset: (seed) => {
       setPubkey(seed.pubkey);
       setName(seed.name);
@@ -110,6 +117,7 @@ export function useSelfSession(): SelfSession {
       setStatus(seed.status ?? "online");
       setStatusMessage(seed.statusMessage ?? "");
       setNowPlaying(""); // 純易失，不跨身分也不跨 session
+      setCapabilityGap(undefined); // ADR-0397：缺口屬於上一個身分的裝置
       setConnection("connecting"); // ADR-0169：換身分＝重連，先回連線中，待後端回報 online
     },
   };

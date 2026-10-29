@@ -7,6 +7,7 @@ import {
 } from "./messages.js";
 
 export * from "./messages.js";
+export * from "./device-gap.js";
 
 export type MessageKey = keyof Messages;
 export type TranslateParams = Record<string, string | number>;

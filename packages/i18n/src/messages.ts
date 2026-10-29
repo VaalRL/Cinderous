@@ -335,6 +335,20 @@ export interface Messages {
   devices_title: string;
   devices_thisOne: string;
   devices_firstSeen: string;
+  /** 裝置清單上自報的版號（ADR-0397）；{ver} */
+  devices_version: string;
+  /** ADR-0397 裝置能力缺口：本機跟不上 */
+  devcap_self: string;
+  /** ADR-0397：某台沒有回報版本；{name} */
+  devcap_unreported: string;
+  /** ADR-0397：某台回報了但缺能力；{name} */
+  devcap_missing: string;
+  /** ADR-0397：好幾台；{n} */
+  devcap_many: string;
+  /** ADR-0397：沒有標籤的裝置；{id} */
+  devcap_unnamed: string;
+  /** ADR-0397：名稱＋版號；{name} {ver} */
+  devcap_nameVer: string;
   devices_limit: string;
   devices_new: string;
   devices_source_local: string;
@@ -1385,6 +1399,13 @@ const zhHant: Messages = {
   devices_title: "我的裝置",
   devices_thisOne: "這台",
   devices_firstSeen: "首次看到 {when}",
+  devices_version: "版本 {ver}",
+  devcap_self: "這台裝置的版本太舊，可能收不到訊息。請更新到最新版。",
+  devcap_unreported: "有裝置可能收不到訊息：「{name}」沒有回報版本，可能還是舊版。請把它更新到最新版。",
+  devcap_missing: "有裝置可能收不到訊息：「{name}」不支援目前的加密方式。請把它更新到最新版。",
+  devcap_many: "有 {n} 台裝置可能收不到訊息，請到「設定 → 裝置」查看並更新。",
+  devcap_unnamed: "裝置 {id}",
+  devcap_nameVer: "{name}（{ver}）",
   devices_limit: "⚠️ 這份清單只看得到**會寫入的裝置**（有開雲端備份、或與你配對過的）。任何拿到你身分私鑰的人都能安靜地讀取訊息而不留下痕跡——**看到只有一台，不等於沒有人在讀你的訊息**。",
   devices_new: "⚠️ 偵測到一台你沒見過的裝置（{id}）。如果不是你自己新增的，請立即更換身分金鑰。",
   devices_source_local: "這台裝置",
@@ -2335,6 +2356,13 @@ const en: Messages = {
   devices_title: "My devices",
   devices_thisOne: "this one",
   devices_firstSeen: "first seen {when}",
+  devices_version: "version {ver}",
+  devcap_self: "This device is out of date and may miss messages. Please update to the latest version.",
+  devcap_unreported: 'A device may miss messages: "{name}" has not reported its version and may be out of date. Please update it to the latest version.',
+  devcap_missing: 'A device may miss messages: "{name}" does not support the current encryption. Please update it to the latest version.',
+  devcap_many: "{n} devices may miss messages. Check Settings → Devices and update them.",
+  devcap_unnamed: "Device {id}",
+  devcap_nameVer: "{name} ({ver})",
   devices_limit: "⚠️ This list only shows devices that **write** (ones with cloud backup on, or that you paired with). Anyone holding your identity key can read your messages silently without leaving a trace — **seeing only one device does not mean nobody is reading them**.",
   devices_new: "⚠️ A device you have not seen before appeared ({id}). If you did not add it, rotate your identity key now.",
   devices_source_local: "this device",
