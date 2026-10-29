@@ -7,6 +7,7 @@ import {
   readInboxRelayList,
   readPublicName,
   shardPath,
+  wrapMessage,
   type NostrEvent,
   type RelayClient,
   type RelayClientHandlers,
@@ -48,20 +49,41 @@ afterEach(() => {
 function world() {
   const net = storedNet();
   const subscribed = new Set<string>();
+  /** 每座中繼上目前有效的訂閱（連線 → filters）與連線時給的 handlers */
+  const subs = new Map<string, Map<object, unknown[]>>();
+  const handlers: { url: string; h: RelayClientHandlers }[] = [];
   const connFor = (id: string) => (url: string) => (h: RelayClientHandlers) => {
     // 每條連線各自一個 id：記憶體中繼以連線 id 分派，共用 id 會把同一座上的前一條連線頂掉
     const client = net.connect(url, `${id}-${Math.random()}`, h);
+    handlers.push({ url, h });
+    const key = {};
     const subscribe = client.subscribe.bind(client);
     client.subscribe = (subId, filters) => {
       if (filters.length > 0) subscribed.add(url);
+      const at = subs.get(url) ?? new Map<object, unknown[]>();
+      subs.set(url, at);
+      if (filters.length > 0) at.set(key, filters);
+      else at.delete(key);
       subscribe(subId, filters);
+    };
+    const close = client.close?.bind(client);
+    client.close = () => {
+      subs.get(url)?.delete(key);
+      close?.();
     };
     return client;
   };
-  return { net, subscribed, connFor };
+  /** 某座中繼上目前有效的訂閱 filters（所有連線攤平） */
+  const filtersAt = (url: string) => [...(subs.get(url)?.values() ?? [])].flat();
+  return { net, subscribed, connFor, filtersAt, handlers };
 }
 
-function device(w: ReturnType<typeof world>, sk: Uint8Array, id: string, opts: { org?: boolean; index?: string[] } = {}) {
+function device(
+  w: ReturnType<typeof world>,
+  sk: Uint8Array,
+  id: string,
+  opts: { org?: boolean; index?: string[]; inbox?: string[] } = {},
+) {
   const store = new MemoryStorage();
   store.saveIdentity({ nsec: nsecEncode(sk), name: "Joe" });
   const states: PublicReachState[] = [];
@@ -70,10 +92,11 @@ function device(w: ReturnType<typeof world>, sk: Uint8Array, id: string, opts: {
     connectorFor: w.connFor(id),
     ...(opts.org ? { orgAdminPubkey: getPublicKey(generateSecretKey()) } : {}),
     ...(opts.index ? { publicIndexRelays: opts.index } : {}),
+    ...(opts.inbox ? { publicInboxRelays: opts.inbox } : {}),
   });
   running.push(b);
   b.start({ ...noop, onPublicReach: (s) => states.push(s) });
-  return { b, states };
+  return { b, states, store };
 }
 
 /** 以另一把金鑰到某座中繼查某作者的 kind 0／10002／10050（第三方客戶端的查法） */
@@ -190,5 +213,122 @@ describe("公開聯絡方式（ADR-0382）", () => {
     const got = lookup(w.net, INDEX, b.self.pubkey);
     expect(got.map((e) => e.kind).sort()).toEqual([0, 10002, 10050]);
     expect(w.subscribed.has(INDEX)).toBe(false);
+  });
+});
+
+describe("🔴 公開清單不指向主平面：改列公共收件中繼（ADR-0402）", () => {
+  const PUB1 = "wss://pub-one.example";
+  const PUB2 = "wss://pub-two.example";
+  const flush = () => new Promise((r) => setTimeout(r, 0));
+  /** 第三方客戶端照我的 10050 寄一封信到某座 */
+  const thirdPartyWrites = (w: ReturnType<typeof world>, url: string, to: string) => {
+    const sk = generateSecretKey();
+    w.net.connect(url, `tp-${Math.random()}`).publish(wrapMessage("hello", sk, to).events[0]!);
+    return getPublicKey(sk);
+  };
+
+  it("打開「能聯絡我」：10050／10002 只列公共收件中繼、不列 home 分片；home、公共中繼、索引中繼都查得到", () => {
+    const w = world();
+    const { b } = device(w, generateSecretKey(), "a", { inbox: [PUB1, PUB2], index: [INDEX] });
+    const home = `${BASE}${shardPath(b.self.pubkey)}`;
+    b.setPublicReach({ contactable: true });
+    for (const url of [home, PUB1, PUB2, INDEX]) {
+      const got = lookup(w.net, url, b.self.pubkey);
+      expect(readInboxRelayList(latest(got, 10050)!), url).toEqual([PUB1, PUB2]);
+      expect(latest(got, 10002)?.tags, url).toEqual([
+        ["r", PUB1, "write"],
+        ["r", PUB2, "write"],
+      ]);
+      expect(JSON.stringify(got), url).not.toContain(home);
+    }
+    expect(b.publicReach().contactable).toBe(true);
+  });
+
+  it("公開名稱也發一份到公共收件中繼（outbox 型客戶端照 10002 去那裡找名稱）", () => {
+    const w = world();
+    const { b } = device(w, generateSecretKey(), "a", { inbox: [PUB1] });
+    b.setPublicReach({ contactable: true, publicName: true });
+    expect(readPublicName(latest(lookup(w.net, PUB1, b.self.pubkey), 0)!)).toBe("Joe");
+  });
+
+  it("開著時：在公共收件中繼只訂寄給自己的 1059、不認證；第三方寄到那裡的信進請求區", async () => {
+    const w = world();
+    const { b, store } = device(w, generateSecretKey(), "a", { inbox: [PUB1] });
+    b.setPublicReach({ contactable: true });
+    expect(w.filtersAt(PUB1)).toEqual([{ kinds: [1059], "#p": [b.self.pubkey] }]);
+    // 收信的那條連線不認證（讀信用不到；認證＝把 IP 和身分綁在一起）。發布清單的單次連線另計：那些事件本來就是我簽的
+    const receiving = w.handlers.filter((c) => c.url === PUB1 && c.h.onEvent !== undefined);
+    expect(receiving).toHaveLength(1);
+    expect(receiving[0]!.h.authSigner).toBeUndefined();
+    const from = thirdPartyWrites(w, PUB1, b.self.pubkey);
+    await flush();
+    expect(store.loadRequests().map((r) => r.pubkey)).toContain(from);
+  });
+
+  it("關掉：公共收件中繼上也換成空清單；不再收那裡的信", async () => {
+    const w = world();
+    const { b, store } = device(w, generateSecretKey(), "a", { inbox: [PUB1] });
+    b.setPublicReach({ contactable: true });
+    b.setPublicReach({ contactable: false });
+    expect(readInboxRelayList(latest(lookup(w.net, PUB1, b.self.pubkey), 10050)!)).toEqual([]);
+    expect(w.filtersAt(PUB1)).toEqual([]);
+    const from = thirdPartyWrites(w, PUB1, b.self.pubkey);
+    await flush();
+    expect(store.loadRequests().map((r) => r.pubkey)).not.toContain(from);
+  });
+
+  it("只開「公開我的名稱」：不去公共收件中繼收信", () => {
+    const w = world();
+    const { b } = device(w, generateSecretKey(), "a", { inbox: [PUB1] });
+    b.setPublicReach({ publicName: true });
+    expect(w.subscribed.has(PUB1)).toBe(false);
+  });
+
+  it("另一台裝置（同一把身分）讀到開著：也去公共收件中繼收信", () => {
+    const w = world();
+    const sk = generateSecretKey();
+    device(w, sk, "a", { inbox: [PUB1] }).b.setPublicReach({ contactable: true });
+    const before = w.filtersAt(PUB1).length;
+    device(w, sk, "b", { inbox: [PUB1] });
+    expect(w.filtersAt(PUB1).length).toBe(before + 1);
+  });
+
+  it("升版前開過的（清單還列著 home 分片）：開機就換成公共收件中繼", () => {
+    const w = world();
+    const sk = generateSecretKey();
+    const pk = getPublicKey(sk);
+    const home = `${BASE}${shardPath(pk)}`;
+    const old = buildInboxRelayList(sk, [home], Math.floor(Date.now() / 1000) - 3600);
+    w.net.connect(home, "seed").publish(old);
+    device(w, sk, "a", { inbox: [PUB1, PUB2] });
+    expect(readInboxRelayList(latest(lookup(w.net, home, pk), 10050)!)).toEqual([PUB1, PUB2]);
+    expect(readInboxRelayList(latest(lookup(w.net, PUB1, pk), 10050)!)).toEqual([PUB1, PUB2]);
+  });
+
+  it("單座中繼模式（手機版）也一樣：列公共收件中繼，不列 home（錨點的根路徑同樣是主平面）", () => {
+    const w = world();
+    const SELF = "wss://anchor-root.example";
+    const sk = generateSecretKey();
+    const store = new MemoryStorage();
+    store.saveIdentity({ nsec: nsecEncode(sk), name: "Joe" });
+    const b = new RelayChatBackend(store, (h) => w.net.connect(SELF, `self-${Math.random()}`, h), "Joe", {
+      relayUrl: SELF,
+      connectorFor: w.connFor("self"),
+      publicInboxRelays: [PUB1],
+    });
+    running.push(b);
+    b.start(noop);
+    b.setPublicReach({ contactable: true });
+    expect(readInboxRelayList(latest(lookup(w.net, SELF, b.self.pubkey), 10050)!)).toEqual([PUB1]);
+    expect(w.filtersAt(PUB1)).toEqual([{ kinds: [1059], "#p": [b.self.pubkey] }]);
+  });
+
+  it("沒設公共收件中繼（自架）：照舊只列 home、不連任何公共中繼", () => {
+    const w = world();
+    const { b } = device(w, generateSecretKey(), "a");
+    b.setPublicReach({ contactable: true });
+    const home = `${BASE}${shardPath(b.self.pubkey)}`;
+    expect(readInboxRelayList(latest(lookup(w.net, home, b.self.pubkey), 10050)!)).toEqual([home]);
+    expect([...w.subscribed].every((u) => u.startsWith(BASE))).toBe(true);
   });
 });

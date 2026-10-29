@@ -6,6 +6,7 @@
 import {
   ANCHOR_RELAYS,
   PUBLIC_INDEX_RELAYS,
+  publicInboxRelaysFor,
   type AppStorage,
   type ChatBackend,
   type CloudSyncMode,
@@ -74,6 +75,7 @@ export function createRelayChat(
         // 錨點恆連保底：不再只綁使用者當下那一座（去重，避免同座重複）。
         anchors: [...new Set([relayUrl, ...ANCHOR_RELAYS])],
         publicIndexRelays: PUBLIC_INDEX_RELAYS, // ADR-0382 §2：公開聯絡方式（使用者打開才發布）
+        publicInboxRelays: publicInboxRelaysFor(relayUrl), // ADR-0402：home 在錨點上時，公開清單列公共收件中繼、不列錨點
         ...(MAINTAINER_PUBKEY ? { maintainerPubkey: MAINTAINER_PUBKEY } : {}),
       };
   return new RelayChatBackend(

@@ -31,6 +31,34 @@ export const PUBLIC_INDEX_RELAYS: string[] = [
   "wss://indexer.coracle.social",
 ];
 
+/**
+ * 公共收件中繼（ADR-0402）：「能聯絡我」打開時，公開的 10050／10002 列這兩座，不列錨點的分片——
+ * 清單一旦外流就收不回，被爬蟲長期輪詢的是這兩座（為公開流量設計的設施），不是錨點的主平面（ADR-0394）。
+ * 打開時也在這兩座只訂寄給自己的 1059。
+ *
+ * 2026-10-29 以一次性金鑰實測（寄一顆 1059 → 不認證讀回 `#p`／`ids`）：nos.lol、relay.primal.net、nostr.mom、
+ * offchain.pub、relay.snort.social 都收、都讀得回；relay.damus.io 讀寄給某人的 1059 要認證；auth.nostr1.com 認證後仍拒收；
+ * inbox.nostr.wine 要付費。保存期限 NIP-11 都沒宣告，待複查。
+ */
+export const PUBLIC_INBOX_RELAYS: string[] = ["wss://nos.lol", "wss://relay.primal.net"];
+
+/**
+ * 這個 home 該不該用公共收件中繼（ADR-0402）：home 在官方錨點上（分片或根路徑都算）才用——那裡的額度是大家共用的。
+ * 自架的中繼照舊列自己（要不要讓爬蟲輪詢，是架站的人自己的事）。
+ */
+export function publicInboxRelaysFor(homeUrl: string | undefined): string[] {
+  const hostOf = (url: string): string | undefined => {
+    try {
+      return new URL(url).host.toLowerCase();
+    } catch {
+      return undefined;
+    }
+  };
+  const home = homeUrl === undefined ? undefined : hostOf(homeUrl);
+  if (home === undefined) return [];
+  return ANCHOR_RELAYS.some((a) => hostOf(a) === home) ? [...PUBLIC_INBOX_RELAYS] : [];
+}
+
 /** 維護者公鑰（hex，64 字元）；發佈簽章 relay 清單者。留空 = 不學帶內清單。 */
 // 🔄 2026-09-18 輪替（ADR-0358）。舊值 `6efd2603…` 曾在金鑰住在 CI 的期間被釘進來
 // （2026-07-03～07-23，ADR-0239 判定為已曝險），故換掉。

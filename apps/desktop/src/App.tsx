@@ -174,7 +174,7 @@ import {
   withoutLabel,
   withPinned,
 } from "./ui/group-labels.js";
-import { ANCHOR_RELAYS, MAINTAINER_PUBKEY, PUBLIC_INDEX_RELAYS } from "@cinderous/engine";
+import { ANCHOR_RELAYS, MAINTAINER_PUBKEY, PUBLIC_INDEX_RELAYS, publicInboxRelaysFor } from "@cinderous/engine";
 import { initIdle, reduceIdle, type IdleState } from "./ui/idle-status.js";
 import { setBroadcastAvatars } from "./ui/personalize.js";
 import {
@@ -488,6 +488,7 @@ async function buildBackend(p: Profile, nsecOverride?: string, storage?: AppStor
         ...(shardingEnabled() ? { shardingBase: p.relayUrl } : {}),
         anchors: ANCHOR_RELAYS,
         publicIndexRelays: PUBLIC_INDEX_RELAYS, // ADR-0382 §2：公開聯絡方式（使用者打開才發布）
+        publicInboxRelays: publicInboxRelaysFor(p.relayUrl), // ADR-0402：home 在錨點上時，公開清單列公共收件中繼、不列錨點
         ...(MAINTAINER_PUBKEY ? { maintainerPubkey: MAINTAINER_PUBKEY } : {}),
         onHomeSwitched: (url: string) => {
           try {
