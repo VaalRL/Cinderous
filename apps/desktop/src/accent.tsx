@@ -76,7 +76,7 @@ export function useAccent(): AccentContextValue {
   return ctx;
 }
 
-/** MSN 懷舊預設色票（供設定頁快選）。 */
+/** 懷舊預設色票（供設定頁快選）。 */
 export const ACCENT_PRESETS: { key: string; hex: string }[] = [
   { key: "classic", hex: "#2f6cd6" },
   { key: "forest", hex: "#2f9e44" },

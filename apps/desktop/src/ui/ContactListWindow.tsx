@@ -22,10 +22,10 @@ const STATUS_KEY: Record<Status, MessageKey> = {
   offline: "status_offline",
 };
 
-/** 上線狀態的分區順序（MSN 風：線上→離開→忙碌→離線）。 */
+/** 上線狀態的分區順序（經典即時通風：線上→離開→忙碌→離線）。 */
 const STATUS_SECTIONS: Status[] = ["online", "away", "busy", "offline"];
 
-/** 依上線狀態分區、每區內依名稱排序；只回傳非空的區（MSN 風清單）。不改動輸入。 */
+/** 依上線狀態分區、每區內依名稱排序；只回傳非空的區（經典即時通風清單）。不改動輸入。 */
 export function groupByStatus(contacts: Contact[]): { status: Status; contacts: Contact[] }[] {
   return STATUS_SECTIONS.map((status) => ({
     status,
@@ -33,7 +33,7 @@ export function groupByStatus(contacts: Contact[]): { status: Status; contacts: 
   })).filter((sec) => sec.contacts.length > 0);
 }
 
-/** 排序模式切換（ADR-0215）：MSN 風「依 群組/狀態/名稱」。 */
+/** 排序模式切換（ADR-0215）：經典即時通風「依 群組/狀態/名稱」。 */
 const SORT_MODES: { mode: SortMode; key: MessageKey }[] = [
   { mode: "status", key: "sort_byStatus" },
   { mode: "group", key: "sort_byGroup" },
@@ -194,7 +194,7 @@ export interface ContactListProps {
   onSelfAvatar?: (uri: string | undefined) => boolean;
 }
 
-/** MSN 風狀態選單：目前狀態的彩色圓點＋下拉，每項附對應顏色圓點（取代原生 select）。 */
+/** 經典即時通風狀態選單：目前狀態的彩色圓點＋下拉，每項附對應顏色圓點（取代原生 select）。 */
 export function StatusPicker({ value, onChange }: { value: Status; onChange: (s: Status) => void }): JSX.Element {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);

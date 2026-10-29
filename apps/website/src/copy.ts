@@ -454,7 +454,7 @@ const zhHant: Copy = {
   roadmap_intro: "Cinderous 已上線桌面版與網頁版。以下是已完成的能力，以及正在規劃的未來待辦。",
   roadmap_shipped_t: "✅ 已上線",
   roadmap_shipped_b:
-    "桌面版（Windows）、網頁版（瀏覽器・本地優先加密）、端到端加密訊息（Nostr NIP-17/44/59）與去中心化中繼、WebRTC P2P（檔案／在線／通話）、群組、多身分、企業名冊、通知細分開關與每對話靜音、經典 MSN 佈局（浮動視窗、聯絡人分組）。",
+    "桌面版（Windows）、網頁版（瀏覽器・本地優先加密）、端到端加密訊息（Nostr NIP-17/44/59）與去中心化中繼、WebRTC P2P（檔案／在線／通話）、群組、多身分、企業名冊、通知細分開關與每對話靜音、經典即時通佈局（浮動視窗、聯絡人分組）。",
   tech_fs_t: "前向保密（實驗性，尚未經外部審計）",
   tech_fs_b:
     "發給聯絡人的訊息可加密到一把會過期的加密子鑰；更換並讓舊鑰過期後，就算你的身分私鑰日後被竊，被側錄的舊密文也解不開。**這個功能已實作但尚未經獨立第三方的密碼學審計**——加密的錯誤不會讓程式壞掉，它只是不保護，而且沒有任何症狀。因此它預設關閉，要在應用程式的「設定 → 隱私」裡自行啟用，而我們**不會**在功能對照表上把它與已經多輪審計的產品並列。",
@@ -839,7 +839,7 @@ const en: Copy = {
   roadmap_intro: "Cinderous already ships desktop and web. Here's what's done, and what's planned next.",
   roadmap_shipped_t: "✅ Shipped",
   roadmap_shipped_b:
-    "Desktop (Windows), web app (browser, local-first encrypted), end-to-end encrypted messaging (Nostr NIP-17/44/59) with decentralized relays, WebRTC P2P (files / presence / calls), groups, multi-identity, enterprise roster, per-event notification toggles and per-conversation mute, and the classic MSN layout (floating windows, contact grouping).",
+    "Desktop (Windows), web app (browser, local-first encrypted), end-to-end encrypted messaging (Nostr NIP-17/44/59) with decentralized relays, WebRTC P2P (files / presence / calls), groups, multi-identity, enterprise roster, per-event notification toggles and per-conversation mute, and the classic IM layout (floating windows, contact grouping).",
   tech_fs_t: "Forward secrecy (experimental, not yet externally audited)",
   tech_fs_b:
     "Messages you send can be encrypted to a rotating encryption subkey; once you rotate and let the old key expire, ciphertext recorded earlier stays unreadable even if your identity key is stolen later. **This is implemented but has not been reviewed by an independent cryptography audit** — crypto bugs don't break anything visibly, they just fail to protect, with no symptoms. So it is off by default and you turn it on yourself under Settings → Privacy, and we do **not** list it alongside products that have been through multiple audits in the feature comparison.",

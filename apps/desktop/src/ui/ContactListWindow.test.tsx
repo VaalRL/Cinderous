@@ -67,7 +67,7 @@ describe("ContactListWindow 群組標籤 UI（ADR-0040）", () => {
   });
 });
 
-describe("ContactListWindow — 狀態分區 + 頂部狀態 + 分享（MSN 風）", () => {
+describe("ContactListWindow — 狀態分區 + 頂部狀態 + 分享（經典即時通風）", () => {
   const mk = (name: string, status: Status): Contact => ({ pubkey: name, name, status, statusMessage: "", nowPlaying: "" });
   const longId = "npub1qqqqqqqqqqqqqqqqqqqqqqqqqqwxyz@wss://r";
 

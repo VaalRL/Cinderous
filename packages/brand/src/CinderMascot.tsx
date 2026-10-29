@@ -1,5 +1,5 @@
 // Cinderous 吉祥物（原創向量，無第三方商標素材）——桌面與官網共用的 SSOT（ADR-0247）。
-// 造型：MSN buddy 藍身 + 燭火頭 + 臉；`alert` 態＝有新訊息（火更旺 + 紅點徽章）。
+// 造型：藍色圓身 + 燭火頭 + 臉；`alert` 態＝有新訊息（火更旺 + 紅點徽章）。
 //
 // 身體色系跟隨主題色 `var(--accent)`（ADR-0064）：桌面吃使用者主題色（預設偏藍），
 // 官網吃站台 accent（橘紅火焰調）——同一顆元件、各自環境自動上色，頭的餘燼恆常。
@@ -17,7 +17,7 @@ export interface CinderMascotProps {
   size?: number;
 }
 
-/** 吉祥物：MSN buddy 藍身 + 燭火頭。alert＝有新訊息（火更旺 + 紅點）。 */
+/** 吉祥物：藍色圓身 + 燭火頭。alert＝有新訊息（火更旺 + 紅點）。 */
 export function CinderMascot({ alert = false, size = 48 }: CinderMascotProps): JSX.Element {
   const id = useId().replace(/:/g, "");
   const height = Math.round((size * 150) / 120);

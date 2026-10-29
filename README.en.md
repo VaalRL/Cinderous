@@ -4,7 +4,7 @@
 
 > **Life is short, connect buddies.**
 
-> A decentralized instant messenger with no central database. It fuses the **Nostr protocol** with **WebRTC** to faithfully recreate the classic interaction experience of early MSN Messenger (nudges, music status, offline messages), with "zero server maintenance cost" as its operating goal.
+> A decentralized instant messenger with no central database. It fuses the **Nostr protocol** with **WebRTC** to faithfully recreate the classic interaction experience of early desktop instant messengers (nudges, music status, offline messages), with "zero server maintenance cost" as its operating goal.
 
 **🔥 Website: <https://vaalrl.github.io/Cinderous/>** · **🌐 Open in browser (web app): <https://cinderous.cinderous1.workers.dev>** · **💻 Download desktop: [GitHub Releases](https://github.com/VaalRL/Cinderous/releases)**
 
@@ -61,7 +61,7 @@ Everything from the core protocol to the desktop / mobile clients and **enterpri
 - WebRTC: real P2P (`RTCPeerConnection` / ICE / TURN) voice / video calls, data-channel chunked file transfer, dual-track fallback and automatic rerouting
 - Multi-device: QR / pairing migration (P2P, AES-256-GCM), encrypted cloud backup (opt-in), backup code (NIP-49), multi-identity coexistence
 
-**Instant-Messenger Experience (nostalgic MSN style)**
+**Instant-Messenger Experience (nostalgic classic-IM style)**
 - Nudge (vibration), typing indicator, now-listening (music status), custom status text, invisible mode, local restore of online status
 - Emoji reactions, message unsend, read receipts, @mentions, inline replies / threads, timed messages (self-destructing)
 - Groups (create / member management), stickers (built-in + custom), conversation backgrounds, private notes (encrypted), media albums
@@ -311,3 +311,7 @@ This means you are free to use, modify, and distribute it; but if you **distribu
 you must publish your source code under the same license (AGPL Section 13). This choice is made to ensure that all derivative versions and self-hosted relays remain transparent and auditable to users, carrying through this project's spirit of privacy and decentralization.
 
 Copyright (C) 2026 Cinderous contributors.
+
+The Manrope font used on the website is licensed under the SIL Open Font License 1.1; see [`apps/website/src/fonts/OFL.txt`](./apps/website/src/fonts/OFL.txt).
+
+Cinderous is an independent open-source project. It is not affiliated with or endorsed by Microsoft or any other instant-messaging vendor. Product names and trademarks mentioned belong to their respective owners.
