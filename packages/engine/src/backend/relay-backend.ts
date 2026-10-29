@@ -689,7 +689,11 @@ export class RelayChatBackend implements ChatBackend {
     return this.homeUrl ? `${this.selfNpub}@${this.homeUrl}` : this.selfNpub;
   }
   private readonly sk: SecretKey;
-  private readonly client: CloseableRelayClient;
+  private client: CloseableRelayClient;
+  /** 建 home 連線的工廠（ADR-0399）：`stop()` 關掉之後，同一個實例再 `start()` 要用它重建 */
+  private readonly homeConnector: RelayConnector;
+  /** home 連線被 `stop()` 關掉了、還沒重建（ADR-0399） */
+  private homeClosed = false;
   /** `this.client` 實際連往的 URL（不變）；home 遞補時 effective home 才變。 */
   private readonly originalHomeUrl: string | undefined;
   /** 目前 effective home（ADR-0039 可自動遞補）。 */
@@ -1026,22 +1030,8 @@ export class RelayChatBackend implements ChatBackend {
     });
     // ADR-0241：分片模式下 home 連線改由 connectorFor 建到「自己的訊息片」（注入的 connector 是給
     // 單一 relay 的舊路徑）；仍用同一組 handlers/auth（auth 綁自己的片 URL）。
-    const homeConnector = this.shardingBase && this.homeUrl && this.connectorFor ? this.connectorFor(this.homeUrl) : connector;
-    this.client = homeConnector(
-      {
-        onEvent: (_sub, event) => this.onEvent(event, this.homeUrl),
-        onOk: (id, accepted, message) => this.onRelayOk(this.originalHomeUrl, id, accepted, message),
-        // NIP-42 AUTH（ADR-0057）：回應挑戰；認證成功後重掛訂閱（解「訂閱早於認證」）。
-        authSigner: (challenge) => {
-          // A 層健檢（ADR-0275）：收到挑戰＝這座 relay 要求認證＝收件匣不是公開可讀。
-          // 零成本——正常連線就看得到，不需任何探測。
-          if (this.homeUrl) recordAuthObservation(this.homeUrl, true);
-          return buildAuthEvent(challenge, this.homeUrl ?? "", this.sk);
-        },
-        onAuthenticated: (client) => this.subscribeOn(client, this.homeUrl),
-      },
-      (state, unavailable) => this.onConnection(state, unavailable),
-    );
+    this.homeConnector = this.shardingBase && this.homeUrl && this.connectorFor ? this.connectorFor(this.homeUrl) : connector;
+    this.client = this.openHome();
     this.transfer = new WebRtcTransfer(
       this.sk,
       {
@@ -1102,8 +1092,35 @@ export class RelayChatBackend implements ChatBackend {
     );
   }
 
+  /**
+   * 建 home 連線（建構時、以及 `stop()` 之後再 `start()` 時；ADR-0399）。
+   * 同一組 handlers：收件、OK、NIP-42 AUTH（A 層健檢在這裡記「這座要求認證」）。
+   */
+  private openHome(): CloseableRelayClient {
+    return this.homeConnector(
+      {
+        onEvent: (_sub, event) => this.onEvent(event, this.homeUrl),
+        onOk: (id, accepted, message) => this.onRelayOk(this.originalHomeUrl, id, accepted, message),
+        // NIP-42 AUTH（ADR-0057）：回應挑戰；認證成功後重掛訂閱（解「訂閱早於認證」）。
+        authSigner: (challenge) => {
+          // A 層健檢（ADR-0275）：收到挑戰＝這座 relay 要求認證＝收件匣不是公開可讀。
+          // 零成本——正常連線就看得到，不需任何探測。
+          if (this.homeUrl) recordAuthObservation(this.homeUrl, true);
+          return buildAuthEvent(challenge, this.homeUrl ?? "", this.sk);
+        },
+        onAuthenticated: (client) => this.subscribeOn(client, this.homeUrl),
+      },
+      (state, unavailable) => this.onConnection(state, unavailable),
+    );
+  }
+
   start(handlers: ChatBackendEvents): void {
     this.handlers = handlers;
+    // ADR-0399：同一個實例 stop 過又 start（桌面版 StrictMode 的開發模式就會這樣）——關掉的 home 連線要重建
+    if (this.homeClosed) {
+      this.client = this.openHome();
+      this.homeClosed = false;
+    }
     // P1（ADR-0294 §1.2）：**必須在 resubscribe 之前**建好 tid→訊息索引。
     // 訂閱一掛上，中繼就可能立刻把 TTL 內的檔案塊全推過來（記憶體網路是同步送達）；
     // 索引若還沒建好，`onFileBytes` 查不到既有訊息 ⇒ 去重失效、又跳一次「另存新檔」。
@@ -5676,6 +5693,7 @@ export class RelayChatBackend implements ChatBackend {
     // 會設 `stopped = true` 的地方，於是登出/切換身分後那些 WebSocket 會**永遠自動重連**。
     // 行動端每次登入都先 `stop()` 再建新後端 → 孤兒 socket 隨身分切換累積。
     this.client.close?.();
+    this.homeClosed = true;
     for (const client of this.relayPool.values()) client.close?.();
     this.relayPool.clear();
     this.handlers = null;

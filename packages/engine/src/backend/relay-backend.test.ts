@@ -332,7 +332,9 @@ describe("RelayChatBackend（真實後端 + 持久化）", () => {
   });
 
   it("入職邀請自動核准（ADR-0156）：成員憑權杖入職 → 企業主自動併入名冊、互為聯絡人、同事自動同步；壞權杖忽略；重啟不失憶", () => {
-    const net = createInMemoryRelayNetwork();
+    // 中繼要有儲存（ADR-0399）：「重啟不失憶」靠的是從中繼訂回自己的可取代名冊。沒有儲存時名冊根本沒存下來，
+    // 這個測試以前是靠 stop() 過、卻沒真的斷線的舊企業主替新人核准而通過的。
+    const net = createInMemoryRelayNetwork({ store: new MessageStore() });
     const token = "tok-secret-123";
     const storeO = new MemoryStorage();
     const owner = new RelayChatBackend(storeO, (h) => net.connect("o", h), "老闆", {
@@ -2354,6 +2356,36 @@ describe("健檢修正（ADR-0119）", () => {
     // `close()` 是**唯一**會設 `stopped = true`（停止重連）的地方。
     expect(closed).toContain("home");
     expect(closed).toContain("wss://other");
+  });
+
+  it("🔴 同一個實例 `stop()` 之後再 `start()`：home 連線重建，照樣收得到（ADR-0399）", () => {
+    // 桌面版開了 React StrictMode：開發模式下 effect 會跑 start → stop → start，用的是同一個後端。
+    // 修正前 home 連線在建構子裡建一次，stop() 關掉之後 start() 不會重建——這台從此收不到任何東西。
+    const net = createInMemoryRelayNetwork();
+    let homes = 0;
+    const a = new RelayChatBackend(new MemoryStorage(), (h) => (homes++, net.connect("a", h)), "Alice");
+    const b = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("b", h), "Bob");
+    a.start(noop);
+    b.start(noop);
+    b.addContact(a.selfNpub);
+    a.stop();
+
+    const got: string[] = [];
+    a.start({ ...noop, onMessage: (_pk, m) => got.push(m.text) });
+    expect(homes).toBe(2); // 重建了一條，不是沿用關掉的那條
+    b.sendMessage(a.self.pubkey, "還在嗎");
+    expect(got).toEqual(["還在嗎"]);
+    a.stop();
+    b.stop();
+  });
+
+  it("沒 stop 過就再 start：不重建 home 連線（不多開一條）", () => {
+    const net = createInMemoryRelayNetwork();
+    let homes = 0;
+    const a = new RelayChatBackend(new MemoryStorage(), (h) => (homes++, net.connect("a", h)), "Alice");
+    a.start(noop);
+    expect(homes).toBe(1);
+    a.stop();
   });
 
   it("在線判定用**對方自報的心跳節奏**——閒置聯絡人（5 分鐘一次）不該被判離線", () => {
