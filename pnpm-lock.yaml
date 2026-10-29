@@ -227,8 +227,8 @@ importers:
   packages/core:
     dependencies:
       '@cinderous/client':
-        specifier: github:VaalRL/cinderous-sdk#v0.77.8
-        version: https://codeload.github.com/VaalRL/cinderous-sdk/tar.gz/c5b61e6fb39481d4c08f3a1ff7957da100f36168(typescript@5.9.3)
+        specifier: github:VaalRL/cinderous-sdk#v0.83.1
+        version: https://codeload.github.com/VaalRL/cinderous-sdk/tar.gz/c6dc94f2b444af7bf6d9b79942ad526679cb31a4(typescript@5.9.3)
       '@noble/ciphers':
         specifier: 2.4.0
         version: 2.4.0
@@ -453,6 +453,17 @@ packages:
   '@cinderous/client@https://codeload.github.com/VaalRL/cinderous-sdk/tar.gz/c5b61e6fb39481d4c08f3a1ff7957da100f36168':
     resolution: {tarball: https://codeload.github.com/VaalRL/cinderous-sdk/tar.gz/c5b61e6fb39481d4c08f3a1ff7957da100f36168}
     version: 0.77.8
+    engines: {node: '>=20'}
+    hasBin: true
+    peerDependencies:
+      mqtt: ^5.16.0
+    peerDependenciesMeta:
+      mqtt:
+        optional: true
+
+  '@cinderous/client@https://codeload.github.com/VaalRL/cinderous-sdk/tar.gz/c6dc94f2b444af7bf6d9b79942ad526679cb31a4':
+    resolution: {tarball: https://codeload.github.com/VaalRL/cinderous-sdk/tar.gz/c6dc94f2b444af7bf6d9b79942ad526679cb31a4}
+    version: 0.83.1
     engines: {node: '>=20'}
     hasBin: true
     peerDependencies:
@@ -2169,6 +2180,21 @@ snapshots:
       tslib: 2.8.1
 
   '@cinderous/client@https://codeload.github.com/VaalRL/cinderous-sdk/tar.gz/c5b61e6fb39481d4c08f3a1ff7957da100f36168(typescript@5.9.3)':
+    dependencies:
+      '@noble/ciphers': 2.4.0
+      '@noble/curves': 2.4.0
+      '@noble/hashes': 2.4.0
+      '@noble/post-quantum': 0.7.1
+      '@scure/base': 2.4.0
+      nostr-tools: 2.25.2(typescript@5.9.3)
+    optionalDependencies:
+      ws: 8.22.0
+    transitivePeerDependencies:
+      - bufferutil
+      - typescript
+      - utf-8-validate
+
+  '@cinderous/client@https://codeload.github.com/VaalRL/cinderous-sdk/tar.gz/c6dc94f2b444af7bf6d9b79942ad526679cb31a4(typescript@5.9.3)':
     dependencies:
       '@noble/ciphers': 2.4.0
       '@noble/curves': 2.4.0

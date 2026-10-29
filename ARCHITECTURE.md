@@ -73,7 +73,7 @@
 
 ## 5. 事件契約（Nostr Kind 對照）
 
-> 內容一律 NIP-44 加密；私訊以 NIP-17（kind 14 → kind 13 seal → kind 1059 Gift Wrap）隱藏收發雙方。1:1 的 rumor 同時帶 `to`（自封副本歸檔，ADR-0107）與標準的 `["p", 收件人]`（NIP-17 對話歸屬，第三方客戶端靠它歸檔；等於 `to` 的 `p` 不算 @提及，ADR-0382 §8）。中繼站要求 **NIP-42 AUTH ＋ 具名訂閱**（帶 `#p`／`authors`，ADR-0057／0123）；AUTH 另驗 `relay` tag 指向本站與事件新鮮度（ADR-0235，擋中間人轉發挑戰）。持久化事件可要求 NIP-13 PoW（`minPow`）。**訊息平面仍未強制**——現有安裝沒有挖礦實作，啟用會讓它們發不出訊息；core 自 ADR-0366 起提供 `minePow`（與中繼端共用同一個 `leadingZeroBits`），但那是**新的**，現有安裝不會有它。第三方車道另有 `APP_LANE_POW` 旋鈕，**預設同樣為 0**（ADR-0366 P2）。第三方車道（`/app/<id>`，ADR-0366）不要求 AUTH，但**訂閱範圍照樣檢查**（另接受標籤 filter），並發出**可選的** AUTH 挑戰——`#p` 仍只能是自己，須 AUTH 後才能用（ADR-0369）。認不得的路徑與車道升級限速不再回 404／429，改為「接受、送一則 `NOTICE`、以 1008 關閉」並指向官網開發者文件 `/developers/`，全程不碰任何 DO（ADR-0368）。主平面也有反覆重連限速（ADR-0391）：Worker 以「IP＋DO 名」每 60 秒 4 次（`STRICT_UPGRADE_LIMIT`，不碰 DO），DO 在記憶體裡以 IP 計 10 分鐘 20 次、超過擋 10 分鐘（`RECONNECT_GUARD`，不寫儲存）；被擋的送 `NOTICE` 後以 1013 關閉。客戶端（`webSocketConnector`，ADR-0395）收到 1013 不算上線、5 分鐘後再試，並把原因（額度用完＋恢復時間，或暫時不能用）交給 UI 的連線列；中繼開口（非 NOTICE）或連上 1 秒沒被關才算上線。檔案塊（kind 1060，ADR-0162）預設整類拒收；錨點以 `FILE_LANES` 只在 `cindersync`、`cinder-coffice` 兩條已知車道收（單檔 30MB 由 NIP-11 `cinder_max_file_mb` 宣告、客戶端遵守；relay 以每收件人 1440 塊、每顆車道 DO 的離線天花板封頂（預設 1GiB，錨點 512MiB，ADR-0377），保存 7 天），**Cinderous 主訊息平面照舊不收**；一次 REQ 的歷史回傳另有 16MB 位元組預算，超過以 `until` 分頁（ADR-0371）。每條連線的訂閱跨 DO 休眠保存：放得進 WebSocket attachment（16KB）的照舊放那裡，放不下的溢位到 DO SQLite `ws_subs`（連線 id＋訂閱 id；連線關閉即刪，部署重啟的孤兒於下次喚醒還原時清）；每連線訂閱合計 512KiB，超過或存不住回 `CLOSED` 說明原因，不靜默遺失（ADR-0373）。
+> 內容一律 NIP-44 加密；私訊以 NIP-17（kind 14 → kind 13 seal → kind 1059 Gift Wrap）隱藏收發雙方。1:1 的 rumor 同時帶 `to`（自封副本歸檔，ADR-0107）與標準的 `["p", 收件人]`（NIP-17 對話歸屬，第三方客戶端靠它歸檔；等於 `to` 的 `p` 不算 @提及，ADR-0382 §8）。中繼站要求 **NIP-42 AUTH ＋ 具名訂閱**（帶 `#p`／`authors`，ADR-0057／0123）；AUTH 另驗 `relay` tag 指向本站與事件新鮮度（ADR-0235，擋中間人轉發挑戰）。持久化事件可要求 NIP-13 PoW（`minPow`）。**訊息平面仍未強制**——現有安裝沒有挖礦實作，啟用會讓它們發不出訊息；core 自 ADR-0366 起提供 `minePow`（與中繼端共用同一個 `leadingZeroBits`），但那是**新的**，現有安裝不會有它。第三方車道另有 `APP_LANE_POW` 旋鈕，**預設同樣為 0**（ADR-0366 P2）。第三方車道（`/app/<id>`，ADR-0366）不要求 AUTH，但**訂閱範圍照樣檢查**（另接受標籤 filter），並發出**可選的** AUTH 挑戰——`#p` 仍只能是自己，須 AUTH 後才能用（ADR-0369）。認不得的路徑與車道升級限速不再回 404／429，改為「接受、送一則 `NOTICE`、以 1008 關閉」並指向官網開發者文件 `/developers/`，全程不碰任何 DO（ADR-0368）。主平面也有反覆重連限速（ADR-0391）：Worker 以「IP＋DO 名」每 60 秒 4 次（`STRICT_UPGRADE_LIMIT`，不碰 DO），DO 在記憶體裡以 IP 計 10 分鐘 20 次、超過擋 10 分鐘（`RECONNECT_GUARD`，不寫儲存）；被擋的送 `NOTICE` 後以 1013 關閉。客戶端（`webSocketConnector`，ADR-0395）收到 1013 不算上線、5 分鐘後再試，並把原因（額度用完＋恢復時間，或暫時不能用）交給 UI 的連線列；中繼要求認證（AUTH 挑戰）或連上 1 秒沒被關才算上線。檔案塊（kind 1060，ADR-0162）預設整類拒收；錨點以 `FILE_LANES` 只在 `cindersync`、`cinder-coffice` 兩條已知車道收（單檔 30MB 由 NIP-11 `cinder_max_file_mb` 宣告、客戶端遵守；relay 以每收件人 1440 塊、每顆車道 DO 的離線天花板封頂（預設 1GiB，錨點 512MiB，ADR-0377），保存 7 天），**Cinderous 主訊息平面照舊不收**；一次 REQ 的歷史回傳另有 16MB 位元組預算，超過以 `until` 分頁（ADR-0371）。每條連線的訂閱跨 DO 休眠保存：放得進 WebSocket attachment（16KB）的照舊放那裡，放不下的溢位到 DO SQLite `ws_subs`（連線 id＋訂閱 id；連線關閉即刪，部署重啟的孤兒於下次喚醒還原時清）；每連線訂閱合計 512KiB，超過或存不住回 `CLOSED` 說明原因，不靜默遺失（ADR-0373）。
 >
 > **濫用防護（ADR-0235，產線已啟用）**：解析層驗事件結構（`tags` 必為字串陣列的陣列——畸形結構可通過驗簽卻讓中繼拋例外）；單則訊息 384KB、單顆事件 256KB、tag 128 個、`p` tag 16 個；每 pubkey 120 事件/分；每連線 16 個訂閱；查詢一律有 `LIMIT`（1024）且條件下推 SQL。**時鐘窗是非對稱的**——未來 15 分、過去 `TIMESTAMP_JITTER_SECONDS + 1h`，因為 NIP-59 刻意把外層 `created_at` 往前推最多 2 天（對稱窗會擋掉幾乎每一則 Gift Wrap）；重放去重只涵蓋近 1 小時（封裝事件由收件端以 `rumor.id` 去重，真正要擋的是裸心跳被重放偽造在線）。
 >
@@ -83,7 +83,23 @@
 >
 > **收件確認（ADR-0380；SDK ADR 0067 移植）**：收件人處理完自己收件匣裡的包後送 kind 25190（本人簽、content 是外層 id，最多 500 個）；中繼只在連線已 AUTH 且簽章者＝AUTH 身分時處理，把**只寄給他一人**的那幾列降為「現在＋2 小時」到期（`inboxAckGraceFor`：未註冊應用的保存期與站方保存上限取小），不存、不扇出；NIP-11 宣告 `cinder_inbox_ack: { kind, grace_sec }`，客戶端只對宣告了的中繼送。
 >
-> **認證前送出（ADR-0385）**：錨點連上就發 NIP-42 挑戰，認證前的 EVENT 一律回 `auth-required`。core `RelayClient`（所有連線共用）把認證前送出的事件記著，被這樣拒收就不往上報、認證成功後（先重掛訂閱）自動重送——心跳、直連信令、輸入中這些沒有外送匣的即時事件才不會在剛連上時消失。
+> **認證前送出（ADR-0385）**：錨點連上就發 NIP-42 挑戰，認證前的 EVENT 一律回 `auth-required`。認證前送出、被這樣拒收的事件不往上報，認證成功後（先補送訂閱）自動重送——心跳、直連信令、輸入中這些沒有外送匣的即時事件才不會在剛連上時消失。真實網路由 SDK `RelayPool` 處理，記憶體測試網路由 core `RelayClient` 處理。
+>
+> **真實網路的連線層是 SDK 的 `RelayPool`（ADR-0398）**：`webSocketConnector(url)` 對每座中繼開一個只有這一座的 `RelayPool`（core 轉出），轉成引擎的 `RelayConnection`（`publish`／`subscribe(subId, filters)`／`unsubscribe`／`close`）。以下都由 SDK 負責：
+> - 重連退避：0.5、1、2、5、10 秒，連線撐過 30 秒才歸零；
+> - 1013 的冷卻（健康標記）；
+> - NIP-42：簽章仍交給引擎的 `authSigner`；
+> - 認證前被拒的重送；
+> - 補訂閱：從游標接續，禮物包往前退讓兩天；
+> - 驗簽與以 id 去重：去重表有上限，SDK ADR 0124。
+>
+> 轉接層自己只做四件事：
+> - 判斷什麼時候算上線（ADR-0395）；
+> - 還沒連上時的發布先排著；
+> - OK 只轉交中繼真的回答的：逾時、沒連上、斷線不回，交給外送匣補送；
+> - 同一個 `subId` 用同樣的 filter 再訂一次時不多送 REQ：SDK 已經補送過了。
+>
+> 引擎的路由（home／分片／錨點冗餘／presence 層）不變，每座仍是一條獨立的連線。
 >
 > **容量訊號（ADR-0379；SDK v0.34.0 ADR 0042 移植）**：中繼的容量政策與 SDK 逐字相同——保底份額（`DO_GUARANTEE_KIB`，只在淘汰制）、溢位帶（`DO_BORROW_PERCENT`，天花板之上借用 2 小時、`OK true "warning: borrowed: …"`）、粗分級預警（`DO_NEAR_FULL_PERCENT`，`OK true "warning: near-full: <級>: …"`，只有門檻與 95 兩級）、丟棄計數（`DO_DROP_NOTICES`：還沒送到就被 FIFO／淘汰刪掉的留言按收件人累計，本人讀收件匣時在 EOSE 前收到 `NOTICE "warning: dropped: N: since: until: …"`、送出即歸零），全部預設關閉；NIP-11 一律多 `cinder_ceiling_policy`／`cinder_ceiling_bytes`，其餘設了才出現。帳號預算改用 `computeCeilingBudget`（含溢位帶）。**錨點開預警與丟棄計數；保底（每位收件人 64 MiB）與溢位帶（20%）只開在檔案車道**（ADR-0381，客戶端都是 SDK ≥ v0.33）；嚴格平面與其他車道的溢位帶與保底要等客戶端接得住（App v0.0.18 只看 `OK` 的布林，會把借用當成送達）。DO SQLite 多 `borrowed` 欄、兩個只收借用列的部分索引與 `inbox_drops` 表（每次喚醒冪等遷移，舊程式可回滾）。
 >
