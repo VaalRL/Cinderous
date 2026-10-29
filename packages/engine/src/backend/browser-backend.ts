@@ -97,12 +97,12 @@ export class BrowserChatBackend implements ChatBackend {
   constructor(name: string) {
     this.selfSk = generateSecretKey();
     this.self = { pubkey: getPublicKey(this.selfSk), name, status: "online", statusMessage: "" };
-    this.client = this.net.connect("self", { onEvent: (_sub, e) => this.onSelfEvent(e) });
+    this.client = this.net.connectDirect("self", { onEvent: (_sub, e) => this.onSelfEvent(e) });
 
     for (const def of BOTS) {
       const sk = generateSecretKey();
       const peer: Peer = { sk, pk: getPublicKey(sk), name: def.name };
-      const client = this.net.connect(peer.pk, { onEvent: (_sub, e) => this.onBotEvent(peer, def, e) });
+      const client = this.net.connectDirect(peer.pk, { onEvent: (_sub, e) => this.onBotEvent(peer, def, e) });
       this.bots.push({ peer, def, client });
       this.roster.push(peer);
       this.defaults.set(peer.pk, { status: def.status, message: def.statusMessage });

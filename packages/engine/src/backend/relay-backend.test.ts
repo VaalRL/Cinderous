@@ -13,6 +13,11 @@ import {
   RelayChatBackend,
 } from "./relay-backend.js";
 
+/** 等 SDK 連線層的發布結果（OK）回來：它晚一個微任務以上（ADR-0400）。只排微任務，假時鐘下也能用。 */
+const settle = async (): Promise<void> => {
+  for (let i = 0; i < 50; i++) await Promise.resolve();
+};
+
 const noop: ChatBackendEvents = { onContacts() {}, onMessage() {}, onTyping() {}, onNudge() {} };
 
 describe("RelayChatBackend（真實後端 + 持久化）", () => {
@@ -86,7 +91,7 @@ describe("RelayChatBackend（真實後端 + 持久化）", () => {
     b.stop();
   });
 
-  it("emoji blob 首次推播（ADR-0223 P2b）：A 送含 ref 訊息 → B 主動收到 blob（不需索取）", () => {
+  it("emoji blob 首次推播（ADR-0223 P2b）：A 送含 ref 訊息 → B 主動收到 blob（不需索取）", async () => {
     const net = createInMemoryRelayNetwork();
     const storeA = new MemoryStorage();
     const storeB = new MemoryStorage();
@@ -95,14 +100,20 @@ describe("RelayChatBackend（真實後端 + 持久化）", () => {
     const data = "data:image/gif;base64,R0lGODlhAQABAAAA" + "A".repeat(ASSET_CHUNK_CHARS + 300); // 合法 GIF 頭
     const hash = contentHash(data);
     storeA.saveAssetBlobs([{ hash, data }]); // A 有 blob（emoji 作者）
+    await settle();
     const cached: string[] = [];
     a.start(noop);
+    await settle();
     b.start({ ...noop, onAssetCached: (h) => cached.push(h) });
+    await settle();
     a.addContact(b.selfNpub);
+    await settle();
     b.addContact(a.selfNpub);
+    await settle();
 
     const text = `嗨 :dance:\nnb-assets:v1:${JSON.stringify({ dance: { label: "跳舞", ref: hash, format: "raster" } })}`;
     a.sendMessage(b.self.pubkey, text); // A 送含 ref 的訊息 → 主動推 blob
+    await settle();
 
     expect(cached).toContain(hash); // B 主動收到（沒呼叫 requestAsset）
     expect(storeB.loadAssetBlobs()).toEqual([{ hash, data }]);
@@ -515,7 +526,7 @@ describe("RelayChatBackend（真實後端 + 持久化）", () => {
     b.stop();
   });
 
-  it("群組（M9）：Alice 建群 + 送群訊，Bob 與 Carol 皆收到並帶 sender", () => {
+  it("群組（M9）：Alice 建群 + 送群訊，Bob 與 Carol 皆收到並帶 sender", async () => {
     const net = createInMemoryRelayNetwork();
     const storeB = new MemoryStorage();
     const a = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("a", h), "Alice");
@@ -527,18 +538,25 @@ describe("RelayChatBackend（真實後端 + 持久化）", () => {
     const bMsgs: { pk: string; m: ChatMessage }[] = [];
     const cMsgs: { pk: string; m: ChatMessage }[] = [];
     a.start(noop);
+    await settle();
     b.start({ ...noop, onGroups: (gs) => bGroups.push(...gs.map((g) => g.id)), onMessage: (pk, m) => bMsgs.push({ pk, m }) });
+    await settle();
     c.start({ ...noop, onGroups: (gs) => cGroups.push(...gs.map((g) => g.id)), onMessage: (pk, m) => cMsgs.push({ pk, m }) });
+    await settle();
 
     a.createGroup("好友", [b.self.pubkey, c.self.pubkey]);
+    await settle();
     // Bob、Carol 收到 group-create
     expect(bGroups.length).toBeGreaterThan(0);
     expect(cGroups.length).toBeGreaterThan(0);
     const gid = bGroups[0]!;
 
     a.sendGroupMessage(gid, "嗨大家");
+    await settle();
     const bGot = bMsgs.find((x) => x.pk === gid && x.m.text === "嗨大家");
+    await settle();
     const cGot = cMsgs.find((x) => x.pk === gid && x.m.text === "嗨大家");
+    await settle();
     expect(bGot?.m.sender).toBe(a.self.pubkey);
     expect(cGot?.m.sender).toBe(a.self.pubkey);
     // Bob 端持久化群訊於 groupId 之下
@@ -549,7 +567,7 @@ describe("RelayChatBackend（真實後端 + 持久化）", () => {
     c.stop();
   });
 
-  it("群組成員管理（M9）：管理者加入新成員→其實例化群；移除成員→該成員退群", () => {
+  it("群組成員管理（M9）：管理者加入新成員→其實例化群；移除成員→該成員退群", async () => {
     const net = createInMemoryRelayNetwork();
     const storeC = new MemoryStorage();
     const a = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("a", h), "Alice");
@@ -557,21 +575,28 @@ describe("RelayChatBackend（真實後端 + 持久化）", () => {
     const c = new RelayChatBackend(storeC, (h) => net.connect("c", h), "Carol");
     const bGroups: string[] = [];
     a.start(noop);
+    await settle();
     b.start({ ...noop, onGroups: (gs) => bGroups.push(...gs.map((g) => g.id)) });
+    await settle();
     c.start(noop);
+    await settle();
 
     a.createGroup("小群", [b.self.pubkey]); // 僅 Alice、Bob
+    await settle();
     const gid = bGroups[0]!;
     expect(storeC.loadGroups()).toEqual([]); // Carol 尚未在群
 
     // 加入 Carol → Carol 端實例化該群、成員含三人
     a.addGroupMember(gid, c.self.pubkey);
+    await settle();
     const cg = storeC.loadGroups().find((g) => g.id === gid);
+    await settle();
     expect(cg?.members).toContain(c.self.pubkey);
     expect(cg?.members).toContain(b.self.pubkey);
 
     // 移除 Carol → Carol 端退出該群
     a.removeGroupMember(gid, c.self.pubkey);
+    await settle();
     expect(storeC.loadGroups().find((g) => g.id === gid)).toBeUndefined();
 
     a.stop();
@@ -1122,13 +1147,17 @@ describe("送達/已讀回條（ADR-0058）", () => {
     return { storeA, a, b };
   };
 
-  it("Tier1+2：送出 → sent → delivered（同步網路一次到位）", () => {
+  it("Tier1+2：送出 → sent → delivered（同步網路一次到位）", async () => {
     const { storeA, a, b } = pair();
     const statuses: string[] = [];
     a.start({ ...noop, onMessageStatus: (_c, _id, s) => statuses.push(s) });
+    await settle();
     b.start(noop);
+    await settle();
     a.addContact(b.selfNpub);
+    await settle();
     a.sendMessage(b.self.pubkey, "hi");
+    await settle();
     expect(storeA.loadMessages(b.self.pubkey)[0]?.status).toBe("delivered");
     expect(statuses).toContain("sent");
     expect(statuses).toContain("delivered");
@@ -1370,7 +1399,7 @@ describe("顯示名稱個人檔（ADR-0061，加密廣播）", () => {
 });
 
 describe("群組送達/已讀分級（ADR-0095）", () => {
-  it("小群（≤10）：成員收到群訊後回送達回條，發訊者記錄「誰送達」（每成員回條表）", () => {
+  it("小群（≤10）：成員收到群訊後回送達回條，發訊者記錄「誰送達」（每成員回條表）", async () => {
     const net = createInMemoryRelayNetwork();
     const storeA = new MemoryStorage();
     const a = new RelayChatBackend(storeA, (h) => net.connect("a", h), "Alice");
@@ -1379,15 +1408,21 @@ describe("群組送達/已讀分級（ADR-0095）", () => {
     const bGroups: string[] = [];
     const aReceipts: { messageId: string; receipts: Record<string, string> }[] = [];
     a.start({ ...noop, onMessageReceipts: (_g, messageId, receipts) => aReceipts.push({ messageId, receipts }) });
+    await settle();
     b.start({ ...noop, onGroups: (gs) => bGroups.push(...gs.map((g) => g.id)) });
+    await settle();
     c.start(noop);
+    await settle();
 
     a.createGroup("小群", [b.self.pubkey, c.self.pubkey]); // 3 人＝名單制
+    await settle();
     const gid = bGroups[0]!;
     a.sendGroupMessage(gid, "嗨大家");
+    await settle();
 
     // Bob、Carol 各自回一則送達回條 → Alice 端記錄兩位成員都已送達。
     const stored = storeA.loadMessages(gid).find((m) => m.outgoing);
+    await settle();
     expect(stored?.receipts?.[b.self.pubkey]).toBe("delivered");
     expect(stored?.receipts?.[c.self.pubkey]).toBe("delivered");
     expect(aReceipts.length).toBeGreaterThan(0); // UI 有收到更新
@@ -1482,7 +1517,7 @@ describe("檔案投遞與另存（ADR-0093）", () => {
   beforeEach(() => vi.stubGlobal("RTCPeerConnection", FakePeerConnection));
   afterEach(() => vi.unstubAllGlobals());
 
-  it("relay 檔案暫存（ADR-0162）：政策啟用＋名冊成員 1:1 → 分塊經中繼；離線收件人上線後收齊位元組", () => {
+  it("relay 檔案暫存（ADR-0162）：政策啟用＋名冊成員 1:1 → 分塊經中繼；離線收件人上線後收齊位元組", async () => {
     // 企業站：MAX_FILE_MB 已設（acceptFileEvents）；離線暫存需要持久層（store）。
     const net = createInMemoryRelayNetwork({ acceptFileEvents: true, store: new MessageStore() });
     const token = "tok-relay-file";
@@ -1491,8 +1526,10 @@ describe("檔案投遞與另存（ADR-0093）", () => {
       orgInviteToken: token,
     });
     owner.start(noop);
+    await settle();
     // 政策：relay 檔案上限 1MB（ADR-0162）。
     owner.publishRoster("小公司", [{ pubkey: owner.self.pubkey, name: "老闆" }], { relayFilesMaxMb: 1 });
+    await settle();
 
     const storeA = new MemoryStorage();
     const a = new RelayChatBackend(storeA, (h) => net.connect("a", h), "小美", {
@@ -1500,18 +1537,22 @@ describe("檔案投遞與另存（ADR-0093）", () => {
       orgJoinToken: token,
     });
     a.start(noop);
+    await settle();
     const storeB = new MemoryStorage();
     const bId = new RelayChatBackend(storeB, (h) => net.connect("b", h), "阿強", {
       orgAdminPubkey: owner.self.pubkey,
       orgJoinToken: token,
     });
     bId.start(noop);
+    await settle();
     const bPk = bId.self.pubkey;
     bId.stop(); // 收件人離線——P2P 在此必然失敗，relay 暫存是唯一出路
+    await settle();
 
     // A 送 100KB（> 1 塊）給離線的 B：政策啟用＋B 在名冊 → 走 relay 分塊（不碰 P2P，node 下無 RTC 也不炸）。
     const payload = new Uint8Array(100_000).map((_, i) => i % 251);
     a.sendFile(bPk, { name: "簡報.pdf", mime: "application/pdf", bytes: payload });
+    await settle();
 
     // B 上線 → 從離線信箱收齊分塊 → 重組 → onFileBytes（走既有收檔路徑）。
     const gotBytes: { name: string; size: number; first: number; last: number }[] = [];
@@ -1525,7 +1566,8 @@ describe("檔案投遞與另存（ADR-0093）", () => {
       onFileBytes: (_pk, _id, f) =>
         gotBytes.push({ name: f.name, size: f.size, first: f.bytes![0]!, last: f.bytes![f.size - 1]! }),
     });
-    expect(gotBytes.length).toBe(1);
+    // 分塊經外送匣節流送出（真實時間）：OK 經 SDK 晚一步回來，最後幾塊可能在 B 上線後才送——B 即時收得到，等它收齊（ADR-0400）
+    await vi.waitFor(() => expect(gotBytes.length).toBe(1), { timeout: 5_000 });
     expect(gotBytes[0]).toEqual({ name: "簡報.pdf", size: 100_000, first: 0, last: (100_000 - 1) % 251 });
     // metadata 訊息照舊入庫（檔案訊息存在、只存 metadata 無位元組）。
     expect(storeB.loadMessages(a.self.pubkey).some((m) => m.file?.name === "簡報.pdf")).toBe(true);
@@ -1717,7 +1759,7 @@ describe("檔案投遞與另存（ADR-0093）", () => {
     b.stop();
   });
 
-  it("群組的每位成員**共用同一個 tid**（否則位元組對不回同一則訊息）", () => {
+  it("群組的每位成員**共用同一個 tid**（否則位元組對不回同一則訊息）", async () => {
     const net = createInMemoryRelayNetwork();
     const sa = new MemoryStorage();
     const sb = new MemoryStorage();
@@ -1726,14 +1768,21 @@ describe("檔案投遞與另存（ADR-0093）", () => {
     const b = new RelayChatBackend(sb, (h) => net.connect("b", h), "Bob");
     const c = new RelayChatBackend(sc, (h) => net.connect("c", h), "Carol");
     a.start(noop);
+    await settle();
     b.start(noop);
+    await settle();
     c.start(noop);
+    await settle();
     a.addContact(b.selfNpub);
+    await settle();
     a.addContact(c.selfNpub);
+    await settle();
     a.createGroup("三人群", [b.self.pubkey, c.self.pubkey]);
+    await settle();
     const gid = sa.loadGroups()[0]!.id;
 
     const tid = a.sendFile(gid, { name: "x.bin", mime: "application/octet-stream", bytes: new Uint8Array([9]) });
+    await settle();
 
     // rumor 跨成員共用 → 兩人看到的 tid 必須相同，也必須等於送出端的。
     expect(sb.loadMessages(gid).find((m) => m.file)?.file?.tid).toBe(tid);
@@ -1779,18 +1828,25 @@ describe("自封副本：多裝置對話完整性（ADR-0107）", () => {
     bob.stop();
   });
 
-  it("對話在兩台裝置上都完整（來訊 + 自己發的都在）", () => {
+  it("對話在兩台裝置上都完整（來訊 + 自己發的都在）", async () => {
     const net = createInMemoryRelayNetwork();
     const { d1, d2 } = twoDevices(net, generateSecretKey());
     const bob = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("bob", h), "Bob");
     d1.be.start(noop);
+    await settle();
     d2.be.start(noop);
+    await settle();
     bob.start(noop);
+    await settle();
 
     d1.be.addContact(bob.selfNpub);
+    await settle();
     d1.be.sendMessage(bob.self.pubkey, "在嗎");
+    await settle();
     bob.sendMessage(d1.be.self.pubkey, "在");
+    await settle();
     d2.be.sendMessage(bob.self.pubkey, "那我從電腦回你"); // 換一台裝置繼續講
+    await settle();
 
     const expected = ["在嗎", "在", "那我從電腦回你"];
     expect(d1.store.loadMessages(bob.self.pubkey).map((m) => m.text)).toEqual(expected);
@@ -1860,18 +1916,24 @@ describe("自封副本：多裝置對話完整性（ADR-0107）", () => {
     bob.stop();
   });
 
-  it("在手機收回，電腦上也會消失（隱私不變式，非便利功能）", () => {
+  it("在手機收回，電腦上也會消失（隱私不變式，非便利功能）", async () => {
     const net = createInMemoryRelayNetwork();
     const { d1, d2 } = twoDevices(net, generateSecretKey());
     const bob = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("bob", h), "Bob");
     d1.be.start(noop);
+    await settle();
     d2.be.start(noop);
+    await settle();
     bob.start(noop);
+    await settle();
 
     d1.be.addContact(bob.selfNpub);
+    await settle();
     d1.be.sendMessage(bob.self.pubkey, "說錯話了");
+    await settle();
     const id = d1.store.loadMessages(bob.self.pubkey)[0]!.id;
     d1.be.unsendMessage(bob.self.pubkey, id);
+    await settle();
 
     expect(d1.store.loadDeleted()).toContain(id);
     expect(d2.store.loadDeleted()).toContain(id); // 不可留在自己的另一台裝置上
@@ -1902,16 +1964,21 @@ describe("自封副本：多裝置對話完整性（ADR-0107）", () => {
     bob.stop();
   });
 
-  it("群訊也有自封副本：在手機發的群訊，電腦看得到（標 outgoing）", () => {
+  it("群訊也有自封副本：在手機發的群訊，電腦看得到（標 outgoing）", async () => {
     const net = createInMemoryRelayNetwork();
     const { d1, d2 } = twoDevices(net, generateSecretKey());
     const bob = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("bob", h), "Bob");
     d1.be.start(noop);
+    await settle();
     d2.be.start(noop);
+    await settle();
     bob.start(noop);
+    await settle();
 
     d1.be.addContact(bob.selfNpub);
+    await settle();
     d1.be.createGroup("專案群", [bob.self.pubkey]);
+    await settle();
     const gid = d1.store.loadGroups()[0]!.id;
 
     // 群控也自封（ADR-0107）：否則電腦端根本不知道這個群存在，群訊自封副本會被
@@ -1920,9 +1987,11 @@ describe("自封副本：多裝置對話完整性（ADR-0107）", () => {
     expect(d2.store.loadGroups()[0]!.admin).toBe(d1.be.self.pubkey); // 管理者仍是我
 
     d1.be.sendGroupMessage(gid, "大家好");
+    await settle();
 
     // 群訊原本只扇出給**其他**成員 → 自己的另一台裝置本來看不到自己發的群訊。
     const onDesktop = d2.store.loadMessages(gid);
+    await settle();
     expect(onDesktop.map((m) => m.text)).toEqual(["大家好"]);
     expect(onDesktop[0]!.outgoing).toBe(true);
 
@@ -2183,20 +2252,39 @@ describe("中繼流量削減（ADR-0109）", () => {
     b.stop();
   });
 
-  it("**防風暴**：握手在一輪後停止——已是活躍就不再回發（否則兩端會互相觸發到爆）", () => {
-    const net = createInMemoryRelayNetwork();
+  it("**防風暴**：握手在一輪後停止——已是活躍就不再回發（否則兩端會互相觸發到爆）", async () => {
+    // 在線路上數送出的心跳（ADR-0400）：同一秒內內容相同的兩顆心跳 id 一樣，訂閱端（SDK）以 id 去重只看得到一顆
+    const hb: string[] = [];
+    const net = createInMemoryRelayNetwork({
+      tap: (_conn, dir, frame) => {
+        const m = JSON.parse(frame) as unknown[];
+        if (dir === "out" && m[0] === "EVENT" && (m[1] as NostrEvent).kind === KIND.HEARTBEAT) hb.push(frame);
+      },
+    });
     const a = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("a", h), "Alice");
     const b = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("b", h), "Bob");
     a.start(noop);
     b.start(noop);
     a.addContact(b.selfNpub);
+    // 接受後才訂閱彼此的心跳（ADR-0121）。少了這行，Bob 根本看不到 Alice 的心跳，
+    // 「不回發」是因為沒收到而不是因為已活躍——風暴照樣通過（ADR-0400 的破壞測試抓到的空包彈）
+    b.acceptRequest(a.self.pubkey);
+    await settle();
 
-    const hb = spy(net, { kinds: [KIND.HEARTBEAT] });
+    hb.length = 0;
     a.setStatus("online");
+    await settle(); // SDK 的發布是非同步送出：連鎖回發要等一輪才看得到
     const afterHandshake = hb.length;
+    expect(afterHandshake).toBeGreaterThanOrEqual(2); // 前提：握手真的發生了（Bob 有回發）
 
     // 雙方都已是 ACTIVE：再發一顆不該再觸發任何補發（wasIdle === false）。
+    // 晚兩秒再發：同一秒內容相同的心跳 id 一樣，Bob 那端的 SDK 會以 id 去重、根本看不到它，測試就成了空包彈
+    const now = Date.now();
+    const clock = vi.spyOn(Date, "now").mockReturnValue(now + 2_000);
     a.setStatus("online");
+    await settle();
+    clock.mockRestore();
+    console.log("HB", afterHandshake, hb.map((f) => { const e = JSON.parse(f)[1]; return e.pubkey.slice(0, 4) + "@" + e.created_at; }).join(" "));
     expect(hb.length).toBe(afterHandshake + 1); // 只有 Alice 自己那一顆，沒有連鎖
     a.stop();
     b.stop();
@@ -2312,7 +2400,7 @@ describe("群訊必須走 sendGroupMessage（不是 sendMessage）", () => {
 });
 
 describe("健檢修正（ADR-0119）", () => {
-  it("**群組上的 emoji 回應與收回不再拋錯**，且其他成員真的收得到", () => {
+  it("**群組上的 emoji 回應與收回不再拋錯**，且其他成員真的收得到", async () => {
     const net = createInMemoryRelayNetwork();
     const sa = new MemoryStorage();
     const a = new RelayChatBackend(sa, (h) => net.connect("a", h), "Alice");
@@ -2320,11 +2408,16 @@ describe("健檢修正（ADR-0119）", () => {
     const unsent: string[] = [];
     const b = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("b", h), "Bob");
     a.start(noop);
+    await settle();
     b.start({ ...noop, onReaction: (id, e) => reacted.push(`${id}:${e}`), onUnsend: (id) => unsent.push(id) });
+    await settle();
     a.addContact(b.selfNpub);
+    await settle();
     a.createGroup("專案群", [b.self.pubkey]);
+    await settle();
     const gid = sa.loadGroups()[0]!.id;
     a.sendGroupMessage(gid, "訊息");
+    await settle();
     const mid = sa.loadMessages(gid)[0]!.id;
 
     // 修正前：groupId（32 字元）被當成 pubkey（64 字元）丟進 NIP-44 → `second arg must be
@@ -3730,15 +3823,18 @@ describe("FS 停用＝明示退場（ADR-0314）", () => {
     expect(fs.keys).toHaveLength(1); // 🔴 不立刻刪——立刻刪＝在途訊息靜默消失
   });
 
-  it("🔴 對方讀到「明示退場」而非「宣告消失」——後者會變成永久的假警報", () => {
+  it("🔴 對方讀到「明示退場」而非「宣告消失」——後者會變成永久的假警報", async () => {
     const { a, b, storeB } = setup();
     a.enableFs();
+    await settle();
     a.sendMessage(b.self.pubkey, "先讓 Bob 釘選 Alice 用 FS");
+    await settle();
     // ADR-0302 §3：釘選記的是機制而非布林。
     // ADR-0365 起啟用 FS 的宣告是 `ek-pq-v1`（混合式），不再是 `ek-v1`。
     expect(readPin(storeB.loadFsState().pinned?.[a.self.pubkey])?.scheme).toBe(FS_CAPABILITY_PQ);
 
     a.disableFs();
+    await settle();
     // 退場宣告到達 → 解除釘選（不是留著釘選然後每次送訊都喊「對方可能被攻擊」）。
     expect(storeB.loadFsState().pinned?.[a.self.pubkey]).toBeFalsy();
   });
@@ -3902,7 +3998,7 @@ describe("入群邀請的同意閘門（ADR-0317）", () => {
 });
 
 describe("FS 擴大批二：群訊（ADR-0320）", () => {
-  it("🔴 群訊逐位成員決定：有 EK 的成員收到 FS 版、沒有的照樣收得到（混合不是失敗）", () => {
+  it("🔴 群訊逐位成員決定：有 EK 的成員收到 FS 版、沒有的照樣收得到（混合不是失敗）", async () => {
     const net = createInMemoryRelayNetwork();
     const a = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("a", h), "Alice");
     const b = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("b", h), "Bob");
@@ -3910,16 +4006,26 @@ describe("FS 擴大批二：群訊（ADR-0320）", () => {
     const bMsgs: string[] = [];
     const cMsgs: string[] = [];
     b.start({ ...noop, onMessage: (_id, m) => bMsgs.push(m.text) });
+    await settle();
     c.start({ ...noop, onMessage: (_id, m) => cMsgs.push(m.text) });
+    await settle();
     a.addContact(b.selfNpub);
+    await settle();
     a.addContact(c.selfNpub);
+    await settle();
     b.addContact(a.selfNpub); // Bob 與 Alice 互為聯絡人 → Alice 學得到 Bob 的 EK
+    await settle();
     a.enableFs();
+    await settle();
     b.enableFs(); // Bob 有 EK；Carol 沒開
+    await settle();
     const groups: { id: string }[] = [];
     a.start({ ...noop, onGroups: (gs) => groups.splice(0, groups.length, ...gs) });
+    await settle();
     a.createGroup("小群", [b.self.pubkey, c.self.pubkey]);
+    await settle();
     a.sendGroupMessage(groups[0]!.id, "午餐吃什麼");
+    await settle();
     // 兩人都收得到——FS 有沒有覆蓋到不影響送達
     expect(bMsgs).toContain("午餐吃什麼");
     expect(cMsgs).toContain("午餐吃什麼");
@@ -4547,7 +4653,7 @@ describe("雲端備份狀態可見性（ADR-0071／2026-09-18 稽核）", () => 
     return kv;
   };
 
-  it("🔴 成功備份後留下 lastOkAt——沒有它，「從沒成功」與「剛成功」長得一樣", () => {
+  it("🔴 成功備份後留下 lastOkAt——沒有它，「從沒成功」與「剛成功」長得一樣", async () => {
     withLocalStorage();
     const net = createInMemoryRelayNetwork();
     const store = new MemoryStorage();
@@ -4555,13 +4661,15 @@ describe("雲端備份狀態可見性（ADR-0071／2026-09-18 稽核）", () => 
       cloudSync: { mode: "basic", deviceId: "desk" },
     });
     a.start(noop);
+    await settle();
     const st = a.cloudBackupState();
+    await settle();
     expect(st.lastOkAt).toBeGreaterThan(0);
     expect(st.lastFailAt).toBeUndefined();
     a.stop();
   });
 
-  it("🔴 relay 拒收快照 → 記下失敗與原因，不再只是一行 console.warn", () => {
+  it("🔴 relay 拒收快照 → 記下失敗與原因，不再只是一行 console.warn", async () => {
     withLocalStorage();
     // 站方只收訊息類 kind，不收 30078——這正是企業自架站最常見的設定失誤
     // （見 OPERATOR-TODO：allowedKinds 沒加 30078 會默默拒收）。
@@ -4572,15 +4680,17 @@ describe("雲端備份狀態可見性（ADR-0071／2026-09-18 稽核）", () => 
     });
     const seen: Array<{ lastOkAt?: number; lastFailAt?: number }> = [];
     a.start({ ...noop, onCloudBackup: (s) => seen.push(s) });
+    await settle();
 
     const st = a.cloudBackupState();
+    await settle();
     expect(st.lastFailAt).toBeGreaterThan(0);
     expect(st.lastOkAt).toBeUndefined(); // 從沒成功過
     expect(seen.length).toBeGreaterThan(0); // UI 收得到通知
     a.stop();
   });
 
-  it("🔴 失敗不得抹掉上次成功的時間——那正是使用者最需要知道的數字", () => {
+  it("🔴 失敗不得抹掉上次成功的時間——那正是使用者最需要知道的數字", async () => {
     const kv = withLocalStorage();
     // 先手動放一筆「昨天成功過」，再讓這次失敗。
     const yesterday = Date.now() - 86_400_000;
@@ -4592,10 +4702,13 @@ describe("雲端備份狀態可見性（ADR-0071／2026-09-18 稽核）", () => 
     // 鍵是以 pubkey 前 8 碼組的；backend 已建好，直接問它自己那把。
     const key = `nb.backupState.${a.self.pubkey.slice(0, 8)}`;
     kv.set(key, JSON.stringify({ lastOkAt: yesterday }));
+    await settle();
 
     a.start(noop);
+    await settle();
 
     const st = a.cloudBackupState();
+    await settle();
     expect(st.lastOkAt).toBe(yesterday); // 保留
     expect(st.lastFailAt).toBeGreaterThan(yesterday); // 並記下這次失敗
     a.stop();

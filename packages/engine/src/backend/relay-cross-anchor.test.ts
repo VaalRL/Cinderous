@@ -40,7 +40,7 @@ function farm(optsFor: (url: string) => RelayCoreOptions | undefined = () => und
     (who: string) =>
     (url: string): RelayConnector =>
     (h: RelayClientHandlers, onStatus) => {
-      const client: RelayClient = netFor(url).connect(`${who}-${seq++}`, h);
+      const client = netFor(url).connect(`${who}-${seq++}`, h);
       const publish = client.publish.bind(client);
       client.publish = (e: NostrEvent) => {
         if (e.kind === GIFT_WRAP) wraps.push({ url, to: e.tags.find((t) => t[0] === "p")?.[1] });

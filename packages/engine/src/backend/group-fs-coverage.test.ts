@@ -11,6 +11,11 @@ import {
 import { MemoryStorage } from "../storage/memory.js";
 import { RelayChatBackend } from "./relay-backend.js";
 
+/** 等 SDK 連線層的發布結果（OK）回來：它晚一個微任務以上（ADR-0400）。只排微任務，假時鐘下也能用。 */
+const settle = async (): Promise<void> => {
+  for (let i = 0; i < 50; i++) await Promise.resolve();
+};
+
 const noop = new Proxy({}, { get: () => () => {} }) as never;
 const member = () => {
   const sk = generateSecretKey();
@@ -113,7 +118,7 @@ describe("群組 FS 覆蓋率實測（ADR-0326）", () => {
     a.stop();
   });
 
-  it("🔴 但他只要在群裡**發過一次言**，我就學到了（ADR-0326 的 seal 層 hint）", () => {
+  it("🔴 但他只要在群裡**發過一次言**，我就學到了（ADR-0326 的 seal 層 hint）", async () => {
     const m = member();
     const inviter = member();
     const { net, store, a, sent, group } = boot([m.pk], "invited", inviter.sk);
@@ -121,6 +126,7 @@ describe("群組 FS 覆蓋率實測（ADR-0326）", () => {
 
     const w = wrapGroupMessage("我也在", m.sk, m.pk, group(), { myEk: m.ek.pk });
     for (const e of w.events) net.connect("m", {}).publish(e);
+    await settle();
     expect(store.loadFsState().contactEks[m.pk]).toBe(m.ek.pk);
 
     expect(targetFor(a, sent, group().id, m)).toBe("ek"); // 發言後

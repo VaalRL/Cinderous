@@ -7,6 +7,11 @@ import { MemoryStorage } from "../storage/memory.js";
 import { RelayChatBackend } from "./relay-backend.js";
 import type { ChatBackendEvents } from "./types.js";
 
+/** 等 SDK 連線層的發布結果（OK）回來：它晚一個微任務以上（ADR-0400）。只排微任務，假時鐘下也能用。 */
+const settle = async (): Promise<void> => {
+  for (let i = 0; i < 50; i++) await Promise.resolve();
+};
+
 const noop: ChatBackendEvents = { onContacts() {}, onMessage() {}, onTyping() {}, onNudge() {} };
 const NOW = Math.floor(Date.now() / 1000);
 const soon = (days: number): number => NOW + days * 86_400;
@@ -58,7 +63,7 @@ describe("共享行程端到端（ADR-0263）", () => {
   });
 
   describe("群組：建立一次、扇出全體", () => {
-    const setup = (): [RelayChatBackend, RelayChatBackend, RelayChatBackend, string] => {
+    const setup = async (): Promise<[RelayChatBackend, RelayChatBackend, RelayChatBackend, string]> => {
       const [a, b, c] = peers(["Alice", "Bob", "Carol"]) as [RelayChatBackend, RelayChatBackend, RelayChatBackend];
       // `createGroup` 回傳 void——群組 id 從 onGroups 取（早期版本的測試誤以為它回傳 id，
       // 導致 `expect(undefined).toBe(undefined)` 假通過）。
@@ -69,13 +74,15 @@ describe("共享行程端到端（ADR-0263）", () => {
       a.addContact(b.selfNpub);
       a.addContact(c.selfNpub);
       a.createGroup("登山團", [b.self.pubkey, c.self.pubkey]);
+      await settle();
       expect(gid).toBeTruthy();
       return [a, b, c, gid];
     };
 
-    it("兩位成員收到的是**同一個**行程（rumor.id 跨成員一致，ADR-0095）", () => {
-      const [a, b, c, gid] = setup();
+    it("兩位成員收到的是**同一個**行程（rumor.id 跨成員一致，ADR-0095）", async () => {
+      const [a, b, c, gid] = await setup();
       const id = a.calendarPublish({ groupId: gid }, trip);
+      await settle();
 
       expect(id).toBeTruthy(); // 沒有這行，下面兩個 undefined===undefined 會假通過
       expect(a.calendarList()[0]?.id).toBe(id);
@@ -85,11 +92,13 @@ describe("共享行程端到端（ADR-0263）", () => {
       for (const p of [a, b, c]) p.stop();
     });
 
-    it("小群 RSVP 廣播：其他成員也看得到誰要來", () => {
-      const [a, b, c, gid] = setup();
+    it("小群 RSVP 廣播：其他成員也看得到誰要來", async () => {
+      const [a, b, c, gid] = await setup();
       const id = a.calendarPublish({ groupId: gid }, trip)!;
+      await settle();
 
       b.calendarRsvp(id, "tentative");
+      await settle();
 
       expect(a.calendarList()[0]!.rsvps?.[b.self.pubkey]?.status).toBe("tentative");
       expect(c.calendarList()[0]!.rsvps?.[b.self.pubkey]?.status).toBe("tentative"); // 非主揪也收到
@@ -98,18 +107,23 @@ describe("共享行程端到端（ADR-0263）", () => {
   });
 
   describe("主揪權威（§1.7）", () => {
-    it("主揪改時間 → 全體更新；主揪取消 → 全體移除", () => {
+    it("主揪改時間 → 全體更新；主揪取消 → 全體移除", async () => {
       const [a, b] = peers(["Alice", "Bob"]) as [RelayChatBackend, RelayChatBackend];
       a.start(noop);
+      await settle();
       b.start(noop);
+      await settle();
       a.addContact(b.selfNpub);
+      await settle();
       const id = a.calendarPublish({ contact: b.self.pubkey }, trip)!;
 
       a.calendarPublish({ contact: b.self.pubkey }, { ...trip, start: soon(4) }, { action: "update", eventId: id });
+      await settle();
       expect(b.calendarList()[0]!.start).toBe(soon(4));
       expect(b.calendarList()[0]!.id).toBe(id); // id 不因修改而變
 
       a.calendarPublish({ contact: b.self.pubkey }, trip, { action: "cancel", eventId: id });
+      await settle();
       expect(b.calendarList()).toEqual([]);
       a.stop();
       b.stop();
@@ -266,19 +280,26 @@ describe("未送達邀請的補送（ADR-0264 §9）", () => {
     b.stop();
   });
 
-  it("新成員入群 → 補送既有的未來行程（無伺服器端房間＝沒有歷史重播）", () => {
+  it("新成員入群 → 補送既有的未來行程（無伺服器端房間＝沒有歷史重播）", async () => {
     const [a, b, c] = peers(["Alice", "Bob", "Carol"]) as [RelayChatBackend, RelayChatBackend, RelayChatBackend];
     let gid = "";
     a.start({ ...noop, onGroups: (gs) => { gid = gs[0]?.id ?? gid; } });
+    await settle();
     b.start(noop);
+    await settle();
     c.start(noop);
+    await settle();
     a.addContact(b.selfNpub);
+    await settle();
     a.addContact(c.selfNpub);
+    await settle();
     a.createGroup("登山團", [b.self.pubkey]);
+    await settle();
     const id = a.calendarPublish({ groupId: gid }, trip)!;
     expect(c.calendarList()).toEqual([]); // Carol 還不在群裡
 
     a.addGroupMember(gid, c.self.pubkey);
+    await settle();
 
     expect(c.calendarList().map((e) => e.id)).toEqual([id]);
     for (const p of [a, b, c]) p.stop();

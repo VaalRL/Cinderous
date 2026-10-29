@@ -59,7 +59,7 @@ class DemoPeer {
     private readonly dom: PeerDom,
   ) {
     this.pk = getPublicKey(sk);
-    this.client = net.connect(connId, { onEvent: (_sub, event) => this.onEvent(event) });
+    this.client = net.connectDirect(connId, { onEvent: (_sub, event) => this.onEvent(event) });
     this.wireControls();
   }
 

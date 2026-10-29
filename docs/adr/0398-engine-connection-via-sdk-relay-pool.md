@@ -60,8 +60,8 @@ ADR-0395 就是這樣來的：SDK 早就處理好 1013（SDK ADR 0108），聊�
   - **上線判定**：「中繼先開口」只認 AUTH 挑戰。不要求認證、又先送別的訊息的第三方中繼，改成等 1 秒才算上線。
   - **來自中繼的事件**：在 SDK 先驗簽一次。引擎原本的驗證照舊，所以會多花一次驗簽。
 - 負面 / 已知殘餘風險：
-  - **測試走的路和正式環境不同**：記憶體測試網路仍用 core `RelayClient`，所以 `relay-backend.test.ts` 測不到 SDK 的行為，例如去重、`onEose` 只叫一次、補訂閱。轉接層本身由 `ws-connector.test.ts` 用假 WebSocket 測。把記憶體網路也改成走 SDK 是後續項目。
-  - core `RelayClient` 的認證前重送（ADR-0385）只剩記憶體網路在用。與 SDK 的同一套行為是兩份程式，但不在正式環境的路徑上。
+  - **測試走的路和正式環境不同**：記憶體測試網路仍用 core `RelayClient`，所以 `relay-backend.test.ts` 測不到 SDK 的行為，例如去重、`onEose` 只叫一次、補訂閱。轉接層本身由 `ws-connector.test.ts` 用假 WebSocket 測。把記憶體網路也改成走 SDK 是後續項目。**已由 ADR-0400 完成**：轉接層搬到 core `connectRelay`，記憶體網路注入記憶體 socket 共用它。
+  - core `RelayClient` 的認證前重送（ADR-0385）只剩記憶體網路在用（ADR-0400 之後只剩展示模式的 `connectDirect`）。與 SDK 的同一套行為是兩份程式，但不在正式環境的路徑上。
   - 手機 App 的 JS 打包大了約 32 KB（未壓縮，971 KB 增加到 1,003 KB，+3.3%），多出來的是連線池、健康狀態與拒收分類。
   - 每座中繼各一個連線池，健康狀態不跨座共享。引擎本來就自己管各座的狀態（`trackRelayState`），不受影響。
 - 驗證：

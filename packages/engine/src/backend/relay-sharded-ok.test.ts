@@ -19,6 +19,11 @@ import { MemoryStorage } from "../storage/memory.js";
 import type { ChatBackendEvents, ChatMessage, MessageStatus } from "./types.js";
 import { RelayChatBackend, type RelayConnector } from "./relay-backend.js";
 
+/** 等 SDK 連線層的發布結果（OK）回來：它晚一個微任務以上（ADR-0400）。只排微任務，假時鐘下也能用。 */
+const settle = async (): Promise<void> => {
+  for (let i = 0; i < 50; i++) await Promise.resolve();
+};
+
 const noop: ChatBackendEvents = { onContacts() {}, onMessage() {}, onTyping() {}, onNudge() {} };
 const BASE = "wss://relay";
 const ANCHOR = "wss://anchor";
@@ -39,7 +44,7 @@ function farm(optsFor: (host: string) => RelayCoreOptions | undefined = () => un
     (who: string) =>
     (url: string): RelayConnector =>
     (h: RelayClientHandlers, onStatus) => {
-      const client: RelayClient = netFor(url).connect(`${who}-${seq++}`, h);
+      const client = netFor(url).connect(`${who}-${seq++}`, h);
       onStatus?.("online");
       return client;
     };
@@ -75,21 +80,24 @@ afterEach(() => {
 });
 
 describe("分片連線也處理 OK（ADR-0378）", () => {
-  it("對方分片收下 → 訊息標成「已送中繼」（修正前停在「傳送中」）", () => {
+  it("對方分片收下 → 訊息標成「已送中繼」（修正前停在「傳送中」）", async () => {
     const { skA, skB } = crossShardKeys();
     const net = farm();
     const { b: a, store: storeA } = backend(skA, "Alice", net.connectorFor("a"));
     const bobPk = getPublicKey(skB);
     const statuses: MessageStatus[] = [];
     a.start({ ...noop, onMessageStatus: (_c, _id, s) => statuses.push(s) });
+    await settle();
     a.addContact(backend(skB, "Bob", net.connectorFor("b")).b.selfNpub); // Bob 不上線：沒有送達回條干擾
+    await settle();
     a.sendMessage(bobPk, "嗨");
+    await settle();
     expect(statuses).toContain("sent");
     expect(storeA.loadMessages(bobPk)[0]?.status).toBe("sent");
     a.stop();
   });
 
-  it("對方分片永久拒收（白名單外）→ 立刻標成失敗，不再等 30 秒後當成已送達", () => {
+  it("對方分片永久拒收（白名單外）→ 立刻標成失敗，不再等 30 秒後當成已送達", async () => {
     const { skA, skB } = crossShardKeys();
     const bobPk = getPublicKey(skB);
     const bobShard = `${BASE}${shardPath(bobPk)}`;
@@ -97,13 +105,16 @@ describe("分片連線也處理 OK（ADR-0378）", () => {
     const net = farm((host) => (host === bobShard ? { allowedAuthors: [bobPk] } : undefined));
     const { b: a, store: storeA } = backend(skA, "Alice", net.connectorFor("a"));
     a.start(noop);
+    await settle();
     a.addContact(backend(skB, "Bob", net.connectorFor("b")).b.selfNpub);
+    await settle();
     a.sendMessage(bobPk, "嗨");
+    await settle();
     expect(storeA.loadMessages(bobPk)[0]?.status).toBe("failed");
     a.stop();
   });
 
-  it("對方分片滿了（blocked: ceiling:）→ 不判失敗；退避後改送健康的引導座，對方從那裡收到、標成已送中繼", () => {
+  it("對方分片滿了（blocked: ceiling:）→ 不判失敗；退避後改送健康的引導座，對方從那裡收到、標成已送中繼", async () => {
     vi.useFakeTimers();
     const { skA, skB } = crossShardKeys();
     const bobPk = getPublicKey(skB);
@@ -114,11 +125,16 @@ describe("分片連線也處理 OK（ADR-0378）", () => {
     const { b: bob } = backend(skB, "Bob", net.connectorFor("b"), { anchors: [ANCHOR] });
     const bobGot: ChatMessage[] = [];
     a.start(noop);
+    await settle();
     bob.start({ ...noop, onMessage: (_pk, m) => bobGot.push(m) });
+    await settle();
     a.addContact(bob.selfNpub);
+    await settle();
     bob.addContact(a.selfNpub);
+    await settle();
 
     a.sendMessage(bobPk, "滿了也要到");
+    await settle();
     // 第一次：Bob 的分片回 `blocked: ceiling:` → 外送匣排重試，不是失敗
     expect(storeA.loadMessages(bobPk)[0]?.status).toBe("sending");
     expect(bobGot.map((m) => m.text)).not.toContain("滿了也要到");
@@ -130,7 +146,7 @@ describe("分片連線也處理 OK（ADR-0378）", () => {
     bob.stop();
   });
 
-  it("冗餘座的拒收不判失敗：只有主路由（對方訊息片）的回覆算數；主路由一直滿，重試耗盡才標失敗", () => {
+  it("冗餘座的拒收不判失敗：只有主路由（對方訊息片）的回覆算數；主路由一直滿，重試耗盡才標失敗", async () => {
     vi.useFakeTimers();
     const { skA, skB } = crossShardKeys();
     const bobPk = getPublicKey(skB);
@@ -140,12 +156,15 @@ describe("分片連線也處理 OK（ADR-0378）", () => {
     const net = farm((host) => (host === bobShard ? { store: full } : host === ANCHOR ? { allowedAuthors: [bobPk] } : undefined));
     const { b: a, store: storeA } = backend(skA, "Alice", net.connectorFor("a"), { anchors: [ANCHOR] });
     a.start(noop);
+    await settle();
     // 帶提示的分享字串：知道 Bob 在 BASE 這座，不會多寄到錨點上 Bob 的分片（ADR-0383）——這裡只驗冗餘座
     a.addContact(backend(skB, "Bob", net.connectorFor("b")).b.selfShareUri);
+    await settle();
     a.sendMessage(bobPk, "嗨");
-    vi.advanceTimersByTime(1_000); // 第一次重送：主路由仍滿、錨點永久拒收
+    await settle();
+    await vi.advanceTimersByTimeAsync(1_000); // 第一次重送：主路由仍滿、錨點永久拒收
     expect(storeA.loadMessages(bobPk)[0]?.status).toBe("sending");
-    vi.advanceTimersByTime(60_000); // 主路由一直滿 → 重試耗盡
+    await vi.advanceTimersByTimeAsync(60_000); // 主路由一直滿 → 重試耗盡
     expect(storeA.loadMessages(bobPk)[0]?.status).toBe("failed");
     a.stop();
   });
@@ -179,6 +198,7 @@ describe("對方 10050 的多座收件中繼與 OK（ADR-0378 × ADR-0382 §6）
   it("排第一的那座拒收、第二座收下 → 已送中繼，不是失敗（第三方的收件中繼地位相同，任一座收下就算）", async () => {
     const { a, store, tPk } = await setup([PAID, OPEN]);
     a.sendMessage(tPk, "hi");
+    await settle();
     expect(store.loadMessages(tPk).at(-1)?.status).toBe("sent");
     a.stop();
   });
@@ -186,6 +206,7 @@ describe("對方 10050 的多座收件中繼與 OK（ADR-0378 × ADR-0382 §6）
   it("第一座收下、第二座拒收 → 已送中繼", async () => {
     const { a, store, tPk } = await setup([OPEN, PAID]);
     a.sendMessage(tPk, "hi");
+    await settle();
     expect(store.loadMessages(tPk).at(-1)?.status).toBe("sent");
     a.stop();
   });
@@ -193,6 +214,7 @@ describe("對方 10050 的多座收件中繼與 OK（ADR-0378 × ADR-0382 §6）
   it("每一座都永久拒收 → 才標失敗", async () => {
     const { a, store, tPk } = await setup([PAID, PAID2]);
     a.sendMessage(tPk, "hi");
+    await settle();
     expect(store.loadMessages(tPk).at(-1)?.status).toBe("failed");
     a.stop();
   });

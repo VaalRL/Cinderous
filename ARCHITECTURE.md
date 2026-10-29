@@ -83,9 +83,9 @@
 >
 > **收件確認（ADR-0380；SDK ADR 0067 移植）**：收件人處理完自己收件匣裡的包後送 kind 25190（本人簽、content 是外層 id，最多 500 個）；中繼只在連線已 AUTH 且簽章者＝AUTH 身分時處理，把**只寄給他一人**的那幾列降為「現在＋2 小時」到期（`inboxAckGraceFor`：未註冊應用的保存期與站方保存上限取小），不存、不扇出；NIP-11 宣告 `cinder_inbox_ack: { kind, grace_sec }`，客戶端只對宣告了的中繼送。
 >
-> **認證前送出（ADR-0385）**：錨點連上就發 NIP-42 挑戰，認證前的 EVENT 一律回 `auth-required`。認證前送出、被這樣拒收的事件不往上報，認證成功後（先補送訂閱）自動重送——心跳、直連信令、輸入中這些沒有外送匣的即時事件才不會在剛連上時消失。真實網路由 SDK `RelayPool` 處理，記憶體測試網路由 core `RelayClient` 處理。
+> **認證前送出（ADR-0385）**：錨點連上就發 NIP-42 挑戰，認證前的 EVENT 一律回 `auth-required`。認證前送出、被這樣拒收的事件不往上報，認證成功後（先補送訂閱）自動重送——心跳、直連信令、輸入中這些沒有外送匣的即時事件才不會在剛連上時消失。真實網路與記憶體測試網路都由 SDK `RelayPool` 處理（ADR-0400）；只有展示模式的直連（`connectDirect`）還是 core `RelayClient`。
 >
-> **真實網路的連線層是 SDK 的 `RelayPool`（ADR-0398）**：`webSocketConnector(url)` 對每座中繼開一個只有這一座的 `RelayPool`（core 轉出），轉成引擎的 `RelayConnection`（`publish`／`subscribe(subId, filters)`／`unsubscribe`／`close`）。以下都由 SDK 負責：
+> **連線層是 SDK 的 `RelayPool`（ADR-0398、ADR-0400）**：core 的 `connectRelay(url, handlers, onStatus?, { createSocket? })` 對每座中繼開一個只有這一座的 `RelayPool`，轉成引擎的 `RelayConnection`（`publish`／`subscribe(subId, filters)`／`unsubscribe`／`close`）。以下都由 SDK 負責：
 > - 重連退避：0.5、1、2、5、10 秒，連線撐過 30 秒才歸零；
 > - 1013 的冷卻（健康標記）；
 > - NIP-42：簽章仍交給引擎的 `authSigner`；
@@ -98,6 +98,8 @@
 > - 還沒連上時的發布先排著；
 > - OK 只轉交中繼真的回答的：逾時、沒連上、斷線不回，交給外送匣補送；
 > - 同一個 `subId` 用同樣的 filter 再訂一次時不多送 REQ：SDK 已經補送過了。
+>
+> **測試走的就是正式環境的路（ADR-0400）**：engine 的 `webSocketConnector(url)` 與 relay 的記憶體測試網路 `createInMemoryRelayNetwork().connect()` 都呼叫 `connectRelay`，差別只在 socket——記憶體網路注入一個同步開啟、同步收發的記憶體 socket 接到 `RelayCore`。所以 SDK 的驗簽、以 id 去重、NIP-42、補訂閱在引擎測試裡一樣成立。時序上唯一的差別：OK 經 SDK 的發布結果回來、發布本身也晚一個微任務送出，測試要 `await` 才看得到「已送中繼」與連鎖反應。要看線上實際的訊框（OK 附帶的說明文字、NOTICE 的位置）用網路的 `tap` 選項。展示模式（`BrowserChatBackend`）與示範頁用 `connectDirect`（core `RelayClient`，同步、不帶 SDK 的計時器）。
 >
 > 引擎的路由（home／分片／錨點冗餘／presence 層）不變，每座仍是一條獨立的連線。
 >
