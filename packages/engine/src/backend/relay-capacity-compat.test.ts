@@ -18,17 +18,15 @@ import type { ChatBackendEvents, ChatMessage } from "./types.js";
 
 const noop: ChatBackendEvents = { onContacts() {}, onMessage() {}, onTyping() {}, onNudge() {} };
 
-/** 中繼送給某條連線的每一則原始訊息（照順序），用來看 OK 的說明文字與 NOTICE／EOSE 的先後。 */
+/** 中繼送給某條連線的每一則原始訊息（照順序，在線路上記錄），用來看 OK 的說明文字與 NOTICE／EOSE 的先後。 */
 type Wire = { kind: "OK"; id: string; accepted: boolean; message: string } | { kind: "NOTICE"; message: string } | { kind: "EOSE"; subId: string };
 
 /**
- * 在 engine 給的 handlers 外面包一層記錄（不改變 engine 收到的任何東西）。
- *
  * `gate` 給了就先把 relay 送來的東西排隊、`open()` 之後才交給 engine：記憶體網路是**同步**的，
  * 認證與收件匣回放會在 engine 的建構子裡（`this.client` 指派之前）就跑完，真的 WebSocket 不會。
  * `authSigner` 不排隊（它要同步回傳簽好的事件，而且只用到建構子早就備好的金鑰）。
  */
-function tap(h: RelayClientHandlers, log: Wire[], gate?: { queue: (() => void)[] | undefined }): RelayClientHandlers {
+function gated(h: RelayClientHandlers, gate?: { queue: (() => void)[] | undefined }): RelayClientHandlers {
   const later = (fn: () => void): void => {
     if (gate?.queue) gate.queue.push(fn);
     else fn();
@@ -37,30 +35,36 @@ function tap(h: RelayClientHandlers, log: Wire[], gate?: { queue: (() => void)[]
     ...h,
     onEvent: (subId, event) => later(() => h.onEvent?.(subId, event)),
     onAuthenticated: (client) => later(() => h.onAuthenticated?.(client)),
-    onOk: (id, accepted, message) =>
-      later(() => {
-        log.push({ kind: "OK", id, accepted, message });
-        h.onOk?.(id, accepted, message);
-      }),
-    onNotice: (message) =>
-      later(() => {
-        log.push({ kind: "NOTICE", message });
-        h.onNotice?.(message);
-      }),
-    onEose: (subId) =>
-      later(() => {
-        log.push({ kind: "EOSE", subId });
-        h.onEose?.(subId);
-      }),
+    onOk: (id, accepted, message) => later(() => h.onOk?.(id, accepted, message)),
+    onNotice: (message) => later(() => h.onNotice?.(message)),
+    onEose: (subId) => later(() => h.onEose?.(subId)),
   };
 }
 
+/** 等 SDK 連線層的發布結果（OK）回來：它晚一個微任務以上（ADR-0400）。 */
+const settle = async (): Promise<void> => {
+  for (let i = 0; i < 50; i++) await Promise.resolve();
+};
+
 function setup(storeOpts: MessageStoreOptions) {
-  const net = createInMemoryRelayNetwork({ requireAuth: true, store: new MessageStore(storeOpts) });
   const aliceWire: Wire[] = [];
   const bobWire: Wire[] = [];
+  // 在線路上記錄（ADR-0400）：連線層只把結果交給 engine，OK 的說明文字與 NOTICE 的位置要在這裡看
+  const wires: Record<string, Wire[]> = { alice: aliceWire, bob: bobWire };
+  const net = createInMemoryRelayNetwork({
+    requireAuth: true,
+    store: new MessageStore(storeOpts),
+    tap: (connId, direction, frame) => {
+      const log = wires[connId];
+      if (!log || direction !== "in") return;
+      const m = JSON.parse(frame) as unknown[];
+      if (m[0] === "OK") log.push({ kind: "OK", id: String(m[1]), accepted: m[2] === true, message: String(m[3] ?? "") });
+      else if (m[0] === "NOTICE") log.push({ kind: "NOTICE", message: String(m[1]) });
+      else if (m[0] === "EOSE") log.push({ kind: "EOSE", subId: String(m[1]) });
+    },
+  });
   const storeA = new MemoryStorage();
-  const alice = new RelayChatBackend(storeA, (h) => net.connect("alice", tap(h, aliceWire)), "Alice", {
+  const alice = new RelayChatBackend(storeA, (h) => net.connect("alice", h), "Alice", {
     nsecOverride: nsecEncode(generateSecretKey()),
   });
   const bobSk = generateSecretKey();
@@ -69,7 +73,7 @@ function setup(storeOpts: MessageStoreOptions) {
   // 順序同 App：建構（連線）→ start → 之後才收到 relay 的訊息。
   const bobOnline = (events: ChatBackendEvents): RelayChatBackend => {
     const gate: { queue: (() => void)[] | undefined } = { queue: [] };
-    const bob = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("bob", tap(h, bobWire, gate)), "Bob", {
+    const bob = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("bob", gated(h, gate)), "Bob", {
       nsecOverride: nsecEncode(bobSk),
     });
     bob.start(events);
@@ -84,7 +88,7 @@ let warn: ReturnType<typeof vi.spyOn> | undefined;
 afterEach(() => warn?.mockRestore());
 
 describe("🔴 v0.0.18 相容：OK true 附 warning: near-full:（ADR-0379）", () => {
-  it("收下了就是收下了：訊息狀態是 sent、沒有任何一則被標成失敗、外送匣不報錯", () => {
+  it("收下了就是收下了：訊息狀態是 sent、沒有任何一則被標成失敗、外送匣不報錯", async () => {
     warn = vi.spyOn(console, "warn");
     // 拒收制（嚴格平面）＋預警門檻 50%：一直寫到第一次出現預警，再多寫兩則（仍遠低於天花板）
     const { alice, bobOnline, bobPk, storeA, aliceWire } = setup({ offlineMaxTotalBytes: 2_000_000, nearFullPercent: 50 });
@@ -94,8 +98,15 @@ describe("🔴 v0.0.18 相容：OK true 附 warning: near-full:（ADR-0379）", 
     const text = "內容".repeat(2000);
     const nearFull = (): boolean => aliceWire.some((w) => w.kind === "OK" && w.accepted && w.message.startsWith("warning: near-full: "));
     let sent = 0;
-    while (!nearFull() && sent < 200) alice.sendMessage(bobPk, `${sent++}:${text}`);
-    for (let i = 0; i < 2; i += 1) alice.sendMessage(bobPk, `${sent++}:${text}`);
+    // 一則一則等 OK（外送匣有在途上限，OK 經 SDK 晚一個微任務才回）
+    while (!nearFull() && sent < 200) {
+      alice.sendMessage(bobPk, `${sent++}:${text}`);
+      await settle();
+    }
+    for (let i = 0; i < 2; i += 1) {
+      alice.sendMessage(bobPk, `${sent++}:${text}`);
+      await settle();
+    }
 
     const oks = aliceWire.filter((w): w is Extract<Wire, { kind: "OK" }> => w.kind === "OK");
     // 前提：真的有預警（不是一串永遠不會觸發的寫入），而且沒有任何拒收
@@ -119,15 +130,19 @@ describe("🔴 v0.0.18 相容：OK true 附 warning: near-full:（ADR-0379）", 
 });
 
 describe("🔴 v0.0.18 相容：EOSE 之前多一則 NOTICE「warning: dropped: …」（ADR-0379）", () => {
-  it("engine 忽略它：收件匣照常回放、EOSE 照常、之後的即時訊息照常收到", () => {
+  it("engine 忽略它：收件匣照常回放、EOSE 照常、之後的即時訊息照常收到", async () => {
     // 每位收件人只留 3 則（FIFO）＋丟棄計數：Bob 不在線時 Alice 寄 6 則 ⇒ 至少 3 則還沒送到就被擠掉
     const { alice, bobOnline, bobPk, bobWire } = setup({ maxPerRecipient: 3, countDrops: true });
     alice.start(noop);
     alice.addContact(npubEncode(bobPk));
-    for (let i = 1; i <= 6; i += 1) alice.sendMessage(bobPk, `離線 ${i}`);
+    for (let i = 1; i <= 6; i += 1) {
+      alice.sendMessage(bobPk, `離線 ${i}`);
+      await settle();
+    }
 
     const live: string[] = [];
     const bob = bobOnline({ ...noop, onMessage: (_pk, m) => live.push(m.text) });
+    await settle();
 
     // 中繼真的送了 NOTICE，而且在那條收件匣訂閱的 EOSE 之前
     const noticeAt = bobWire.findIndex((w) => w.kind === "NOTICE" && w.message.startsWith("warning: dropped: "));
@@ -143,6 +158,7 @@ describe("🔴 v0.0.18 相容：EOSE 之前多一則 NOTICE「warning: dropped: 
 
     // 訂閱還活著：之後的即時訊息照收
     alice.sendMessage(bobPk, "上線之後");
+    await settle();
     expect(live).toContain("上線之後");
     alice.stop();
     bob.stop();
@@ -172,7 +188,7 @@ describe("v0.0.18 相容：NIP-11 多出的容量欄位無害（ADR-0379）", ()
 });
 
 describe("為什麼錨點先不開溢位帶（ADR-0379 的證據，不是規格）", () => {
-  it("OK true「warning: borrowed: 7200: …」被 v0.0.18 當成送達（sent），但中繼只存 2 小時", () => {
+  it("OK true「warning: borrowed: 7200: …」被 v0.0.18 當成送達（sent），但中繼只存 2 小時", async () => {
     // 拒收制、溢位帶 100%：一直寫到第一次被收進溢位帶
     const { alice, bobPk, storeA, aliceWire } = setup({ offlineMaxTotalBytes: 200_000, overflowRatio: 1, borrowPerKeyBytes: 1_000_000 });
     alice.start(noop);
@@ -181,7 +197,10 @@ describe("為什麼錨點先不開溢位帶（ADR-0379 的證據，不是規格�
     const borrowed = (): number =>
       aliceWire.filter((w) => w.kind === "OK" && w.accepted && w.message.startsWith("warning: borrowed: 7200: ")).length;
     let sent = 0;
-    while (borrowed() === 0 && sent < 200) alice.sendMessage(bobPk, `${sent++}:${text}`);
+    while (borrowed() === 0 && sent < 200) {
+      alice.sendMessage(bobPk, `${sent++}:${text}`);
+      await settle();
+    }
     expect(borrowed()).toBe(1);
     // App 分不出來：借用的那則也是 sent。收件人 2 小時內沒上線，它就無聲消失——比看得到的 blocked: ceiling: 更糟
     const msgs = storeA.loadMessages(bobPk);

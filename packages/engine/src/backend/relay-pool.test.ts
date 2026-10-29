@@ -619,7 +619,7 @@ describe("NIP-62 清除請求（ADR-0260）", () => {
     };
     const published: Record<string, NostrEvent[]> = { "wss://x": [], "wss://y": [] };
     /** 側錄 publish：kind 62 不會被中繼扇出（刻意），所以只能在送出端量。 */
-    const recording = (url: string, client: RelayClient): RelayClient => {
+    const recording = <C extends { publish(e: NostrEvent): void }>(url: string, client: C): C => {
       const orig = client.publish.bind(client);
       (client as { publish: (e: NostrEvent) => void }).publish = (e: NostrEvent) => {
         published[url]!.push(e);

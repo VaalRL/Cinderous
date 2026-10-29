@@ -85,7 +85,7 @@ export async function runWebRtcScenario(): Promise<WebRtcResult> {
     peerPublish: () => RelayClient,
     peerPk: () => PubkeyHex,
   ): RelayClient {
-    return net.connect(id, {
+    return net.connectDirect(id, {
       onEvent: (_sub, event: NostrEvent) => {
         if (event.kind !== SDP_SIGNAL_KIND) return;
         const { signal } = readSignal(event, ownSk);

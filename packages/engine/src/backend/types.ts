@@ -1,3 +1,4 @@
+import type { RelayUnavailable } from "@cinderous/core";
 import type { IcePath } from "./ice-path.js";
 import type { RelayFileWarning } from "./file-gate.js";
 import type {
@@ -76,17 +77,8 @@ export interface CapabilityGap {
 /** 與中繼站的連線狀態（供顯示連線/重連中）。 */
 export type ConnectionState = "connecting" | "online" | "offline";
 
-/**
- * 中繼以 1013 關閉＝這座暫時不能用（ADR-0395；SDK ADR 0097、0108）。
- * - `over-quota`：今天的額度用完，`resetsAt` 是下一個 00:00 UTC（Cloudflare 的每日額度重置時間）；
- * - `unavailable`：其他暫時的錯誤（儲存起不來、連線數滿了…）。
- * `retryAt` 是下一次重連的時間。
- */
-export interface RelayUnavailable {
-  kind: "over-quota" | "unavailable";
-  retryAt: number;
-  resetsAt?: number;
-}
+/** 中繼以 1013 關閉＝這座暫時不能用（ADR-0395）：定義在 core 的連線層（ADR-0400）。 */
+export type { RelayUnavailable } from "@cinderous/core";
 
 export interface Contact {
   pubkey: PubkeyHex;

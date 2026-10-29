@@ -40,7 +40,6 @@ function relayFarm(urls: string[]) {
       },
       subscribe: (...a: Parameters<RelayClient["subscribe"]>) => real.subscribe(...a),
       unsubscribe: (...a: Parameters<RelayClient["unsubscribe"]>) => real.unsubscribe(...a),
-      receive: (...a: Parameters<RelayClient["receive"]>) => real.receive(...a),
       close: () => {},
     };
     return wrapped as unknown as RelayClient;
