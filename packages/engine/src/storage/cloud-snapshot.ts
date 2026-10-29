@@ -369,7 +369,12 @@ export function mergeSnapshotContent(
     const local = storage.loadFsState();
     const byPk = new Map<string, StoredFsKey>();
     for (const k of [...local.keys, ...content.fs.keys]) {
-      if (k && typeof k.nsec === "string" && typeof k.pk === "string" && typeof k.at === "number") byPk.set(k.pk, k);
+      if (!k || typeof k.nsec !== "string" || typeof k.pk !== "string" || typeof k.at !== "number") continue;
+      // ADR-0403：同一把公鑰，後到的照舊蓋掉先到的——**除非那會把種子蓋成沒有**。v0.0.15 以前解析分發時
+      // 會丟掉 `pq`，那台升級後的快照仍帶著沒有種子的同一把 EK；照單全收會把這台的種子洗掉 ⇒
+      // 這台也解不開混合式密文，公告還會退回 v1、在聯絡人那邊被判成降級。
+      const had = byPk.get(k.pk);
+      byPk.set(k.pk, had?.pq && !k.pq ? had : k);
     }
     // ADR-0334：帶時間戳的 LWW 取代原本的 OR——沒有時間概念的 OR 會讓**停用永遠被舊快照撤銷**。
     // 已撤銷裝置不投票（見 `fromRevokedDevice` 的說明）。

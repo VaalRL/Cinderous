@@ -737,6 +737,28 @@ describe("後量子 EK 通過同步路徑（Phase 3）", () => {
     expect(dst.loadFsState().keys[0]?.pq).toBe("seed-b");
   });
 
+  it("🔴 同一把 EK、遠端那份沒有種子：本機的種子不被蓋掉（ADR-0403）", () => {
+    // 舊版（v0.0.15 以前）存的 EK 沒有 `pq`；它的快照帶著同一把公鑰時，後到的不能把種子蓋成沒有
+    const now = Date.now();
+    const dst = new MemoryStorage();
+    dst.saveFsState({ enabled: true, keys: [pqKey("c1", now)], contactEks: {} });
+    const src = new MemoryStorage();
+    src.saveFsState({ enabled: true, keys: [{ nsec: "nsec-c1", pk: "c1", at: now }], contactEks: {} });
+    mergeSnapshotContent(dst, buildSnapshotContent(src, "full"));
+    expect(dst.loadFsState().keys.find((k) => k.pk === "c1")?.pq).toBe("seed-c1");
+  });
+
+  it("同一把 EK、本機沒有種子而遠端有：補上（ADR-0403）", () => {
+    const now = Date.now();
+    const dst = new MemoryStorage();
+    dst.saveFsState({ enabled: true, keys: [{ nsec: "nsec-c1", pk: "c1", at: now }], contactEks: {} });
+    const src = new MemoryStorage();
+    src.saveFsState({ enabled: true, keys: [pqKey("c1", now)], contactEks: {} });
+    const { changed } = mergeSnapshotContent(dst, buildSnapshotContent(src, "full"));
+    expect(changed).toBe(true);
+    expect(dst.loadFsState().keys.find((k) => k.pk === "c1")?.pq).toBe("seed-c1");
+  });
+
   it("古典與後量子金鑰混合合併都不丟（遷移期的常態）", () => {
     const dst = new MemoryStorage();
     const now = Date.now();
