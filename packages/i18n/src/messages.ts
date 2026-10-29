@@ -574,6 +574,10 @@ export interface Messages {
   unread_title: string;
   conn_connecting: string;
   conn_offline: string;
+  /** 中繼今天的額度用完（ADR-0395）；{time}＝恢復時間（當地） */
+  conn_overQuota: string;
+  /** 中繼暫時不能用（1013；ADR-0395）；{time}＝下次重試（當地） */
+  conn_unavailable: string;
   conn_state_online: string;
   conn_state_connecting: string;
   conn_state_offline: string;
@@ -1612,6 +1616,8 @@ const zhHant: Messages = {
   unread_title: "{count} 則未讀",
   conn_connecting: "連線中…",
   conn_offline: "已斷線，重連中…",
+  conn_overQuota: "已斷線：中繼站今天的額度用完了，約 {time} 恢復",
+  conn_unavailable: "已斷線：中繼站暫時不能用，約 {time} 重試",
   conn_state_online: "已連線",
   conn_state_connecting: "連線中",
   conn_state_offline: "離線",
@@ -2562,6 +2568,8 @@ const en: Messages = {
   unread_title: "{count} unread",
   conn_connecting: "Connecting…",
   conn_offline: "Disconnected — reconnecting…",
+  conn_overQuota: "Disconnected: the relay has used up today's quota. It should be back around {time}.",
+  conn_unavailable: "Disconnected: the relay is temporarily unavailable. Retrying around {time}.",
   conn_state_online: "Connected",
   conn_state_connecting: "Connecting",
   conn_state_offline: "Offline",

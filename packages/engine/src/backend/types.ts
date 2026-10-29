@@ -64,6 +64,18 @@ export type Status = "online" | "away" | "busy" | "offline";
 /** 與中繼站的連線狀態（供顯示連線/重連中）。 */
 export type ConnectionState = "connecting" | "online" | "offline";
 
+/**
+ * 中繼以 1013 關閉＝這座暫時不能用（ADR-0395；SDK ADR 0097、0108）。
+ * - `over-quota`：今天的額度用完，`resetsAt` 是下一個 00:00 UTC（Cloudflare 的每日額度重置時間）；
+ * - `unavailable`：其他暫時的錯誤（儲存起不來、連線數滿了…）。
+ * `retryAt` 是下一次重連的時間。
+ */
+export interface RelayUnavailable {
+  kind: "over-quota" | "unavailable";
+  retryAt: number;
+  resetsAt?: number;
+}
+
 export interface Contact {
   pubkey: PubkeyHex;
   /** 對方廣播的顯示名（ADR-0061）或短 npub 後備。 */
@@ -256,8 +268,11 @@ export interface ChatBackendEvents {
    * UI 以此更新顯示與 `shouldNotify`。開機與快照合併後皆會發。
    */
   onMutes?(convoIds: string[]): void;
-  /** 與中繼站的連線狀態改變。 */
-  onConnection?(state: ConnectionState): void;
+  /**
+   * 與中繼站的連線狀態改變。`unavailable`：這次離線是中繼說「暫時不能用」（1013；ADR-0395），
+   * 例如今天的額度用完——UI 照實說原因與恢復時間，而不是只說「重連中」。
+   */
+  onConnection?(state: ConnectionState, unavailable?: RelayUnavailable): void;
   /**
    * 這次離線久到可能漏訊了（PRD §9／ADR-0364）：`offlineMs` 是離線的毫秒數。
    *
