@@ -1,8 +1,8 @@
 import { formatContactInput, qrDataUri } from "@cinderous/core";
-import type { MessageKey } from "@cinderous/i18n";
+import { connectionBannerText, type MessageKey } from "@cinderous/i18n";
 import { Fragment, type ReactNode, useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n.js";
-import type { BlockedContact, ChatMessage, ConnectionState, Contact, ContactRequest, Group, Self, Status } from "@cinderous/engine";
+import type { BlockedContact, ChatMessage, ConnectionState, Contact, ContactRequest, Group, RelayUnavailable, Self, Status } from "@cinderous/engine";
 import { contactLabel } from "@cinderous/engine";
 
 import { CinderMascot } from "./Brand.js";
@@ -168,6 +168,8 @@ export interface ContactListProps {
   onRemoveContactLabel?: (pubkey: string, label: string) => void;
   /** 與中繼站的連線狀態（非 online 時顯示提示）。 */
   connection?: ConnectionState;
+  /** 中繼說「暫時不能用」的原因（ADR-0395）：連線列照實說原因與恢復時間。 */
+  connectionUnavailable?: RelayUnavailable | undefined;
   /** 群組清單（M9）。 */
   groups?: Group[];
   /** 建立群組（名稱 + 成員公鑰）。 */
@@ -246,7 +248,7 @@ export function StatusPicker({ value, onChange }: { value: Status; onChange: (s:
 }
 
 export function ContactListWindow(props: ContactListProps): JSX.Element {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const { self, contacts } = props;
   // 排序模式與收合狀態（ADR-0215）：皆持久化本機。
   const [sortMode, setSortMode] = useState<SortMode>(() => loadSortMode());
@@ -317,7 +319,7 @@ export function ContactListWindow(props: ContactListProps): JSX.Element {
 
       {props.connection && props.connection !== "online" ? (
         <div className={`connbar connbar--${props.connection}`} role="status">
-          {props.connection === "connecting" ? t("conn_connecting") : t("conn_offline")}
+          {connectionBannerText(locale, props.connection, props.connectionUnavailable)}
         </div>
       ) : null}
 

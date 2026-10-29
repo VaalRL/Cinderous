@@ -1,6 +1,9 @@
 import type { NostrEvent } from "./event.js";
 import type { Filter } from "./presence.js";
 
+// 關閉碼分類的唯一來源在 Cinderous SDK（SDK ADR 0038 P0-C、0108）：1013＝這座暫時不能用（ADR-0395）
+export { classifyRelayClose } from "@cinderous/client/protocol";
+
 /** 實際的網路通道（瀏覽器 WebSocket / Tauri / 測試替身皆可注入）。 */
 export interface RelayTransport {
   send(data: string): void;
