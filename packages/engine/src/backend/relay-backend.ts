@@ -438,6 +438,13 @@ export interface RelayPoolOptions {
    * 打開開關時把 kind 0／10002／10050 **另外發一份**到這些站；只發布、不訂閱（不把收件匣與聯絡人交出去）。
    */
   publicIndexRelays?: string[];
+  /**
+   * 公共收件中繼（ADR-0402）：設了就讓公開的 10050／10002 列這些站，**不列 home**——
+   * 清單一旦外流就收不回，被爬蟲長期輪詢的會是這些站，不是錨點的主平面（ADR-0394）。
+   * 「能聯絡我」開著時在這些站只訂寄給自己的 1059（不認證）。
+   * 要不要設由 App 決定（`publicInboxRelaysFor(home)`：home 在官方錨點上才設）；未設（自架）照舊列 home。
+   */
+  publicInboxRelays?: string[];
   /** 維護者公鑰：驗證帶內 relay 清單事件（ADR-0039）；未設則不學清單。 */
   maintainerPubkey?: string;
   /** home 因長期離線自動遞補到健康引導座時通知（ADR-0039）。 */
@@ -586,6 +593,9 @@ export class RelayChatBackend implements ChatBackend {
   private readonly maintainerPubkey: string | undefined;
   /** 公開聯絡方式（ADR-0382）：索引中繼、home 上自己最新的 10050／kind 0（狀態以它們為準）、單次連線的關閉計時器 */
   private readonly publicIndexRelays: string[];
+  /** 公共收件中繼（ADR-0402）與「能聯絡我」開著時連著收信的連線 */
+  private readonly publicInboxRelays: string[];
+  private readonly publicInboxClients = new Map<string, CloseableRelayClient>();
   private ownInboxList: NostrEvent | undefined;
   private ownPublicName: NostrEvent | undefined;
   private readonly indexCloseTimers = new Set<ReturnType<typeof setTimeout>>();
@@ -793,6 +803,9 @@ export class RelayChatBackend implements ChatBackend {
     this.maintainerPubkey = pool?.maintainerPubkey;
     this.publicIndexRelays = [
       ...new Set((pool?.publicIndexRelays ?? []).map((u) => normalizeRelayUrl(u)).filter((u): u is string => u !== undefined)),
+    ];
+    this.publicInboxRelays = [
+      ...new Set((pool?.publicInboxRelays ?? []).map((u) => normalizeRelayUrl(u)).filter((u): u is string => u !== undefined)),
     ];
     this.orgAdminPubkey = pool?.orgAdminPubkey;
     this.orgJoinToken = pool?.orgJoinToken; // ADR-0156
@@ -1825,6 +1838,7 @@ export class RelayChatBackend implements ChatBackend {
     if (!this.publicReachAvailable()) return;
     if (change.contactable !== undefined) this.publishContactable(change.contactable);
     if (change.publicName !== undefined) this.publishPublicName(change.publicName);
+    this.syncPublicInbox();
     this.handlers?.onPublicReach?.(this.publicReach());
   }
 
@@ -1833,9 +1847,22 @@ export class RelayChatBackend implements ChatBackend {
     return this.originalHomeUrl !== undefined && this.orgAdminPubkey === undefined && !this.orgOwnerFlag;
   }
 
-  /** 10050 只列 home：Cinderous 只在 home 讀收件匣，列別座＝寄到那裡的信沒人收（ADR-0382 §3）。 */
+  /** 設了公共收件中繼（home 在錨點上）：公開清單改列它們，不列主平面（ADR-0402） */
+  private usesPublicInbox(): boolean {
+    return this.publicInboxRelays.length > 0;
+  }
+
+  /**
+   * 公開的 10050／10002 列哪些站：錨點上是公共收件中繼（ADR-0402）；自架的只列 home——
+   * Cinderous 只在 home 與這些站讀收件匣，列別座＝寄到那裡的信沒人收（ADR-0382 §3）。
+   */
+  private publicInboxTargets(): string[] {
+    if (this.usesPublicInbox()) return this.publicInboxRelays;
+    return this.originalHomeUrl ? [this.originalHomeUrl] : [];
+  }
+
   private publishContactable(on: boolean): void {
-    const urls = on && this.originalHomeUrl ? [this.originalHomeUrl] : [];
+    const urls = on ? this.publicInboxTargets() : [];
     const at = laterThan(this.ownInboxList);
     const inbox = buildInboxRelayList(this.sk, urls, at);
     this.ownInboxList = inbox;
@@ -1848,12 +1875,16 @@ export class RelayChatBackend implements ChatBackend {
     this.publishPublic([event]);
   }
 
-  /** 發到 home；索引中繼走單次連線，只發布、不訂閱，發完一段時間後關掉。 */
+  /**
+   * 發到 home；索引中繼與公共收件中繼（ADR-0402：outbox 型客戶端照 10002 去那裡找名稱，關掉時那裡的舊清單也要換掉）
+   * 走單次連線，只發布、不訂閱，發完一段時間後關掉。
+   */
   private publishPublic(events: NostrEvent[]): void {
     const home = this.homeClient() ?? this.client;
     for (const e of events) home.publish(e);
     if (!this.connectorFor) return;
-    for (const url of this.publicIndexRelays) {
+    const targets = new Set([...this.publicIndexRelays, ...(this.usesPublicInbox() ? this.publicInboxRelays : [])]);
+    for (const url of targets) {
       const client: CloseableRelayClient = this.connectorFor(url)({
         authSigner: (challenge) => buildAuthEvent(challenge, url, this.sk),
       });
@@ -1876,11 +1907,36 @@ export class RelayChatBackend implements ChatBackend {
     const state = this.publicReach();
     const stale = event.created_at < nowSec() - PUBLIC_REACH_REFRESH_SEC;
     if (isInbox && state.contactable) {
+      // 列的不是現在該列的（換了 home、或升版前列的是 home 分片，ADR-0402）就重發
       const listed = readInboxRelayList(event) ?? [];
-      if (stale || listed.length !== 1 || listed[0] !== this.originalHomeUrl) this.publishContactable(true);
+      const want = this.publicInboxTargets();
+      if (stale || listed.length !== want.length || listed.some((u, i) => u !== want[i])) this.publishContactable(true);
     }
     if (!isInbox && state.publicName && stale) this.publishPublicName(true);
+    if (isInbox) this.syncPublicInbox();
     this.handlers?.onPublicReach?.(this.publicReach());
+  }
+
+  /**
+   * 「能聯絡我」開著時，在公共收件中繼收第三方寄來的信（ADR-0402）。只訂寄給自己的 1059：
+   * 不訂心跳、快照、裝置目錄等，不把聯絡人與其他資料交給它；不認證——讀信用不到，認證只會把 IP 與身分綁在一起。
+   * 收到的照一般收件匣處理（陌生人進請求區、依 id 去重）。關掉、或狀態變成關（別台裝置關的）就斷線。
+   */
+  private syncPublicInbox(): void {
+    const want = new Set(
+      this.usesPublicInbox() && this.connectorFor && this.publicReach().contactable ? this.publicInboxRelays : [],
+    );
+    for (const [url, client] of this.publicInboxClients) {
+      if (want.has(url)) continue;
+      client.close?.();
+      this.publicInboxClients.delete(url);
+    }
+    for (const url of want) {
+      if (this.publicInboxClients.has(url)) continue;
+      const client: CloseableRelayClient = this.connectorFor!(url)({ onEvent: (_sub, event) => this.onEvent(event, url) });
+      client.subscribe("inbox", [{ kinds: [KIND.OFFLINE_DM_GIFT_WRAP], "#p": [this.self.pubkey], ...this.inboxSince(url) }]);
+      this.publicInboxClients.set(url, client);
+    }
   }
 
   /** 啟用前向保密（ADR-0245，opt-in）：生成第一把 EK、掛 10040 訂閱、發 10040。冪等。 */
@@ -5547,6 +5603,8 @@ export class RelayChatBackend implements ChatBackend {
     this.homeClosed = true;
     for (const client of this.relayPool.values()) client.close?.();
     this.relayPool.clear();
+    for (const client of this.publicInboxClients.values()) client.close?.();
+    this.publicInboxClients.clear();
     this.handlers = null;
   }
 }
