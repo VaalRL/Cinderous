@@ -4,8 +4,12 @@ import { RelayCore, type RelayCoreOptions } from "@cinderous/client/relay";
 export interface InMemoryRelayNetwork {
   /** 內部的 RelayCore（可檢視/操作）。 */
   core: RelayCore;
-  /** 連入一個客戶端，回傳已接好收發的 RelayClient。 */
-  connect(connId: string, handlers?: RelayClientHandlers): RelayClient;
+  /**
+   * 連入一個客戶端，回傳已接好收發的 RelayClient。`close()` 真的斷線：中繼忘掉這條連線的訂閱、
+   * 之後送給它的不再送達、它送出的也不再處理——與真實 WebSocket 相同。
+   * 沒有它的話，`stop()` 過的後端會繼續收訊息、照樣反應，測試靠這種「殭屍實例」通過而不自知。
+   */
+  connect(connId: string, handlers?: RelayClientHandlers): RelayClient & { close(): void };
 }
 
 export interface InMemoryNetworkOptions extends RelayCoreOptions {
@@ -28,11 +32,24 @@ export function createInMemoryRelayNetwork(opts?: InMemoryNetworkOptions): InMem
   };
   return {
     core,
-    connect(connId: string, handlers: RelayClientHandlers = {}): RelayClient {
-      const client = new RelayClient({ send: (data) => route(core.handle(connId, data)) }, handlers);
+    connect(connId: string, handlers: RelayClientHandlers = {}): RelayClient & { close(): void } {
+      let closed = false;
+      const client = new RelayClient(
+        { send: (data) => (closed ? undefined : route(core.handle(connId, data))) },
+        handlers,
+      );
       clients.set(connId, client);
       route(core.connect(connId, opts?.host)); // 送出 NIP-42 AUTH 挑戰（requireAuth 時；否則空）
-      return client;
+      return Object.assign(client, {
+        close: () => {
+          if (closed) return;
+          closed = true;
+          // 同一個 connId 之後又連上的是另一條連線：只有還是自己時才讓中繼忘掉
+          if (clients.get(connId) !== client) return;
+          clients.delete(connId);
+          core.disconnect(connId);
+        },
+      });
     },
   };
 }
@@ -40,7 +57,7 @@ export function createInMemoryRelayNetwork(opts?: InMemoryNetworkOptions): InMem
 /** 多主機（分片）記憶體網路（ADR-0241）：每個 host（分片 URL）＝一個獨立 RelayCore（＝一個 DO）。 */
 export interface ShardedRelayNetwork {
   /** 連入某 host（分片 URL）的獨立 relay；同 host 的連線共用同一 core（如同一個分片 DO）。 */
-  connect(host: string, connId: string, handlers?: RelayClientHandlers): RelayClient;
+  connect(host: string, connId: string, handlers?: RelayClientHandlers): RelayClient & { close(): void };
   /** 取某 host 的 core（供測試檢視某分片的離線留言）。 */
   coreFor(host: string): RelayCore;
 }
