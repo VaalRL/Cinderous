@@ -59,7 +59,7 @@ import {
 } from "./native/foreground.js";
 import { hasCallSupport } from "./native/call-media.js";
 import { CallScreen } from "./screens/CallScreen.js";
-import { type Locale, type MessageKey, translate } from "@cinderous/i18n";
+import { connectionBannerText, type Locale, type MessageKey, translate } from "@cinderous/i18n";
 import type { ChatBg, Theme } from "@cinderous/theme";
 import { getChatBg, removeChatBg, setChatBg } from "./personalize.js";
 import { StyleSheet, Text, View } from "react-native-web";
@@ -870,7 +870,7 @@ export function AppSession({
       // 對方正在輸入（ADR-0120；行動端於 ADR-0169 補齊）：記下來源，對話副標顯示「正在輸入…」。
       onTyping: (pk) => threads.markTyping(pk), // ADR-0120／0331：計時器與逾時都在對話簇內
       // 與中繼站連線狀態（ADR-0034；行動端於 ADR-0169 補齊）：非 online 時頂端顯示細條。
-      onConnection: (state) => self.setConnection(state),
+      onConnection: (state, unavailable) => self.setConnection(state, unavailable),
       // 敲一下（ADR-0114）：收到就震動（行動端於 ADR-0168 補齊）。裝置不支援 Vibration API
       // （多數桌面瀏覽器、iOS Safari）時靜默略過——不是錯誤，只是沒有觸覺回饋。
       onNudge: () => {
@@ -1625,7 +1625,7 @@ export function AppSession({
     relayUrl && self.connection !== "online" ? (
       <View style={self.connection === "offline" ? bannerStyles.offline : bannerStyles.connecting}>
         <Text style={bannerStyles.text} testID="conn-banner">
-          {translate(locale, self.connection === "offline" ? "conn_offline" : "conn_connecting")}
+          {connectionBannerText(locale, self.connection, self.connectionUnavailable)}
         </Text>
       </View>
     ) : null;

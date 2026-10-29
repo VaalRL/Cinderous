@@ -52,6 +52,7 @@ import {
   ORG_ROSTER_KIND,
   reactionTarget,
   RelayClient,
+  classifyRelayClose,
   RELAY_LIST_KIND,
   buildSnapshotEvent,
   buildSnapshotPurge,
@@ -212,6 +213,7 @@ import type {
   ConnectionState,
   Contact,
   PublicProfile,
+  RelayUnavailable,
   PublicReachState,
   Self,
   Status,
@@ -349,13 +351,39 @@ function storedToChat(m: StoredMessage): ChatMessage {
  */
 export type RelayConnector = (
   handlers: RelayClientHandlers,
-  onStatus?: (state: ConnectionState) => void,
+  onStatus?: (state: ConnectionState, unavailable?: RelayUnavailable) => void,
 ) => RelayClient;
 
 /** 可關閉的 relay client：`close` 停止重連並斷線（清除 hint 時釋放連線）。 */
 export type CloseableRelayClient = RelayClient & { close?: () => void };
 
 const RECONNECT_MAX_MS = 15_000;
+/**
+ * 中繼以 1013 關閉（這座暫時不能用）之後多久才重連（ADR-0395）：與 SDK `RelayPool` 的 `unavailableMs` 相同（SDK ADR 0108）。
+ * 額度用完要等到隔天，照一般退避每 15 秒打一次只會再被關一次，還吃掉恢復後的額度。
+ */
+export const RELAY_UNAVAILABLE_RETRY_MS = 5 * 60_000;
+/**
+ * 連上之後多久沒被關就算上線（ADR-0395）。中繼拒絕時是先**接受**升級、送 NOTICE、再關閉（ADR-0368／0387），
+ * 所以 `open` 不等於上線。中繼先開口（AUTH 挑戰等非 NOTICE 訊息）就立刻算，不必等。
+ */
+const ONLINE_SETTLE_MS = 1000;
+
+/** 下一個 00:00 UTC——Cloudflare 每日額度的重置時間（SDK ADR 0097 的 NOTICE 也這樣說）。 */
+function nextUtcMidnight(now: number): number {
+  const d = new Date(now);
+  return Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1);
+}
+
+/** 第一則訊息是不是 NOTICE（拒絕連線時中繼只送 NOTICE 就關）。 */
+function isNoticeFrame(data: string): boolean {
+  try {
+    const msg: unknown = JSON.parse(data);
+    return Array.isArray(msg) && msg[0] === "NOTICE";
+  } catch {
+    return false;
+  }
+}
 /** 記住「冗餘送出的主路由」的上限（ADR-0378）：外送匣同時在途只有幾顆，1024 綽綽有餘 */
 const OK_ROUTE_MAX = 1024;
 
@@ -387,6 +415,9 @@ export function webSocketConnector(url: string): RelayConnector {
   return (handlers, onStatus) => {
     let ws: WebSocket;
     let open = false;
+    /** 這條連線算上線了沒（ADR-0395）：`open` 之後，中繼開口或撐過 {@link ONLINE_SETTLE_MS}。 */
+    let online = false;
+    let settle: ReturnType<typeof setTimeout> | undefined;
     let attempt = 0;
     let pending: string[] = [];
 
@@ -407,24 +438,47 @@ export function webSocketConnector(url: string): RelayConnector {
     const connect = () => {
       onStatus?.("connecting");
       ws = new WebSocket(url);
+      const goOnline = () => {
+        if (online || !open) return;
+        online = true;
+        clearTimeout(settle);
+        attempt = 0; // 只有真的上線才把退避歸零：被「接受→關閉」的連線不算（ADR-0395）
+        onStatus?.("online");
+      };
       ws.addEventListener("open", () => {
         open = true;
-        attempt = 0;
-        onStatus?.("online");
         for (const m of pending) ws.send(m);
         pending = [];
+        settle = setTimeout(goOnline, ONLINE_SETTLE_MS);
       });
       ws.addEventListener("message", (e: MessageEvent) => {
-        client.receive(typeof e.data === "string" ? e.data : "");
+        const data = typeof e.data === "string" ? e.data : "";
+        if (!online && !isNoticeFrame(data)) goOnline(); // 先報上線再處理（訂閱、AUTH 的順序與舊版相同）
+        client.receive(data);
       });
-      ws.addEventListener("close", () => {
+      ws.addEventListener("close", (e: CloseEvent) => {
         open = false;
+        online = false;
+        clearTimeout(settle);
         client.connectionLost(); // ADR-0385：重連後要重新認證，期間送出的事件被拒時才會在認證後重送
         if (stopped) return; // 已清除 hint：不再重連
-        onStatus?.("offline");
-        const delay = Math.min(1000 * 2 ** attempt, RECONNECT_MAX_MS);
+        const backoff = Math.min(1000 * 2 ** attempt, RECONNECT_MAX_MS);
         attempt += 1;
-        setTimeout(connect, delay);
+        if (classifyRelayClose(e.code, e.reason).kind === "unavailable") {
+          // 1013：這座暫時不能用（ADR-0395）——說出原因，等冷卻過了才重連
+          const delay = Math.max(backoff, RELAY_UNAVAILABLE_RETRY_MS);
+          const now = Date.now();
+          const overQuota = /^over quota/i.test(e.reason ?? "");
+          onStatus?.("offline", {
+            kind: overQuota ? "over-quota" : "unavailable",
+            retryAt: now + delay,
+            ...(overQuota ? { resetsAt: nextUtcMidnight(now) } : {}),
+          });
+          setTimeout(connect, delay);
+          return;
+        }
+        onStatus?.("offline");
+        setTimeout(connect, backoff);
       });
       ws.addEventListener("error", () => {
         try {
@@ -925,7 +979,7 @@ export class RelayChatBackend implements ChatBackend {
         },
         onAuthenticated: (client) => this.subscribeOn(client, this.homeUrl),
       },
-      (state) => this.onConnection(state),
+      (state, unavailable) => this.onConnection(state, unavailable),
     );
     this.transfer = new WebRtcTransfer(
       this.sk,
@@ -3717,9 +3771,9 @@ export class RelayChatBackend implements ChatBackend {
     this.handlers?.onBlocked?.(this.blocked.map((b) => ({ pubkey: b.pubkey, name: b.name })));
   }
 
-  private onConnection(state: ConnectionState): void {
+  private onConnection(state: ConnectionState, unavailable?: RelayUnavailable): void {
     this.trackRelayState(this.originalHomeUrl ?? "", state);
-    this.handlers?.onConnection?.(state);
+    this.handlers?.onConnection?.(state, unavailable);
     // 離線缺口（PRD §9／ADR-0364）：連上的那一刻先算，再把「我在線」的時刻蓋掉。
     // 順序不能反——蓋掉之後就再也算不出來了。
     if (state === "online") {

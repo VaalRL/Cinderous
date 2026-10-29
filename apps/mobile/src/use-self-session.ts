@@ -33,7 +33,8 @@
 // 而手寫的那種，正是會被下一個新增欄位的人漏掉的東西。
 
 import { useState } from "react";
-import type { ConnectionState, Status } from "@cinderous/engine";
+import type { ConnectionState, RelayUnavailable, Status } from "@cinderous/engine";
+import { nextRelayUnavailable } from "@cinderous/i18n";
 
 /** 切身分時的種子。 */
 export interface SelfSeed {
@@ -60,6 +61,8 @@ export interface SelfSession {
   nowPlaying: string;
   /** 與中繼站的連線（ADR-0034）：非 online 時頂端顯示細條。 */
   connection: ConnectionState;
+  /** 中繼說「暫時不能用」的原因（ADR-0395）：細條照實說原因與恢復時間。 */
+  connectionUnavailable: RelayUnavailable | undefined;
 
   /** 改名（ADR-0138 的身分改名，同步更新登錄檔由呼叫端負責）。 */
   setName(name: string): void;
@@ -67,8 +70,8 @@ export interface SelfSession {
   setStatus(s: Status): void;
   setStatusMessage(m: string): void;
   setNowPlaying(t: string): void;
-  /** 後端 `onConnection`。 */
-  setConnection(s: ConnectionState): void;
+  /** 後端 `onConnection`（ADR-0395 起帶原因）。 */
+  setConnection(s: ConnectionState, unavailable?: RelayUnavailable): void;
 
   /** 切身分：換成新身分的我。 */
   reset(seed: SelfSeed): void;
@@ -83,7 +86,8 @@ export function useSelfSession(): SelfSession {
   const [status, setStatus] = useState<Status>("online");
   const [statusMessage, setStatusMessage] = useState("");
   const [nowPlaying, setNowPlaying] = useState("");
-  const [connection, setConnection] = useState<ConnectionState>("connecting");
+  const [connection, setConnectionState] = useState<ConnectionState>("connecting");
+  const [connectionUnavailable, setConnectionUnavailable] = useState<RelayUnavailable | undefined>(undefined);
 
   return {
     pubkey,
@@ -95,12 +99,16 @@ export function useSelfSession(): SelfSession {
     statusMessage,
     nowPlaying,
     connection,
+    connectionUnavailable,
     setName,
     setInvisible,
     setStatus,
     setStatusMessage,
     setNowPlaying,
-    setConnection,
+    setConnection: (s, unavailable) => {
+      setConnectionState(s);
+      setConnectionUnavailable((prev) => nextRelayUnavailable(prev, s, unavailable));
+    },
     reset: (seed) => {
       setPubkey(seed.pubkey);
       setName(seed.name);
@@ -110,7 +118,8 @@ export function useSelfSession(): SelfSession {
       setStatus(seed.status ?? "online");
       setStatusMessage(seed.statusMessage ?? "");
       setNowPlaying(""); // 純易失，不跨身分也不跨 session
-      setConnection("connecting"); // ADR-0169：換身分＝重連，先回連線中，待後端回報 online
+      setConnectionUnavailable(undefined); // ADR-0395：原因屬於上一個身分的連線
+      setConnectionState("connecting"); // ADR-0169：換身分＝重連，先回連線中，待後端回報 online
     },
   };
 }
