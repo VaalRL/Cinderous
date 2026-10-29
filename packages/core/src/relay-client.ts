@@ -3,6 +3,9 @@ import type { Filter } from "./presence.js";
 
 // 關閉碼分類的唯一來源在 Cinderous SDK（SDK ADR 0038 P0-C、0108）：1013＝這座暫時不能用（ADR-0395）
 export { classifyRelayClose } from "@cinderous/client/protocol";
+// 真實網路的連線（重連退避、NIP-42、認證前被拒的重送、補訂閱、拒收分類）由 SDK 的連線池負責（ADR-0398）；
+// 下面的 RelayClient 只剩記憶體測試網路與示範頁在用。
+export { RelayPool, type RelayRejection } from "@cinderous/client";
 
 /** 實際的網路通道（瀏覽器 WebSocket / Tauri / 測試替身皆可注入）。 */
 export interface RelayTransport {

@@ -48,3 +48,5 @@
   - 認證前送出、但認證一直沒成功的事件會留在 `awaitingAuth` 直到連線關閉（量很小；連線重建時是新的 client 或 `connectionLost` 後再被拒時重新累積——不會無限長，但也不會主動清）。
   - 錨點有時對同一條連線發兩次相同挑戰（實測可見），兩次的認證事件 id 相同，不影響判斷。
 - 後續行動 / 待辦：無。測試：`packages/core/src/relay-client.test.ts`〈認證前送出的事件〉5 項；配對信令原本那一項（以假 handler 驅動）移除，`requireAuth` 中繼上的配對互通測試保留。
+
+> 2026-10-29 補註（ADR-0398）：真實網路的連線改由 SDK `RelayPool` 負責，認證前被拒的重送由 SDK 處理；core `RelayClient` 的這段只剩記憶體測試網路在用。
