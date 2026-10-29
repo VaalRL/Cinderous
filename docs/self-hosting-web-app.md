@@ -150,7 +150,7 @@ fork／部署**，不要 PR 回共用 repo（共用 repo 保持與 relay 網域�
 - Zeabur → 專案 → Add Service → **Deploy from GitHub** → 選這個 repo；建置方式 **Dockerfile**：
   - **Dockerfile 路徑**：`apps/desktop/Dockerfile`
   - **根目錄（Root）**：保持 **repo 根**（`/`）——不可設 `apps/desktop/`（pnpm workspace 需根 lockfile 與 `packages/*`）。
-- **環境變數**：`PORT` 由 Zeabur 自動注入（不用設）。可選 `CSP_CONNECT=wss://relay.你的網域` 把 CSP 的 `connect-src` **鎖死到你的 relay**（不設＝預設允許任意 `wss:`，配合「使用者可自選 relay」）。
+- **環境變數**：`PORT` 由 Zeabur 自動注入（不用設）。可選 `CSP_CONNECT="wss://relay.你的網域 https://relay.你的網域"` 把 CSP 的 `connect-src` **鎖死到你的 relay**（不設＝預設允許任意 `wss:` 與 `https:`，配合「使用者可自選 relay」；`https` 是連不上時探測 relay 的 NIP-11 用的，ADR-0401）。
 - **子網域**：Networking → 綁自訂網域 `app.你的網域`，Zeabur 自動配 TLS → 使用者開 `https://app.你的網域` 就是登入畫面。
 - 這樣 **relay（`relay/Dockerfile`）與 web app（`apps/desktop/Dockerfile`）可放同一個 Zeabur 專案的兩個服務**，各自綁 `relay.你的網域` / `app.你的網域`。
 

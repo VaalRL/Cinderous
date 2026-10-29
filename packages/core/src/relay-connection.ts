@@ -2,7 +2,7 @@
 //
 // 正式環境（engine `webSocketConnector`）與記憶體測試網路（relay `createInMemoryRelayNetwork`）共用這一份：
 // 測試走的路就是正式環境的路，SDK 的重連、NIP-42、補訂閱、驗簽去重在測試裡一樣成立。
-import { RelayPool, type SocketLike } from "@cinderous/client";
+import { EDGE_ANSWERED_TOKEN, RelayPool, type SocketLike } from "@cinderous/client";
 import type { NostrEvent } from "./event.js";
 import type { Filter } from "./presence.js";
 import type { RelayClientHandlers } from "./relay-client.js";
@@ -13,13 +13,17 @@ export type { SocketLike } from "@cinderous/client";
 export type RelayConnectionState = "connecting" | "online" | "offline";
 
 /**
- * 中繼以 1013 關閉＝這座暫時不能用（ADR-0395；SDK ADR 0097、0108）。
- * - `over-quota`：今天的額度用完，`resetsAt` 是下一個 00:00 UTC（Cloudflare 的每日額度重置時間）；
- * - `unavailable`：其他暫時的錯誤（儲存起不來、連線數滿了…）。
+ * 這座暫時不能用的原因。
+ * - 中繼以 1013 關閉（ADR-0395；SDK ADR 0097、0108）：
+ *   - `over-quota`：今天的額度用完，`resetsAt` 是下一個 00:00 UTC（Cloudflare 的每日額度重置時間）；
+ *   - `unavailable`：其他暫時的錯誤（儲存起不來、連線數滿了…）。
+ * - `edge`：連不上時 SDK 探測出「主機有回應、回答的卻不是中繼」（ADR-0401；SDK ADR 0125）。
+ *   最可能是主機的每日請求數用完（Cloudflare 1027，Worker 根本沒執行），`resetsAt` 同樣是下一個 00:00 UTC；
+ *   但 Worker 當掉、攔截代理也長這樣，文案只能說「最可能」。
  * `retryAt` 是下一次重連的時間。
  */
 export interface RelayUnavailable {
-  kind: "over-quota" | "unavailable";
+  kind: "over-quota" | "unavailable" | "edge";
   retryAt: number;
   resetsAt?: number;
 }
@@ -113,6 +117,14 @@ export function connectRelay(
         }
       : {}),
     onRelayReject: (_url, rejection) => {
+      if (rejection.source === "probe" && rejection.token === EDGE_ANSWERED_TOKEN) {
+        // 邊緣代答（ADR-0401）：探測在斷線之後才回來，離線早就報過了——帶著原因再報一次。
+        // 探測期間連上了、或連線已關閉，SDK 就不會回報（SDK ADR 0125）
+        const now = Date.now();
+        const mark = pool.relayHealth().get(url)?.marks.find((m) => m.kind === "unavailable");
+        onStatus?.("offline", { kind: "edge", retryAt: mark?.until ?? now, resetsAt: nextUtcMidnight(now) });
+        return;
+      }
       if (rejection.source !== "close" || rejection.kind !== "unavailable") return;
       // 1013：這座暫時不能用（ADR-0395）——說出原因；重連時間以 SDK 的健康標記為準
       const now = Date.now();

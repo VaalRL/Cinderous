@@ -6,7 +6,7 @@ type ConnState = "connecting" | "online" | "offline";
 
 /** 與 `@cinderous/engine` 的 `RelayUnavailable` 同形（i18n 不依賴引擎，只取用得到的欄位）。 */
 export interface RelayUnavailableInfo {
-  kind: "over-quota" | "unavailable";
+  kind: "over-quota" | "unavailable" | "edge";
   retryAt: number;
   resetsAt?: number;
 }
@@ -35,6 +35,9 @@ export function connectionBannerText(
     new Date(ms).toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit", hourCycle: "h23", ...(timeZone ? { timeZone } : {}) });
   if (unavailable?.kind === "over-quota" && unavailable.resetsAt !== undefined) {
     return translate(locale, "conn_overQuota", { time: at(unavailable.resetsAt) });
+  }
+  if (unavailable?.kind === "edge" && unavailable.resetsAt !== undefined) {
+    return translate(locale, "conn_edge", { time: at(unavailable.resetsAt) });
   }
   if (unavailable) return translate(locale, "conn_unavailable", { time: at(unavailable.retryAt) });
   return translate(locale, state === "connecting" ? "conn_connecting" : "conn_offline");
