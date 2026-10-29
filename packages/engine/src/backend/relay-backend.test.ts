@@ -1566,7 +1566,8 @@ describe("檔案投遞與另存（ADR-0093）", () => {
       onFileBytes: (_pk, _id, f) =>
         gotBytes.push({ name: f.name, size: f.size, first: f.bytes![0]!, last: f.bytes![f.size - 1]! }),
     });
-    expect(gotBytes.length).toBe(1);
+    // 分塊經外送匣節流送出（真實時間）：OK 經 SDK 晚一步回來，最後幾塊可能在 B 上線後才送——B 即時收得到，等它收齊（ADR-0400）
+    await vi.waitFor(() => expect(gotBytes.length).toBe(1), { timeout: 5_000 });
     expect(gotBytes[0]).toEqual({ name: "簡報.pdf", size: 100_000, first: 0, last: (100_000 - 1) % 251 });
     // metadata 訊息照舊入庫（檔案訊息存在、只存 metadata 無位元組）。
     expect(storeB.loadMessages(a.self.pubkey).some((m) => m.file?.name === "簡報.pdf")).toBe(true);
