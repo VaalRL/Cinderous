@@ -6,7 +6,7 @@
 // ——回覆只在串面板顯示，跳轉高亮無處落點；日後若納入需連同「開串定位」一起設計。
 // 封存搜尋另行處理（冷熱分離，ADR-0111）。
 import { splitAssetManifest } from "@cinderous/core";
-import type { ChatMessage } from "@cinderous/engine";
+import { isExpired, type ChatMessage } from "@cinderous/engine";
 
 export interface SearchHit {
   id: string;
@@ -44,8 +44,9 @@ export function stepHit(current: number, total: number, dir: 1 | -1): number {
  * 封存訊息比對（ADR-0256 階段 3）：文字或檔名、大小寫不敏感；q 需先 trim+lowercase
  * （掃描迴圈每塊上千則，正規化一次由呼叫端做）。空 q＝不命中。
  */
-export function matchesStored(m: { text: string; file?: { name: string } }, q: string): boolean {
+export function matchesStored(m: { text: string; file?: { name: string }; expiresAt?: number }, q: string): boolean {
   if (!q) return false;
+  if (isExpired(m)) return false; // 到期的限時訊息（ADR-0406）：封存裡還有原文，但不能被搜出來
   if (m.file) return m.file.name.toLowerCase().includes(q);
   return splitAssetManifest(m.text).text.toLowerCase().includes(q);
 }

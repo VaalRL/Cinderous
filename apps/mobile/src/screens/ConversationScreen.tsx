@@ -22,7 +22,7 @@ import {
   validateStickerSvg,
 } from "@cinderous/core";
 import type { CallMedia, MentionCandidate } from "@cinderous/core";
-import { DEFAULT_MESSAGE_TTL_MS, formatBytes, looksUndelivered, replyCounts } from "@cinderous/engine";
+import { DEFAULT_MESSAGE_TTL_MS, formatBytes, isExpired, looksUndelivered, replyCounts } from "@cinderous/engine";
 import type { CalendarEventInput, ChatMessage, IcePath, MessageStatus, RsvpStatus, StoredCalendarEvent } from "@cinderous/engine";
 import { type Locale, type MessageKey, translate } from "@cinderous/i18n";
 import { BG_PRESETS, type ChatBg, chatBgStyle, p2pPathChip, P2P_PATH_COLORS, resolveTheme, type Theme, type ThemeTokens } from "@cinderous/theme";
@@ -30,6 +30,7 @@ import { Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 
 import { CalendarPanel } from "./CalendarPanel.js";
 import { MsgStatusIcon } from "./MsgStatusIcon.js";
 import { BundleRow, isBundleMessage } from "./BundleRow.js"; // ADR-0355：合集列出與解開
+import { useExpiryClock } from "../expiry-clock.js";
 import { downloadImageFromUrl, shareImageFromUrl } from "../native/share.js";
 
 /** 送出狀態的 i18n 標籤（ADR-0058／0095）；與桌面同鍵。 */
@@ -495,6 +496,8 @@ export function ConversationScreen({
   const t = (k: MessageKey, params?: Record<string, string | number>): string => translate(locale, k, params);
   /** 長按選中的訊息（顯示回應/收回列）。手機沒有 hover，長按是等價的入口。 */
   const [picked, setPicked] = useState<string | null>(null);
+  // 限時訊息（ADR-0406）：到最近的到期時刻重繪一次；到期的訊息比照已收回，絕不顯示原文。
+  const now = useExpiryClock(messages);
   /** 收回二次確認（ADR-0234）：目標訊息 id＋「無痕收回」勾選（每次開啟重置）。 */
   const [unsendAsk, setUnsendAsk] = useState<string | null>(null);
   const [unsendTraceless, setUnsendTraceless] = useState(false);
@@ -671,6 +674,7 @@ export function ConversationScreen({
   /** 引用預覽文字：已收回不顯示原文；檔案顯示檔名；否則截斷本文。 */
   const quoteText = (m: ChatMessage): string => {
     if (unsent?.has(m.id)) return t("msg_unsent");
+    if (isExpired(m, now)) return t("convo_expired");
     if (m.file) return `📎 ${m.file.name}`;
     return m.text.length > 60 ? `${m.text.slice(0, 60)}…` : m.text;
   };
@@ -1068,7 +1072,9 @@ export function ConversationScreen({
 
       <ScrollView style={[styles.list, chatBgStyle(chatBg)]} contentContainerStyle={styles.listInner}>
         {messages.map((m) => {
-          const gone = unsent?.has(m.id) ?? false; // 已收回（NIP-09）
+          const unsentHere = unsent?.has(m.id) ?? false; // 已收回（NIP-09）
+          const expiredHere = isExpired(m, now); // 限時訊息到期（ADR-0406）
+          const gone = unsentHere || expiredHere; // 兩者一樣：內容、回應、操作全部不留
           const emojis = reactions?.[m.id] ?? [];
           // 未收回的訊息一律可長按：至少能「回覆」（ADR-0136），可能還有回應/收回/分享。
           const canAct = !gone;
@@ -1139,8 +1145,18 @@ export function ConversationScreen({
                       gone ? styles.textGone : null,
                     ]}
                   >
-                    {/* 已收回：**絕不顯示原文**——收回的意義就在這裡。 */}
-                    {gone ? t("msg_unsent") : m.file ? `📎 ${m.file.name}` : m.text}
+                    {/* 已收回／已到期：**絕不顯示原文**——收回與閱後即焚的意義就在這裡。 */}
+                    {unsentHere ? t("msg_unsent") : expiredHere ? t("convo_expired") : m.file ? `📎 ${m.file.name}` : m.text}
+                  </Text>
+                ) : null}
+                {/* 限時訊息標記（同桌面的 ⏱）：讓人知道這則會消失。 */}
+                {!gone && m.expiresAt !== undefined ? (
+                  <Text
+                    style={[styles.fileMeta, { color: m.outgoing ? "#ffffffcc" : tk.muted }]}
+                    aria-label={t("convo_timerTitle")}
+                    testID={`timer-badge-${m.id}`}
+                  >
+                    ⏱
                   </Text>
                 ) : null}
                 {!gone && m.file ? (

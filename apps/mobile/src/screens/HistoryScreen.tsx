@@ -7,7 +7,7 @@
 //
 // 補這個畫面之前，行動端的封存是「寫得進去、讀不出來」——資料沒遺失，但使用者看不到。
 
-import { type MessageArchive, nextOlderChunk, prependChunk, type StoredMessage } from "@cinderous/engine";
+import { type MessageArchive, nextOlderChunk, prependChunk, type StoredMessage, visibleText } from "@cinderous/engine";
 import { type Locale, type MessageKey, translate } from "@cinderous/i18n";
 import { resolveTheme, type Theme, type ThemeTokens } from "@cinderous/theme";
 import { useCallback, useEffect, useMemo, useState } from "react";
@@ -117,7 +117,8 @@ export function HistoryScreen({
             <Text style={styles.meta}>
               {fmtTime(m.at)} · {whoOf(m)}
             </Text>
-            <Text style={styles.text}>{m.file ? `📎 ${m.file.name}` : m.text}</Text>
+            {/* 到期的限時訊息（ADR-0406）：封存裡還有原文，畫面上不能露 */}
+            <Text style={styles.text}>{visibleText(m, t("convo_expired"))}</Text>
           </View>
         ))}
       </ScrollView>

@@ -6,6 +6,7 @@
 export * from "./backend/types.js";
 export * from "./backend/thread-util.js";
 export * from "./backend/search-util.js";
+export * from "./backend/expiry.js"; // ADR-0406：限時訊息到期判斷（桌面＋行動端共用）
 // ── 通訊後端實作 ──
 export * from "./backend/relay-backend.js";
 export * from "./backend/browser-backend.js";

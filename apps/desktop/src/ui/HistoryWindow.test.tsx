@@ -96,3 +96,44 @@ describe("封存搜尋（ADR-0256 階段 3）", () => {
     m.unmount();
   });
 });
+
+describe("封存裡到期的限時訊息（ADR-0406）", () => {
+  // 封存保存的是原文；到期後對話視窗遮掉了，歷史紀錄與封存搜尋不能再把它翻出來。
+  const timed = {
+    chunkCount: async () => 1,
+    loadChunk: async () => [
+      { ...sm("t1", "密碼是 1234", 100), expiresAt: Date.now() - 1 },
+      sm("t2", "週五見", 101),
+    ],
+  } as unknown as MessageArchive;
+
+  it("🔴 分頁瀏覽：顯示「訊息已到期」，不露原文", async () => {
+    const m = mount(
+      <I18nProvider locale="zh-Hant">
+        <HistoryWindow convo="bb" name="Bob" archive={timed} selfLabel="我" onClose={() => {}} />
+      </I18nProvider>,
+    );
+    await act(async () => {});
+    expect(m.container.textContent).toContain("週五見");
+    expect(m.container.textContent).toContain("訊息已到期");
+    expect(m.container.textContent).not.toContain("密碼是 1234");
+    m.unmount();
+  });
+
+  it("🔴 封存搜尋：搜它的原文搜不到", async () => {
+    const m = mount(
+      <I18nProvider locale="zh-Hant">
+        <HistoryWindow convo="bb" name="Bob" archive={timed} selfLabel="我" onClose={() => {}} />
+      </I18nProvider>,
+    );
+    await act(async () => {});
+    const input = m.container.querySelector('[data-testid="history-search"]') as HTMLInputElement;
+    await act(async () => type(input, "1234"));
+    await act(async () => {
+      (m.container.querySelector('[data-testid="history-search-go"]') as HTMLButtonElement).click();
+    });
+    await act(async () => {});
+    expect(m.container.textContent).toContain("無符合");
+    m.unmount();
+  });
+});

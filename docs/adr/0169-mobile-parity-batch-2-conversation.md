@@ -29,6 +29,8 @@
 
 ### 2. 限時訊息（ADR-0057，1:1）
 
+> 2026-10-30 更正（ADR-0406）：這裡只做了**送出**，收到的限時訊息在行動端從來不到期；到期處理由 ADR-0406 補上。
+
 - `ConversationScreen` 加 `ttl` 狀態與燒毀切換鈕：點一下循環 **關→1 分→1 小時→1 天**
   （`convo_timer*` 既有 i18n），作用中顯示 🔥＋效期標籤（`burn-label`），關閉時為 ⏱ 淡色。
 - 送出時 `onSend(text, mentions, replyTo, ttlSeconds)`；`MobileApp.send` 把 `ttlSeconds`
