@@ -121,7 +121,7 @@ const en: CliGuide = {
               ["`0`", "You approved with the right code. Without `--approve`, any reply from you counts — even “no”", "Continue (always use `--approve` when the answer decides whether to act)"],
               ["`2`", "You replied `no <code>` (the JSON says `\"ok\":false`)", "Stop"],
               ["`3`", "The question reached the relay, but you did not answer in time", "Stop, or ask again later"],
-              ["`1`", "The question never reached the relay (`not-sent`) or was rejected", "Retry once, then stop"],
+              ["`1`", "The question never reached the relay (`not-sent`), was rejected, or the relay is temporarily refusing connections (`relay-unavailable`)", "Retry once, then stop; for `relay-unavailable`, wait until `retryAt`"],
               ["`64` / `70`", "Wrong flag, key or state directory (or the directory is in use) / an unexpected error", "Stop; retrying gives the same result"],
             ],
           },
@@ -186,6 +186,9 @@ const en: CliGuide = {
         {
           p: "By default the CLI uses the official anchor relay, which runs on a free plan shared by everyone: each identity may send up to 120 events a minute, and a `listen` left running keeps a connection open the whole time. If your agent talks a lot, [run your own relay](view:selfhost) and point the CLI at it with `--relay`.",
         },
+        {
+          p: "**Don't start the CLI more than three or four times a minute on the same machine.** Each run opens a new connection, and the relay accepts at most 4 new connections a minute (and 20 every 10 minutes) from one IP address to each shard — your desktop app on the same network counts too. Past that it refuses the connection for a few minutes; the CLI then says so on stderr, and `ask` returns `relay-unavailable` with a `retryAt` instead of waiting out its timeout. To wait for messages, keep one `listen` running instead of starting new processes.",
+        },
       ],
     },
   ],
@@ -239,7 +242,7 @@ const zh: CliGuide = {
               ["`0`", "你用正確的短碼核准了。沒加 `--approve` 時，你的任何回覆都算——連「不要」也是", "繼續（回答會決定要不要做事時，一定要加 `--approve`）"],
               ["`2`", "你回了 `no <短碼>`（JSON 裡是 `\"ok\":false`）", "停止"],
               ["`3`", "問題送到中繼了，但你沒在時限內回", "停止，或晚點再問"],
-              ["`1`", "問題根本沒送到中繼（`not-sent`），或被拒收", "重試一次，再不行就停止"],
+              ["`1`", "問題根本沒送到中繼（`not-sent`）、被拒收，或中繼暫時拒絕連線（`relay-unavailable`）", "重試一次，再不行就停止；`relay-unavailable` 要等到 `retryAt` 之後"],
               ["`64`／`70`", "旗標、金鑰或狀態目錄錯（或目錄正被別的程序使用）／非預期的錯誤", "停止；重試結果一樣"],
             ],
           },
@@ -301,6 +304,9 @@ const zh: CliGuide = {
       blocks: [
         {
           p: "CLI 預設使用官方錨點中繼。它跑在大家共用的免費方案上：每個身分每分鐘最多 120 則事件，而一直開著的 `listen` 會一直佔著一條連線。如果你的 agent 話很多，請[自己架一座中繼站](view:selfhost)，再用 `--relay` 指向它。",
+        },
+        {
+          p: "**同一台機器一分鐘內不要啟動 CLI 超過三、四次。** 每次啟動都會開一條新連線，而中繼對同一個 IP、同一個分片每分鐘最多接受 4 條新連線（每 10 分鐘 20 條），同一個網路裡的桌面版也算在內。超過之後中繼會拒絕連線幾分鐘；CLI 會在 stderr 說明，`ask` 也會直接回 `relay-unavailable` 和 `retryAt`，不空等到逾時。要等訊息，請讓一個 `listen` 一直開著，不要一直開新的程序。",
         },
       ],
     },

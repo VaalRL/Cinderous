@@ -184,7 +184,7 @@ async function run(cmd: Command): Promise<number> {
   if (cmd.cmd === "send") {
     const to = npubDecode(cmd.to); // 非法 npub 會拋錯
     // 逾時保護：連不上中繼就不要無限卡住。failed＝重試耗盡/被拒（ADR-0095）。
-    const status = await sendAndConfirm(backend, to, cmd.text, { timeoutMs: 15_000, ...(cmd.ttl !== undefined ? { ttl: cmd.ttl } : {}) }, cmd);
+    const status = await sendAndConfirm(backend, to, cmd.text, { timeoutMs: 15_000, onLog: (l) => console.error(l), ...(cmd.ttl !== undefined ? { ttl: cmd.ttl } : {}) }, cmd);
     backend.stop();
     if (status === "sent") {
       console.log(JSON.stringify({ ok: true, to: cmd.to, status }));
