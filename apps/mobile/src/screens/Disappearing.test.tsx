@@ -53,6 +53,23 @@ describe("對話畫面", () => {
     expect(m.container.textContent).toContain("訊息已到期");
     m.unmount();
   });
+
+  it("🔴 到期超過 24.8 天（setTimeout 上限）也會到期：截斷的計時器醒來要再排下一段（2026-10-30 審查）", async () => {
+    vi.useFakeTimers({ now: NOW });
+    const far = 30 * 86_400_000; // 對方可以給任意的到期時間
+    const late: ChatMessage = { ...live, id: "f1", text: "三十天後消失", expiresAt: NOW + far };
+    const m = mount(<ConversationScreen {...base} messages={[late]} />);
+    await act(async () => {
+      vi.advanceTimersByTime(2 ** 31 - 1); // 第一段：截斷在上限
+    });
+    expect(m.container.textContent).toContain("三十天後消失");
+    await act(async () => {
+      vi.advanceTimersByTime(far - (2 ** 31 - 1) + 100); // 第二段：到期
+    });
+    expect(m.container.textContent).not.toContain("三十天後消失");
+    expect(m.container.textContent).toContain("訊息已到期");
+    m.unmount();
+  });
 });
 
 describe("聊天清單", () => {
