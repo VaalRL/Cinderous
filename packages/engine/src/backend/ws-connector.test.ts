@@ -77,6 +77,7 @@ beforeEach(() => {
   FakeWebSocket.all = [];
   vi.useFakeTimers();
   vi.setSystemTime(Date.UTC(2026, 9, 29, 3, 0, 0)); // 台灣 11:00
+  vi.spyOn(Math, "random").mockReturnValue(0); // SDK v0.87.0 起 1013 的等待加了抖動（SDK ADR 0130）；這裡驗的是精確時間
   vi.stubGlobal("WebSocket", FakeWebSocket);
   vi.stubGlobal("fetch", vi.fn(offlineFetch));
   edgeFetch.mockClear();
@@ -84,6 +85,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
 
 describe("🔴 中繼額度用完（1013 over quota，ADR-0395）", () => {

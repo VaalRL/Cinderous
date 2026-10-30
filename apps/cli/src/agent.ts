@@ -37,8 +37,9 @@ const hhmm = (t: number): string => new Date(t).toTimeString().slice(0, 5);
  * 連線狀態行（stderr）。原本只印 offline，分不出斷網、額度用完、還是被中繼限速。
  * 引擎已經把原因與重試時間交給我們（ADR-0395、ADR-0401），這裡照實說出來。
  *
- * `unavailable` 最常見的是同一台機器短時間內連太多次：主平面每個 IP 對每個分片每分鐘 4 次新連線、
- * 每 10 分鐘 20 次（SDK ADR 0111），超過就以 1013 關閉，引擎約 5 分鐘後才重連。
+ * `unavailable` 最常見的是同一台機器短時間內連太多次：主平面每個 IP 對每個分片每分鐘 12 次新連線（ADR-0409）、
+ * 10 分鐘 60 次（沒認證就斷線的是 20 條；SDK ADR 0111、0131），超過就以 1013 關閉，引擎約 1 分鐘後重連、
+ * 連續被擋才加倍（SDK ADR 0130）。
  */
 export function connectionLine(state: ConnectionState, u?: RelayUnavailable): string {
   const head = `… 中繼狀態：${state}`;

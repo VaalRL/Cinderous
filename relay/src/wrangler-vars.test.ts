@@ -106,6 +106,11 @@ describe("速率限制 binding 兩份同步（ADR-0366 §容量）", () => {
     expect(top["STRICT_UPGRADE_LIMIT"]).toBeDefined();
   });
 
+  it("🔴 主平面每分鐘 12 次（ADR-0409）：4 次會誤擋同一個網路裡的多台裝置與斷斷續續的手機網路", () => {
+    // 每 8 秒重連一次的來源（每分鐘約 7.5 次）會穿過這一道，靠的是 DO 那一道（SDK ADR 0111、0131）在 20 條沒認證之後擋下
+    expect(top["STRICT_UPGRADE_LIMIT"]).toBe("12/60");
+  });
+
   it("🔴 頂層有的每一個 binding，統一模式也要有同樣的額度", () => {
     const drift = Object.entries(top)
       .filter(([k, v]) => unified[k] !== v)
