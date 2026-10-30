@@ -1,5 +1,24 @@
 [
   {
+    "version": "0.0.22",
+    "date": "2026-10-30",
+    "released": true,
+    "zh": [
+      "🔒 **限時訊息到期後，本機的原文真的刪掉了。** 到期時從本機儲存刪掉原文、檔名與縮圖，只留「訊息已到期」；關機期間到期的，下次開啟時先清掉。限時訊息搬進封存時不帶原文，匯出只寫「（已到期）」，雲端快照不帶限時訊息。仍有的限制：這版之前就搬進封存的限時訊息，原文還在封存檔裡（畫面與匯出已擋掉）；你自己另存到磁碟的檔案不會刪；對方的裝置也要更新到這一版才會清。",
+      "🔧 **修正：對方先加你、你改用貼 npub 加他時，名字顯示成一串 npub。** 現在這樣加等於接受對方的請求，沿用請求裡的名字。",
+      "🔧 **被中繼暫時拒絕連線時，約一分鐘後就重試（原本等 5 分鐘），而且不會跟同一個網路的其他裝置同時重連。** 中繼也放寬了同一個網路有多台裝置、手機網路斷斷續續時的重連限制。",
+      "✨ 命令列工具 `cinder.mjs` 連不上時會說原因（中繼暫時拒絕、額度用完、主機回答的不是中繼）和預計重試時間；`ask` 確定等不到回覆時直接回 `relay-unavailable` 與 `retryAt`，不空等到逾時。",
+      "ℹ️ 已知：Android 版是測試版（debug 簽章；開了 USB 偵錯的人讀得到它的記憶體，真正在意的對話請不要用它）；桌面版與 `cinder.mjs` 都沒有程式碼簽章（Windows SmartScreen 會警告；`cinder.mjs` 只附 sha256 校驗檔）。Android 版在背景時不會跳訊息通知（訊息照收，只是不提醒），下一版修正。"
+    ],
+    "en": [
+      "🔒 **When a disappearing message expires, its text is now actually deleted from your device.** The text, file name and thumbnail are removed from local storage, leaving only “Message expired”; messages that expired while the app was closed are cleared the next time it opens. Disappearing messages moved into the archive no longer carry their text, exports only say “(expired)”, and cloud snapshots leave disappearing messages out. Remaining limits: disappearing messages archived before this version still have their text in the archive file (the app and exports already hide it); files you saved to disk yourself are not deleted; the other person's device only clears them once it is on this version too.",
+      "🔧 **Fix: if someone added you first and you then added them by pasting their npub, their name showed as an npub.** Adding them this way now accepts their request and keeps the name from it.",
+      "🔧 **When a relay temporarily refuses the connection, the app retries after about a minute (instead of 5 minutes), and not at the same moment as the other devices on your network.** The relays also allow more reconnects from a network with several devices or a patchy mobile connection.",
+      "✨ The command-line tool `cinder.mjs` now says why it can't connect (relay temporarily refusing, quota used up, or the host answering instead of the relay) and when it will retry; when `ask` can't possibly get a reply in time, it returns `relay-unavailable` with `retryAt` instead of waiting out its timeout.",
+      "ℹ️ Known: the Android build is a test build (debug-signed; anyone with USB debugging can read its memory — don't use it for conversations you really care about); the desktop build and `cinder.mjs` are not code-signed (Windows SmartScreen will warn; `cinder.mjs` comes with a sha256 checksum file only). The Android app doesn't show message notifications while in the background (messages still arrive, you just aren't alerted); this will be fixed in the next version."
+    ]
+  },
+  {
     "version": "0.0.21",
     "date": "2026-10-30",
     "released": true,
