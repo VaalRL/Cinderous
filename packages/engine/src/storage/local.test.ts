@@ -166,3 +166,15 @@ describe("LocalStorage 靜態加密（ADR-0112）", () => {
     expect(backing.get("nb.ns.msgs.bob")!.startsWith("c1:")).toBe(false);
   });
 });
+
+describe("到期的限時訊息清掉後要落地（ADR-0408）", () => {
+  it("🔴 重開之後讀到的也是清過的版本", () => {
+    const a = new LocalStorage("ns");
+    a.addContact({ pubkey: "bob", name: "Bob" });
+    a.appendMessage({ id: "e1", contact: "bob", outgoing: false, text: "密碼是 1234", at: 100, expiresAt: 200 });
+    a.scrubExpired(300);
+    const b = new LocalStorage("ns");
+    expect(b.loadMessages("bob")[0]?.text).toBe("");
+    expect([...backing.values()].join("")).not.toContain("密碼是 1234");
+  });
+});

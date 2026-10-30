@@ -7,7 +7,8 @@
 // 已收回訊息標「（已收回）」。**不含私鑰、不含檔案本體。**
 
 import { loadAllArchived } from "./archive.js";
-import type { AppStorage, StoredMessage } from "./types.js";
+import { isExpired } from "../backend/expiry.js";
+import { redactedCopy, type AppStorage, type StoredMessage } from "./types.js";
 
 export type ExportFormat = "txt" | "md" | "json";
 
@@ -88,10 +89,18 @@ function whoOf(m: StoredMessage, convo: ExportConvo, selfLabel: string, nameOf: 
 }
 
 /** 某訊息的正文（已收回／檔案 metadata／文字），可含回應。 */
-function bodyOf(m: StoredMessage, opts: ExportOptions, deleted: Set<string>, reactions: Map<string, string[]>): string {
+function bodyOf(
+  m: StoredMessage,
+  opts: ExportOptions,
+  deleted: Set<string>,
+  reactions: Map<string, string[]>,
+  expired: Set<string>,
+): string {
   let body: string;
   if (deleted.has(m.id)) {
     body = "（已收回）";
+  } else if (expired.has(m.id)) {
+    body = "（已到期）";
   } else if (m.file && opts.includeFiles !== false) {
     const path = m.file.savedPath ? ` → ${m.file.savedPath}` : "";
     body = `📄 ${m.file.name}（${formatBytes(m.file.size)}）${path}`;
@@ -122,6 +131,15 @@ export async function exportRecords(
   // 無痕收回（ADR-0234）：匯出也不留痕——整行剔除（一般收回仍以「（已收回）」佔位）。
   const purged = new Set(storage.loadPurged());
   for (const c of convos) c.messages = c.messages.filter((m) => !purged.has(m.id));
+  // ADR-0408：到期的限時訊息只留佔位——熱區還沒清到的、舊版封存裡的，都在這裡擋掉。
+  const expired = new Set<string>();
+  for (const c of convos) {
+    c.messages = c.messages.map((m) => {
+      if (!isExpired(m, now)) return m;
+      expired.add(m.id);
+      return redactedCopy(m);
+    });
+  }
   const reactions = new Map<string, string[]>();
   for (const r of storage.loadReactions()) {
     const list = reactions.get(r.messageId) ?? [];
@@ -144,10 +162,11 @@ export async function exportRecords(
             outgoing: m.outgoing,
             ...(m.sender ? { sender: m.sender } : {}),
             ...(deleted.has(m.id) ? { deleted: true } : {}),
+            ...(expired.has(m.id) ? { expired: true } : {}),
             ...(m.file && opts.includeFiles !== false
               ? { file: { name: m.file.name, size: m.file.size, mime: m.file.mime, ...(m.file.savedPath ? { savedPath: m.file.savedPath } : {}) } }
               : {}),
-            ...(!m.file ? { text: m.text } : {}),
+            ...(!m.file && !expired.has(m.id) ? { text: m.text } : {}),
             ...(opts.includeReactions !== false && reactions.get(m.id)?.length ? { reactions: reactions.get(m.id) } : {}),
           })),
         })),
@@ -168,7 +187,7 @@ export async function exportRecords(
     }
     for (const m of convo.messages) {
       const who = whoOf(m, convo, selfLabel, nameOf);
-      const body = bodyOf(m, opts, deleted, reactions);
+      const body = bodyOf(m, opts, deleted, reactions, expired);
       if (format === "md") lines.push(`- **[${fmtTime(m.at)}] ${who}：** ${body}`);
       else lines.push(`[${fmtTime(m.at)}] ${who}：${body}`);
     }

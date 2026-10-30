@@ -5060,3 +5060,40 @@ describe("三種 FS 提示互不混用（ADR-0302 §4／§1）", () => {
     a.stop();
   });
 });
+
+describe("到期的限時訊息從本機刪掉明文（ADR-0408）", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("🔴 收發兩端：到期時引擎自己把原文從儲存裡清掉（不用等重開）", () => {
+    vi.useFakeTimers({ now: 1_800_000_000_000 });
+    const net = createInMemoryRelayNetwork();
+    const storeA = new MemoryStorage();
+    const storeB = new MemoryStorage();
+    const a = new RelayChatBackend(storeA, (h) => net.connect("a", h), "Alice");
+    const b = new RelayChatBackend(storeB, (h) => net.connect("b", h), "Bob");
+    a.start(noop);
+    b.start(noop);
+    a.addContact(b.selfNpub);
+    b.addContact(a.selfNpub);
+    a.sendMessage(b.self.pubkey, "密碼是 1234", 60);
+    expect(storeB.loadMessages(a.self.pubkey).at(-1)?.text).toBe("密碼是 1234");
+    vi.advanceTimersByTime(61_000);
+    expect(JSON.stringify(storeB.loadMessages(a.self.pubkey))).not.toContain("密碼是 1234");
+    expect(JSON.stringify(storeA.loadMessages(b.self.pubkey))).not.toContain("密碼是 1234");
+    a.stop();
+    b.stop();
+  });
+
+  it("🔴 開機時就清掉關機期間到期的", () => {
+    const T = Date.now();
+    const net = createInMemoryRelayNetwork();
+    const store = new MemoryStorage();
+    const bob = getPublicKey(generateSecretKey());
+    store.addContact({ pubkey: bob, name: "Bob" });
+    store.appendMessage({ id: "e1", contact: bob, outgoing: false, text: "密碼是 1234", at: T - 60_000, expiresAt: T - 1 });
+    const a = new RelayChatBackend(store, (h) => net.connect("a", h), "Alice");
+    a.start(noop);
+    expect(store.loadMessages(bob)[0]?.text).toBe("");
+    a.stop();
+  });
+});

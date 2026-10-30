@@ -177,3 +177,29 @@ describe("匯出必須含封存（ADR-0111）", () => {
     expect(txt.split("只該出現一次")).toHaveLength(2); // 出現剛好一次
   });
 });
+
+describe("到期的限時訊息不匯出原文（ADR-0408）", () => {
+  const T = 1_800_000_000_000;
+  const seedExpiry = () => {
+    const s = new MemoryStorage();
+    s.addContact({ pubkey: "bob", name: "Bob" });
+    s.appendMessage({ id: "e1", contact: "bob", outgoing: false, text: "密碼是 1234", at: T - 60_000, expiresAt: T - 1 });
+    s.appendMessage({
+      id: "e2", contact: "bob", outgoing: false, text: "", at: T - 50_000, expiresAt: T - 1,
+      file: { tid: "t", name: "合約.pdf", size: 1, mime: "application/pdf" },
+    });
+    s.appendMessage({ id: "l1", contact: "bob", outgoing: false, text: "週五見", at: T - 40_000, expiresAt: T + 60_000 });
+    return s;
+  };
+  it("🔴 TXT／JSON 都不帶到期訊息的原文與檔名；還沒到期的照常匯出", async () => {
+    for (const format of ["txt", "json"] as const) {
+      const out = await exportRecords(seedExpiry(), format, { now: T });
+      expect(out).not.toContain("密碼是 1234");
+      expect(out).not.toContain("合約.pdf");
+      expect(out).toContain("週五見");
+    }
+    expect(await exportRecords(seedExpiry(), "txt", { now: T })).toContain("（已到期）");
+    const json = JSON.parse(await exportRecords(seedExpiry(), "json", { now: T }));
+    expect(json.conversations[0].messages[0]).toMatchObject({ id: "e1", expired: true });
+  });
+});

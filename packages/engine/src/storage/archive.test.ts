@@ -247,3 +247,20 @@ describe("保留上限＝封存門檻，不再刪除（ADR-0126）", () => {
     expect(mem.loadMessages("bob")).toHaveLength(10);
   });
 });
+
+describe("限時訊息不帶原文進封存（ADR-0408）", () => {
+  it("🔴 封存只能追加、事後改不了：限時訊息搬進封存時就拿掉原文與檔案", async () => {
+    const arch = new FakeArchive();
+    const { mem, writer } = writerWith(10, arch);
+    mem.appendMessage({ ...msg(0), text: "密碼是 1234", expiresAt: Date.now() + 86_400_000 });
+    mem.appendMessage({ ...msg(1), text: "", expiresAt: Date.now() + 86_400_000, file: { tid: "t", name: "合約.pdf", size: 1, mime: "x" } });
+    for (let i = 2; i < 10 + ARCHIVE_CHUNK; i++) mem.appendMessage(msg(i));
+    writer.schedule("bob");
+    await writer.flush();
+    const chunk = await arch.loadChunk("bob", 0);
+    expect(JSON.stringify(chunk)).not.toContain("密碼是 1234");
+    expect(JSON.stringify(chunk)).not.toContain("合約.pdf");
+    expect(chunk[0]).toMatchObject({ id: "m0", text: "" });
+    expect(chunk[2]!.text).toBe("#2"); // 一般訊息照常
+  });
+});
