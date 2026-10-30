@@ -126,6 +126,13 @@ function ttlOf(argv: string[]): { ttl?: number } {
   return { ttl };
 }
 
+/** `ask --timeout`：最多 7 天——再長 Node 的 setTimeout 會溢位成 1ms，問題還沒送出就判定失敗。 */
+function timeoutOf(argv: string[]): number {
+  const t = positiveInt(argv, "timeout") ?? DEFAULT_ASK_TIMEOUT;
+  if (t > MAX_TTL_SECONDS) throw new ArgError(`--timeout 最多 7 天（${MAX_TTL_SECONDS} 秒）`);
+  return t;
+}
+
 /**
  * 取出位置參數：必須**跳過帶值旗標的值**，否則 `send <npub> 訊息 --nsec-file /k/nsec` 會把
  * `/k/nsec` 也當成訊息內容的一部分（把私鑰路徑寫進要送出的訊息裡——正是不能發生的事）。
@@ -192,7 +199,7 @@ export function parseArgs(argv: string[], env: Record<string, string | undefined
         relay,
         to,
         text,
-        timeout: positiveInt(argv, "timeout") ?? DEFAULT_ASK_TIMEOUT,
+        timeout: timeoutOf(argv),
         approve: argv.includes("--approve"),
         ...ttlOf(argv),
         ...agentOptions(argv),
@@ -248,9 +255,12 @@ agent 私人頻道（ADR-0404；給 Claude Code 等 agent 用自己的身分跟�
   --ttl <秒>                            限時訊息（send／ask），1 秒到 7 天；到期中繼與對方 App 都刪除
   --fs on|off                           這個身分的前向保密（要搭 --state-dir）；只保護中繼上的密文，
                                         agent 讀到的明文仍會進 LLM
-  ask --timeout <秒>                    最多等多久（預設 ${DEFAULT_ASK_TIMEOUT}）
-  ask --approve                         附 4 位數短碼，要回「yes 1234」／「no 1234」才算
-                                        結束碼：0＝回覆／核准、2＝拒絕、3＝逾時、1＝錯誤
+  ask --timeout <秒>                    最多等多久（預設 ${DEFAULT_ASK_TIMEOUT}，最多 7 天）
+  ask --approve                         附 4 位數短碼，要回「yes 1234」／「no 1234」才算；
+                                        要決定能不能做事一定要加（不加時任何回覆都算，連「不要」也是 0）
+                                        結束碼：0＝回覆／核准、2＝拒絕、3＝逾時、1＝沒送到／被拒收
+
+結束碼（全部指令）：64＝用法、金鑰或狀態目錄錯（重試也一樣）、70＝非預期錯誤
 
 keygen：私鑰只寫進 --out 指定的檔案（已存在就拒絕，不覆蓋）；請放在只有自己讀得到的地方，
 並在 agent 的設定裡禁止它讀那個檔案。

@@ -4,11 +4,32 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { generateSecretKey, getPublicKey, nsecEncode, type NostrEvent } from "@cinderous/core";
-import { LocalStorage, MemoryStorage, RelayChatBackend, webSocketConnector, type ChatMessage } from "@cinderous/engine";
+import {
+  LocalStorage,
+  MemoryStorage,
+  RelayChatBackend,
+  webSocketConnector,
+  type ChatBackendEvents,
+  type ChatMessage,
+} from "@cinderous/engine";
 import { createInMemoryRelayNetwork, MessageStore } from "@cinderous/relay";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { applyAgentSetup, ask, listenEvents, noopEvents, parseApproval, questionWithCode, type AgentIo } from "./agent.js";
-import { installStateDir, openStateDir, type StateDir } from "./state-dir.js";
+import {
+  applyAgentSetup,
+  ask,
+  askReport,
+  EXIT_INTERNAL,
+  EXIT_USAGE,
+  exitCodeForError,
+  listenEvents,
+  noopEvents,
+  parseApproval,
+  questionWithCode,
+  sendAndConfirm,
+  type AgentIo,
+} from "./agent.js";
+import { ArgError } from "./args.js";
+import { installStateDir, openStateDir, StateDirError, type StateDir } from "./state-dir.js";
 
 const settle = async (): Promise<void> => {
   for (let i = 0; i < 50; i++) await Promise.resolve();
@@ -225,6 +246,22 @@ describe("ask：送出並等回覆（ADR-0404 §3）", () => {
     });
   });
 
+  it("🔴 舊訊息的狀態事件先到，也不會被當成這次的問題（2026-10-30 審查）", async () => {
+    // 有 --state-dir 時，舊訊息的回條／重送狀態可能比這次問題的「已送出」先到。
+    let h: ChatBackendEvents | undefined;
+    const to = getPublicKey(generateSecretKey());
+    const fake = {
+      start: (e: ChatBackendEvents) => (h = e),
+      addContact: () => {},
+      sendMessage: (c: string) => {
+        h!.onMessageStatus?.(c, "old", "failed"); // 上一次失敗的那則
+        h!.onMessage(c, { id: "new", outgoing: true, text: "q", at: Date.now(), status: "sending" });
+        h!.onMessageStatus?.(c, "new", "sent");
+      },
+    } as unknown as RelayChatBackend;
+    expect(await ask(fake, { to, text: "要部署嗎？", timeoutMs: 50, approve: false })).toEqual({ decision: "timeout" });
+  });
+
   it("沒人回 → 逾時", async () => {
     const net = mkNet();
     const me = owner(net);
@@ -233,6 +270,48 @@ describe("ask：送出並等回覆（ADR-0404 §3）", () => {
     expect(await ask(a, { to: me.b.self.pubkey, text: "在嗎？", timeoutMs: 50, approve: false })).toEqual({
       decision: "timeout",
     });
+  });
+});
+
+describe("send：只看這一則的狀態（2026-10-30 審查）", () => {
+  it("🔴 舊訊息的「已送出」先到，這一則卻被拒收 → failed，不是 sent", async () => {
+    let h: ChatBackendEvents | undefined;
+    const to = getPublicKey(generateSecretKey());
+    const fake = {
+      start: (e: ChatBackendEvents) => (h = e),
+      addContact: () => {},
+      sendMessage: (c: string) => {
+        h!.onMessageStatus?.(c, "old", "sent"); // 狀態目錄裡上次沒送完、這次重送成功的那則
+        h!.onMessage(c, { id: "new", outgoing: true, text: "q", at: Date.now(), status: "sending" });
+        h!.onMessageStatus?.(c, "new", "failed");
+      },
+    } as unknown as RelayChatBackend;
+    expect(await sendAndConfirm(fake, to, "部署好了", { timeoutMs: 50 })).toBe("failed");
+  });
+
+  it("真實中繼：中繼收下 → sent", async () => {
+    const net = mkNet();
+    const me = owner(net);
+    const a = agent(net, generateSecretKey());
+    cleanups.push(() => a.stop());
+    expect(await sendAndConfirm(a, me.b.self.pubkey, "部署好了", { timeoutMs: 2000 })).toBe("sent");
+  });
+});
+
+describe("結束碼與 ok 欄位（2026-10-30 審查）", () => {
+  it("🔴 只有回覆／核准是 ok:true；拒絕是 ok:false＋2（看 JSON 的 agent 不能把拒絕讀成可以做）", () => {
+    expect(askReport({ decision: "reply", text: "x", at: 1 })).toMatchObject({ code: 0, ok: true });
+    expect(askReport({ decision: "approved", text: "x", at: 1 })).toMatchObject({ code: 0, ok: true });
+    expect(askReport({ decision: "denied", text: "x", at: 1 })).toMatchObject({ code: 2, ok: false });
+    expect(askReport({ decision: "timeout" })).toMatchObject({ code: 3, ok: false });
+    expect(askReport({ decision: "failed", reason: "not-sent" })).toMatchObject({ code: 1, ok: false });
+  });
+
+  it("🔴 用法／狀態目錄錯誤是 64、其他非預期錯誤是 70——1 只留給「沒送到」，agent 才知道哪些可以重試", () => {
+    expect(exitCodeForError(new ArgError("x"))).toBe(EXIT_USAGE);
+    expect(exitCodeForError(new StateDirError("x"))).toBe(EXIT_USAGE);
+    expect(exitCodeForError(new Error("boom"))).toBe(EXIT_INTERNAL);
+    expect([EXIT_USAGE, EXIT_INTERNAL]).toEqual([64, 70]);
   });
 });
 

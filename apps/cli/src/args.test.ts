@@ -157,6 +157,9 @@ describe("agent 私人頻道的旗標（ADR-0404）", () => {
   it("ask：--approve、--timeout；逾時要是正整數", () => {
     expect(parseArgs(["ask", A, "部署", ...F, "--approve", "--timeout", "30"])).toMatchObject({ approve: true, timeout: 30 });
     expect(() => parseArgs(["ask", A, "部署", ...F, "--timeout", "0"])).toThrow(ArgError);
+    // 🔴 超過約 24.8 天 Node 的 setTimeout 會溢位成 1ms：還沒送出就判定失敗（2026-10-30 審查）
+    expect(() => parseArgs(["ask", A, "部署", ...F, "--timeout", String(7 * 86400 + 1)])).toThrow(/7 天/);
+    expect(parseArgs(["ask", A, "部署", ...F, "--timeout", String(7 * 86400)])).toMatchObject({ timeout: 7 * 86400 });
     expect(() => parseArgs(["ask", ...F])).toThrow(/收件人/);
     expect(() => parseArgs(["ask", A, ...F])).toThrow(/內容/);
   });

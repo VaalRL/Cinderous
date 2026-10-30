@@ -4,6 +4,8 @@
 
 import { npubEncode } from "@cinderous/core";
 import type { ChatBackendEvents, ChatMessage, RelayChatBackend } from "@cinderous/engine";
+import { ArgError } from "./args.js";
+import { StateDirError } from "./state-dir.js";
 
 /** CLI 只關心其中幾個事件；其餘的給空實作。 */
 export const noopEvents: ChatBackendEvents = {
@@ -88,12 +90,71 @@ export function parseApproval(text: string, code: string): "approved" | "denied"
   return undefined;
 }
 
+/**
+ * `send`：送出一則、等中繼收下（Tier 1，ADR-0058）。會呼叫 `backend.start`，不 stop。
+ * 只看**這一則**的狀態——有 `--state-dir` 時，舊訊息的重送／回條狀態也會進來。
+ */
+export function sendAndConfirm(
+  backend: RelayChatBackend,
+  to: string,
+  text: string,
+  o: { timeoutMs: number; ttl?: number },
+  setup: { from?: string[]; fs?: "on" | "off" } = {},
+): Promise<"sent" | "failed" | "timeout"> {
+  return new Promise((resolve) => {
+    let id: string | undefined;
+    let sending = false;
+    let done = false;
+    const finish = (r: "sent" | "failed" | "timeout") => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      resolve(r);
+    };
+    const timer = setTimeout(() => finish("timeout"), o.timeoutMs);
+    backend.start({
+      ...noopEvents,
+      onMessage: (contact, m) => {
+        if (m.outgoing && contact === to && sending) id ??= m.id;
+      },
+      onMessageStatus: (contact, mid, status) => {
+        if (contact !== to || mid !== id) return;
+        if (status === "failed") finish("failed");
+        else if (status !== "sending") finish("sent");
+      },
+    });
+    applyAgentSetup(backend, setup);
+    sending = true;
+    backend.sendMessage(to, text, o.ttl);
+    sending = false;
+  });
+}
+
 export type AskResult =
   | { decision: "reply"; text: string; at: number }
   | { decision: "approved" | "denied"; text: string; at: number }
   | { decision: "timeout" }
   /** `not-sent`＝等到逾時，問題都還沒被中繼收下（連不上）；`rejected`＝中繼拒收或重試耗盡。 */
   | { decision: "failed"; reason: "not-sent" | "rejected" };
+
+/** 用法、旗標或狀態目錄錯（sysexits 的 EX_USAGE）：重試也一樣錯。 */
+export const EXIT_USAGE = 64;
+/** 非預期的錯誤（EX_SOFTWARE）。 */
+export const EXIT_INTERNAL = 70;
+
+/** `ask` 的結束碼（ADR-0404 §3）。1 只代表「問題沒送到／被拒收」，agent 可以重試一次。 */
+const ASK_EXIT = { reply: 0, approved: 0, denied: 2, timeout: 3, failed: 1 } as const;
+
+/** `ask` 的結束碼與 JSON 的 `ok`：兩者必須一致，`ok` 只在「可以繼續」時為 true。 */
+export function askReport(r: AskResult): { code: number; ok: boolean } {
+  const code = ASK_EXIT[r.decision];
+  return { code, ok: code === 0 };
+}
+
+/** 頂層例外的結束碼：不讓「金鑰錯、鎖被佔」跟「沒送到」共用 1。 */
+export function exitCodeForError(e: unknown): number {
+  return e instanceof ArgError || e instanceof StateDirError ? EXIT_USAGE : EXIT_INTERNAL;
+}
 
 export interface AskOptions {
   /** 收件人＝唯一被接受的回覆者（hex 公鑰）。 */
@@ -123,6 +184,7 @@ export function ask(backend: RelayChatBackend, o: AskOptions, setup: { from?: st
   const body = code ? questionWithCode(o.text, code) : o.text;
   let sentAt = 0;
   let askId: string | undefined;
+  let sending = false;
 
   return new Promise<AskResult>((resolve) => {
     let done = false;
@@ -142,14 +204,17 @@ export function ask(backend: RelayChatBackend, o: AskOptions, setup: { from?: st
     backend.start({
       ...noopEvents,
       onMessageStatus: (contact, id, status) => {
-        if (contact !== o.to) return;
-        askId ??= id;
-        if (id !== askId) return;
+        // askId 只認 sendMessage 當下同步發出的那則自己的訊息：舊訊息的回條／重送狀態可能先到。
+        if (contact !== o.to || id !== askId) return;
         if (status === "failed") finish({ decision: "failed", reason: "rejected" });
         else if (status !== "sending") sent = true; // sent／delivered／read 都代表中繼收下了
       },
       onMessage: (contact, m) => {
-        if (m.outgoing || senderOf(contact, m) !== o.to || sentAt === 0) return;
+        if (m.outgoing) {
+          if (contact === o.to && sending) askId ??= m.id; // 引擎在 sendMessage 裡同步發出、帶確切 id
+          return;
+        }
+        if (senderOf(contact, m) !== o.to || sentAt === 0) return;
         const quotesUs = askId !== undefined && m.replyTo === askId;
         if (!quotesUs && m.at < sentAt - skew) return; // 問之前就在的訊息
         if (!code) {
@@ -164,6 +229,8 @@ export function ask(backend: RelayChatBackend, o: AskOptions, setup: { from?: st
     });
     applyAgentSetup(backend, { ...setup, from: [...(setup.from ?? []), npubEncode(o.to)] });
     sentAt = Date.now();
+    sending = true;
     backend.sendMessage(o.to, body, o.ttl);
+    sending = false;
   });
 }

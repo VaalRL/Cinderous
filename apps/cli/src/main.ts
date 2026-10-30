@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url";
 
 import { generateSecretKey, getPublicKey, npubDecode, npubEncode, nsecDecode, nsecEncode } from "@cinderous/core";
 import { LocalStorage, MemoryStorage, type RelayChatBackend } from "@cinderous/engine";
-import { applyAgentSetup, ask, listenEvents, noopEvents, type AgentIo } from "./agent.js";
+import { applyAgentSetup, ask, askReport, exitCodeForError, listenEvents, sendAndConfirm, type AgentIo } from "./agent.js";
 import { createCliBackend } from "./backend.js";
 import { ArgError, HELP, parseArgs, type AgentOptions, type Command, type NsecSource } from "./args.js";
 import { HOST, portBusyMessage, startServer } from "./serve.js";
@@ -61,9 +61,6 @@ function allowOf(from: string[] | undefined): Set<string> | undefined {
   if (!from) return undefined;
   return new Set(from.map((n) => npubDecode(n)));
 }
-
-/** `ask` 的結束碼（ADR-0404 §3）。 */
-const ASK_EXIT = { reply: 0, approved: 0, denied: 2, timeout: 3, failed: 1 } as const;
 
 /** 已建置的桌面 App（瀏覽器版）。從 CLI 自身位置推出，`--dir` 可覆寫。 */
 function defaultStaticDir(): string {
@@ -176,42 +173,26 @@ async function run(cmd: Command): Promise<number> {
       cmd,
     );
     backend.stop();
+    const { code, ok } = askReport(result);
+    // denied 是你給的答案（印 stdout），只是 ok:false；逾時與失敗走 stderr。
     (result.decision === "failed" || result.decision === "timeout" ? console.error : console.log)(
-      JSON.stringify({ ok: result.decision !== "failed" && result.decision !== "timeout", to: cmd.to, ...result }),
+      JSON.stringify({ ok, to: cmd.to, ...result }),
     );
-    return ASK_EXIT[result.decision];
+    return code;
   }
 
   if (cmd.cmd === "send") {
     const to = npubDecode(cmd.to); // 非法 npub 會拋錯
-    return await new Promise<number>((resolve) => {
-      // 逾時保護：連不上中繼就不要無限卡住。
-      const timer = setTimeout(() => {
-        console.error("⚠ 逾時：未收到中繼站確認（訊息可能未送出）。");
-        backend.stop();
-        resolve(1);
-      }, 15_000);
-
-      backend.start({
-        ...noopEvents,
-        // Tier 1（ADR-0058）：中繼接受＝已送出。failed＝重試耗盡/被拒（ADR-0095）。
-        onMessageStatus: (_c, _id, status) => {
-          if (status === "sent") {
-            clearTimeout(timer);
-            console.log(JSON.stringify({ ok: true, to: cmd.to, status }));
-            backend.stop();
-            resolve(0);
-          } else if (status === "failed") {
-            clearTimeout(timer);
-            console.error(JSON.stringify({ ok: false, to: cmd.to, status }));
-            backend.stop();
-            resolve(1);
-          }
-        },
-      });
-      applyAgentSetup(backend, cmd);
-      backend.sendMessage(to, cmd.text, cmd.ttl);
-    });
+    // 逾時保護：連不上中繼就不要無限卡住。failed＝重試耗盡/被拒（ADR-0095）。
+    const status = await sendAndConfirm(backend, to, cmd.text, { timeoutMs: 15_000, ...(cmd.ttl !== undefined ? { ttl: cmd.ttl } : {}) }, cmd);
+    backend.stop();
+    if (status === "sent") {
+      console.log(JSON.stringify({ ok: true, to: cmd.to, status }));
+      return 0;
+    }
+    if (status === "timeout") console.error("⚠ 逾時：未收到中繼站確認（訊息可能未送出）。");
+    console.error(JSON.stringify({ ok: false, to: cmd.to, status }));
+    return 1;
   }
 
   // listen：以 JSON Lines 印出收到的訊息，方便接管線（jq、腳本、通知…）。
@@ -232,5 +213,5 @@ try {
   process.exit(await run(parseArgs(process.argv.slice(2), process.env)));
 } catch (e) {
   console.error(e instanceof ArgError || e instanceof StateDirError ? `✖ ${e.message}` : e);
-  process.exit(1);
+  process.exit(exitCodeForError(e));
 }

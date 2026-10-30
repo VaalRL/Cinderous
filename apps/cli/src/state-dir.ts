@@ -8,7 +8,7 @@
 //  - **綁定身分**：DEK 由 nsec 導出，換一把金鑰開同一個目錄會讀出全空，下一次寫入就把原本的狀態蓋掉。
 //  - **獨占鎖**：每次寫入都是整份覆寫，兩個程序共用一個目錄會互相吃掉對方的更新。
 
-import { mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync, closeSync, existsSync } from "node:fs";
+import { closeSync, existsSync, linkSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { setKvBackend } from "@cinderous/engine";
 
@@ -109,23 +109,101 @@ function pidAlive(pid: number): boolean {
   }
 }
 
-function takeLock(lock: string): void {
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    try {
-      const fd = openSync(lock, "wx");
-      writeFileSync(fd, String(process.pid));
-      closeSync(fd);
-      return;
-    } catch (e) {
-      if ((e as NodeJS.ErrnoException).code !== "EEXIST") throw e;
-      const pid = Number(readFileSync(lock, "utf8").trim());
-      if (Number.isInteger(pid) && pid > 0 && pidAlive(pid)) {
-        throw new StateDirError(`狀態目錄正在被另一個 cinder 程序使用（pid ${pid}）；要同時跑請各給一個目錄`);
-      }
-      unlinkSync(lock); // 前一個程序當掉留下的鎖
-    }
+/** 空的或看不懂的鎖放了這麼久還沒寫好，才當成「寫入前就當掉」。 */
+const HALF_WRITTEN_GRACE_MS = 10_000;
+
+const errCode = (e: unknown) => (e as NodeJS.ErrnoException).code;
+const uniq = () => `${process.pid}.${crypto.getRandomValues(new Uint32Array(1))[0]!.toString(36)}`;
+
+/** 讀鎖的內容；鎖剛好被放掉＝undefined。 */
+function readLock(lock: string): string | undefined {
+  try {
+    return readFileSync(lock, "utf8");
+  } catch (e) {
+    if (errCode(e) === "ENOENT") return undefined;
+    throw e;
   }
-  throw new StateDirError(`拿不到狀態目錄的鎖：${lock}`);
+}
+
+/** 把鎖原子地建立成「已經寫好 pid」：先寫暫存檔再 hard link，別的程序不會讀到半寫的空檔。 */
+function linkLock(lock: string, tmp: string): boolean {
+  try {
+    linkSync(tmp, lock);
+    return true;
+  } catch (e) {
+    if (errCode(e) === "EEXIST") return false;
+    if (errCode(e) !== "EPERM" && errCode(e) !== "ENOTSUP" && errCode(e) !== "EXDEV") throw e;
+  }
+  // 檔案系統不支援 hard link（FAT／exFAT）：退回 wx——空檔的窗口由 HALF_WRITTEN_GRACE_MS 擋。
+  try {
+    const fd = openSync(lock, "wx");
+    writeFileSync(fd, String(process.pid));
+    closeSync(fd);
+    return true;
+  } catch (e) {
+    if (errCode(e) === "EEXIST") return false;
+    throw e;
+  }
+}
+
+function inUse(detail: string): StateDirError {
+  return new StateDirError(`狀態目錄正在被另一個 cinder 程序使用（${detail}）；要同時跑請各給一個目錄`);
+}
+
+function takeLock(lock: string): void {
+  const tmp = `${lock}.${uniq()}`;
+  writeFileSync(tmp, String(process.pid), { mode: 0o600 });
+  try {
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      if (linkLock(lock, tmp)) return;
+      const held = readLock(lock);
+      if (held === undefined) continue; // 剛好被放掉：再搶一次
+      const pid = Number(held.trim());
+      if (held.trim() !== "" && Number.isInteger(pid) && pid > 0) {
+        if (pidAlive(pid)) throw inUse(`pid ${pid}`);
+      } else {
+        // 空的或看不懂：可能是別人正在寫（退回 wx 時）。放久了才算殘留。
+        let age = 0;
+        try {
+          age = Date.now() - statSync(lock).mtimeMs;
+        } catch {
+          continue;
+        }
+        if (age < HALF_WRITTEN_GRACE_MS) throw inUse("鎖正在建立");
+      }
+      // 殘留鎖：原子地移到旁邊，再確認移走的是**剛剛看到的那一份**——
+      // 兩個程序同時接手時，後到的那個可能移走的是先到者新建的鎖，要放回去並讓出。
+      const aside = `${lock}.stale.${uniq()}`;
+      try {
+        renameSync(lock, aside);
+      } catch (e) {
+        if (errCode(e) === "ENOENT") continue;
+        throw e;
+      }
+      const moved = readLock(aside);
+      if (moved !== held) {
+        try {
+          linkSync(aside, lock);
+        } catch {
+          /* 又有第三個人拿到了：一樣讓出 */
+        }
+        unlinkQuiet(aside);
+        throw inUse("另一個程序剛接手");
+      }
+      unlinkQuiet(aside);
+    }
+    throw new StateDirError(`拿不到狀態目錄的鎖：${lock}`);
+  } finally {
+    unlinkQuiet(tmp);
+  }
+}
+
+function unlinkQuiet(p: string): void {
+  try {
+    unlinkSync(p);
+  } catch {
+    /* 已經不在了 */
+  }
 }
 
 /** 開一個狀態目錄：建目錄、拿鎖、檢查綁定的身分。 */

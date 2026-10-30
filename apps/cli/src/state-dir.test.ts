@@ -1,5 +1,5 @@
 // --state-dir（ADR-0404 §2）：Node 裡的檔案 localStorage，讓引擎原本的 LocalStorage 存得下來。
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -70,6 +70,29 @@ describe("openStateDir：綁定身分＋獨占鎖", () => {
     const dir = fresh();
     writeFileSync(join(dir, "lock"), "999999999");
     expect(() => open(dir, "aa")).not.toThrow();
+  });
+
+  it("🔴 剛建立、還沒寫進 pid 的鎖（空檔）＝有人正在拿，不能當成殘留鎖搶走（2026-10-30 審查）", () => {
+    const dir = fresh();
+    writeFileSync(join(dir, "lock"), "");
+    expect(() => openStateDir(dir, "aa")).toThrow(/正在被另一個/);
+  });
+
+  it("空的或看不懂的鎖放久了（當掉在寫入前）才接手", () => {
+    const dir = fresh();
+    const lock = join(dir, "lock");
+    writeFileSync(lock, "");
+    const old = new Date(Date.now() - 60_000);
+    utimesSync(lock, old, old);
+    expect(() => open(dir, "aa")).not.toThrow();
+    expect(readFileSync(lock, "utf8")).toBe(String(process.pid));
+  });
+
+  it("拿鎖不留暫存檔；鎖的內容一出現就是完整的 pid", () => {
+    const dir = fresh();
+    open(dir, "aa");
+    expect(readFileSync(join(dir, "lock"), "utf8")).toBe(String(process.pid));
+    expect(readdirSync(dir).sort()).toEqual(["lock", "state.json"]);
   });
 
   it("裝進全域之後，引擎的裝置 id 跨程序固定（不再每跑一次多一份裝置報告）", () => {
