@@ -1,5 +1,32 @@
 [
   {
+    "version": "0.0.21",
+    "date": "2026-10-30",
+    "released": true,
+    "zh": [
+      "🔴 **請把每一台裝置都更新到這一版，包括手機。** 手機這一版開始跟桌面走同一套中繼分片；更新過的手機寄給還沒更新的手機會收不到。到「設定 → 裝置」確認沒有跟不上的那台。",
+      "🔧 **修正：桌面寄給手機的訊息全部遺失。** 手機版之前沒有開中繼分片，桌面寄到的位置手機從來不讀。現在兩邊一致。",
+      "🔧 **修正：限時訊息在手機上從來不會到期。** 到期後手機的對話、聊天清單、回覆引用、歷史紀錄現在都改顯示「訊息已到期」。桌面與手機的聯絡人清單預覽、搜尋、封存搜尋也不再翻出到期訊息的原文。（本機仍保存明文，只是不顯示；要真正刪除是之後的工作。）",
+      "🔧 **修正：舊裝置升級後，後量子加密的種子補不回來。** 同一把加密金鑰合併時改為保留帶種子的那份。",
+      "✨ **新功能：命令列工具 `cinder.mjs`，讓你的 agent（例如 Claude Code）用它自己的身分聯絡你。** 可以只接受你的訊息、記住處理過哪些、送出問題後等你回覆（可要求附短碼核准）、限時訊息、顯示名稱。在官網的 CLI 頁下載，需要 Node.js 22。注意：agent 讀到的明文會送進它用的模型；前向保密選項是實驗性、預設關閉、尚未經外部審計。",
+      "✨ 自己有一台裝置跟不上目前的加密方式時，每一台裝置都會看到提示。",
+      "🔧 連線狀態說得出原因：中繼暫時不能用、或 Cloudflare 當日請求額度用完，不再跟「斷網」混在一起；暫時不能用時 5 分鐘後再試。",
+      "🔒 公開的「能聯絡我」清單改列公共收件中繼，不再指向官方中繼，外流的清單不會讓爬蟲吃掉官方中繼的額度。",
+      "ℹ️ 已知：Android 版是測試版（debug 簽章；開了 USB 偵錯的人讀得到它的記憶體，真正在意的對話請不要用它）；桌面版與 `cinder.mjs` 都沒有程式碼簽章（Windows SmartScreen 會警告；`cinder.mjs` 只附 sha256 校驗檔）。"
+    ],
+    "en": [
+      "🔴 **Update every device to this version, including phones.** Starting with this version the phone app uses the same relay sharding as desktop; an updated phone cannot deliver to a phone that hasn't updated. Check Settings → Devices for any device that is behind.",
+      "🔧 **Fix: messages from desktop to phone were all lost.** The phone app had never enabled relay sharding, so it never read where desktop delivered. Both now match.",
+      "🔧 **Fix: disappearing messages never expired on phones.** After they expire, the phone's conversation, chat list, reply quotes and history now show “Message expired”. Contact-list previews, search and archive search on desktop and phone no longer surface the text of expired messages. (The plaintext is still stored on the device, only hidden; actually deleting it is future work.)",
+      "🔧 **Fix: an old device couldn't recover its post-quantum seed after upgrading.** When the same encryption key is merged, the copy that has the seed is now kept.",
+      "✨ **New: a command-line tool, `cinder.mjs`, that lets your agent (such as Claude Code) contact you with its own identity.** It can accept only your messages, remember what it has handled, send a question and wait for your reply (optionally requiring a code to approve), send disappearing messages and set a display name. Download it from the CLI page on the website; it needs Node.js 22. Note: whatever the agent reads goes to the model it uses; the forward-secrecy option is experimental, off by default and has not been externally audited.",
+      "✨ When one of your own devices can't keep up with the current encryption, every device shows a notice.",
+      "🔧 The connection status now says why: the relay is temporarily unavailable, or Cloudflare's daily request quota has run out — no longer lumped in with “offline”. When temporarily unavailable, it retries after 5 minutes.",
+      "🔒 Your public “reach me” list now names public inbox relays instead of the official relays, so a leaked list can't make crawlers use up the official relays' quota.",
+      "ℹ️ Known: the Android build is a test build (debug-signed; anyone with USB debugging can read its memory — don't use it for conversations you really care about); the desktop build and `cinder.mjs` are not code-signed (Windows SmartScreen will warn; `cinder.mjs` comes with a sha256 checksum file only)."
+    ]
+  },
+  {
     "version": "0.0.20",
     "date": "2026-10-14",
     "released": true,
