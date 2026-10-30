@@ -357,6 +357,11 @@ export class LocalStorage implements AppStorage {
     if (changed.length > 0) this.writeConvo(contactPubkey);
     return changed;
   }
+  scrubExpired(now: number): { convos: string[]; next?: number } {
+    const r = this.mem.scrubExpired(now);
+    for (const c of r.convos) this.writeConvo(c); // ADR-0408：清掉的明文也要從磁碟上消失
+    return r;
+  }
   setFileSavedPath(contactPubkey: string, messageId: string, savedPath: string): void {
     this.mem.setFileSavedPath(contactPubkey, messageId, savedPath);
     this.writeConvo(contactPubkey);

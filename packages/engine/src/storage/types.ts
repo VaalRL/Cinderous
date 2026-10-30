@@ -192,6 +192,15 @@ export function stripDeviceLocalFile(message: StoredMessage): StoredMessage {
 }
 
 /**
+ * 拿掉限時訊息的原文與檔案 metadata（ADR-0408）：只留 id／時間／`expiresAt` 當「訊息已到期」的佔位。
+ * 不就地改，給封存、匯出這些「另存一份」的路徑用；熱區的就地清除見 `AppStorage.scrubExpired`。
+ */
+export function redactedCopy(message: StoredMessage): StoredMessage {
+  const { file: _f, ...rest } = message;
+  return { ...rest, text: "" };
+}
+
+/**
  * 群組回條只前進（delivered→read，不倒退、不重複）（ADR-0095）。
  * 無變更回 `undefined`；有變更回新的回條表（不就地改，供儲存層決定是否寫回）。
  */
@@ -427,6 +436,12 @@ export interface AppStorage {
   loadDeleted(): string[];
   /** 以訊息 id 跨對話尋找已存訊息（收回擁有者驗證用，ADR-0233；線性掃描——收回事件罕見）。 */
   findMessage(messageId: string): StoredMessage | undefined;
+  /**
+   * 到期的限時訊息從本機刪掉明文（ADR-0408）：原文清成空字串、檔案 metadata（檔名、縮圖）整個拿掉，
+   * 只留 id／時間／`expiresAt` 當「訊息已到期」的佔位。已經清過的不再算。
+   * 回傳動到的對話鍵（實作要把它們落地），以及還沒到期的訊息裡最早的到期時刻（排下一次用）。
+   */
+  scrubExpired(now: number): { convos: string[]; next?: number };
   /** 標記某訊息為無痕收回（ADR-0234）：UI 整行移除、不留佔位。 */
   markPurged(messageId: string): void;
   /** 無痕收回的訊息 id 集合。 */

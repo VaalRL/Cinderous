@@ -788,3 +788,28 @@ describe("後量子 EK 通過同步路徑（Phase 3）", () => {
     expect(JSON.stringify(c).length).toBeLessThan(256 * 1024); // 仍在 relay 上限內
   });
 });
+
+describe("雲端快照不帶限時訊息（ADR-0408）", () => {
+  const T = 1_800_000_000_000;
+  it("🔴 建快照時跳過所有限時訊息（快照在中繼上一放好幾天，比訊息本身活得久）", () => {
+    const s = new MemoryStorage();
+    s.addContact({ pubkey: "bob", name: "Bob" });
+    s.appendMessage({ id: "e1", contact: "bob", outgoing: false, text: "密碼是 1234", at: T - 1, expiresAt: T + 60_000 });
+    s.appendMessage({ id: "n1", contact: "bob", outgoing: false, text: "一般", at: T });
+    const content = buildSnapshotContent(s, "full", { now: T });
+    expect(content.messages?.map((m) => m.id)).toEqual(["n1"]);
+  });
+
+  it("🔴 還原舊版快照時，已到期的限時訊息不補回", () => {
+    const dst = new MemoryStorage();
+    const content: CloudSnapshotContent = {
+      ...buildSnapshotContent(new MemoryStorage(), "full", { now: T }),
+      messages: [
+        { id: "e1", contact: "bob", outgoing: false, text: "密碼是 1234", at: T - 2, expiresAt: T - 1 },
+        { id: "n1", contact: "bob", outgoing: false, text: "一般", at: T - 1 },
+      ],
+    };
+    mergeSnapshotContent(dst, content, { now: T });
+    expect(dst.loadMessages("bob").map((m) => m.id)).toEqual(["n1"]);
+  });
+});

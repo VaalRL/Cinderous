@@ -8,7 +8,7 @@
 // 現在是「封存而非刪除」。
 
 import type { MemoryStorage } from "./memory.js";
-import type { StoredMessage } from "./types.js";
+import { redactedCopy, type StoredMessage } from "./types.js";
 
 /** 熱區每對話保留的訊息數（ADR-0111）。主視窗、未讀、回條水位都只碰這一段。 */
 export const HOT_CAP = 5_000;
@@ -109,7 +109,9 @@ export class ArchiveWriter {
     while (this.mem.loadMessages(convo).length >= hotCap + ARCHIVE_CHUNK) {
       const chunk = this.mem.oldest(convo, ARCHIVE_CHUNK);
       if (chunk.length < ARCHIVE_CHUNK) return;
-      await this.archive.append(convo, chunk); // ← 先寫封存
+      // ADR-0408：封存只能追加、事後改不了——限時訊息進封存前就拿掉原文，不等它到期。
+      const archived = chunk.map((m) => (m.expiresAt !== undefined ? redactedCopy(m) : m));
+      await this.archive.append(convo, archived); // ← 先寫封存
       this.mem.trimOldest(convo, chunk.length); // ← 成功後才裁切
       this.onTrim(convo);
     }

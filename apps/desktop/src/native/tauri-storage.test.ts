@@ -251,3 +251,20 @@ describe("寫入失敗（ADR-0119）", () => {
     expect(parts.has("ns|meta")).toBe(true);
   });
 });
+
+describe("到期的限時訊息清掉後要落地（ADR-0408）", () => {
+  it("🔴 寫進磁碟的那份也沒有原文；重開讀到的是清過的版本", async () => {
+    const { io, parts } = fakeIo();
+    const s = new TauriStorage("nsx", io);
+    await s.hydrate();
+    s.addContact({ pubkey: "a", name: "Alice" });
+    s.appendMessage({ id: "e1", contact: "a", outgoing: false, text: "密碼是 1234", at: 100, expiresAt: 200 });
+    await s.flush();
+    s.scrubExpired(300);
+    await s.flush();
+    expect([...parts.values()].join("")).not.toContain("密碼是 1234");
+    const s2 = new TauriStorage("nsx", io);
+    await s2.hydrate();
+    expect(s2.loadMessages("a")[0]?.text).toBe("");
+  });
+});

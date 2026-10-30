@@ -24,6 +24,7 @@ import {
   strongerPin,
   type StoredFsPin,
 } from "@cinderous/core";
+import { isExpired } from "../backend/expiry.js";
 import { stripDeviceLocalFile } from "./types.js";
 import { utf8ByteLength } from "./utf8-size.js";
 import type {
@@ -169,7 +170,8 @@ export function buildSnapshotContent(
   const all: StoredMessage[] = [];
   for (const key of [...contacts.map((c) => c.pubkey), ...groups.map((g) => g.id)]) {
     // 剝除裝置本地欄位：`received` 帶過去會讓另一台**永遠收不到**那個檔案（見 stripDeviceLocalFile）。
-    all.push(...storage.loadMessages(key).map(stripDeviceLocalFile));
+    // ADR-0408：限時訊息一律不進快照——快照在中繼上一放好幾天，比訊息本身活得久。
+    all.push(...storage.loadMessages(key).filter((m) => m.expiresAt === undefined).map(stripDeviceLocalFile));
   }
   all.sort((a, b) => b.at - a.at);
   // 則數＋位元組雙預算（審查修正 #2）：由新到舊累計，超過任一上限即停——
@@ -436,6 +438,7 @@ export function mergeSnapshotContent(
     }
   }
 
+  const now = opts.now ?? Date.now();
   const convos: string[] = [];
   if (content.messages) {
     const idsByConvo = new Map<string, Set<string>>();
@@ -452,6 +455,7 @@ export function mergeSnapshotContent(
     for (const m of sorted) {
       const ids = knownIds(m.contact);
       if (ids.has(m.id)) continue;
+      if (isExpired(m, now)) continue; // ADR-0408：舊版快照裡已到期的限時訊息不補回
       storage.appendMessage(m);
       ids.add(m.id);
       if (!convos.includes(m.contact)) convos.push(m.contact);

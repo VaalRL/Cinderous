@@ -418,6 +418,11 @@ export class TauriStorage implements AppStorage {
     if (changed.length > 0) this.persist(MSGS + contactPubkey);
     return changed;
   }
+  scrubExpired(now: number): { convos: string[]; next?: number } {
+    const r = this.mem.scrubExpired(now);
+    for (const c of r.convos) this.persist(MSGS + c); // ADR-0408：清掉的明文也要從磁碟上消失
+    return r;
+  }
   /** ADR-0110：群組已讀水位一次改完、**一次寫回**。 */
   setMessageReceiptBulk(
     convoKey: string,

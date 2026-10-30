@@ -260,3 +260,34 @@ describe("批次狀態/回條（ADR-0110）", () => {
   // 註：封存搬移（trimOldest）的 id 索引一致性由 archive.test.ts 的 ADR-0126 區塊涵蓋
   //（那裡有 FakeArchive 可觸發真的裁切）。ADR-0126 後 MemoryStorage 本身不再有刪除路徑。
 });
+
+describe("到期的限時訊息從本機刪掉明文（ADR-0408）", () => {
+  const T = 1_800_000_000_000;
+  it("🔴 到期的原文與檔案 metadata 清掉、留下佔位；沒到期的不動；回傳動到的對話與下一則到期時刻", () => {
+    const s = new MemoryStorage();
+    s.appendMessage({ id: "e1", contact: "bob", outgoing: false, text: "密碼是 1234", at: T - 60_000, expiresAt: T - 1 });
+    s.appendMessage({
+      id: "e2", contact: "bob", outgoing: true, text: "", at: T - 50_000, expiresAt: T,
+      file: { tid: "t1", name: "合約.pdf", size: 10, mime: "application/pdf", thumb: "data:image/png;base64,AA" },
+    });
+    s.appendMessage({ id: "l1", contact: "bob", outgoing: false, text: "週五見", at: T - 40_000, expiresAt: T + 60_000 });
+    s.appendMessage({ id: "n1", contact: "carol", outgoing: false, text: "一般訊息", at: T - 30_000 });
+
+    expect(s.scrubExpired(T)).toEqual({ convos: ["bob"], next: T + 60_000 });
+    const bob = s.loadMessages("bob");
+    expect(bob.find((m) => m.id === "e1")).toEqual({ id: "e1", contact: "bob", outgoing: false, text: "", at: T - 60_000, expiresAt: T - 1 });
+    expect(bob.find((m) => m.id === "e2")?.file).toBeUndefined();
+    expect(JSON.stringify(bob)).not.toContain("密碼是 1234");
+    expect(JSON.stringify(bob)).not.toContain("合約.pdf");
+    expect(bob.find((m) => m.id === "l1")?.text).toBe("週五見");
+    expect(s.loadMessages("carol")[0]?.text).toBe("一般訊息");
+    expect(s.findMessage("e1")?.text).toBe(""); // byId 也要換掉，不然還找得到原文
+  });
+
+  it("已經清過的不再算（重複掃描不會一直重寫）", () => {
+    const s = new MemoryStorage();
+    s.appendMessage({ id: "e1", contact: "bob", outgoing: false, text: "x", at: T - 1, expiresAt: T - 1 });
+    expect(s.scrubExpired(T).convos).toEqual(["bob"]);
+    expect(s.scrubExpired(T + 1)).toEqual({ convos: [] });
+  });
+});

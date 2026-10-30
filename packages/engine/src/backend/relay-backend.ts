@@ -588,6 +588,9 @@ export class RelayChatBackend implements ChatBackend {
   private readonly retireDelayFn: (() => number) | undefined;
   private migrateFired = false;
   private retireTimer: ReturnType<typeof setTimeout> | undefined;
+  /** 下一次清除到期限時訊息明文的計時器與時刻（ADR-0408）。 */
+  private scrubTimer: ReturnType<typeof setTimeout> | undefined;
+  private scrubAt: number | undefined;
   /** 引導座（錨點 ∪ 已採用清單，ADR-0039）：恆連保底、冗餘廣播與 home 遞補來源。 */
   private readonly bootstrapSeats = new Set<string>();
   private readonly maintainerPubkey: string | undefined;
@@ -989,6 +992,7 @@ export class RelayChatBackend implements ChatBackend {
     // 訂閱一掛上，中繼就可能立刻把 TTL 內的檔案塊全推過來（記憶體網路是同步送達）；
     // 索引若還沒建好，`onFileBytes` 查不到既有訊息 ⇒ 去重失效、又跳一次「另存新檔」。
     // 這是把它放在下方歷史回放裡的第一版沒修好的原因。
+    this.sweepExpired(); // ADR-0408：關機期間到期的，先清掉再回放歷史
     this.hydrateFileIndex();
     // 同一個理由（ADR-0404）：已存訊息的 rumor id 也要先進去重集合，否則補推來的舊訊息會再走一次
     // `onMessage`。下方歷史回放仍照舊交付 `onHistory`（重複加入去重集合無害）。
@@ -3199,6 +3203,7 @@ export class RelayChatBackend implements ChatBackend {
     };
     if (!selfCopy) this.trackExpectedRefs(rumor.content); // ADR-0223 P2b：據此接受寄件者主動推播的 blob。
     this.storage.appendMessage(message);
+    if (expiresAt !== undefined) this.armScrub(expiresAt); // ADR-0408
     this.handlers?.onMessage(convo, {
       id: rumor.id,
       outgoing: selfCopy,
@@ -3395,6 +3400,7 @@ export class RelayChatBackend implements ChatBackend {
     };
     if (!selfCopy) this.trackExpectedRefs(rumor.content); // ADR-0223 P2b：接受寄件者推播的 blob。
     this.storage.appendMessage({ ...body, contact: groupId });
+    if (expiresAt !== undefined) this.armScrub(expiresAt); // ADR-0408
     this.handlers?.onMessage(groupId, body);
     this.applyPendingDeletes(id); // 收回早於群訊抵達（ADR-0233）：落地後驗證補套用
     if (!selfCopy) this.bumpUnread(groupId, body.at); // 未讀 +1（O(1)，ADR-0110）
@@ -4056,6 +4062,7 @@ export class RelayChatBackend implements ChatBackend {
     const message = { id, contact: to, outgoing: true, text, at: now * 1000, status: "sending" as const, ...extra };
     this.seenMsg.add(id); // 自封副本回流到本機時據此丟棄（ADR-0107）
     this.storage.appendMessage(message);
+    if (extra.expiresAt !== undefined) this.armScrub(extra.expiresAt); // ADR-0408
     this.handlers?.onMessage(to, { id, outgoing: true, text, at: message.at, status: "sending" as const, ...extra });
     // 先存後送：確保同步（測試網路）回來的 OK/回條找得到已存訊息才更新狀態（ADR-0058）。
     this.publishWrapped(to, id, wrapped);
@@ -4411,6 +4418,25 @@ export class RelayChatBackend implements ChatBackend {
   /** 關閉雲端快照＝立即清除 relay 上此裝置的快照（purge；「已關閉」必須立即為真）。 */
   purgeCloudSnapshot(deviceId: string): void {
     this.publishReliable(buildSnapshotPurge(this.sk, deviceId));
+  }
+
+  /** 清掉已到期限時訊息的本機明文，並排下一次（ADR-0408）。 */
+  private sweepExpired(): void {
+    if (this.scrubTimer !== undefined) clearTimeout(this.scrubTimer);
+    this.scrubTimer = undefined;
+    this.scrubAt = undefined;
+    const { next } = this.storage.scrubExpired(Date.now());
+    if (next !== undefined) this.armScrub(next);
+  }
+
+  /** 新的限時訊息進來時，到期時刻比已排的早才改排（ADR-0408）。 */
+  private armScrub(at: number): void {
+    if (this.scrubAt !== undefined && this.scrubAt <= at) return;
+    if (this.scrubTimer !== undefined) clearTimeout(this.scrubTimer);
+    this.scrubAt = at;
+    // 上限約 24.8 天：截斷的那一次醒來會掃到「還沒到期」，再排下一段。
+    const delay = Math.min(Math.max(at - Date.now(), 0) + 50, 2 ** 31 - 1);
+    this.scrubTimer = setTimeout(() => this.sweepExpired(), delay);
   }
 
   /** 寫入並廣播訊息狀態（只前進，由儲存層守門）。 */
@@ -5610,6 +5636,9 @@ export class RelayChatBackend implements ChatBackend {
     if (this.remindTimer) clearInterval(this.remindTimer);
     if (this.turnTimer) clearTimeout(this.turnTimer);
     if (this.retireTimer !== undefined) clearTimeout(this.retireTimer);
+    if (this.scrubTimer !== undefined) clearTimeout(this.scrubTimer);
+    this.scrubTimer = undefined;
+    this.scrubAt = undefined;
     this.outbox.clear();
     this.transfer.close();
     this.call.close();

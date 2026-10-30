@@ -440,6 +440,27 @@ export class MemoryStorage implements AppStorage {
   loadDeleted(): string[] {
     return [...this.deleted];
   }
+  scrubExpired(now: number): { convos: string[]; next?: number } {
+    const convos: string[] = [];
+    let next: number | undefined;
+    for (const [key, convo] of this.convos) {
+      let touched = false;
+      for (const m of convo.list) {
+        if (m.expiresAt === undefined) continue;
+        if (m.expiresAt > now) {
+          if (next === undefined || m.expiresAt < next) next = m.expiresAt;
+          continue;
+        }
+        if (m.text === "" && m.file === undefined) continue; // 清過了
+        m.text = ""; // 就地改：byId 指向同一個物件
+        delete m.file;
+        touched = true;
+      }
+      if (touched) convos.push(key);
+    }
+    return next === undefined ? { convos } : { convos, next };
+  }
+
   findMessage(messageId: string): StoredMessage | undefined {
     for (const c of this.convos.values()) {
       const hit = c.byId.get(messageId);
