@@ -18,6 +18,7 @@ import {
   applyAgentSetup,
   ask,
   askReport,
+  connectionLine,
   EXIT_INTERNAL,
   EXIT_USAGE,
   exitCodeForError,
@@ -295,6 +296,85 @@ describe("send：只看這一則的狀態（2026-10-30 審查）", () => {
     const a = agent(net, generateSecretKey());
     cleanups.push(() => a.stop());
     expect(await sendAndConfirm(a, me.b.self.pubkey, "部署好了", { timeoutMs: 2000 })).toBe("sent");
+  });
+});
+
+describe("中繼暫時不能用：說出原因（偶發連不上，2026-10-30）", () => {
+  const hhmm = (t: number) => new Date(t).toTimeString().slice(0, 5);
+
+  /** 只會開機、加聯絡人、送訊息的假後端；`ref.h` 讓測試自己丟連線狀態進去。 */
+  function fakeBackend(onSend?: (h: ChatBackendEvents, to: string) => void) {
+    const ref: { h?: ChatBackendEvents } = {};
+    const b = {
+      start: (e: ChatBackendEvents) => (ref.h = e),
+      addContact: () => {},
+      sendMessage: (to: string) => onSend?.(ref.h!, to),
+    } as unknown as RelayChatBackend;
+    return { b, ref };
+  }
+
+  it("🔴 狀態行帶上原因與重試時間（原本只印 offline，分不出斷網、額度用完、還是被限速）", () => {
+    const at = Date.UTC(2026, 9, 30, 4, 10);
+    expect(connectionLine("online")).toBe("… 中繼狀態：online");
+    expect(connectionLine("offline")).toBe("… 中繼狀態：offline");
+    const busy = connectionLine("offline", { kind: "unavailable", retryAt: at });
+    expect(busy).toContain("暫時拒絕連線");
+    expect(busy).toContain(`約 ${hhmm(at)} 重試`);
+    expect(busy).toContain("連太多次");
+    expect(connectionLine("offline", { kind: "over-quota", retryAt: at, resetsAt: at })).toContain(`額度用完，約 ${hhmm(at)} 恢復`);
+    expect(connectionLine("offline", { kind: "edge", retryAt: at, resetsAt: at })).toContain("回答的卻不是中繼");
+  });
+
+  it("listen 的 stderr 也帶原因", () => {
+    const errs: string[] = [];
+    const ev = listenEvents({ out: () => {}, err: (l) => errs.push(l) });
+    ev.onConnection?.("offline", { kind: "unavailable", retryAt: Date.now() + 60_000 });
+    expect(errs[0]).toContain("暫時拒絕連線");
+  });
+
+  it("🔴 ask：要等到逾時之後才會重連 → 立刻回失敗＋重試時間，不空等到逾時", async () => {
+    const to = getPublicKey(generateSecretKey());
+    const retryAt = Date.now() + 5 * 60_000;
+    const logs: string[] = [];
+    const { b, ref } = fakeBackend();
+    const p = ask(b, { to, text: "在嗎？", timeoutMs: 60_000, approve: false, onLog: (l) => logs.push(l) });
+    ref.h!.onConnection?.("offline", { kind: "unavailable", retryAt });
+    expect(await p).toEqual({ decision: "failed", reason: "relay-unavailable", retryAt, sent: false });
+    expect(logs.some((l) => l.includes("暫時拒絕連線"))).toBe(true);
+    expect(askReport({ decision: "failed", reason: "relay-unavailable", retryAt, sent: false })).toMatchObject({ code: 1, ok: false });
+  });
+
+  it("ask：問題已經送到、之後才收不到回覆 → 也回失敗，標明 sent:true（你可能已經看到問題）", async () => {
+    const to = getPublicKey(generateSecretKey());
+    const retryAt = Date.now() + 5 * 60_000;
+    const { b, ref } = fakeBackend((h, c) => {
+      h.onMessage(c, { id: "q", outgoing: true, text: "q", at: Date.now(), status: "sending" });
+      h.onMessageStatus?.(c, "q", "sent");
+    });
+    const p = ask(b, { to, text: "在嗎？", timeoutMs: 60_000, approve: false });
+    ref.h!.onConnection?.("offline", { kind: "unavailable", retryAt });
+    expect(await p).toMatchObject({ decision: "failed", reason: "relay-unavailable", sent: true });
+  });
+
+  it("ask：逾時之前就會重連 → 繼續等（短暫被拒不算失敗）", async () => {
+    const to = getPublicKey(generateSecretKey());
+    const { b, ref } = fakeBackend();
+    const p = ask(b, { to, text: "在嗎？", timeoutMs: 60_000, approve: false });
+    ref.h!.onConnection?.("offline", { kind: "unavailable", retryAt: Date.now() + 1000 });
+    ref.h!.onMessage(to, { id: "r", outgoing: false, text: "在", at: Date.now() + 1, status: "delivered" });
+    expect(await p).toMatchObject({ decision: "reply", text: "在" });
+  });
+
+  it("send：中繼暫時拒絕時 stderr 說出原因（逾時訊息才不會只剩「可能未送出」）", async () => {
+    const to = getPublicKey(generateSecretKey());
+    const logs: string[] = [];
+    const { b, ref } = fakeBackend();
+    const p = sendAndConfirm(b, to, "部署好了", { timeoutMs: 30, onLog: (l) => logs.push(l) });
+    ref.h!.onConnection?.("connecting");
+    ref.h!.onConnection?.("offline", { kind: "unavailable", retryAt: Date.now() + 60_000 });
+    expect(await p).toBe("timeout");
+    expect(logs).toHaveLength(1); // 沒有原因的狀態變化不印，跟原本一樣安靜
+    expect(logs[0]).toContain("暫時拒絕連線");
   });
 });
 

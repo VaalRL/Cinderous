@@ -3,7 +3,7 @@
 // 與 I/O 分開：後端由呼叫端建好傳進來（真實中繼或測試的記憶體網路），輸出走 `AgentIo`。
 
 import { npubEncode } from "@cinderous/core";
-import type { ChatBackendEvents, ChatMessage, RelayChatBackend } from "@cinderous/engine";
+import type { ChatBackendEvents, ChatMessage, ConnectionState, RelayChatBackend, RelayUnavailable } from "@cinderous/engine";
 import { ArgError } from "./args.js";
 import { StateDirError } from "./state-dir.js";
 
@@ -28,6 +28,25 @@ export function applyAgentSetup(backend: RelayChatBackend, o: { from?: string[];
   for (const npub of o.from ?? []) backend.addContact(npub);
   if (o.fs === "on") backend.enableFs();
   else if (o.fs === "off") backend.disableFs(); // ADR-0314：明示退場，不是把宣告拿掉
+}
+
+/** 本機時間的「時:分」（stderr 給人看的）。 */
+const hhmm = (t: number): string => new Date(t).toTimeString().slice(0, 5);
+
+/**
+ * 連線狀態行（stderr）。原本只印 offline，分不出斷網、額度用完、還是被中繼限速。
+ * 引擎已經把原因與重試時間交給我們（ADR-0395、ADR-0401），這裡照實說出來。
+ *
+ * `unavailable` 最常見的是同一台機器短時間內連太多次：主平面每個 IP 對每個分片每分鐘 4 次新連線、
+ * 每 10 分鐘 20 次（SDK ADR 0111），超過就以 1013 關閉，引擎約 5 分鐘後才重連。
+ */
+export function connectionLine(state: ConnectionState, u?: RelayUnavailable): string {
+  const head = `… 中繼狀態：${state}`;
+  if (!u) return head;
+  if (u.kind === "over-quota") return `${head}（這座中繼今天的額度用完，約 ${hhmm(u.resetsAt ?? u.retryAt)} 恢復）`;
+  if (u.kind === "edge")
+    return `${head}（主機有回應、回答的卻不是中繼；最可能是今天的請求數用完，約 ${hhmm(u.resetsAt ?? u.retryAt)} 恢復）`;
+  return `${head}（中繼暫時拒絕連線，約 ${hhmm(u.retryAt)} 重試；同一台機器短時間內連太多次也會這樣，請隔幾分鐘再跑）`;
 }
 
 /** 訊息的寄件人：群訊看 `sender`，一對一就是對話對象。 */
@@ -60,7 +79,7 @@ export function listenEvents(io: AgentIo, allow?: ReadonlySet<string>): ChatBack
       }
       io.out(line(contact, m));
     },
-    onConnection: (state) => io.err(`… 中繼狀態：${state}`),
+    onConnection: (state, u) => io.err(connectionLine(state, u)),
   };
 }
 
@@ -98,7 +117,7 @@ export function sendAndConfirm(
   backend: RelayChatBackend,
   to: string,
   text: string,
-  o: { timeoutMs: number; ttl?: number },
+  o: { timeoutMs: number; ttl?: number; onLog?: (line: string) => void },
   setup: { from?: string[]; fs?: "on" | "off" } = {},
 ): Promise<"sent" | "failed" | "timeout"> {
   return new Promise((resolve) => {
@@ -122,6 +141,10 @@ export function sendAndConfirm(
         if (status === "failed") finish("failed");
         else if (status !== "sending") finish("sent");
       },
+      // 只在說得出原因時印：一般的連線狀態變化 send 一向不印
+      onConnection: (state, u) => {
+        if (u) o.onLog?.(connectionLine(state, u));
+      },
     });
     applyAgentSetup(backend, setup);
     sending = true;
@@ -135,7 +158,12 @@ export type AskResult =
   | { decision: "approved" | "denied"; text: string; at: number }
   | { decision: "timeout" }
   /** `not-sent`＝等到逾時，問題都還沒被中繼收下（連不上）；`rejected`＝中繼拒收或重試耗盡。 */
-  | { decision: "failed"; reason: "not-sent" | "rejected" };
+  | { decision: "failed"; reason: "not-sent" | "rejected" }
+  /**
+   * 收件的中繼暫時不能用，而且要到逾時之後才會重連＝這次等不到回覆，不空等。
+   * `retryAt` 之後再跑；`sent` 表示問題在那之前已經被中繼收下（你可能已經看到了）。
+   */
+  | { decision: "failed"; reason: "relay-unavailable"; retryAt: number; sent: boolean };
 
 /** 用法、旗標或狀態目錄錯（sysexits 的 EX_USAGE）：重試也一樣錯。 */
 export const EXIT_USAGE = 64;
@@ -196,6 +224,7 @@ export function ask(backend: RelayChatBackend, o: AskOptions, setup: { from?: st
     };
     let sent = false;
     // 問題沒送出去就等到逾時＝「沒問到你」，不是「你沒回」——agent 要能分辨、才知道要不要重試。
+    const deadline = Date.now() + o.timeoutMs;
     const timer = setTimeout(
       () => finish(sent ? { decision: "timeout" } : { decision: "failed", reason: "not-sent" }),
       o.timeoutMs,
@@ -225,7 +254,13 @@ export function ask(backend: RelayChatBackend, o: AskOptions, setup: { from?: st
         if (d) finish({ decision: d, text: m.text, at: m.at });
         else o.onLog?.("… 收到一則回覆，但不是「yes／no＋短碼」，繼續等");
       },
-      onConnection: (state) => o.onLog?.(`… 中繼狀態：${state}`),
+      onConnection: (state, u) => {
+        o.onLog?.(connectionLine(state, u));
+        // 回覆只從自己的收件中繼進來：它要到逾時之後才重連，就不可能在時限內等到
+        if (state === "offline" && u && u.retryAt >= deadline) {
+          finish({ decision: "failed", reason: "relay-unavailable", retryAt: u.retryAt, sent });
+        }
+      },
     });
     applyAgentSetup(backend, { ...setup, from: [...(setup.from ?? []), npubEncode(o.to)] });
     sentAt = Date.now();

@@ -141,7 +141,7 @@ ADR-0098 原本是「CLI 絕不寫檔」。改成：**只有這一個明確的�
    `hydrateSeenMessages()`。歷史回放照舊交付 `onHistory`。
 2. **錨點偶爾連不上**：實跑時約十幾次有一次，`ask` 從頭到尾只看到 `中繼狀態：offline`，40 秒內沒有連上；
    你回的訊息其實有存在中繼上（事後 `listen` 補拉得到）。當時是短時間內連開很多條連線的測試，原因沒有查明。
-   這就是上面把 `not-sent` 從逾時分出來的原因。
+   這就是上面把 `not-sent` 從逾時分出來的原因。原因後來查到了，見下面〈偶發連不上的原因〉。
 
 ## 實跑驗證（2026-10-30，錨點 1，一次性金鑰）
 
@@ -184,6 +184,21 @@ ADR-0098 原本是「CLI 絕不寫檔」。改成：**只有這一個明確的�
 - **狀態目錄的鎖有競態**：見上面〈獨占鎖〉。
 - **CLI 一律開分片**，不看 App 的 `nb.sharding` 關閉開關（ADR-0407）：CLI 沒有設定畫面，而錨點都已經開分片。要退回非分片得改程式。
 
+## 偶發連不上的原因（2026-10-30）
+
+- **原因**：主平面的重連限速（SDK ADR 0111）。
+  - Worker 端：同一個 IP 對同一個分片每分鐘 4 次新連線（`STRICT_UPGRADE_LIMIT`）。
+  - DO 端：每 10 分鐘 20 次，超過封鎖 10 分鐘（`RECONNECT_GUARD`）。
+  - 實跑時同一台機器連開很多個 `ask`／`listen`，加上同一個網路的桌面版，很容易超過。
+  - 中繼以 1013 拒絕。引擎把這座標成暫時不能用，約 5 分鐘後才重連（SDK ADR 0108），所以 40 秒內都是 offline。
+- **證據**：錨點 1 的 Worker 呼叫紀錄（10-29～10-30）沒有任何錯誤，排除中繼本身出錯。錨點沒開 Worker 日誌，所以沒有直接拒絕紀錄；結論來自程式路徑與現象吻合（中繼正常、訊息有存下、只有短時間大量連線時出現）。
+- **限速不改**：它擋的是不退避的用戶端與爬蟲，正常使用的 App 碰不到。
+- **CLI 的修正**：
+  - 引擎早就把原因與重試時間交給 `onConnection`，CLI 卻只印 `state`。現在狀態行照實說：暫時拒絕連線（並提示同一台機器連太多次）、額度用完、或主機有回應卻不是中繼，附上本機時間。
+  - `ask`：收件中繼要到逾時之後才重連＝這次不可能等到回覆，直接回 `{decision:"failed", reason:"relay-unavailable", retryAt, sent}`，結束碼仍是 `1`。`sent` 表示問題在那之前已經被中繼收下。只看自己的收件中繼，因為回覆只會從那裡進來；逾時前就會重連的就繼續等。
+  - `send`：說得出原因時才在 stderr 印一行，平常照舊安靜。不提早結束，因為寄件走對方的分片，自己的收件中繼不能用不代表寄不出去。
+- **官網 CLI 頁**：結束碼 `1` 加上 `relay-unavailable`；「中繼站與額度」補上「同一台機器一分鐘內不要啟動超過三、四次，要等訊息就讓一個 `listen` 開著」。
+
 ## 測試
 
 - `apps/cli/src/args.test.ts`：新旗標與 `keygen`／`ask` 的解析；`--fs` 沒有 `--state-dir` 報錯；
@@ -198,4 +213,5 @@ ADR-0098 原本是「CLI 絕不寫檔」。改成：**只有這一個明確的�
 - `apps/cli/src/state-dir.test.ts`：沒有狀態目錄時裝記憶體的 localStorage。
 - `apps/cli/src/state-dir.test.ts`：`--name` 記在狀態目錄。
 - 審查後新增：`agent.test.ts` 舊訊息狀態先到時 `ask`／`send` 仍只看這一則、`askReport`／`exitCodeForError`；`args.test.ts` `--timeout` 上限；`state-dir.test.ts` 空鎖檔不被搶、放久了才接手、不留暫存檔。除了 `sendAndConfirm` 是跟實作一起寫的，其餘實作前都先確認是紅燈。
+- 偶發連不上的修正：`agent.test.ts` 狀態行帶原因與時間、`listen` 也帶、`ask` 等不到就提早回 `relay-unavailable`（問題送出前／送出後）、逾時前會重連就繼續等、`send` 只在有原因時印。全部實作前先確認是紅燈。
 - `apps/desktop/src/ui/deck-sidebar.test.ts`、`packages/engine/src/backend/search-util.test.ts`：到期的限時訊息不進預覽、不被搜到。
