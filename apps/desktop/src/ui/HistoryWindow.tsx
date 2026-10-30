@@ -9,7 +9,7 @@
 // 封存搜尋（ADR-0256 階段 3）：由新到舊**逐塊解密掃描、即掃即棄**——不建持久明文索引
 // （那會在加密儲存旁放一份可搜明文，掏空 ADR-0054）。掃描進度即時回饋、可清除中止。
 
-import { type MessageArchive, nextOlderChunk, prependChunk, type StoredMessage } from "@cinderous/engine";
+import { type MessageArchive, nextOlderChunk, prependChunk, type StoredMessage, visibleText } from "@cinderous/engine";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n.js";
 import { matchesStored } from "./msg-search.js";
@@ -106,7 +106,8 @@ export function HistoryWindow(props: Props): JSX.Element {
       <span className="hist__meta">
         {fmtTime(m.at)} · {m.outgoing ? props.selfLabel : props.name}
       </span>
-      <span className="hist__text">{m.file ? `📎 ${m.file.name}` : m.text}</span>
+      {/* 到期的限時訊息（ADR-0406）：封存裡還有原文，畫面上不能露 */}
+      <span className="hist__text">{visibleText(m, t("convo_expired"))}</span>
     </div>
   );
 

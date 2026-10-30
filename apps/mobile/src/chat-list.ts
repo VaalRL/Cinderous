@@ -3,7 +3,7 @@
 // 概念同桌面 `deck-sidebar.ts`（最近互動排序），但這裡是「聊天列」超集（多帶 lastText/未讀），
 // 且不含桌面的標籤/搜尋；日後若要單一化可把 lastInteraction/sort 抽到共用套件。
 import type { ChatMessage, Contact, Group, Status } from "@cinderous/engine";
-import { contactLabel } from "@cinderous/engine";
+import { contactLabel, visibleText } from "@cinderous/engine";
 
 export interface ChatListEntry {
   id: string;
@@ -33,9 +33,16 @@ export function lastMessageOf(msgs: ChatMessage[] | undefined): ChatMessage | un
   return latest;
 }
 
-/** 某訊息的清單預覽文字（檔案顯示 📎 檔名，否則內文）。 */
-export function previewText(m: ChatMessage | undefined): string {
+/** 到期的限時訊息在預覽裡顯示什麼（ADR-0406）；沒給＝不判斷到期（舊呼叫端）。 */
+export interface ExpiryOpts {
+  expiredLabel: string;
+  now: number;
+}
+
+/** 某訊息的清單預覽文字（檔案顯示 📎 檔名，否則內文；到期的限時訊息顯示到期字樣）。 */
+export function previewText(m: ChatMessage | undefined, expiry?: ExpiryOpts): string {
   if (!m) return "";
+  if (expiry) return visibleText(m, expiry.expiredLabel, expiry.now);
   return m.file ? `📎 ${m.file.name}` : m.text;
 }
 
@@ -45,6 +52,7 @@ export function buildChatList(
   groups: Group[],
   convos: Record<string, ChatMessage[]>,
   unread: Record<string, number>,
+  expiry?: ExpiryOpts,
 ): ChatListEntry[] {
   const make = (id: string, name: string, isGroup: boolean, extra: Partial<ChatListEntry>): ChatListEntry => {
     const last = lastMessageOf(convos[id]);
@@ -52,7 +60,7 @@ export function buildChatList(
       id,
       name,
       isGroup,
-      lastText: previewText(last),
+      lastText: previewText(last, expiry),
       lastAt: last?.at ?? 0,
       lastOutgoing: last?.outgoing ?? false,
       unread: unread[id] ?? 0,
@@ -76,8 +84,9 @@ export function chatList(
   groups: Group[],
   convos: Record<string, ChatMessage[]>,
   unread: Record<string, number>,
+  expiry?: ExpiryOpts,
 ): ChatListEntry[] {
-  return sortByRecent(buildChatList(contacts, groups, convos, unread));
+  return sortByRecent(buildChatList(contacts, groups, convos, unread, expiry));
 }
 
 /** 清單用的簡短時間標籤：今日＝HH:MM、昨日＝「昨天」、更早＝M/D；無互動（0）回空字串。 */

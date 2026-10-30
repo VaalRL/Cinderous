@@ -91,6 +91,7 @@ import { loadNote, saveNote } from "./note-store.js";
 import { completeSlot, enqueueSlot, type MobileSlotItem, nextPending, removeSlot as removeSlotItem, retryFailed, setSlotStatus } from "./slot-queue.js";
 import { type EscrowEntry, loadEscrow, offboardedEntries, removeEscrow, saveEscrow, upsertEscrow } from "./org-escrow.js";
 import { chatList } from "./chat-list.js";
+import { useExpiryClock } from "./expiry-clock.js";
 import { BottomTabs, type Tab } from "./screens/BottomTabs.js";
 import { ChatsListScreen } from "./screens/ChatsListScreen.js";
 import { ContactListScreen, type MobileContact } from "./screens/ContactListScreen.js";
@@ -1434,7 +1435,13 @@ export function AppSession({
   const nameFor = (pk: string): string =>
     pk === self.pubkey ? self.name : contacts.find((c) => c.pubkey === pk)?.name ?? `${pk.slice(0, 8)}…`;
 
-  const entries = useMemo(() => chatList(contacts, groups, convos, unread), [contacts, groups, convos, unread]);
+  // 限時訊息（ADR-0406）：最後一則到期時清單預覽也要換掉——到最近的到期時刻重算一次。
+  const allMessages = useMemo(() => Object.values(convos).flat(), [convos]);
+  const expiryNow = useExpiryClock(allMessages);
+  const entries = useMemo(
+    () => chatList(contacts, groups, convos, unread, { expiredLabel: translate(locale, "convo_expired"), now: expiryNow }),
+    [contacts, groups, convos, unread, locale, expiryNow],
+  );
   const unreadTotal = useMemo(() => Object.values(unread).reduce((a, b) => a + b, 0), [unread]);
   const mobileContacts = useMemo<MobileContact[]>(
     // ADR-0148：暱稱優先；ADR-0170：帶對方企業自報頭銜（有才帶，供 chip 顯示）。
