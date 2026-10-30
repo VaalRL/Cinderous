@@ -3559,6 +3559,16 @@ export class RelayChatBackend implements ChatBackend {
     // 自我防呆（ADR-0055）：不得加自己作用中身分（跨身分連結風險；App 層另擋其他自身身分）。
     if (pubkey === this.self.pubkey || this.isBlocked(pubkey) || this.contacts.some((c) => c.pubkey === pubkey)) return;
     const hint = normalizeRelayUrl(relayUrl ?? inlineHint);
+    // 對方已在請求區（他先加了我）：手動貼 npub 加他＝接受。否則會另建一個 `npub1abc…` 佔位的聯絡人、
+    // 請求留著不清，而對方這次已送過個人檔、不會再送——名字要等他重開才補得回來（2026-10-30 實機）。
+    if (this.requests.some((r) => r.pubkey === pubkey)) {
+      this.acceptRequest(pubkey);
+      if (hint && hint !== this.homeUrl) {
+        this.storage.updateContactRelay(pubkey, hint);
+        this.contacts = this.storage.loadContacts();
+      }
+      return;
+    }
     this.storage.addContact(
       this.stampAt({
         pubkey,
