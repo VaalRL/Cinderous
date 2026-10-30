@@ -1396,6 +1396,24 @@ describe("顯示名稱個人檔（ADR-0061，加密廣播）", () => {
     a.stop();
     b.stop();
   });
+
+  it("🔴 對方先加了我、我改用貼 npub 加他（沒按接受）→ 一樣是接受：沿用請求裡學到的名字，請求清掉（2026-10-30 實機）", () => {
+    const net = createInMemoryRelayNetwork();
+    const storeA = new MemoryStorage();
+    const storeB = new MemoryStorage();
+    const a = new RelayChatBackend(storeA, (h) => net.connect("a", h), "Alice");
+    const b = new RelayChatBackend(storeB, (h) => net.connect("b", h), "Bob");
+    a.start(noop);
+    b.start(noop);
+    a.addContact(b.selfNpub);
+    // A 這次已經送過個人檔給 B，不會再送一次——B 只能靠請求裡那份名字。
+    b.addContact(a.selfNpub);
+    expect(storeB.loadContacts().find((c) => c.pubkey === a.self.pubkey)?.name).toBe("Alice");
+    expect(storeB.loadRequests()).toEqual([]);
+    expect(storeA.loadContacts().find((c) => c.pubkey === b.self.pubkey)?.name).toBe("Bob");
+    a.stop();
+    b.stop();
+  });
 });
 
 describe("群組送達/已讀分級（ADR-0095）", () => {
