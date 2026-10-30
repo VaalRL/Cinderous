@@ -66,3 +66,19 @@ export function publicInboxRelaysFor(homeUrl: string | undefined): string[] {
 // ⚠ 這是**編譯期常數**：已出貨的客戶端仍只認舊公鑰。並存期間 `relays.json` 每次變動
 // 都要用新舊金鑰**各簽一次**，否則舊客戶端會收不到任何清單更新而變成孤島。
 export const MAINTAINER_PUBKEY = "7b5cd386c71c1c68ecf979ffe9dde6a008090ee3fbe377934a1bbb3ff6dd5114";
+
+/**
+ * 中繼分片開關（ADR-0241）：**預設開**。啟用後 home 收件匣連自己的訊息片、發布路由到 `shard(對方)`、
+ * presence 走獨立層——全由引擎依 `shardingBase` 處理（見 relay-backend）。
+ * kill-switch：若產線有狀況，設 `localStorage nb.sharding=0` 即停用、退回單一全域 DO（不需改版）。
+ *
+ * 🔴 桌面與行動端**必須**同一個值（ADR-0407）：一邊分片、一邊不分片，分片端寄出的訊息會落在對方的訊息片，
+ * 不分片的那邊只聽主網址、永遠收不到。2026-10-30 之前這個函式只在桌面，行動端從沒開過分片。
+ */
+export function shardingEnabled(): boolean {
+  try {
+    return globalThis.localStorage?.getItem("nb.sharding") !== "0";
+  } catch {
+    return true;
+  }
+}

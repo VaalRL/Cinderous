@@ -15,6 +15,8 @@ import {
   MAINTAINER_PUBKEY,
   type PairBundleOrg,
   RelayChatBackend,
+  type RelayConnector,
+  shardingEnabled,
   type Status,
   webSocketConnector,
 } from "@cinderous/engine";
@@ -29,6 +31,8 @@ export const DEFAULT_RELAY = "wss://cinder-relay.cinderous1.workers.dev";
 export interface MobileBackendOptions {
   /** 與 App 共用的儲存（ADR-0094：保留上限/導出需同一份）。 */
   store?: AppStorage | undefined;
+  /** 測試注入記憶體網路（ADR-0407）；預設真的 WebSocket。 */
+  connectorFor?: ((url: string) => RelayConnector) | undefined;
   /** 加密雲端備份模式（ADR-0071）；`off`／未提供＝不發佈快照。 */
   cloudSync?: CloudSyncMode | undefined;
   /** 上線時的初始狀態（ADR-0164／0168：本機記住的上次手動狀態）；未提供＝online。 */
@@ -68,10 +72,14 @@ export function createRelayChat(
   // ADR-0180：企業**成員**（enterprise）鎖定公司座——**不漫遊、不遞補、不學錨點**（與桌面
   // buildBackend 同款）：連公司自架 relay 收名冊/allowlist，不該被自動改道到公開錨點座（否則
   // 收不到名冊、還把企業裝置心跳洩漏到公司外）。企業主（orgOwner）與個人身分照舊漫遊保命。
+  const connectorFor = opts.connectorFor ?? webSocketConnector;
   const roaming = opts.org?.enterprise
     ? {}
     : {
-        connectorFor: webSocketConnector,
+        connectorFor,
+        // ADR-0407：與桌面同樣預設開分片（ADR-0241）——收件匣連自己的訊息片、發布路由到 shard(對方)。
+        // 過去行動端沒開：桌面寄來的訊息落在手機的訊息片上，手機只聽主網址，全部收不到。
+        ...(shardingEnabled() ? { shardingBase: relayUrl } : {}),
         // 錨點恆連保底：不再只綁使用者當下那一座（去重，避免同座重複）。
         anchors: [...new Set([relayUrl, ...ANCHOR_RELAYS])],
         publicIndexRelays: PUBLIC_INDEX_RELAYS, // ADR-0382 §2：公開聯絡方式（使用者打開才發布）
@@ -80,7 +88,7 @@ export function createRelayChat(
       };
   return new RelayChatBackend(
     opts.store ?? new LocalStorage(identity.pubkey),
-    webSocketConnector(relayUrl),
+    connectorFor(relayUrl),
     identity.name,
     {
       relayUrl,

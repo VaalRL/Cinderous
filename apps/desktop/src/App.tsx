@@ -174,7 +174,7 @@ import {
   withoutLabel,
   withPinned,
 } from "./ui/group-labels.js";
-import { ANCHOR_RELAYS, MAINTAINER_PUBKEY, PUBLIC_INDEX_RELAYS, publicInboxRelaysFor } from "@cinderous/engine";
+import { ANCHOR_RELAYS, MAINTAINER_PUBKEY, PUBLIC_INDEX_RELAYS, publicInboxRelaysFor, shardingEnabled } from "@cinderous/engine";
 import { initIdle, reduceIdle, type IdleState } from "./ui/idle-status.js";
 import { setBroadcastAvatars } from "./ui/personalize.js";
 import {
@@ -398,20 +398,6 @@ function normalizeAdminPubkey(input: string): string | undefined {
  * connectorFor/anchors/onHomeSwitched → 不漫遊、不遞補；個人身分走開放模式。
  * 資料以 profile.namespace 隔離。
  */
-/**
- * 中繼分片開關（ADR-0241）：**預設開**。pre-release 幾乎無使用者 → 直接切換（不需雙讀/最低版本閘遷移；
- * 全域 DO 上頂多幾則離線留言，可捨棄）。啟用後 home 收件匣連自己的訊息片、發布路由到 `shard(對方)`、
- * presence 走獨立層——全由引擎依 `shardingBase` 處理（見 relay-backend）。
- * kill-switch：若產線有狀況，設 `localStorage nb.sharding=0` 即停用、退回單一全域 DO（不需改版）。
- */
-function shardingEnabled(): boolean {
-  try {
-    return localStorage.getItem("nb.sharding") !== "0";
-  } catch {
-    return true;
-  }
-}
-
 // ADR-0306 D1（2026-07-31）：原本這裡有一道 `fsUiEnabled()`——以 `localStorage nb.fs=1`
 // 把整個 FS 區塊對使用者隱藏，來源是 ADR-0245 Phase 3「審計通過前不得產線啟用」。
 //
