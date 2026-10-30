@@ -16,6 +16,7 @@ export function useExpiryClock(msgs: Iterable<{ expiresAt?: number }>): number {
     // +50ms：計時器可能早一點點醒，醒來時要確定已經過了到期時刻。
     const id = setTimeout(() => setNow(Date.now()), Math.min(Math.max(next - Date.now(), 0) + 50, MAX_DELAY));
     return () => clearTimeout(id);
-  }, [next]);
+    // 依賴 `now`：截斷的計時器醒來時 `next` 沒變，只靠 `next` 不會再排下一段（2026-10-30 審查）。
+  }, [next, now]);
   return now;
 }
