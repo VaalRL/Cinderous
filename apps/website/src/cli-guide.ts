@@ -187,7 +187,7 @@ const en: CliGuide = {
           p: "By default the CLI uses the official anchor relay, which runs on a free plan shared by everyone: each identity may send up to 120 events a minute, and a `listen` left running keeps a connection open the whole time. If your agent talks a lot, [run your own relay](view:selfhost) and point the CLI at it with `--relay`.",
         },
         {
-          p: "**Don't start the CLI more than three or four times a minute on the same machine.** Each run opens a new connection, and the relay accepts at most 4 new connections a minute (and 20 every 10 minutes) from one IP address to each shard — your desktop app on the same network counts too. Past that it refuses the connection for a few minutes; the CLI then says so on stderr, and `ask` returns `relay-unavailable` with a `retryAt` instead of waiting out its timeout. To wait for messages, keep one `listen` running instead of starting new processes.",
+          p: "**Don't start the CLI more than about ten times a minute on the same machine.** Each run opens a new connection, and the relay accepts at most 12 new connections a minute (and 60 every 10 minutes) from one IP address to each shard — your desktop app and phone on the same network count too. Past that it refuses the connection for a minute or more; the CLI then says so on stderr, and `ask` returns `relay-unavailable` with a `retryAt` instead of waiting out its timeout. To wait for messages, keep one `listen` running instead of starting new processes.",
         },
       ],
     },
@@ -306,7 +306,7 @@ const zh: CliGuide = {
           p: "CLI 預設使用官方錨點中繼。它跑在大家共用的免費方案上：每個身分每分鐘最多 120 則事件，而一直開著的 `listen` 會一直佔著一條連線。如果你的 agent 話很多，請[自己架一座中繼站](view:selfhost)，再用 `--relay` 指向它。",
         },
         {
-          p: "**同一台機器一分鐘內不要啟動 CLI 超過三、四次。** 每次啟動都會開一條新連線，而中繼對同一個 IP、同一個分片每分鐘最多接受 4 條新連線（每 10 分鐘 20 條），同一個網路裡的桌面版也算在內。超過之後中繼會拒絕連線幾分鐘；CLI 會在 stderr 說明，`ask` 也會直接回 `relay-unavailable` 和 `retryAt`，不空等到逾時。要等訊息，請讓一個 `listen` 一直開著，不要一直開新的程序。",
+          p: "**同一台機器一分鐘內不要啟動 CLI 超過十次左右。** 每次啟動都會開一條新連線，而中繼對同一個 IP、同一個分片每分鐘最多接受 12 條新連線（每 10 分鐘 60 條），同一個網路裡的桌面版和手機也算在內。超過之後中繼會拒絕連線一分鐘以上；CLI 會在 stderr 說明，`ask` 也會直接回 `relay-unavailable` 和 `retryAt`，不空等到逾時。要等訊息，請讓一個 `listen` 一直開著，不要一直開新的程序。",
         },
       ],
     },

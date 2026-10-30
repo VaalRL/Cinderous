@@ -132,16 +132,17 @@ namespace_id = "1002"
 limit = 30
 period = 60
 
-# 主平面的升級限速（ADR-0391）：以「IP＋DO 名」計數（主平面分 16 片，共用 IP 後面的人分散在不同的桶）。
-# 正常用戶端每個分片一條連線、連上就掛著；每分鐘 4 次只有不退避的用戶端會碰到
-# （2026-10-20：錨點 2 有個來源每 8 秒重連 shard-b 一次，一天約 4.5 萬次 DO 請求）。
-# 長窗口那道在 DO 記憶體裡（RECONNECT_GUARD，預設 20/600/600）。⚠ 同樣是 per-location 計數且最終一致。
+# 主平面的升級限速（ADR-0391、ADR-0409）：以「IP＋DO 名」計數（主平面分 16 片，共用 IP 後面的人分散在不同的桶）。
+# 每分鐘 12 次（ADR-0409）：原本 4 次，同一個網路裡的手機＋桌面＋平板＋CLI 一次斷線就用光，
+# 斷斷續續的手機網路照退避也會撞到。每 8 秒重連一次的來源（2026-10-20，錨點 2 shard-b，每分鐘約 7.5 次）
+# 會穿過這一道，由 DO 那一道（RECONNECT_GUARD，預設 20/600/600＝沒認證就斷線 10 分鐘 20 條；
+# 總上限 60，SDK ADR 0131）擋下。⚠ 同樣是 per-location 計數且最終一致。
 [[ratelimits]]
 name = "STRICT_UPGRADE_LIMIT"
 namespace_id = "1003"
 
 [ratelimits.simple]
-limit = 4
+limit = 12
 period = 60
 
 # ── 統一節點模式（ADR-0354，選配）───────────────────────────────────────────────
@@ -228,5 +229,5 @@ name = "STRICT_UPGRADE_LIMIT"
 namespace_id = "1003"
 
 [env.unified.ratelimits.simple]
-limit = 4
+limit = 12
 period = 60
