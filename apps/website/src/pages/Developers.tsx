@@ -102,7 +102,8 @@ function Inline({ text, locale, onNavigate }: { text: string; locale: Locale; on
   return <>{out}</>;
 }
 
-function BlockView({ block, locale, onNavigate }: { block: Block; locale: Locale; onNavigate?: Navigate | undefined }): JSX.Element {
+/** 一個內容區塊（段落、提示、程式碼、清單、表格）。CLI 頁也用它（ADR-0405）。 */
+export function BlockView({ block, locale, onNavigate }: { block: Block; locale: Locale; onNavigate?: Navigate | undefined }): JSX.Element {
   const inline = (t: string): JSX.Element => <Inline text={t} locale={locale} onNavigate={onNavigate} />;
   if ("p" in block) return <p>{inline(block.p)}</p>;
   if ("note" in block) return <p className="docs__note">{inline(block.note)}</p>;

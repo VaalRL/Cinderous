@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ChatMessage, Contact, Group } from "@cinderous/engine";
 import type { GroupPrefsMap } from "./group-labels.js";
-import { buildEntries, lastInteraction, matchesQuery, sortEntries, visibleEntries } from "./deck-sidebar.js";
+import { buildEntries, lastInteraction, matchesQuery, messagePreview, sortEntries, visibleEntries } from "./deck-sidebar.js";
 
 const c = (pubkey: string, name: string, status: Contact["status"] = "online"): Contact => ({
   pubkey,
@@ -64,5 +64,17 @@ describe("三欄左側欄邏輯（ADR-0079 Q2）", () => {
     const entries = buildEntries([c("a", "A"), c("b", "B")], [], convos, prefs);
     expect(visibleEntries(entries, "", "vip", convos).map((e) => e.id)).toEqual(["a"]); // 只有 a 有 vip
     expect(visibleEntries(entries, "world", undefined, convos).map((e) => e.id)).toEqual(["b"]); // 內容命中
+  });
+});
+
+describe("messagePreview：限時訊息", () => {
+  const now = 10_000;
+  it("🔴 末則已到期 → 不顯示原文，改顯示到期字樣", () => {
+    const convos = { aa: [{ ...msg("密碼是 1234", 1), expiresAt: now - 1 }] };
+    expect(messagePreview("aa", convos, "訊息已到期", now)).toBe("訊息已到期");
+  });
+  it("還沒到期照常顯示", () => {
+    const convos = { aa: [{ ...msg("週五見", 1), expiresAt: now + 1 }] };
+    expect(messagePreview("aa", convos, "訊息已到期", now)).toBe("週五見");
   });
 });

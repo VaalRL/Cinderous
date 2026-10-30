@@ -990,6 +990,9 @@ export class RelayChatBackend implements ChatBackend {
     // 索引若還沒建好，`onFileBytes` 查不到既有訊息 ⇒ 去重失效、又跳一次「另存新檔」。
     // 這是把它放在下方歷史回放裡的第一版沒修好的原因。
     this.hydrateFileIndex();
+    // 同一個理由（ADR-0404）：已存訊息的 rumor id 也要先進去重集合，否則補推來的舊訊息會再走一次
+    // `onMessage`。下方歷史回放仍照舊交付 `onHistory`（重複加入去重集合無害）。
+    this.hydrateSeenMessages();
     this.resubscribe();
     this.beat();
     this.broadcastProfile(); // ADR-0061：把自己的顯示名稱廣播給聯絡人
@@ -1434,6 +1437,16 @@ export class RelayChatBackend implements ChatBackend {
         if (m.file) this.fileMsgByTid.set(m.file.tid, { contact: g.id, msgId: m.id });
       }
     }
+  }
+
+  /**
+   * 已存訊息與回應的 id 先進去重集合（ADR-0404）。**必須在 `resubscribe()` 之前**，理由同
+   * {@link hydrateFileIndex}：訂閱一掛上，中繼可能立刻把收件匣推過來。下方歷史回放會再加一次，無害。
+   */
+  private hydrateSeenMessages(): void {
+    for (const c of this.contacts) for (const m of this.storage.loadMessages(c.pubkey)) this.seenMsg.add(m.id);
+    for (const g of this.groups) for (const m of this.storage.loadMessages(g.id)) this.seenMsg.add(m.id);
+    for (const r of this.storage.loadReactions()) this.seenMsg.add(r.id);
   }
 
   private resubscribeRelay(url: string): void {

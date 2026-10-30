@@ -267,7 +267,7 @@ export function DeckSidebar(props: DeckSidebarProps): JSX.Element {
               hint={t("contact_openHint")}
               {...(e.statusMessage ? { statusMessage: e.statusMessage } : {})}
               {...(e.nowPlaying ? { nowPlaying: e.nowPlaying } : {})}
-              preview={messagePreview(e.id, props.convos)}
+              preview={messagePreview(e.id, props.convos, t("convo_expired"))}
               {...(e.title ? { title: e.title } : {})}
               labels={e.labels}
               onOpen={props.onOpen}
@@ -281,7 +281,7 @@ export function DeckSidebar(props: DeckSidebarProps): JSX.Element {
             <DeckRow
               key={e.id}
               entry={e}
-              preview={messagePreview(e.id, props.convos)}
+              preview={messagePreview(e.id, props.convos, t("convo_expired"))}
               unread={props.unread[e.id] ?? 0}
               editing={labelEditId === e.id}
               labelDraft={labelDraft}

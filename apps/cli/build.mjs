@@ -15,4 +15,6 @@ await build({
   format: "esm",
   outfile: "dist/cinder.js",
   define: { __APP_VERSION__: JSON.stringify(version) },
+  // 單檔發行（ADR-0405）：Unix 上 chmod +x 就能直接執行；Node 本身會略過這一行。
+  banner: { js: "#!/usr/bin/env node" },
 });

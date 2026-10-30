@@ -25,6 +25,9 @@ importers:
         specifier: workspace:*
         version: link:../../packages/engine
     devDependencies:
+      '@cinderous/relay':
+        specifier: workspace:*
+        version: link:../../relay
       '@types/node':
         specifier: ^22.10.2
         version: 22.20.0

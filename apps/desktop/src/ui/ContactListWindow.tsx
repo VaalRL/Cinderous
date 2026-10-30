@@ -291,7 +291,7 @@ export function ContactListWindow(props: ContactListProps): JSX.Element {
       hint={t("contact_openHint")}
       {...(c.statusMessage ? { statusMessage: c.statusMessage } : {})}
       {...(c.nowPlaying ? { nowPlaying: c.nowPlaying } : {})}
-      {...(props.convos ? { preview: messagePreview(c.pubkey, props.convos) } : {})}
+      {...(props.convos ? { preview: messagePreview(c.pubkey, props.convos, t("convo_expired")) } : {})}
       {...(c.title ? { title: c.title } : {})}
       labels={props.contactLabels?.[c.pubkey] ?? []}
       onOpen={props.onOpen}

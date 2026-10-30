@@ -8,10 +8,12 @@ export function nameOrMessagesMatch(
   id: string,
   query: string,
   convos: Record<string, ChatMessage[]>,
+  now: number = Date.now(),
 ): boolean {
   const q = query.trim().toLowerCase();
   if (!q) return true;
   if (name.toLowerCase().includes(q)) return true;
   const msgs = convos[id];
-  return !!msgs && msgs.some((m) => m.text?.toLowerCase().includes(q));
+  // 到期的限時訊息畫面上已經遮掉，搜它的內容也不能再找到這個人
+  return !!msgs && msgs.some((m) => !(m.expiresAt !== undefined && m.expiresAt <= now) && m.text?.toLowerCase().includes(q));
 }

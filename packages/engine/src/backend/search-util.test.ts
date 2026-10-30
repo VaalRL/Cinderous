@@ -20,4 +20,15 @@ describe("nameOrMessagesMatch（ADR-0256）", () => {
     expect(nameOrMessagesMatch("Amy", "bb", "  ", convos)).toBe(true);
     expect(nameOrMessagesMatch("Amy", "bb", "早餐", convos)).toBe(false);
   });
+  it("🔴 到期的限時訊息不算命中（否則搜它的內容還找得到這個人）", () => {
+    const now = 10_000;
+    const timed: Record<string, ChatMessage[]> = {
+      bb: [
+        { id: "1", outgoing: false, text: "密碼是 1234", at: 1, expiresAt: now - 1 } as ChatMessage,
+        { id: "2", outgoing: false, text: "週五見", at: 2, expiresAt: now + 60_000 } as ChatMessage,
+      ],
+    };
+    expect(nameOrMessagesMatch("Amy", "bb", "1234", timed, now)).toBe(false);
+    expect(nameOrMessagesMatch("Amy", "bb", "週五", timed, now)).toBe(true); // 還沒到期照常
+  });
 });

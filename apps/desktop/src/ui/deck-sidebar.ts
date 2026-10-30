@@ -19,11 +19,20 @@ export interface SidebarEntry {
   nowPlaying?: string;
 }
 
-/** 某對話末則訊息的預覽文字（ADR-0214，經典/三欄共用）；檔案以 `📎 檔名` 佔位；無訊息回空字串。 */
-export function messagePreview(id: string, convos: Record<string, ChatMessage[]>): string {
+/**
+ * 某對話末則訊息的預覽文字（ADR-0214，經典/三欄共用）；檔案以 `📎 檔名` 佔位；無訊息回空字串。
+ * 末則是已到期的限時訊息 → 回 `expiredLabel`（對話視窗遮掉了，預覽不能還留著原文）。
+ */
+export function messagePreview(
+  id: string,
+  convos: Record<string, ChatMessage[]>,
+  expiredLabel: string,
+  now: number = Date.now(),
+): string {
   const msgs = convos[id];
   if (!msgs || msgs.length === 0) return "";
   const last = msgs[msgs.length - 1]!;
+  if (last.expiresAt !== undefined && last.expiresAt <= now) return expiredLabel;
   return last.file ? `📎 ${last.file.name}` : last.text;
 }
 

@@ -3,7 +3,7 @@ import type { Copy } from "../copy.js";
 import { CinderMark } from "../Brand.js";
 import { OFFICIAL_DONATIONS } from "../donations.js";
 import { GITHUB_URL, WEBAPP_URL } from "../App.js";
-import { AppleIcon, GitHubIcon, GlobeIcon, MobileIcon, WindowsIcon } from "../icons.js";
+import { AppleIcon, GitHubIcon, GlobeIcon, MobileIcon, TerminalIcon, WindowsIcon } from "../icons.js";
 
 // 首頁（ADR-0187）：闡述核心價值觀與「取回通訊自主權」的願景。技術細節移至技術原理頁。
 export function Home({
@@ -11,11 +11,17 @@ export function Home({
   theme,
   onNode,
   onTech,
+  cliHref,
+  onCli,
 }: {
   c: Copy;
   theme: Theme;
   onNode: () => void;
   onTech: () => void;
+  /** CLI 頁的網址（ADR-0405）；給了才顯示 hero 的 CLI 入口。 */
+  cliHref?: string;
+  /** 左鍵點擊時交給 SPA 導覽（同 NavLink）。 */
+  onCli?: () => void;
 }): JSX.Element {
   const values = [
     { t: c.val_autonomy_t, b: c.val_autonomy_b },
@@ -81,6 +87,24 @@ export function Home({
               <span className="iconbtn__label">{c.hero_ic_mobile_beta}</span>
               <span className="iconbtn__tip">{c.hero_mobile_caveat}</span>
             </a>
+            {/* CLI（ADR-0405）：連到 CLI 頁而不是直接下載——單一個 .mjs 檔沒有說明，使用者不知道要用 Node 跑、
+                也不知道要先設 --from。下載鈕在那一頁的最上面。 */}
+            {cliHref !== undefined && (
+              <a
+                className="iconbtn"
+                href={cliHref}
+                aria-label={c.hero_tip_cli}
+                onClick={(e) => {
+                  if (!onCli || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey || e.button !== 0) return;
+                  e.preventDefault();
+                  onCli();
+                }}
+              >
+                <TerminalIcon />
+                <span className="iconbtn__label">{c.hero_ic_cli}</span>
+                <span className="iconbtn__tip">{c.hero_tip_cli}</span>
+              </a>
+            )}
             <a
               className="iconbtn"
               href={WEBAPP_URL}

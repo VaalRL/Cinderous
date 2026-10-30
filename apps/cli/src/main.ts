@@ -1,21 +1,24 @@
-// Cinderous CLI（ADR-0098）：無狀態的無頭收發工具。
+// Cinderous CLI（ADR-0098）：無頭收發工具；ADR-0404 加上 agent 私人頻道。
 //
 // 刻意的設計取捨：
-//  - **無本機儲存**（用 MemoryStorage）：不留私鑰、不留明文歷史。歷史請用桌面版的導出（ADR-0094）。
-//  - 私鑰只讀進記憶體，用完隨行程結束；**絕不輸出、絕不寫檔**。
+//  - **預設無本機儲存**（用 MemoryStorage）：不留私鑰、不留明文歷史。歷史請用桌面版的導出（ADR-0094）。
+//    給了 `--state-dir` 才持久化（引擎原本的 LocalStorage，靜態加密；ADR-0404 §2）。
+//  - 私鑰只讀進記憶體，用完隨行程結束；**絕不輸出**。唯一會寫私鑰的是 `keygen --out`（ADR-0404 §4）。
 //  - 只做文字（走中繼）。檔案/通話需要 WebRTC，Node 無瀏覽器環境 → 不支援。
 //  - listen 會拿到中繼站仍保存的近期收件匣（kind 1059，NIP-40 約 7 天）＋連線期間的新訊息。
 
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { getPublicKey, npubDecode, npubEncode, nsecDecode } from "@cinderous/core";
-import { MemoryStorage, RelayChatBackend, webSocketConnector } from "@cinderous/engine";
-import type { ChatBackendEvents } from "@cinderous/engine";
-import { ArgError, HELP, parseArgs, type Command, type NsecSource } from "./args.js";
+import { generateSecretKey, getPublicKey, npubDecode, npubEncode, nsecDecode, nsecEncode } from "@cinderous/core";
+import { LocalStorage, MemoryStorage, type RelayChatBackend } from "@cinderous/engine";
+import { applyAgentSetup, ask, askReport, exitCodeForError, listenEvents, sendAndConfirm, type AgentIo } from "./agent.js";
+import { createCliBackend } from "./backend.js";
+import { ArgError, HELP, parseArgs, type AgentOptions, type Command, type NsecSource } from "./args.js";
 import { HOST, portBusyMessage, startServer } from "./serve.js";
+import { installMemoryKv, installStateDir, openStateDir, resolveName, StateDirError } from "./state-dir.js";
 
 /** 讀出私鑰（不回顯、不落地）。env 來源會警告。 */
 function loadNsec(src: NsecSource): string {
@@ -30,23 +33,34 @@ function loadNsec(src: NsecSource): string {
   }
 }
 
-/** 建立無頭後端（記憶體儲存＝不落地）。 */
-function makeBackend(nsec: string, relay: string): RelayChatBackend {
-  return new RelayChatBackend(new MemoryStorage(), webSocketConnector(relay), "cli", {
-    relayUrl: relay,
-    connectorFor: webSocketConnector,
-    anchors: [relay],
-    nsecOverride: nsec,
-  });
+/**
+ * 建立無頭後端。沒給 `--state-dir`＝記憶體儲存（不落地）；給了就把狀態目錄裝成全域
+ * `localStorage`，再用引擎原本的 LocalStorage（ADR-0404 §2）。**必須在建後端之前裝**——
+ * 裝置 id 在建構時就讀了。
+ */
+function makeBackend(nsec: string, relay: string, o: AgentOptions): RelayChatBackend {
+  const sk = nsecDecode(nsec);
+  let storage: MemoryStorage | LocalStorage = new MemoryStorage();
+  let kv: Storage | undefined;
+  if (o.stateDir) {
+    const state = openStateDir(o.stateDir, getPublicKey(sk));
+    process.on("exit", () => state.release());
+    installStateDir(state);
+    kv = state.kv;
+    storage = new LocalStorage("cli", 0, sk);
+  } else {
+    installMemoryKv(); // 裝置 id 等小東西也只留在記憶體
+  }
+  return createCliBackend(storage, nsec, relay, resolveName(kv, o.name));
 }
 
-/** ChatBackendEvents 的必填欄位樣板（CLI 只關心其中幾個）。 */
-const noopEvents: ChatBackendEvents = {
-  onContacts() {},
-  onMessage() {},
-  onTyping() {},
-  onNudge() {},
-};
+const io: AgentIo = { out: (l) => console.log(l), err: (l) => console.error(l) };
+
+/** `--from` 的 npub → hex（非法 npub 直接報錯，不默默放行）。 */
+function allowOf(from: string[] | undefined): Set<string> | undefined {
+  if (!from) return undefined;
+  return new Set(from.map((n) => npubDecode(n)));
+}
 
 /** 已建置的桌面 App（瀏覽器版）。從 CLI 自身位置推出，`--dir` 可覆寫。 */
 function defaultStaticDir(): string {
@@ -110,9 +124,27 @@ async function run(cmd: Command): Promise<number> {
     console.log(HELP);
     return 0;
   }
+  if (cmd.cmd === "version") {
+    // 建置時由 esbuild `define` 注入（build.mjs，ADR-0227 P2）；直接用 tsx 跑原始碼時沒有它。
+    console.log(typeof __APP_VERSION__ === "string" ? __APP_VERSION__ : "dev");
+    return 0;
+  }
 
   // serve **不需要私鑰**：它只送靜態資源，私鑰全程在瀏覽器裡。必須在 loadNsec 之前分派。
   if (cmd.cmd === "serve") return await serve(cmd);
+
+  if (cmd.cmd === "keygen") {
+    // 唯一會寫私鑰的指令（ADR-0404 §4）：`wx`＝已存在就失敗，絕不覆蓋任何東西；畫面只印 npub。
+    const sk = generateSecretKey();
+    try {
+      writeFileSync(cmd.out, `${nsecEncode(sk)}\n`, { flag: "wx", mode: 0o600 });
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code === "EEXIST") throw new ArgError(`檔案已存在，不覆蓋：${cmd.out}`);
+      throw e;
+    }
+    console.log(npubEncode(getPublicKey(sk)));
+    return 0;
+  }
 
   const nsec = loadNsec(cmd.nsec);
   if (!nsec.startsWith("nsec1")) throw new ArgError("私鑰格式不正確（應為 nsec1…）");
@@ -124,56 +156,52 @@ async function run(cmd: Command): Promise<number> {
     return 0;
   }
 
-  const backend = makeBackend(nsec, cmd.relay);
+  const backend = makeBackend(nsec, cmd.relay, cmd);
+
+  if (cmd.cmd === "ask") {
+    const result = await ask(
+      backend,
+      {
+        to: npubDecode(cmd.to),
+        text: cmd.text,
+        timeoutMs: cmd.timeout * 1000,
+        approve: cmd.approve,
+        ...(cmd.ttl !== undefined ? { ttl: cmd.ttl } : {}),
+        onCode: (code) => console.error(`… 短碼 ${code}：等「yes ${code}」或「no ${code}」`),
+        onLog: (l) => console.error(l),
+      },
+      cmd,
+    );
+    backend.stop();
+    const { code, ok } = askReport(result);
+    // denied 是你給的答案（印 stdout），只是 ok:false；逾時與失敗走 stderr。
+    (result.decision === "failed" || result.decision === "timeout" ? console.error : console.log)(
+      JSON.stringify({ ok, to: cmd.to, ...result }),
+    );
+    return code;
+  }
 
   if (cmd.cmd === "send") {
     const to = npubDecode(cmd.to); // 非法 npub 會拋錯
-    return await new Promise<number>((resolve) => {
-      // 逾時保護：連不上中繼就不要無限卡住。
-      const timer = setTimeout(() => {
-        console.error("⚠ 逾時：未收到中繼站確認（訊息可能未送出）。");
-        backend.stop();
-        resolve(1);
-      }, 15_000);
-
-      backend.start({
-        ...noopEvents,
-        // Tier 1（ADR-0058）：中繼接受＝已送出。failed＝重試耗盡/被拒（ADR-0095）。
-        onMessageStatus: (_c, _id, status) => {
-          if (status === "sent") {
-            clearTimeout(timer);
-            console.log(JSON.stringify({ ok: true, to: cmd.to, status }));
-            backend.stop();
-            resolve(0);
-          } else if (status === "failed") {
-            clearTimeout(timer);
-            console.error(JSON.stringify({ ok: false, to: cmd.to, status }));
-            backend.stop();
-            resolve(1);
-          }
-        },
-      });
-      backend.sendMessage(to, cmd.text);
-    });
+    // 逾時保護：連不上中繼就不要無限卡住。failed＝重試耗盡/被拒（ADR-0095）。
+    const status = await sendAndConfirm(backend, to, cmd.text, { timeoutMs: 15_000, ...(cmd.ttl !== undefined ? { ttl: cmd.ttl } : {}) }, cmd);
+    backend.stop();
+    if (status === "sent") {
+      console.log(JSON.stringify({ ok: true, to: cmd.to, status }));
+      return 0;
+    }
+    if (status === "timeout") console.error("⚠ 逾時：未收到中繼站確認（訊息可能未送出）。");
+    console.error(JSON.stringify({ ok: false, to: cmd.to, status }));
+    return 1;
   }
 
   // listen：以 JSON Lines 印出收到的訊息，方便接管線（jq、腳本、通知…）。
   console.error(`… 連線 ${cmd.relay}（Ctrl+C 結束）`);
-  backend.start({
-    ...noopEvents,
-    onMessage: (contact, m) => {
-      if (m.outgoing) return; // 只印收到的
-      console.log(
-        JSON.stringify({
-          from: npubEncode(contact),
-          at: m.at,
-          text: m.text,
-          ...(m.file ? { file: { name: m.file.name, size: m.file.size } } : {}),
-        }),
-      );
-    },
-    onConnection: (state) => console.error(`… 中繼狀態：${state}`),
-  });
+  const allow = allowOf(cmd.from);
+  if (!allow) console.error("⚠ 沒有 --from：任何人的訊息都會印出來。交給 agent 處理時，請只接受你自己（ADR-0404）。");
+  if (!cmd.stateDir) console.error("… 沒有 --state-dir：重開會把中繼上 7 天內的訊息再印一次。");
+  backend.start(listenEvents(io, allow));
+  applyAgentSetup(backend, cmd);
   process.on("SIGINT", () => {
     backend.stop();
     process.exit(0);
@@ -184,6 +212,6 @@ async function run(cmd: Command): Promise<number> {
 try {
   process.exit(await run(parseArgs(process.argv.slice(2), process.env)));
 } catch (e) {
-  console.error(e instanceof ArgError ? `✖ ${e.message}` : e);
-  process.exit(1);
+  console.error(e instanceof ArgError || e instanceof StateDirError ? `✖ ${e.message}` : e);
+  process.exit(exitCodeForError(e));
 }
