@@ -14,12 +14,34 @@ import { setKvBackend } from "@cinderous/engine";
 
 export class StateDirError extends Error {}
 
-/** 檔案為底的 `Storage`：每次寫入整份落地（先寫暫存檔再改名，斷電不會留下半份）。 */
-export class FileKv implements Storage {
-  private readonly data: Map<string, string>;
+/** 記憶體的 `Storage`（沒給 --state-dir 時用；不落地）。 */
+export class MemoryKv implements Storage {
+  protected readonly data = new Map<string, string>();
 
+  get length(): number {
+    return this.data.size;
+  }
+  key(index: number): string | null {
+    return [...this.data.keys()][index] ?? null;
+  }
+  getItem(key: string): string | null {
+    return this.data.get(key) ?? null;
+  }
+  setItem(key: string, value: string): void {
+    this.data.set(key, String(value));
+  }
+  removeItem(key: string): void {
+    this.data.delete(key);
+  }
+  clear(): void {
+    this.data.clear();
+  }
+}
+
+/** 檔案為底的 `Storage`：每次寫入整份落地（先寫暫存檔再改名，斷電不會留下半份）。 */
+export class FileKv extends MemoryKv {
   constructor(private readonly file: string) {
-    this.data = new Map();
+    super();
     if (!existsSync(file)) return;
     let parsed: unknown;
     try {
@@ -33,24 +55,17 @@ export class FileKv implements Storage {
     }
   }
 
-  get length(): number {
-    return this.data.size;
-  }
-  key(index: number): string | null {
-    return [...this.data.keys()][index] ?? null;
-  }
-  getItem(key: string): string | null {
-    return this.data.get(key) ?? null;
-  }
-  setItem(key: string, value: string): void {
-    this.data.set(key, String(value));
+  override setItem(key: string, value: string): void {
+    super.setItem(key, value);
     this.flush();
   }
-  removeItem(key: string): void {
-    if (this.data.delete(key)) this.flush();
+  override removeItem(key: string): void {
+    if (!this.data.has(key)) return;
+    super.removeItem(key);
+    this.flush();
   }
-  clear(): void {
-    this.data.clear();
+  override clear(): void {
+    super.clear();
     this.flush();
   }
 
@@ -69,6 +84,20 @@ export interface StateDir {
 
 /** 這個目錄綁定的身分（hex 公鑰）。 */
 const PUBKEY_KEY = "cli.pubkey";
+/** 上次用的 `--name`。 */
+const NAME_KEY = "cli.name";
+
+/**
+ * 這次送給對方的顯示名稱。名稱每次都會送出，忘了帶 `--name` 時，對方 App 裡的名稱會被改回預設——
+ * 有狀態目錄就記住上次給的、沒給時沿用。
+ */
+export function resolveName(kv: Storage | undefined, name: string | undefined): string {
+  if (name !== undefined) {
+    kv?.setItem(NAME_KEY, name);
+    return name;
+  }
+  return kv?.getItem(NAME_KEY) ?? "cli";
+}
 
 function pidAlive(pid: number): boolean {
   try {
@@ -127,6 +156,20 @@ export function openStateDir(dir: string, pubkey: string): StateDir {
 
 /** 把狀態目錄裝成全域 `localStorage`＋引擎的 KV（裝置 id 從此固定）。必須在建立後端之前呼叫。 */
 export function installStateDir(state: StateDir): void {
-  Object.defineProperty(globalThis, "localStorage", { value: state.kv, configurable: true, writable: true });
-  setKvBackend(state.kv);
+  installKv(state.kv);
+}
+
+/**
+ * 沒給 --state-dir：裝一份記憶體的。Node 25 起內建全域 localStorage，沒給 `--localstorage-file`
+ * 時引擎一碰就印 ExperimentalWarning，agent 讀 stderr 會被干擾。
+ */
+export function installMemoryKv(): MemoryKv {
+  const kv = new MemoryKv();
+  installKv(kv);
+  return kv;
+}
+
+function installKv(kv: Storage): void {
+  Object.defineProperty(globalThis, "localStorage", { value: kv, configurable: true, writable: true });
+  setKvBackend(kv);
 }

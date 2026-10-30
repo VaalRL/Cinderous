@@ -13,11 +13,12 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { generateSecretKey, getPublicKey, npubDecode, npubEncode, nsecDecode, nsecEncode } from "@cinderous/core";
-import { LocalStorage, MemoryStorage, RelayChatBackend, webSocketConnector } from "@cinderous/engine";
+import { LocalStorage, MemoryStorage, type RelayChatBackend } from "@cinderous/engine";
 import { applyAgentSetup, ask, listenEvents, noopEvents, type AgentIo } from "./agent.js";
+import { createCliBackend } from "./backend.js";
 import { ArgError, HELP, parseArgs, type AgentOptions, type Command, type NsecSource } from "./args.js";
 import { HOST, portBusyMessage, startServer } from "./serve.js";
-import { installStateDir, openStateDir, StateDirError } from "./state-dir.js";
+import { installMemoryKv, installStateDir, openStateDir, resolveName, StateDirError } from "./state-dir.js";
 
 /** 讀出私鑰（不回顯、不落地）。env 來源會警告。 */
 function loadNsec(src: NsecSource): string {
@@ -40,18 +41,17 @@ function loadNsec(src: NsecSource): string {
 function makeBackend(nsec: string, relay: string, o: AgentOptions): RelayChatBackend {
   const sk = nsecDecode(nsec);
   let storage: MemoryStorage | LocalStorage = new MemoryStorage();
+  let kv: Storage | undefined;
   if (o.stateDir) {
     const state = openStateDir(o.stateDir, getPublicKey(sk));
     process.on("exit", () => state.release());
     installStateDir(state);
+    kv = state.kv;
     storage = new LocalStorage("cli", 0, sk);
+  } else {
+    installMemoryKv(); // 裝置 id 等小東西也只留在記憶體
   }
-  return new RelayChatBackend(storage, webSocketConnector(relay), o.name ?? "cli", {
-    relayUrl: relay,
-    connectorFor: webSocketConnector,
-    anchors: [relay],
-    nsecOverride: nsec,
-  });
+  return createCliBackend(storage, nsec, relay, resolveName(kv, o.name));
 }
 
 const io: AgentIo = { out: (l) => console.log(l), err: (l) => console.error(l) };

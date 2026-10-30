@@ -244,7 +244,7 @@ serve（不需要私鑰——私鑰全程在瀏覽器裡）：
 agent 私人頻道（ADR-0404；給 Claude Code 等 agent 用自己的身分跟你聯絡）：
   --from <npub>                         只接受這個人的訊息（可重複）；🔴 listen 不給就是任何人都能下指令
   --state-dir <目錄>                    持久狀態：裝置固定、重開不重複處理（一個目錄同時只給一個程序用）
-  --name <名稱>                         對方 App 裡顯示的名稱（預設 cli）
+  --name <名稱>                         對方 App 裡顯示的名稱（預設 cli；有 --state-dir 會記住）
   --ttl <秒>                            限時訊息（send／ask），1 秒到 7 天；到期中繼與對方 App 都刪除
   --fs on|off                           這個身分的前向保密（要搭 --state-dir）；只保護中繼上的密文，
                                         agent 讀到的明文仍會進 LLM

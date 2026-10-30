@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { getDeviceId } from "@cinderous/engine";
-import { FileKv, installStateDir, openStateDir, StateDirError, type StateDir } from "./state-dir.js";
+import { FileKv, installMemoryKv, installStateDir, openStateDir, resolveName, StateDirError, type StateDir } from "./state-dir.js";
 
 const fresh = () => mkdtempSync(join(tmpdir(), "cinder-state-"));
 const opened: StateDir[] = [];
@@ -82,5 +82,36 @@ describe("openStateDir：綁定身分＋獨占鎖", () => {
     const b = open(dir, "aa");
     installStateDir(b);
     expect(getDeviceId()).toBe(id);
+  });
+});
+
+describe("沒給 --state-dir：純記憶體的 localStorage", () => {
+  // Node 25 起內建全域 localStorage，沒給 --localstorage-file 時一碰就印 ExperimentalWarning——
+  // agent 讀 stderr 會被這行干擾。CLI 自己裝一份記憶體的，蓋掉內建那份；不落地。
+  it("裝上後讀寫都在記憶體、裝置 id 也取得到", () => {
+    const kv = installMemoryKv();
+    expect(globalThis.localStorage).toBe(kv);
+    localStorage.setItem("x", "1");
+    expect(kv.getItem("x")).toBe("1");
+    expect(getDeviceId()).toMatch(/.+/);
+    expect(kv.length).toBeGreaterThan(0);
+  });
+});
+
+describe("--name 記在狀態目錄（2026-10-30 實機對接）", () => {
+  // 名稱每次送給對方；有一次忘了帶，對方 App 裡的名稱就被改回「cli」。
+  it("給了就記住；下次沒給沿用記住的", () => {
+    const dir = fresh();
+    const a = open(dir, "aa");
+    expect(resolveName(a.kv, "Claude")).toBe("Claude");
+    a.release();
+    const b = open(dir, "aa");
+    expect(resolveName(b.kv, undefined)).toBe("Claude");
+    expect(resolveName(b.kv, "Claude（家裡）")).toBe("Claude（家裡）"); // 明確給新的就換
+    expect(resolveName(b.kv, undefined)).toBe("Claude（家裡）");
+  });
+  it("沒有狀態目錄、也沒給 → 預設 cli", () => {
+    expect(resolveName(undefined, undefined)).toBe("cli");
+    expect(resolveName(undefined, "Claude")).toBe("Claude");
   });
 });

@@ -147,6 +147,29 @@ ADR-0098 原本是「CLI 絕不寫檔」。改成：**只有這一個明確的�
 - 同一個狀態目錄跑了 4 個程序，中繼上 agent 的裝置報告（30079）**只有 1 份**（修正前是一次一份）。
 - Windows 上從程式強制結束程序（不經 Ctrl+C）時鎖檔留著；下一個程序看到 pid 已不在就接手，實跑確認可用。
 
+## 跟 App 實機對接（2026-10-30，錨點 2，一次性金鑰）
+
+上面的實跑兩端都是 CLI。這次「你」那端換成桌面 App（瀏覽器版、獨立的 Chrome 設定資料夾，經除錯連接埠操作）。
+
+- 🔴 **發現並修正：CLI 寄給 App 顯示 `sent`，App 卻收不到。** 原因是 App 預設開分片（ADR-0241），收件匣在錨點的訊息片上，CLI 卻只連基底網址、也只知道自己那座錨點。CLI 對 CLI 測不出來，因為兩邊同樣沒開分片。
+  - 修法：建後端抽成 `apps/cli/src/backend.ts`，設定照 App 的個人身分：`shardingBase: relay`、`anchors: ANCHOR_RELAYS`，另帶 `appVersion` 供 ADR-0397 的裝置報告用。
+  - 新增 `backend.test.ts`：每個網址一顆 RelayCore，同一座、不同錨點兩種情況都要雙向送達。修正前紅燈。
+- **發現並修正：Node 25 以上不帶 `--state-dir` 時，stderr 多一行 `ExperimentalWarning: localStorage is not available`。** Node 內建了全域 localStorage，引擎一碰就警告。修法：沒有狀態目錄時裝一份記憶體的 `MemoryKv`，不落地。
+- 修正後的實機結果：
+  - CLI→App 送達。App 端顯示的名稱是 `--name`；要帶 `--from`，CLI 才會把名稱送給對方。
+  - `ask --approve`：App 回「核准 8438」→ `approved`、結束碼 0；回「不要 6307」→ `denied`、結束碼 2。
+  - App 傳指令 → `listen --from` 印出一行 JSON。同一個狀態目錄裡先前已處理過的回覆不重複印。
+  - 跨錨點：CLI 用預設的錨點 1、App 在錨點 2，送達。
+  - `--ttl 30`：App 對話視窗顯示 ⏱，到期後換成「訊息已到期」。
+  - `--fs on`（App 沒開前向保密）：照常送達。
+- 同一輪一併修正（使用者 2026-10-30 指示）：
+  - **App：限時訊息到期後，聯絡人清單的預覽還是原文**，用原文搜尋也還找得到這個人。
+    - `messagePreview` 對已到期的末則改回「訊息已到期」，經典與三欄佈局都適用。
+    - 共用的 `nameOrMessagesMatch` 會跳過已到期的訊息，桌面與手機的搜尋都適用。
+    - 實機確認：到期後清單會自己重繪，原文搜不到。
+  - **CLI：沒帶 `--name` 時，App 裡的名稱被改回「cli」。** 有 `--state-dir` 時記住上次的名稱，沒帶就沿用（`resolveName`）。實機確認名稱維持不變。
+- 🔴 已知、未修：**手機版完全沒處理 `expiresAt`**。到期的限時訊息在手機的對話裡仍顯示原文，桌面版則會遮成「訊息已到期」。這要另外處理。
+
 ## 測試
 
 - `apps/cli/src/args.test.ts`：新旗標與 `keygen`／`ask` 的解析；`--fs` 沒有 `--state-dir` 報錯；
@@ -157,3 +180,7 @@ ADR-0098 原本是「CLI 絕不寫檔」。改成：**只有這一個明確的�
   白名單擋陌生人；重開不重複輸出（含沒有狀態目錄的對照組）；`ask` 只收對的人、送出之後的回覆；
   短碼核准／拒絕／對不上；逾時；連不上時回 `not-sent` 而不是逾時；
   `--ttl` 帶出 `expiration`；`--name` 送到對方；`--fs on` 之後對方加密到 agent 的 EK、重開仍解得開。
+- `apps/cli/src/backend.test.ts`：CLI ↔ App（分片、兩座錨點）雙向送達。
+- `apps/cli/src/state-dir.test.ts`：沒有狀態目錄時裝記憶體的 localStorage。
+- `apps/cli/src/state-dir.test.ts`：`--name` 記在狀態目錄。
+- `apps/desktop/src/ui/deck-sidebar.test.ts`、`packages/engine/src/backend/search-util.test.ts`：到期的限時訊息不進預覽、不被搜到。

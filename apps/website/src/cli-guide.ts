@@ -137,7 +137,7 @@ const en: CliGuide = {
             rows: [
               ["`--from <npub>`", "`listen`", "Only accept messages from this person. Repeatable. Without it, anyone who knows the agent's npub can give it instructions."],
               ["`--state-dir <dir>`", "all", "Keep state between runs: fixed device, no re-processing. One process per directory at a time — give `listen` and `ask` different directories."],
-              ["`--name <name>`", "all", "The name you see in the app (default `cli`)."],
+              ["`--name <name>`", "all", "The name you see in the app (default `cli`). With `--state-dir` it is remembered, so later calls can leave it out."],
               ["`--ttl <seconds>`", "`send`, `ask`", "Disappearing message, 1 second to 7 days. The relay and your app both delete it when it expires."],
               ["`--approve`", "`ask`", "Require `yes <code>` / `no <code>`."],
               ["`--timeout <seconds>`", "`ask`", "How long to wait (default 300)."],
@@ -253,7 +253,7 @@ const zh: CliGuide = {
             rows: [
               ["`--from <npub>`", "`listen`", "只接受這個人的訊息，可以給多個。不給的話，任何知道 agent npub 的人都能對它下指令。"],
               ["`--state-dir <目錄>`", "全部", "跨次保留狀態：裝置固定、不重複處理。同一個目錄同時只能給一個程序用——`listen` 和 `ask` 請各給一個目錄。"],
-              ["`--name <名稱>`", "全部", "你在 App 裡看到的名稱（預設 `cli`）。"],
+              ["`--name <名稱>`", "全部", "你在 App 裡看到的名稱（預設 `cli`）。有 `--state-dir` 時會記住，之後的呼叫可以不帶。"],
               ["`--ttl <秒>`", "`send`、`ask`", "閱後即焚，1 秒到 7 天。到期時中繼和你的 App 都會刪掉。"],
               ["`--approve`", "`ask`", "要回 `yes <短碼>`／`no <短碼>` 才算數。"],
               ["`--timeout <秒>`", "`ask`", "最多等多久（預設 300）。"],
