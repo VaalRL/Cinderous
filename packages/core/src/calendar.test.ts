@@ -128,10 +128,12 @@ describe("共享行程（ADR-0263）", () => {
     });
 
     it("外層不洩漏這是 RSVP 或其狀態", () => {
-      const { events } = wrapCalendarRsvp("evt1", "declined", bobSk, [alice], { now: NOW });
+      // id 帶 base64 沒有的字元（「-」）：原本用 "evt1"，隨機密文偶爾就會拼出這四個字，CI 誤報（2026-10-30）。
+      const eventId = "evt-rsvp-leak-check";
+      const { events } = wrapCalendarRsvp(eventId, "declined", bobSk, [alice], { now: NOW });
       const onTheWire = JSON.stringify(events[0]!);
       expect(onTheWire).not.toContain("declined");
-      expect(onTheWire).not.toContain("evt1");
+      expect(onTheWire).not.toContain(eventId);
     });
 
     it("非法狀態不解析", () => {
