@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ArgError, DEFAULT_RELAY, parseArgs, resolveNsecSource, DEFAULT_PORT } from "./args.js";
+import { ArgError, DEFAULT_RELAY, HELP, parseArgs, resolveNsecSource, DEFAULT_PORT } from "./args.js";
 
 const F = ["--nsec-file", "/k/nsec"]; // 最短的合法金鑰來源
 
@@ -113,5 +113,67 @@ describe("serve（本地啟動器，ADR-0113）", () => {
   it("--dir 的值不會被當成位置參數（同 ADR-0098 的 VALUE_FLAGS 修正）", () => {
     const cmd = parseArgs(["serve", "--dir", "/x/dist"]);
     expect(cmd.cmd).toBe("serve");
+  });
+});
+
+describe("agent 私人頻道的旗標（ADR-0404）", () => {
+  const A = "npub1owner";
+
+  it("--from 可重複；--state-dir／--name 帶進 listen", () => {
+    const c = parseArgs(["listen", ...F, "--from", A, "--from", "npub1b", "--state-dir", "/s", "--name", "家裡的 agent"]);
+    expect(c).toMatchObject({ cmd: "listen", from: [A, "npub1b"], stateDir: "/s", name: "家裡的 agent" });
+  });
+
+  it("沒給的旗標不出現（舊的 send／listen 形狀不變）", () => {
+    expect(parseArgs(["listen", ...F])).toEqual({ cmd: "listen", nsec: { kind: "file", path: "/k/nsec" }, relay: DEFAULT_RELAY });
+  });
+
+  it("旗標的值不會混進訊息內容", () => {
+    const c = parseArgs(["send", A, "嗨", "--state-dir", "/s", "--name", "bot", "--ttl", "60", "--from", "npub1x", ...F]);
+    if (c.cmd !== "send") throw new Error("expected send");
+    expect(c.text).toBe("嗨");
+    expect(c.ttl).toBe(60);
+  });
+
+  it("--ttl：1 秒到 7 天，其他一律報錯（不靜默夾值）", () => {
+    expect(() => parseArgs(["send", A, "嗨", ...F, "--ttl", "0"])).toThrow(ArgError);
+    expect(() => parseArgs(["send", A, "嗨", ...F, "--ttl", "1.5"])).toThrow(ArgError);
+    expect(() => parseArgs(["send", A, "嗨", ...F, "--ttl", String(7 * 86400 + 1)])).toThrow(/7 天/);
+    const c = parseArgs(["send", A, "嗨", ...F, "--ttl", String(7 * 86400)]);
+    expect(c).toMatchObject({ ttl: 7 * 86400 });
+  });
+
+  it("--fs on|off 必須搭 --state-dir（EK 存不下來就解不開對方加密到它的訊息）", () => {
+    expect(() => parseArgs(["listen", ...F, "--fs", "on"])).toThrow(/--state-dir/);
+    expect(() => parseArgs(["listen", ...F, "--state-dir", "/s", "--fs", "maybe"])).toThrow(ArgError);
+    expect(parseArgs(["listen", ...F, "--state-dir", "/s", "--fs", "off"])).toMatchObject({ fs: "off" });
+  });
+
+  it("ask：收件人＋問題；預設逾時 300 秒、不帶短碼", () => {
+    const c = parseArgs(["ask", A, "要部署嗎？", ...F]);
+    expect(c).toMatchObject({ cmd: "ask", to: A, text: "要部署嗎？", timeout: 300, approve: false });
+  });
+
+  it("ask：--approve、--timeout；逾時要是正整數", () => {
+    expect(parseArgs(["ask", A, "部署", ...F, "--approve", "--timeout", "30"])).toMatchObject({ approve: true, timeout: 30 });
+    expect(() => parseArgs(["ask", A, "部署", ...F, "--timeout", "0"])).toThrow(ArgError);
+    expect(() => parseArgs(["ask", ...F])).toThrow(/收件人/);
+    expect(() => parseArgs(["ask", A, ...F])).toThrow(/內容/);
+  });
+
+  it("keygen：要 --out，而且**不解析私鑰來源**（它就是在產生私鑰）", () => {
+    expect(parseArgs(["keygen", "--out", "/k/agent.nsec"], {})).toEqual({ cmd: "keygen", out: "/k/agent.nsec" });
+    expect(() => parseArgs(["keygen"], {})).toThrow(/--out/);
+  });
+});
+
+describe("--version（ADR-0405：從 Release 下載的單檔要看得出版本）", () => {
+  it("--version／-v → version（不需要金鑰）", () => {
+    expect(parseArgs(["--version"], {})).toEqual({ cmd: "version" });
+    expect(parseArgs(["-v"], {})).toEqual({ cmd: "version" });
+  });
+  it("help 開頭說得出這是什麼，不再只寫「無狀態」", () => {
+    expect(HELP.split("\n")[0]).not.toContain("無狀態");
+    expect(HELP).toContain("--version");
   });
 });

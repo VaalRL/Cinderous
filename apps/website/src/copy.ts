@@ -131,6 +131,11 @@ export interface Copy {
   hero_webapp: string;
   hero_tech: string;
   hero_github: string;
+  /** hero 的 CLI 入口（ADR-0405）：連到 CLI 頁。 */
+  hero_ic_cli: string;
+  hero_tip_cli: string;
+  /** 頁尾的 CLI 頁連結（ADR-0405）。 */
+  footer_cli: string;
   vision_title: string;
   vision_body: string;
   values_title: string;
@@ -488,6 +493,9 @@ const zhHant: Copy = {
   hero_webapp: "在瀏覽器開啟",
   hero_tech: "看技術原理",
   hero_github: "在 GitHub 檢視原始碼",
+  hero_ic_cli: "CLI",
+  hero_tip_cli: "命令列工具：讓你的 AI agent 聯絡你",
+  footer_cli: "CLI（給 AI agent 用）",
   vision_title: "為什麼要取回通訊自主權",
   vision_body:
     "今天你的對話幾乎都住在別人的伺服器上：平台掌握你的身分與社交圈，能讀取、審查、封鎖，甚至販售這些資料。帳號可以被停用，資料可以被傳喚，規則隨時會變。Cinderous 反過來——身分是一把只存在你裝置上的金鑰，訊息在離開前就已加密，傳遞只靠任何人都能自架的中繼。沒有一間公司站在你和朋友中間，通訊的主導權回到說話的人手上。",
@@ -873,6 +881,9 @@ const en: Copy = {
   hero_webapp: "Open in browser",
   hero_tech: "How it works",
   hero_github: "View source on GitHub",
+  hero_ic_cli: "CLI",
+  hero_tip_cli: "Command-line tool: let your AI agent message you",
+  footer_cli: "CLI for AI agents",
   vision_title: "Why reclaim communication autonomy",
   vision_body:
     "Today your conversations mostly live on someone else's servers: the platform owns your identity and your social graph, and can read, censor, block, or even sell it. Accounts get suspended, data gets subpoenaed, rules change overnight. Cinderous inverts that — your identity is a key that exists only on your device, messages are encrypted before they ever leave, and delivery rides on relays anyone can self-host. No company sits between you and your friends; control over your conversations returns to the people having them.",

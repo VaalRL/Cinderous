@@ -17,6 +17,7 @@
     "release:notes": "node scripts/release-notes.mjs",
     "release:check": "node scripts/release-notes.mjs --check",
     "threat:snapshot": "node scripts/threat-snapshot.mjs",
+    "release:cli": "pnpm --filter @cinderous/cli build && node scripts/cli-artifact.mjs",
     "threat:check": "node scripts/threat-snapshot.mjs --check"
   },
   "pnpm": {

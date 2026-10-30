@@ -22,6 +22,7 @@ export type View =
   | "compare"
   | "node"
   | "selfhost"
+  | "cli"
   | "enterprise"
   | "roadmap"
   | "faq"
@@ -35,6 +36,8 @@ export const VIEWS: readonly View[] = [
   // ADR-0357：自架的**完整教學**。`node` 頁談「為什麼」，這頁談「怎麼做」——
   // 決定要不要做的人與已經決定要做的人是兩種受眾，同一頁服務兩種人會兩種人都讀到一半就走。
   "selfhost",
+  // ADR-0405：CLI 使用說明與下載——讓自己的 agent 用自己的身分聯絡你。
+  "cli",
   "enterprise",
   "roadmap",
   "faq",

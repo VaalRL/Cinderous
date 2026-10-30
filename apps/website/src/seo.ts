@@ -90,6 +90,12 @@ export function pageMeta(route: Route, c: Copy): PageMeta {
         ? "一步一步教你把 Cinderous 中繼站架在自己的 Cloudflare 帳號上：桌面版一鍵部署、官網 Deploy 按鈕、或自己跑 wrangler。含費用說明、常見錯誤與誠實的限制。"
         : "A step-by-step guide to running your own Cinderous relay on your own Cloudflare account: one-click deploy from the desktop app, the Deploy button, or wrangler by hand. Includes costs, common errors and the honest limits.",
     },
+    cli: {
+      title: zh ? `CLI：讓你的 AI agent 用自己的身分聯絡你｜${BRAND}` : `CLI: let your AI agent message you with its own identity｜${BRAND}`,
+      description: zh
+        ? "下載 Cinderous CLI（單一檔案、需要 Node.js 22）：讓 Claude Code 等 AI agent 用自己的身分透過端對端加密訊息通知你、做重要的事之前先問你核准，並且只接受你的指令。含設定步驟、結束碼與誠實的限制。"
+        : "Download the Cinderous CLI (one file, Node.js 22): let Claude Code or any AI agent message you over end-to-end encryption with its own identity, ask for your approval before important actions, and take instructions only from you. Setup, exit codes and honest limits.",
+    },
     enterprise: {
       title: zh ? `企業版：自架封閉節點與組織名冊｜${BRAND}` : `Enterprise: self-hosted closed relay & org roster｜${BRAND}`,
       description: zh

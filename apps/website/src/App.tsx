@@ -10,6 +10,7 @@ import { Faq } from "./pages/Faq.js";
 import { Home } from "./pages/Home.js";
 import { Node } from "./pages/Node.js";
 import { SelfHost } from "./pages/SelfHost.js"; // ADR-0357：自架完整教學
+import { Cli } from "./pages/Cli.js"; // ADR-0405：CLI 使用說明與下載
 import { Roadmap } from "./pages/Roadmap.js";
 import { parseRoute, routeHref, withLocale, type Route, type View } from "./routes.js";
 import { Tech } from "./pages/Tech.js";
@@ -183,6 +184,8 @@ export function App({ route: initialRoute }: { route: Route }): JSX.Element {
           theme={theme}
           onNode={() => navigate({ view: "node", locale })}
           onTech={() => navigate({ view: "tech", locale })}
+          cliHref={routeHref({ view: "cli", locale })}
+          onCli={() => navigate({ view: "cli", locale })}
         />
       ) : view === "tech" ? (
         <Tech c={c} />
@@ -190,6 +193,8 @@ export function App({ route: initialRoute }: { route: Route }): JSX.Element {
         <Compare c={c} locale={locale} />
       ) : view === "selfhost" ? (
         <SelfHost c={c} locale={locale} />
+      ) : view === "cli" ? (
+        <Cli locale={locale} onNavigate={navigate} />
       ) : view === "enterprise" ? (
         <Enterprise c={c} locale={locale} />
       ) : view === "roadmap" ? (
@@ -209,6 +214,8 @@ export function App({ route: initialRoute }: { route: Route }): JSX.Element {
           <span>{c.footer_privacy}</span>
           {/* ADR-0368：開發者文件放頁尾而非主導覽——受眾是第三方開發者，不是一般使用者。 */}
           <NavLink route={{ view: "developers", locale }} current={view} label={c.footer_developers} onNavigate={navigate} />
+          {/* ADR-0405：CLI 頁同樣放頁尾（受眾是會跑 Node 的人），首頁 hero 另有一顆入口。 */}
+          <NavLink route={{ view: "cli", locale }} current={view} label={c.footer_cli} onNavigate={navigate} />
         </div>
       </footer>
     </>
