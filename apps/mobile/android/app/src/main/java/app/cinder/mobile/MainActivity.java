@@ -12,6 +12,8 @@ public class MainActivity extends BridgeActivity {
         // 裝置金鑰保管庫（ADR-0323）：沒註冊＝前端 `Plugins.DeviceKeyStore` 是 undefined
         // ⇒ 退回明文 KV，而設定頁會如實顯示 plaintext（不會靜默降級成假的「已保護」）。
         registerPlugin(DeviceKeyStorePlugin.class);
+        // 訊息通知（ADR-0410）：WebView 沒有 Web Notification API，前端改走這個外掛。
+        registerPlugin(LocalNotifyPlugin.class);
         super.onCreate(savedInstanceState);
     }
 }

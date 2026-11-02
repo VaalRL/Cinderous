@@ -115,4 +115,19 @@ describe("行動端通知設定（ADR-0116）", () => {
     );
     expect(html).toContain('data-testid="notify-hide-toggle"');
   });
+
+  it("手機上叫「訊息通知」，不是「桌面通知」（ADR-0410）", () => {
+    const html = renderToStaticMarkup(<SettingsScreen {...base} notify={false} onNotify={() => {}} />);
+    expect(html).toContain("Message notifications");
+    expect(html).not.toContain("Desktop notifications");
+  });
+
+  it("🔴 系統沒允許通知 → 說明要去哪裡打開，不讓開關看起來壞掉（ADR-0410）", () => {
+    const off = renderToStaticMarkup(<SettingsScreen {...base} notify={false} onNotify={() => {}} />);
+    expect(off).not.toContain('data-testid="notify-blocked"');
+    const html = renderToStaticMarkup(
+      <SettingsScreen {...base} notify={false} notifyBlocked onNotify={() => {}} />,
+    );
+    expect(html).toContain('data-testid="notify-blocked"');
+  });
 });

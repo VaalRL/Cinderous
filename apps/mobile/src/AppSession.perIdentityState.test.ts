@@ -44,14 +44,14 @@ const PER_IDENTITY = new Set<string>([
 /**
  * 裝置或外殼層：**刻意不隨身分歸零**。
  * 外觀與語言是這台裝置的偏好；`profiles`／`screen`／`tab` 是外殼導航；
- * `notify`／`fgOn`／`chatBg` 是裝置層開關；`pendingSwitch`／`pairPhase` 是流程狀態。
+ * `notify`／`notifyBlocked`（系統通知權限）／`fgOn`／`chatBg` 是裝置層開關；`pendingSwitch`／`pairPhase` 是流程狀態。
  */
 const DEVICE_OR_SHELL = new Set([
   // ⚠ `profiles`／`theme`／`locale`／`accent` 已於 ADR-0332 2b 搬到外殼 `MobileApp.tsx`
   // ——它們必須**比一個 session 活得久**（切身分時 profiles 不能消失、外觀不該重設）。
   // 留在這裡的是 session 內的外殼狀態。
   "screen", "pendingSwitch", "tab",
-  "fgOn", "notify", "notifyHide", "chatBg", "pairPhase",
+  "fgOn", "notify", "notifyHide", "notifyBlocked", "chatBg", "pairPhase",
   // ⚠ 這兩個讀的是**全域** localStorage 鍵（`nb.readReceipts`／保留上限），不帶 pubkey
   // ⇒ 現行語意是裝置層，切身分不重載。已讀回條是「這台要不要送回條」、保留上限是「這台留多少」，
   // 裝置層語意說得過去。
