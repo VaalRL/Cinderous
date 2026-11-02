@@ -109,6 +109,7 @@ export function SettingsScreen({
   onSlotRemove,
   notify,
   onNotify,
+  notifyBlocked,
   notifyHidePreview,
   foreground,
   onForeground,
@@ -190,6 +191,8 @@ export function SettingsScreen({
   /** 通知（ADR-0116）。未提供則不顯示（示範模式）。 */
   notify?: boolean;
   onNotify?: (v: boolean) => void;
+  /** 使用者要開通知、系統卻沒允許（ADR-0410）：顯示去哪裡打開。 */
+  notifyBlocked?: boolean;
   /** 隱藏預覽：通知只說「有新訊息」，不把明文推到鎖定畫面。 */
   notifyHidePreview?: boolean;
   /** ADR-0272/0274：背景保持連線（前台服務）；未提供＝非原生殼，不顯示。 */
@@ -868,7 +871,7 @@ export function SettingsScreen({
         {/* 通知（ADR-0116）：預設關；開啟時才向瀏覽器要權限（必須在使用者手勢裡）。 */}
         {onNotify ? (
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>{t("settings_notifications")}</Text>
+            <Text style={styles.sectionTitle}>{t("settings_messageNotifications")}</Text>
             <Pressable
               accessibilityRole="button"
               testID="notify-toggle"
@@ -879,10 +882,15 @@ export function SettingsScreen({
               ]}
             >
               <Text style={[styles.segText, { color: notify ? "#ffffff" : tk.ink }]}>
-                {t("settings_notifications")}
+                {t("settings_messageNotifications")}
                 {notify ? " ✓" : ""}
               </Text>
             </Pressable>
+            {notifyBlocked && !notify ? (
+              <Text testID="notify-blocked" style={styles.label}>
+                {t("settings_notifyBlocked")}
+              </Text>
+            ) : null}
             {/* 通知會出現在鎖定畫面／通知中心——那是裝置的「非加密表面」。 */}
             {notify && onNotifyHidePreview ? (
               <>

@@ -281,6 +281,8 @@ export function AppSession({
       return false;
     }
   });
+  /** 要開通知、系統卻沒允許（ADR-0410）：設定頁據此說明去哪裡打開。 */
+  const [notifyBlocked, setNotifyBlocked] = useState(false);
   // 對話背景（ADR-0134，本地個人化）：開對話時載入該對話的偏好，換對話時更新。
   const [chatBg, setChatBgState] = useState<ChatBg | null>(null);
   const [retentionCap, setRetentionCapState] = useState<number>(() => readRetentionCap());
@@ -1284,7 +1286,11 @@ export function AppSession({
    * `Notification.requestPermission()`。使用者拒絕授權 → 開關不打開（不假裝成功）。
    */
   const setNotify = async (v: boolean): Promise<void> => {
-    if (v && !(await notifier.ensurePermission())) return; // 拒絕授權 → 維持關閉
+    if (v && !(await notifier.ensurePermission())) {
+      setNotifyBlocked(true); // 拒絕授權 → 維持關閉，並說明去哪裡打開（ADR-0410）
+      return;
+    }
+    setNotifyBlocked(false);
     setNotifyState(v);
     try {
       localStorage.setItem(NOTIFY_KEY, v ? "1" : "0");
@@ -1948,6 +1954,7 @@ export function AppSession({
                 onPairExport: () => setScreen("pairExport"),
                 notify,
                 onNotify: (v: boolean) => void setNotify(v),
+                notifyBlocked,
                 notifyHidePreview: notifyHide,
                 onNotifyHidePreview: setNotifyHide,
                 // 背景保持連線（ADR-0272/0274）：僅原生殼提供 → 瀏覽器預覽不顯示此開關。

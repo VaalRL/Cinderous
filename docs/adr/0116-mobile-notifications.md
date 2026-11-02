@@ -74,5 +74,8 @@ Google／Apple——**與 Cinder 的威脅模型直接衝突**（ADR-0088 才剛
   - 行動端仍缺：多身分、本地密碼、貼圖、相簿、AI、音樂狀態、多中繼管理、配對搬家（送出端）。
   - 桌面的「通知音效」（ADR-0076）未移植到行動端。
 
+- 後續（2026-11-02，ADR-0410）：Android 殼的 WebView 沒有 Web Notification API，本 ADR 的通知在 APK 上從來沒跳過。
+  原生殼改走 `LocalNotify` 外掛；瀏覽器預覽仍用本 ADR 的 Web Notification 基質。
+
 - 一個 i18n 教訓（第二次了）：`settings_notifications` **早就存在**，我第一版又新增了
   `settings_notify`。**加鍵之前先 grep。**

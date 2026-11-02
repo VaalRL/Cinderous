@@ -550,6 +550,8 @@ export interface Messages {
   settings_copied: string;
   settings_notifications: string;
   settings_notificationsHint: string;
+  settings_messageNotifications: string;
+  settings_notifyBlocked: string;
   settings_notifySound: string;
   settings_notifyChime: string;
   sound_perContact: string;
@@ -1601,6 +1603,8 @@ const zhHant: Messages = {
   settings_copied: "已複製",
   settings_notifications: "桌面通知",
   settings_notificationsHint: "視窗未聚焦時，有新訊息就通知。",
+  settings_messageNotifications: "訊息通知",
+  settings_notifyBlocked: "系統沒有允許 Cinderous 發通知。請到手機的「設定 → 應用程式 → Cinderous → 通知」打開，再回來按一次。",
   settings_notifySound: "通知提示音",
   settings_notifyChime: "提示音效",
   sound_perContact: "此聯絡人的通知音效",
@@ -2561,6 +2565,8 @@ const en: Messages = {
   settings_copied: "Copied",
   settings_notifications: "Desktop notifications",
   settings_notificationsHint: "Notify on new messages when the window isn't focused.",
+  settings_messageNotifications: "Message notifications",
+  settings_notifyBlocked: "Your phone isn't allowing Cinderous to show notifications. Turn them on in Settings → Apps → Cinderous → Notifications, then tap this again.",
   settings_notifySound: "Notification sound",
   settings_notifyChime: "Sound effect",
   sound_perContact: "Notification sound for this contact",
