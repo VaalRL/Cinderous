@@ -60,9 +60,23 @@
 | `REQUIRE_AUTH` | 開啟 | 設 `0` 關閉 NIP-42 認證。**強烈不建議**——見各平台文件的說明。 | 僅 `node-relay` |
 | `PORT`／`DB_PATH` | `8787`／`cinder-relay.db` | 監聽埠與 SQLite 檔路徑。 | 僅 `node-relay` |
 | `TURN_KEY_ID`／`TURN_API_TOKEN`／`TURN_TTL_SECONDS` | 未設 | 公共 TURN 保底（ADR-0243）。未設＝`GET /turn` 回 204、客戶端退回純 STUN。**務必在 Cloudflare 端設用量上限封頂**（TURN 按流量計費）。 | 僅 Worker |
+| `ALLOWED_PUBKEYS` | 未設 | 只收這些公鑰發的事件（npub 或 hex，逗號分隔；企業封閉站，ADR-0044）。寫錯任何一筆就拒絕啟動。未設＝開放站。 | 僅 `node-relay` |
+| `ALLOWED_KINDS` | 未設 | 只收這些事件類型（0–65535 整數，逗號分隔；ADR-0048）。寫錯就拒絕啟動。未設＝全收。 | 僅 `node-relay` |
+| `NIP86_ADMIN_PUBKEYS` | 未設 | 開啟 NIP-86 管理 API 的運維金鑰（npub 或 hex，逗號分隔）。未設＝沒有這個端點。見下方「執行期管理」。 | 僅 `node-relay` |
+| `ROSTER_ADMIN_PUBKEY` | 未設 | 組織名冊的管理者公鑰（恰好一把），`cinder_applyroster` 用它驗名冊。**不得**是運維金鑰之一，否則拒絕啟動。 | 僅 `node-relay` |
 
 > **`MAX_PER_RECIPIENT`（每收件人 500 則）是程式內建常數，不是環境變數**——設了不會有作用。
 > 舊版文件曾誤列為可設定，已更正。
+
+### 執行期管理（NIP-86，僅 `node-relay`）
+
+設了 `NIP86_ADMIN_PUBKEYS`，中繼網址就多收 `POST`＋`Content-Type: application/nostr+json+rpc` 的 NIP-86 請求（ADR-0261、SDK ADR 0132），用 NIP-98 授權、必須帶 `payload` tag。改成員、事件類型、站名**不必重開**：
+
+- **成員只能用簽章名冊改**：`cinder_applyroster` 送入 `ROSTER_ADMIN_PUBKEY` 簽的組織名冊，比上次新才套用。`allowpubkey`／`banpubkey` 一律拒絕——否則中繼能悄悄加人、客戶端驗不出來（ADR-0047）。名冊金鑰請離線保管；運維金鑰只是這台機器的憑證，可以交給託管方。
+- `allowkind`／`disallowkind`／`listallowedkinds` 只改 `ALLOWED_KINDS` 既有的清單，不會刪掉最後一個。
+- `changerelayname`／`changerelaydescription` 改 NIP-11 的站名與說明。
+- 有 SQLite 檔（`DB_PATH`）時改過的設定重開後還在、**蓋過環境變數**；純記憶體模式重開就回到環境變數。
+- Cloudflare Worker 不提供這個 API。
 
 ### 節點識別與贊助入口（NIP-11）
 
