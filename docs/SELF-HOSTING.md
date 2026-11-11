@@ -64,18 +64,23 @@
 | `ALLOWED_KINDS` | 未設 | 只收這些事件類型（0–65535 整數，逗號分隔；ADR-0048）。寫錯就拒絕啟動。未設＝全收。 | 僅 `node-relay` |
 | `NIP86_ADMIN_PUBKEYS` | 未設 | 開啟 NIP-86 管理 API 的運維金鑰（npub 或 hex，逗號分隔）。未設＝沒有這個端點。見下方「執行期管理」。 | 僅 `node-relay` |
 | `ROSTER_ADMIN_PUBKEY` | 未設 | 組織名冊的管理者公鑰（恰好一把），`cinder_applyroster` 用它驗名冊。**不得**是運維金鑰之一，否則拒絕啟動。 | 僅 `node-relay` |
+| `NIP86_PUBLIC_URL` | 未設 | 本站對外的 `https://` 網址。設了，管理 API 就只認簽給這個網址的請求；寫錯拒絕啟動。**在反向代理後面一定要設**（不信任 `X-Forwarded-Host`）。沒設時只比對對方送來的 `Host` 標頭，啟動時會警告。 | 僅 `node-relay` |
 
 > **`MAX_PER_RECIPIENT`（每收件人 500 則）是程式內建常數，不是環境變數**——設了不會有作用。
 > 舊版文件曾誤列為可設定，已更正。
 
 ### 執行期管理（NIP-86，僅 `node-relay`）
 
-設了 `NIP86_ADMIN_PUBKEYS`，中繼網址就多收 `POST`＋`Content-Type: application/nostr+json+rpc` 的 NIP-86 請求（ADR-0261、SDK ADR 0132），用 NIP-98 授權、必須帶 `payload` tag。改成員、事件類型、站名**不必重開**：
+設了 `NIP86_ADMIN_PUBKEYS`，中繼網址就多收 `POST`＋`Content-Type: application/nostr+json+rpc` 的 NIP-86 請求（ADR-0261、SDK ADR 0132／0133），用 NIP-98 授權、必須帶 `payload` tag。改成員、事件類型、站名**不必重開**：
 
 - **成員只能用簽章名冊改**：`cinder_applyroster` 送入 `ROSTER_ADMIN_PUBKEY` 簽的組織名冊，比上次新才套用。`allowpubkey`／`banpubkey` 一律拒絕——否則中繼能悄悄加人、客戶端驗不出來（ADR-0047）。名冊金鑰請離線保管；運維金鑰只是這台機器的憑證，可以交給託管方。
 - `allowkind`／`disallowkind`／`listallowedkinds` 只改 `ALLOWED_KINDS` 既有的清單，不會刪掉最後一個。
 - `changerelayname`／`changerelaydescription` 改 NIP-11 的站名與說明。
-- 有 SQLite 檔（`DB_PATH`）時改過的設定重開後還在、**蓋過環境變數**；純記憶體模式重開就回到環境變數。
+- **請設 `NIP86_PUBLIC_URL`**：請求的簽章綁的是網址，而伺服器不知道自己對外叫什麼。沒設時，同一把運維金鑰管不只一座站的話，一座站的請求可以在 60 秒內被拿到另一座站重送。
+- 不是運維金鑰簽的請求，內容還沒收就被拒絕（401）。
+- 有 SQLite 檔（`DB_PATH`）時改過的設定重開後還在、**蓋過環境變數**（兩者不同時啟動會警告）；純記憶體模式重開就回到環境變數。
+- **不想再用名冊時**：把 `ROSTER_ADMIN_PUBKEY` 拿掉（或換成另一把）再重開，存過的名冊就不再生效，成員回到 `ALLOWED_PUBKEYS`。
+- 名冊把某人移除後，他**已經連著的連線不會被切斷**：寫入立刻被擋，但斷線前仍收得到投遞給他的事件。要立刻切斷請重開中繼。
 - Cloudflare Worker 不提供這個 API。
 
 ### 節點識別與贊助入口（NIP-11）

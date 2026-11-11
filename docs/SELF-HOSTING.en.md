@@ -66,18 +66,23 @@ read ordinary environment variables.
 | `ALLOWED_KINDS` | unset | Accept only these event kinds (integers 0–65535, comma-separated; ADR-0048). Any invalid entry stops startup. Unset means all kinds. | `node-relay` only |
 | `NIP86_ADMIN_PUBKEYS` | unset | Operator keys that enable the NIP-86 admin API (npub or hex, comma-separated). Unset means the endpoint does not exist. See "Runtime management" below. | `node-relay` only |
 | `ROSTER_ADMIN_PUBKEY` | unset | The organization roster's admin pubkey (exactly one); `cinder_applyroster` verifies rosters with it. It **must not** be one of the operator keys, or the relay refuses to start. | `node-relay` only |
+| `NIP86_PUBLIC_URL` | unset | The relay's public `https://` URL. When set, the admin API accepts only requests signed for this URL; an invalid value stops the relay from starting. **Required behind a reverse proxy** (`X-Forwarded-Host` is not trusted). When unset, only the `Host` header the caller sent is checked, and the relay warns at startup. | `node-relay` only |
 
 > **`MAX_PER_RECIPIENT` (500 per recipient) is a compile-time constant, not an environment
 > variable** — setting it has no effect. Earlier docs listed it as configurable; that was wrong.
 
 ### Runtime management (NIP-86, `node-relay` only)
 
-With `NIP86_ADMIN_PUBKEYS` set, the relay URL also accepts NIP-86 requests: `POST` with `Content-Type: application/nostr+json+rpc` (ADR-0261, SDK ADR 0132), authorized by NIP-98 with a required `payload` tag. You can change members, kinds and the relay name **without a restart**:
+With `NIP86_ADMIN_PUBKEYS` set, the relay URL also accepts NIP-86 requests: `POST` with `Content-Type: application/nostr+json+rpc` (ADR-0261, SDK ADR 0132/0133), authorized by NIP-98 with a required `payload` tag. You can change members, kinds and the relay name **without a restart**:
 
 - **Members change only through a signed roster.** `cinder_applyroster` takes an organization roster signed by `ROSTER_ADMIN_PUBKEY` and applies it only if it is newer. `allowpubkey`/`banpubkey` are refused; otherwise the relay could add people silently and clients could not tell (ADR-0047). Keep the roster key offline; the operator key is only this machine's credential and can be handed to a hosting provider.
 - `allowkind`/`disallowkind`/`listallowedkinds` only edit an existing `ALLOWED_KINDS` list and never remove the last kind.
 - `changerelayname`/`changerelaydescription` edit the NIP-11 name and description.
-- With a SQLite file (`DB_PATH`), changes survive restarts and **override the environment**; in memory-only mode a restart returns to the environment values.
+- **Set `NIP86_PUBLIC_URL`.** A request's signature is bound to a URL, and the server does not know its own public name. Without it, if one operator key manages more than one relay, a request sent to one relay can be resent to another within 60 seconds.
+- Requests not signed by an operator key are refused (401) before any body is read.
+- With a SQLite file (`DB_PATH`), changes survive restarts and **override the environment** (the relay warns at startup when the two differ); in memory-only mode a restart returns to the environment values.
+- **To stop using the roster,** remove `ROSTER_ADMIN_PUBKEY` (or change it) and restart. The stored roster no longer applies and members fall back to `ALLOWED_PUBKEYS`.
+- When a roster removes someone, their **open connections are not dropped**: writes are refused at once, but they still receive events delivered to them until they disconnect. Restart the relay to cut them off immediately.
 - The Cloudflare Worker does not offer this API.
 
 ### Node identity and the sponsorship entry (NIP-11)
