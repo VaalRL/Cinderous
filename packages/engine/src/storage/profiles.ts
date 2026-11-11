@@ -187,6 +187,35 @@ export function resolveSignIn(state: ProfilesState, name: string): SignInResolut
 }
 
 /**
+ * 〈我的裝置都沒了〉（ADR-0412）：使用者貼了 nsec 或救援登入碼、解出 `pubkey` 之後，決定要回到哪個身分。
+ * - `enter`：本機已有這把金鑰的身分（含隱藏的——手上有金鑰就本來進得去）→ 回到它，不建重複；名稱不看。
+ * - `unlock`：同上，但它的金鑰庫條目被本地密碼包著（`opts.vaultLocked`＝桌面，且身分 `locked`）。
+ *   🔴 這時**不得**直接進入：那會把密碼包裹的 nsec 蓋成明文，而資料庫金鑰還鎖著——密碼保護被拆掉、
+ *   而且照樣進不去。改帶去解鎖畫面（密碼解鎖，或以 nsec 救援並設新密碼，ADR-0073）。
+ * - `needName`／`nameTaken`：本機沒有，要建新的設定檔，但名稱空白或撞到可見同名（ADR-0146）。
+ * - `create`：以這把金鑰建新的設定檔。
+ */
+export type RestoreResolution =
+  | { kind: "enter"; profile: Profile }
+  | { kind: "unlock"; profile: Profile }
+  | { kind: "needName" }
+  | { kind: "nameTaken" }
+  | { kind: "create" };
+
+export function resolveRestore(
+  state: ProfilesState,
+  pubkey: string,
+  name: string,
+  opts: { vaultLocked?: boolean } = {},
+): RestoreResolution {
+  const hit = state.profiles.find((p) => p.pubkey === pubkey);
+  if (hit) return { kind: opts.vaultLocked && hit.locked ? "unlock" : "enter", profile: hit };
+  if (!name.trim()) return { kind: "needName" };
+  if (nameTaken(state, name)) return { kind: "nameTaken" };
+  return { kind: "create" };
+}
+
+/**
  * 本機是否已有同名的**可見（非隱藏）**身分（ADR-0146 名稱唯一）。用於新增/改名時擋重名，
  * 讓 `resolveSignIn` 的命中無歧義。排除 hidden：既不因「名稱被佔用」洩漏隱藏身分的存在，
  * 也允許一個可見與一個隱藏同名並存（登入只命中可見那個）。`exceptPubkey` 排除自己（改名情境）。

@@ -250,6 +250,8 @@ export function AppSession({
     // ADR-0332 2b：有作用中身分就直接落在它要去的畫面（2c 掛 key 後，這就是「掛載即定位」）。
     active ? (active.opts.landOn ?? "main") : activeProfile(profiles) ? "unlock" : "signin",
   );
+  // 進登入畫面時要不要直接開〈我的裝置都沒了〉（ADR-0412：從解鎖畫面「改用私鑰登入」而來）。
+  const [signinRestore, setSigninRestore] = useState(false);
   /** 切換身分時，待解鎖的目標 pubkey（ADR-0138）。 */
   const [pendingSwitch, setPendingSwitch] = useState<string | null>(null);
   const [tab, setTab] = useState<Tab>("chats");
@@ -1526,7 +1528,10 @@ export function AppSession({
           setScreen("main");
           return true;
         }}
-        onUseNsec={() => setScreen("signin")}
+        onUseNsec={() => {
+          setSigninRestore(true); // ADR-0412：直接開〈我的裝置都沒了〉
+          setScreen("signin");
+        }}
         onForget={forgetActive}
         {...themeProps}
       />
@@ -1592,11 +1597,15 @@ export function AppSession({
   if (screen === "signin") {
     return (
       <NsecSignInScreen
-        onSignIn={handleSignIn}
+        onSignIn={(identity, password) => {
+          setSigninRestore(false); // 之後再回登入畫面時從三條路的起點開始
+          handleSignIn(identity, password);
+        }}
         onJoinOrg={joinOrg}
         onCreateCompany={createCompany}
         nameTaken={(name, pubkey) => nameTaken(profiles, name, pubkey)}
         onUsePairing={() => setScreen("pair")}
+        restoreFirst={signinRestore}
         canRemember
         {...themeProps}
       />
@@ -1611,7 +1620,10 @@ export function AppSession({
           runPairTarget({ code, transport: webRtcPairTransport(webSocketConnector), onSas })
         }
         onImport={importFromOldDevice}
-        onUseNsec={() => setScreen("signin")}
+        onUseNsec={() => {
+          setSigninRestore(false); // 「← 返回登入」回到三條路的起點
+          setScreen("signin");
+        }}
         {...themeProps}
       />
     );

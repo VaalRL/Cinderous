@@ -39,6 +39,9 @@ function makeStyles(tk: ThemeTokens) {
     button: { backgroundColor: tk.accent, borderRadius: 8, paddingVertical: 10, alignItems: "center", marginTop: 8 },
     buttonText: { color: "#ffffff", fontWeight: "700", fontSize: 15 },
     link: { color: tk.accent, fontSize: 13, textAlign: "center", marginTop: 4 },
+    // 三條路（ADR-0412）：「已經用過 Cinderous？」底下的兩條次要入口，以細線與主路徑分開。
+    entries: { marginTop: 12, paddingTop: 6, borderTopWidth: 1, borderTopColor: tk.border, gap: 4 },
+    entriesTitle: { fontSize: 11, color: tk.muted, textAlign: "center" },
   });
 }
 
@@ -50,6 +53,7 @@ export function NsecSignInScreen({
   onUsePairing,
   onBack,
   canRemember,
+  restoreFirst = false,
   locale = "zh-Hant",
   theme = "light",
   accent = null,
@@ -81,6 +85,8 @@ export function NsecSignInScreen({
   onUsePairing?: () => void;
   /** 返回（新增身分模式，ADR-0138）；未提供＝不顯示（初次登入沒有返回）。 */
   onBack?: () => void;
+  /** 一進來就打開〈我的裝置都沒了〉（從解鎖畫面選「改用私鑰登入」而來，ADR-0412）。 */
+  restoreFirst?: boolean;
   locale?: Locale;
   theme?: Theme;
   accent?: string | null;
@@ -95,8 +101,8 @@ export function NsecSignInScreen({
   const [password, setPassword] = useState("");
   /** 備份密碼（ADR-0070／0135）：貼的是備份碼時才需要，用來解開 NIP-49 信封。 */
   const [backupPw, setBackupPw] = useState("");
-  // ADR-0277：既有私鑰登入降為次要路徑，預設收合。
-  const [nsecOpen, setNsecOpen] = useState(false);
+  // ADR-0277：既有私鑰登入降為次要路徑，預設收合；ADR-0412 起叫〈我的裝置都沒了〉。
+  const [nsecOpen, setNsecOpen] = useState(restoreFirst);
   const [joinName, setJoinName] = useState(""); // 入職時的顯示名稱（同事看到的）
   const T = (k: MessageKey): string => translate(locale, k);
   const isBackup = looksLikeBackupCode(nsec); // 貼的是備份碼？→ 顯示備份密碼欄
@@ -174,8 +180,11 @@ export function NsecSignInScreen({
             {joinTaken ? <Text style={styles.error}>{T("mobileSignIn_nameTaken")}</Text> : null}
           </>
         ) : nsecOpen ? (
-          // 用既有私鑰／備份碼登入（ADR-0277：降為次要路徑，預設收合）。
+          // 〈我的裝置都沒了〉（ADR-0412）：nsec 或救援登入碼。先說清楚能找回什麼、不能找回什麼（ADR-0305 §6）。
           <>
+            <Text style={styles.hint} testID="restore-hint">
+              {T("signIn_useNsecHint")}
+            </Text>
             <Text style={styles.label}>{T("rescue_secret")}</Text>
             <TextInput
               style={styles.input}
@@ -247,15 +256,24 @@ export function NsecSignInScreen({
           </Pressable>
         )}
 
-        {/* 次要路徑（ADR-0277）：用既有私鑰／備份碼登入——預設收合，點擊才展開。 */}
-        {!invite ? (
-          <Pressable onPress={() => setNsecOpen((v) => !v)} accessibilityRole="button" testID="use-nsec">
-            <Text style={styles.link}>{T(nsecOpen ? "mobileSignIn_backToCreate" : "signIn_useNsec")}</Text>
-          </Pressable>
+        {/* 三條路（ADR-0305／0412）：建立新身分是上面的主路徑；用過的人依處境二選一——
+            〈我還有另一台裝置〉＝配對搬家（ADR-0118），〈我的裝置都沒了〉＝nsec 或救援登入碼（收合在本頁）。 */}
+        {!invite && !nsecOpen ? (
+          <View style={styles.entries} testID="signin-entries">
+            <Text style={styles.entriesTitle}>{T("entry_haveUsed")}</Text>
+            {onUsePairing ? (
+              <Pressable onPress={onUsePairing} accessibilityRole="button" testID="use-pairing">
+                <Text style={styles.link}>{T("mobileSignIn_toPair")}</Text>
+              </Pressable>
+            ) : null}
+            <Pressable onPress={() => setNsecOpen(true)} accessibilityRole="button" testID="use-nsec">
+              <Text style={styles.link}>{T("signIn_useNsec")}</Text>
+            </Pressable>
+          </View>
         ) : null}
-        {onUsePairing ? (
-          <Pressable onPress={onUsePairing} accessibilityRole="button">
-            <Text style={styles.link}>{T("mobileSignIn_toPair")}</Text>
+        {!invite && nsecOpen ? (
+          <Pressable onPress={() => setNsecOpen(false)} accessibilityRole="button" testID="use-nsec">
+            <Text style={styles.link}>{T("mobileSignIn_backToCreate")}</Text>
           </Pressable>
         ) : null}
         {/* 建立公司（ADR-0178，企業主）：填顯示名稱後可直接建企業主身分（不需邀請碼/nsec）。 */}

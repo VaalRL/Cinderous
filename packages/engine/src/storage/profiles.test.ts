@@ -15,6 +15,7 @@ import {
   saveProfiles,
   setActive,
   nameTaken,
+  resolveRestore,
   resolveSignIn,
   setProfileCloudSync,
   setProfileSecurity,
@@ -181,6 +182,40 @@ describe("resolveSignIn（ADR-0146：登入以顯示名稱解析既有身分）"
     const r = resolveSignIn(s, "重複");
     expect(r.kind).toBe("ambiguous");
     expect(r.kind === "ambiguous" && r.profiles.map((p) => p.pubkey)).toEqual(["a", "b"]);
+  });
+});
+
+describe("resolveRestore（ADR-0412：〈我的裝置都沒了〉以金鑰找回身分）", () => {
+  it("金鑰對得上本機既有身分 → enter 那個身分（名稱可空、不看名稱）", () => {
+    const s = upsertProfile(empty, mk("a", { name: "小明" }));
+    const r = resolveRestore(s, "a", "");
+    expect(r.kind === "enter" && r.profile.pubkey).toBe("a");
+    expect(resolveRestore(s, "a", "別的名字").kind).toBe("enter");
+  });
+
+  it("隱藏身分也對得上——手上有金鑰的人本來就能進去，不必再建一個重複的", () => {
+    const s = upsertProfile(empty, mk("a", { name: "祕密", hidden: true }));
+    expect(resolveRestore(s, "a", "").kind).toBe("enter");
+  });
+
+  it("🔴 金鑰庫條目被本地密碼包著的既有身分（桌面）→ unlock：帶去解鎖畫面，不得直接進入", () => {
+    // 直接進入會把金鑰庫裡密碼包裹的 nsec 蓋成明文，而資料庫金鑰還鎖著——密碼保護被拆掉、
+    // 而且進不去（審查發現）。解鎖畫面本來就有「密碼解鎖」與「nsec 救援」兩條路。
+    const s = upsertProfile(empty, mk("a", { name: "小明", locked: true }));
+    const r = resolveRestore(s, "a", "", { vaultLocked: true });
+    expect(r.kind === "unlock" && r.profile.pubkey).toBe("a");
+    // 瀏覽器（金鑰不在會被覆蓋的金鑰庫條目裡）照舊直接進入；沒上鎖的桌面身分也是。
+    expect(resolveRestore(s, "a", "").kind).toBe("enter");
+    const open = upsertProfile(empty, mk("b", { name: "小華" }));
+    expect(resolveRestore(open, "b", "", { vaultLocked: true }).kind).toBe("enter");
+  });
+
+  it("本機沒有這把金鑰：沒填名稱 → needName；撞到可見同名 → nameTaken；否則 create", () => {
+    const s = upsertProfile(empty, mk("a", { name: "小明" }));
+    expect(resolveRestore(s, "z", "  ")).toEqual({ kind: "needName" });
+    expect(resolveRestore(s, "z", " 小明 ")).toEqual({ kind: "nameTaken" });
+    expect(resolveRestore(s, "z", "小華")).toEqual({ kind: "create" });
+    expect(resolveRestore(empty, "z", "小華")).toEqual({ kind: "create" });
   });
 });
 

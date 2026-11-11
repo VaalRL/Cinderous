@@ -160,6 +160,39 @@ describe("中繼大檔提示的文案紅線（ADR-0344）", () => {
   });
 });
 
+describe("身分入口收成三條路（ADR-0305／0412）", () => {
+  it("〈我還有另一台裝置〉：桌面與行動端用同一個名字", () => {
+    expect(translate("zh-Hant", "pair_importButton")).toBe("我還有另一台裝置");
+    expect(translate("zh-Hant", "mobileSignIn_toPair")).toBe(translate("zh-Hant", "pair_importButton"));
+    expect(translate("en", "mobileSignIn_toPair")).toBe(translate("en", "pair_importButton"));
+  });
+
+  it("〈我的裝置都沒了〉：以處境命名，不再叫「用 nsec 登入」", () => {
+    expect(translate("zh-Hant", "signIn_useNsec")).toBe("我的裝置都沒了");
+    expect(translate("en", "signIn_useNsec").toLowerCase()).not.toContain("nsec");
+  });
+
+  it("〈我的裝置都沒了〉收救援登入碼與 nsec——兩樣東西走同一個入口", () => {
+    expect(translate("zh-Hant", "signIn_useNsecHint")).toContain("救援登入碼");
+    expect(translate("en", "signIn_useNsecHint").toLowerCase()).toContain("rescue login code");
+  });
+
+  it("🔴 其他文案提到這兩個入口時，用的是現在畫面上的名字（改名時漏掉就會叫人去按不存在的按鈕）", () => {
+    for (const locale of ["zh-Hant", "en"] as const) {
+      expect(translate(locale, "signIn_ambiguousName")).toContain(translate(locale, "signIn_useNsec"));
+      expect(translate(locale, "pair_offerHint")).toContain(translate(locale, "pair_importButton"));
+      expect(translate(locale, "mobilePair_title")).toBe(translate(locale, "pair_importButton"));
+    }
+    expect(translate("zh-Hant", "signIn_ambiguousName")).not.toContain("用 nsec 登入");
+    expect(translate("zh-Hant", "pair_offerHint")).not.toContain("從舊裝置匯入");
+  });
+
+  it("🔴 搬家是「可延後但有期限」：要說出舊裝置沒了就補不回來（ADR-0305 §6）", () => {
+    expect(translate("zh-Hant", "signIn_useNsecHint")).toContain("沒了就真的沒了");
+    expect(translate("en", "signIn_useNsecHint").toLowerCase()).toContain("gone");
+  });
+});
+
 describe("nsec 登入的還原範圍要誠實（ADR-0305 §6.1）", () => {
   it("🔴 不得無條件宣稱「訊息會一起回來」——貼 nsec 拿不回本機歷史，也拿不回 EK", () => {
     // 事實：`fsState` 來自 `storage.loadFsState()`（本機），而備份碼刻意身分-only（0245 §2）

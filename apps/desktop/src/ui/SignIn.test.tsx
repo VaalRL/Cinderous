@@ -112,9 +112,52 @@ describe("瀏覽器登入必填本地密碼（ADR-0122）", () => {
     expect(html).toContain("重新整理");
   });
 
-  it("提供「用 nsec 登入」的出路（忘記密碼、或在舊版被換掉身分的人）", () => {
-    expect(render({ onEnterNsec: async () => true })).toContain('data-testid="nsec-open"');
+  it("提供〈我的裝置都沒了〉的出路（忘記密碼、裝置全沒、或在舊版被換掉身分的人）", () => {
+    expect(render({ onRestore: async () => "ok" })).toContain('data-testid="nsec-open"');
     expect(render({})).not.toContain('data-testid="nsec-open"');
+  });
+});
+
+describe("身分入口收成三條路（ADR-0305／0412）", () => {
+  const render = (extra: Record<string, unknown>) =>
+    renderToStaticMarkup(
+      <I18nProvider locale="zh-Hant">
+        <ThemeProvider>
+          <SignIn onSignIn={() => {}} {...extra} />
+        </ThemeProvider>
+      </I18nProvider>,
+    );
+  const both = { onPair: async () => {}, onRestore: async () => "ok" as const };
+
+  it("建立新身分是主路徑；另外兩條以處境命名、放在「已經用過 Cinderous？」底下", () => {
+    const html = render(both);
+    expect(html).toContain("建立新身分");
+    const heading = html.indexOf('data-testid="signin-entries"');
+    expect(heading).toBeGreaterThan(-1);
+    expect(html).toContain("已經用過 Cinderous？");
+    // 兩條次要入口都在標題之後、且用處境命名（不再叫「用 nsec 登入」「從舊裝置匯入」）
+    expect(html.indexOf('data-testid="pair-import"')).toBeGreaterThan(heading);
+    expect(html.indexOf('data-testid="nsec-open"')).toBeGreaterThan(heading);
+    expect(html).toContain("我還有另一台裝置");
+    expect(html).toContain("我的裝置都沒了");
+    expect(html).not.toContain("用 nsec 登入");
+  });
+
+  it("有設定檔但拿不到金鑰（ADR-0122 needNsec）→ 一進來就打開〈我的裝置都沒了〉面板", () => {
+    const html = render({ ...both, restoreFirst: true });
+    expect(html).toContain('data-testid="nsec-panel"');
+    expect(html).toContain("救援登入碼"); // 提示文案
+    expect(html).not.toContain('data-testid="signin-entries"'); // 面板開著時收起入口列
+  });
+
+  it("兩條次要入口都沒提供（示範模式）→ 不顯示那個標題", () => {
+    expect(render({})).not.toContain('data-testid="signin-entries"');
+  });
+
+  it("貼邀請碼時三條路都收起（入職面板優先）", () => {
+    const invite = makeOrgInvite({ relayUrl: "wss://corp.example", adminPubkey: "a".repeat(64), token: "t" });
+    const html = render({ ...both, onJoinOrg: () => {}, initialName: invite });
+    expect(html).not.toContain('data-testid="signin-entries"');
   });
 });
 
@@ -174,7 +217,7 @@ describe("ADR-0156：登入畫面貼入職邀請碼 → 加入組織面板", () 
   });
 
   it("名稱欄含邀請碼＋提供 onJoinOrg → 顯示加入面板（主機提示＋顯示名稱欄＋加入鈕），收起建新/登入/nsec/配對區塊", () => {
-    const html = render({ requirePassword: true, onJoinOrg: () => {}, onEnterNsec: async () => true, initialName: `歡迎加入！${invite}` });
+    const html = render({ requirePassword: true, onJoinOrg: () => {}, onRestore: async () => "ok", initialName: `歡迎加入！${invite}` });
     expect(html).toContain('data-testid="signin-join"');
     expect(html).toContain("corp.example"); // signIn_joinHint 帶主機
     expect(html).toContain("加入組織"); // signIn_joinButton

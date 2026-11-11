@@ -50,7 +50,7 @@ const DEVICE_OR_SHELL = new Set([
   // ⚠ `profiles`／`theme`／`locale`／`accent` 已於 ADR-0332 2b 搬到外殼 `MobileApp.tsx`
   // ——它們必須**比一個 session 活得久**（切身分時 profiles 不能消失、外觀不該重設）。
   // 留在這裡的是 session 內的外殼狀態。
-  "screen", "pendingSwitch", "tab",
+  "screen", "pendingSwitch", "tab", "signinRestore", // signinRestore：進登入畫面時開哪一格（ADR-0412，流程狀態）
   "fgOn", "notify", "notifyHide", "notifyBlocked", "chatBg", "pairPhase",
   // ⚠ 這兩個讀的是**全域** localStorage 鍵（`nb.readReceipts`／保留上限），不帶 pubkey
   // ⇒ 現行語意是裝置層，切身分不重載。已讀回條是「這台要不要送回條」、保留上限是「這台留多少」，
