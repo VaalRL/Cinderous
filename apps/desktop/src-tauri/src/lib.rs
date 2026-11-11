@@ -14,6 +14,8 @@
 
 #[cfg(feature = "encstore")]
 pub mod encstore;
+#[cfg(feature = "encstore")]
+pub mod archive; // 封存塊＋每塊一把金鑰（ADR-0413）
 // 金鑰庫帳號的信任邊界（ADR-0128／0356）：**不掛 feature**——守衛必須在 `cargo test`
 // 的預設設定下就被編譯與測試，而 `keyvault` 本身掛在 `keyring` 底下（CI 跑不動）。
 pub mod keyaccount;

@@ -96,6 +96,18 @@ export class ArchiveWriter {
     });
   }
 
+  /**
+   * 移除某對話的全部封存——**排在在途搬移之後**（ADR-0413 審查）。
+   *
+   * 直接呼叫 `archive.remove` 會與正在寫的那一塊交錯：移除先列完目錄，那一塊之後才落地，
+   * 於是「刪掉的對話」留下一塊讀得到的封存，重新加回同一個人就會出現在歷史裡。
+   */
+  remove(convo: string): void {
+    this.chain = this.chain.then(() => this.archive.remove(convo)).catch((e: unknown) => {
+      console.warn("[archive] 移除封存失敗：", e);
+    });
+  }
+
   /** 等待所有在途搬移完成（關閉前 flush；測試亦用）。 */
   async flush(): Promise<void> {
     await this.chain;

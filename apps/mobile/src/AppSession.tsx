@@ -30,6 +30,7 @@ import {
   LocalStorage,
   onStorageQuota,
   openOpfsArchive,
+  wipeOpfsArchive,
   type PairBundle,
   shouldMuteOrgNotification,
 } from "@cinderous/engine";
@@ -1039,7 +1040,11 @@ export function AppSession({
     const target = activeProfile(profiles)?.pubkey;
     backendRef.current?.stop();
     backendRef.current = null;
-    if (target) clearStorageNamespace(target);
+    if (target) {
+      clearStorageNamespace(target);
+      // ADR-0413：封存（OPFS）也要清——過去整批留著，同一把 nsec 再輸入就解得開。
+      void wipeOpfsArchive(target);
+    }
     forgetActive();
   };
   /**

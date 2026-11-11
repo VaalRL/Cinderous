@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { deriveStorageKey, isSealed, openValue, sealValue } from "./at-rest.js";
+import {
+  deriveStorageKey,
+  isSealed,
+  newSegmentKey,
+  openValue,
+  sealValue,
+  unwrapSegmentKey,
+  wrapSegmentKey,
+} from "./at-rest.js";
 import { generateSecretKey } from "./keys.js";
 import { isWrapped, unwrapSecret, wrapSecret } from "./passlock-web.js";
 
@@ -78,5 +86,37 @@ describe("瀏覽器密碼包裹（ADR-0112）", () => {
   it("明文 nsec 不會被誤判為包裹 blob", () => {
     expect(isWrapped(nsec)).toBe(false);
     expect(isWrapped("")).toBe(false);
+  });
+});
+
+describe("封存塊金鑰的包裹（ADR-0413）", () => {
+  const root = deriveStorageKey(generateSecretKey());
+
+  it("每次產生的塊金鑰都不同，長度 32 bytes", () => {
+    const a = newSegmentKey();
+    expect(a).toHaveLength(32);
+    expect(newSegmentKey()).not.toEqual(a);
+  });
+
+  it("往返：用根金鑰包起來、再解回同一把", () => {
+    const seg = newSegmentKey();
+    const wrapped = wrapSegmentKey(root, seg);
+    expect(unwrapSegmentKey(root, wrapped)).toEqual(seg);
+  });
+
+  it("🔴 塊金鑰是隨機的、不是從根金鑰導出的——沒有那份包裹，有根金鑰也拿不回來", () => {
+    // 這是「刪掉包裹＝永久刪除」成立的唯一條件（ADR-0298 §2 的更正）。
+    const sealed = sealValue(newSegmentKey(), "祕密");
+    expect(openValue(root, sealed)).toBeNull();
+  });
+
+  it("錯的根金鑰、被竄改、或根本不是包裹 → null（不丟例外、不回傳垃圾金鑰）", () => {
+    const wrapped = wrapSegmentKey(root, newSegmentKey());
+    expect(unwrapSegmentKey(deriveStorageKey(generateSecretKey()), wrapped)).toBeNull();
+    expect(unwrapSegmentKey(root, wrapped.slice(0, -4) + "AAAA")).toBeNull();
+    expect(unwrapSegmentKey(root, "")).toBeNull();
+    expect(unwrapSegmentKey(root, "不是包裹")).toBeNull();
+    // 包的不是 32 bytes（例如誤把一般值當包裹）→ 拒絕
+    expect(unwrapSegmentKey(root, sealValue(root, "hello").replace("c1:", "k1:"))).toBeNull();
   });
 });

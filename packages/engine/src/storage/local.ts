@@ -260,7 +260,7 @@ export class LocalStorage implements AppStorage {
     this.writeContacts();
     localStorage.removeItem(this.k(MSGS + pubkey));
     this.writeOrphanSweep();
-    void this.archive?.remove(pubkey); // 封存也要清（ADR-0111），否則刪好友卻留下歷史
+    this.writer?.remove(pubkey); // 封存也要清（ADR-0111），否則刪好友卻留下歷史
   }
   remapContact(from: string, to: string): void {
     this.mem.remapContact(from, to);
@@ -278,7 +278,7 @@ export class LocalStorage implements AppStorage {
     this.writeOrphanSweep();
     write(this.k("blocked"), this.mem.loadBlocked(), this.dek);
     this.writeRequests(); // 封鎖請求者＝連請求一起清（ADR-0121）
-    void this.archive?.remove(contact.pubkey);
+    this.writer?.remove(contact.pubkey);
   }
 
   // ── 訊息請求（ADR-0121）────────────────────────────────────────────────
@@ -445,7 +445,7 @@ export class LocalStorage implements AppStorage {
     this.writeGroups();
     localStorage.removeItem(this.k(MSGS + id));
     this.writeOrphanSweep();
-    void this.archive?.remove(id);
+    this.writer?.remove(id);
   }
   loadBootstrapList(): StoredBootstrapList | null {
     return this.mem.loadBootstrapList();

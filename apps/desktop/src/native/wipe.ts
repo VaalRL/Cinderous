@@ -2,7 +2,7 @@
 // 瀏覽器清 localStorage / IndexedDB / OPFS。呼叫端負責二次確認與呼叫後 reload。
 
 import { invoke, isTauri } from "@tauri-apps/api/core";
-import { clearStorageNamespace, type Profile } from "@cinderous/engine";
+import { clearStorageNamespace, type Profile, wipeOpfsArchive } from "@cinderous/engine";
 
 /** 供清除用的最小身分資訊（pubkey＋namespace）。 */
 export type WipeTarget = Pick<Profile, "pubkey" | "namespace">;
@@ -19,12 +19,16 @@ export function clearBrowserNamespace(namespace: string): void {
   clearStorageNamespace(namespace);
 }
 
-/** 移除單一身分的本機資料（金鑰＋儲存）。桌面走 Rust `wipe_identity`；瀏覽器清 localStorage。 */
+/**
+ * 移除單一身分的本機資料（金鑰＋儲存）。桌面走 Rust `wipe_identity`；瀏覽器清 localStorage
+ * **與 OPFS 封存**（ADR-0413：過去封存整批留著，同一把 nsec 再輸入就解得開）。
+ */
 export async function wipeIdentityLocal(p: WipeTarget): Promise<void> {
   if (isTauri()) {
     await invoke("wipe_identity", { pubkey: p.pubkey, namespace: p.namespace });
   } else {
     clearBrowserNamespace(p.namespace);
+    await wipeOpfsArchive(p.namespace);
   }
 }
 
