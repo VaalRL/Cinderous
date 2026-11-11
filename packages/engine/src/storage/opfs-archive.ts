@@ -13,12 +13,19 @@
 //
 // **每塊一把隨機金鑰**（ADR-0413；ADR-0298 §2 的第一階段）：
 //
-//   <convo>.<seq>.json  塊本體＝sealValue(K_seg, json)
-//   <convo>.<seq>.key   塊金鑰的包裹＝wrapSegmentKey(dek, K_seg)；dek 由 nsec 導出
+//   <convo>.<seq>.json        塊本體＝"s1:<kid>:" + sealValue(K_seg, json)
+//   <convo>.<seq>.<kid>.key   塊金鑰的包裹＝wrapSegmentKey(dek, K_seg)；dek 由 nsec 導出
 //
 // 過去每一塊都直接用 dek 加密，而刪除只是 `removeEntry`——在 flash 上刪檔不保證位元組被抹掉，
-// 殘留的塊**拿到 nsec 就照樣解得開**。現在刪除對話＝先銷毀 `.key`（覆寫後刪除）、再刪塊：
+// 殘留的塊**拿到 nsec 就照樣解得開**。現在刪除對話＝先刪 `.key`、再刪塊：
 // 塊金鑰是隨機的、不是導出的，沒有包裹就沒有任何辦法重建，殘留的塊變成解不開的亂數。
+//
+// **塊自己記下用的是哪一份包裹**（`kid`，隨機 16 個 hex；審查後加上）。包裹不靠「同一個 seq」
+// 對上塊，所以這幾種情況都不會把一塊配到別人的金鑰：
+//   - 兩個分頁同時封存同一個 seq：各寫各的包裹，最後留下的那一塊讀得到（後寫者贏，與加金鑰前相同）。
+//   - 降回舊版又升級：舊版寫的塊沒有 `s1:` 開頭＝舊塊，直接用 dek 解，不會撞上留下來的包裹。
+//   - 當機留下的孤兒包裹：下一次 append 另寫一份，不覆蓋誰。
+// 多出來的孤兒包裹只有幾十個位元組，移除對話時一起刪。
 //
 // ⚠ 量的改善，不是質的保證：`.key` 自己也在同一個介質上（ADR-0298 §6；
 // `archive-residue.test.ts` 最後把這條界線釘住）。
@@ -35,6 +42,14 @@ import type { StoredMessage } from "./types.js";
 const ROOT = "cinder-archive";
 const SUFFIX = ".json";
 const KEY_SUFFIX = ".key";
+/** 新格式塊的開頭：`s1:<kid>:`，後面接 `sealValue` 的輸出（ADR-0413）。 */
+const KEYED = "s1:";
+const KID_RE = /^[0-9a-f]{16}$/;
+
+function newKid(): string {
+  const bytes = globalThis.crypto.getRandomValues(new Uint8Array(8));
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+}
 
 /**
  * `FileSystemDirectoryHandle.keys()` 是較新的 API，尚不在本專案 TS 版本的 lib.dom 裡。
@@ -84,7 +99,7 @@ export async function wipeOpfsArchive(namespace: string): Promise<void> {
     const archive = new OpfsArchive(dir, undefined);
     const names: string[] = [];
     for await (const key of dir.keys()) names.push(key);
-    for (const key of names.filter((k) => k.endsWith(KEY_SUFFIX))) await archive.destroyKey(key);
+    for (const key of names.filter((k) => k.endsWith(KEY_SUFFIX))) await archive.removeQuietly(key);
     for (const key of names.filter((k) => !k.endsWith(KEY_SUFFIX))) await dir.removeEntry(key).catch(() => {});
     await app.removeEntry(namespace, { recursive: true }).catch(() => {});
   } catch {
@@ -103,8 +118,8 @@ class OpfsArchive implements MessageArchive {
     return `${convo}.${seq}${SUFFIX}`;
   }
 
-  private keyName(convo: string, seq: number): string {
-    return `${convo}.${seq}${KEY_SUFFIX}`;
+  private keyName(convo: string, seq: number, kid: string): string {
+    return `${convo}.${seq}.${kid}${KEY_SUFFIX}`;
   }
 
   private async writeFile(name: string, data: string): Promise<void> {
@@ -132,11 +147,12 @@ class OpfsArchive implements MessageArchive {
       return;
     }
     // ADR-0413：**先包裹、後塊**。中途當機留下的是「有包裹、沒有塊」——塊數以 `.json` 計，
-    // 下一次 append 會用同一個 seq 重來並以新金鑰覆蓋這份孤兒包裹。反過來（先塊後包裹）
-    // 當機會留下一個沒有金鑰的塊＝那一塊訊息遺失。
+    // 下一次 append 會用同一個 seq 重來、另寫一份包裹（孤兒包裹留到移除對話時一起刪）。
+    // 反過來（先塊後包裹）當機會留下一個沒有金鑰的塊＝那一塊訊息遺失。
     const seg = newSegmentKey();
-    await this.writeFile(this.keyName(convo, seq), wrapSegmentKey(this.dek, seg));
-    await this.writeFile(this.name(convo, seq), sealValue(seg, json));
+    const kid = newKid();
+    await this.writeFile(this.keyName(convo, seq, kid), wrapSegmentKey(this.dek, seg));
+    await this.writeFile(this.name(convo, seq), `${KEYED}${kid}:${sealValue(seg, json)}`);
   }
 
   async chunkCount(convo: string): Promise<number> {
@@ -155,13 +171,22 @@ class OpfsArchive implements MessageArchive {
       const raw = await this.readFile(this.name(convo, seq));
       if (raw === null) return [];
       if (!this.dek) return JSON.parse(raw) as StoredMessage[];
-      const wrapped = await this.readFile(this.keyName(convo, seq));
-      // 有包裹：解不開（換了 nsec／遭竄改／已被銷毀時覆寫過）就是讀不到，不退回用 dek 直接解——
-      // 那一塊本來就不是用 dek 加密的。沒有包裹＝升級前的舊塊，直接用 dek；
-      // 更舊的明文塊也仍讀得出來（`openValue` 對無前綴者原樣回傳）——升級不能讓既有封存變亂碼。
-      const key = wrapped === null ? this.dek : unwrapSegmentKey(this.dek, wrapped);
-      if (key === null) return [];
-      const json = openValue(key, raw);
+      // 沒有 `s1:` 開頭＝升級前（或降版時）寫下的舊塊，直接用 dek；更舊的明文塊也仍讀得出來
+      // （`openValue` 對無前綴者原樣回傳）——升級不能讓既有封存變亂碼。
+      let key = this.dek;
+      let body = raw;
+      if (raw.startsWith(KEYED)) {
+        const kid = raw.slice(KEYED.length, KEYED.length + 16);
+        if (!KID_RE.test(kid) || raw[KEYED.length + 16] !== ":") return [];
+        // 包裹不在（已刪除）或解不開（換了 nsec／遭竄改）就是讀不到，不退回用 dek 直接解——
+        // 那一塊本來就不是用 dek 加密的。
+        const wrapped = await this.readFile(this.keyName(convo, seq, kid));
+        const seg = wrapped === null ? null : unwrapSegmentKey(this.dek, wrapped);
+        if (seg === null) return [];
+        key = seg;
+        body = raw.slice(KEYED.length + 17);
+      }
+      const json = openValue(key, body);
       if (json === null) return []; // 密文解不開（錯鑰/竄改）
       return JSON.parse(json) as StoredMessage[];
     } catch {
@@ -178,25 +203,27 @@ class OpfsArchive implements MessageArchive {
       if (key.endsWith(KEY_SUFFIX)) wraps.push(key);
       else if (key.endsWith(SUFFIX)) chunks.push(key);
     }
-    // ADR-0413：**先銷毀所有金鑰包裹，再刪塊**。包裹沒了，塊就算刪不乾淨也解不開；
+    // ADR-0413：**先刪所有金鑰包裹，再刪塊**。包裹沒了，塊就算刪不乾淨也解不開；
     // 反過來做，中途當機會留下「塊刪了一半、金鑰全都還在」。
-    for (const key of wraps) await this.destroyKey(key);
-    for (const key of chunks) await this.dir.removeEntry(key);
+    // 每一個檔各自嘗試：一個刪不掉（例如另一個分頁正握著它）不能讓後面的全都留下來。
+    let failed = 0;
+    for (const key of wraps) if (!(await this.removeQuietly(key))) failed++;
+    for (const key of chunks) if (!(await this.removeQuietly(key))) failed++;
+    if (failed > 0) console.warn(`[archive] 移除對話封存時有 ${failed} 個檔刪不掉`);
   }
 
   /**
-   * 銷毀一份金鑰包裹：先以等長的零覆寫、再刪除。
+   * 刪一個檔；失敗回 `false`，不丟例外。
    *
-   * 覆寫是**盡力而為**：flash 的控制器可能把新內容寫到別的區塊，舊位元組仍在。
-   * 不因此省略——幾十個位元組，成本近乎零。覆寫失敗也照樣刪除。
+   * 這裡**不做「先覆寫再刪」**：OPFS 的 `createWritable` 依規格是寫到另一份暫存檔、關閉時才換上，
+   * 碰不到原本的位元組，覆寫只會多留一份痕跡。包裹的殘留能不能被撿回來取決於介質（ADR-0298 §6）。
    */
-  async destroyKey(name: string): Promise<void> {
+  async removeQuietly(name: string): Promise<boolean> {
     try {
-      const old = await this.readFile(name);
-      if (old !== null) await this.writeFile(name, "0".repeat(old.length));
+      await this.dir.removeEntry(name);
+      return true;
     } catch {
-      /* 覆寫失敗不擋刪除 */
+      return false;
     }
-    await this.dir.removeEntry(name);
   }
 }

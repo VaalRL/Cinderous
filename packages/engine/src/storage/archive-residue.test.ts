@@ -27,9 +27,23 @@ import type { StoredMessage } from "./types.js";
  *
  * `live` ＝ App 看得到的檔案；`residue` ＝ 曾經寫下的每一份位元組（刪除、覆寫都不會消失）。
  */
-function residualOpfs(): { live: Map<string, string>; residue: { name: string; bytes: string }[] } {
+interface Disk {
+  live: Map<string, string>;
+  residue: { name: string; bytes: string }[];
+  /** 依序記下每一次刪除的檔名 */
+  removed: string[];
+  /** 這些檔刪不掉（另一個分頁正握著它） */
+  locked: Set<string>;
+  /** 寫這個檔時，關閉前先等這個 promise（用來排出並發的先後） */
+  hold: Map<string, Promise<void>>;
+}
+
+function residualOpfs(): Disk {
   const live = new Map<string, string>();
   const residue: { name: string; bytes: string }[] = [];
+  const removed: string[] = [];
+  const locked = new Set<string>();
+  const hold = new Map<string, Promise<void>>();
   const dir = {
     keys: async function* () {
       for (const k of [...live.keys()]) yield k;
@@ -44,6 +58,11 @@ function residualOpfs(): { live: Map<string, string>; residue: { name: string; b
               buf += data;
             },
             close: async () => {
+              const gate = hold.get(name);
+              if (gate) {
+                hold.delete(name); // 只擋第一個寫這個檔的人
+                await gate;
+              }
               live.set(name, buf);
               residue.push({ name, bytes: buf }); // 介質上的痕跡：寫下去就在了
             },
@@ -54,13 +73,18 @@ function residualOpfs(): { live: Map<string, string>; residue: { name: string; b
     },
     /** 檔案系統刪除：只移索引。**residue 一動也沒動**。 */
     removeEntry: async (name: string) => {
+      if (locked.has(name)) throw new Error("NoModificationAllowedError");
+      removed.push(name);
       live.delete(name);
     },
     getDirectoryHandle: async () => dir,
   };
   vi.stubGlobal("navigator", { storage: { getDirectory: async () => dir } });
-  return { live, residue };
+  return { live, residue, removed, locked, hold };
 }
+
+/** 新格式塊去掉開頭的 `s1:<kid>:`，剩下密文本體。 */
+const body = (bytes: string) => bytes.replace(/^s1:[0-9a-f]{16}:/, "");
 
 const msg = (id: string, text: string): StoredMessage => ({ id, text }) as unknown as StoredMessage;
 const chunksOf = (residue: { name: string; bytes: string }[]) => residue.filter((r) => r.name.endsWith(".json"));
@@ -88,7 +112,8 @@ describe("封存刪除後的殘留可解性（ADR-0298 §3 → ADR-0413）", () 
     const left = chunksOf(disk.residue);
     expect(left).toHaveLength(1);
     expect(left[0]!.bytes).not.toContain("週五老地方見");
-    expect(openValue(dek, left[0]!.bytes)).toBeNull();
+    expect(left[0]!.bytes.startsWith("s1:")).toBe(true);
+    expect(openValue(dek, body(left[0]!.bytes))).toBeNull();
   });
 
   it("🔴 每塊各自一把隨機金鑰——不是從 nsec 導出的，同樣的內容兩塊的密鑰也不同", async () => {
@@ -105,9 +130,9 @@ describe("封存刪除後的殘留可解性（ADR-0298 §3 → ADR-0413）", () 
     expect(k0).not.toEqual(dek);
     // 每把只開得了自己那一塊。
     const [c0, c1] = chunksOf(disk.residue);
-    expect(openValue(k0, c0!.bytes)).toContain("去年的事");
-    expect(openValue(k0, c1!.bytes)).toBeNull();
-    expect(openValue(k1, c1!.bytes)).toContain("上週的事");
+    expect(openValue(k0, body(c0!.bytes))).toContain("去年的事");
+    expect(openValue(k0, body(c1!.bytes))).toBeNull();
+    expect(openValue(k1, body(c1!.bytes))).toContain("上週的事");
   });
 
   it("刪除時先銷毀金鑰包裹、再刪塊（順序是重點：包裹沒了，塊刪不乾淨也解不開）", async () => {
@@ -118,13 +143,27 @@ describe("封存刪除後的殘留可解性（ADR-0298 §3 → ADR-0413）", () 
     const before = disk.residue.length;
 
     await arch.remove("bob");
-    // 刪除過程中寫下的東西只有「覆寫金鑰包裹」——內容不再是可用的包裹。
-    const overwrites = disk.residue.slice(before);
-    expect(overwrites.length).toBe(2);
-    for (const o of overwrites) {
-      expect(o.name.endsWith(".key")).toBe(true);
-      expect(unwrapSegmentKey(dek, o.bytes)).toBeNull();
-    }
+    expect(disk.removed).toHaveLength(4);
+    expect(disk.removed.slice(0, 2).every((n) => n.endsWith(".key"))).toBe(true);
+    expect(disk.removed.slice(2).every((n) => n.endsWith(".json"))).toBe(true);
+    // 刪除過程不再寫任何東西（OPFS 的覆寫碰不到原本的位元組，只會多留一份）。
+    expect(disk.residue.length).toBe(before);
+  });
+
+  it("🔴 一個檔刪不掉，其餘的照樣刪——不能因為一次失敗就把後面的金鑰全留下來", async () => {
+    const disk = residualOpfs();
+    const arch = (await openOpfsArchive("ns", dek))!;
+    await arch.append("bob", [msg("m1", "a")]);
+    await arch.append("bob", [msg("m2", "b")]);
+    const firstKey = [...disk.live.keys()].find((k) => k.startsWith("bob.0.") && k.endsWith(".key"))!;
+    disk.locked.add(firstKey);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    await expect(arch.remove("bob")).resolves.toBeUndefined();
+    expect([...disk.live.keys()]).toEqual([firstKey]); // 只剩刪不掉的那一個
+    expect(await arch.loadChunk("bob", 1)).toEqual([]);
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
   });
 
   it("⚠ 界線：連**金鑰包裹的殘留**都被撿回來、又有 nsec 的人，還是解得開（ADR-0298 §6）", async () => {
@@ -136,7 +175,7 @@ describe("封存刪除後的殘留可解性（ADR-0298 §3 → ADR-0413）", () 
 
     const wrap = keysOf(disk.residue).find((r) => unwrapSegmentKey(dek, r.bytes) !== null)!;
     const seg = unwrapSegmentKey(dek, wrap.bytes)!;
-    expect(openValue(seg, chunksOf(disk.residue)[0]!.bytes)).toContain("還是被看到了");
+    expect(openValue(seg, body(chunksOf(disk.residue)[0]!.bytes))).toContain("還是被看到了");
   });
 
   it("對照組：升級前的舊塊（直接用 dek 加密）刪除後殘留**仍然解得開**——保障只及於升級後寫下的塊", async () => {
@@ -167,10 +206,51 @@ describe("OPFS 封存的基本行為（每塊金鑰加進來之後不能壞的�
     expect(await arch.loadChunk("bob", 2)).toEqual([]);
   });
 
+  it("🔴 兩個分頁同時封存同一個 seq：留下來的那一塊讀得到（不會配到另一個分頁的金鑰）", async () => {
+    const disk = residualOpfs();
+    const tabA = (await openOpfsArchive("ns", dek))!;
+    const tabB = (await openOpfsArchive("ns", dek))!;
+    // A 的塊最後才落地：A 先算出 seq 0、寫了包裹，塊卡在關閉前；B 整個做完；A 才寫完。
+    let release!: () => void;
+    disk.hold.set("bob.0.json", new Promise<void>((r) => (release = r)));
+    const a = tabA.append("bob", [msg("a", "分頁 A 的")]);
+    await new Promise((r) => setTimeout(r, 0));
+    await tabB.append("bob", [msg("b", "分頁 B 的")]);
+    release();
+    await a;
+
+    expect(await tabB.chunkCount("bob")).toBe(1);
+    const got = await tabB.loadChunk("bob", 0);
+    expect(got).toHaveLength(1); // 後寫者贏；重點是**不是空的**
+    expect(got[0]!.text).toBe("分頁 A 的");
+    // 移除時兩份包裹都清掉。
+    await tabA.remove("bob");
+    expect(disk.live.size).toBe(0);
+  });
+
+  it("🔴 降回舊版又升級：舊版在同一個 seq 寫下的塊讀得到，不會被留下來的包裹拿去解", async () => {
+    const disk = residualOpfs();
+    const arch = (await openOpfsArchive("ns", dek))!;
+    await arch.append("bob", [msg("new", "新版寫的")]);
+    // 舊版的 remove 只刪 `.json`、留下包裹；之後在同一個 seq 用 dek 直接加密寫下一塊。
+    disk.live.delete("bob.0.json");
+    disk.live.set("bob.0.json", sealValue(dek, JSON.stringify([msg("old", "舊版寫的")])));
+
+    expect((await arch.loadChunk("bob", 0))[0]!.text).toBe("舊版寫的");
+  });
+
+  it("新格式塊的包裹不在了（刪到一半）→ 讀不到，也不會退回用 nsec 的金鑰硬解", async () => {
+    const disk = residualOpfs();
+    const arch = (await openOpfsArchive("ns", dek))!;
+    await arch.append("bob", [msg("a", "x")]);
+    for (const k of [...disk.live.keys()]) if (k.endsWith(".key")) disk.live.delete(k);
+    expect(await arch.loadChunk("bob", 0)).toEqual([]);
+  });
+
   it("寫完包裹、還沒寫塊就當機 → 下一次 append 用同一個 seq 重來，讀得到", async () => {
     const disk = residualOpfs();
     const arch = (await openOpfsArchive("ns", dek))!;
-    disk.live.set("bob.0.key", "k1:孤兒包裹"); // 上一次只寫到包裹
+    disk.live.set("bob.0.0123456789abcdef.key", "k1:孤兒包裹"); // 上一次只寫到包裹
     expect(await arch.chunkCount("bob")).toBe(0);
     await arch.append("bob", [msg("a", "重來的那一塊")]);
     expect(await arch.chunkCount("bob")).toBe(1);
@@ -213,15 +293,13 @@ describe("移除身分時連封存一起清（ADR-0202／0413）", () => {
     const arch = (await openOpfsArchive("ns", dek))!;
     await arch.append("bob", [msg("a", "給 bob 的")]);
     await arch.append("carol", [msg("b", "給 carol 的")]);
-    const before = disk.residue.length;
 
     await wipeOpfsArchive("ns");
     expect(disk.live.size).toBe(0);
-    // 刪除過程寫下的只有「覆寫金鑰包裹」，而且都不再是可用的包裹。
-    const overwrites = disk.residue.slice(before);
-    expect(overwrites).toHaveLength(2);
-    expect(overwrites.every((o) => o.name.endsWith(".key") && unwrapSegmentKey(dek, o.bytes) === null)).toBe(true);
-    for (const c of chunksOf(disk.residue)) expect(openValue(dek, c.bytes)).toBeNull();
+    // 包裹先刪、塊後刪。
+    const firstChunk = disk.removed.findIndex((n) => n.endsWith(".json"));
+    expect(disk.removed.slice(0, firstChunk).filter((n) => n.endsWith(".key"))).toHaveLength(2);
+    for (const c of chunksOf(disk.residue)) expect(openValue(dek, body(c.bytes))).toBeNull();
   });
 
   it("空的 namespace 不做事（舊的單一身分共用 legacy 目錄，不能被別的身分的移除波及）", async () => {

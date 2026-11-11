@@ -47,6 +47,28 @@ function writerWith(hotCap: number, archive: MessageArchive, mem = new MemorySto
 }
 
 describe("訊息封存（ADR-0111）", () => {
+  it("🔴 移除排在在途搬移之後：刪對話時正在寫的那一塊不會被留下來（ADR-0413 審查）", async () => {
+    // 寫入慢的封存：append 要等 `release` 才落地。
+    class SlowArchive extends FakeArchive {
+      release!: () => void;
+      private gate = new Promise<void>((r) => (this.release = r));
+      override async append(convo: string, messages: StoredMessage[]): Promise<void> {
+        await this.gate;
+        return super.append(convo, messages);
+      }
+    }
+    const arch = new SlowArchive();
+    const { mem, writer } = writerWith(10, arch);
+    for (let i = 0; i < 10 + ARCHIVE_CHUNK; i++) mem.appendMessage(msg(i));
+    writer.schedule("bob"); // 開始寫第 0 塊（卡在 gate）
+    await Promise.resolve();
+    writer.remove("bob"); // 使用者這時刪了這個對話
+    arch.release();
+    await writer.flush();
+
+    expect(await arch.chunkCount("bob")).toBe(0);
+  });
+
   it("溢出滿一整塊才搬——不足一塊時熱區原封不動", async () => {
     const arch = new FakeArchive();
     const { mem, writer } = writerWith(10, arch);
@@ -159,6 +181,7 @@ describe("封存接上 LocalStorage（ADR-0111）", () => {
     s.addContact({ pubkey: "bob", name: "Bob" });
     await arch.append("bob", [msg(1)]);
     s.removeContact("bob");
+    await s.flushArchive();
     expect(await arch.chunkCount("bob")).toBe(0);
   });
 });

@@ -329,7 +329,7 @@ export class TauriStorage implements AppStorage {
     this.mem.removeContact(pubkey);
     this.persist(META);
     this.persist(MSGS + pubkey);
-    void this.archive?.remove(pubkey); // 封存也要清（ADR-0111）
+    this.writer?.remove(pubkey); // 封存也要清（ADR-0111）
   }
   remapContact(from: string, to: string): void {
     this.mem.remapContact(from, to);
@@ -339,7 +339,7 @@ export class TauriStorage implements AppStorage {
     this.mem.blockContact(contact);
     this.persist(META);
     this.persist(MSGS + contact.pubkey);
-    void this.archive?.remove(contact.pubkey);
+    this.writer?.remove(contact.pubkey);
   }
   unblockContact(pubkey: string): void {
     this.mem.unblockContact(pubkey);
@@ -478,7 +478,7 @@ export class TauriStorage implements AppStorage {
     this.mem.removeGroup(id);
     this.persist(META);
     this.persist(MSGS + id);
-    void this.archive?.remove(id);
+    this.writer?.remove(id);
   }
   saveBootstrapList(doc: StoredBootstrapList): void {
     this.mem.saveBootstrapList(doc);
