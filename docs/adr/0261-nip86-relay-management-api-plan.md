@@ -1,6 +1,6 @@
-# 0261. NIP-86 Relay 管理 API 的規劃（提議中，未實作）
+# 0261. NIP-86 Relay 管理 API 的規劃
 
-- 狀態：**提議中（規劃；接受後為實作依據）**
+- 狀態：**已接受（Accepted，2026-11-11）——只在自架 Node 主機實作**（SDK ADR 0132、SDK v0.88.0）；Cloudflare 版（含官方錨點）不做。見文末「實作紀錄」。
 - 日期：2026-07-27
 - 相關文件：ADR-0259 §2.3（本 ADR 是其展開）、0257 §4.2（託管營運＝主要收入項，需要管理面）、
   **0044**（企業封閉 allowlist）、**0047**（管理者簽章名冊＝成員權威）、0048（政策 `allowedKinds`）、
@@ -107,3 +107,14 @@ NIP-86 要求 `Authorization` 帶 NIP-98 事件。**授權金鑰必須與管理�
   2. 定義 `cinder_applyroster` 的請求／回應格式與錯誤碼，補 core 端的驗證共用函式。
   3. 決定管理金鑰的佈建方式（`wrangler secret`／環境變數）與輪替流程。
   4. 決定 NIP-11 可變欄位的持久化位置（目前全部來自啟動時環境）。
+
+## 實作紀錄（2026-11-11）
+
+使用者接受本 ADR，並決定**只在自架 Node 主機開、官方錨點不開**。後續行動的處理：
+
+1. **分片傳播**：避開——Node 主機（`startNodeRelay`）只有一個 `RelayCore`、沒有分片，套用名冊就是換掉一個 Set。Worker 不實作；等真的有託管企業站跑在 Cloudflare 上再回來解（共享設定 DO 或 KV）。官方錨點不必重新部署。
+2. **`cinder_applyroster`**：參數是一則名冊事件；用 `ROSTER_ADMIN_PUBKEY` 以 `verifyOrgRoster` 驗，`updatedAt` 比上次套用的新才採用，名單＝`rosterAllowlist`（不含已輪替作廢的舊金鑰），結果是空名單就拒絕。回 `{ allowed, updatedAt }`。名冊驗證程式自 `packages/core` 搬進 `@cinderous/client/protocol`，core 照原名轉出（同 ADR-0370）。
+3. **管理金鑰**：環境變數 `NIP86_ADMIN_PUBKEYS`（npub 或 hex，逗號分隔）；沒設＝端點不存在。`ROSTER_ADMIN_PUBKEY` 出現在其中就**拒絕啟動**（本 ADR 的金鑰分離要求）。NIP-98 授權必須帶 `payload` tag（內容 sha256），時間窗 60 秒。輪替＝改環境變數後重開。
+4. **持久化**：有 SQLite 檔時存在 `cinder_admin_state` 表，重開後蓋過環境變數（名冊、事件類型、站名、說明）；純記憶體模式重開回到環境變數。
+
+另新增環境變數 `ALLOWED_KINDS`（事件類型清單）；`allowkind`／`disallowkind` 只改既有清單、不從空清單起建、不刪最後一個。細節與殘餘風險（60 秒內可重放同一請求等）見 SDK ADR 0132。企業管理端「推送名冊到自架站」的按鈕另開 PR。
