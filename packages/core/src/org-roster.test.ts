@@ -1,4 +1,6 @@
+import * as sdk from "@cinderous/client/protocol";
 import { describe, expect, it } from "vitest";
+import { ORG_ROSTER_KIND } from "./constants.js";
 import { generateSecretKey, getPublicKey } from "./keys.js";
 import {
   applyRosterRotations,
@@ -23,6 +25,16 @@ const c = getPublicKey(generateSecretKey());
 const d = getPublicKey(generateSecretKey());
 
 const doc = (members: OrgRosterDoc["members"], updatedAt = 1000): OrgRosterDoc => ({ org: "Acme", members, updatedAt });
+
+// 名冊驗證的唯一來源在 SDK（SDK ADR 0132）：這裡只是照原名轉出，自架站 NIP-86 `cinder_applyroster` 用的是同一份。
+describe("org-roster 單一來源", () => {
+  it("轉出的是 SDK 的同一個函式、kind 一致", () => {
+    expect(signOrgRoster).toBe(sdk.signOrgRoster);
+    expect(verifyOrgRoster).toBe(sdk.verifyOrgRoster);
+    expect(rosterAllowlist).toBe(sdk.rosterAllowlist);
+    expect(ORG_ROSTER_KIND).toBe(sdk.ORG_ROSTER_KIND);
+  });
+});
 
 describe("org-roster 簽章名冊（ADR-0047）", () => {
   it("sign/verify round-trip", () => {
