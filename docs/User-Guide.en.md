@@ -121,7 +121,7 @@ This is where Cinderous differs from LINE the most, and where advance preparatio
 
 **How to generate it**: Settings → "Identity backup" → "Generate encrypted backup code" → set a backup password.
 
-**How to restore it**: on the new device's "Add identity," paste the backup code and enter the backup password.
+**How to restore it**: on the new device's sign-in screen, choose "All my devices are gone," paste the backup code and enter the backup password (if that device already has another identity, "Add identity" works too).
 
 **What it recovers**: the identity itself plus your relay location. **Contacts and messages don't come back via this route** (that takes B or C) — but your identity is alive, so friends' messages will gradually reappear as they message you.
 
@@ -150,7 +150,7 @@ This is where Cinderous differs from LINE the most, and where advance preparatio
 
 **How to do it**:
 1. Old device: Settings → "Pair a new device" → a pairing code and QR appear.
-2. New device: login screen → "Import from an old device" → paste the pairing code.
+2. New device: login screen → "I still have another device" → paste the pairing code.
 3. Each device displays a set of **4 digits**. **Confirm the digits match on both sides**, then press "Match, start transfer" on the old device.
 4. Once done, the new device is a complete copy of the old one.
 

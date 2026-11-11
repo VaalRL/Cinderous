@@ -1,4 +1,4 @@
-import { listEntries, type OrgInvite, parseOrgInvite, weightedOrder } from "@cinderous/core";
+import { isBackupCode, listEntries, type OrgInvite, parseOrgInvite, weightedOrder } from "@cinderous/core";
 import { useEffect, useRef, useState } from "react";
 import { ANCHOR_RELAYS } from "@cinderous/engine";
 import { useI18n } from "../i18n.js";
@@ -105,14 +105,35 @@ export function hostOf(url: string): string {
   }
 }
 
+/**
+ * 〈我的裝置都沒了〉的結果（ADR-0412）。`invalid`＝認不出的 nsec／救援登入碼，或救援密碼不對
+ * （兩者不細分，不給猜密碼的人訊號）；`needName`／`nameTaken`／`needPassword`＝本機沒有這個身分、
+ * 要建新設定檔但表單還缺東西。
+ */
+export type RestoreOutcome = "ok" | "invalid" | "needName" | "nameTaken" | "needPassword";
+
+export interface RestoreRequest {
+  /** nsec 或救援登入碼（NIP-49 信封），由呼叫端以 `isBackupCode` 分辨。 */
+  secret: string;
+  /** 救援密碼；貼的是 nsec 時為空字串。 */
+  backupPassword: string;
+  /** 上方的顯示名稱欄；本機已有這把金鑰的身分時不看。 */
+  name: string;
+  /** 目前選定的中繼站（救援登入碼自帶的優先）。 */
+  relayUrl: string;
+  /** 瀏覽器的本機密碼（ADR-0122）；桌面不帶。 */
+  password?: string;
+}
+
 export function SignIn({
   onSignIn,
   onPair,
   requirePassword = false,
-  onEnterNsec,
+  onRestore,
   lookupName = () => "create",
   onJoinOrg,
   initialName,
+  restoreFirst = false,
 }: {
   /** `password` 只在 `requirePassword` 時有值（瀏覽器）。 */
   onSignIn: (name: string, relayUrl: string, password?: string) => void;
@@ -126,8 +147,12 @@ export function SignIn({
    * 桌面不需要（Tauri 有金鑰庫），故預設 false。
    */
   requirePassword?: boolean;
-  /** 以既有 nsec 登入（ADR-0122）：忘記密碼、或在舊版卡住的瀏覽器使用者的出路。 */
-  onEnterNsec?: (nsec: string) => Promise<boolean>;
+  /**
+   * 〈我的裝置都沒了〉（ADR-0305／0412）：貼 nsec 或救援登入碼找回身分。本機已有那個身分就回到它
+   * （含 ADR-0122「有設定檔但拿不到金鑰」的瀏覽器使用者），沒有就以這把金鑰建新的設定檔。
+   * 未提供＝不顯示入口（示範模式）。
+   */
+  onRestore?: (req: RestoreRequest) => Promise<RestoreOutcome>;
   /**
    * ADR-0146：以顯示名稱查詢本機是否已有同名身分。`"enter"`＝命中既有（改為登入該身分，不建新；
    * 密碼在重載後的解鎖畫面驗證）；`"ambiguous"`＝多個同名（擋下）；`"create"`＝建新。
@@ -139,6 +164,8 @@ export function SignIn({
    * 以邀請碼的 relay／管理者建立企業成員身分（建立後自動向管理者提出入職）。
    */
   onJoinOrg?: (invite: OrgInvite, name: string, password?: string) => void;
+  /** 一進來就打開〈我的裝置都沒了〉面板：有設定檔但拿不到金鑰時（ADR-0122），那是唯一的出路。 */
+  restoreFirst?: boolean;
   /** 測試用：預填顯示名稱欄（SSR 測試無法打字；貼邀請碼情境）。 */
   initialName?: string;
 }): JSX.Element {
@@ -200,9 +227,14 @@ export function SignIn({
   const [password, setPassword] = useState("");
   const [password2, setPassword2] = useState("");
   const [pwErr, setPwErr] = useState("");
-  const [nsecOpen, setNsecOpen] = useState(false);
+  // 〈我的裝置都沒了〉面板（ADR-0412）。開著時收起建新身分用的中繼站／密碼欄與按鈕——
+  // 上方的顯示名稱欄沿用（本機沒有這個身分時當新設定檔的名字）。
+  const [nsecOpen, setNsecOpen] = useState(restoreFirst);
   const [nsec, setNsec] = useState("");
   const [nsecErr, setNsecErr] = useState("");
+  const [backupPw, setBackupPw] = useState("");
+  const [restoreBusy, setRestoreBusy] = useState(false);
+  const isCode = isBackupCode(nsec.trim());
 
   // ADR-0146：輸入的名稱是否命中本機既有身分。命中＝改為「登入既有」，隱藏建新用的密碼/中繼站欄。
   const nameMatch = lookupName(name.trim());
@@ -254,13 +286,44 @@ export function SignIn({
     onSignIn(n, relay.trim(), password);
   };
 
-  const submitNsec = (): void => {
-    if (!nsec.trim() || !onEnterNsec) return;
+  const submitRestore = (): void => {
+    if (!nsec.trim() || !onRestore || restoreBusy) return;
+    if (isCode && !backupPw) return;
+    if (requirePassword && password && password !== password2) {
+      setNsecErr(t("signIn_passwordMismatch"));
+      return;
+    }
     setNsecErr("");
-    void onEnterNsec(nsec.trim()).then((ok) => {
-      if (!ok) setNsecErr(t("signIn_nsecInvalid"));
-    });
+    setRestoreBusy(true);
+    const req: RestoreRequest = {
+      secret: nsec.trim(),
+      backupPassword: isCode ? backupPw : "",
+      name: name.trim(),
+      relayUrl: relay.trim(),
+      ...(requirePassword && password ? { password } : {}),
+    };
+    // scrypt（救援登入碼）約需一秒：先讓「找回中」上畫再做（同新增身分的作法）。
+    setTimeout(() => {
+      void onRestore(req)
+        .catch((): RestoreOutcome => "invalid")
+        .then((r) => {
+          setRestoreBusy(false);
+          if (r === "ok") return;
+          setNsecErr(
+            t(
+              r === "needName"
+                ? "signIn_restoreNeedName"
+                : r === "nameTaken"
+                  ? "addId_nameTaken"
+                  : r === "needPassword"
+                    ? "signIn_passwordRequired"
+                    : "signIn_nsecInvalid",
+            ),
+          );
+        });
+    }, 0);
   };
+  const restoring = !invite && nsecOpen;
   return (
     <div className="desktop desktop--center">
       <div className="win signin">
@@ -277,7 +340,7 @@ export function SignIn({
             aria-label={t("signIn_displayName")}
             value={name}
             onChange={(e) => setName(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && (invite ? submitJoin() : submit())}
+            onKeyDown={(e) => e.key === "Enter" && (invite ? submitJoin() : restoring ? submitRestore() : submit())}
             placeholder={t("signIn_displayName")}
           />
           {/* 入職邀請（ADR-0156）：偵測到邀請碼 → 加入組織面板（其餘建新/登入區塊全收起）。 */}
@@ -334,7 +397,7 @@ export function SignIn({
             </div>
           ) : null}
           {/* ADR-0146：名稱命中本機既有身分 → 提示「將登入既有身分」，並收起建新用的中繼站/密碼欄。 */}
-          {!invite && entering ? (
+          {!invite && !restoring && entering ? (
             <p className="hint signin__enterhint" data-testid="signin-enter-existing">
               {nameMatch === "ambiguous"
                 ? t("signIn_ambiguousName")
@@ -342,7 +405,7 @@ export function SignIn({
             </p>
           ) : null}
           {/* ADR-0218：名稱是新的（沒用過）→ 明示「將建立新身分」，與「登入既有」對稱、消除誤解。 */}
-          {!invite && !entering && name.trim() ? (
+          {!invite && !restoring && !entering && name.trim() ? (
             <p className="hint signin__createhint" data-testid="signin-create-new">{t("signIn_createHint")}</p>
           ) : null}
           {invite || entering ? null : showRelay ? (
@@ -387,7 +450,7 @@ export function SignIn({
           )}
           {/* 瀏覽器（ADR-0122）：本地密碼**必填**——沒有它，重新整理一次身分就沒了。
               ADR-0146：命中既有身分時不在此設密碼（於重載後的解鎖畫面驗證既有密碼）。 */}
-          {!invite && !entering && requirePassword ? (
+          {!invite && !restoring && !entering && requirePassword ? (
             <div className="signin__pw" data-testid="signin-password">
               <p className="hint">{t("signIn_passwordWhy")}</p>
               <input
@@ -416,43 +479,98 @@ export function SignIn({
             </div>
           ) : null}
 
-          {invite ? null : (
+          {invite || restoring ? null : (
             <button onClick={submit}>{entering ? t("signIn_enterExisting") : t("signIn_createButton")}</button>
           )}
 
-          {/* 用既有 nsec 登入（ADR-0122）：忘記密碼、或在舊版被換掉身分的人的出路。
-              次要動作用幽靈鈕（ADR-0251）：settings__reveal 是幽靈 class（無 CSS 規則），
-              先前 fallback 成主色實心與「登入」搶視覺——改與兄弟「從其他裝置登入」同語言。 */}
-          {!invite && onEnterNsec && !nsecOpen ? (
-            <button className="signin__secondary" data-testid="nsec-open" onClick={() => setNsecOpen(true)}>
-              {t("signIn_useNsec")}
-            </button>
+          {/* 三條路（ADR-0305／0412）：建立新身分是上面的主路徑；用過的人依處境二選一——
+              〈我還有另一台裝置〉＝配對搬家（ADR-0072），〈我的裝置都沒了〉＝nsec 或救援登入碼。
+              以處境命名而不是以手段（nsec／配對碼）命名。次要動作用幽靈鈕（ADR-0251）。 */}
+          {!invite && (onPair || onRestore) && !nsecOpen && !pairOpen ? (
+            <div className="signin__entries" data-testid="signin-entries">
+              <p className="hint">{t("entry_haveUsed")}</p>
+              {onPair ? (
+                <button className="signin__secondary" data-testid="pair-import" onClick={() => setPairOpen(true)}>
+                  {t("pair_importButton")}
+                </button>
+              ) : null}
+              {onRestore ? (
+                <button className="signin__secondary" data-testid="nsec-open" onClick={() => setNsecOpen(true)}>
+                  {t("signIn_useNsec")}
+                </button>
+              ) : null}
+            </div>
           ) : null}
-          {!invite && onEnterNsec && nsecOpen ? (
+          {restoring && onRestore ? (
             <div className="settings__key" data-testid="nsec-panel">
               <p className="hint">{t("signIn_useNsecHint")}</p>
               <input
                 type="password"
-                aria-label={t("signIn_nsec")}
+                aria-label={t("rescue_secret")}
                 value={nsec}
                 onChange={(e) => {
                   setNsec(e.target.value);
                   setNsecErr("");
                 }}
-                onKeyDown={(e) => e.key === "Enter" && submitNsec()}
-                placeholder="nsec1…"
+                onKeyDown={(e) => e.key === "Enter" && submitRestore()}
+                placeholder={t("rescue_secret")}
+                disabled={restoreBusy}
               />
+              {/* 救援登入碼（NIP-49 信封）才要救援密碼；貼 nsec 不顯示（ADR-0070）。 */}
+              {isCode ? (
+                <input
+                  type="password"
+                  aria-label={t("rescue_backupPw")}
+                  data-testid="restore-backup-pw"
+                  value={backupPw}
+                  onChange={(e) => {
+                    setBackupPw(e.target.value);
+                    setNsecErr("");
+                  }}
+                  onKeyDown={(e) => e.key === "Enter" && submitRestore()}
+                  placeholder={t("rescue_backupPw")}
+                  disabled={restoreBusy}
+                />
+              ) : null}
+              {/* 瀏覽器（ADR-0122）：本機沒有這個身分時要以密碼包裹落盤；回到既有身分時用不到。 */}
+              {requirePassword ? (
+                <>
+                  <p className="hint">{t("signIn_passwordWhy")}</p>
+                  <input
+                    type="password"
+                    aria-label={t("signIn_password")}
+                    value={password}
+                    onChange={(e) => {
+                      setPassword(e.target.value);
+                      setNsecErr("");
+                    }}
+                    placeholder={t("signIn_password")}
+                    disabled={restoreBusy}
+                  />
+                  <input
+                    type="password"
+                    aria-label={t("signIn_passwordAgain")}
+                    value={password2}
+                    onChange={(e) => {
+                      setPassword2(e.target.value);
+                      setNsecErr("");
+                    }}
+                    onKeyDown={(e) => e.key === "Enter" && submitRestore()}
+                    placeholder={t("signIn_passwordAgain")}
+                    disabled={restoreBusy}
+                  />
+                </>
+              ) : null}
               {nsecErr ? <p className="signin__err" data-testid="nsec-error">{nsecErr}</p> : null}
-              <button data-testid="nsec-submit" onClick={submitNsec}>
-                {t("signIn_useNsecButton")}
-              </button>
+              <div className="settings__keyrow">
+                <button data-testid="nsec-submit" onClick={submitRestore} disabled={!nsec.trim() || (isCode && !backupPw) || restoreBusy}>
+                  {restoreBusy ? t("addId_busy") : t("signIn_useNsecButton")}
+                </button>
+                <button onClick={() => setNsecOpen(false)} disabled={restoreBusy}>
+                  {t("settings_relayChangeCancel")}
+                </button>
+              </div>
             </div>
-          ) : null}
-
-          {!invite && onPair && !pairOpen ? (
-            <button className="signin__secondary" data-testid="pair-import" onClick={() => setPairOpen(true)}>
-              {t("pair_importButton")}
-            </button>
           ) : null}
           {!invite && onPair && pairOpen ? (
             <div className="settings__key" data-testid="pair-import-panel">

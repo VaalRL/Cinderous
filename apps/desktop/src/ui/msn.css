@@ -436,6 +436,8 @@ button:disabled { opacity: .5; cursor: default; filter: none; }
   background: transparent; color: var(--muted); border: 1px solid var(--border); font-weight: 500;
 }
 .signin .signin__secondary:hover { color: var(--ink); border-color: var(--accent); filter: none; }
+/* 三條路（ADR-0412）：「已經用過 Cinderous？」底下的兩條次要入口，以細線與主路徑分開。 */
+.signin__entries { margin-top: 18px; padding-top: 6px; border-top: 1px solid var(--border); }
 /* 登入頁主要動作按鈕改直向堆疊＋間隔（登入／用 nsec 登入／從舊裝置登入不再並排黏一起）。 */
 .signin button { display: block; width: fit-content; margin: 12px auto 0; }
 .signin .signin__relaytoggle { display: inline; }
