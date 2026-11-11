@@ -1597,7 +1597,10 @@ export function AppSession({
   if (screen === "signin") {
     return (
       <NsecSignInScreen
-        onSignIn={handleSignIn}
+        onSignIn={(identity, password) => {
+          setSigninRestore(false); // 之後再回登入畫面時從三條路的起點開始
+          handleSignIn(identity, password);
+        }}
         onJoinOrg={joinOrg}
         onCreateCompany={createCompany}
         nameTaken={(name, pubkey) => nameTaken(profiles, name, pubkey)}

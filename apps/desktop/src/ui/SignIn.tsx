@@ -566,7 +566,16 @@ export function SignIn({
                 <button data-testid="nsec-submit" onClick={submitRestore} disabled={!nsec.trim() || (isCode && !backupPw) || restoreBusy}>
                   {restoreBusy ? t("addId_busy") : t("signIn_useNsecButton")}
                 </button>
-                <button onClick={() => setNsecOpen(false)} disabled={restoreBusy}>
+                <button
+                  onClick={() => {
+                    // 取消就把貼進來的秘密清掉，不留在元件狀態裡等下次打開。
+                    setNsec("");
+                    setBackupPw("");
+                    setNsecErr("");
+                    setNsecOpen(false);
+                  }}
+                  disabled={restoreBusy}
+                >
                   {t("settings_relayChangeCancel")}
                 </button>
               </div>

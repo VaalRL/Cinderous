@@ -177,6 +177,16 @@ describe("身分入口收成三條路（ADR-0305／0412）", () => {
     expect(translate("en", "signIn_useNsecHint").toLowerCase()).toContain("rescue login code");
   });
 
+  it("🔴 其他文案提到這兩個入口時，用的是現在畫面上的名字（改名時漏掉就會叫人去按不存在的按鈕）", () => {
+    for (const locale of ["zh-Hant", "en"] as const) {
+      expect(translate(locale, "signIn_ambiguousName")).toContain(translate(locale, "signIn_useNsec"));
+      expect(translate(locale, "pair_offerHint")).toContain(translate(locale, "pair_importButton"));
+      expect(translate(locale, "mobilePair_title")).toBe(translate(locale, "pair_importButton"));
+    }
+    expect(translate("zh-Hant", "signIn_ambiguousName")).not.toContain("用 nsec 登入");
+    expect(translate("zh-Hant", "pair_offerHint")).not.toContain("從舊裝置匯入");
+  });
+
   it("🔴 搬家是「可延後但有期限」：要說出舊裝置沒了就補不回來（ADR-0305 §6）", () => {
     expect(translate("zh-Hant", "signIn_useNsecHint")).toContain("沒了就真的沒了");
     expect(translate("en", "signIn_useNsecHint").toLowerCase()).toContain("gone");

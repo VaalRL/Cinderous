@@ -85,7 +85,7 @@ describe("行動端登入畫面（ADR-0081）", () => {
         theme="light"
       />,
     );
-    expect(html).toContain("從舊裝置匯入"); // mobilePair_title
+    expect(html).toContain("我還有另一台裝置"); // mobilePair_title（ADR-0412：與入口同名）
     expect(html).toContain("返回登入"); // mobilePair_toNsec（ADR-0412）
   });
 });

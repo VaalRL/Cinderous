@@ -2333,14 +2333,29 @@ export function App(): JSX.Element {
       } catch {
         return "invalid"; // 格式不符與救援密碼錯回同一個結果，不給猜密碼的人訊號
       }
-      const r = resolveRestore(profilesState, pubkey, req.name);
+      const activate = (): void => {
+        if (profilesState.active === pubkey) return;
+        const next = setActive(profilesState, pubkey);
+        saveProfiles(next);
+        setProfilesState(next);
+      };
+      const r = resolveRestore(profilesState, pubkey, req.name, { vaultLocked: isTauri() });
+      if (r.kind === "unlock") {
+        // 🔴 桌面且這個身分設了本地密碼：金鑰庫裡的 nsec 與資料庫金鑰都被密碼包著。
+        // 直接 `enterWithNsec` 會把包裹的 nsec 蓋成明文、資料庫卻還鎖著（審查發現）。
+        // 帶去它的解鎖畫面：記得密碼就解鎖，忘了就走那裡的 nsec 救援並設新密碼（ADR-0073）。
+        activate();
+        setLockedProfile(r.profile);
+        return "ok";
+      }
       if (r.kind === "enter") {
-        if (profilesState.active !== pubkey) {
-          const next = setActive(profilesState, pubkey);
-          saveProfiles(next);
-          setProfilesState(next);
-        }
-        return (await enterWithNsec(r.profile, nsec)) ? "ok" : "invalid";
+        // 瀏覽器：有填本機密碼＝要用新密碼重新包裹（忘記舊密碼的人靠這個回來，ADR-0122）；
+        // 沒填就照舊只進入這一次。
+        if (!isTauri() && req.password) await browserPassEnable(pubkey, nsec, req.password);
+        // 先進得去、再把它設成作用中——失敗時不留下「作用中卻進不去」的狀態。
+        if (!(await enterWithNsec(r.profile, nsec))) return "invalid";
+        activate();
+        return "ok";
       }
       if (r.kind !== "create") return r.kind;
       if (!isTauri() && !req.password) return "needPassword"; // ADR-0122
