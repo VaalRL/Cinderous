@@ -19,7 +19,27 @@ describe("行動端登入畫面（ADR-0081）", () => {
       />,
     );
     expect(html).toContain("Sign in to Cinderous"); // mobileSignIn_title（ADR-0277）
-    expect(html).toContain("Import from old device instead"); // mobileSignIn_toPair
+    expect(html).toContain("I still have another device"); // mobileSignIn_toPair（ADR-0412）
+  });
+
+  it("三條路（ADR-0305／0412）：建立新身分是主路徑；另外兩條以處境命名、放在「已經用過 Cinderous？」底下", () => {
+    const html = renderToStaticMarkup(<NsecSignInScreen onSignIn={() => {}} onUsePairing={() => {}} locale="zh-Hant" />);
+    const heading = html.indexOf('data-testid="signin-entries"');
+    expect(heading).toBeGreaterThan(-1);
+    expect(html).toContain("已經用過 Cinderous？");
+    // 〈我還有另一台裝置〉在前、〈我的裝置都沒了〉在後，兩者都在標題之後
+    const other = html.indexOf("我還有另一台裝置");
+    const lost = html.indexOf("我的裝置都沒了");
+    expect(other).toBeGreaterThan(heading);
+    expect(lost).toBeGreaterThan(other);
+    expect(html).not.toContain("用 nsec 登入");
+  });
+
+  it("〈我的裝置都沒了〉打開時說清楚能找回什麼、不能找回什麼（ADR-0305 §6）", () => {
+    const html = renderToStaticMarkup(<NsecSignInScreen onSignIn={() => {}} restoreFirst locale="zh-Hant" />);
+    expect(html).toContain('data-testid="nsec-input"');
+    expect(html).toContain("沒了就真的沒了");
+    expect(html).toContain("子鑰");
   });
 
   // ADR-0277：初次登入只要「顯示名稱＋密碼」。過去這裡是 nsec 欄且標題寫「用私鑰登入」，
@@ -65,7 +85,7 @@ describe("行動端登入畫面（ADR-0081）", () => {
         theme="light"
       />,
     );
-    expect(html).toContain("從舊裝置匯入"); // mobilePair_title
-    expect(html).toContain("改用私鑰登入"); // mobilePair_toNsec
+    expect(html).toContain("我還有另一台裝置"); // mobilePair_title（ADR-0412：與入口同名）
+    expect(html).toContain("返回登入"); // mobilePair_toNsec（ADR-0412）
   });
 });

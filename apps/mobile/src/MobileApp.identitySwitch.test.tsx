@@ -28,7 +28,8 @@ import { byTestId, clearStorage, click, ids, mount, settle, stubWebSocket, typeI
 /** 以 nsec ＋ 本地密碼登入一個新身分（走真正的登入畫面，不繞過任何一步）。 */
 async function signIn(c: HTMLElement, name: string, pw: string): Promise<void> {
   typeInto(byTestId(c, "signin-name"), name);
-  click(byTestId(c, "use-nsec"));
+  // 從解鎖畫面「改用私鑰登入」而來時〈我的裝置都沒了〉已經開著（ADR-0412）；從頭來才要點開。
+  if (!ids(c).includes("nsec-input")) click(byTestId(c, "use-nsec"));
   typeInto(byTestId(c, "nsec-input"), nsecEncode(generateSecretKey()));
   typeInto(byTestId(c, "remember-password"), pw);
   click(byTestId(c, "signin-submit"));

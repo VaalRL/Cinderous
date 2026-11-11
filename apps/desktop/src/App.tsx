@@ -102,6 +102,7 @@ import {
   type Profile,
   type ProfilesState,
   removeProfile,
+  resolveRestore,
   resolveSignIn,
   saveProfiles,
   setActive,
@@ -218,7 +219,7 @@ import { ThemeToggleButton } from "./ui/ThemeToggleButton.js";
 import { useRegisterIdentityControls, useRegisterSettingsOpener } from "./titlebar.js";
 import { dialog, useDialog } from "./ui/Dialog.js";
 import { ExportModal, type ExportConvoItem } from "./ui/ExportModal.js";
-import { RELAY_URL_KEY, SignIn } from "./ui/SignIn.js";
+import { RELAY_URL_KEY, type RestoreOutcome, type RestoreRequest, SignIn } from "./ui/SignIn.js";
 import { DeployWizard } from "./ui/DeployWizard.js"; // ADR-0356：建立我的節點
 import { canDeployHere } from "./native/cf-deploy.js";
 
@@ -1217,7 +1218,7 @@ export function App(): JSX.Element {
             return;
           }
           if (cancelled) return;
-          setNeedNsec(active); // → SignIn 的「用 nsec 登入」
+          setNeedNsec(active); // → SignIn 一進來就開〈我的裝置都沒了〉（ADR-0412）
           return;
         }
 
@@ -2312,19 +2313,56 @@ export function App(): JSX.Element {
     // ADR-0122：瀏覽器的登入畫面**必填本地密碼**（nsec 是本機產生的，使用者沒看過，
     // 而這裡沒有 OS 金鑰庫——不包裹它，重新整理一次身分就沒了）。
     //
-    // `needNsec`＝有設定檔但拿不到金鑰（沒記住／已忘記）→ 唯一的出路是貼回備份的 nsec。
-    const enterNsec = needNsec
-      ? {
-          onEnterNsec: async (nsec: string): Promise<boolean> => {
-            try {
-              if (getPublicKey(nsecDecode(nsec.trim())) !== needNsec.pubkey) return false;
-              return await enterWithNsec(needNsec, nsec.trim());
-            } catch {
-              return false;
-            }
-          },
+    // 〈我的裝置都沒了〉（ADR-0305／0412）：貼 nsec 或救援登入碼。過去桌面第一次啟動**沒有**這條路——
+    // 只有 `needNsec`（有設定檔但拿不到金鑰）時才出現 nsec 欄，裝置全沒、手上只剩救援登入碼的人
+    // 得先隨便建一個身分、再到「新增身分」匯入。現在兩種處境都走這裡：本機有那個身分就回到它，
+    // 沒有就用這把金鑰建新的設定檔（`addIdentity`，同新增身分匯入的那條路）。
+    const restoreIdentity = async (req: RestoreRequest): Promise<RestoreOutcome> => {
+      let nsec: string;
+      let codeRelay = "";
+      let pubkey: string;
+      try {
+        if (isBackupCode(req.secret)) {
+          const r = parseBackupCode(req.secret, req.backupPassword);
+          nsec = r.nsec;
+          codeRelay = r.relayUrl;
+        } else {
+          nsec = req.secret.trim();
         }
-      : {};
+        pubkey = getPublicKey(nsecDecode(nsec));
+      } catch {
+        return "invalid"; // 格式不符與救援密碼錯回同一個結果，不給猜密碼的人訊號
+      }
+      const activate = (): void => {
+        if (profilesState.active === pubkey) return;
+        const next = setActive(profilesState, pubkey);
+        saveProfiles(next);
+        setProfilesState(next);
+      };
+      const r = resolveRestore(profilesState, pubkey, req.name, { vaultLocked: isTauri() });
+      if (r.kind === "unlock") {
+        // 🔴 桌面且這個身分設了本地密碼：金鑰庫裡的 nsec 與資料庫金鑰都被密碼包著。
+        // 直接 `enterWithNsec` 會把包裹的 nsec 蓋成明文、資料庫卻還鎖著（審查發現）。
+        // 帶去它的解鎖畫面：記得密碼就解鎖，忘了就走那裡的 nsec 救援並設新密碼（ADR-0073）。
+        activate();
+        setLockedProfile(r.profile);
+        return "ok";
+      }
+      if (r.kind === "enter") {
+        // 瀏覽器：有填本機密碼＝要用新密碼重新包裹（忘記舊密碼的人靠這個回來，ADR-0122）；
+        // 沒填就照舊只進入這一次。
+        if (!isTauri() && req.password) await browserPassEnable(pubkey, nsec, req.password);
+        // 先進得去、再把它設成作用中——失敗時不留下「作用中卻進不去」的狀態。
+        if (!(await enterWithNsec(r.profile, nsec))) return "invalid";
+        activate();
+        return "ok";
+      }
+      if (r.kind !== "create") return r.kind;
+      if (!isTauri() && !req.password) return "needPassword"; // ADR-0122
+      const relayUrl = codeRelay || req.relayUrl || ANCHOR_RELAYS[0] || "";
+      await addIdentity(req.name, relayUrl, false, { nsec, password: req.password });
+      return "ok";
+    };
     return (
       <SignIn
         onSignIn={signIn}
@@ -2341,7 +2379,8 @@ export function App(): JSX.Element {
             ...(inv.escrow ? { orgEscrow: true } : {}), // ADR-0163：公司帳號託管
           });
         }}
-        {...enterNsec}
+        onRestore={restoreIdentity}
+        restoreFirst={!!needNsec}
       />
     );
   }
