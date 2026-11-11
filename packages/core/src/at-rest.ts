@@ -20,7 +20,7 @@
 import { decryptBundle, encryptBundle } from "./pairing.js";
 import { hkdf } from "@noble/hashes/hkdf.js";
 import { sha256 } from "@noble/hashes/sha2.js";
-import { utf8ToBytes } from "@noble/hashes/utils.js";
+import { randomBytes, utf8ToBytes } from "@noble/hashes/utils.js";
 import { base64 } from "@scure/base";
 
 /** HKDF 的 info（版本化：日後換演算法可平行共存）。 */
@@ -62,4 +62,38 @@ export function openValue(key: Uint8Array, stored: string): string | null {
 /** 這個值是否已是密文（供測試與遷移檢查）。 */
 export function isSealed(stored: string): boolean {
   return stored.startsWith(PREFIX);
+}
+
+// ── 封存塊金鑰（ADR-0413；ADR-0298 §2 的第一階段）────────────────────────────
+//
+// 封存的每一塊各用一把**隨機**金鑰加密，那把金鑰再用根金鑰包起來另外存。
+// 刪除＝銷毀那份包裹：塊金鑰不是導出的，所以沒有包裹就沒有任何辦法重建——
+// 介質上殘留的塊變成解不開的亂數，即使對方有根金鑰（nsec）。
+//
+// ⚠ 一定要是**隨機**的。若寫成 `hkdf(root, 塊編號)`，有根金鑰的人隨時能重新導出，
+// 「銷毀」什麼都沒達成（ADR-0298 §2 初版就錯在這裡）。
+
+/** 封存塊金鑰的包裹前綴（與值的 `c1:` 分開，避免把一般值誤當成金鑰包裹）。 */
+const WRAP_PREFIX = "k1:";
+const SEGMENT_KEY_BYTES = 32;
+
+/** 產生一把新的封存塊金鑰（隨機 32 bytes）。 */
+export function newSegmentKey(): Uint8Array {
+  return randomBytes(SEGMENT_KEY_BYTES);
+}
+
+/** 用根金鑰包起一把塊金鑰（`k1:` ＋ base64(`nonce || ciphertext`)）。 */
+export function wrapSegmentKey(root: Uint8Array, segmentKey: Uint8Array): string {
+  return WRAP_PREFIX + base64.encode(encryptBundle(root, segmentKey));
+}
+
+/** 解開包裹；根金鑰錯、遭竄改、格式不對、或解出來不是 32 bytes 都回 `null`。 */
+export function unwrapSegmentKey(root: Uint8Array, stored: string): Uint8Array | null {
+  if (!stored.startsWith(WRAP_PREFIX)) return null;
+  try {
+    const key = decryptBundle(root, base64.decode(stored.slice(WRAP_PREFIX.length)));
+    return key.length === SEGMENT_KEY_BYTES ? key : null;
+  } catch {
+    return null;
+  }
 }

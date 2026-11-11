@@ -9,6 +9,7 @@
 //!
 //! 需以 `--features tauri-app` 在具 Tauri 工具鏈與 webkit2gtk 的環境建置。
 
+use cinder_desktop::archive; // ADR-0413：封存塊與每塊金鑰
 use cinder_desktop::encstore;
 use tauri::{
     menu::{Menu, MenuItem},
@@ -260,7 +261,7 @@ fn archive_dir(app: &tauri::AppHandle, namespace: &str) -> Result<std::path::Pat
     Ok(dir)
 }
 
-/// 封存某對話的一個塊（加密）。
+/// 封存某對話的一個塊（加密；每塊一把隨機金鑰，ADR-0413——邏輯在 lib 的 `archive`）。
 #[tauri::command]
 fn archive_append(
     app: tauri::AppHandle,
@@ -269,37 +270,14 @@ fn archive_append(
     seq: u32,
     json: String,
 ) -> Result<(), String> {
-    if !valid_part(&convo) {
-        return Err("非法對話鍵".into());
-    }
     let dir = archive_dir(&app, &namespace)?;
-    let key = db_key(&namespace)?;
-    let ciphertext = encstore::encrypt(&key, json.as_bytes()).map_err(|e| e.to_string())?;
-    atomic_write(&dir.join(format!("{convo}.{seq}.enc")), &ciphertext)
+    archive::append(&dir, &db_key(&namespace)?, &convo, seq, &json)
 }
 
 /// 某對話的封存塊數（= 最大 seq + 1；無封存回 0）。
 #[tauri::command]
 fn archive_count(app: tauri::AppHandle, namespace: String, convo: String) -> Result<u32, String> {
-    if !valid_part(&convo) {
-        return Err("非法對話鍵".into());
-    }
-    let dir = archive_dir(&app, &namespace)?;
-    let prefix = format!("{convo}.");
-    let mut max: i64 = -1;
-    for entry in std::fs::read_dir(&dir).map_err(|e| e.to_string())?.flatten() {
-        let name = entry.file_name();
-        let Some(name) = name.to_str() else { continue };
-        let Some(rest) = name.strip_prefix(&prefix).and_then(|r| r.strip_suffix(".enc")) else {
-            continue;
-        };
-        if let Ok(seq) = rest.parse::<i64>() {
-            if seq > max {
-                max = seq;
-            }
-        }
-    }
-    Ok((max + 1) as u32)
+    archive::count(&archive_dir(&app, &namespace)?, &convo)
 }
 
 /// 讀某對話的第 `seq` 塊（解密）；不存在或毀損回 `None`。
@@ -310,40 +288,14 @@ fn archive_load(
     convo: String,
     seq: u32,
 ) -> Result<Option<String>, String> {
-    if !valid_part(&convo) {
-        return Err("非法對話鍵".into());
-    }
-    let path = archive_dir(&app, &namespace)?.join(format!("{convo}.{seq}.enc"));
-    let data = match std::fs::read(&path) {
-        Ok(d) => d,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
-        Err(e) => return Err(e.to_string()),
-    };
-    let key = db_key(&namespace)?;
-    // 單一塊毀損不該讓整個歷史打不開 → 回 None，其餘塊仍可讀。隔離起來別讓它被覆蓋。
-    let Ok(plain) = encstore::decrypt(&key, &data) else {
-        quarantine(&path);
-        return Ok(None);
-    };
-    Ok(String::from_utf8(plain).ok())
+    let dir = archive_dir(&app, &namespace)?;
+    archive::load(&dir, &db_key(&namespace)?, &convo, seq)
 }
 
-/// 移除某對話的**全部**封存塊（刪好友/封鎖/退群）。
+/// 移除某對話的**全部**封存（刪好友/封鎖/退群）：先銷毀塊金鑰、再刪塊（ADR-0413）。
 #[tauri::command]
 fn archive_remove(app: tauri::AppHandle, namespace: String, convo: String) -> Result<(), String> {
-    if !valid_part(&convo) {
-        return Err("非法對話鍵".into());
-    }
-    let dir = archive_dir(&app, &namespace)?;
-    let prefix = format!("{convo}.");
-    for entry in std::fs::read_dir(&dir).map_err(|e| e.to_string())?.flatten() {
-        let name = entry.file_name();
-        let Some(name) = name.to_str() else { continue };
-        if name.starts_with(&prefix) && name.ends_with(".enc") {
-            let _ = std::fs::remove_file(entry.path());
-        }
-    }
-    Ok(())
+    archive::remove(&archive_dir(&app, &namespace)?, &convo)
 }
 
 /// 刪除單一部位（對話被移除時）。不存在視為成功。

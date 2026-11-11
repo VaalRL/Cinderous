@@ -180,3 +180,19 @@ describe("nsec 登入的還原範圍要誠實（ADR-0305 §6.1）", () => {
     expect(translate("en", "signIn_useNsecHint").toLowerCase()).toContain("subkey");
   });
 });
+
+describe("本地密碼的保護範圍要誠實（ADR-0298 §2 待辦 4／ADR-0413）", () => {
+  // 事實：桌面留有 `rescue:{ns}`（ADR-0073，nsec 可解出資料金鑰）；網頁與行動端的資料金鑰
+  // 本來就由 nsec 導出。⇒ 「磁碟資料＋nsec」在每個平台都不需要本地密碼。
+  it("🔴 不得宣稱「不輸入密碼無法解開」", () => {
+    expect(translate("zh-Hant", "settings_passwordOn")).not.toContain("不輸入密碼無法解開");
+    expect(translate("en", "settings_passwordOn").toLowerCase()).not.toContain("nothing opens without it");
+  });
+
+  it("🔴 啟用前後的說明都要點出例外：同時有這台裝置的資料與 nsec 的人不需要密碼", () => {
+    for (const key of ["settings_passwordOn", "settings_passwordOffHint"] as const) {
+      expect(translate("zh-Hant", key)).toContain("nsec");
+      expect(translate("en", key)).toContain("nsec");
+    }
+  });
+});
