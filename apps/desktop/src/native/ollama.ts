@@ -1,7 +1,7 @@
 // 本機/線上 LLM 改寫與摘要（ADR-0060/0062）。Tauri 走 Rust IPC（無 CORS、prod 穩、線上
 // provider 的 API key 存 OS 金鑰庫、不落 JS/localStorage）；瀏覽器 fetch 後備（僅本機 Ollama）。
 // 純函式（prompt/端點判斷）與客戶端分離，IO 可注入以利測試。
-import { invoke, isTauri } from "@tauri-apps/api/core";
+import { Channel, invoke, isTauri } from "@tauri-apps/api/core";
 import type { MessageKey } from "@cinderous/i18n";
 
 /** LLM provider：本機 Ollama 或 OpenAI 相容線上服務（OpenAI/Groq/OpenRouter/LM Studio…）。 */
@@ -95,9 +95,61 @@ export function isLocalEndpoint(endpoint: string): boolean {
 /** 底層收發（可注入以利測試）。 */
 export interface OllamaIo {
   generate(cfg: OllamaConfig, prompt: string): Promise<string>;
+  /**
+   * 串流生成（ADR-0416）：每收到一段文字就呼叫 `onDelta`，回傳完整文字。`signal` 中止時
+   * 停止接收（Tauri 端會叫 `ai_cancel` 讓 Rust 不再讀 provider 的回應）。沒有實作就退回 `generate`。
+   */
+  generateStream?(cfg: OllamaConfig, prompt: string, onDelta: (delta: string) => void, signal?: AbortSignal): Promise<string>;
   available(cfg: OllamaConfig): Promise<boolean>;
   models(cfg: OllamaConfig): Promise<string[]>;
 }
+
+/**
+ * Ollama `/api/generate` 串流（NDJSON）的解碼器（ADR-0416，瀏覽器後備用；Tauri 端在 Rust 解）。
+ * 收到的文字可能把一行切在兩塊中間 → 先收齊整行再解析；看不懂的行略過，`error` 行丟錯。
+ */
+export function createNdjsonDecoder(): { push(text: string): string[]; finish(): string[]; readonly done: boolean } {
+  let buf = "";
+  let done = false;
+  const line = (raw: string, out: string[]): void => {
+    const l = raw.trim();
+    if (!l || done) return;
+    let v: { response?: unknown; done?: unknown; error?: unknown };
+    try {
+      v = JSON.parse(l) as typeof v;
+    } catch {
+      return;
+    }
+    if (typeof v.error === "string") throw new Error(`ollama: ${v.error}`);
+    if (typeof v.response === "string" && v.response) out.push(v.response);
+    if (v.done === true) done = true;
+  };
+  return {
+    push(text) {
+      buf += text;
+      const out: string[] = [];
+      let i: number;
+      while ((i = buf.indexOf("\n")) >= 0) {
+        const l = buf.slice(0, i);
+        buf = buf.slice(i + 1);
+        line(l, out);
+      }
+      return out;
+    },
+    finish() {
+      const out: string[] = [];
+      line(buf, out);
+      buf = "";
+      return out;
+    },
+    get done() {
+      return done;
+    },
+  };
+}
+
+/** 串流請求編號（Tauri 端用來取消）。 */
+let streamSeq = 0;
 
 /** 預設 IO：Tauri 走 Rust IPC（多 provider、API key 存金鑰庫）；瀏覽器 fetch 後備（僅 Ollama）。 */
 export function defaultOllamaIo(): OllamaIo {
@@ -105,6 +157,27 @@ export function defaultOllamaIo(): OllamaIo {
     return {
       generate: (cfg, prompt) =>
         invoke<string>("ai_generate", { provider: providerOf(cfg), endpoint: cfg.endpoint, model: cfg.model, prompt }),
+      async generateStream(cfg, prompt, onDelta, signal) {
+        const req = ++streamSeq;
+        const onChunk = new Channel<string>();
+        onChunk.onmessage = (delta) => {
+          if (!signal?.aborted) onDelta(delta);
+        };
+        const cancel = (): void => void invoke("ai_cancel", { req }).catch(() => {});
+        signal?.addEventListener("abort", cancel, { once: true });
+        try {
+          return await invoke<string>("ai_generate_stream", {
+            provider: providerOf(cfg),
+            endpoint: cfg.endpoint,
+            model: cfg.model,
+            prompt,
+            req,
+            onDelta: onChunk,
+          });
+        } finally {
+          signal?.removeEventListener("abort", cancel);
+        }
+      },
       available: (cfg) => invoke<boolean>("ai_available", { provider: providerOf(cfg), endpoint: cfg.endpoint }),
       models: (cfg) => invoke<string[]>("ai_models", { provider: providerOf(cfg), endpoint: cfg.endpoint }),
     };
@@ -120,6 +193,39 @@ export function defaultOllamaIo(): OllamaIo {
       });
       if (!r.ok) throw new Error(`ollama ${r.status}`);
       return String(((await r.json()) as { response?: unknown }).response ?? "");
+    },
+    async generateStream(cfg, prompt, onDelta, signal) {
+      if (providerOf(cfg) !== "ollama") throw new Error("browser 僅支援本機 Ollama");
+      const timeout = AbortSignal.timeout(120_000);
+      const r = await fetch(`${cfg.endpoint}/api/generate`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ model: cfg.model, prompt, stream: true }),
+        signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
+      });
+      if (!r.ok || !r.body) throw new Error(`ollama ${r.status}`);
+      const reader = r.body.getReader();
+      const text = new TextDecoder();
+      const dec = createNdjsonDecoder();
+      let full = "";
+      const emit = (parts: string[]): void => {
+        for (const p of parts) {
+          full += p;
+          onDelta(p);
+        }
+      };
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        emit(dec.push(text.decode(value, { stream: true })));
+        if (dec.done) {
+          void reader.cancel().catch(() => {});
+          break;
+        }
+      }
+      emit(dec.push(text.decode()));
+      emit(dec.finish());
+      return full;
     },
     async available(cfg) {
       if (providerOf(cfg) !== "ollama") return false;
@@ -145,10 +251,21 @@ export async function ollamaRewrite(
   instruction: string,
   cfg: OllamaConfig,
   io: OllamaIo = defaultOllamaIo(),
+  stream?: RewriteStream,
 ): Promise<string> {
   ensureAllowed(cfg);
-  const out = await io.generate(cfg, buildRewritePrompt(text, instruction));
+  const prompt = buildRewritePrompt(text, instruction);
+  if (!stream) return (await io.generate(cfg, prompt)).trim();
+  if (io.generateStream) return (await io.generateStream(cfg, prompt, stream.onDelta, stream.signal)).trim();
+  const out = await io.generate(cfg, prompt);
+  stream.onDelta(out); // 沒有串流的 IO：整段當成一個片段
   return out.trim();
+}
+
+/** 改寫的串流選項（ADR-0416）：`onDelta` 收到每一段文字；`signal` 中止。 */
+export interface RewriteStream {
+  onDelta: (delta: string) => void;
+  signal?: AbortSignal;
 }
 
 /**

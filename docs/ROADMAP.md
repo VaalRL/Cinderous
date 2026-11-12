@@ -431,6 +431,6 @@ git switch -c rollback/xxx baseline/pre-ratchet-fs
 4. **需你決策**：G5 SSO/元資料稽核（等企業試點）；D4b 即時 delta 通道（D4a 用起來後評估）；M7 語音離線退回已暫緩（2026-07-10）。
 4b. **FS 範圍擴大**（ADR-0315，順序見〈FS 範圍擴大的執行順序〉）：第 1 步可觀測性 ✅ **已完成（ADR-0316）**；第 2 步**批一已完成（ADR-0318：檔案 metadata ＋ 共享行程，只 retarget 不帶 EK hint）** **Tier A 全部完成**（批一 0318 檔案 metadata＋行程／批二 0320 群訊＋群組檔名／回應）；**收回訊息與 Tier B 已裁定不做**（fail-open／ephemeral 無價值）。ADR-0315 的清單至此結案。收回與 Tier B 已裁定不做。
 3. **需換環境**：Phase B（Tauri 打包＋OS 金鑰庫）、Phase C（Cloudflare relay 部署＋D1＋NIP-42 AUTH）、Phase D（React Native 行動端＋QR 相機掃描）、通話 TURN 部署、F4 第三方稽核。
-4. **此環境可選打磨**：~~顯示名稱傳遞~~ ✅ **已完成（改用加密個人檔，非公開 kind 0，ADR-0061）**；~~G4 輪替後續（輪替提示 i18n、Rust store 平價）~~ ✅、G1 多管理者名冊、~~多身分切換列同時在線~~ ✅（ADR-0415：預設離開期間摘要、可開背景收件）、AI 改寫串流輸出、~~嚴格 CSP~~ ✅（ADR-0235 C4 已做大部分；ADR-0417 拿掉 `style-src` 的 `'unsafe-inline'`，實機驗過）。
+4. **此環境可選打磨**：~~顯示名稱傳遞~~ ✅ **已完成（改用加密個人檔，非公開 kind 0，ADR-0061）**；~~G4 輪替後續（輪替提示 i18n、Rust store 平價）~~ ✅、G1 多管理者名冊、~~多身分切換列同時在線~~ ✅（ADR-0415：預設離開期間摘要、可開背景收件）、~~AI 改寫串流輸出~~ ✅（ADR-0416）、~~嚴格 CSP~~ ✅（ADR-0235 C4 已做大部分；ADR-0417 拿掉 `style-src` 的 `'unsafe-inline'`，實機驗過）。
 
 > 只有人能做的部署/金鑰步驟集中在 [`OPERATOR-TODO.md`](./OPERATOR-TODO.md)。

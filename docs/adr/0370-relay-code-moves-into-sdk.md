@@ -1,6 +1,6 @@
 # 0370. 中繼程式碼與共用協定搬進 Cinderous SDK，`relay/` 成為部署實例
 
-- 狀態：已接受（**分支 `claude/relay-on-sdk` 已完成，合併與部署暫緩**，見〈落地時程〉）；2026-10-19 相依由 `#v0.18.0` 升到 `#v0.68.3`（含 SDK ADR 0097 額度用完時說明原因、0098 拿掉 `idx_offline_kind`，對應 ADR-0387／0388；新增的 Worker 設定全部可選，錨點沒設、沿用預設）；2026-10-20 再升到 `#v0.71.0`（SDK ADR 0099–0101 只動 Node 版中繼與部署設定器，錨點的 Cloudflare 版行為不變）；2026-10-27 SDK 公開（SDK ADR 0110），相依改成公開 repo `github:VaalRL/cinderous-sdk#v0.77.0`、與 main 合併，見〈與 main 合併〉
+- 狀態：已接受，**已合併並部署**（PR #9＝b1569333，2026-10-28 合併進 main、兩座錨點同日部署；之後錨點跟著 SDK 升版部署，現在相依 `#v0.89.0`）。以下是歷程：原記「分支 `claude/relay-on-sdk` 已完成，合併與部署暫緩」，見〈落地時程〉；2026-10-19 相依由 `#v0.18.0` 升到 `#v0.68.3`（含 SDK ADR 0097 額度用完時說明原因、0098 拿掉 `idx_offline_kind`，對應 ADR-0387／0388；新增的 Worker 設定全部可選，錨點沒設、沿用預設）；2026-10-20 再升到 `#v0.71.0`（SDK ADR 0099–0101 只動 Node 版中繼與部署設定器，錨點的 Cloudflare 版行為不變）；2026-10-27 SDK 公開（SDK ADR 0110），相依改成公開 repo `github:VaalRL/cinderous-sdk#v0.77.0`、與 main 合併，見〈與 main 合併〉
 - 日期：2026-09-27
 - 相關文件：Cinderous SDK ADR 0006（PRD 矛盾拍板）、ADR 0007（中繼與共用協定搬進 SDK）；
   本庫 ADR-0005（自建 Worker relay）、ADR-0056（DO SQLite）、ADR-0075（容器化自架）、ADR-0241（分片）、
@@ -40,7 +40,7 @@ Cinderous SDK（`VaalRL/cinderous-sdk-dev`，AGPL-3.0）原本只有客戶端層
 3. **相依釘住標籤**：`@cinderous/client` 用 `github:VaalRL/cinderous-sdk-dev#v0.5.0`，鎖檔釘在 commit `0e4b8ce`。
    pnpm 預設寫的網址不帶標籤，會一路跟著 SDK 最新版，已手動改掉。
 
-## 落地時程（暫緩合併與部署）
+## 落地時程（當時暫緩合併與部署；2026-10-28 已合併並部署）
 
 - **本庫是公開 repo，SDK 當時是私有 repo**。產品決定：SDK 等實作完成再公開。（2026-10-27 已公開為 `VaalRL/cinderous-sdk`，SDK ADR 0110；合併與部署仍要使用者另外同意。）
 - 在那之前：

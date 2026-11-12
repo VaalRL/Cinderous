@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n.js";
-import { REWRITE_STYLES } from "../native/ollama.js";
+import { REWRITE_STYLES, type RewriteStream } from "../native/ollama.js";
 
 /**
  * composer 的本機 AI 改寫入口（✨）：風格快選 + 自由指示 → 改寫 → **先預覽再採用**（ADR-0060）。
  * 不直接洗掉草稿；採用才 onAdopt 取代。點面板外關閉、開啟時預偵測可用性、作廢過期結果。
+ * 改寫中逐段顯示模型的輸出，可按取消中止；產生完才能採用（ADR-0416）。
  */
 export function ComposerRewrite({
   text,
@@ -13,7 +14,7 @@ export function ComposerRewrite({
   onCheckAvailable,
 }: {
   text: string;
-  onRewrite: (text: string, instruction: string) => Promise<string>;
+  onRewrite: (text: string, instruction: string, stream?: RewriteStream) => Promise<string>;
   onAdopt: (rewritten: string) => void;
   /** 開啟時預先偵測 Ollama 是否可用（未提供則不預檢）。 */
   onCheckAvailable?: () => Promise<boolean>;
@@ -25,33 +26,56 @@ export function ComposerRewrite({
   const [result, setResult] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [available, setAvailable] = useState<boolean | null>(null);
+  const [partial, setPartial] = useState("");
   const ref = useRef<HTMLDivElement>(null);
   const runId = useRef(0);
+  const abortRef = useRef<AbortController | null>(null);
+
+  /** 作廢並中止進行中的改寫（不再耗用 provider 額度）。 */
+  const stop = (): void => {
+    runId.current++;
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setBusy(false);
+    setPartial("");
+  };
 
   const close = (): void => {
-    runId.current++; // 作廢任何進行中的結果
+    stop();
     setOpen(false);
     setResult(null);
     setError("");
-    setBusy(false);
   };
 
   const run = async (instr: string): Promise<void> => {
     const trimmed = instr.trim();
     if (!text.trim() || !trimmed || busy) return;
     const id = ++runId.current;
+    const ac = new AbortController();
+    abortRef.current = ac;
     setBusy(true);
     setError("");
     setResult(null);
+    setPartial("");
+    const onDelta = (delta: string): void => {
+      if (id === runId.current) setPartial((p) => p + delta);
+    };
     try {
-      const out = await onRewrite(text, trimmed);
+      const out = await onRewrite(text, trimmed, { onDelta, signal: ac.signal });
       if (id === runId.current) setResult(out);
     } catch {
       if (id === runId.current) setError(t("ai_unavailable"));
     } finally {
-      if (id === runId.current) setBusy(false);
+      if (id === runId.current) {
+        setBusy(false);
+        setPartial("");
+        abortRef.current = null;
+      }
     }
   };
+
+  // 卸載（換對話、關視窗）時中止進行中的改寫。
+  useEffect(() => () => abortRef.current?.abort(), []);
 
   // 點面板外關閉（與 StatusPicker 一致）。
   useEffect(() => {
@@ -129,7 +153,20 @@ export function ComposerRewrite({
                   {t("ai_rewrite")}
                 </button>
               </div>
-              {busy ? <div className="rewrite__busy">{t("ai_rewriting")}</div> : null}
+              {busy ? (
+                <div className="rewrite__busy">
+                  {partial ? (
+                    <div className="rewrite__result rewrite__result--streaming" data-testid="ai-rewrite-streaming">
+                      {partial}
+                    </div>
+                  ) : (
+                    t("ai_rewriting")
+                  )}
+                  <button type="button" className="rewrite__cancel" data-testid="ai-rewrite-stop" onClick={stop}>
+                    {t("ai_cancel")}
+                  </button>
+                </div>
+              ) : null}
               {error ? <div className="rewrite__error">{error}</div> : null}
             </>
           ) : (

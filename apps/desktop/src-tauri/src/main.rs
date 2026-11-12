@@ -739,6 +739,93 @@ async fn ai_generate(provider: String, endpoint: String, model: String, prompt: 
     Ok(data.get("response").and_then(|v| v.as_str()).unwrap_or("").to_string())
 }
 
+/// 串流生成（ADR-0416）：與 `ai_generate` 同一套端點守則與金鑰綁定，但 `stream: true`，
+/// 每收到一段文字就經 `on_delta` 送給前端；回傳完整文字。`req` 是前端給的請求編號，
+/// `ai_cancel(req)` 會讓這個迴圈在下一塊資料時停下（不再耗用 provider 額度）。
+#[tauri::command]
+async fn ai_generate_stream(
+    provider: String,
+    endpoint: String,
+    model: String,
+    prompt: String,
+    req: u32,
+    on_delta: tauri::ipc::Channel<String>,
+) -> Result<String, String> {
+    use cinder_desktop::aistream::{StreamDecoder, StreamFormat};
+    check_endpoint(&endpoint)?;
+    let builder = if provider == "openai" {
+        let key = api_key("openai", &endpoint).ok_or("此端點未設定 API key（請於設定中為該端點輸入）")?;
+        let body = serde_json::json!({
+            "model": model,
+            "messages": [{ "role": "user", "content": prompt }],
+            "stream": true
+        });
+        http().post(ai_url(&endpoint, "/v1/chat/completions")).bearer_auth(key).json(&body)
+    } else {
+        let body = serde_json::json!({ "model": model, "prompt": prompt, "stream": true });
+        http().post(ai_url(&endpoint, "/api/generate")).json(&body)
+    };
+    let mut resp = builder.timeout(GEN_TIMEOUT).send().await.map_err(|e| e.to_string())?;
+    if !resp.status().is_success() {
+        return Err(format!("{provider} {}", resp.status()));
+    }
+    let mut dec = StreamDecoder::new(StreamFormat::of(&provider));
+    let mut full = String::new();
+    let result = loop {
+        if ai_cancelled(req, false) {
+            break Err("cancelled".to_string());
+        }
+        match resp.chunk().await {
+            Ok(Some(bytes)) => match dec.push(&bytes) {
+                Ok(parts) => {
+                    for p in parts {
+                        full.push_str(&p);
+                        let _ = on_delta.send(p);
+                    }
+                    if dec.is_done() {
+                        break Ok(());
+                    }
+                }
+                Err(e) => break Err(e),
+            },
+            Ok(None) => {
+                break dec.finish().map(|parts| {
+                    for p in parts {
+                        full.push_str(&p);
+                        let _ = on_delta.send(p);
+                    }
+                })
+            }
+            Err(e) => break Err(e.to_string()),
+        }
+    };
+    ai_cancelled(req, true); // 清掉這個請求的取消記號
+    result.map(|()| full)
+}
+
+/// 取消一個進行中的串流生成（ADR-0416）。
+#[tauri::command]
+fn ai_cancel(req: u32) {
+    if let Ok(mut set) = ai_cancel_set().lock() {
+        set.insert(req);
+    }
+}
+
+fn ai_cancel_set() -> &'static std::sync::Mutex<std::collections::HashSet<u32>> {
+    use std::sync::OnceLock;
+    static SET: OnceLock<std::sync::Mutex<std::collections::HashSet<u32>>> = OnceLock::new();
+    SET.get_or_init(Default::default)
+}
+
+/// 查（`clear` 時順便清掉）某請求是否被取消。
+fn ai_cancelled(req: u32, clear: bool) -> bool {
+    match ai_cancel_set().lock() {
+        Ok(mut set) if clear => set.remove(&req),
+        Ok(set) => set.contains(&req),
+        Err(_) => false,
+    }
+}
+
 /// 偵測可用。ollama → GET /api/tags；openai → 有 key 即視為可用（不多打一次 API）。
 #[tauri::command]
 async fn ai_available(provider: String, endpoint: String) -> bool {
@@ -1757,6 +1844,8 @@ fn main() {
             pass_rescue,
             pass_disable,
             ai_generate,
+            ai_generate_stream,
+            ai_cancel,
             ai_available,
             ai_models,
             ai_set_key,
