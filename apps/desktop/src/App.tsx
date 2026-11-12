@@ -45,7 +45,7 @@ import { sendsUnstrippedImage } from "@cinderous/engine"; // ADR-0359：大到�
 import { blobStream, bundleHasSanitizableImage } from "@cinderous/core"; // ADR-0346：大檔逐塊讀；ADR-0355：合集隱私提示
 import { browserStore } from "./native/browser-store.js";
 import { InboxWatcher, fsRecipientKeys } from "@cinderous/engine"; // ADR-0415：背景收件
-import { awayDelta, bgInboxEnabled, bgStartDelayMs, inboxUrlOf, readAway, recordAway, setBgInboxEnabled, takeAway, totalUnread } from "./away-inbox.js";
+import { bgInboxEnabled, bgStartDelayMs, countAwayMessage, inboxUrlOf, readAway, recordAway, setBgInboxEnabled, takeAway, type AwayTally } from "./away-inbox.js";
 import { safeNsecDecode } from "./nsec.js";
 import { getKeyVault, tauriKeyVault } from "./native/keyvault.js";
 import { wipeDeviceLocal, wipeIdentityLocal } from "./native/wipe.js";
@@ -614,6 +614,10 @@ export function App(): JSX.Element {
   /** 訊息請求（ADR-0121）：陌生人傳來訊息但尚未接受。**不是聯絡人**。 */
   const [requests, setRequests] = useState<ContactRequest[]>([]);
   const [unread, setUnread] = useState<Record<string, number>>({});
+  // ADR-0415 C：切回身分後，數「離開時間之後送出、別人寄來」的訊息。
+  // 不用未讀數的差——對話視窗開著時訊息一到就已讀，差永遠是 0（實機測試發現）。
+  const awayRef = useRef<AwayTally | null>(null);
+  const [awayCount, setAwayCount] = useState(0);
   /** 有封存的對話（ADR-0111）：只有真的有封存才顯示「歷史紀錄」入口。 */
   const [archived, setArchived] = useState<Record<string, number>>({});
   const [historyOf, setHistoryOf] = useState<string | null>(null);
@@ -1269,6 +1273,7 @@ export function App(): JSX.Element {
         // 訊息請求（ADR-0121）：**不自動開窗、不跳通知**。它只出現在聯絡人清單上方的請求區，
         // 由使用者決定要不要接受。自動開窗等於讓陌生人強制彈出視窗——那就是騷擾。
         const isRequest = requestsRef.current.some((r) => r.pubkey === pk);
+        if (!isRequest && countAwayMessage(awayRef.current, msg)) setAwayCount(awayRef.current!.ids.size); // ADR-0415 C
         if (!isRequest) setOpen((prev) => (prev.includes(pk) ? prev : [...prev, pk]));
         // 未讀徽章：由後端從儲存推導（ADR-0108），UI 不再自行 +1。若該對話當下**看得到**，
         // 就立刻推進已讀水位（三欄背景分頁也算看不到，ADR-0079 修正）。
@@ -2143,17 +2148,18 @@ export function App(): JSX.Element {
 
 
   // ADR-0415 C：切回這個身分時，顯示離開期間多出來的未讀數（60 秒後自動收起，可手動關）。
-  const [awayBaseline, setAwayBaseline] = useState<number | null>(null);
   useEffect(() => {
     if (!backend || !profilesState.active) return;
     const rec = takeAway(profilesState.active);
     if (!rec) return;
-    setAwayBaseline(rec.unread);
-    const timer = setTimeout(() => setAwayBaseline(null), 60_000);
+    awayRef.current = { since: rec.at, ids: new Set() };
+    const timer = setTimeout(() => {
+      awayRef.current = null;
+      setAwayCount(0);
+    }, 60_000);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- 只在後端就緒時取一次（切換身分走 reload）
   }, [backend]);
-  const awayCount = awayBaseline === null ? 0 : awayDelta(awayBaseline, totalUnread(unread));
 
   // ADR-0415 B：背景收件——設定裡打開才有。Tauri 限定：瀏覽器版沒有金鑰庫，其他身分的 nsec 不在手上。
   const [bgInbox, setBgInbox] = useState(bgInboxEnabled);
@@ -2182,6 +2188,11 @@ export function App(): JSX.Element {
       if (!live) return;
       const fsKeys = ts.loadFsState().keys;
       const blocked = new Set(ts.loadBlocked().map((c) => c.pubkey));
+      // 陌生人只進訊息請求、接受前不跳通知（ADR-0121）→ 只數聯絡人與已加入的群組
+      const known = {
+        contacts: new Set(ts.loadContacts().map((c) => c.pubkey)),
+        groups: new Set(ts.loadGroups().map((g) => g.id)),
+      };
       const url = inboxUrlOf(p, shardingEnabled());
       let last = 0;
       watchers.push(
@@ -2193,6 +2204,7 @@ export function App(): JSX.Element {
           sinceSec: readAway(p.pubkey)?.at ?? Math.floor(Date.now() / 1000),
           keys: () => fsRecipientKeys(fsKeys, sk),
           blocked,
+          known,
           onCount: (n) => {
             setBgCounts((prev) => ({ ...prev, [p.pubkey]: n }));
             // 通知不含寄件人與內文（ADR-0415 §4）：只說哪個身分、幾則。
@@ -2224,7 +2236,7 @@ export function App(): JSX.Element {
   const switchProfile = (pubkey: string) => {
     if (pubkey === profilesState.active) return;
     // ADR-0415 C：記下離開時間與當時的未讀數——切回來時顯示這段期間多了幾則；背景收件也從這個時間開始數。
-    if (profilesState.active) recordAway(profilesState.active, { at: Math.floor(Date.now() / 1000), unread: totalUnread(unread) });
+    if (profilesState.active) recordAway(profilesState.active, { at: Math.floor(Date.now() / 1000) });
     saveProfiles(setActive(profilesState, pubkey));
     try {
       location.reload();
@@ -2317,6 +2329,8 @@ export function App(): JSX.Element {
           }),
       ...(!isTauri() ? { locked: true } : {}), // 瀏覽器：以密碼包裹（ADR-0122）→ 下次開機走解鎖
     };
+    // ADR-0415 C：新增身分也會切走目前的身分 → 一樣記下離開時間與未讀數（實機測試發現漏了這條路）
+    if (profilesState.active) recordAway(profilesState.active, { at: Math.floor(Date.now() / 1000) });
     const next = upsertProfile(profilesState, profile);
     saveProfiles(next);
     // ADR-0155：企業主建立後首次進入自動開名冊管理。Tauri 走 reload → 旗標跨越重載；
@@ -3175,7 +3189,10 @@ export function App(): JSX.Element {
       {awayCount > 0 ? (
         <div className="awaynote" role="status" data-testid="away-note">
           <span>{t("away_note", { count: awayCount })}</span>
-          <button className="sponsor__x" aria-label={t("settings_close")} onClick={() => setAwayBaseline(null)}>
+          <button className="sponsor__x" aria-label={t("settings_close")} onClick={() => {
+              awayRef.current = null;
+              setAwayCount(0);
+            }}>
             ×
           </button>
         </div>

@@ -1,6 +1,6 @@
 // 沒在用的身分的新訊息（ADR-0415）。
 //
-// - **C（預設）**：切換身分時記下「離開時間＋當時未讀數」；切回來後，顯示這段期間多出來的未讀數。
+// - **C（預設）**：切換身分時記下離開時間；切回來後，數這段期間別人寄來的訊息。
 // - **B（設定裡打開才有）**：沒在用的身分各掛一條只讀的收件匣訂閱（引擎 `InboxWatcher`），
 //   在身分切換列顯示新訊息數、跳不含寄件人與內文的通知。
 //
@@ -29,10 +29,9 @@ export function setBgInboxEnabled(on: boolean): void {
   }
 }
 
-/** 離開某身分時的紀錄。`at`＝unix 秒；`unread`＝當時的未讀總數。 */
+/** 離開某身分時的紀錄。`at`＝unix 秒。 */
 export interface AwayRecord {
   at: number;
-  unread: number;
 }
 
 export function recordAway(pubkey: string, rec: AwayRecord): void {
@@ -49,8 +48,8 @@ export function readAway(pubkey: string): AwayRecord | undefined {
     const raw = localStorage.getItem(AWAY_PREFIX + pubkey);
     if (!raw) return undefined;
     const v = JSON.parse(raw) as Partial<AwayRecord>;
-    if (typeof v.at !== "number" || typeof v.unread !== "number") return undefined;
-    return { at: v.at, unread: v.unread };
+    if (typeof v.at !== "number") return undefined;
+    return { at: v.at };
   } catch {
     return undefined;
   }
@@ -67,14 +66,22 @@ export function takeAway(pubkey: string): AwayRecord | undefined {
   return rec;
 }
 
-/** 未讀總數（各對話相加）。 */
-export function totalUnread(unread: Record<string, number>): number {
-  return Object.values(unread).reduce((a, b) => a + (b > 0 ? b : 0), 0);
+/** 切回身分後正在數的「離開期間的訊息」：`since`＝離開時間（unix 秒）；`ids` 去重。 */
+export interface AwayTally {
+  since: number;
+  ids: Set<string>;
 }
 
-/** 離開期間多出來的未讀數：別台裝置可能已讀掉一些 → 不會小於 0。 */
-export function awayDelta(baseline: number, current: number): number {
-  return Math.max(0, current - baseline);
+/**
+ * 這則訊息算不算「離開期間收到的」，算的話記進 tally 並回 true。
+ *
+ * 不用未讀數的差：對話視窗開著時訊息一到就標已讀，差永遠是 0（ADR-0415 實機測試）。
+ * 自己送的（含別台裝置的副本）、離開前送出的、重複的都不算；訊息請求由呼叫端排除。
+ */
+export function countAwayMessage(tally: AwayTally | null, msg: { id: string; outgoing: boolean; at: number }): boolean {
+  if (!tally || msg.outgoing || msg.at <= tally.since * 1000 || tally.ids.has(msg.id)) return false;
+  tally.ids.add(msg.id);
+  return true;
 }
 
 /**

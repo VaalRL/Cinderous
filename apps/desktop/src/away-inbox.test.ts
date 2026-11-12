@@ -1,15 +1,14 @@
 import { shardPath } from "@cinderous/core";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
-  awayDelta,
   bgInboxEnabled,
   bgStartDelayMs,
+  countAwayMessage,
   inboxUrlOf,
   readAway,
   recordAway,
   setBgInboxEnabled,
   takeAway,
-  totalUnread,
 } from "./away-inbox.js";
 
 const PK = "a".repeat(64);
@@ -35,10 +34,10 @@ describe("沒在用的身分的新訊息（ADR-0415）", () => {
     expect(bgInboxEnabled()).toBe(false);
   });
 
-  it("C：切走時記下離開時間與未讀數，切回來讀一次就清掉", () => {
-    recordAway(PK, { at: 100, unread: 2 });
-    expect(readAway(PK)).toEqual({ at: 100, unread: 2 });
-    expect(takeAway(PK)).toEqual({ at: 100, unread: 2 });
+  it("C：切走時記下離開時間，切回來讀一次就清掉", () => {
+    recordAway(PK, { at: 100 });
+    expect(readAway(PK)).toEqual({ at: 100 });
+    expect(takeAway(PK)).toEqual({ at: 100 });
     expect(takeAway(PK)).toBeUndefined();
   });
 
@@ -49,10 +48,14 @@ describe("沒在用的身分的新訊息（ADR-0415）", () => {
     expect(readAway(PK)).toBeUndefined();
   });
 
-  it("離開期間多出來的未讀數；別台裝置讀掉了也不會是負的", () => {
-    expect(totalUnread({ a: 2, b: 3 })).toBe(5);
-    expect(awayDelta(2, 5)).toBe(3);
-    expect(awayDelta(5, 1)).toBe(0);
+  it("🔴 C 數的是離開後別人寄來的訊息——對話開著、訊息一到就已讀也照樣算（實機測試發現）", () => {
+    const tally = { since: 100, ids: new Set<string>() };
+    expect(countAwayMessage(tally, { id: "a", outgoing: false, at: 101_000 })).toBe(true);
+    expect(countAwayMessage(tally, { id: "a", outgoing: false, at: 101_000 })).toBe(false); // 重複
+    expect(countAwayMessage(tally, { id: "b", outgoing: true, at: 101_000 })).toBe(false); // 自己送的
+    expect(countAwayMessage(tally, { id: "c", outgoing: false, at: 99_000 })).toBe(false); // 離開前的
+    expect(countAwayMessage(null, { id: "d", outgoing: false, at: 101_000 })).toBe(false); // 沒在數
+    expect(tally.ids.size).toBe(1);
   });
 
   it("收件匣網址：個人身分在分片模式下是自己的訊息片，工作身分固定公司站", () => {

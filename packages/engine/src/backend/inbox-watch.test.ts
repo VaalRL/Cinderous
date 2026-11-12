@@ -143,3 +143,20 @@ describe("前向保密的訊息（加密到 EK）", () => {
     }
   });
 });
+
+describe("陌生人不數（ADR-0121：接受前不跳通知）", () => {
+  it("給了聯絡人名單：只數聯絡人寄來的；陌生人的不數", () => {
+    const relay = fakeRelay();
+    const counts: number[] = [];
+    const stranger = generateSecretKey();
+    new InboxWatcher({
+      self: mePk, sk: me, url: "wss://r", connector: relay.connector, sinceSec: SINCE, keys: () => [me],
+      known: { contacts: new Set([getPublicKey(alice)]), groups: new Set() },
+      onCount: (n) => counts.push(n),
+    });
+    relay.deliver(wrapMessage("hi from stranger", stranger, mePk, { now: SINCE + 10 }).events[0]!);
+    expect(counts).toEqual([]);
+    relay.deliver(wrapMessage("hi from alice", alice, mePk, { now: SINCE + 10 }).events[0]!);
+    expect(counts).toEqual([1]);
+  });
+});
