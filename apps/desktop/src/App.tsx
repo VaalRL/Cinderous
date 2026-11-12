@@ -209,6 +209,7 @@ import {
   ollamaRewrite,
   ollamaSummarize,
   type OllamaConfig,
+  type RewriteStream,
 } from "./native/ollama.js";
 import { createPairingOffer, runPairSource, runPairTarget, webRtcPairTransport } from "@cinderous/engine";
 import { applyPairBundle } from "@cinderous/engine";
@@ -984,7 +985,8 @@ export function App(): JSX.Element {
   // 該環境整個 AI 面（設定/🧠/改寫）不出現；enabled 偏好仍保留（換回可用環境即恢復）。
   const aiOk = aiRewriteSupported();
   const rewriteFn = aiOk && ollama.enabled
-    ? (text: string, instruction: string): Promise<string> => ollamaRewrite(text, instruction, ollama)
+    ? (text: string, instruction: string, stream?: RewriteStream): Promise<string> =>
+        ollamaRewrite(text, instruction, ollama, undefined, stream)
     : undefined;
   const checkAiAvailable = aiOk && ollama.enabled ? (): Promise<boolean> => ollamaAvailable(ollama) : undefined;
   // 未讀摘要（點開對話前）：狀態驅動的小視窗。

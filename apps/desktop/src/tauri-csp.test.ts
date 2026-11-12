@@ -36,6 +36,24 @@ describe("Tauri 安全設定（ADR-0235 C4）", () => {
     expect(scriptSrc).not.toContain("unsafe-eval");
   });
 
+  it("style-src 不放行 unsafe-inline（ADR-0417：CSS 注入不能拿來外洩畫面內容）", () => {
+    // React 的 style={} 走 CSSOM（element.style），不受 CSP 管；只有 HTML 的 style 屬性、
+    // setAttribute("style")、<style> 標籤會被擋——出貨的程式碼一個都沒有（實機走過全部主要畫面）。
+    // devCsp 不收緊：Vite 開發伺服器用 <style> 注入 CSS（HMR）。
+    const styleSrc = /style-src([^;]*)/.exec(String(csp))?.[1] ?? "";
+    expect(styleSrc.trim()).toBe("'self'");
+  });
+
+  it("網頁版（Pages 的 _headers、自架的 Caddyfile）的 style-src 也不放行 unsafe-inline（ADR-0417）", () => {
+    for (const file of ["../public/_headers", "../Caddyfile"]) {
+      const header = readFileSync(new URL(file, import.meta.url), "utf8")
+        .split(/\r?\n/)
+        .find((line) => line.includes("Content-Security-Policy"));
+      const styleSrc = /style-src([^;]*)/.exec(header ?? "")?.[1] ?? "";
+      expect(styleSrc.trim(), file).toBe("'self'");
+    }
+  });
+
   it("img-src 不放行任意遠端主機（遠端圖片＝IP 追蹤信標）", () => {
     const imgSrc = /img-src([^;]*)/.exec(String(csp))?.[1] ?? "";
     expect(imgSrc).not.toContain("https:");
