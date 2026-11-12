@@ -17,3 +17,4 @@ export const RELEASES: ReleaseNote[] = __RELEASES__;
 export function releaseFor(version: string): ReleaseNote | undefined {
   return RELEASES.find((r) => r.version === version) ?? RELEASES[0];
 }
+

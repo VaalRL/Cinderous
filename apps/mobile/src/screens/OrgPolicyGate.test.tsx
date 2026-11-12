@@ -185,6 +185,12 @@ describe("我的裝置（ADR-0321，行動端）", () => {
     expect(html).toContain('data-testid="devices-limit"');
     expect(html).toContain("不等於沒有人在讀你的訊息");
   });
+
+  it("字串裡的 **粗體** 渲染成粗體，不露出星號", () => {
+    const html = renderToStaticMarkup(<SettingsScreen {...settingsBase2} devices={devices} />);
+    expect(html).not.toContain("**");
+    expect(html).toMatch(/font-weight:\s*700[^>]*>會寫入的裝置/);
+  });
 });
 
 describe("行動端顯示自己的裝置代碼（ADR-0322 S5）", () => {

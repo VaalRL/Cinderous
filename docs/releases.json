@@ -164,7 +164,7 @@
       "🗂 **Exporting your records no longer has a size limit.** Long-time users could hit a failure; it now writes in chunks, at any size.",
       "🖥 **Picking a very large file on desktop no longer exhausts memory**, and the browser build finally reclaims its temporary files (they used to accumulate until storage filled up and messages could not even be saved).",
       "🔒 **Encryption version negotiation is stricter**: if a contact rolls back from a stronger scheme to a weaker one, you are told. That case was previously invisible.",
-      "🧪 **Groundwork: the building blocks for post-quantum encryption are in place, but **not enabled** — nothing about encryption behaves differently yet. Turning it on requires most people to be on this version first, so **please update**. ⚠️ When it does land it protects the confidentiality of message contents, **not** the authenticity of identities; and like the existing forward secrecy it has **not been externally audited**.",
+      "🧪 **Groundwork: the building blocks for post-quantum encryption are in place**, but **not enabled** — nothing about encryption behaves differently yet. Turning it on requires most people to be on this version first, so **please update**. ⚠️ When it does land it protects the confidentiality of message contents, **not** the authenticity of identities; and like the existing forward secrecy it has **not been externally audited**.",
       "ℹ️ Known limitations: the Android build is a test build (debug-signed — anyone who can attach USB debugging can read its memory, so do not use it for conversations you actually care about); the desktop build is not code-signed, so Windows SmartScreen will warn on install."
     ]
   },

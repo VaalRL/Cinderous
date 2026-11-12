@@ -24,6 +24,7 @@ import { avatarFromUrl, pickAvatarImage } from "../native/avatar.js";
 import { copyText } from "../native/clipboard.js";
 import { isNativeShell } from "../native/platform.js";
 import { StatusSegments } from "./SelfStatusBar.js";
+import { rich } from "./rich-text.js";
 import { APP_VERSION } from "../version.js";
 
 const ACCENTS: { label: string; hex: string | null }[] = [
@@ -998,7 +999,7 @@ export function SettingsScreen({
         {fs ? (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>{t("fs_title")}</Text>
-            <Text style={styles.label}>{t("fs_hint")}</Text>
+            <Text style={styles.label}>{rich(t("fs_hint"))}</Text>
             <Text
               testID="fs-unaudited"
               style={[styles.label, { color: "#c0392b" }]}
@@ -1108,18 +1109,20 @@ export function SettingsScreen({
                     deviceKeyTier === "plaintext" || deviceKeyTier === "ephemeral" ? { color: "#c0392b" } : null,
                   ]}
                 >
-                  {deviceKeyTier === "plaintext"
-                    ? t("devices_tierPlaintext")
-                    : deviceKeyTier === "ephemeral"
-                      ? t("devices_tierEphemeral")
-                      : deviceKeyTier === "encrypted"
-                        ? t("devices_tierEncrypted")
-                        : t("devices_tierKeystore")}
+                  {rich(
+                    deviceKeyTier === "plaintext"
+                      ? t("devices_tierPlaintext")
+                      : deviceKeyTier === "ephemeral"
+                        ? t("devices_tierEphemeral")
+                        : deviceKeyTier === "encrypted"
+                          ? t("devices_tierEncrypted")
+                          : t("devices_tierKeystore"),
+                  )}
                 </Text>
                 {/* ADR-0323：遷移進金鑰庫的舊金鑰曾經明文躺過——刪副本收不回已被拿走的東西。 */}
                 {deviceKeyTier === "keystore" && deviceKeyEverPlaintext ? (
                   <Text testID="key-tier-was-plain" style={[styles.label, { color: "#c0392b" }]}>
-                    {t("devices_tierWasPlain")}
+                    {rich(t("devices_tierWasPlain"))}
                   </Text>
                 ) : null}
               </>
@@ -1129,7 +1132,7 @@ export function SettingsScreen({
               <>
                 <Text style={styles.sectionTitle}>{t("devices_myCode")}</Text>
                 <Text style={styles.npub} testID="my-device-code">{selfDevicePk}</Text>
-                <Text style={styles.label}>{t("devices_myCodeHint")}</Text>
+                <Text style={styles.label}>{rich(t("devices_myCodeHint"))}</Text>
               </>
             ) : null}
             {/* ADR-0322 S2：撤銷三態。雙軌期間必須明說「移除還不會生效」。 */}
@@ -1138,17 +1141,19 @@ export function SettingsScreen({
                 testID={`revocation-${revocation.state}`}
                 style={[styles.label, revocation.state === "dual-track" ? { color: "#c0392b" } : null]}
               >
-                {revocation.state === "unknown"
-                  ? t("devices_revUnknown")
-                  : revocation.state === "dual-track"
-                    ? t("devices_revDualTrack", {
-                        ids: (revocation.devices ?? []).map((i) => i.slice(0, 8)).join("、"),
-                      })
-                    : t("devices_revActive")}
+                {rich(
+                  revocation.state === "unknown"
+                    ? t("devices_revUnknown")
+                    : revocation.state === "dual-track"
+                      ? t("devices_revDualTrack", {
+                          ids: (revocation.devices ?? []).map((i) => i.slice(0, 8)).join("、"),
+                        })
+                      : t("devices_revActive"),
+                )}
               </Text>
             ) : null}
             <Text style={[styles.label, { color: "#c0392b" }]} testID="devices-limit">
-              {t("devices_limit")}
+              {rich(t("devices_limit"))}
             </Text>
           </View>
         ) : null}
@@ -1308,7 +1313,7 @@ export function SettingsScreen({
         {onRetention ? (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>{t("settings_retention")}</Text>
-            <Text style={styles.label}>{t("settings_retentionHint")}</Text>
+            <Text style={styles.label}>{rich(t("settings_retentionHint"))}</Text>
             <View style={[styles.rowSeg, { flexWrap: "wrap" }]}>
               {[0, 1000, 5000, 10000].map((n) => (
                 <Pressable key={n} style={seg(retention === n)} accessibilityRole="button" onPress={() => onRetention(n)}>

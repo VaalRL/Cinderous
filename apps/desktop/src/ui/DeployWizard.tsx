@@ -14,6 +14,7 @@
 // 因此整個狀態機在 jsdom 裡測得到，不需要真的部署一座節點。
 
 import { useRef, useState } from "react";
+import { RichText } from "./RichText.js";
 import { useI18n } from "../i18n.js";
 import * as cf from "../native/cf-deploy.js";
 import type { CfAccount, DeployFail } from "../native/cf-deploy.js";
@@ -169,7 +170,7 @@ export function DeployWizard({
       {step === "intro" ? (
         <section data-testid="deploy-intro">
           <h3>{t("deploy_introTitle")}</h3>
-          <p>{t("deploy_introBody")}</p>
+          <p><RichText text={t("deploy_introBody")} /></p>
           <p className="hint">{t("deploy_introCost")}</p>
           <button type="button" data-testid="deploy-start" onClick={() => setStep("token")}>
             {t("deploy_start")}
@@ -241,7 +242,7 @@ export function DeployWizard({
             />
             {t("deploy_unified")}
           </label>
-          <p className="hint">{t("deploy_unifiedWarn")}</p>
+          <p className="hint"><RichText text={t("deploy_unifiedWarn")} /></p>
           {err}
           <button
             type="button"
@@ -258,7 +259,7 @@ export function DeployWizard({
         <section data-testid="deploy-subdomain">
           <h3>{t("deploy_subdomainTitle")}</h3>
           {/* 🔴 這個名字之後改不了，所以不替他編一個。 */}
-          <p>{t("deploy_subdomainBody")}</p>
+          <p><RichText text={t("deploy_subdomainBody")} /></p>
           <input
             data-testid="deploy-subdomain-input"
             placeholder={t("deploy_subdomainPlaceholder")}

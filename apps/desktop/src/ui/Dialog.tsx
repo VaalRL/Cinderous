@@ -8,6 +8,8 @@
 // ——元件照常渲染；正式 app 一律有 provider（main.tsx），走自訂對話框。
 
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { stripRich } from "@cinderous/i18n";
+import { RichText } from "./RichText.js";
 import { useI18n } from "../i18n.js";
 
 type DialogKind = "confirm" | "alert" | "prompt";
@@ -44,14 +46,14 @@ const norm = (o: string | DialogOptions | PromptOptions): DialogOptions & Prompt
 
 /** 無 provider 時的回退（僅隔離測試/邊角情境）：用原生對話框，不丟例外。 */
 const FALLBACK: DialogApi = {
-  confirm: (o) => Promise.resolve(typeof window !== "undefined" ? !!window.confirm?.(norm(o).message) : false),
+  confirm: (o) => Promise.resolve(typeof window !== "undefined" ? !!window.confirm?.(stripRich(norm(o).message)) : false),
   alert: (o) => {
-    if (typeof window !== "undefined") window.alert?.(norm(o).message);
+    if (typeof window !== "undefined") window.alert?.(stripRich(norm(o).message));
     return Promise.resolve();
   },
   prompt: (o) => {
     const n = norm(o);
-    return Promise.resolve(typeof window !== "undefined" ? (window.prompt?.(n.message, n.defaultValue) ?? null) : null);
+    return Promise.resolve(typeof window !== "undefined" ? (window.prompt?.(stripRich(n.message), n.defaultValue) ?? null) : null);
   },
 };
 
@@ -162,7 +164,7 @@ function DialogView({ item, onDone }: { item: Pending; onDone: (r: unknown) => v
         </div>
         <div className="dialog__body">
           <p className="dialog__msg" data-testid="dialog-message">
-            {opts.message}
+            <RichText text={opts.message} />
           </p>
           {isPrompt ? (
             <input
