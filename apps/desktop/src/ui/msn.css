@@ -1211,7 +1211,9 @@ button:disabled { opacity: .5; cursor: default; filter: none; }
 .rewrite__go { border: 1px solid var(--accent); background: var(--accent); color: #fff; border-radius: 6px; font-size: 12px; font-weight: 600; padding: 3px 8px; cursor: pointer; }
 .rewrite__go:hover { filter: brightness(1.06); }
 .rewrite__go:disabled { opacity: .5; cursor: not-allowed; }
-.rewrite__busy { font-size: 12px; color: var(--muted); }
+.rewrite__busy { font-size: 12px; color: var(--muted); display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.rewrite__busy .rewrite__cancel { align-self: flex-end; }
+.rewrite__result--streaming { align-self: stretch; opacity: .85; }
 .rewrite__error { font-size: 12px; color: #c0392b; }
 .rewrite__result { font-size: 13px; color: var(--ink); white-space: pre-wrap; word-break: break-word; max-height: 180px; overflow-y: auto; background: var(--surface2); border-radius: 6px; padding: 6px 8px; }
 .rewrite__actions { display: flex; gap: 6px; justify-content: flex-end; }

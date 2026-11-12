@@ -114,6 +114,7 @@ import { resolveComposerKey } from "./composer-keys.js";
 import { enterToSendEnabled } from "./composer-prefs.js";
 import { detectDateAtEnd, detectDates } from "@cinderous/core";
 import { ComposerRewrite } from "./ComposerRewrite.js";
+import type { RewriteStream } from "../native/ollama.js";
 import { applyEmoticons } from "./emoticons.js";
 import { avatarColor, EMOTICONS, initial } from "./util.js";
 import { p2pChipSpec } from "./p2p-chip.js"; // ADR-0213/0344：連線路徑晶片
@@ -301,8 +302,8 @@ export interface ConversationProps {
   expired?: Set<string>;
   onSend: (text: string, ttlSeconds?: number, mentions?: string[], replyTo?: string, alsoMain?: boolean) => void;
   onTyping: () => void;
-  /** 本機 AI 改寫（ADR-0060）：提供才顯示 ✨ 改寫入口；回傳改寫後文字。 */
-  onRewrite?: (text: string, instruction: string) => Promise<string>;
+  /** 本機 AI 改寫（ADR-0060）：提供才顯示 ✨ 改寫入口；回傳改寫後文字。`stream` 逐段回報（ADR-0416）。 */
+  onRewrite?: (text: string, instruction: string, stream?: RewriteStream) => Promise<string>;
   /** 開啟改寫面板時預偵測 Ollama 是否可用。 */
   onCheckAiAvailable?: () => Promise<boolean>;
   /** @提及候選（ADR-0050）：群成員／對方，供 composer 自動完成與送出解析。 */
