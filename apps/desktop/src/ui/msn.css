@@ -909,7 +909,7 @@ button:disabled { opacity: .5; cursor: default; filter: none; }
 /* 設定彈窗較寬（表單/中繼站清單較多）；仍受 max-width: calc(100vw - 24px) 封頂。
    固定高度（改善回報）：切換分頁時整窗高度不變，由內文區卷軸調節——避免每次切頁彈窗跳動。
    小視窗由 .modal__box 的 max-height: calc(var(--viewport-h) - 24px) 自動封頂。 */
-.modal__box.settings-modal { width: 480px; height: 560px; }
+.modal__box.settings-modal { width: 640px; height: 560px; }
 /* 設定分頁列（ADR-0142）：固定在標題下、不隨內文捲動。 */
 .settings__tabs { flex: 0 0 auto; display: flex; gap: 2px; padding: 6px 8px 0; border-bottom: 1px solid var(--border); overflow-x: auto; }
 .settings__tab {
@@ -920,6 +920,50 @@ button:disabled { opacity: .5; cursor: default; filter: none; }
 .settings__tab:hover { color: var(--ink); background: var(--hover); }
 .settings__tab.on { color: var(--accent); border-bottom-color: var(--accent); }
 .settings__body { flex: 1 1 auto; padding: 10px 12px; display: flex; flex-direction: column; gap: 12px; }
+
+/* 外觀分頁：左邊設定、右邊即時預覽線稿（捲動時預覽固定）。顏色全走 CSS 變數，改設定就跟著變。 */
+.appearance { display: grid; grid-template-columns: minmax(0, 1fr) 176px; gap: 16px; align-items: start; }
+.appearance__main { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.pv { position: sticky; top: 0; }
+.pv__label { font-size: 11px; font-weight: 600; color: var(--muted); margin-bottom: 4px; }
+.pv__screen {
+  height: 210px; display: flex; flex-direction: column; overflow: hidden;
+  border: 1px solid var(--border); border-radius: 8px;
+  background: radial-gradient(120% 100% at 50% 0%, var(--bg-a) 0%, var(--bg-b) 60%, var(--bg-c) 100%);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+}
+.pv__bar { flex: none; height: 10px; background: var(--titlebar); }
+.pv__line { flex: none; height: 5px; border-radius: 3px; background: var(--border); width: 78%; }
+.pv__line:nth-child(even) { width: 58%; }
+.pv__bubble { flex: none; height: 9px; border-radius: 5px; width: 70%; }
+.pv__bubble--in { align-self: flex-start; background: var(--surface2); border: 1px solid var(--border); }
+.pv__bubble--out { align-self: flex-end; width: 58%; background: var(--accent); }
+.pv__bubble--short { width: 44%; }
+.pv__compose { margin-top: auto; display: flex; gap: 3px; align-items: center; }
+.pv__field { flex: 1; height: 10px; border: 1px solid var(--border); border-radius: 4px; background: var(--field); }
+.pv__send { flex: none; width: 14px; height: 10px; border-radius: 3px; background: var(--accent); }
+/* 三欄式 */
+.pv__cols { flex: 1; min-height: 0; display: grid; grid-template-columns: 30% 1fr 24%; background: var(--panel); }
+.pv__pane { min-width: 0; padding: 6px 5px; display: flex; flex-direction: column; gap: 4px; }
+.pv__pane--list { background: var(--surface2); border-right: 1px solid var(--border); }
+.pv__pane--aux { background: var(--surface2); border-left: 1px solid var(--border); }
+/* 預設（浮動視窗） */
+.pv__desk { flex: 1; min-height: 0; position: relative; }
+.pv__win {
+  position: absolute; display: flex; flex-direction: column; overflow: hidden;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 5px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.18);
+}
+.pv__winbar { flex: none; height: 7px; background: var(--titlebar); }
+.pv__win--list { left: 8px; top: 8px; bottom: 8px; width: 62px; gap: 4px; }
+.pv__win--list > .pv__line { margin-left: 5px; }
+.pv__me { flex: none; height: 12px; margin: 4px 5px 2px; border-radius: 3px; background: color-mix(in srgb, var(--accent) 28%, var(--panel)); }
+.pv__win--float { left: 56px; right: 8px; top: 36px; bottom: 12px; }
+.pv__winbody { flex: 1; min-height: 0; padding: 5px; display: flex; flex-direction: column; gap: 4px; }
+@media (max-width: 600px) {
+  .appearance { grid-template-columns: minmax(0, 1fr); }
+  .pv { display: none; }
+}
 
 /* 統一自訂對話框（ADR-0139）：confirm/alert/prompt，取代瀏覽器內建。 */
 .dialog { width: 340px; }

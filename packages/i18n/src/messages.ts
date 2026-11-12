@@ -468,7 +468,7 @@ export interface Messages {
   settings_layout: string;
   settings_layoutClassic: string;
   settings_layoutModern: string;
-  settings_layoutHint: string;
+  settings_preview: string;
   deck_auxPlaceholder: string;
   settings_accent: string;
   settings_accentPrimary: string;
@@ -485,7 +485,6 @@ export interface Messages {
   a11y_stateOff: string;
   a11y_uiScale: string;
   a11y_uiScaleHint: string;
-  settings_accentHint: string;
   settings_aiProvider: string;
   settings_aiProviderOllama: string;
   settings_aiProviderOpenai: string;
@@ -889,7 +888,6 @@ export interface Messages {
   slash_hint: string;
   settings_composer: string;
   settings_enterToSend: string;
-  settings_enterToSendHint: string;
   mention_hint: string;
   mention_you: string;
   thread_title: string;
@@ -1559,9 +1557,9 @@ const zhHant: Messages = {
   aux_admin: "管理者",
   aux_replies: "{count} 則回覆",
   settings_layout: "版面佈局",
-  settings_layoutClassic: "經典（浮動視窗）",
-  settings_layoutModern: "三欄整合",
-  settings_layoutHint: "經典＝可同時攤開多個對話視窗；三欄＝左聯絡人／中對話／右輔助（開發中，逐步完善）。只存本機。",
+  settings_layoutClassic: "預設",
+  settings_layoutModern: "三欄式",
+  settings_preview: "預覽",
   deck_auxPlaceholder: "對話輔助區（建置中）",
   settings_accent: "主題色",
   settings_accentPrimary: "主色（泡泡／按鈕／連結）",
@@ -1577,7 +1575,6 @@ const zhHant: Messages = {
   a11y_stateOff: "關",
   a11y_uiScale: "介面尺寸",
   a11y_uiScaleHint: "整體縮放文字與介面（立即生效、只存這台裝置）。",
-  settings_accentHint: "即時套用、只存在本機；深色主題會自動提亮以維持對比。主色連吉祥物身體，副色驅動標題列與頂部漸層（留空＝跟隨主色）。",
   settings_aiProvider: "AI 服務",
   settings_aiProviderOllama: "本機 Ollama",
   settings_aiProviderOpenai: "OpenAI 相容（線上）",
@@ -1942,7 +1939,6 @@ const zhHant: Messages = {
   slash_hint: "↵/Tab 執行 · ↑↓ 選擇 · Esc 關閉",
   settings_composer: "輸入行為",
   settings_enterToSend: "按 Enter 送出訊息",
-  settings_enterToSendHint: "開啟：Enter 送出、Shift+Enter 換行。關閉：Enter 換行、Ctrl/⌘+Enter 送出。",
   mention_hint: "Tab/Enter 選取・↑↓ 選擇・Esc 關閉",
   mention_you: "提及了你",
   thread_title: "討論串",
@@ -2553,9 +2549,9 @@ const en: Messages = {
   aux_admin: "Admin",
   aux_replies: "{count} replies",
   settings_layout: "Layout",
-  settings_layoutClassic: "Classic (floating windows)",
+  settings_layoutClassic: "Default",
   settings_layoutModern: "Three-column",
-  settings_layoutHint: "Classic = open several chat windows side by side; three-column = contacts / conversation / assistant (in progress). Stored locally.",
+  settings_preview: "Preview",
   deck_auxPlaceholder: "Conversation assistant (coming soon)",
   settings_accent: "Theme color",
   settings_accentPrimary: "Primary (bubbles / buttons / links)",
@@ -2571,7 +2567,6 @@ const en: Messages = {
   a11y_stateOff: "Off",
   a11y_uiScale: "UI size",
   a11y_uiScaleHint: "Scale the whole interface (applies instantly; stored on this device only).",
-  settings_accentHint: "Applies instantly, stored locally; auto-brightened in dark theme. Primary recolors the mascot too; secondary drives the title bar and background gradient (blank = follow primary).",
   settings_aiProvider: "AI provider",
   settings_aiProviderOllama: "Local Ollama",
   settings_aiProviderOpenai: "OpenAI-compatible (online)",
@@ -2937,7 +2932,6 @@ const en: Messages = {
   slash_hint: "↵/Tab run · ↑↓ choose · Esc close",
   settings_composer: "Typing",
   settings_enterToSend: "Press Enter to send",
-  settings_enterToSendHint: "On: Enter sends, Shift+Enter adds a line. Off: Enter adds a line, Ctrl/⌘+Enter sends.",
   mention_hint: "Tab/Enter to pick · ↑↓ select · Esc dismiss",
   mention_you: "mentioned you",
   thread_title: "Thread",
