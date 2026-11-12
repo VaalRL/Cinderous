@@ -165,6 +165,11 @@ export interface Messages {
   roster_rotationAria: string;
   roster_rotationPlaceholder: string;
   roster_signAndPublish: string;
+  roster_adminsLabel: string;
+  roster_adminsParseError: string;
+  roster_dropsAdmin: string;
+  roster_coAdminNote: string;
+  roster_groupsKeep: string;
   settings_bgInbox: string;
   bgInbox_notify: string;
   away_note: string;
@@ -1293,6 +1298,11 @@ const zhHant: Messages = {
   roster_rotationAria: "身分輪替",
   roster_rotationPlaceholder: "npub1舊… npub1新… Alice",
   roster_signAndPublish: "簽章並發布名冊",
+  roster_adminsLabel: "共同管理者（可選，每行一個 npub；也要列在上面的成員裡。他們能發布名冊，但只有你能改這份名單）",
+  roster_adminsParseError: "共同管理者無法解析：",
+  roster_dropsAdmin: "不能把任何一位管理者移出成員——只有組織擁有者能改管理者名單",
+  roster_coAdminNote: "你是這個組織的共同管理者：可以改成員、政策與群組，但不能改誰是管理者，也不能把管理者移出成員。",
+  roster_groupsKeep: "留空＝沿用現有群組；要改群組就整份重打（每行：群組名稱, npub, npub…）",
   settings_bgInbox: "背景也收其他身分的新訊息（切換列顯示數量、跳通知；不顯示寄件人與內容）",
   bgInbox_notify: "有 {count} 則新訊息",
   away_note: "你離開期間收到 {count} 則新訊息",
@@ -2281,6 +2291,11 @@ const en: Messages = {
   roster_rotationAria: "Identity rotation",
   roster_rotationPlaceholder: "npub1old… npub1new… Alice",
   roster_signAndPublish: "Sign and publish roster",
+  roster_adminsLabel: "Co-admins (optional, one npub per line; they must also be listed as members above. They can publish the roster, but only you can change this list)",
+  roster_adminsParseError: "Could not parse co-admin: ",
+  roster_dropsAdmin: "You can't remove an admin from the members — only the organization owner can change who the admins are",
+  roster_coAdminNote: "You are a co-admin of this organization: you can change members, policy and groups, but not who the admins are, and you can't remove an admin from the members.",
+  roster_groupsKeep: "Leave empty to keep the current groups; to change groups, re-enter the full list (one per line: group name, npub, npub…)",
   settings_bgInbox: "Also receive new messages for my other identities in the background (count in the switcher and a notification; no sender or content)",
   bgInbox_notify: "{count} new messages",
   away_note: "{count} new messages while you were away",

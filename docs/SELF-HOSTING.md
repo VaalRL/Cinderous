@@ -71,7 +71,7 @@
 
 ### 執行期管理（NIP-86，僅 `node-relay`）
 
-**名冊自動套用（ADR-0414、SDK ADR 0134）**：設了 `ROSTER_ADMIN_PUBKEY`，管理者在 App 裡按「發布名冊」，名冊到了本站就換成員——檢查和下面的 `cinder_applyroster` 一樣（驗簽、比上次新），有 `DB_PATH` 時重開還在。不需要設 `NIP86_ADMIN_PUBKEYS`，管理者也不必經手運維金鑰。設了 `ALLOWED_KINDS` 的話清單要包含 `10038`。
+**名冊自動套用（ADR-0414、SDK ADR 0134）**：設了 `ROSTER_ADMIN_PUBKEY`，管理者在 App 裡按「發布名冊」，名冊到了本站就換成員——檢查和下面的 `cinder_applyroster` 一樣（驗簽、比上次新），有 `DB_PATH` 時重開還在。不需要設 `NIP86_ADMIN_PUBKEYS`，管理者也不必經手運維金鑰。名冊裡列的共同管理者（ADR-0418、SDK ADR 0135）簽的名冊也照樣套用，不必另外設定；`ROSTER_ADMIN_PUBKEY` 仍只填擁有者。設了 `ALLOWED_KINDS` 的話清單要包含 `10038`。
 
 設了 `NIP86_ADMIN_PUBKEYS`，中繼網址就多收 `POST`＋`Content-Type: application/nostr+json+rpc` 的 NIP-86 請求（ADR-0261、SDK ADR 0132／0133），用 NIP-98 授權、必須帶 `payload` tag。改成員、事件類型、站名**不必重開**：
 

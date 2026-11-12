@@ -53,6 +53,8 @@ export interface OrgSession {
   title: string;
   /** 公司政策（ADR-0048／0311）：UI 閘門旗標。 */
   policy: OrgPolicy;
+  /** 我是共同管理者（ADR-0418）：引擎 `onOrgInfo` 說了算；設定頁出現名冊管理入口。 */
+  coAdmin: boolean;
 
   /** 後端 `onPolicy`：引擎採用簽章名冊時送來。 */
   setPolicy(p: OrgPolicy): void;
@@ -66,6 +68,7 @@ export interface OrgSession {
   /** 改儲存槽佇列。 */
   updateSlots(fn: (queue: MobileSlotItem[]) => MobileSlotItem[]): void;
   setTitle(t: string): void;
+  setCoAdmin(v: boolean): void;
 
   /**
    * 切身分：歸零並以新身分的種子重新播種。
@@ -85,6 +88,7 @@ export function useOrgSession(): OrgSession {
   const [slots, setSlots] = useState<MobileSlotItem[]>([]);
   const [title, setTitle] = useState("");
   const [policy, setPolicy] = useState<OrgPolicy>({});
+  const [coAdmin, setCoAdmin] = useState(false);
 
   return {
     enterprise,
@@ -95,11 +99,13 @@ export function useOrgSession(): OrgSession {
     slots,
     title,
     policy,
+    coAdmin,
     setPolicy,
     markEnterprise: () => setEnterprise(true),
     updateEscrow: setEscrow,
     updateSlots: setSlots,
     setTitle,
+    setCoAdmin,
     reset: (seed) => {
       const org = seed?.org;
       setEnterprise(!!(org?.enterprise || org?.orgOwner));
@@ -110,6 +116,7 @@ export function useOrgSession(): OrgSession {
       setSlots([]); // session 內的待傳佇列，不跨身分也不跨重啟
       setTitle(seed?.title ?? "");
       setPolicy({});
+      setCoAdmin(false); // 由新身分的 onOrgInfo 重新告知
     },
   };
 }

@@ -92,4 +92,13 @@ describe("企業簇（ADR-0331）", () => {
     act(() => h.get().reset({ org: MEMBER }));
     expect(h.get().policy).toEqual({});
   });
+
+  it("共同管理者（ADR-0418）由後端告知，切身分歸零——別讓另一個身分看到名冊管理入口", () => {
+    const h = hook();
+    expect(h.get().coAdmin).toBe(false);
+    act(() => h.get().setCoAdmin(true));
+    expect(h.get().coAdmin).toBe(true);
+    act(() => h.get().reset({ org: MEMBER }));
+    expect(h.get().coAdmin).toBe(false);
+  });
 });

@@ -43,6 +43,7 @@ export function RosterAdminScreen({
   offboarded,
   onTakeover,
   onDeleteEscrow,
+  coAdmin = false,
   locale = "zh-Hant",
   theme = "light",
   accent = null,
@@ -54,7 +55,7 @@ export function RosterAdminScreen({
     org: string,
     members: OrgMember[],
     policy?: OrgPolicy,
-    profile?: { welcome?: string; workHours?: { start: string; end: string } },
+    profile?: { welcome?: string; workHours?: { start: string; end: string }; admins?: string[] },
   ) => string[];
   onBack: () => void;
   /** 邀請碼組件（ADR-0156）：企業主 pubkey＋核准權杖＋公司座；缺則不顯示邀請區。 */
@@ -68,6 +69,8 @@ export function RosterAdminScreen({
   offboarded?: { pubkey: string; name: string }[];
   onTakeover?: (pubkey: string) => void;
   onDeleteEscrow?: (pubkey: string) => void;
+  /** 我是共同管理者（ADR-0418）：能發布名冊，但不能改管理者名單；沒有邀請碼、託管與儲存槽區（那些只屬於擁有者）。 */
+  coAdmin?: boolean;
   locale?: Locale;
   theme?: Theme;
   accent?: string | null;
@@ -89,12 +92,14 @@ export function RosterAdminScreen({
   const [workStart, setWorkStart] = useState(initial?.workHours?.start ?? "");
   const [workEnd, setWorkEnd] = useState(initial?.workHours?.end ?? "");
   const [ttlDays, setTtlDays] = useState(initial?.policy?.messageTtlDays !== undefined ? String(initial.policy.messageTtlDays) : "");
+  // 共同管理者（ADR-0418，只有擁有者看得到）：每行一個 npub；清空＝移除全部
+  const [admins, setAdmins] = useState(() => (initial?.admins ?? []).map((pk) => npubEncode(pk)).join("\n"));
   const [escrow, setEscrow] = useState(false);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [published, setPublished] = useState(false);
 
-  const inviteCode = invite ? makeOrgInvite({ ...invite, ...(escrow ? { escrow: true } : {}) }) : undefined;
+  const inviteCode = invite && !coAdmin ? makeOrgInvite({ ...invite, ...(escrow ? { escrow: true } : {}) }) : undefined;
 
   const publish = (): void => {
     setError(null);
@@ -115,12 +120,27 @@ export function RosterAdminScreen({
       setError(t("roster_needMember"));
       return;
     }
+    const adminList: string[] = [];
+    if (!coAdmin) {
+      for (const line of admins.split("\n")) {
+        const s = line.trim();
+        if (!s) continue;
+        try {
+          adminList.push(npubDecode(s.split(/\s+/)[0] ?? ""));
+        } catch {
+          setError(`${t("roster_adminsParseError")}${s}`);
+          return;
+        }
+      }
+    }
     const ttl = parseInt(ttlDays.trim(), 10);
     const policy: OrgPolicy = { ...(Number.isInteger(ttl) && ttl >= 1 && ttl <= 365 ? { messageTtlDays: ttl } : {}) };
     // 公司設定（ADR-0157）：兩端皆填且不等才帶班表。
     const profile = {
       ...(welcome.trim() ? { welcome: welcome.trim() } : {}),
       ...(workStart && workEnd && workStart !== workEnd ? { workHours: { start: workStart, end: workEnd } } : {}),
+      // 擁有者每次都帶（空陣列＝清掉名單）；共同管理者不帶
+      ...(coAdmin ? {} : { admins: adminList }),
     };
     try {
       onPublish(
@@ -130,8 +150,8 @@ export function RosterAdminScreen({
         Object.keys(profile).length > 0 ? profile : undefined,
       );
       setPublished(true);
-    } catch {
-      setError(t("roster_publishFailed"));
+    } catch (e) {
+      setError(e instanceof Error && e.message === "roster-drops-admin" ? t("roster_dropsAdmin") : t("roster_publishFailed"));
     }
   };
 
@@ -185,12 +205,23 @@ export function RosterAdminScreen({
           </View>
         ) : null}
 
+        {coAdmin ? (
+          <Text style={styles.hint} testID="roster-coadmin-note">
+            {t("roster_coAdminNote")}
+          </Text>
+        ) : null}
         <View style={styles.section}>
           <Text style={styles.label}>{t("roster_orgName")}</Text>
           <TextInput style={styles.input} value={org} onChangeText={setOrg} placeholder={t("roster_orgName")} placeholderTextColor={tk.muted} aria-label={t("roster_orgName")} testID="roster-org" />
           <Text style={styles.label}>{t("roster_membersLabel")}</Text>
           <Text style={styles.hint}>{t("roster_membersHint")}</Text>
           <TextInput style={[styles.input, styles.area]} value={members} onChangeText={setMembers} multiline aria-label={t("roster_membersLabel")} testID="roster-members" />
+          {!coAdmin ? (
+            <>
+              <Text style={styles.label}>{t("roster_adminsLabel")}</Text>
+              <TextInput style={styles.input} value={admins} onChangeText={setAdmins} multiline placeholder="npub1…" placeholderTextColor={tk.muted} aria-label={t("roster_adminsLabel")} testID="roster-admins" />
+            </>
+          ) : null}
         </View>
 
         <View style={styles.section}>
@@ -236,10 +267,12 @@ export function RosterAdminScreen({
         ) : null}
 
         {/* 公司儲存槽（ADR-0177／0179）：收檔落盤僅桌面（手機無檔案系統）——文字提示，讓企業主知道去哪收檔。 */}
-        <View style={styles.section}>
-          <Text style={styles.label}>{t("settings_slot")}</Text>
-          <Text style={styles.hint} testID="vault-desktop-only">{t("settings_vaultDesktopOnly")}</Text>
-        </View>
+        {!coAdmin ? (
+          <View style={styles.section}>
+            <Text style={styles.label}>{t("settings_slot")}</Text>
+            <Text style={styles.hint} testID="vault-desktop-only">{t("settings_vaultDesktopOnly")}</Text>
+          </View>
+        ) : null}
       </ScrollView>
     </View>
   );

@@ -1,5 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
+import { npubEncode } from "@cinderous/core";
 import { RosterAdminScreen } from "./RosterAdminScreen.js";
 
 // 發布互動（解析成員、簽章名冊）在 SSR 下不跑——onPublish 契約與簽章由 engine/core 測試把關；
@@ -62,5 +63,40 @@ describe("行動端組織名冊管理（ADR-0178）", () => {
     expect(withOff).toContain("Eve");
     const withoutOff = renderToStaticMarkup(<RosterAdminScreen {...base} />);
     expect(withoutOff).not.toContain('data-testid="takeover-');
+  });
+});
+
+describe("行動端名冊的共同管理者（ADR-0418）", () => {
+  const co = "b".repeat(64);
+  const initial = {
+    org: "Acme",
+    members: [
+      { pubkey: "a".repeat(64), name: "Owner" },
+      { pubkey: co, name: "Bob" },
+    ],
+    admins: [co],
+    updatedAt: 1,
+  };
+
+  it("擁有者：有共同管理者欄，預填現有名單", () => {
+    const html = renderToStaticMarkup(<RosterAdminScreen {...base} initial={initial} />);
+    expect(html).toContain('data-testid="roster-admins"');
+    expect(html).toContain(npubEncode(co));
+    expect(html).not.toContain('data-testid="roster-coadmin-note"');
+  });
+
+  it("🔴 共同管理者：沒有共同管理者欄、沒有邀請碼與儲存槽區，有說明", () => {
+    const html = renderToStaticMarkup(
+      <RosterAdminScreen
+        {...base}
+        initial={initial}
+        coAdmin
+        invite={{ relayUrl: "wss://co.relay", adminPubkey: "a".repeat(64), token: "tok" }}
+      />,
+    );
+    expect(html).not.toContain('data-testid="roster-admins"');
+    expect(html).not.toContain('data-testid="roster-invite"');
+    expect(html).not.toContain('data-testid="vault-desktop-only"');
+    expect(html).toContain('data-testid="roster-coadmin-note"');
   });
 });

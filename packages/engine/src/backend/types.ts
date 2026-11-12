@@ -42,6 +42,8 @@ export interface OrgInfo {
   welcome?: string;
   /** 表定上下班時間。 */
   workHours?: OrgWorkHours;
+  /** 我是這個組織的共同管理者（ADR-0418）：可以發布名冊，但不能改管理者名單。 */
+  coAdmin?: boolean;
 }
 
 /**
@@ -711,10 +713,12 @@ export interface ChatBackend {
     members: OrgMember[],
     policy?: OrgPolicy,
     groups?: OrgGroup[],
-    profile?: { welcome?: string; workHours?: OrgWorkHours },
+    profile?: { welcome?: string; workHours?: OrgWorkHours; admins?: PubkeyHex[] },
   ): PubkeyHex[];
-  /** 現行名冊（ADR-0157，企業主）：供名冊管理視窗預填；尚未發佈/找回前為 null。 */
+  /** 現行名冊（ADR-0157，企業主／共同管理者）：供名冊管理視窗預填；尚未發佈/找回前為 null。 */
   currentRoster?(): OrgRosterDoc | null;
+  /** 我是不是組織的共同管理者（ADR-0418）。 */
+  isOrgCoAdmin?(): boolean;
   /** 發起語音/視訊通話（M8，媒體全程 P2P）。 */
   startCall?(to: PubkeyHex, media: CallMedia): void;
   /** 接聽目前來電。 */
