@@ -69,12 +69,13 @@ Content-Security-Policy:
   connect-src 'self' wss://relay.example.com;
   img-src 'self' data: blob:;
   media-src 'self' blob:;
-  style-src 'self' 'unsafe-inline';
+  style-src 'self';
   base-uri 'none';
   object-src 'none';
   frame-ancestors 'none'
 ```
 
+- `style-src` only needs `'self'`: the app uses no inline styles (ADR-0417), so don't add `'unsafe-inline'`.
 - Set `connect-src` to **the relay you actually connect to** (your self-hosted URL if self-hosting; `wss://cinder-relay.cinderous1.workers.dev` if using the default node). If you allow users to enter any relay themselves, you need to loosen this to `connect-src wss:` — **a trade-off**: flexibility comes at the cost of a larger connection surface, so for self-hosted setups we recommend pinning to your own relay.
 - WebRTC calls go over P2P and do not need to be opened up separately in `connect-src` (browser RTC is not restricted by `connect-src`); if you need TURN, adjust according to your TURN configuration.
 
@@ -93,7 +94,7 @@ The `_headers` / `netlify.toml` / `vercel.json` files below are all **deployment
 - CSP: in your fork, add `apps/desktop/public/_headers` (Vite copies it into `dist`; create `public/` if it doesn't exist):
   ```
   /*
-    Content-Security-Policy: default-src 'self'; connect-src 'self' wss://relay.example.com; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'
+    Content-Security-Policy: default-src 'self'; connect-src 'self' wss://relay.example.com; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'
   ```
 - Custom domain: add `app.example.com`.
 
@@ -107,7 +108,7 @@ The `_headers` / `netlify.toml` / `vercel.json` files below are all **deployment
   [[headers]]
     for = "/*"
     [headers.values]
-      Content-Security-Policy = "default-src 'self'; connect-src 'self' wss://relay.example.com; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'"
+      Content-Security-Policy = "default-src 'self'; connect-src 'self' wss://relay.example.com; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'"
   ```
 - Custom domain: add `app.example.com` under Domain settings.
 
@@ -120,7 +121,7 @@ The `_headers` / `netlify.toml` / `vercel.json` files below are all **deployment
       {
         "source": "/(.*)",
         "headers": [
-          { "key": "Content-Security-Policy", "value": "default-src 'self'; connect-src 'self' wss://relay.example.com; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'" }
+          { "key": "Content-Security-Policy", "value": "default-src 'self'; connect-src 'self' wss://relay.example.com; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'" }
         ]
       }
     ]
