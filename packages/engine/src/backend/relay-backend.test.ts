@@ -2695,6 +2695,30 @@ describe("訊息請求（ADR-0121）", () => {
     stranger.stop();
   });
 
+  it("🔴 陌生人的第一則訊息：**先**送出含他的 onRequests，**才**送 onMessage（ADR-0420）", () => {
+    // App 在 onMessage 裡判斷「這是不是請求」來決定要不要跳通知。這個順序是兩端依賴的契約：
+    // 反過來，第一則陌生訊息在判斷當下還不在請求清單裡 ⇒ 被當成聯絡人訊息跳通知。
+    const net = createInMemoryRelayNetwork();
+    const events: string[] = [];
+    const me = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("me", h), "我");
+    const stranger = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("x", h), "陌生人");
+    me.start({
+      ...noop,
+      onMessage: (pk) => events.push(`message:${pk}`),
+      onRequests: (r) => events.push(`requests:${r.map((x) => x.pubkey).join(",")}`),
+    });
+    stranger.start(noop);
+    stranger.sendMessage(me.self.pubkey, "第一則");
+    const pk = stranger.self.pubkey;
+    const firstMessage = events.indexOf(`message:${pk}`);
+    const firstListing = events.findIndex((e) => e.startsWith("requests:") && e.includes(pk));
+    expect(firstMessage).toBeGreaterThan(-1);
+    expect(firstListing).toBeGreaterThan(-1);
+    expect(firstListing).toBeLessThan(firstMessage);
+    me.stop();
+    stranger.stop();
+  });
+
   it("🔴 **請求者不能 nudge 你**——這正是 ADR-0120 那道把關被繞過的路", () => {
     const { me, stranger, nudged, typed } = strangerSends();
 
