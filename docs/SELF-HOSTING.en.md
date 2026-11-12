@@ -65,13 +65,15 @@ read ordinary environment variables.
 | `ALLOWED_PUBKEYS` | unset | Accept events only from these pubkeys (npub or hex, comma-separated; closed enterprise relay, ADR-0044). Any invalid entry stops startup. Unset means an open relay. | `node-relay` only |
 | `ALLOWED_KINDS` | unset | Accept only these event kinds (integers 0–65535, comma-separated; ADR-0048). Any invalid entry stops startup. Unset means all kinds. | `node-relay` only |
 | `NIP86_ADMIN_PUBKEYS` | unset | Operator keys that enable the NIP-86 admin API (npub or hex, comma-separated). Unset means the endpoint does not exist. See "Runtime management" below. | `node-relay` only |
-| `ROSTER_ADMIN_PUBKEY` | unset | The organization roster's admin pubkey (exactly one); `cinder_applyroster` verifies rosters with it. It **must not** be one of the operator keys, or the relay refuses to start. | `node-relay` only |
+| `ROSTER_ADMIN_PUBKEY` | unset | The organization roster's admin pubkey (exactly one: the admin identity's npub). A roster signed by this key and published to the relay **changes the members automatically**, with no restart and no admin API; `cinder_applyroster` also verifies rosters with it. This key can always write to the relay. It **must not** be one of the operator keys, or the relay refuses to start. | `node-relay` only |
 | `NIP86_PUBLIC_URL` | unset | The relay's public `https://` URL. When set, the admin API accepts only requests signed for this URL; an invalid value stops the relay from starting. **Required behind a reverse proxy** (`X-Forwarded-Host` is not trusted). When unset, only the `Host` header the caller sent is checked, and the relay warns at startup. | `node-relay` only |
 
 > **`MAX_PER_RECIPIENT` (500 per recipient) is a compile-time constant, not an environment
 > variable** — setting it has no effect. Earlier docs listed it as configurable; that was wrong.
 
 ### Runtime management (NIP-86, `node-relay` only)
+
+**Automatic roster apply (ADR-0414, SDK ADR 0134).** With `ROSTER_ADMIN_PUBKEY` set, when the admin taps "Publish roster" in the app, the roster reaches this relay and replaces the members. The checks are the same as `cinder_applyroster` below (signature, newer than the last one), and with `DB_PATH` it survives restarts. `NIP86_ADMIN_PUBKEYS` is not needed, and the admin never handles an operator key. If `ALLOWED_KINDS` is set, include `10038`.
 
 With `NIP86_ADMIN_PUBKEYS` set, the relay URL also accepts NIP-86 requests: `POST` with `Content-Type: application/nostr+json+rpc` (ADR-0261, SDK ADR 0132/0133), authorized by NIP-98 with a required `payload` tag. You can change members, kinds and the relay name **without a restart**:
 

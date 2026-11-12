@@ -63,13 +63,15 @@
 | `ALLOWED_PUBKEYS` | 未設 | 只收這些公鑰發的事件（npub 或 hex，逗號分隔；企業封閉站，ADR-0044）。寫錯任何一筆就拒絕啟動。未設＝開放站。 | 僅 `node-relay` |
 | `ALLOWED_KINDS` | 未設 | 只收這些事件類型（0–65535 整數，逗號分隔；ADR-0048）。寫錯就拒絕啟動。未設＝全收。 | 僅 `node-relay` |
 | `NIP86_ADMIN_PUBKEYS` | 未設 | 開啟 NIP-86 管理 API 的運維金鑰（npub 或 hex，逗號分隔）。未設＝沒有這個端點。見下方「執行期管理」。 | 僅 `node-relay` |
-| `ROSTER_ADMIN_PUBKEY` | 未設 | 組織名冊的管理者公鑰（恰好一把），`cinder_applyroster` 用它驗名冊。**不得**是運維金鑰之一，否則拒絕啟動。 | 僅 `node-relay` |
+| `ROSTER_ADMIN_PUBKEY` | 未設 | 組織名冊的管理者公鑰（恰好一把，管理者那個身分的 npub）。這把金鑰簽的名冊發到本站就**自動換成員**，不必重開、也不必開管理 API；`cinder_applyroster` 也用它驗名冊。這把金鑰一定寫得進本站。**不得**是運維金鑰之一，否則拒絕啟動。 | 僅 `node-relay` |
 | `NIP86_PUBLIC_URL` | 未設 | 本站對外的 `https://` 網址。設了，管理 API 就只認簽給這個網址的請求；寫錯拒絕啟動。**在反向代理後面一定要設**（不信任 `X-Forwarded-Host`）。沒設時只比對對方送來的 `Host` 標頭，啟動時會警告。 | 僅 `node-relay` |
 
 > **`MAX_PER_RECIPIENT`（每收件人 500 則）是程式內建常數，不是環境變數**——設了不會有作用。
 > 舊版文件曾誤列為可設定，已更正。
 
 ### 執行期管理（NIP-86，僅 `node-relay`）
+
+**名冊自動套用（ADR-0414、SDK ADR 0134）**：設了 `ROSTER_ADMIN_PUBKEY`，管理者在 App 裡按「發布名冊」，名冊到了本站就換成員——檢查和下面的 `cinder_applyroster` 一樣（驗簽、比上次新），有 `DB_PATH` 時重開還在。不需要設 `NIP86_ADMIN_PUBKEYS`，管理者也不必經手運維金鑰。設了 `ALLOWED_KINDS` 的話清單要包含 `10038`。
 
 設了 `NIP86_ADMIN_PUBKEYS`，中繼網址就多收 `POST`＋`Content-Type: application/nostr+json+rpc` 的 NIP-86 請求（ADR-0261、SDK ADR 0132／0133），用 NIP-98 授權、必須帶 `payload` tag。改成員、事件類型、站名**不必重開**：
 
