@@ -44,8 +44,8 @@ import { formatBytes } from "@cinderous/engine"; // ADR-0344：提示文案與�
 import { sendsUnstrippedImage } from "@cinderous/engine"; // ADR-0359：大到不能清 EXIF 的圖片先問過
 import { blobStream, bundleHasSanitizableImage } from "@cinderous/core"; // ADR-0346：大檔逐塊讀；ADR-0355：合集隱私提示
 import { browserStore } from "./native/browser-store.js";
-import { InboxWatcher, fsRecipientKeys } from "@cinderous/engine"; // ADR-0415：背景收件
-import { bgInboxEnabled, bgStartDelayMs, countAwayMessage, inboxUrlOf, readAway, recordAway, setBgInboxEnabled, takeAway, type AwayTally } from "./away-inbox.js";
+import { InboxWatcher, fsRecipientKeys, mutedConvosOf } from "@cinderous/engine"; // ADR-0415：背景收件
+import { advanceNotified, bgInboxEnabled, bgShouldNotify, bgStartDelayMs, countAwayMessage, inboxUrlOf, readAway, readOrgInfo, recordAway, saveOrgInfo, setBgInboxEnabled, takeAway, type AwayTally } from "./away-inbox.js";
 import { safeNsecDecode } from "./nsec.js";
 import { getKeyVault, tauriKeyVault } from "./native/keyvault.js";
 import { wipeDeviceLocal, wipeIdentityLocal } from "./native/wipe.js";
@@ -618,6 +618,13 @@ export function App(): JSX.Element {
   // 不用未讀數的差——對話視窗開著時訊息一到就已讀，差永遠是 0（實機測試發現）。
   const awayRef = useRef<AwayTally | null>(null);
   const [awayCount, setAwayCount] = useState(0);
+  /**
+   * 離開作用中身分（切換、新增身分並切換、解鎖隱藏身分、登出）：記下離開時間（ADR-0415 C）。
+   * 每條會換掉作用中身分的路都要呼叫——漏一條，那條路切回來就看不到離開期間的摘要。
+   */
+  const leaveActive = (): void => {
+    if (profilesState.active) recordAway(profilesState.active, { at: Math.floor(Date.now() / 1000) });
+  };
   /** 有封存的對話（ADR-0111）：只有真的有封存才顯示「歷史紀錄」入口。 */
   const [archived, setArchived] = useState<Record<string, number>>({});
   const [historyOf, setHistoryOf] = useState<string | null>(null);
@@ -1474,6 +1481,8 @@ export function App(): JSX.Element {
       onOrgInfo: (info) => {
         // 組織資訊（ADR-0157）：供設定面板顯示與下班靜音判定。
         setOrgInfo(info);
+        // 這個身分之後在背景時，背景收件也要套下班靜音（ADR-0415 §4）→ 記在本機
+        if (activePkRef.current) saveOrgInfo(activePkRef.current, info);
         // 歡迎詞：首次或內容變更時一次性彈窗（標題＝公司名稱）；以身分為鍵記住已顯示的內容。
         if (info.welcome) {
           const key = `nb.orgWelcome.${backend.self.pubkey}`;
@@ -1934,6 +1943,7 @@ export function App(): JSX.Element {
     for (const p of hidden) {
       try {
         await passUnlock(p.namespace, p.pubkey, password);
+        leaveActive(); // ADR-0415 C
         saveProfiles(setActive(profilesState, p.pubkey));
         try {
           location.reload();
@@ -2152,7 +2162,7 @@ export function App(): JSX.Element {
     if (!backend || !profilesState.active) return;
     const rec = takeAway(profilesState.active);
     if (!rec) return;
-    awayRef.current = { since: rec.at, ids: new Set() };
+    awayRef.current = { since: rec.at, until: Date.now(), ids: new Set() };
     const timer = setTimeout(() => {
       awayRef.current = null;
       setAwayCount(0);
@@ -2164,17 +2174,28 @@ export function App(): JSX.Element {
   // ADR-0415 B：背景收件——設定裡打開才有。Tauri 限定：瀏覽器版沒有金鑰庫，其他身分的 nsec 不在手上。
   const [bgInbox, setBgInbox] = useState(bgInboxEnabled);
   const [bgCounts, setBgCounts] = useState<Record<string, number>>({});
+  // 已通知到第幾則（跨背景連線重建保留）：重建會從 0 重數同一批，沒有水位就會重跳通知（審查 M2）。
+  const bgNotifiedRef = useRef<Record<string, number>>({});
   const toggleBgInbox = (): void => {
     const next = !bgInbox;
     setBgInboxEnabled(next);
     setBgInbox(next);
-    if (!next) setBgCounts({});
+    if (!next) {
+      setBgCounts({});
+      bgNotifiedRef.current = {};
+    }
   };
+  // 要背景收的身分。effect 只依「這份清單實際內容」重建——`profilesState` 的其他變動
+  // （例如切換雲端備份模式）不該拆掉重連（審查 M2）。
+  const bgTargets = visibleProfiles(profilesState).filter(
+    (p) => p.pubkey !== profilesState.active && !p.locked && p.relayUrl,
+  );
+  const bgTargetsKey = JSON.stringify(bgTargets.map((p) => [p.pubkey, p.namespace, p.relayUrl, p.enterprise, p.name]));
+  const bgTargetsRef = useRef(bgTargets);
+  bgTargetsRef.current = bgTargets;
   useEffect(() => {
     if (!bgInbox || !backend || !isTauri()) return;
-    const others = visibleProfiles(profilesState).filter(
-      (p) => p.pubkey !== profilesState.active && !p.locked && p.relayUrl,
-    );
+    const others = bgTargetsRef.current;
     const watchers: InboxWatcher[] = [];
     const timers: ReturnType<typeof setTimeout>[] = [];
     let live = true;
@@ -2186,7 +2207,11 @@ export function App(): JSX.Element {
       const ts = new TauriStorage(p.namespace);
       await ts.hydrate();
       if (!live) return;
-      const fsKeys = ts.loadFsState().keys;
+      // 解封金鑰算一次（審查 L1）：每顆 Gift Wrap 都重展開後量子金鑰太浪費
+      const keys = fsRecipientKeys(ts.loadFsState().keys, sk);
+      // 通知閘門要用的：這個身分的每對話靜音、組織群組（ADR-0217／0157）
+      const muted = new Set(mutedConvosOf(ts.loadSyncedPrefs()));
+      const orgGroups = new Set(ts.loadGroups().filter((g) => g.org).map((g) => g.id));
       const blocked = new Set(ts.loadBlocked().map((c) => c.pubkey));
       // 陌生人只進訊息請求、接受前不跳通知（ADR-0121）→ 只數聯絡人與已加入的群組
       const known = {
@@ -2194,7 +2219,6 @@ export function App(): JSX.Element {
         groups: new Set(ts.loadGroups().map((g) => g.id)),
       };
       const url = inboxUrlOf(p, shardingEnabled());
-      let last = 0;
       watchers.push(
         new InboxWatcher({
           self: p.pubkey,
@@ -2202,16 +2226,26 @@ export function App(): JSX.Element {
           url,
           connector: webSocketConnector(url),
           sinceSec: readAway(p.pubkey)?.at ?? Math.floor(Date.now() / 1000),
-          keys: () => fsRecipientKeys(fsKeys, sk),
+          keys: () => keys,
           blocked,
           known,
-          onCount: (n) => {
-            setBgCounts((prev) => ({ ...prev, [p.pubkey]: n }));
+          onCount: (n, latest) => {
+            setBgCounts((prev) => ({ ...prev, [p.pubkey]: Math.max(prev[p.pubkey] ?? 0, n) }));
+            if (!advanceNotified(bgNotifiedRef.current, p.pubkey, n)) return; // 重建後重數到的舊訊息不再通知
+            const d = new Date();
+            const allowed = bgShouldNotify({
+              prefs: notifyPrefsRef.current,
+              masterOn: notifyRef.current,
+              latest,
+              muted,
+              org: readOrgInfo(p.pubkey),
+              orgGroups,
+              nowMin: d.getHours() * 60 + d.getMinutes(),
+            });
             // 通知不含寄件人與內文（ADR-0415 §4）：只說哪個身分、幾則。
-            if (n > last && notifyRef.current) {
+            if (allowed) {
               void getNotifier().notify({ title: `${profileGlyph(p)} ${p.name}`, body: tRef.current("bgInbox_notify", { count: n }) });
             }
-            last = n;
           },
         }),
       );
@@ -2225,8 +2259,8 @@ export function App(): JSX.Element {
       timers.forEach(clearTimeout);
       watchers.forEach((w) => w.stop());
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- 依開關／後端／身分清單重建
-  }, [bgInbox, backend, profilesState]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 只依開關／後端／背景身分清單的實際內容重建
+  }, [bgInbox, backend, bgTargetsKey]);
   const profileLabel = (p: Profile): string => {
     const n = bgCounts[p.pubkey] ?? 0;
     return `${profileGlyph(p)} ${p.name}${n > 0 ? ` (${n})` : ""}`;
@@ -2235,8 +2269,7 @@ export function App(): JSX.Element {
   // 切換身分：持久化作用中選擇後重載，讓所有 per-身分 狀態乾淨重建（ADR-0045）。
   const switchProfile = (pubkey: string) => {
     if (pubkey === profilesState.active) return;
-    // ADR-0415 C：記下離開時間與當時的未讀數——切回來時顯示這段期間多了幾則；背景收件也從這個時間開始數。
-    if (profilesState.active) recordAway(profilesState.active, { at: Math.floor(Date.now() / 1000) });
+    leaveActive(); // ADR-0415 C：切回來時顯示離開期間的訊息；背景收件也從這個時間開始數
     saveProfiles(setActive(profilesState, pubkey));
     try {
       location.reload();
@@ -2249,6 +2282,7 @@ export function App(): JSX.Element {
   // 於本機（有密碼者下次需解鎖）。與「移除此身分／清空裝置」的破壞性動作刻意分開。
   const logout = async () => {
     if (!(await confirm({ message: t("settings_logoutConfirm"), confirmLabel: t("settings_logout") }))) return;
+    leaveActive(); // ADR-0415 C：下次登入時顯示離開期間的訊息
     saveProfiles(clearActive(profilesState));
     try {
       location.reload();
@@ -2329,8 +2363,7 @@ export function App(): JSX.Element {
           }),
       ...(!isTauri() ? { locked: true } : {}), // 瀏覽器：以密碼包裹（ADR-0122）→ 下次開機走解鎖
     };
-    // ADR-0415 C：新增身分也會切走目前的身分 → 一樣記下離開時間與未讀數（實機測試發現漏了這條路）
-    if (profilesState.active) recordAway(profilesState.active, { at: Math.floor(Date.now() / 1000) });
+    leaveActive(); // ADR-0415 C：新增身分也會切走目前的身分（實機測試發現漏了這條路）
     const next = upsertProfile(profilesState, profile);
     saveProfiles(next);
     // ADR-0155：企業主建立後首次進入自動開名冊管理。Tauri 走 reload → 旗標跨越重載；

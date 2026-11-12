@@ -114,12 +114,15 @@ export class ArchiveWriter {
    * 熱區由 `remapContact` 併過去了，封存沒有：不搬的話，新對話的歷史只看得到熱區那一段，
    * 更早的封存變成沒人讀、也永遠不會被刪的孤兒。
    *
-   * 逐塊照原順序追加到新對話、全部寫完才移除舊的（寫到一半失敗＝舊的還在，不會兩邊都沒有）。
+   * 逐塊照原順序追加到新對話、全部寫完才移除舊的。寫到一半失敗＝**撤掉已寫進新對話的塊**、
+   * 舊的原封保留——否則新對話留著半份重複歷史，而且之後也不會再搬（新對話已有封存就跳過）。
+   * 撤得掉是因為：開始前確認過新對話是空的，而同一條佇列上不會有別的寫入插進來。
    * 新對話**已經有**封存時不搬（極少見）：搬過去會排在比它新的塊後面、歷史順序錯亂；
    * 舊的原封留著，不刪、不遺失，記一行警告。
    */
   remap(from: string, to: string): void {
     if (from === to) return;
+    let wrote = false;
     this.chain = this.chain
       .then(async () => {
         const total = await this.archive.chunkCount(from);
@@ -130,6 +133,7 @@ export class ArchiveWriter {
         }
         for (let seq = 0; seq < total; seq++) {
           const chunk = await this.archive.loadChunk(from, seq);
+          wrote = true;
           await this.archive.append(
             to,
             chunk.map((m) => ({ ...m, contact: to })),
@@ -137,8 +141,14 @@ export class ArchiveWriter {
         }
         await this.archive.remove(from);
       })
-      .catch((e: unknown) => {
+      .catch(async (e: unknown) => {
         console.warn("[archive] 輪替時搬移封存失敗（舊封存保留）：", e);
+        if (!wrote) return;
+        try {
+          await this.archive.remove(to); // 撤掉寫了一半的（見上）
+        } catch (e2: unknown) {
+          console.warn("[archive] 撤回寫了一半的封存也失敗：", e2);
+        }
       });
   }
 

@@ -6,13 +6,14 @@ import {
   generateSecretKey,
   getPublicKey,
   nsecEncode,
+  wrapGroupMessage,
   wrapMessage,
   wrapReceipt,
   type NostrEvent,
   type RelayClientHandlers,
 } from "@cinderous/core";
 import { describe, expect, it } from "vitest";
-import { InboxWatcher, fsRecipientKeys } from "./inbox-watch.js";
+import { InboxWatcher, fsRecipientKeys, mutedConvosOf, type CountedMessage } from "./inbox-watch.js";
 import type { RelayConnector } from "./relay-backend.js";
 
 function fakeRelay() {
@@ -158,5 +159,36 @@ describe("陌生人不數（ADR-0121：接受前不跳通知）", () => {
     expect(counts).toEqual([]);
     relay.deliver(wrapMessage("hi from alice", alice, mePk, { now: SINCE + 10 }).events[0]!);
     expect(counts).toEqual([1]);
+  });
+});
+
+describe("onCount 帶出剛數到那一則的路由資訊（給呼叫端套通知閘門）", () => {
+  it("1:1：寄件人、沒有群組；不含內文", () => {
+    const relay = fakeRelay();
+    const got: CountedMessage[] = [];
+    new InboxWatcher({ self: mePk, sk: me, url: "wss://r", connector: relay.connector, sinceSec: SINCE, keys: () => [me], onCount: (_n, m) => got.push(m) });
+    relay.deliver(wrapMessage("secret", alice, mePk, { now: SINCE + 10 }).events[0]!);
+    expect(got).toEqual([{ sender: getPublicKey(alice), mentionsMe: false }]);
+  });
+
+  it("群訊：帶群組 id；@我 時 mentionsMe", () => {
+    const relay = fakeRelay();
+    const got: CountedMessage[] = [];
+    new InboxWatcher({ self: mePk, sk: me, url: "wss://r", connector: relay.connector, sinceSec: SINCE, keys: () => [me], onCount: (_n, m) => got.push(m) });
+    const alicePk = getPublicKey(alice);
+    const group = { id: "g1", name: "G", admin: alicePk, members: [alicePk, mePk] };
+    const forMe = (w: { events: NostrEvent[] }) => w.events.find((e) => e.tags.some((t) => t[0] === "p" && t[1] === mePk))!;
+    relay.deliver(forMe(wrapGroupMessage("plain", alice, alicePk, group, { now: SINCE + 10 })));
+    relay.deliver(forMe(wrapGroupMessage("@me", alice, alicePk, group, { now: SINCE + 11, mentions: [mePk] })));
+    expect(got).toEqual([
+      { sender: alicePk, group: "g1", mentionsMe: false },
+      { sender: alicePk, group: "g1", mentionsMe: true },
+    ]);
+  });
+});
+
+describe("mutedConvosOf（後端與背景收件共用）", () => {
+  it("只取 mute: 開頭且 v=1 的", () => {
+    expect(mutedConvosOf({ "mute:a": { v: "1" }, "mute:b": { v: "" }, "other:c": { v: "1" } })).toEqual(["a"]);
   });
 });
