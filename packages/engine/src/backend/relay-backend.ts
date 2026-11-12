@@ -194,7 +194,7 @@ import {
   readPublicName,
   verifyEvent,
 } from "@cinderous/core";
-import { fsRecipientKeys } from "./inbox-watch.js"; // ADR-0415
+import { MUTE_PREFIX, fsRecipientKeys, mutedConvosOf } from "./inbox-watch.js"; // ADR-0415
 import { loadRelayCheck, recordAuthObservation } from "./relay-check.js"; // ADR-0275：A 層健檢
 import { buildRtcConfig } from "./rtc-config.js";
 import { opfsFileSink } from "../storage/opfs-file-sink.js"; // ADR-0347：收檔串流落盤
@@ -528,7 +528,6 @@ export interface RelayPoolOptions {
 }
 
 /** 每對話靜音在同步設定表中的鍵前綴（ADR-0242 階段③）：`mute:<convoId>` → v "1"＝靜音。 */
-const MUTE_PREFIX = "mute:";
 /**
  * 入群邀請閘門的同步設定鍵（ADR-0317）。值：`"contacts"`＝只有聯絡人可邀；
  * 其餘（含缺席／空字串）＝**任何人**（今日行為，預設）。
@@ -3637,9 +3636,7 @@ export class RelayChatBackend implements ChatBackend {
 
   /** 目前靜音的對話集合（ADR-0242 階段③）。 */
   mutedConvos(): string[] {
-    return Object.entries(this.storage.loadSyncedPrefs())
-      .filter(([k, p]) => k.startsWith(MUTE_PREFIX) && p.v === "1")
-      .map(([k]) => k.slice(MUTE_PREFIX.length));
+    return mutedConvosOf(this.storage.loadSyncedPrefs()); // 與背景收件共用（ADR-0415）
   }
 
   /**

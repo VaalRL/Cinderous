@@ -20,6 +20,7 @@ import {
   calendarEventOf,
   calendarRsvpOf,
   groupTarget,
+  isMentioned,
   openWrapWithEks,
   parseOrgJoin,
   parseProfile,
@@ -72,8 +73,33 @@ export interface InboxWatchOptions {
    * 背景收件也一樣：**只數聯絡人寄來的、與已加入群組裡的**。省略＝不過濾（只給測試用）。
    */
   known?: { contacts: ReadonlySet<string>; groups: ReadonlySet<string> };
-  /** 新訊息數變了（累計值）。 */
-  onCount: (count: number) => void;
+  /**
+   * 新訊息數變了。`count`＝累計值；`latest`＝剛數到的那一則（給呼叫端套通知閘門：
+   * 1:1／群組事件開關、每對話靜音、下班靜音——ADR-0217／0157）。
+   */
+  onCount: (count: number, latest: CountedMessage) => void;
+}
+
+/** 剛數到的一則訊息的路由資訊（不含內文）。 */
+export interface CountedMessage {
+  sender: PubkeyHex;
+  /** 群訊的群組 id；1:1 沒有。 */
+  group?: string;
+  /** 群訊有沒有 @這個身分。 */
+  mentionsMe: boolean;
+}
+
+/** 同步設定裡的每對話靜音鍵前綴（ADR-0242 階段③）。 */
+export const MUTE_PREFIX = "mute:";
+
+/**
+ * 從同步設定導出目前靜音的對話（純函式）。`RelayChatBackend.mutedConvos` 與背景收件共用——
+ * 背景身分沒有在跑的後端，只能直接讀它存的同步設定。
+ */
+export function mutedConvosOf(prefs: Record<string, { v: string }>): string[] {
+  return Object.entries(prefs)
+    .filter(([k, p]) => k.startsWith(MUTE_PREFIX) && p.v === "1")
+    .map(([k]) => k.slice(MUTE_PREFIX.length));
 }
 
 /**
@@ -147,6 +173,11 @@ export class InboxWatcher {
     if (this.seen.has(rumor.id)) return;
     if (!isCountableIncoming(sender, rumor, this.opts.self, this.opts.sinceSec, this.opts.blocked, this.opts.known)) return;
     this.seen.add(rumor.id);
-    this.opts.onCount(this.seen.size);
+    const group = groupTarget(rumor);
+    this.opts.onCount(this.seen.size, {
+      sender,
+      ...(group ? { group } : {}),
+      mentionsMe: isMentioned(rumor, this.opts.self),
+    });
   }
 }

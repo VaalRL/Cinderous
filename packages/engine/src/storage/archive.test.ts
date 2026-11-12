@@ -16,8 +16,14 @@ import type { StoredMessage } from "./types.js";
 class FakeArchive implements MessageArchive {
   readonly chunks = new Map<string, StoredMessage[][]>();
   failNext = false;
+  /** 再成功幾次 append 之後失敗一次（模擬寫到一半）；undefined＝不注入。 */
+  failAfter: number | undefined;
 
   append(convo: string, messages: StoredMessage[]): Promise<void> {
+    if (this.failAfter !== undefined && this.failAfter-- === 0) {
+      this.failAfter = undefined;
+      return Promise.reject(new Error("磁碟寫入失敗（寫到一半）"));
+    }
     if (this.failNext) {
       this.failNext = false;
       return Promise.reject(new Error("磁碟寫入失敗"));
@@ -234,6 +240,25 @@ describe("封存接上 LocalStorage（ADR-0111）", () => {
     await s.flushArchive();
 
     expect(await arch.chunkCount("bob")).toBe(1);
+    warn.mockRestore();
+  });
+
+  it("🔴 寫到第二塊才失敗 → 撤掉新 npub 底下寫了一半的塊（不留半份重複歷史），舊封存完整保留", async () => {
+    const arch = new FakeArchive();
+    const s = new LocalStorage("ns");
+    s.attachArchive(arch);
+    s.addContact({ pubkey: "bob", name: "Bob" });
+    s.addContact({ pubkey: "bob2", name: "Bob" });
+    await arch.append("bob", [msg(1)]);
+    await arch.append("bob", [msg(2)]);
+    await arch.append("bob", [msg(3)]);
+    arch.failAfter = 1; // 第一塊搬成功、第二塊失敗
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    s.remapContact("bob", "bob2");
+    await s.flushArchive();
+
+    expect(await arch.chunkCount("bob2")).toBe(0);
+    expect(await arch.chunkCount("bob")).toBe(3);
     warn.mockRestore();
   });
 });
