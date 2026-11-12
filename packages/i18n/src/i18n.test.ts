@@ -229,3 +229,18 @@ describe("本地密碼的保護範圍要誠實（ADR-0298 §2 待辦 4／ADR-041
     }
   });
 });
+
+describe("名冊發布後的說明要誠實（ADR-0414）", () => {
+  // 事實：只有設了 ROSTER_ADMIN_PUBKEY 的自架 Node 中繼會跟著換成員；官方錨點與其他中繼不會。
+  it("🔴 不得宣稱「已佈建到中繼站」", () => {
+    expect(translate("zh-Hant", "roster_published")).not.toContain("佈建");
+    expect(translate("en", "roster_published").toLowerCase()).not.toContain("provisioned");
+  });
+
+  it("說明哪種中繼會自動套用（ROSTER_ADMIN_PUBKEY），其他中繼要設 ALLOWED_PUBKEYS", () => {
+    for (const locale of ["zh-Hant", "en"] as const) {
+      expect(translate(locale, "roster_autoApplyHint")).toContain("ROSTER_ADMIN_PUBKEY");
+      expect(translate(locale, "roster_allowlistLabel")).toContain("ALLOWED_PUBKEYS");
+    }
+  });
+});

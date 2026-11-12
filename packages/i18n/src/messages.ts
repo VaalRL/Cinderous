@@ -143,6 +143,8 @@ export interface Messages {
   roster_needMember: string;
   roster_publishFailed: string;
   roster_published: string;
+  roster_autoApplyHint: string;
+  roster_allowlistLabel: string;
   roster_publish: string;
   settings_orgRoster: string;
   settings_createCompany: string;
@@ -1245,7 +1247,9 @@ const zhHant: Messages = {
   roster_parseError: "無法解析：",
   roster_needMember: "至少需要一位成員",
   roster_publishFailed: "發布失敗",
-  roster_published: "名冊已發布並佈建到中繼站。",
+  roster_published: "名冊已發布。",
+  roster_autoApplyHint: "自架 Node 中繼把 ROSTER_ADMIN_PUBKEY 設成你這個身分的 npub，就會照這份名冊自動換成員；官方錨點與其他中繼不會。",
+  roster_allowlistLabel: "不會自動套用的中繼：把下列 pubkey 設進 ALLOWED_PUBKEYS",
   roster_publish: "發布名冊",
   settings_orgRoster: "組織名冊",
   settings_createCompany: "建立公司（企業主）",
@@ -2208,7 +2212,9 @@ const en: Messages = {
   roster_parseError: "Can't parse: ",
   roster_needMember: "At least one member is required",
   roster_publishFailed: "Publish failed",
-  roster_published: "Roster published and provisioned to the relay.",
+  roster_published: "Roster published.",
+  roster_autoApplyHint: "A self-hosted Node relay with ROSTER_ADMIN_PUBKEY set to this identity's npub changes its members to match this roster automatically; the official anchors and other relays do not.",
+  roster_allowlistLabel: "For relays that do not apply it automatically, put these pubkeys in ALLOWED_PUBKEYS",
   roster_publish: "Publish roster",
   settings_orgRoster: "Organization roster",
   settings_createCompany: "Create a company (owner)",

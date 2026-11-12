@@ -4400,7 +4400,10 @@ export function RosterAdminModal({
           </button>
           {allowlist ? (
             <>
-              <div className="groupmodal__label">✅ 已發布。以下 pubkey 供 relay allowedAuthors 佈建：</div>
+              {/* ADR-0414：只有設了 ROSTER_ADMIN_PUBKEY 的自架 Node 站會自動換成員，別說「已佈建」 */}
+              <div className="groupmodal__label" data-testid="roster-published">✅ {t("roster_published")}</div>
+              <div className="text">{t("roster_autoApplyHint")}</div>
+              <div className="groupmodal__label">{t("roster_allowlistLabel")}</div>
               <textarea className="groupmodal__name" rows={4} readOnly value={allowlist.join("\n")} />
             </>
           ) : null}

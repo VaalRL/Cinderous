@@ -233,8 +233,8 @@ importers:
   packages/core:
     dependencies:
       '@cinderous/client':
-        specifier: github:VaalRL/cinderous-sdk#v0.88.1
-        version: https://codeload.github.com/VaalRL/cinderous-sdk/tar.gz/87795e0a053556046bbefd067722ab0d65f06785(typescript@5.9.3)
+        specifier: github:VaalRL/cinderous-sdk#v0.89.0
+        version: https://codeload.github.com/VaalRL/cinderous-sdk/tar.gz/a19e19240e160b76dc4b5891778ea5c43d691c5e(typescript@5.9.3)
       '@noble/ciphers':
         specifier: 2.4.0
         version: 2.4.0
@@ -307,8 +307,8 @@ importers:
   relay:
     dependencies:
       '@cinderous/client':
-        specifier: github:VaalRL/cinderous-sdk#v0.88.1
-        version: https://codeload.github.com/VaalRL/cinderous-sdk/tar.gz/87795e0a053556046bbefd067722ab0d65f06785(typescript@5.9.3)
+        specifier: github:VaalRL/cinderous-sdk#v0.89.0
+        version: https://codeload.github.com/VaalRL/cinderous-sdk/tar.gz/a19e19240e160b76dc4b5891778ea5c43d691c5e(typescript@5.9.3)
       '@cinderous/core':
         specifier: workspace:*
         version: link:../packages/core
@@ -456,9 +456,9 @@ packages:
   '@capacitor/core@7.6.8':
     resolution: {integrity: sha512-x1xfxvNcTSnj6OoYaAB0n0a0HRvi5f2YjcVnMLxpMhbHDgGDAzzN9z8cnPCYV+SKTvqGF1hezHm82Op32XaAGg==}
 
-  '@cinderous/client@https://codeload.github.com/VaalRL/cinderous-sdk/tar.gz/87795e0a053556046bbefd067722ab0d65f06785':
-    resolution: {tarball: https://codeload.github.com/VaalRL/cinderous-sdk/tar.gz/87795e0a053556046bbefd067722ab0d65f06785}
-    version: 0.88.1
+  '@cinderous/client@https://codeload.github.com/VaalRL/cinderous-sdk/tar.gz/a19e19240e160b76dc4b5891778ea5c43d691c5e':
+    resolution: {tarball: https://codeload.github.com/VaalRL/cinderous-sdk/tar.gz/a19e19240e160b76dc4b5891778ea5c43d691c5e}
+    version: 0.89.0
     engines: {node: '>=20'}
     hasBin: true
     peerDependencies:
@@ -2174,7 +2174,7 @@ snapshots:
     dependencies:
       tslib: 2.8.1
 
-  '@cinderous/client@https://codeload.github.com/VaalRL/cinderous-sdk/tar.gz/87795e0a053556046bbefd067722ab0d65f06785(typescript@5.9.3)':
+  '@cinderous/client@https://codeload.github.com/VaalRL/cinderous-sdk/tar.gz/a19e19240e160b76dc4b5891778ea5c43d691c5e(typescript@5.9.3)':
     dependencies:
       '@noble/ciphers': 2.4.0
       '@noble/curves': 2.4.0

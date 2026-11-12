@@ -208,6 +208,8 @@ export function RosterAdminScreen({
 
         {error ? <Text style={styles.error}>{error}</Text> : null}
         {published ? <Text style={styles.ok} testID="roster-published">{t("roster_published")}</Text> : null}
+        {/* ADR-0414：只有設了 ROSTER_ADMIN_PUBKEY 的自架 Node 站會自動換成員 */}
+        {published ? <Text style={styles.hint} testID="roster-auto-apply-hint">{t("roster_autoApplyHint")}</Text> : null}
         <Pressable style={styles.button} accessibilityRole="button" testID="roster-publish" onPress={publish}>
           <Text style={styles.buttonText}>{t("roster_publish")}</Text>
         </Pressable>

@@ -179,7 +179,7 @@
 **中繼端 — 發布 allowlist（封閉節點）**
 - SDK `@cinderous/client/relay` 的 `RelayCore`（ADR-0370）：`RelayCoreOptions.allowedAuthors`（hex pubkey 集合）。`handleEvent` 於**驗簽後、寫庫/扇出前**檢查 `event.pubkey ∈ allowlist`；非成員的任何事件（含心跳 20000）回 `OK false "blocked:"`（永久拒絕）。未設＝開放中繼。
 - 「外部客戶不進系統」在**內容層**由此成立；讀取層由企業自架於私網/VPN 把關（無 NIP-42 亦足夠，且取到皆 E2E 密文）。
-- **執行期改成員（ADR-0261；SDK ADR 0132，只在 Node 主機）**：設 `NIP86_ADMIN_PUBKEYS` 後，同一網址收 NIP-86 JSON-RPC（`POST`、`application/nostr+json+rpc`、NIP-98＋`payload`）。成員只能經 `cinder_applyroster` 送入名冊金鑰（`ROSTER_ADMIN_PUBKEY`，不得是運維金鑰）簽的名冊、較新才換掉 allowlist——中繼仍無法自己加人；`allowpubkey`／`banpubkey` 一律拒絕。事件類型（`ALLOWED_KINDS`）、NIP-11 站名說明可改；有 SQLite 時存在 `cinder_admin_state`。Worker／官方錨點不提供。
+- **執行期改成員（ADR-0261／0414；SDK ADR 0132／0134，只在 Node 主機）**：設了 `ROSTER_ADMIN_PUBKEY`，管理者發布的名冊事件（kind 10038）到了這座站就照 `cinder_applyroster` 同一套檢查套用，不必開管理 API、管理端不經手運維金鑰；名冊金鑰一定寫得進該站。另外，設 `NIP86_ADMIN_PUBKEYS` 後，同一網址收 NIP-86 JSON-RPC（`POST`、`application/nostr+json+rpc`、NIP-98＋`payload`）。成員只能經 `cinder_applyroster` 送入名冊金鑰（`ROSTER_ADMIN_PUBKEY`，不得是運維金鑰）簽的名冊、較新才換掉 allowlist——中繼仍無法自己加人；`allowpubkey`／`banpubkey` 一律拒絕。事件類型（`ALLOWED_KINDS`）、NIP-11 站名說明可改；有 SQLite 時存在 `cinder_admin_state`。Worker／官方錨點不提供。
 
 **自架外殼 — 與 Cloudflare 解耦**
 - `RelayCore` 為傳輸無關；SDK 的 `relay/worker` 僅注入 Cloudflare `WebSocketPair`。自架＝以 Node/Deno/Bun/Docker 的 WS server 包 `RelayCore`（SDK 的 `startNodeRelay`／`startDevRelay`，本庫 `relay/src/node-relay.ts`、`dev-server.ts` 只注入版號後呼叫；`in-memory-network.ts` 示範 Worker 外執行）。
