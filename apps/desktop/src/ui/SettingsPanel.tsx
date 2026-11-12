@@ -17,7 +17,7 @@ import { useLayout } from "../layout.js";
 import { useI18n } from "../i18n.js";
 import { getUiScale, setUiScale, UI_SCALE_STEPS } from "../ui-scale.js";
 import { APP_VERSION } from "../version.js";
-import { releaseFor } from "../releases.js";
+import { noteSegments, releaseFor } from "../releases.js";
 import { GITHUB_RELEASES } from "../update-check.js";
 import { useDialog } from "./Dialog.js";
 import { enterToSendEnabled, setEnterToSendEnabled } from "./composer-prefs.js";
@@ -1451,7 +1451,11 @@ function AboutSettings(props: {
       <p className="settings__hint">{t("settings_aboutWhatsNew")}</p>
       <ul className="settings__notes">
         {notes.map((n) => (
-          <li key={n}>{n}</li>
+          <li key={n}>
+            {noteSegments(n).map((s, i) =>
+              s.kind === "bold" ? <strong key={i}>{s.text}</strong> : s.kind === "code" ? <code key={i}>{s.text}</code> : s.text,
+            )}
+          </li>
         ))}
       </ul>
     </section>

@@ -52,5 +52,5 @@ ROADMAP 當初寫「需 tauri:dev 逐項驗」：怕某個畫面靠 inline 樣�
     寫法上一律用 class 或 React 的 `style={}`。
   - 自架者若照舊文件自己寫了含 `'unsafe-inline'` 的標頭，仍然可以用，只是沒有這層保護；文件已改。
 - 順帶發現（與本 ADR 無關，未處理）：
-  - 用 `ws://` 的本機中繼時，連線前的 NIP-11 探測走 `http://`，被 `connect-src`（只放行 `https:`）擋掉。
-  - App 內「本版更新內容」把 `releases.json` 的 `**粗體**` 原樣顯示，歷來各版都是如此。
+  - 用 `ws://` 的本機中繼時，連線前的 NIP-11 探測走 `http://`，被 `connect-src`（只放行 `https:`）擋掉。→ 已由 ADR-0419 修正（桌面 `connect-src` 加 `http:`）。
+  - App 內「本版更新內容」把 `releases.json` 的 `**粗體**` 原樣顯示，歷來各版都是如此。→ 2026-11-12 已修：關於頁渲染 `**粗體**` 與 `` `程式碼` ``（`noteSegments`），並補上 0.0.17 英文條目少一個 `**` 的錯字。

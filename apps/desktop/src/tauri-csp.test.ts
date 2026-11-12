@@ -74,6 +74,16 @@ describe("Tauri 安全設定（ADR-0235 C4）", () => {
     }
   });
 
+  it("桌面 connect-src 含 http:：ws:// 的本機／區網中繼，NIP-11 探測走 http://（ADR-0419）", () => {
+    for (const policy of [csp, conf.app?.security?.devCsp]) {
+      const connectSrc = /connect-src([^;]*)/.exec(String(policy))?.[1] ?? "";
+      const tokens = connectSrc.split(/\s+/);
+      // 前提：ws: 本來就放行任何主機——http: 沒有多開出外洩管道
+      expect(tokens).toContain("ws:");
+      expect(tokens).toContain("http:");
+    }
+  });
+
   it("網頁版（Pages 的 _headers、自架的 Caddyfile）的 connect-src 也含 https:", () => {
     for (const file of ["../public/_headers", "../Caddyfile"]) {
       // 只看真正的標頭那一行（Caddyfile 的註解也提到 connect-src）
