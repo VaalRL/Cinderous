@@ -34,3 +34,5 @@ pub mod inbox;
 // AI provider API key 的端點綁定（ADR-0235 H3）：同上，**無 feature 閘門**——防止
 // 「換個 endpoint 就把 API key 送出去」是安全關鍵，必須進 `cargo test` 的預設編譯範圍。
 pub mod aikey;
+// AI 改寫的串流回應解析（ADR-0416）：純 std＋serde_json，無 feature 閘門。
+pub mod aistream;
