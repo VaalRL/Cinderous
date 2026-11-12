@@ -652,7 +652,12 @@ export function AppSession({
           return next;
         }),
       onBlocked: roster.setBlocked,
-      onRequests: roster.setRequests, // ADR-0121
+      onRequests: (reqs) => {
+        // ADR-0121；ADR-0420：引擎緊接著就送 onMessage，那裡用 requestsRef 判斷要不要跳通知。
+        // 只交給 setState 要等 render 才鏡像過去 ⇒ 第一則陌生訊息會被當成聯絡人的。
+        requestsRef.current = reqs;
+        roster.setRequests(reqs);
+      },
       // 送出狀態（ADR-0095）：與桌面同一套（傳送中/失敗/已送出/已送達/已讀）→ 氣泡旁圖示。
       onMessageStatus: (pk, messageId, status) =>
         threads.setConvos((c) => {

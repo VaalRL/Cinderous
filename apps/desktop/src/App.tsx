@@ -1412,6 +1412,9 @@ export function App(): JSX.Element {
         // ADR-0121 清單設定 ＋ ADR-0217 opt-in 通知：僅對「新出現」的請求者提示一次（預設關）。
         const prev = new Set(requestsRef.current.map((r) => r.pubkey));
         const fresh = reqs.find((r) => !prev.has(r.pubkey));
+        // ADR-0420：引擎緊接著就送 onMessage，那裡用 requestsRef 判斷通知與離開摘要。
+        // 只交給 setState 要等 render 才鏡像過去 ⇒ 第一則陌生訊息會被當成聯絡人的。
+        requestsRef.current = reqs;
         setRequests(reqs);
         const hidden = typeof document !== "undefined" && document.hidden;
         if (
