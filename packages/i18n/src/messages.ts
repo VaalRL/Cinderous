@@ -165,6 +165,9 @@ export interface Messages {
   roster_rotationAria: string;
   roster_rotationPlaceholder: string;
   roster_signAndPublish: string;
+  settings_bgInbox: string;
+  bgInbox_notify: string;
+  away_note: string;
   roster_publish: string;
   settings_orgRoster: string;
   settings_createCompany: string;
@@ -1290,6 +1293,9 @@ const zhHant: Messages = {
   roster_rotationAria: "身分輪替",
   roster_rotationPlaceholder: "npub1舊… npub1新… Alice",
   roster_signAndPublish: "簽章並發布名冊",
+  settings_bgInbox: "背景也收其他身分的新訊息（切換列顯示數量、跳通知；不顯示寄件人與內容）",
+  bgInbox_notify: "有 {count} 則新訊息",
+  away_note: "你離開期間收到 {count} 則新訊息",
   roster_publish: "發布名冊",
   settings_orgRoster: "組織名冊",
   settings_createCompany: "建立公司（企業主）",
@@ -2275,6 +2281,9 @@ const en: Messages = {
   roster_rotationAria: "Identity rotation",
   roster_rotationPlaceholder: "npub1old… npub1new… Alice",
   roster_signAndPublish: "Sign and publish roster",
+  settings_bgInbox: "Also receive new messages for my other identities in the background (count in the switcher and a notification; no sender or content)",
+  bgInbox_notify: "{count} new messages",
+  away_note: "{count} new messages while you were away",
   roster_publish: "Publish roster",
   settings_orgRoster: "Organization roster",
   settings_createCompany: "Create a company (owner)",

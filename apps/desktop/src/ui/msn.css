@@ -1282,6 +1282,14 @@ button:disabled { opacity: .5; cursor: default; filter: none; }
 .requests__clear { font-size: 10px; border: 1px solid #e5484d; background: var(--field); color: #e5484d; border-radius: 5px; cursor: pointer; padding: 1px 6px; }
 .requests__clear:hover { background: #e5484d; color: #fff; }
 
+/* 離開期間的新訊息（ADR-0415 C）：切回身分時短暫顯示，60 秒後自動收起。 */
+.awaynote {
+  position: fixed; left: 50%; top: 12px; transform: translateX(-50%); z-index: 45;
+  display: flex; align-items: center; gap: 8px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+  padding: 6px 10px; box-shadow: 0 4px 16px rgba(0,0,0,.18); font-size: 12px; color: var(--ink);
+}
+
 /* 「贊助此節點」角落卡（ADR-0089／0262）：低調、可關閉、絕不擋操作。
    z-index 刻意低於對話框/通話/貼圖編輯器（55–70）——它是最不重要的東西，不該蓋住任何互動。 */
 .sponsor {

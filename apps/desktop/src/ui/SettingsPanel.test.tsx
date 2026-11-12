@@ -954,3 +954,22 @@ describe("建立我的節點的入口（ADR-0356）", () => {
     expect(render(relayTab({ onRelayChange: () => {} }))).not.toContain('data-testid="use-my-node"');
   });
 });
+
+describe("背景收件開關（ADR-0415 B）", () => {
+  beforeEach(() => {
+    (globalThis as Record<string, unknown>).window = { matchMedia: () => ({ matches: false }) };
+    (globalThis as Record<string, unknown>).localStorage = { getItem: () => null };
+  });
+  afterEach(() => {
+    delete (globalThis as Record<string, unknown>).window;
+    delete (globalThis as Record<string, unknown>).localStorage;
+  });
+
+  it("有接 onToggleBgInbox（桌面版、兩個以上身分）才顯示；預設沒勾", () => {
+    const out = render({ initialTab: "privacy", notifications: true, bgInbox: false, onToggleBgInbox: () => {} });
+    expect(out).toContain('data-testid="bg-inbox-toggle"');
+    expect(out).not.toMatch(/data-testid="bg-inbox-toggle"[^>]*checked/);
+    expect(out).toContain("背景也收其他身分的新訊息");
+    expect(render({ initialTab: "privacy", notifications: true })).not.toContain('data-testid="bg-inbox-toggle"');
+  });
+});

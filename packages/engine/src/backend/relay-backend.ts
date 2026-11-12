@@ -194,6 +194,7 @@ import {
   readPublicName,
   verifyEvent,
 } from "@cinderous/core";
+import { fsRecipientKeys } from "./inbox-watch.js"; // ADR-0415
 import { loadRelayCheck, recordAuthObservation } from "./relay-check.js"; // ADR-0275：A 層健檢
 import { buildRtcConfig } from "./rtc-config.js";
 import { opfsFileSink } from "../storage/opfs-file-sink.js"; // ADR-0347：收檔串流落盤
@@ -1552,11 +1553,7 @@ export class RelayChatBackend implements ChatBackend {
    * 而加密到 IK 的訊息本來就是「對方不知道我有 FS」的退回路徑，不會是混合式。
    */
   private fsDecryptCandidates(): RecipientKeyLike[] {
-    const eks: RecipientKeyLike[] = this.fsState.keys.map((k) => {
-      const pq = this.pqOf(k);
-      return pq ? { sk: nsecDecode(k.nsec), pqSk: pq.sk } : nsecDecode(k.nsec);
-    });
-    return [...eks, this.sk];
+    return fsRecipientKeys(this.fsState.keys, this.sk, (k) => this.pqOf(k)); // 與背景收件共用（ADR-0415）
   }
   /**
    * 送訊息的 FS 選項：啟用且有 EK 才回。encryptToFor＝收件人 learned EK

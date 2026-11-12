@@ -118,6 +118,9 @@ export interface SettingsPanelProps {
   /** 通知提示音（ADR-0076）；未提供則不顯示該子開關。 */
   notifySound?: boolean;
   onToggleNotifySound?: () => void;
+  /** 背景收件（ADR-0415 B）：沒在用的身分也收新訊息數；未提供（瀏覽器／只有一個身分）則不顯示。 */
+  bgInbox?: boolean;
+  onToggleBgInbox?: () => void;
   /** 全域通知音效（ADR-0149）：合成預設集 id；與 onSelectNotifyChime 一起提供才顯示下拉。 */
   notifyChime?: string;
   onSelectNotifyChime?: (id: string) => void;
@@ -1870,6 +1873,17 @@ export function SettingsPanel(props: SettingsPanelProps): JSX.Element {
               />
               <span>{t("settings_notificationsHint")}</span>
             </label>
+            {props.onToggleBgInbox ? (
+              <label className="settings__toggle">
+                <input
+                  type="checkbox"
+                  data-testid="bg-inbox-toggle"
+                  checked={props.bgInbox ?? false}
+                  onChange={props.onToggleBgInbox}
+                />
+                <span>{t("settings_bgInbox")}</span>
+              </label>
+            ) : null}
             {props.notifications && props.onToggleNotifySound ? (
               <label className="settings__toggle">
                 <input type="checkbox" checked={props.notifySound ?? true} onChange={props.onToggleNotifySound} />

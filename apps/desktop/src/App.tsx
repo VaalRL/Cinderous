@@ -44,6 +44,8 @@ import { formatBytes } from "@cinderous/engine"; // ADR-0344：提示文案與�
 import { sendsUnstrippedImage } from "@cinderous/engine"; // ADR-0359：大到不能清 EXIF 的圖片先問過
 import { blobStream, bundleHasSanitizableImage } from "@cinderous/core"; // ADR-0346：大檔逐塊讀；ADR-0355：合集隱私提示
 import { browserStore } from "./native/browser-store.js";
+import { InboxWatcher, fsRecipientKeys } from "@cinderous/engine"; // ADR-0415：背景收件
+import { awayDelta, bgInboxEnabled, bgStartDelayMs, inboxUrlOf, readAway, recordAway, setBgInboxEnabled, takeAway, totalUnread } from "./away-inbox.js";
 import { safeNsecDecode } from "./nsec.js";
 import { getKeyVault, tauriKeyVault } from "./native/keyvault.js";
 import { wipeDeviceLocal, wipeIdentityLocal } from "./native/wipe.js";
@@ -2140,9 +2142,89 @@ export function App(): JSX.Element {
   };
 
 
+  // ADR-0415 C：切回這個身分時，顯示離開期間多出來的未讀數（60 秒後自動收起，可手動關）。
+  const [awayBaseline, setAwayBaseline] = useState<number | null>(null);
+  useEffect(() => {
+    if (!backend || !profilesState.active) return;
+    const rec = takeAway(profilesState.active);
+    if (!rec) return;
+    setAwayBaseline(rec.unread);
+    const timer = setTimeout(() => setAwayBaseline(null), 60_000);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 只在後端就緒時取一次（切換身分走 reload）
+  }, [backend]);
+  const awayCount = awayBaseline === null ? 0 : awayDelta(awayBaseline, totalUnread(unread));
+
+  // ADR-0415 B：背景收件——設定裡打開才有。Tauri 限定：瀏覽器版沒有金鑰庫，其他身分的 nsec 不在手上。
+  const [bgInbox, setBgInbox] = useState(bgInboxEnabled);
+  const [bgCounts, setBgCounts] = useState<Record<string, number>>({});
+  const toggleBgInbox = (): void => {
+    const next = !bgInbox;
+    setBgInboxEnabled(next);
+    setBgInbox(next);
+    if (!next) setBgCounts({});
+  };
+  useEffect(() => {
+    if (!bgInbox || !backend || !isTauri()) return;
+    const others = visibleProfiles(profilesState).filter(
+      (p) => p.pubkey !== profilesState.active && !p.locked && p.relayUrl,
+    );
+    const watchers: InboxWatcher[] = [];
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    let live = true;
+    const startOne = async (p: Profile): Promise<void> => {
+      const nsec = await loadNsecFromVault(p);
+      if (!live || !nsec || isWrappedValue(nsec)) return; // 設了密碼的身分沒解鎖就沒有金鑰 → 不背景收
+      const sk = nsecDecode(nsec);
+      // 只讀它的 EK 與封鎖名單（ADR-0415 §2）——解得開前向保密的訊息、不數封鎖的人。
+      const ts = new TauriStorage(p.namespace);
+      await ts.hydrate();
+      if (!live) return;
+      const fsKeys = ts.loadFsState().keys;
+      const blocked = new Set(ts.loadBlocked().map((c) => c.pubkey));
+      const url = inboxUrlOf(p, shardingEnabled());
+      let last = 0;
+      watchers.push(
+        new InboxWatcher({
+          self: p.pubkey,
+          sk,
+          url,
+          connector: webSocketConnector(url),
+          sinceSec: readAway(p.pubkey)?.at ?? Math.floor(Date.now() / 1000),
+          keys: () => fsRecipientKeys(fsKeys, sk),
+          blocked,
+          onCount: (n) => {
+            setBgCounts((prev) => ({ ...prev, [p.pubkey]: n }));
+            // 通知不含寄件人與內文（ADR-0415 §4）：只說哪個身分、幾則。
+            if (n > last && notifyRef.current) {
+              void getNotifier().notify({ title: `${profileGlyph(p)} ${p.name}`, body: tRef.current("bgInbox_notify", { count: n }) });
+            }
+            last = n;
+          },
+        }),
+      );
+    };
+    for (const p of others) {
+      // 錯開連線時間（ADR-0415 §3）：不跟作用中身分同一刻連上。
+      timers.push(setTimeout(() => void startOne(p).catch(() => undefined), bgStartDelayMs()));
+    }
+    return () => {
+      live = false;
+      timers.forEach(clearTimeout);
+      watchers.forEach((w) => w.stop());
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 依開關／後端／身分清單重建
+  }, [bgInbox, backend, profilesState]);
+  const profileLabel = (p: Profile): string => {
+    const n = bgCounts[p.pubkey] ?? 0;
+    return `${profileGlyph(p)} ${p.name}${n > 0 ? ` (${n})` : ""}`;
+  };
+
   // 切換身分：持久化作用中選擇後重載，讓所有 per-身分 狀態乾淨重建（ADR-0045）。
   const switchProfile = (pubkey: string) => {
     if (pubkey === profilesState.active) return;
+    // ADR-0415 C：記下離開時間與當時的未讀數——切回來時顯示這段期間多了幾則；背景收件也從這個時間開始數。
+    if (profilesState.active) recordAway(profilesState.active, { at: Math.floor(Date.now() / 1000), unread: totalUnread(unread) });
     saveProfiles(setActive(profilesState, pubkey));
     try {
       location.reload();
@@ -2290,7 +2372,7 @@ export function App(): JSX.Element {
     }
     registerIdentityControls({
       active: profilesState.active ?? "",
-      options: visibleProfiles(profilesState).map((p) => ({ pubkey: p.pubkey, label: `${profileGlyph(p)} ${p.name}` })),
+      options: visibleProfiles(profilesState).map((p) => ({ pubkey: p.pubkey, label: profileLabel(p) })),
       switchLabel: t("idbar_switch"),
       addLabel: t("idbar_addIdentity"),
       onSwitch: switchProfile,
@@ -2304,7 +2386,7 @@ export function App(): JSX.Element {
           : null,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- 註冊器來自 context；依 layout/profiles/backend 重註冊
-  }, [layout, profilesState, backend]);
+  }, [layout, profilesState, backend, bgCounts]);
 
   // H4（ADR-0067）：作用中身分已上鎖→解鎖畫面（不落 SignIn，避免誤建新身分）。
   if (lockedProfile && !backend)
@@ -2901,7 +2983,7 @@ export function App(): JSX.Element {
               >
                 {visibleProfiles(profilesState).map((p) => (
                   <option key={p.pubkey} value={p.pubkey}>
-                    {`${profileGlyph(p)} ${p.name}`}
+                    {profileLabel(p)}
                   </option>
                 ))}
               </select>
@@ -3090,6 +3172,14 @@ export function App(): JSX.Element {
           />
         </aside>
       ) : null}
+      {awayCount > 0 ? (
+        <div className="awaynote" role="status" data-testid="away-note">
+          <span>{t("away_note", { count: awayCount })}</span>
+          <button className="sponsor__x" aria-label={t("settings_close")} onClick={() => setAwayBaseline(null)}>
+            ×
+          </button>
+        </div>
+      ) : null}
       {sponsor ? (
         <SponsorCard
           donations={sponsor.info.donations}
@@ -3103,6 +3193,7 @@ export function App(): JSX.Element {
       ) : null}
       {settingsOpen ? (
         <SettingsPanel
+          {...(isTauri() && visibleProfiles(profilesState).length > 1 ? { bgInbox, onToggleBgInbox: toggleBgInbox } : {})}
           selfName={self.name}
           onRename={renameSelf}
           onLogout={() => void logout()}
