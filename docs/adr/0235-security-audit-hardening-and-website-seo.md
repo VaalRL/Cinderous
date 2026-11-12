@@ -122,7 +122,7 @@
 
 - **C4**：`tauri.conf.json` 設定完整 CSP（`script-src 'self'` 無 unsafe-inline、`img-src` 不放行
   遠端主機、`object-src`/`base-uri`/`frame-ancestors` 收斂），另設 `devCsp` 放行 HMR。
-  加 `tauri-csp.test.ts` 防回歸。
+  加 `tauri-csp.test.ts` 防回歸。（2026-11-12：`style-src` 的 `'unsafe-inline'` 也拿掉了，見 ADR-0417。）
 - **H3**：API key **綁定端點主機**（`ai:<provider>:<host>`）。換端點＝查不到 key ＝金鑰根本不會
   從金鑰庫被讀出來。純函式移入 lib（`aikey.rs`）以進入 `cargo test` 預設編譯範圍。
   舊版無主機金鑰只在端點正是該 provider **官方主機**時沿用。

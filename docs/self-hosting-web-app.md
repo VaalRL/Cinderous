@@ -80,12 +80,13 @@ Content-Security-Policy:
   connect-src 'self' wss://relay.example.com;
   img-src 'self' data: blob:;
   media-src 'self' blob:;
-  style-src 'self' 'unsafe-inline';
+  style-src 'self';
   base-uri 'none';
   object-src 'none';
   frame-ancestors 'none'
 ```
 
+- `style-src` 只要 `'self'`：App 不用 inline 樣式（ADR-0417），不要加 `'unsafe-inline'`。
 - `connect-src` 填**你實際要連的 relay**（自架就填自架網址；用預設站就填
   `wss://cinder-relay.cinderous1.workers.dev`）。若允許使用者自填任意 relay，需放寬 `connect-src wss:`
   ——**取捨**：彈性換來較大的連線面，自架情境建議釘死自己的 relay。
@@ -123,7 +124,7 @@ fork／部署**，不要 PR 回共用 repo（共用 repo 保持與 relay 網域�
   [[headers]]
     for = "/*"
     [headers.values]
-      Content-Security-Policy = "default-src 'self'; connect-src 'self' wss://relay.example.com; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'"
+      Content-Security-Policy = "default-src 'self'; connect-src 'self' wss://relay.example.com; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'"
   ```
 - 自訂網域：Domain settings 加 `app.example.com`。
 
@@ -137,7 +138,7 @@ fork／部署**，不要 PR 回共用 repo（共用 repo 保持與 relay 網域�
       {
         "source": "/(.*)",
         "headers": [
-          { "key": "Content-Security-Policy", "value": "default-src 'self'; connect-src 'self' wss://relay.example.com; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self' 'unsafe-inline'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'" }
+          { "key": "Content-Security-Policy", "value": "default-src 'self'; connect-src 'self' wss://relay.example.com; img-src 'self' data: blob:; media-src 'self' blob:; style-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'" }
         ]
       }
     ]
