@@ -316,4 +316,4 @@
 ### 13.7 實作現況與後續
 
 * **已完成：** 中繼發布 allowlist（`RelayCore.allowedAuthors`）；客戶端多身分設定檔、命名空間隔離、切換器與工作身分鎖定建置；成員名冊佈建工具與企業通訊錄（G1）、集中政策＋強制 TURN 接入 WebRTC（G2）、組織群組/公告（G3）、**工作身分輪替（G4，ADR-0052）**；邀請碼入職（ADR-0156）、入職託管＋離職接管（ADR-0163）、公司設定／下班提示／訊息保留天數／公司儲存槽（ADR-0157–0162）；自架（容器化 node relay ADR-0075、網頁版自架 ADR-0147、App 內一鍵部署 ADR-0356，文件見 `docs/SELF-HOSTING.md`）。
-* **後續：** G5（SSO 綁定 / 連線元資料稽核，未動工、等企業試點，範圍草案見 ADR-0257 §8）；relay 管理 API（NIP-86，ADR-0261）已在自架 Node 主機完成（SDK v0.88.1；Cloudflare 版不做），管理者發布的名冊到了設有 `ROSTER_ADMIN_PUBKEY` 的自架站就自動換成員（ADR-0414，不做推送按鈕）；輪替提示 i18n、Rust 原生 store 平價；多身分切換列同時在線（可選）；離職接管與強制 TURN 真機驗證（見 `docs/OPERATOR-TODO.md`）。
+* **後續：** G5（SSO 綁定 / 連線元資料稽核，未動工、等企業試點，範圍草案見 ADR-0257 §8）；relay 管理 API（NIP-86，ADR-0261）已在自架 Node 主機完成（SDK v0.88.1；Cloudflare 版不做），管理者發布的名冊到了設有 `ROSTER_ADMIN_PUBKEY` 的自架站就自動換成員（ADR-0414，不做推送按鈕）；多身分切換列同時在線（可選）；離職接管與強制 TURN 真機驗證（見 `docs/OPERATOR-TODO.md`）。

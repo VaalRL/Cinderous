@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { StorageSnapshot } from "@cinderous/engine";
+import type { MessageArchive, StorageSnapshot, StoredMessage } from "@cinderous/engine";
 import { onStoreFailure, type StoreIo, TauriStorage } from "./tauri-storage.js";
 
 /**
@@ -176,6 +176,47 @@ describe("分部位持久化（ADR-0110）", () => {
     s.removeContact("bob");
     await s.flush();
     expect(parts.has("ns|msgs.bob")).toBe(false);
+  });
+
+  it("🔴 身分輪替（ADR-0052）→ 舊 npub 的部位檔也要刪，否則重開後舊對話又冒出來（與 LocalStorage 平價）", async () => {
+    const { io, parts } = fakeIo();
+    const s = new TauriStorage("ns", io);
+    await s.hydrate();
+    s.addContact({ pubkey: "bob", name: "Bob" });
+    s.addContact({ pubkey: "bob2", name: "Bob" });
+    s.appendMessage(msg("m1", "bob"));
+    await s.flush();
+
+    s.remapContact("bob", "bob2");
+    await s.flush();
+    expect(parts.has("ns|msgs.bob")).toBe(false);
+    expect(parts.has("ns|msgs.bob2")).toBe(true);
+
+    const reopened = new TauriStorage("ns", io);
+    await reopened.hydrate();
+    expect(reopened.loadMessages("bob")).toEqual([]);
+    expect(reopened.loadMessages("bob2").map((m) => m.id)).toEqual(["m1"]);
+  });
+
+  it("🔴 身分輪替 → 封存也從舊 npub 搬到新 npub（與 LocalStorage 同一個 ArchiveWriter.remap）", async () => {
+    const chunks = new Map<string, StoredMessage[][]>();
+    const archive: MessageArchive = {
+      append: async (c, m) => void chunks.set(c, [...(chunks.get(c) ?? []), m]),
+      chunkCount: async (c) => chunks.get(c)?.length ?? 0,
+      loadChunk: async (c, i) => chunks.get(c)?.[i] ?? [],
+      remove: async (c) => void chunks.delete(c),
+    };
+    const { io } = fakeIo();
+    const s = new TauriStorage("ns", io);
+    await s.hydrate();
+    s.attachArchive(archive);
+    s.addContact({ pubkey: "bob", name: "Bob" });
+    s.addContact({ pubkey: "bob2", name: "Bob" });
+    await archive.append("bob", [msg("old", "bob")]);
+    s.remapContact("bob", "bob2");
+    await s.flushArchive();
+    expect(chunks.has("bob")).toBe(false);
+    expect(chunks.get("bob2")?.[0]?.map((m) => [m.id, m.contact])).toEqual([["old", "bob2"]]);
   });
 });
 

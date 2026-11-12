@@ -264,6 +264,7 @@ export class LocalStorage implements AppStorage {
   }
   remapContact(from: string, to: string): void {
     this.mem.remapContact(from, to);
+    this.writer?.remap(from, to); // 封存也跟著搬（ADR-0052）：否則更早的歷史在新對話裡看不到
     // 身分輪替會重寫對話歸屬與群訊 sender（ADR-0052）→ 影響面廣，整批寫回（極少發生）。
     this.writeContacts();
     this.writeGroups();

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   ARCHIVE_CHUNK,
   ArchiveWriter,
@@ -183,6 +183,58 @@ describe("封存接上 LocalStorage（ADR-0111）", () => {
     s.removeContact("bob");
     await s.flushArchive();
     expect(await arch.chunkCount("bob")).toBe(0);
+  });
+
+  it("🔴 身分輪替（ADR-0052）→ 舊 npub 的封存照順序搬到新 npub、舊的刪掉（否則更早的歷史在新對話裡看不到）", async () => {
+    const arch = new FakeArchive();
+    const s = new LocalStorage("ns");
+    s.attachArchive(arch);
+    s.addContact({ pubkey: "bob", name: "Bob" });
+    s.addContact({ pubkey: "bob2", name: "Bob" });
+    await arch.append("bob", [msg(1), msg(2)]);
+    await arch.append("bob", [msg(3)]);
+    s.remapContact("bob", "bob2");
+    await s.flushArchive();
+
+    expect(await arch.chunkCount("bob")).toBe(0);
+    expect(await arch.chunkCount("bob2")).toBe(2);
+    const all = await loadAllArchived(arch, "bob2");
+    expect(all.map((m) => m.id)).toEqual(["m1", "m2", "m3"]);
+    expect(all.every((m) => m.contact === "bob2")).toBe(true);
+  });
+
+  it("輪替時新 npub 已經有封存（極少見）→ 不搬、舊的原封保留（不遺失、不打亂順序）", async () => {
+    const arch = new FakeArchive();
+    const s = new LocalStorage("ns");
+    s.attachArchive(arch);
+    s.addContact({ pubkey: "bob", name: "Bob" });
+    s.addContact({ pubkey: "bob2", name: "Bob" });
+    await arch.append("bob", [msg(1)]);
+    await arch.append("bob2", [msg(9)]);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    s.remapContact("bob", "bob2");
+    await s.flushArchive();
+
+    expect(await arch.chunkCount("bob")).toBe(1);
+    expect(await arch.chunkCount("bob2")).toBe(1);
+    expect(warn).toHaveBeenCalled();
+    warn.mockRestore();
+  });
+
+  it("搬到一半寫失敗 → 舊封存保留（寧可重複，絕不遺失）", async () => {
+    const arch = new FakeArchive();
+    const s = new LocalStorage("ns");
+    s.attachArchive(arch);
+    s.addContact({ pubkey: "bob", name: "Bob" });
+    s.addContact({ pubkey: "bob2", name: "Bob" });
+    await arch.append("bob", [msg(1)]);
+    arch.failNext = true;
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    s.remapContact("bob", "bob2");
+    await s.flushArchive();
+
+    expect(await arch.chunkCount("bob")).toBe(1);
+    warn.mockRestore();
   });
 });
 

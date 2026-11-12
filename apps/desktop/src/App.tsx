@@ -4150,7 +4150,7 @@ export function RosterAdminModal({
           .map((m) => `${npubEncode(m.pubkey)} ${m.name}`)
           .join("\n")
       : selfNpub
-        ? `${selfNpub} 管理者`
+        ? `${selfNpub} ${t("roster_adminName")}`
         : "",
   );
   const [groupText, setGroupText] = useState("");
@@ -4175,22 +4175,22 @@ export function RosterAdminModal({
     setError("");
     const members: OrgMember[] = [];
     for (const line of text.split("\n")) {
-      const t = line.trim();
-      if (!t) continue;
-      const [np, ...rest] = t.split(/\s+/);
+      const raw = line.trim();
+      if (!raw) continue;
+      const [np, ...rest] = raw.split(/\s+/);
       try {
-        members.push({ pubkey: npubDecode((np ?? "").trim()), name: rest.join(" ") || "成員" });
+        members.push({ pubkey: npubDecode((np ?? "").trim()), name: rest.join(" ") || t("roster_memberName") });
       } catch {
-        setError(`無法解析：${t}`);
+        setError(`${t("roster_parseError")}${raw}`);
         return;
       }
     }
     // 身分輪替（ADR-0052）：每行 `舊npub 新npub [名稱]`；舊成員標記作廢、新 npub 補入。
     const rotations: { from: PubkeyHex; to: PubkeyHex; name?: string }[] = [];
     for (const line of rotText.split("\n")) {
-      const t = line.trim();
-      if (!t) continue;
-      const [oldNp, newNp, ...rest] = t.split(/\s+/);
+      const raw = line.trim();
+      if (!raw) continue;
+      const [oldNp, newNp, ...rest] = raw.split(/\s+/);
       try {
         rotations.push({
           from: npubDecode((oldNp ?? "").trim()),
@@ -4198,13 +4198,13 @@ export function RosterAdminModal({
           ...(rest.length > 0 ? { name: rest.join(" ") } : {}),
         });
       } catch {
-        setError(`輪替無法解析：${t}`);
+        setError(`${t("roster_rotationParseError")}${raw}`);
         return;
       }
     }
     const finalMembers = rotations.length > 0 ? applyRosterRotations(members, rotations) : members;
     if (finalMembers.length === 0) {
-      setError("至少需要一位成員");
+      setError(t("roster_needMember"));
       return;
     }
     // 管理者自身公鑰（發布者）：自動納入每個群組，確保有人可管理／發布公告。
@@ -4216,19 +4216,19 @@ export function RosterAdminModal({
     }
     const groups: OrgGroup[] = [];
     for (const line of groupText.split("\n")) {
-      const t = line.trim();
-      if (!t) continue;
+      const raw = line.trim();
+      if (!raw) continue;
       // 格式：`群組名稱, npub, npub …`；名稱前綴 `!` 代表公告頻道（僅管理者可發文）。
-      const parts = t.split(",").map((s) => s.trim()).filter(Boolean);
+      const parts = raw.split(",").map((s) => s.trim()).filter(Boolean);
       const rawName = parts.shift() ?? "";
       const announce = rawName.startsWith("!");
-      const name = (announce ? rawName.slice(1) : rawName).trim() || "群組";
+      const name = (announce ? rawName.slice(1) : rawName).trim() || t("roster_groupName");
       const gm = new Set<PubkeyHex>();
       if (adminPubkey) gm.add(adminPubkey);
       try {
         for (const np of parts) gm.add(npubDecode(np));
       } catch {
-        setError(`群組無法解析：${t}`);
+        setError(`${t("roster_groupParseError")}${raw}`);
         return;
       }
       groups.push({ id: newGroupId(), name, members: [...gm], ...(announce ? { announce: true } : {}) });
@@ -4251,7 +4251,7 @@ export function RosterAdminModal({
       };
       setAllowlist(
         onPublish(
-          org.trim() || "組織",
+          org.trim() || t("roster_orgDefault"),
           finalMembers,
           anyPol ? polOut : undefined,
           groups.length ? groups : undefined,
@@ -4259,16 +4259,16 @@ export function RosterAdminModal({
         ),
       );
     } catch {
-      setError("發布失敗");
+      setError(t("roster_publishFailed"));
     }
   };
   return (
-    <div className="modal" role="dialog" aria-modal="true" aria-label="組織名冊" onClick={onCancel}>
+    <div className="modal" role="dialog" aria-modal="true" aria-label={t("settings_orgRoster")} onClick={onCancel}>
       <div className="modal__box win" onClick={(e) => e.stopPropagation()}>
         <div className="win__title">
-          <span>組織名冊（管理者佈建）</span>
+          <span>{t("roster_title")}</span>
           <span className="spacer" />
-          <span className="win__btn" role="button" aria-label="關閉" onClick={onCancel}>×</span>
+          <span className="win__btn" role="button" aria-label={t("settings_close")} onClick={onCancel}>×</span>
         </div>
         <div className="groupmodal">
           {/* 入職邀請碼（ADR-0156）：員工在登入畫面或「企業成員」表單貼上即自動加入。 */}
@@ -4296,12 +4296,12 @@ export function RosterAdminModal({
               </label>
             </>
           ) : null}
-          <input className="groupmodal__name" placeholder="組織名稱" value={org} onChange={(e) => setOrg(e.target.value)} />
-          <div className="groupmodal__label">成員（每行：npub 名稱）</div>
+          <input className="groupmodal__name" placeholder={t("roster_orgName")} value={org} onChange={(e) => setOrg(e.target.value)} />
+          <div className="groupmodal__label">{t("roster_membersFormat")}</div>
           <textarea
             className="groupmodal__name"
             rows={6}
-            aria-label="成員清單"
+            aria-label={t("roster_membersLabel")}
             value={text}
             onChange={(e) => setText(e.target.value)}
           />
@@ -4335,22 +4335,22 @@ export function RosterAdminModal({
               onChange={(e) => setWorkEnd(e.target.value)}
             />
           </div>
-          <div className="groupmodal__label">政策（可選，集中控管）</div>
+          <div className="groupmodal__label">{t("roster_policyLabel")}</div>
           <label className="groupmodal__item">
             <input type="checkbox" checked={!!pol.disableFiles} onChange={() => flip("disableFiles")} />
-            <span>停用檔案傳輸</span>
+            <span>{t("roster_policyNoFiles")}</span>
           </label>
           <label className="groupmodal__item">
             <input type="checkbox" checked={!!pol.disableCalls} onChange={() => flip("disableCalls")} />
-            <span>停用通話</span>
+            <span>{t("roster_policyNoCalls")}</span>
           </label>
           <label className="groupmodal__item">
             <input type="checkbox" checked={!!pol.disableStickers} onChange={() => flip("disableStickers")} />
-            <span>停用貼圖</span>
+            <span>{t("roster_policyNoStickers")}</span>
           </label>
           <label className="groupmodal__item">
             <input type="checkbox" checked={!!pol.forceTurn} onChange={() => flip("forceTurn")} />
-            <span>強制 TURN（不揭露內網 IP）</span>
+            <span>{t("roster_policyForceTurn")}</span>
           </label>
           {/* 訊息保留天數（ADR-0160）：需搭配自架 relay 的 MAX_TTL_DAYS 放寬上限。 */}
           <div className="groupmodal__label">{t("roster_ttlLabel")}</div>
@@ -4376,27 +4376,27 @@ export function RosterAdminModal({
             value={relayFilesMb}
             onChange={(e) => setRelayFilesMb(e.target.value)}
           />
-          <div className="groupmodal__label">組織群組（可選，每行：群組名稱, npub, npub…；名稱前綴 ! 為公告頻道）</div>
+          <div className="groupmodal__label">{t("roster_groupsLabel")}</div>
           <textarea
             className="groupmodal__name"
             rows={4}
-            aria-label="組織群組"
-            placeholder="!全體公告, npub1…, npub1…"
+            aria-label={t("roster_groupsAria")}
+            placeholder={t("roster_groupsPlaceholder")}
             value={groupText}
             onChange={(e) => setGroupText(e.target.value)}
           />
-          <div className="groupmodal__label">身分輪替（可選，換裝置/遺失，每行：舊npub 新npub 名稱）</div>
+          <div className="groupmodal__label">{t("roster_rotationLabel")}</div>
           <textarea
             className="groupmodal__name"
             rows={3}
-            aria-label="身分輪替"
-            placeholder="npub1舊… npub1新… Alice"
+            aria-label={t("roster_rotationAria")}
+            placeholder={t("roster_rotationPlaceholder")}
             value={rotText}
             onChange={(e) => setRotText(e.target.value)}
           />
           {error ? <div className="text expired__text">{error}</div> : null}
           <button className="groupmodal__create" data-testid="roster-publish" onClick={publish}>
-            簽章並發布名冊
+            {t("roster_signAndPublish")}
           </button>
           {allowlist ? (
             <>
