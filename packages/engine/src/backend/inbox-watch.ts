@@ -19,6 +19,7 @@ import {
   buildAuthEvent,
   calendarEventOf,
   calendarRsvpOf,
+  groupTarget,
   openWrapWithEks,
   parseOrgJoin,
   parseProfile,
@@ -66,6 +67,11 @@ export interface InboxWatchOptions {
   keys: () => RecipientKeyLike[];
   /** 封鎖名單：不數。 */
   blocked?: ReadonlySet<string>;
+  /**
+   * 這個身分的聯絡人與已加入的群組。陌生人的訊息只進「訊息請求」、接受前不跳通知（ADR-0121）——
+   * 背景收件也一樣：**只數聯絡人寄來的、與已加入群組裡的**。省略＝不過濾（只給測試用）。
+   */
+  known?: { contacts: ReadonlySet<string>; groups: ReadonlySet<string> };
   /** 新訊息數變了（累計值）。 */
   onCount: (count: number) => void;
 }
@@ -81,10 +87,15 @@ export function isCountableIncoming(
   self: PubkeyHex,
   sinceSec: number,
   blocked?: ReadonlySet<string>,
+  known?: { contacts: ReadonlySet<string>; groups: ReadonlySet<string> },
 ): boolean {
   if (sender === self) return false;
   if (blocked?.has(sender)) return false;
   if (rumor.kind !== KIND.CHAT) return false;
+  if (known) {
+    const group = groupTarget(rumor);
+    if (group ? !known.groups.has(group) : !known.contacts.has(sender)) return false; // 陌生人不數（ADR-0121）
+  }
   if (rumor.created_at <= sinceSec) return false;
   if (receiptOf(rumor) || parseProfile(rumor) || calendarEventOf(rumor) || calendarRsvpOf(rumor) || parseOrgJoin(rumor)) {
     return false;
@@ -134,7 +145,7 @@ export class InboxWatcher {
     }
     const { sender, rumor } = opened;
     if (this.seen.has(rumor.id)) return;
-    if (!isCountableIncoming(sender, rumor, this.opts.self, this.opts.sinceSec, this.opts.blocked)) return;
+    if (!isCountableIncoming(sender, rumor, this.opts.self, this.opts.sinceSec, this.opts.blocked, this.opts.known)) return;
     this.seen.add(rumor.id);
     this.opts.onCount(this.seen.size);
   }
