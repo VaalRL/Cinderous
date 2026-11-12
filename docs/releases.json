@@ -1,5 +1,28 @@
 [
   {
+    "version": "0.0.23",
+    "date": "2026-11-12",
+    "released": true,
+    "zh": [
+      "🔔 **Android 版會跳訊息通知了。** 原本 Android 版的 WebView 沒有網頁通知功能，通知開關按了也沒反應；現在改用系統的本機通知，第一次會要求通知權限，點通知會回到那段對話。被系統擋住時，設定裡會說明去哪裡打開。",
+      "👥 **沒在用的身分有新訊息，現在看得到了（桌面版）。** 切回某個身分時，會顯示「你離開期間收到 N 則新訊息」。設定 → 通知可以另外打開「背景也收其他身分的新訊息」（預設關閉）：沒在用的身分只連一條唯讀的收件連線，不送回條、不發上線狀態，在身分切換列顯示數量；通知只寫「〔身分〕有 N 則新訊息」，不顯示寄件人與內容，並照你的通知開關、對話靜音與公司下班靜音。打開後，兩個身分會從同一個 IP 連線，中繼站有可能把它們關聯起來。設了本機密碼還沒解鎖的身分、隱藏身分不會在背景收。",
+      "🚪 **登入畫面收成三條路：** 建立新身分；「已經用過 Cinderous？」底下分成「我還有另一台裝置」（配對搬家）與「我的裝置都沒了」（救援登入碼或 nsec）。桌面版第一次啟動也能從這裡找回原本的身分。",
+      "🗑️ **刪除對話後，封存裡的舊訊息就真的讀不回來了。** 這版之後寫進封存的訊息，每一塊各用一把隨機金鑰加密，刪除對話就銷毀這些金鑰。這版之前已經封存的訊息不會重新加密，刪除方式跟以前一樣。網頁版／手機版移除身分時，也會一併刪掉那個身分的封存。網頁版兩個分頁同時封存時，不會再丟掉一塊。",
+      "🏢 **企業自架中繼：** 自架的 Node 中繼設了 `ROSTER_ADMIN_PUBKEY` 之後，收到管理者簽章的名冊就自動換成員，不必重開，也不必開管理 API；另外提供 NIP-86 管理 API（`cinder_applyroster`）。官方中繼與其他中繼不會自動套用，管理端發布名冊後的說明已改成實話。",
+      "🔧 **身分輪替後，舊對話不會在重開桌面版後冒回來；封存的歷史也會跟著搬到新身分。** 組織名冊管理畫面（含身分輪替欄位）已有英文介面。",
+      "ℹ️ 已知：Android 版是測試版（debug 簽章；開了 USB 偵錯的人讀得到它的記憶體，真正在意的對話請不要用它）；桌面版與 `cinder.mjs` 都沒有程式碼簽章（Windows SmartScreen 會警告；`cinder.mjs` 只附 sha256 校驗檔）。身分輪替之前的群組封存，寄件人仍顯示舊身分。背景收件的系統通知尚未在實機上確認。"
+    ],
+    "en": [
+      "🔔 **The Android app now shows message notifications.** The Android WebView has no web notifications, so the notification switch silently did nothing; the app now uses the system's local notifications, asks for notification permission the first time, and tapping a notification opens that conversation. If the system blocks notifications, Settings explains where to turn them on.",
+      "👥 **You can now see new messages for an identity you're not using (desktop).** When you switch back to an identity, the app shows “N new messages while you were away”. Settings → Notifications has an extra option, “Also receive new messages for my other identities in the background” (off by default): each identity you're not using keeps one read-only inbox connection that sends no receipts and no presence, and the identity switcher shows a count. The notification only says “[identity] has N new messages” — no sender, no content — and follows your notification switches, muted conversations and company off-hours. With it on, both identities connect from the same IP, so a relay could link them. Identities with a local password that hasn't been unlocked, and hidden identities, are not checked in the background.",
+      "🚪 **The sign-in screen now has three paths:** create a new identity; or, under “Used Cinderous before?”, “I still have another device” (pairing) and “All my devices are gone” (recovery code or nsec). On desktop you can now recover your identity from here on first launch too.",
+      "🗑️ **Deleting a conversation now makes its archived messages unrecoverable.** Messages archived from this version on are encrypted with a random key per chunk, and deleting the conversation destroys those keys. Messages archived before this version are not re-encrypted and are deleted the same way as before. On web and mobile, removing an identity now also removes its archive, and two browser tabs archiving at the same time no longer lose a chunk.",
+      "🏢 **Self-hosted company relays:** a self-hosted Node relay with `ROSTER_ADMIN_PUBKEY` set now applies a roster signed by the admin automatically — no restart and no management API needed; a NIP-86 management API (`cinder_applyroster`) is also available. Official and other relays do not apply it automatically, and the message after publishing a roster now says so.",
+      "🔧 **After an identity rotation, the old conversation no longer comes back when the desktop app restarts, and the archived history moves to the new identity too.** The organization roster screen (including the identity rotation field) is now available in English.",
+      "ℹ️ Known: the Android build is a test build (debug-signed; anyone with USB debugging can read its memory — don't use it for conversations you really care about); the desktop build and `cinder.mjs` are not code-signed (Windows SmartScreen will warn; `cinder.mjs` comes with a sha256 checksum file only). Group archives from before an identity rotation still show the old identity as the sender. Background-inbox system notifications have not been confirmed on a real device yet."
+    ]
+  },
+  {
     "version": "0.0.22",
     "date": "2026-10-30",
     "released": true,
