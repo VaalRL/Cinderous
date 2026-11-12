@@ -17,7 +17,8 @@ import { useLayout } from "../layout.js";
 import { useI18n } from "../i18n.js";
 import { getUiScale, setUiScale, UI_SCALE_STEPS } from "../ui-scale.js";
 import { APP_VERSION } from "../version.js";
-import { noteSegments, releaseFor } from "../releases.js";
+import { releaseFor } from "../releases.js";
+import { RichText } from "./RichText.js";
 import { GITHUB_RELEASES } from "../update-check.js";
 import { useDialog } from "./Dialog.js";
 import { enterToSendEnabled, setEnterToSendEnabled } from "./composer-prefs.js";
@@ -403,11 +404,15 @@ function DeviceSettings({
           className={`hint${revocation.state === "dual-track" ? " settings__warn" : ""}`}
           data-testid={`revocation-${revocation.state}`}
         >
-          {revocation.state === "unknown"
-            ? t("devices_revUnknown")
-            : revocation.state === "dual-track"
-              ? t("devices_revDualTrack", { ids: (revocation.devices ?? []).map((i) => i.slice(0, 8)).join("、") })
-              : t("devices_revActive")}
+          <RichText
+            text={
+              revocation.state === "unknown"
+                ? t("devices_revUnknown")
+                : revocation.state === "dual-track"
+                  ? t("devices_revDualTrack", { ids: (revocation.devices ?? []).map((i) => i.slice(0, 8)).join("、") })
+                  : t("devices_revActive")
+            }
+          />
         </p>
       ) : null}
       {/* ADR-0322 S4：**常駐**呈現，不是一次性對話框——這是「身分私鑰可能外洩」等級的事件，
@@ -436,19 +441,23 @@ function DeviceSettings({
             className={`hint${keyTier === "plaintext" || keyTier === "ephemeral" ? " settings__warn" : ""}`}
             data-testid={`key-tier-${keyTier}`}
           >
-            {keyTier === "plaintext"
-              ? t("devices_tierPlaintext")
-              : keyTier === "ephemeral"
-                ? t("devices_tierEphemeral")
-                : keyTier === "encrypted"
-                  ? t("devices_tierEncrypted")
-                  : t("devices_tierKeystore")}
+            <RichText
+              text={
+                keyTier === "plaintext"
+                  ? t("devices_tierPlaintext")
+                  : keyTier === "ephemeral"
+                    ? t("devices_tierEphemeral")
+                    : keyTier === "encrypted"
+                      ? t("devices_tierEncrypted")
+                      : t("devices_tierKeystore")
+              }
+            />
           </p>
           {/* ADR-0323：遷移進金鑰庫的舊金鑰**曾經明文躺在磁碟上**——刪掉那份副本
               並不能收回可能已被複製走的東西，所以不能只說「已受金鑰庫保護」。 */}
           {keyTier === "keystore" && keyEverPlaintext ? (
             <p className="hint settings__warn" data-testid="key-tier-was-plain">
-              {t("devices_tierWasPlain")}
+              <RichText text={t("devices_tierWasPlain")} />
             </p>
           ) : null}
         </>
@@ -458,7 +467,9 @@ function DeviceSettings({
         <>
           <p className="settings__desc">{t("devices_myCode")}</p>
           <code className="settings__relay" data-testid="my-device-code">{selfDevicePk}</code>
-          <p className="hint">{t("devices_myCodeHint")}</p>
+          <p className="hint">
+            <RichText text={t("devices_myCodeHint")} />
+          </p>
         </>
       ) : null}
       {/* 授權入口只給**已在清單上**的裝置——這正是「當期短期狀態才有授權資格」的落實。 */}
@@ -469,7 +480,9 @@ function DeviceSettings({
           <p className="hint settings__warn" data-testid="no-authority">{t("devices_noAuthority")}</p>
         )
       ) : null}
-      <p className="hint settings__warn" data-testid="devices-limit">{t("devices_limit")}</p>
+      <p className="hint settings__warn" data-testid="devices-limit">
+        <RichText text={t("devices_limit")} />
+      </p>
     </section>
   );
 }
@@ -1195,7 +1208,9 @@ function VanishSettings({ onVanish }: { onVanish: () => string[] }): JSX.Element
   return (
     <section className="settings__sec" data-testid="vanish-section">
       <h4 className="settings__warn">{t("vanish_title")}</h4>
-      <p className="hint">{t("vanish_hint")}</p>
+      <p className="hint">
+        <RichText text={t("vanish_hint")} />
+      </p>
       <button
         type="button"
         className="settings__danger"
@@ -1338,7 +1353,7 @@ function SecuritySettings({ value }: { value: NonNullable<SettingsPanelProps["se
           {/* 瀏覽器的「停用」會清掉記住的身分——不能讓使用者以為只是「關掉密碼」（ADR-0122）。 */}
           {value.browser ? (
             <p className="settings__warn" data-testid="disable-browser-warn">
-              {t("settings_passwordDisableBrowser")}
+              <RichText text={t("settings_passwordDisableBrowser")} />
             </p>
           ) : null}
           <input
@@ -1452,9 +1467,7 @@ function AboutSettings(props: {
       <ul className="settings__notes">
         {notes.map((n) => (
           <li key={n}>
-            {noteSegments(n).map((s, i) =>
-              s.kind === "bold" ? <strong key={i}>{s.text}</strong> : s.kind === "code" ? <code key={i}>{s.text}</code> : s.text,
-            )}
+            <RichText text={n} />
           </li>
         ))}
       </ul>
@@ -2033,7 +2046,9 @@ export function SettingsPanel(props: SettingsPanelProps): JSX.Element {
           {tab === "privacy" && props.fs ? (
             <section className="settings__sec">
               <h4>{t("fs_title")}</h4>
-              <p className="settings__hint">{t("fs_hint")}</p>
+              <p className="settings__hint">
+                <RichText text={t("fs_hint")} />
+              </p>
               {/*
                 ADR-0306 D1：未經審計必須**明示**，且**啟用前後都要在**——
                 啟用不是把警語關掉的開關。這句話放在 hint 之後、按鈕之前，
@@ -2119,7 +2134,9 @@ function RetentionSettings({ cap, onChange, full }: { cap: number; onChange: (n:
   return (
     <section className="settings__sec">
       <h4>{t("settings_retention")}</h4>
-      <p className="settings__hint">{t("settings_retentionHint")}</p>
+      <p className="settings__hint">
+        <RichText text={t("settings_retentionHint")} />
+      </p>
       <div className="retention__row">
         {RETENTION_PRESETS.map((n) => (
           <button

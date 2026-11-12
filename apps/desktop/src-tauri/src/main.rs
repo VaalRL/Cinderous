@@ -724,7 +724,7 @@ async fn ai_generate(provider: String, endpoint: String, model: String, prompt: 
         let data: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
         return Ok(data["choices"][0]["message"]["content"].as_str().unwrap_or("").to_string());
     }
-    let body = serde_json::json!({ "model": model, "prompt": prompt, "stream": false });
+    let body = cinder_desktop::aistream::ollama_body(&model, &prompt, false);
     let resp = http()
         .post(ai_url(&endpoint, "/api/generate"))
         .timeout(GEN_TIMEOUT)
@@ -762,7 +762,7 @@ async fn ai_generate_stream(
         });
         http().post(ai_url(&endpoint, "/v1/chat/completions")).bearer_auth(key).json(&body)
     } else {
-        let body = serde_json::json!({ "model": model, "prompt": prompt, "stream": true });
+        let body = cinder_desktop::aistream::ollama_body(&model, &prompt, true);
         http().post(ai_url(&endpoint, "/api/generate")).json(&body)
     };
     let mut resp = builder.timeout(GEN_TIMEOUT).send().await.map_err(|e| e.to_string())?;

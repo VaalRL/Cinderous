@@ -121,9 +121,27 @@ impl StreamDecoder {
     }
 }
 
+/// Ollama `/api/generate` 的請求本體。`think: false`：會思考的模型（gemma4、qwen3…）預設先默默推理，
+/// CPU 上要等一分鐘才吐第一個字；改寫用不到那段推理（ADR-0416 實機：56 秒 → 5 秒）。不支援思考的模型忽略這格。
+pub fn ollama_body(model: &str, prompt: &str, stream: bool) -> serde_json::Value {
+    serde_json::json!({ "model": model, "prompt": prompt, "stream": stream, "think": false })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ollama_body_turns_off_thinking() {
+        // 會「思考」的模型（gemma4、qwen3…）在 CPU 上先默默想一分鐘才吐字；改寫用不到（ADR-0416 實機）
+        for stream in [false, true] {
+            let b = ollama_body("gemma4:e4b", "改客氣", stream);
+            assert_eq!(b["model"], "gemma4:e4b");
+            assert_eq!(b["prompt"], "改客氣");
+            assert_eq!(b["stream"], stream);
+            assert_eq!(b["think"], false);
+        }
+    }
 
     fn all(format: StreamFormat, chunks: &[&[u8]]) -> Result<String, String> {
         let mut d = StreamDecoder::new(format);

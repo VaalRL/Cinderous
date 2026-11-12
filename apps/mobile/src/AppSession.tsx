@@ -60,7 +60,7 @@ import {
 } from "./native/foreground.js";
 import { hasCallSupport } from "./native/call-media.js";
 import { CallScreen } from "./screens/CallScreen.js";
-import { capabilityGapText, connectionBannerText, type Locale, type MessageKey, translate } from "@cinderous/i18n";
+import { capabilityGapText, connectionBannerText, type Locale, type MessageKey, stripRich, translate } from "@cinderous/i18n";
 import type { ChatBg, Theme } from "@cinderous/theme";
 import { getChatBg, removeChatBg, setChatBg } from "./personalize.js";
 import { StyleSheet, Text, View } from "react-native-web";
@@ -757,10 +757,12 @@ export function AppSession({
       onOfflineGap: (offlineMs) => {
         const day = 86_400_000;
         window.alert(
-          translate(localeRef.current, "offlineGap_notice", {
-            days: Math.floor(offlineMs / day),
-            ttl: Math.round((backendRef.current?.messageTtlMs?.() ?? 7 * day) / day),
-          }),
+          stripRich(
+            translate(localeRef.current, "offlineGap_notice", {
+              days: Math.floor(offlineMs / day),
+              ttl: Math.round((backendRef.current?.messageTtlMs?.() ?? 7 * day) / day),
+            }),
+          ),
         );
       },
       /**
@@ -912,7 +914,7 @@ export function AppSession({
       onDeviceDirectoryConflict: (_mine, v) => {
         void notifier.notify({
           title: translate(localeRef.current, "devices_title"),
-          body: translate(localeRef.current, "devices_conflict", { v: String(v) }),
+          body: stripRich(translate(localeRef.current, "devices_conflict", { v: String(v) })),
         });
       },
       onNewDevice: (id) => {
@@ -1003,7 +1005,7 @@ export function AppSession({
   /** 破壞性/重要操作的二次確認：無 window.confirm（如 SSR）時照做，有則需使用者確認。回 true＝可繼續。 */
   const confirmAction = (key: MessageKey, params?: Record<string, string | number>): boolean => {
     if (typeof window === "undefined" || typeof window.confirm !== "function") return true;
-    return window.confirm(translate(locale, key, params));
+    return window.confirm(stripRich(translate(locale, key, params)));
   };
   /**
    * 同上，但**取不到 confirm 就不做**（fail-closed）。
@@ -1014,14 +1016,14 @@ export function AppSession({
    */
   const confirmRequired = (key: MessageKey): boolean => {
     if (typeof window === "undefined" || typeof window.confirm !== "function") return false;
-    return window.confirm(translate(locale, key));
+    return window.confirm(stripRich(translate(locale, key)));
   };
   /** 在某對話插入一則本機提示訊息（不上網、不落 relay），供 FS 相關警告使用。 */
   const pushFsNotice = (peer: string, key: MessageKey): void => {
     const msg: ChatMessage = {
       id: `fsn-${key}-${peer}-${Date.now()}`,
       outgoing: false,
-      text: translate(localeRef.current, key),
+      text: stripRich(translate(localeRef.current, key)), // 手機的訊息氣泡不渲染 Markdown
       at: Date.now(),
     };
     threads.setConvos((c) => ({ ...c, [peer]: [...(c[peer] ?? []), msg] }));
@@ -1207,7 +1209,7 @@ export function AppSession({
         Promise.resolve(
           typeof window === "undefined" || typeof window.confirm !== "function"
             ? true // 沒有 confirm 就照舊進行——這只是提示，不是安全閘門（對比 confirmRequired）
-            : window.confirm(translate(localeRef.current, "pair_largeBundleWarn", { mb })),
+            : window.confirm(stripRich(translate(localeRef.current, "pair_largeBundleWarn", { mb }))),
         ),
       // SAS 是這個流程的安全核心：**必須是使用者的明確裁示**，不能自動通過。
       confirmSas: (sas) =>

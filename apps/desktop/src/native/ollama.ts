@@ -105,6 +105,18 @@ export interface OllamaIo {
 }
 
 /**
+ * Ollama `/api/generate` 的請求本體（與 Rust `aistream::ollama_body` 同形）。`think: false`：會思考的模型
+ * 預設先默默推理，CPU 上要等一分鐘才吐字；改寫用不到（ADR-0416 實機：56 秒 → 5 秒）。不支援思考的模型忽略這格。
+ */
+export function ollamaBody(
+  model: string,
+  prompt: string,
+  stream: boolean,
+): { model: string; prompt: string; stream: boolean; think: false } {
+  return { model, prompt, stream, think: false };
+}
+
+/**
  * Ollama `/api/generate` 串流（NDJSON）的解碼器（ADR-0416，瀏覽器後備用；Tauri 端在 Rust 解）。
  * 收到的文字可能把一行切在兩塊中間 → 先收齊整行再解析；看不懂的行略過，`error` 行丟錯。
  */
@@ -188,7 +200,7 @@ export function defaultOllamaIo(): OllamaIo {
       const r = await fetch(`${cfg.endpoint}/api/generate`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ model: cfg.model, prompt, stream: false }),
+        body: JSON.stringify(ollamaBody(cfg.model, prompt, false)),
         signal: AbortSignal.timeout(120_000),
       });
       if (!r.ok) throw new Error(`ollama ${r.status}`);
@@ -200,7 +212,7 @@ export function defaultOllamaIo(): OllamaIo {
       const r = await fetch(`${cfg.endpoint}/api/generate`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ model: cfg.model, prompt, stream: true }),
+        body: JSON.stringify(ollamaBody(cfg.model, prompt, true)),
         signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
       });
       if (!r.ok || !r.body) throw new Error(`ollama ${r.status}`);

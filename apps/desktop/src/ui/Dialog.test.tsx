@@ -119,3 +119,38 @@ describe("useDialog 無 provider（ADR-0139）", () => {
     expect(q(m.container, "bare")?.textContent).toBe("ok");
   });
 });
+
+describe("訊息裡的 **粗體**（UI 字串用來標重點）", () => {
+  function Rich(): JSX.Element {
+    const { alert } = useDialog();
+    return <button data-testid="do-rich" onClick={() => void alert("這個傳輸**不支援**續傳")}>r</button>;
+  }
+
+  it("自訂對話框渲染成粗體，不露出星號", async () => {
+    const m = mount(
+      <I18nProvider>
+        <DialogProvider>
+          <Rich />
+        </DialogProvider>
+      </I18nProvider>,
+    );
+    await click(q(m.container, "do-rich"));
+    const msg = q(m.container, "dialog-message")!;
+    expect(msg.textContent).toBe("這個傳輸不支援續傳");
+    expect(msg.querySelector("strong")?.textContent).toBe("不支援");
+  });
+
+  it("沒有 provider 退回原生對話框時拿掉標記（原生對話框不能顯示粗體）", async () => {
+    const seen: string[] = [];
+    const orig = window.alert;
+    window.alert = (s?: string) => void seen.push(String(s));
+    const m = mount(
+      <I18nProvider>
+        <Rich />
+      </I18nProvider>,
+    );
+    await click(q(m.container, "do-rich"));
+    window.alert = orig;
+    expect(seen).toEqual(["這個傳輸不支援續傳"]);
+  });
+});

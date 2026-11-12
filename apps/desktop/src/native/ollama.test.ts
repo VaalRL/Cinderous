@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  ollamaBody,
   aiRewriteSupported,
   buildRewritePrompt,
   buildSummaryPrompt,
@@ -104,6 +105,14 @@ describe("Ollama 改寫（ADR-0060）", () => {
     expect(aiRewriteSupported("http://127.0.0.1:8080")).toBe(true);
     expect(aiRewriteSupported("https://cinderous.cinderous1.workers.dev")).toBe(false); // 部署版：CORS/LNA 封死
     expect(aiRewriteSupported("")).toBe(false); // 無 origin（防呆）
+  });
+});
+
+describe("Ollama 請求本體（ADR-0416 實機）", () => {
+  it("關掉思考：會思考的模型不必先默默想一分鐘才吐字", () => {
+    for (const stream of [false, true]) {
+      expect(ollamaBody("gemma4:e4b", "改客氣", stream)).toEqual({ model: "gemma4:e4b", prompt: "改客氣", stream, think: false });
+    }
   });
 });
 
