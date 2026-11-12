@@ -145,6 +145,26 @@ export interface Messages {
   roster_published: string;
   roster_autoApplyHint: string;
   roster_allowlistLabel: string;
+  roster_title: string;
+  roster_adminName: string;
+  roster_memberName: string;
+  roster_membersFormat: string;
+  roster_rotationParseError: string;
+  roster_groupName: string;
+  roster_groupParseError: string;
+  roster_orgDefault: string;
+  roster_policyLabel: string;
+  roster_policyNoFiles: string;
+  roster_policyNoCalls: string;
+  roster_policyNoStickers: string;
+  roster_policyForceTurn: string;
+  roster_groupsLabel: string;
+  roster_groupsAria: string;
+  roster_groupsPlaceholder: string;
+  roster_rotationLabel: string;
+  roster_rotationAria: string;
+  roster_rotationPlaceholder: string;
+  roster_signAndPublish: string;
   roster_publish: string;
   settings_orgRoster: string;
   settings_createCompany: string;
@@ -1250,6 +1270,26 @@ const zhHant: Messages = {
   roster_published: "名冊已發布。",
   roster_autoApplyHint: "自架 Node 中繼把 ROSTER_ADMIN_PUBKEY 設成你這個身分的 npub，就會照這份名冊自動換成員；官方錨點與其他中繼不會。",
   roster_allowlistLabel: "不會自動套用的中繼：把下列 pubkey 設進 ALLOWED_PUBKEYS",
+  roster_title: "組織名冊（管理者佈建）",
+  roster_adminName: "管理者",
+  roster_memberName: "成員",
+  roster_membersFormat: "成員（每行：npub 名稱）",
+  roster_rotationParseError: "輪替無法解析：",
+  roster_groupName: "群組",
+  roster_groupParseError: "群組無法解析：",
+  roster_orgDefault: "組織",
+  roster_policyLabel: "政策（可選，集中控管）",
+  roster_policyNoFiles: "停用檔案傳輸",
+  roster_policyNoCalls: "停用通話",
+  roster_policyNoStickers: "停用貼圖",
+  roster_policyForceTurn: "強制 TURN（不揭露內網 IP）",
+  roster_groupsLabel: "組織群組（可選，每行：群組名稱, npub, npub…；名稱前綴 ! 為公告頻道）",
+  roster_groupsAria: "組織群組",
+  roster_groupsPlaceholder: "!全體公告, npub1…, npub1…",
+  roster_rotationLabel: "身分輪替（可選，換裝置/遺失，每行：舊npub 新npub 名稱）",
+  roster_rotationAria: "身分輪替",
+  roster_rotationPlaceholder: "npub1舊… npub1新… Alice",
+  roster_signAndPublish: "簽章並發布名冊",
   roster_publish: "發布名冊",
   settings_orgRoster: "組織名冊",
   settings_createCompany: "建立公司（企業主）",
@@ -2215,6 +2255,26 @@ const en: Messages = {
   roster_published: "Roster published.",
   roster_autoApplyHint: "A self-hosted Node relay with ROSTER_ADMIN_PUBKEY set to this identity's npub changes its members to match this roster automatically; the official anchors and other relays do not.",
   roster_allowlistLabel: "For relays that do not apply it automatically, put these pubkeys in ALLOWED_PUBKEYS",
+  roster_title: "Organization roster (admin provisioning)",
+  roster_adminName: "Admin",
+  roster_memberName: "Member",
+  roster_membersFormat: "Members (one per line: npub name)",
+  roster_rotationParseError: "Could not parse rotation: ",
+  roster_groupName: "Group",
+  roster_groupParseError: "Could not parse group: ",
+  roster_orgDefault: "Organization",
+  roster_policyLabel: "Policy (optional, centrally managed)",
+  roster_policyNoFiles: "Disable file transfer",
+  roster_policyNoCalls: "Disable calls",
+  roster_policyNoStickers: "Disable stickers",
+  roster_policyForceTurn: "Force TURN (do not reveal LAN IPs)",
+  roster_groupsLabel: "Organization groups (optional; one per line: group name, npub, npub…; start the name with ! for an announcement channel)",
+  roster_groupsAria: "Organization groups",
+  roster_groupsPlaceholder: "!All hands, npub1…, npub1…",
+  roster_rotationLabel: "Identity rotation (optional, for a new or lost device; one per line: old-npub new-npub name)",
+  roster_rotationAria: "Identity rotation",
+  roster_rotationPlaceholder: "npub1old… npub1new… Alice",
+  roster_signAndPublish: "Sign and publish roster",
   roster_publish: "Publish roster",
   settings_orgRoster: "Organization roster",
   settings_createCompany: "Create a company (owner)",

@@ -244,3 +244,20 @@ describe("名冊發布後的說明要誠實（ADR-0414）", () => {
     }
   });
 });
+
+describe("組織名冊管理畫面不寫死中文（ADR-0052 輪替提示 i18n）", () => {
+  const keys = [
+    "roster_title", "roster_adminName", "roster_memberName", "roster_membersFormat",
+    "roster_rotationParseError", "roster_groupName", "roster_groupParseError", "roster_orgDefault",
+    "roster_policyLabel", "roster_policyNoFiles", "roster_policyNoCalls", "roster_policyNoStickers",
+    "roster_policyForceTurn", "roster_groupsLabel", "roster_groupsAria", "roster_groupsPlaceholder",
+    "roster_rotationLabel", "roster_rotationAria", "roster_rotationPlaceholder", "roster_signAndPublish",
+  ] as const;
+  it("英文版每個字串都不含中日韓文字", () => {
+    for (const k of keys) {
+      const s = translate("en", k);
+      expect(s, k).toBeTruthy();
+      expect(s, k).not.toMatch(/[\u3400-\u9fff\uff00-\uffef]/);
+    }
+  });
+});

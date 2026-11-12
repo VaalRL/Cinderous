@@ -137,7 +137,7 @@
 | G1 | ① 佈建 + 企業通訊錄 | ✅ **完成（ADR-0047）**：core `org-roster`（簽章名冊 kind 10038、驗簽/採用/allowlist/diff，複用 ADR-0039 機制）＋客戶端工作身分**自動採用名冊**（權威對帳：匯入成員、撤銷離職者）＋**管理者佈建 UI**（🗂 簽章發布名冊、匯出 allowlist）。整合測試涵蓋。**後續**：多管理者/金鑰輪替。 |
 | G2 | ④ 政策開關 + ③ 強制 TURN | ✅ **完成（ADR-0048）**：relay `allowedKinds`（協定層硬強制停用檔案/通話＝排除信令 kind）＋名冊分發客戶端政策（`disableFiles/Calls/Stickers/forceTurn`）＋App UI 閘門（隱藏對應鈕）＋管理者佈建工具政策勾選。**`forceTurn` 已接入 WebRTC**：`buildRtcConfig` 依政策設 `iceTransportPolicy:"relay"`（不揭露內網 IP），以動態 provider 於每次建連取當前政策；`turnServers` 由企業佈建（RelayPoolOptions）。實機驗證仍需 TURN 部署（換環境）。 |
 | G3 | ② 組織群組 / ⑤ 公告 | ✅ **完成（ADR-0049）**：組織群經簽章名冊 `groups` 分發，客戶端對帳自動入/退群（以 `org` 旗標識別名冊群，不誤刪自建群）；⑤ 公告＝`announce` 群，`canPostToGroup` 於收送兩端強制僅管理者可發、成員 UI 唯讀。管理者佈建工具含群組/公告編輯器。整合＋回歸測試涵蓋。 |
-| G4 | 換機/遺失還原：工作身分輪替 | ✅ **完成（ADR-0052，否決金鑰托管）**：換機/遺失＝管理者以簽章名冊把舊 npub 標 `supersededBy`、加入員工自產的新 npub（`applyRosterRotations`＋佈建 UI 輪替欄）；成員端自動 remap（歷史/群成員接續、`onIdentityRotated` 提示），`rosterAllowlist` 排除舊金鑰。**公司全程無解密後門**；「不想丟歷史」＝建議雙設備登記（M4 冗餘），非托管。core＋後端＋端到端測試涵蓋（含**群訊發送者標籤 remap**）。**後續**：Rust store 平價、輪替提示 i18n。 |
+| G4 | 換機/遺失還原：工作身分輪替 | ✅ **完成（ADR-0052，否決金鑰托管）**：換機/遺失＝管理者以簽章名冊把舊 npub 標 `supersededBy`、加入員工自產的新 npub（`applyRosterRotations`＋佈建 UI 輪替欄）；成員端自動 remap（歷史/群成員接續、`onIdentityRotated` 提示），`rosterAllowlist` 排除舊金鑰。**公司全程無解密後門**；「不想丟歷史」＝建議雙設備登記（M4 冗餘），非托管。core＋後端＋端到端測試涵蓋（含**群訊發送者標籤 remap**）。**後續**：~~Rust store 平價、輪替提示 i18n~~ ✅ 2026-11-12 完成（桌面部位檔＋封存跟著搬、名冊管理畫面全 i18n；見 ADR-0052 實作紀錄）。 |
 | G5 | SSO 整合 / 元資料稽核 | 🔧 **後續**：佈建階段綁 AD/LDAP/OIDC → npub、SSO 守金鑰解鎖；自架 relay 記錄連線**元資料**（不碰內容，E2E 不破）供資安維運。 |
 
 > **明確排除**：法遵歸檔/eDiscovery/DLP/通訊監督——需伺服器讀明文，與 E2E 根本衝突，僅能走獨立「受監督版」，不進預設版。
@@ -431,6 +431,6 @@ git switch -c rollback/xxx baseline/pre-ratchet-fs
 4. **需你決策**：G5 SSO/元資料稽核（等企業試點）；D4b 即時 delta 通道（D4a 用起來後評估）；M7 語音離線退回已暫緩（2026-07-10）。
 4b. **FS 範圍擴大**（ADR-0315，順序見〈FS 範圍擴大的執行順序〉）：第 1 步可觀測性 ✅ **已完成（ADR-0316）**；第 2 步**批一已完成（ADR-0318：檔案 metadata ＋ 共享行程，只 retarget 不帶 EK hint）** **Tier A 全部完成**（批一 0318 檔案 metadata＋行程／批二 0320 群訊＋群組檔名／回應）；**收回訊息與 Tier B 已裁定不做**（fail-open／ephemeral 無價值）。ADR-0315 的清單至此結案。收回與 Tier B 已裁定不做。
 3. **需換環境**：Phase B（Tauri 打包＋OS 金鑰庫）、Phase C（Cloudflare relay 部署＋D1＋NIP-42 AUTH）、Phase D（React Native 行動端＋QR 相機掃描）、通話 TURN 部署、F4 第三方稽核。
-4. **此環境可選打磨**：~~顯示名稱傳遞~~ ✅ **已完成（改用加密個人檔，非公開 kind 0，ADR-0061）**；G4 輪替後續（輪替提示 i18n、Rust store 平價）、G1 多管理者名冊、多身分切換列同時在線、AI 改寫串流輸出、嚴格 CSP（需 tauri:dev 逐項驗）。
+4. **此環境可選打磨**：~~顯示名稱傳遞~~ ✅ **已完成（改用加密個人檔，非公開 kind 0，ADR-0061）**；~~G4 輪替後續（輪替提示 i18n、Rust store 平價）~~ ✅、G1 多管理者名冊、多身分切換列同時在線、AI 改寫串流輸出、嚴格 CSP（需 tauri:dev 逐項驗）。
 
 > 只有人能做的部署/金鑰步驟集中在 [`OPERATOR-TODO.md`](./OPERATOR-TODO.md)。

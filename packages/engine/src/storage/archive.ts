@@ -108,6 +108,40 @@ export class ArchiveWriter {
     });
   }
 
+  /**
+   * 身分輪替（ADR-0052）：把舊 npub 的封存搬到新 npub——**排在在途搬移之後**。
+   *
+   * 熱區由 `remapContact` 併過去了，封存沒有：不搬的話，新對話的歷史只看得到熱區那一段，
+   * 更早的封存變成沒人讀、也永遠不會被刪的孤兒。
+   *
+   * 逐塊照原順序追加到新對話、全部寫完才移除舊的（寫到一半失敗＝舊的還在，不會兩邊都沒有）。
+   * 新對話**已經有**封存時不搬（極少見）：搬過去會排在比它新的塊後面、歷史順序錯亂；
+   * 舊的原封留著，不刪、不遺失，記一行警告。
+   */
+  remap(from: string, to: string): void {
+    if (from === to) return;
+    this.chain = this.chain
+      .then(async () => {
+        const total = await this.archive.chunkCount(from);
+        if (total === 0) return;
+        if ((await this.archive.chunkCount(to)) > 0) {
+          console.warn("[archive] 輪替後的新對話已有封存，舊封存保留在原處、沒有搬");
+          return;
+        }
+        for (let seq = 0; seq < total; seq++) {
+          const chunk = await this.archive.loadChunk(from, seq);
+          await this.archive.append(
+            to,
+            chunk.map((m) => ({ ...m, contact: to })),
+          );
+        }
+        await this.archive.remove(from);
+      })
+      .catch((e: unknown) => {
+        console.warn("[archive] 輪替時搬移封存失敗（舊封存保留）：", e);
+      });
+  }
+
   /** 等待所有在途搬移完成（關閉前 flush；測試亦用）。 */
   async flush(): Promise<void> {
     await this.chain;

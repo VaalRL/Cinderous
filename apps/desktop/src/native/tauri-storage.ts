@@ -333,6 +333,10 @@ export class TauriStorage implements AppStorage {
   }
   remapContact(from: string, to: string): void {
     this.mem.remapContact(from, to);
+    // 舊 npub 的對話已併進新的 → 它的部位檔要刪（記憶體裡沒有它 ⇒ writeDirty 走刪除）。
+    // 漏了這一行，重開後舊對話會從磁碟冒回來（LocalStorage 一直有刪，ADR-0052 輪替的 store 平價）。
+    this.dirty.add(MSGS + from);
+    this.writer?.remap(from, to); // 封存也跟著搬（ADR-0052）
     this.persistAll();
   }
   blockContact(contact: StoredContact): void {
