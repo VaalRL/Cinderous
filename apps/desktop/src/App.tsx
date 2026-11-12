@@ -2430,12 +2430,12 @@ export function App(): JSX.Element {
         ? { label: t("idbar_unlockHidden"), onClick: () => void unlockHidden() }
         : null,
       roster:
-        backend.publishRoster && activeProfile(profilesState)?.orgOwner
+        backend.publishRoster && (activeProfile(profilesState)?.orgOwner || orgInfo?.coAdmin)
           ? { label: t("idbar_roster"), onClick: () => setRosterOpen(true) }
           : null,
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- 註冊器來自 context；依 layout/profiles/backend 重註冊
-  }, [layout, profilesState, backend, bgCounts]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 註冊器來自 context；依 layout/profiles/backend/共同管理者（ADR-0418）重註冊
+  }, [layout, profilesState, backend, bgCounts, orgInfo?.coAdmin]);
 
   // H4（ADR-0067）：作用中身分已上鎖→解鎖畫面（不落 SignIn，避免誤建新身分）。
   if (lockedProfile && !backend)
@@ -3044,8 +3044,8 @@ export function App(): JSX.Element {
                   🔒
                 </button>
               ) : null}
-              {/* 名冊管理（ADR-0155 收斂）：只對企業主身分顯示——一般與成員身分的頂欄不再有管理者按鈕。 */}
-              {activeBackend.publishRoster && activeProfile(profilesState)?.orgOwner ? (
+              {/* 名冊管理（ADR-0155 收斂）：只對企業主與共同管理者（ADR-0418）顯示。 */}
+              {activeBackend.publishRoster && (activeProfile(profilesState)?.orgOwner || orgInfo?.coAdmin) ? (
                 <button
                   className="idbar__add"
                   title={t("idbar_roster")}
@@ -3102,6 +3102,7 @@ export function App(): JSX.Element {
           onCancel={() => setRosterOpen(false)}
           onPublish={(org, members, pol, groups, profile) => activeBackend.publishRoster!(org, members, pol, groups, profile)}
           initial={activeBackend.currentRoster?.() ?? null}
+          {...(orgInfo?.coAdmin && !activeProfile(profilesState)?.orgOwner ? { coAdmin: true } : {})}
           {...(() => {
             // 入職邀請碼（ADR-0156）：relay＋自己的 pubkey＋核准權杖；escrow 旗標由 0163 的核取決定。
             const p = activeProfile(profilesState);
@@ -4255,6 +4256,7 @@ export function RosterAdminModal({
   onCancel,
   invite,
   initial,
+  coAdmin,
 }: {
   selfNpub: string;
   onPublish: (
@@ -4262,13 +4264,15 @@ export function RosterAdminModal({
     members: OrgMember[],
     policy?: OrgPolicy,
     groups?: OrgGroup[],
-    profile?: { welcome?: string; workHours?: { start: string; end: string } },
+    profile?: { welcome?: string; workHours?: { start: string; end: string }; admins?: PubkeyHex[] },
   ) => string[];
   onCancel: () => void;
   /** 入職邀請碼組件（ADR-0156）：一鍵複製給員工；未提供（缺權杖/relay）則不顯示。 */
   invite?: { relayUrl: string; adminPubkey: string; token: string };
   /** 現行名冊（ADR-0157）：預填組織名/成員/政策/公司設定——修一項不必重打整份。 */
   initial?: OrgRosterDoc | null;
+  /** 我是共同管理者（ADR-0418）：能發布名冊，但沒有「共同管理者」欄（只有擁有者能改這份名單）。 */
+  coAdmin?: boolean;
 }): JSX.Element {
   const { t } = useI18n();
   const [inviteCopied, setInviteCopied] = useState(false);
@@ -4298,6 +4302,8 @@ export function RosterAdminModal({
   );
   const [groupText, setGroupText] = useState("");
   const [rotText, setRotText] = useState("");
+  // 共同管理者（ADR-0418，只有擁有者看得到）：每行一個 npub，預填現有名單；清空＝移除全部
+  const [adminsText, setAdminsText] = useState(() => (initial?.admins ?? []).map((pk) => npubEncode(pk)).join("\n"));
   const [pol, setPol] = useState<OrgPolicy>(initial?.policy ?? {});
   // 訊息保留天數（ADR-0160）：留空＝預設 7 天；1–365 才併入政策。
   const [ttlDays, setTtlDays] = useState(
@@ -4350,6 +4356,20 @@ export function RosterAdminModal({
       setError(t("roster_needMember"));
       return;
     }
+    // 共同管理者（ADR-0418）：擁有者才送；不是在世成員的會被簽章端濾掉
+    const admins: PubkeyHex[] = [];
+    if (!coAdmin) {
+      for (const line of adminsText.split("\n")) {
+        const raw = line.trim();
+        if (!raw) continue;
+        try {
+          admins.push(npubDecode(raw.split(/\s+/)[0] ?? ""));
+        } catch {
+          setError(`${t("roster_adminsParseError")}${raw}`);
+          return;
+        }
+      }
+    }
     // 管理者自身公鑰（發布者）：自動納入每個群組，確保有人可管理／發布公告。
     let adminPubkey: PubkeyHex | null = null;
     try {
@@ -4376,6 +4396,8 @@ export function RosterAdminModal({
       }
       groups.push({ id: newGroupId(), name, members: [...gm], ...(announce ? { announce: true } : {}) });
     }
+    // 群組欄沒預填（ADR-0418 順手修）：留空＝沿用現有群組，不再每次發布都把組織群組洗掉
+    const groupsOut = groups.length ? groups : initial?.groups;
     // 訊息保留天數（ADR-0160）：1–365 整數才生效；併入政策一起簽發。
     const ttlParsed = parseInt(ttlDays.trim(), 10);
     // relay 檔案上限（ADR-0162）：1–16 整數 MB 才生效。
@@ -4391,18 +4413,20 @@ export function RosterAdminModal({
       const profile = {
         ...(welcome.trim() ? { welcome: welcome.trim() } : {}),
         ...(workStart && workEnd && workStart !== workEnd ? { workHours: { start: workStart, end: workEnd } } : {}),
+        // 擁有者每次都帶（空陣列＝清掉名單）；共同管理者不帶
+        ...(coAdmin ? {} : { admins }),
       };
       setAllowlist(
         onPublish(
           org.trim() || t("roster_orgDefault"),
           finalMembers,
           anyPol ? polOut : undefined,
-          groups.length ? groups : undefined,
+          groupsOut?.length ? groupsOut : undefined,
           Object.keys(profile).length > 0 ? profile : undefined,
         ),
       );
-    } catch {
-      setError(t("roster_publishFailed"));
+    } catch (e) {
+      setError(e instanceof Error && e.message === "roster-drops-admin" ? t("roster_dropsAdmin") : t("roster_publishFailed"));
     }
   };
   return (
@@ -4439,6 +4463,11 @@ export function RosterAdminModal({
               </label>
             </>
           ) : null}
+          {coAdmin ? (
+            <div className="text" data-testid="roster-coadmin-note">
+              {t("roster_coAdminNote")}
+            </div>
+          ) : null}
           <input className="groupmodal__name" placeholder={t("roster_orgName")} value={org} onChange={(e) => setOrg(e.target.value)} />
           <div className="groupmodal__label">{t("roster_membersFormat")}</div>
           <textarea
@@ -4448,6 +4477,21 @@ export function RosterAdminModal({
             value={text}
             onChange={(e) => setText(e.target.value)}
           />
+          {/* 共同管理者（ADR-0418）：只有擁有者能改；必須也在上面的成員裡 */}
+          {!coAdmin ? (
+            <>
+              <div className="groupmodal__label">{t("roster_adminsLabel")}</div>
+              <textarea
+                className="groupmodal__name"
+                rows={2}
+                aria-label={t("roster_adminsLabel")}
+                data-testid="roster-admins"
+                placeholder="npub1…"
+                value={adminsText}
+                onChange={(e) => setAdminsText(e.target.value)}
+              />
+            </>
+          ) : null}
           {/* 公司設定（ADR-0157）：歡迎詞／基本規範＋表定上下班時間。 */}
           <div className="groupmodal__label">{t("roster_welcomeLabel")}</div>
           <textarea
@@ -4524,7 +4568,7 @@ export function RosterAdminModal({
             className="groupmodal__name"
             rows={4}
             aria-label={t("roster_groupsAria")}
-            placeholder={t("roster_groupsPlaceholder")}
+            placeholder={initial?.groups?.length ? t("roster_groupsKeep") : t("roster_groupsPlaceholder")}
             value={groupText}
             onChange={(e) => setGroupText(e.target.value)}
           />
@@ -4537,7 +4581,11 @@ export function RosterAdminModal({
             value={rotText}
             onChange={(e) => setRotText(e.target.value)}
           />
-          {error ? <div className="text expired__text">{error}</div> : null}
+          {error ? (
+            <div className="text expired__text" data-testid="roster-error">
+              {error}
+            </div>
+          ) : null}
           <button className="groupmodal__create" data-testid="roster-publish" onClick={publish}>
             {t("roster_signAndPublish")}
           </button>

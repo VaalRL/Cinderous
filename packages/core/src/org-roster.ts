@@ -9,6 +9,8 @@ export {
   WELCOME_MAX_CHARS,
   inWorkHours,
   MIN_ROSTER,
+  ROSTER_MAX_ADMINS,
+  rosterSigners,
   signOrgRoster,
   verifyOrgRoster,
   applyRosterRotations,
@@ -26,4 +28,5 @@ export type {
   OrgWorkHours,
   OrgRosterDoc,
   RosterRemap,
+  RosterTrust,
 } from "@cinderous/client/protocol";

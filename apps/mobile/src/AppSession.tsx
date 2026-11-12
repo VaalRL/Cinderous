@@ -855,6 +855,7 @@ export function AppSession({
       onOrgInfo: (info) => {
         org.markEnterprise();
         orgInfoRef.current = info;
+        org.setCoAdmin(info.coAdmin === true); // ADR-0418：共同管理者也有名冊管理入口
         if (
           info.welcome &&
           typeof window !== "undefined" &&
@@ -1836,7 +1837,7 @@ export function AppSession({
   }
 
   // 組織名冊管理（ADR-0178，企業主）：建立公司後或設定入口進入；發布名冊、複製邀請碼、設公司設定。
-  if (screen === "roster" && org.owner) {
+  if (screen === "roster" && (org.owner || org.coAdmin)) {
     const rosterDoc = backendRef.current?.currentRoster?.() ?? null;
     // 離職＝在託管中但不在現行名冊在世成員（ADR-0163／0179）。
     const liveMembers = new Set((rosterDoc?.members ?? []).filter((m) => !m.supersededBy).map((m) => m.pubkey));
@@ -1844,8 +1845,9 @@ export function AppSession({
     return (
       <RosterAdminScreen
         selfNpub={self.npub}
+        // 手機沒有群組編輯欄：沿用現有群組（以前傳 undefined 會把組織群組洗掉，ADR-0418 順手修）
         onPublish={(org, members, policy, profile) =>
-          backendRef.current?.publishRoster?.(org, members, policy, undefined, profile) ?? []
+          backendRef.current?.publishRoster?.(org, members, policy, rosterDoc?.groups, profile) ?? []
         }
         onBack={() => setScreen("main")}
         {...(org.inviteToken && relayUrl
@@ -1858,6 +1860,7 @@ export function AppSession({
           if (e) takeoverOffboarded(e);
         }}
         onDeleteEscrow={deleteEscrow}
+        {...(!org.owner ? { coAdmin: true } : {})}
         {...themeProps}
       />
     );
@@ -1959,7 +1962,8 @@ export function AppSession({
                 // 旗標來自配對搬家捆包），且需真實 relay 後端（setSelfTitle 廣播個人檔）。
                 ...(org.enterprise && backendRef.current?.setSelfTitle ? { title: org.title, onSetTitle: changeOrgTitle } : {}),
                 // 組織名冊管理（ADR-0178）：企業主＋後端支援才顯示入口。
-                ...(org.owner && backendRef.current?.publishRoster ? { onOpenRoster: () => setScreen("roster") } : {}),
+                // 共同管理者（ADR-0418）也有入口
+                ...((org.owner || org.coAdmin) && backendRef.current?.publishRoster ? { onOpenRoster: () => setScreen("roster") } : {}),
                 // 公司儲存槽佇列（ADR-0180）：有排隊項才顯示管理（狀態/移除/重試）。
                 ...(org.slots.length > 0
                   ? {

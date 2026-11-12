@@ -73,7 +73,7 @@ read ordinary environment variables.
 
 ### Runtime management (NIP-86, `node-relay` only)
 
-**Automatic roster apply (ADR-0414, SDK ADR 0134).** With `ROSTER_ADMIN_PUBKEY` set, when the admin taps "Publish roster" in the app, the roster reaches this relay and replaces the members. The checks are the same as `cinder_applyroster` below (signature, newer than the last one), and with `DB_PATH` it survives restarts. `NIP86_ADMIN_PUBKEYS` is not needed, and the admin never handles an operator key. If `ALLOWED_KINDS` is set, include `10038`.
+**Automatic roster apply (ADR-0414, SDK ADR 0134).** With `ROSTER_ADMIN_PUBKEY` set, when the admin taps "Publish roster" in the app, the roster reaches this relay and replaces the members. The checks are the same as `cinder_applyroster` below (signature, newer than the last one), and with `DB_PATH` it survives restarts. `NIP86_ADMIN_PUBKEYS` is not needed, and the admin never handles an operator key. Rosters signed by the co-admins listed in the roster (ADR-0418, SDK ADR 0135) are applied too, with no extra setting; `ROSTER_ADMIN_PUBKEY` stays the owner's key. If `ALLOWED_KINDS` is set, include `10038`.
 
 With `NIP86_ADMIN_PUBKEYS` set, the relay URL also accepts NIP-86 requests: `POST` with `Content-Type: application/nostr+json+rpc` (ADR-0261, SDK ADR 0132/0133), authorized by NIP-98 with a required `payload` tag. You can change members, kinds and the relay name **without a restart**:
 

@@ -60,6 +60,7 @@ import {
   SNAPSHOT_KIND,
   rosterAllowlist,
   rosterRemap,
+  rosterSigners,
   shouldAdoptRoster,
   signOrgRoster,
   verifyOrgRoster,
@@ -614,6 +615,13 @@ export class RelayChatBackend implements ChatBackend {
   /** 企業名冊管理者公鑰與最近採用的名冊（ADR-0047）。 */
   private readonly orgAdminPubkey: string | undefined;
   private lastRoster: OrgRosterDoc | null = null;
+  /**
+   * 共同管理者（ADR-0418；SDK ADR 0135）：擁有者**最新一份**名冊列的名單，與「成員內容採用哪一份」分開記。
+   * 也能簽名冊；訂閱名冊事件的 authors＝擁有者＋這份名單。
+   */
+  private orgCoAdmins: PubkeyHex[] = [];
+  /** 上面那份名單取自的擁有者名冊時間（unix 秒）；-1＝還沒收到過。 */
+  private ownerRosterAt = -1;
   /** 入職權杖（ADR-0156 成員側）：開機時名冊未含自己 → 送入職請求。 */
   private readonly orgJoinToken: string | undefined;
   /** 公司帳號金鑰託管（ADR-0163 成員側）：true＝入職請求附上 nsec 託管給管理者。 */
@@ -1375,10 +1383,15 @@ export class RelayChatBackend implements ChatBackend {
       // `OFFLINE_DM_GIFT_WRAP` 推進（見 `onEvent`），套到這裡會**跳掉比 DM 水位舊的檔案塊**，
       // 等於在修 bug 的過程中製造掉檔。
       sub({ kinds: [KIND.FILE_WRAP], "#p": me }, (u) => this.fileSince(u)),
-      // 企業組織名冊（ADR-0047）：訂閱管理者簽章的名冊事件。
-      ...(this.orgAdminPubkey ? [sub({ kinds: [ORG_ROSTER_KIND], authors: [this.orgAdminPubkey] }, "n/a")] : []),
-      // 企業主（ADR-0156）：訂閱**自己**簽章的名冊——重啟後找回 lastRoster，自動核准不失憶。
-      ...(this.orgOwnerFlag ? [sub({ kinds: [ORG_ROSTER_KIND], authors: [this.self.pubkey] }, "n/a")] : []),
+      // 企業組織名冊（ADR-0047）：訂閱管理者＋共同管理者（ADR-0418）簽章的名冊事件。
+      ...(this.orgAdminPubkey
+        ? [sub({ kinds: [ORG_ROSTER_KIND], authors: rosterSigners(this.orgAdminPubkey, this.orgCoAdmins) }, "n/a")]
+        : []),
+      // 企業主（ADR-0156）：訂閱**自己**簽章的名冊——重啟後找回 lastRoster，自動核准不失憶；
+      // 也訂共同管理者的（ADR-0418），下次發布才不會蓋掉他們的修改。
+      ...(this.orgOwnerFlag
+        ? [sub({ kinds: [ORG_ROSTER_KIND], authors: rosterSigners(this.self.pubkey, this.orgCoAdmins) }, "n/a")]
+        : []),
     ];
     client.subscribe("all", planFilters(decls, url));
   }
@@ -2616,13 +2629,7 @@ export class RelayChatBackend implements ChatBackend {
     if (!shouldAdoptRoster(this.lastRoster, doc)) return;
     this.lastRoster = doc;
     if (doc.policy) this.handlers?.onPolicy?.(doc.policy); // 企業政策（ADR-0048）
-    // 組織資訊（ADR-0157）：公司名稱/歡迎詞/班表＋在世成員（供下班靜音判定）。
-    this.handlers?.onOrgInfo?.({
-      org: doc.org,
-      members: rosterAllowlist(doc),
-      ...(doc.welcome ? { welcome: doc.welcome } : {}),
-      ...(doc.workHours ? { workHours: doc.workHours } : {}),
-    });
+    this.emitOrgInfo(doc);
     this.forceTurn = doc.policy?.forceTurn === true; // 強制 TURN 生效於後續新建的 WebRTC 連線
     this.cloudBackupBlocked = doc.policy?.disableCloudBackup === true; // 禁止快照上雲（ADR-0071）
     const self = this.self.pubkey;
@@ -2653,6 +2660,42 @@ export class RelayChatBackend implements ChatBackend {
       this.emitContacts();
     }
     this.reconcileOrgGroups(doc);
+  }
+
+  /** 組織資訊（ADR-0157）：公司名稱/歡迎詞/班表＋在世成員（供下班靜音判定）＋我是不是共同管理者（ADR-0418）。 */
+  private emitOrgInfo(doc: OrgRosterDoc): void {
+    this.handlers?.onOrgInfo?.({
+      org: doc.org,
+      members: rosterAllowlist(doc),
+      ...(doc.welcome ? { welcome: doc.welcome } : {}),
+      ...(doc.workHours ? { workHours: doc.workHours } : {}),
+      ...(this.isOrgCoAdmin() ? { coAdmin: true } : {}),
+    });
+  }
+
+  /** 我是不是這個組織的共同管理者（ADR-0418）：可以發布名冊，但不能改管理者名單。 */
+  isOrgCoAdmin(): boolean {
+    return this.orgAdminPubkey !== undefined && this.orgCoAdmins.includes(this.self.pubkey);
+  }
+
+  /**
+   * 收到擁有者簽的名冊（ADR-0418）：比上次那份新才換共同管理者名單——與成員內容採用哪一份無關。
+   * 名單變了就重訂閱（authors 跟著變；新列的共同管理者先前被丟掉的名冊會重新送來）。
+   */
+  private noteOwnerRoster(doc: OrgRosterDoc): void {
+    if (doc.updatedAt <= this.ownerRosterAt) return;
+    this.ownerRosterAt = doc.updatedAt;
+    const next = doc.admins ?? [];
+    const same = next.length === this.orgCoAdmins.length && next.every((pk) => this.orgCoAdmins.includes(pk));
+    if (same) return;
+    const wasCoAdmin = this.isOrgCoAdmin();
+    this.orgCoAdmins = [...next];
+    if (this.lastRoster) {
+      const { admins: _old, ...rest } = this.lastRoster;
+      this.lastRoster = next.length ? { ...rest, admins: [...next] } : rest;
+    }
+    this.resubscribe();
+    if (this.lastRoster && wasCoAdmin !== this.isOrgCoAdmin()) this.emitOrgInfo(this.lastRoster);
   }
 
   /**
@@ -2881,14 +2924,18 @@ export class RelayChatBackend implements ChatBackend {
       return;
     }
     if (event.kind === ORG_ROSTER_KIND) {
+      // 擁有者（信任根）＋共同管理者（ADR-0418）：成員認邀請碼裡的管理者，企業主認自己。
+      const owner = this.orgAdminPubkey ?? (this.orgOwnerFlag ? this.self.pubkey : undefined);
+      if (!owner) return;
+      const doc = verifyOrgRoster(event, { owner, coAdmins: this.orgCoAdmins });
+      if (!doc) return;
+      if (event.pubkey === owner) this.noteOwnerRoster(doc);
       if (this.orgAdminPubkey) {
-        const doc = verifyOrgRoster(event, this.orgAdminPubkey);
-        if (doc) this.adoptRoster(doc);
-      } else if (this.orgOwnerFlag && event.pubkey === this.self.pubkey) {
-        // ADR-0156：企業主找回自己簽章的名冊（重啟後 lastRoster 失憶的解方）。
+        this.adoptRoster(doc);
+      } else {
+        // ADR-0156：企業主找回自己簽章的名冊（重啟後 lastRoster 失憶的解方），也記下共同管理者發的（ADR-0418）。
         // 只記狀態，不走 adoptRoster 的通訊錄對帳（管理者的聯絡人不受名冊管理）。
-        const doc = verifyOrgRoster(event, this.self.pubkey);
-        if (doc && shouldAdoptRoster(this.lastRoster, doc)) {
+        if (shouldAdoptRoster(this.lastRoster, doc)) {
           this.lastRoster = doc;
           // 名冊到位 → 清掉排隊中的入職請求（逐一核准併入）。
           if (this.pendingJoins.size > 0) {
@@ -5064,8 +5111,27 @@ export class RelayChatBackend implements ChatBackend {
     members: OrgMember[],
     policy?: OrgPolicy,
     groups?: OrgGroup[],
-    profile?: { welcome?: string; workHours?: OrgWorkHours },
+    profile?: { welcome?: string; workHours?: OrgWorkHours; admins?: PubkeyHex[] },
   ): PubkeyHex[] {
+    // 共同管理者（ADR-0418）：用自己的金鑰簽；不能改管理者名單（admins 不寫進去），
+    // 也不能把任何一位管理者移出在世成員——那份名冊會被所有人丟掉，所以直接拒絕。
+    if (this.isOrgCoAdmin()) {
+      const live = new Set(members.filter((m) => !m.supersededBy).map((m) => m.pubkey));
+      if (!this.orgCoAdmins.every((pk) => live.has(pk))) throw new Error("roster-drops-admin");
+      const doc: OrgRosterDoc = {
+        org,
+        members,
+        ...(policy ? { policy } : {}),
+        ...(groups && groups.length > 0 ? { groups } : {}),
+        ...(profile?.welcome ? { welcome: profile.welcome } : {}),
+        ...(profile?.workHours ? { workHours: profile.workHours } : {}),
+        updatedAt: Math.max(nowSec(), (this.lastRoster?.updatedAt ?? 0) + 1),
+      };
+      this.client.publish(signOrgRoster(doc, this.sk));
+      // 自己也照成員流程採用（通訊錄、群組、政策）；管理者名單沿用擁有者的
+      this.adoptRoster({ ...doc, ...(this.orgCoAdmins.length ? { admins: [...this.orgCoAdmins] } : {}) });
+      return rosterAllowlist(doc);
+    }
     // ADR-0156：首份名冊發佈前排隊的入職請求（權杖已驗）自動併入，並補上聯絡人互通。
     const merged = [...members];
     if (this.pendingJoins.size > 0) {
@@ -5087,13 +5153,18 @@ export class RelayChatBackend implements ChatBackend {
       // 公司設定（ADR-0157）：歡迎詞/班表隨名冊簽章分發。
       ...(profile?.welcome ? { welcome: profile.welcome } : {}),
       ...(profile?.workHours ? { workHours: profile.workHours } : {}),
+      // 共同管理者（ADR-0418）：沒給＝沿用現有名單（自動核准入職等路徑不該洗掉它）；給空陣列＝清空
+      ...((profile?.admins ?? this.lastRoster?.admins)?.length ? { admins: [...(profile?.admins ?? this.lastRoster?.admins ?? [])] } : {}),
       // ADR-0156：嚴格遞增——同一秒內連續核准（多名員工同時貼碼入職）時，`updatedAt` 相同
       // 會讓 NIP-01 取代語意 tie-break 不收斂（中繼可能拒收較新份、成員端 shouldAdopt 也不採用）。
       updatedAt: Math.max(nowSec(), (this.lastRoster?.updatedAt ?? 0) + 1),
     };
     const evt = signOrgRoster(doc, this.sk);
     this.client.publish(evt);
-    this.lastRoster = doc; // 自身也記錄，避免採用自己較舊的
+    // 自身也記錄，避免採用自己較舊的。用驗證後的版本：共同管理者名單已清洗（不是在世成員的濾掉，ADR-0418）
+    const signed = verifyOrgRoster(evt, this.self.pubkey) ?? doc;
+    this.lastRoster = signed;
+    this.noteOwnerRoster(signed);
     // 管理者本機立即對帳，否則因 lastRoster 已設而不會再採用自己的名冊、看不到剛發布的群。
     if (this.applyRotations(doc)) {
       // ADR-0052：管理者自身若也認得被輪替的舊 npub，一併接續。
