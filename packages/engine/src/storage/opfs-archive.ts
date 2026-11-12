@@ -46,6 +46,27 @@ const KEY_SUFFIX = ".key";
 const KEYED = "s1:";
 const KID_RE = /^[0-9a-f]{16}$/;
 
+/**
+ * 同一身分的封存寫入，**跨分頁互斥**（Web Locks；ADR-0413 後續 0）。
+ *
+ * 每個分頁各有自己的 `ArchiveWriter`，佇列只排得了自己分頁的寫入。兩個分頁同時封存同一個對話時，
+ * 都會算出同一個 seq，後寫的塊蓋掉先寫的——那一千則就沒了。鎖住「算 seq → 寫包裹 → 寫塊」整段，
+ * 第二個分頁就會拿到下一個 seq。兩個分頁搬的可能是同一批訊息，那只是重複，讀取端以 id 去重。
+ *
+ * 移除對話、移除身分也拿同一把鎖：不會刪到一半時另一個分頁（或同一個分頁的搬移）又寫進來。
+ *
+ * 沒有 Web Locks 的環境照舊直接做（同一分頁內仍由 `ArchiveWriter` 排隊）。
+ */
+function withArchiveLock<T>(name: string, fn: () => Promise<T>): Promise<T> {
+  const locks = typeof navigator === "undefined" ? undefined : navigator.locks;
+  if (typeof locks?.request !== "function") return fn();
+  return locks.request(name, () => fn()) as Promise<T>;
+}
+
+function lockName(namespace: string): string {
+  return `cinder-archive:${namespace || "legacy"}`;
+}
+
 function newKid(): string {
   const bytes = globalThis.crypto.getRandomValues(new Uint8Array(8));
   return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
@@ -75,7 +96,7 @@ export async function openOpfsArchive(namespace: string, storageKey?: Uint8Array
     const root = await navigator.storage.getDirectory();
     const app = await root.getDirectoryHandle(ROOT, { create: true });
     const dir = await app.getDirectoryHandle(namespace || "legacy", { create: true });
-    return new OpfsArchive(dir as DirHandle, storageKey);
+    return new OpfsArchive(dir as DirHandle, storageKey, lockName(namespace));
   } catch {
     return null; // 私密模式／配額拒絕等 → 寧可不封存，也不冒遺失風險
   }
@@ -92,19 +113,22 @@ export async function openOpfsArchive(namespace: string, storageKey?: Uint8Array
  */
 export async function wipeOpfsArchive(namespace: string): Promise<void> {
   if (!namespace || !hasOpfs()) return;
-  try {
-    const root = await navigator.storage.getDirectory();
-    const app = await root.getDirectoryHandle(ROOT);
-    const dir = (await app.getDirectoryHandle(namespace)) as DirHandle;
-    const archive = new OpfsArchive(dir, undefined);
-    const names: string[] = [];
-    for await (const key of dir.keys()) names.push(key);
-    for (const key of names.filter((k) => k.endsWith(KEY_SUFFIX))) await archive.removeQuietly(key);
-    for (const key of names.filter((k) => !k.endsWith(KEY_SUFFIX))) await dir.removeEntry(key).catch(() => {});
-    await app.removeEntry(namespace, { recursive: true }).catch(() => {});
-  } catch {
-    /* 沒有這個目錄（從沒封存過）或 OPFS 不可用 → 沒有東西要清 */
-  }
+  // 拿封存的鎖：正在寫的那一塊（這個分頁或別的分頁）寫完才刪，不會留下剛寫的包裹與塊。
+  await withArchiveLock(lockName(namespace), async () => {
+    try {
+      const root = await navigator.storage.getDirectory();
+      const app = await root.getDirectoryHandle(ROOT);
+      const dir = (await app.getDirectoryHandle(namespace)) as DirHandle;
+      const archive = new OpfsArchive(dir, undefined, lockName(namespace));
+      const names: string[] = [];
+      for await (const key of dir.keys()) names.push(key);
+      for (const key of names.filter((k) => k.endsWith(KEY_SUFFIX))) await archive.removeQuietly(key);
+      for (const key of names.filter((k) => !k.endsWith(KEY_SUFFIX))) await dir.removeEntry(key).catch(() => {});
+      await app.removeEntry(namespace, { recursive: true }).catch(() => {});
+    } catch {
+      /* 沒有這個目錄（從沒封存過）或 OPFS 不可用 → 沒有東西要清 */
+    }
+  });
 }
 
 class OpfsArchive implements MessageArchive {
@@ -112,6 +136,8 @@ class OpfsArchive implements MessageArchive {
     private readonly dir: DirHandle,
     /** 根金鑰（ADR-0112）：與 localStorage 同一把（皆由 nsec 導出）。ADR-0413 起只用來包塊金鑰。 */
     private readonly dek: Uint8Array | undefined,
+    /** 跨分頁互斥的鎖名（每個身分一把，見 `withArchiveLock`） */
+    private readonly lock: string,
   ) {}
 
   private name(convo: string, seq: number): string {
@@ -139,8 +165,12 @@ class OpfsArchive implements MessageArchive {
     }
   }
 
-  async append(convo: string, messages: StoredMessage[]): Promise<void> {
-    const seq = await this.chunkCount(convo); // seq 取自現有塊數 → 天然遞增
+  append(convo: string, messages: StoredMessage[]): Promise<void> {
+    return withArchiveLock(this.lock, () => this.appendLocked(convo, messages));
+  }
+
+  private async appendLocked(convo: string, messages: StoredMessage[]): Promise<void> {
+    const seq = await this.chunkCount(convo); // seq 取自現有塊數 → 天然遞增（鎖住，別的分頁不會同時算出同一個）
     const json = JSON.stringify(messages);
     if (!this.dek) {
       await this.writeFile(this.name(convo, seq), json);
@@ -194,7 +224,11 @@ class OpfsArchive implements MessageArchive {
     }
   }
 
-  async remove(convo: string): Promise<void> {
+  remove(convo: string): Promise<void> {
+    return withArchiveLock(this.lock, () => this.removeLocked(convo));
+  }
+
+  private async removeLocked(convo: string): Promise<void> {
     const prefix = `${convo}.`;
     const wraps: string[] = [];
     const chunks: string[] = [];

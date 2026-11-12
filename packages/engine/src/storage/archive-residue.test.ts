@@ -38,7 +38,19 @@ interface Disk {
   hold: Map<string, Promise<void>>;
 }
 
-function residualOpfs(): Disk {
+/** 假的 Web Locks：同名的請求依序執行（同一個 origin 的所有分頁共用）。 */
+function fakeLocks() {
+  const tails = new Map<string, Promise<unknown>>();
+  return {
+    request: <T>(name: string, cb: () => Promise<T>): Promise<T> => {
+      const run = (tails.get(name) ?? Promise.resolve()).then(cb, cb);
+      tails.set(name, run.catch(() => {}));
+      return run;
+    },
+  };
+}
+
+function residualOpfs(opts: { locks?: boolean } = {}): Disk {
   const live = new Map<string, string>();
   const residue: { name: string; bytes: string }[] = [];
   const removed: string[] = [];
@@ -79,7 +91,10 @@ function residualOpfs(): Disk {
     },
     getDirectoryHandle: async () => dir,
   };
-  vi.stubGlobal("navigator", { storage: { getDirectory: async () => dir } });
+  vi.stubGlobal("navigator", {
+    storage: { getDirectory: async () => dir },
+    ...(opts.locks ? { locks: fakeLocks() } : {}),
+  });
   return { live, residue, removed, locked, hold };
 }
 
@@ -206,7 +221,40 @@ describe("OPFS 封存的基本行為（每塊金鑰加進來之後不能壞的�
     expect(await arch.loadChunk("bob", 2)).toEqual([]);
   });
 
-  it("🔴 兩個分頁同時封存同一個 seq：留下來的那一塊讀得到（不會配到另一個分頁的金鑰）", async () => {
+  it("🔴 有 Web Locks：兩個分頁同時封存，兩塊都留下來（第二個分頁拿到下一個 seq）", async () => {
+    const disk = residualOpfs({ locks: true });
+    const tabA = (await openOpfsArchive("ns", dek))!;
+    const tabB = (await openOpfsArchive("ns", dek))!;
+    let release!: () => void;
+    disk.hold.set("bob.0.json", new Promise<void>((r) => (release = r)));
+    const a = tabA.append("bob", [msg("a", "分頁 A 的")]);
+    await new Promise((r) => setTimeout(r, 0));
+    const b = tabB.append("bob", [msg("b", "分頁 B 的")]); // 等 A 的鎖
+    await new Promise((r) => setTimeout(r, 0));
+    release();
+    await Promise.all([a, b]);
+
+    expect(await tabB.chunkCount("bob")).toBe(2);
+    expect((await tabB.loadChunk("bob", 0))[0]!.text).toBe("分頁 A 的");
+    expect((await tabB.loadChunk("bob", 1))[0]!.text).toBe("分頁 B 的");
+  });
+
+  it("🔴 有 Web Locks：移除身分等正在寫的那一塊寫完才刪，不留下剛寫的包裹與塊", async () => {
+    const disk = residualOpfs({ locks: true });
+    const arch = (await openOpfsArchive("ns", dek))!;
+    let release!: () => void;
+    disk.hold.set("bob.0.json", new Promise<void>((r) => (release = r)));
+    const writing = arch.append("bob", [msg("a", "剛好在搬")]);
+    await new Promise((r) => setTimeout(r, 0));
+    const wiping = wipeOpfsArchive("ns");
+    await new Promise((r) => setTimeout(r, 0));
+    release();
+    await Promise.all([writing, wiping]);
+
+    expect(disk.live.size).toBe(0);
+  });
+
+  it("沒有 Web Locks：兩個分頁同時封存同一個 seq，留下來的那一塊讀得到（不會配到另一個分頁的金鑰）", async () => {
     const disk = residualOpfs();
     const tabA = (await openOpfsArchive("ns", dek))!;
     const tabB = (await openOpfsArchive("ns", dek))!;
