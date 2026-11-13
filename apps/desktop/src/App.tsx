@@ -192,7 +192,7 @@ import {
 } from "./ui/slot-queue.js";
 import { pickSlotFolder, setSlotDir, slotDir, storeSlotDeposit } from "./native/slot-store.js";
 import { type EscrowEntry, loadEscrow, offboardedEntries, removeEscrow, saveEscrow, upsertEscrow } from "./ui/org-escrow.js";
-import { loadPresence, savePresence } from "./ui/presence-store.js";
+import { clearLegacyInvisible, loadPresence, savePresence } from "./ui/presence-store.js";
 import { createRinger, createRingback, DEFAULT_CHIME_ID, playChime } from "./ui/ringtone.js";
 import { CinderMascot } from "@cinderous/brand";
 import { CallWindow } from "./ui/CallWindow.js";
@@ -274,7 +274,6 @@ const VIDEO_QUALITY_KEY = "nb.videoQuality";
 const ALLOW_PUBLIC_TURN_KEY = "nb.allowPublicTurn";
 // 企業主首次進入自動開名冊管理（ADR-0155）：建立時寫入、開啟一次即清除（跨 Tauri reload）。
 const ROSTER_INTRO_PREFIX = "nb.rosterIntro.";
-const INVISIBLE_KEY = "nb.invisible";
 const OLLAMA_KEY = "nb.ollama";
 // 每對話保留上限（ADR-0094）：裝置本地、不同步；`0`＝無上限（預設）。
 const RETENTION_KEY = "nb.retentionCap";
@@ -921,13 +920,6 @@ export function App(): JSX.Element {
       /* 隱私模式等無 localStorage：僅本 session 生效 */
     }
   };
-  const [invisible, setInvisible] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem(INVISIBLE_KEY) === "1";
-    } catch {
-      return false;
-    }
-  });
   // 前向保密（ADR-0245）：opt-in 開關狀態，由後端 fsEnabled() 提供。
   const [fsEnabled, setFsEnabled] = useState<boolean>(false);
   // 公開聯絡方式（ADR-0382）：狀態以 home 上自己發布的事件為準，後端讀到或切換時經 onPublicReach 更新。
@@ -1102,10 +1094,6 @@ export function App(): JSX.Element {
   useEffect(() => {
     backend?.setAllowPublicTurn?.(allowPublicTurn);
   }, [backend, allowPublicTurn]);
-  // 隱身開關同步到後端（ADR-0088）；後端重建或開關變動時皆推送。
-  useEffect(() => {
-    backend?.setInvisible?.(invisible);
-  }, [backend, invisible]);
   // 每對話保留上限（ADR-0094）：後端重建或設定變動時，套用到當前身分的儲存（0＝無上限）。
   useEffect(() => {
     storageRef.current?.setMaxPerConvo(retentionCap);
@@ -2526,6 +2514,7 @@ export function App(): JSX.Element {
     activeBackend.setStatus(status, self.statusMessage);
     setSelf((x) => (x ? { ...x, status } : x));
     savePresence(self.pubkey, { status, statusMessage: self.statusMessage }); // ADR-0164：本機記住手動狀態
+    clearLegacyInvisible(); // ADR-0422：手動選過狀態，舊設定頁的隱身旗標作廢
   };
   const setStatusMessage = (message: string) => {
     activeBackend.setStatus(self.status, message);
@@ -2581,16 +2570,6 @@ export function App(): JSX.Element {
     setReadReceipts(next);
     try {
       localStorage.setItem(READ_RECEIPTS_KEY, next ? "1" : "0");
-    } catch {
-      /* 忽略 */
-    }
-  };
-
-  const toggleInvisible = () => {
-    const next = !invisible;
-    setInvisible(next);
-    try {
-      localStorage.setItem(INVISIBLE_KEY, next ? "1" : "0");
     } catch {
       /* 忽略 */
     }
@@ -3597,8 +3576,6 @@ export function App(): JSX.Element {
           onToggleNotifyEvent={toggleNotifyEvent}
           readReceipts={readReceipts}
           onToggleReadReceipts={toggleReadReceipts}
-          invisible={invisible}
-          onToggleInvisible={toggleInvisible}
           {...(publicReach?.available && activeBackend.setPublicReach
             ? {
                 publicReach: {

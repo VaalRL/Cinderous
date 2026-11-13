@@ -151,9 +151,6 @@ export interface SettingsPanelProps {
    * 限制較嚴的網路下通話接不通。⚠ 文案不得暗示關掉＝匿名。
    */
   publicTurn?: { value: boolean; onChange: (on: boolean) => void };
-  /** 隱身（ADR-0088）：停止一切在線廣播（relay＋P2P）；未提供則不顯示該區塊。 */
-  invisible?: boolean;
-  onToggleInvisible?: () => void;
   /**
    * 前向保密（ADR-0245，opt-in）：啟用後加密到會過期的子鑰；`onEnable` 啟用、`onRotate` 立即更換金鑰。
    * 未提供則不顯示該區塊（如瀏覽器示範）。
@@ -401,7 +398,8 @@ function DeviceSettings({
         ))}
       </ul>
       {/* ADR-0322 S2／S3：撤銷的三態。**在雙軌期間不得讓使用者以為移除會生效**。 */}
-      {revocation ? (
+      {/* 生效（active）時不另外說明——後果寫在移除確認框裡（2026-11-13 使用者要求移除）。 */}
+      {revocation && revocation.state !== "active" ? (
         <p
           className={`hint${revocation.state === "dual-track" ? " settings__warn" : ""}`}
           data-testid={`revocation-${revocation.state}`}
@@ -410,9 +408,7 @@ function DeviceSettings({
             text={
               revocation.state === "unknown"
                 ? t("devices_revUnknown")
-                : revocation.state === "dual-track"
-                  ? t("devices_revDualTrack", { ids: (revocation.devices ?? []).map((i) => i.slice(0, 8)).join("、") })
-                  : t("devices_revActive")
+                : t("devices_revDualTrack", { ids: (revocation.devices ?? []).map((i) => i.slice(0, 8)).join("、") })
             }
           />
         </p>
@@ -436,7 +432,8 @@ function DeviceSettings({
         </>
       ) : null}
       {/* ADR-0297 §6 紅線：**設定頁必須如實顯示本機在哪一級**，不得靜默降級。 */}
-      {keyTier ? (
+      {/* 最高級（keystore）不顯示說明（2026-11-13 使用者要求移除）；較弱等級照常揭露。 */}
+      {keyTier && keyTier !== "keystore" ? (
         <>
           <p className="settings__desc">{t("devices_tierTitle")}</p>
           <p
@@ -449,20 +446,18 @@ function DeviceSettings({
                   ? t("devices_tierPlaintext")
                   : keyTier === "ephemeral"
                     ? t("devices_tierEphemeral")
-                    : keyTier === "encrypted"
-                      ? t("devices_tierEncrypted")
-                      : t("devices_tierKeystore")
+                    : t("devices_tierEncrypted")
               }
             />
           </p>
-          {/* ADR-0323：遷移進金鑰庫的舊金鑰**曾經明文躺在磁碟上**——刪掉那份副本
-              並不能收回可能已被複製走的東西，所以不能只說「已受金鑰庫保護」。 */}
-          {keyTier === "keystore" && keyEverPlaintext ? (
-            <p className="hint settings__warn" data-testid="key-tier-was-plain">
-              <RichText text={t("devices_tierWasPlain")} />
-            </p>
-          ) : null}
         </>
+      ) : null}
+      {/* ADR-0323：遷移進金鑰庫的舊金鑰**曾經明文躺在磁碟上**——刪掉那份副本
+          並不能收回可能已被複製走的東西，所以不能只說「已受金鑰庫保護」。 */}
+      {keyTier === "keystore" && keyEverPlaintext ? (
+        <p className="hint settings__warn" data-testid="key-tier-was-plain">
+          <RichText text={t("devices_tierWasPlain")} />
+        </p>
       ) : null}
       {/* ADR-0322 S5：這台的代碼——供在**另一台已授權的裝置**上貼上授權。 */}
       {selfDevicePk ? (
@@ -650,7 +645,6 @@ function AccessibilitySettings(): JSX.Element {
   return (
     <section className="settings__sec" data-testid="a11y-settings">
       <h4>{t("settings_a11y")}</h4>
-      <p className="hint">{t("a11y_contrastHint")}</p>
       <button type="button" className="a11y__toggle" data-testid="a11y-contrast-toggle" aria-pressed={contrast === "high"} onClick={toggle}>
         {t("a11y_contrast")}：{contrast === "high" ? t("a11y_stateOn") : t("a11y_stateOff")}
       </button>
@@ -1950,7 +1944,6 @@ export function SettingsPanel(props: SettingsPanelProps): JSX.Element {
                     />
                     <span>{t("settings_groupInvite")}</span>
                   </label>
-                  <p className="hint">{t("settings_groupInviteHint")}</p>
                 </>
               ) : null}
               {props.onToggleAutoAcquire ? (
@@ -2096,15 +2089,6 @@ export function SettingsPanel(props: SettingsPanelProps): JSX.Element {
               </label>
             </section>
           ) : null}
-          {tab === "privacy" && props.onToggleInvisible ? (
-            <section className="settings__sec">
-              <h4>{t("settings_invisible")}</h4>
-              <label className="settings__toggle">
-                <input type="checkbox" checked={props.invisible ?? false} onChange={props.onToggleInvisible} />
-                <span>{t("settings_invisibleHint")}</span>
-              </label>
-            </section>
-          ) : null}
           {tab === "privacy" && props.publicReach ? (
             <section className="settings__sec" data-testid="public-reach">
               <h4>{t("publicReach_title")}</h4>
@@ -2226,9 +2210,6 @@ function RetentionSettings({ cap, onChange, full }: { cap: number; onChange: (n:
   return (
     <section className="settings__sec">
       <h4>{t("settings_retention")}</h4>
-      <p className="settings__hint">
-        <RichText text={t("settings_retentionHint")} />
-      </p>
       <div className="retention__row">
         {RETENTION_PRESETS.map((n) => (
           <button

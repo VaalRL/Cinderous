@@ -1322,10 +1322,6 @@ export function AppSession({
     }
   };
 
-  const toggleInvisible = (v: boolean): void => {
-    self.setInvisible(v);
-    backendRef.current?.setInvisible?.(v);
-  };
   // 送出檔案（ADR-0093/0100）：選檔 → P2P 位元組＋中繼 metadata；訊息由 backend 建立。
   /**
    * 送大檔前的中繼把關（ADR-0344）。**提示而非封鎖**——檔案真的送得出去，只是慢且耗中繼
@@ -1954,8 +1950,6 @@ export function AppSession({
           onLocale={setLocale}
           accent={accent}
           onAccent={setAccent}
-          invisible={self.invisible}
-          onInvisible={toggleInvisible}
           orgPolicy={org.policy}
           {...(relayUrl
             ? {

@@ -239,6 +239,8 @@ export interface Messages {
   status_away: string;
   status_busy: string;
   status_offline: string;
+  /** 自己的狀態選單裡的「隱身」（ADR-0422）：選了就是真隱身（ADR-0240）。別人離線仍用 status_offline。 */
+  status_invisible: string;
   msgStatus_sending: string;
   /** 傳送失敗（外送匣重試耗盡/被拒收，ADR-0095）。 */
   msgStatus_failed: string;
@@ -283,7 +285,6 @@ export interface Messages {
   settings_readReceiptsHint: string;
   // 保留上限與導出（ADR-0094）
   settings_retention: string;
-  settings_retentionHint: string;
   retention_unlimited: string;
   retention_custom: string;
   settings_storageFull: string;
@@ -318,7 +319,6 @@ export interface Messages {
   group_namePlaceholder: string;
   export_empty: string;
   settings_invisible: string;
-  settings_invisibleHint: string;
   publicReach_title: string;
   publicReach_hint: string;
   publicReach_irrevocable: string;
@@ -343,7 +343,6 @@ export interface Messages {
   fs_autoRotate: string;
   fs_undecryptable: string;
   settings_groupInvite: string;
-  settings_groupInviteHint: string;
   /**
    * 企業工作身分輪替後的系統提示（ADR-0052／0363）。
    * 桌面原本把這句**硬寫成中文**，英文使用者會看到一串看不懂的字。
@@ -393,7 +392,6 @@ export interface Messages {
   devices_conflict: string;
   devices_revUnknown: string;
   devices_revDualTrack: string;
-  devices_revActive: string;
   devices_remove: string;
   devices_removeConfirm: string;
   devices_revoked: string;
@@ -409,7 +407,6 @@ export interface Messages {
   devices_tierTitle: string;
   devices_tierPlaintext: string;
   devices_tierEncrypted: string;
-  devices_tierKeystore: string;
   devices_tierEphemeral: string;
   devices_tierWasPlain: string;
   fs_downgradeWarning: string;
@@ -480,7 +477,6 @@ export interface Messages {
   settings_accentCb: string;
   settings_a11y: string;
   a11y_contrast: string;
-  a11y_contrastHint: string;
   a11y_stateOn: string;
   a11y_stateOff: string;
   a11y_uiScale: string;
@@ -1378,7 +1374,8 @@ const zhHant: Messages = {
   status_online: "線上",
   status_away: "離開",
   status_busy: "忙碌",
-  status_offline: "顯示為離線（隱身）",
+  status_offline: "離線",
+  status_invisible: "隱身",
   msgStatus_sending: "傳送中",
   msgStatus_failed: "傳送失敗",
   msgStatus_sent: "已送出",
@@ -1411,9 +1408,8 @@ const zhHant: Messages = {
   share_share: "分享",
   share_failed: "此環境不支援",
   settings_readReceipts: "已讀回條",
-  settings_readReceiptsHint: "開啟後，你讀取訊息會通知對方；關閉則不送、也不顯示對方的已讀（互惠）。",
+  settings_readReceiptsHint: "開啟後，你讀取訊息會通知對方。",
   settings_retention: "訊息保留上限",
-  settings_retentionHint: "每個對話在快取區保留幾則；更舊的**移到封存**（歷史紀錄仍可讀），不刪除。預設無上限。網頁版空間有限，設個上限可把舊訊息移出 localStorage、紓解配額。",
   retention_unlimited: "無上限",
   retention_custom: "自訂",
   settings_storageFull: "⚠ 本機 localStorage 空間已滿，新訊息可能未保存。設一個保留上限可把舊訊息移進封存、騰出空間，或改用桌面版。",
@@ -1443,12 +1439,11 @@ const zhHant: Messages = {
   group_namePlaceholder: "群組名稱（可留空）",
   export_empty: "沒有可導出的對話。",
   settings_invisible: "隱身",
-  settings_invisibleHint: "開啟後你對中繼站完全消失——既不廣播自己的在線狀態，也不向中繼查詢聯絡人是否在線。因此你的聯絡人清單不會離開這台裝置（最強的元資料隱私）。代價：你也看不到聯絡人的在線綠點。訊息收發完全正常。",
   publicReach_title: "公開聯絡方式",
   publicReach_hint: "讓使用其他 Nostr 客戶端（例如 Amethyst、0xchat）的人，只憑你的 npub 就能找到你。兩項各自獨立，預設都關；只影響這個身分。",
   publicReach_irrevocable: "⚠ 打開後會發布到公開的中繼站。之後再關掉，只能讓之後的人查不到；已經被別人或其他中繼站存下的副本收不回。",
   publicReach_contactable: "讓知道我 npub 的人能聯絡我",
-  publicReach_contactableHint: "公開你在哪裡收私訊（不含任何訊息內容）。用官方錨點的話，公開的是兩座公用中繼站，不是錨點；打開時這台裝置會連過去收信，那兩座看得到你在收信。陌生人的訊息會進「訊息請求」，由你決定要不要回。",
+  publicReach_contactableHint: "公開慣用 relay 位置。",
   publicReach_name: "公開我的名稱",
   publicReach_nameHint: "只公開顯示名稱，不公開頭像、狀態或頭銜。名稱可能和別人重複，對方仍應以完整的 npub 確認是你。",
   publicReach_enableConfirm: "打開後會發布到公開的中繼站；之後關掉，已經被存下的副本也收不回。要繼續嗎？",
@@ -1465,7 +1460,6 @@ const zhHant: Messages = {
   fs_autoRotate: "金鑰每 7 天自動更換一次；下面那顆是「我懷疑現在就被入侵了」時用的。",
   fs_undecryptable: "⚠️ 這台裝置有 {count} 則收到的訊息解不開（最後一次：{when}）。可能是對方用了你已更換掉的舊金鑰，也可能只是損壞的資料——這兩者無法分辨。解不開的訊息不會顯示，也查不出是誰送的。若經常發生，請讓對方更新到最新版並保持上線。",
   settings_groupInvite: "允許任何人把我加進群組",
-  settings_groupInviteHint: "關閉（預設）：只有你的聯絡人可以把你加進群組；陌生人的邀請會先進「訊息請求」，你接受那個人之後群組才會出現。開啟：任何知道你 npub 的人都能直接把你拉進群組。封鎖的人永遠擋得住，與此設定無關。",
   msg_maybeUndelivered:
     "可能未送達——送出已超過 {days} 天，仍沒收到對方的送達回條。中繼站只保存 {days} 天，超過就會刪除，對方之後上線也拉不回來。建議重傳一次。",
   offlineGap_notice:
@@ -1478,7 +1472,7 @@ const zhHant: Messages = {
   groupFs_lost: "曾知現無",
   devices_title: "我的裝置",
   devices_thisOne: "這台",
-  devices_firstSeen: "首次看到 {when}",
+  devices_firstSeen: "加入日期 {when}",
   devices_version: "版本 {ver}",
   devcap_self: "這台裝置的版本太舊，可能收不到訊息。請更新到最新版。",
   devcap_unreported: "有裝置可能收不到訊息：「{name}」沒有回報版本，可能還是舊版。請把它更新到最新版。",
@@ -1498,23 +1492,21 @@ const zhHant: Messages = {
   devices_conflict: "⚠️ 偵測到兩份互相衝突的裝置目錄（版本 {v}）。這代表有人用你的身分私鑰簽了另一份——**你的私鑰可能已經外洩**。本機沒有採用任何一份（選邊等於幫對方決定）。請考慮更換身分金鑰。",
   devices_revUnknown: "裝置目錄還在建立中，請稍候再試移除。",
   devices_revDualTrack: "⚠️ 目前移除裝置**還不會生效**：裝置 {ids} 仍在使用舊的金鑰同步方式，只要它還在，被移除的裝置照樣拿得到新金鑰。請先更新那台裝置。",
-  devices_revActive: "移除裝置後，它將無法讀取之後的新訊息（已收到的歷史不受影響）。",
   devices_remove: "移除這台裝置",
   devices_removeConfirm: "要移除這台裝置嗎？\n\n・它將無法讀取**之後**的新訊息。\n・它已經收到的歷史**不受影響**，你救不回來。\n・保留期內（約 7 天）它仍能解開在途的舊訊息——這是為了不讓所有在途訊息一起掉。\n・如果它拿到的是你的身分私鑰而不只是那台裝置，移除**擋不住**——那種情況要換身分金鑰。",
   devices_revoked: "已移除",
   devices_conflictLog: "偵測到的目錄異常",
   devices_conflictRow: "{when}：收到版本 {incoming} 的目錄，但本機已在版本 {mine}（版本倒退）。這只可能來自重放或有人用你的身分私鑰簽了舊版本。本機沒有採用它。",
   devices_myCode: "這台的裝置代碼",
-  devices_myCodeHint: "要讓這台加入你的裝置清單，請在**另一台已在清單上的裝置**貼上這串代碼並授權。代碼不是祕密，但請**比對兩邊顯示的字元是否一致**——貼錯就是授權了別人。",
+  devices_myCodeHint: "要讓這台加入你的裝置清單，請在**另一台已在清單上的裝置**貼上這串代碼並授權。",
   devices_authorize: "授權裝置",
-  devices_authorizeHint: "貼上新裝置顯示的代碼。只有已在清單上的裝置能授權——這是為了讓「拿到你身分私鑰但沒碰到你這台」的人加不進來。",
+  devices_authorizeHint: "貼上新裝置顯示的裝置代碼來進行新裝置授權。",
   devices_authorizePlaceholder: "貼上裝置代碼",
-  devices_authorizeConfirm: "要授權這台裝置嗎？\n\n・它將能讀取你之後收到的所有訊息。\n・請先確認代碼與那台裝置螢幕上顯示的**完全一致**。\n・授權後可以隨時移除。",
+  devices_authorizeConfirm: "要授權這台裝置嗎？\n\n・它將能讀取你之後收到的所有訊息。\n・請先確認代碼與那台裝置螢幕上顯示的**完全一致**——代碼不是祕密，貼錯就是授權了別人。\n・授權後可以隨時移除。",
   devices_noAuthority: "這台裝置還不在清單上，因此不能授權其他裝置。請先在已在清單上的裝置授權這一台。",
   devices_tierTitle: "這台的金鑰保護等級",
   devices_tierPlaintext: "⚠️ **明文存放**。這台的裝置金鑰目前直接存在瀏覽器／App 的本機儲存區，沒有加密。若有人取得這台電腦的磁碟內容（備份、舊機沒清、或惡意程式），他就能拿到這把金鑰——**這種情況下「移除裝置」擋不住他**。真正的保護要等這把金鑰移進作業系統金鑰庫。",
   devices_tierEncrypted: "已加密存放，但**包裹它的那把金鑰是軟體保管的**（瀏覽器或系統代管，沒有你的密碼參與）。所以：想偷金鑰的腳本**偷不走**它——這相對於明文是實質改善；但**完整複製這台的資料**、而且知道怎麼做的人，仍有機會解開。真正擋得住磁碟複製的是安全晶片，這台沒有或不支援。",
-  devices_tierKeystore: "存在作業系統金鑰庫（桌面）或裝置安全晶片（Android）。磁碟被複製也解不開；但**這不代表裝置被入侵時也安全**——我們是在需要時把金鑰**取出來用**，不是請晶片代簽，所以以你的身分執行的惡意程式一樣讀得到。",
   devices_tierEphemeral: "⚠️ **這次開機沒能打開金鑰庫**（例如系統的金鑰服務沒啟動）。目前用的是臨時金鑰、沒有存下來——所以**這台不會出現在你的裝置清單裡**，重開又是新的一把。我們刻意不在這種時候偷偷生一把新的長期金鑰把你換掉。修好金鑰庫後重開即可恢復原本的裝置身分。",
   devices_tierWasPlain: "⚠️ 這把金鑰是從舊版的明文儲存**搬進**金鑰庫的。搬進來以後磁碟被複製已經沒用了，但**在那之前備份過磁碟的人可能已經有一份**——刪掉舊副本收不回已經被拿走的東西。若你在意這點，可以移除這台再重新配對，換一把從未明文躺過的金鑰。",
   fs_disable: "停用前向保密",
@@ -1580,7 +1572,6 @@ const zhHant: Messages = {
   settings_accentCb: "色覺友善（色盲可辨）",
   settings_a11y: "無障礙",
   a11y_contrast: "高對比模式",
-  a11y_contrastHint: "拉高文字與邊框對比（WCAG AA），與深淺主題可並用；未設定時跟隨系統的高對比偏好。",
   a11y_stateOn: "開",
   a11y_stateOff: "關",
   a11y_uiScale: "介面尺寸",
@@ -1692,7 +1683,7 @@ const zhHant: Messages = {
   titlebar_close: "關閉",
   settings_titlebar: "視窗外框",
   titlebar_dragHint: "用滑鼠把按鈕拖到標題列左右兩側，即可調整位置與順序。",
-  titlebar_autoHide: "平時隱藏整條標題列（滑鼠移到視窗頂端才滑入）",
+  titlebar_autoHide: "自動隱藏標題列",
   titlebarStyle_flat: "扁平",
   titlebarStyle_rounded: "圓角",
   titlebarStyle_mac: "交通燈",
@@ -1829,7 +1820,7 @@ const zhHant: Messages = {
   sponsor_dismiss: "不再顯示",
   vanish_title: "清除我在中繼站上的資料",
   vanish_hint:
-    "中繼站暫存的離線留言預設 7 天後自動消失。你也可以現在就要求它們立刻刪除——包含寄給你但你還沒收到的訊息、你的加密雲端備份。**本機的對話不受影響**（那本來就只在你的裝置上）。",
+    "中繼站暫存的離線留言預設 7 天後自動消失。**本機的對話不受影響**（那本來就只在你的裝置上）。",
   vanish_action: "要求中繼站清除",
   vanish_confirm:
     "要求所有已連線的中繼站刪除你的資料？還沒收到的離線留言會一併消失且無法救回，你的加密雲端備份也會被刪除（若已開啟）。此動作不可復原。",
@@ -2048,12 +2039,11 @@ const zhHant: Messages = {
   call_quality_low: "省流量",
   call_quality_medium: "標準",
   call_quality_high: "高畫質",
-  settings_publicTurn: "通話中繼保底",
-  settings_publicTurnHint:
-    "在限制較嚴的網路（對稱 NAT／嚴格防火牆）下，通話會改經中繼伺服器才打得通。⚠ 關閉後那些通話可能接不通；文字與檔案不受影響。注意這不是匿名開關——不經中繼時，直連仍會讓對方看到你的 IP，換掉的只是「誰看得到」。",
+  settings_publicTurn: "透過 relay 進行通話",
+  settings_publicTurnHint: "部分網路設定較嚴謹，要透過此方式才能進行通話。",
   settings_videoQuality: "視訊通話畫質",
   settings_videoQualityHint:
-    "省流量約 180 MB/小時、標準約 585 MB/小時、高畫質約 1.4 GB/小時。通話中可隨時調整，這裡設的是下一通的起點。",
+    "省流量約 180 MB/小時、標準約 585 MB/小時、高畫質約 1.4 GB/小時。",
   call_failed_unreachable: "通話接不通——限制網路（對稱 NAT／嚴格防火牆）下無法建立直連。可改用 Wi-Fi 或其他網路再撥；文字與檔案不受影響。",
   call_failed_lost: "通話中斷——連線中途斷開（可能網路不穩）。可再撥一次。",
   fileGate_relayWarn:
@@ -2379,7 +2369,8 @@ const en: Messages = {
   status_online: "Online",
   status_away: "Away",
   status_busy: "Busy",
-  status_offline: "Appear offline",
+  status_offline: "Offline",
+  status_invisible: "Invisible",
   msgStatus_sending: "Sending",
   msgStatus_failed: "Failed to send",
   msgStatus_sent: "Sent",
@@ -2413,9 +2404,8 @@ const en: Messages = {
   share_share: "Share",
   share_failed: "Not supported here",
   settings_readReceipts: "Read receipts",
-  settings_readReceiptsHint: "When on, others are told when you read their messages; off means you neither send yours nor see theirs (reciprocal).",
+  settings_readReceiptsHint: "When on, others are told when you read their messages.",
   settings_retention: "Message retention",
-  settings_retentionHint: "How many messages stay in the fast cache per conversation; older ones move to the archive (still readable in History), not deleted. Default is unlimited. On the web, setting a limit moves old messages out of localStorage to ease the quota.",
   retention_unlimited: "Unlimited",
   retention_custom: "Custom",
   settings_storageFull: "⚠ Local storage is full; new messages may not be saved. Consider setting a retention limit, or use the desktop app.",
@@ -2445,12 +2435,11 @@ const en: Messages = {
   group_namePlaceholder: "Group name (optional)",
   export_empty: "No conversations to export.",
   settings_invisible: "Invisible",
-  settings_invisibleHint: "When on, you vanish from the relay entirely — you neither broadcast your own presence nor ask the relay who's online. So your contact list never leaves this device (the strongest metadata privacy). Trade-off: you can't see contacts' online dots either. Messaging works normally.",
   publicReach_title: "Public contact",
   publicReach_hint: "Let people on other Nostr clients (e.g. Amethyst, 0xchat) find you with just your npub. The two options are independent and both off by default; they only affect this identity.",
   publicReach_irrevocable: "⚠ Turning these on publishes to public relays. Turning them off later only stops new lookups; copies already saved by others or by other relays can't be recalled.",
   publicReach_contactable: "Let people who know my npub contact me",
-  publicReach_contactableHint: "Publishes where you receive direct messages (no message content). On the official anchors, the published relays are two public relays, not the anchors; while this is on, this device connects to them to receive mail, so they can see you checking for messages. Messages from strangers go to Message requests; you decide whether to reply.",
+  publicReach_contactableHint: "Publishes your preferred relay locations.",
   publicReach_name: "Make my name public",
   publicReach_nameHint: "Only your display name is published — not your avatar, status, or title. Names aren't unique; others should still confirm it's you by your full npub.",
   publicReach_enableConfirm: "This publishes to public relays; turning it off later can't recall copies already saved. Continue?",
@@ -2467,7 +2456,6 @@ const en: Messages = {
   fs_autoRotate: "Your key rotates automatically every 7 days. The button below is for \"I think I'm compromised right now\".",
   fs_undecryptable: "⚠️ This device could not decrypt {count} received message(s) (last: {when}). It may be that the sender used a key you have since rotated away, or the data was simply corrupt — the two cannot be told apart. Undecryptable messages are not shown, and there is no way to tell who sent them. If this keeps happening, ask your contacts to update and stay online.",
   settings_groupInvite: "Let anyone add me to groups",
-  settings_groupInviteHint: "Off (default): only your contacts can add you to a group; an invite from a stranger waits in Message requests and the group appears once you accept that person. On: anyone who knows your npub can add you directly. Blocked people are always refused, regardless of this setting.",
   msg_maybeUndelivered:
     "May not have been delivered — sent over {days} days ago with no delivery receipt. Relays only keep offline messages for {days} days, then delete them; the recipient cannot retrieve it later. Consider sending it again.",
   offlineGap_notice:
@@ -2480,7 +2468,7 @@ const en: Messages = {
   groupFs_lost: "Previously known, now missing",
   devices_title: "My devices",
   devices_thisOne: "this one",
-  devices_firstSeen: "first seen {when}",
+  devices_firstSeen: "added {when}",
   devices_version: "version {ver}",
   devcap_self: "This device is out of date and may miss messages. Please update to the latest version.",
   devcap_unreported: 'A device may miss messages: "{name}" has not reported its version and may be out of date. Please update it to the latest version.',
@@ -2500,23 +2488,21 @@ const en: Messages = {
   devices_conflict: "⚠️ Two conflicting device directories were seen (version {v}). Someone signed another one with your identity key — **your key may have leaked**. Neither was adopted (picking a side would decide it for them). Consider rotating your identity key.",
   devices_revUnknown: "The device directory is still being set up; try removing again shortly.",
   devices_revDualTrack: "⚠️ Removing a device will **not take effect yet**: device {ids} still uses the old key-sync path, so a removed device would still receive new keys. Update that device first.",
-  devices_revActive: "Once removed, a device can no longer read new messages (history it already has is unaffected).",
   devices_remove: "Remove this device",
   devices_removeConfirm: "Remove this device?\n\n• It will no longer be able to read **new** messages.\n• History it already received is **unaffected** — you cannot claw that back.\n• During the grace window (~7 days) it can still open in-flight older messages; that is deliberate.\n• If what leaked was your identity key rather than just that device, removal does **not** help — rotate your identity key instead.",
   devices_revoked: "removed",
   devices_conflictLog: "Directory anomalies seen",
   devices_conflictRow: "{when}: received a directory at version {incoming} while this device is already at {mine} (rollback). That can only come from a replay or from someone signing an older version with your identity key. It was not adopted.",
   devices_myCode: "This device's code",
-  devices_myCodeHint: "To add this device to your list, paste this code on **another device that is already on the list** and authorize it. The code is not a secret, but do **compare the characters on both screens** — pasting the wrong one authorizes someone else.",
+  devices_myCodeHint: "To add this device to your list, paste this code on **another device that is already on the list** and authorize it.",
   devices_authorize: "Authorize a device",
-  devices_authorizeHint: "Paste the code shown by the new device. Only a device already on the list can authorize — that is what keeps out someone who has your identity key but never touched this device.",
+  devices_authorizeHint: "Paste the device code shown on the new device to authorize it.",
   devices_authorizePlaceholder: "Paste device code",
-  devices_authorizeConfirm: "Authorize this device?\n\n• It will be able to read every message you receive from now on.\n• Check that the code matches **exactly** what is shown on that device.\n• You can remove it again at any time.",
+  devices_authorizeConfirm: "Authorize this device?\n\n• It will be able to read every message you receive from now on.\n• Check that the code matches **exactly** what is shown on that device — the code is not a secret, and pasting the wrong one authorizes someone else.\n• You can remove it again at any time.",
   devices_noAuthority: "This device is not on the list yet, so it cannot authorize others. Authorize this one from a device that is already on the list.",
   devices_tierTitle: "Key protection on this device",
   devices_tierPlaintext: "⚠️ **Stored in the clear.** This device's key currently sits unencrypted in browser/app local storage. Anyone who obtains this machine's disk contents (a backup, a wiped-but-not-really old machine, malware) gets the key — and in that case **removing the device does not stop them**. Real protection waits on moving this key into the OS keystore.",
   devices_tierEncrypted: "Stored encrypted, but **the key that wraps it is held in software** (by the browser or the system, with no password of yours involved). So: a script trying to steal the key **cannot take it** — a real improvement over plaintext; but someone who copies all of this device's data and knows what they are doing may still open it. What actually stops a disk copy is a secure element, which this device lacks or does not expose.",
-  devices_tierKeystore: "Held in the OS keystore (desktop) or the device secure element (Android). A copied disk cannot open it — but this does **not** mean you are safe if the device itself is compromised: we read the key **out** when we need it rather than asking the chip to sign, so malware running as you can read it too.",
   devices_tierEphemeral: "⚠️ **The keystore could not be opened this session** (for example, the system keyring service is not running). A temporary key is in use and nothing was saved — so **this device will not appear in your device list**, and a restart makes another one. We deliberately do not quietly mint a new long-term key here. Fix the keystore and restart to get the original device identity back.",
   devices_tierWasPlain: "⚠️ This key was **migrated in** from an older plaintext store. A copied disk is useless from now on, but **anyone who backed up the disk before the move may already hold a copy** — deleting the old copy cannot take back what was already taken. If that matters to you, remove this device and pair it again to get a key that never sat in plaintext.",
   fs_disable: "Turn off forward secrecy",
@@ -2582,7 +2568,6 @@ const en: Messages = {
   settings_accentCb: "Color-vision friendly (colorblind-safe)",
   settings_a11y: "Accessibility",
   a11y_contrast: "High contrast",
-  a11y_contrastHint: "Boost text and border contrast (WCAG AA); combines with light/dark theme. Follows your system's contrast preference until set.",
   a11y_stateOn: "On",
   a11y_stateOff: "Off",
   a11y_uiScale: "UI size",
@@ -2694,7 +2679,7 @@ const en: Messages = {
   titlebar_close: "Close",
   settings_titlebar: "Window frame",
   titlebar_dragHint: "Drag the buttons to either side of the title bar to arrange position and order.",
-  titlebar_autoHide: "Hide the whole title bar until the mouse reaches the top edge",
+  titlebar_autoHide: "Auto-hide title bar",
   titlebarStyle_flat: "Flat",
   titlebarStyle_rounded: "Rounded",
   titlebarStyle_mac: "Traffic lights",
@@ -2831,7 +2816,7 @@ const en: Messages = {
   sponsor_dismiss: "Don\u2019t show again",
   vanish_title: "Erase my data on relays",
   vanish_hint:
-    "Offline messages held by relays expire after 7 days by default. You can also ask them to delete everything now — including messages sent to you that you have not received yet, and your encrypted cloud backup. **Your local conversations are unaffected** (they only ever lived on your device).",
+    "Offline messages held by relays expire after 7 days by default. **Your local conversations are unaffected** (they only ever lived on your device).",
   vanish_action: "Request erasure",
   vanish_confirm:
     "Ask every connected relay to delete your data? Undelivered offline messages will be gone for good, and your encrypted cloud backup will be deleted (if enabled). This cannot be undone.",
@@ -3051,12 +3036,11 @@ const en: Messages = {
   call_quality_low: "Data saver",
   call_quality_medium: "Standard",
   call_quality_high: "High",
-  settings_publicTurn: "Call relay fallback",
-  settings_publicTurnHint:
-    "On restrictive networks (symmetric NAT / strict firewalls), calls are routed through a relay server so they can connect at all. ⚠ Turning this off means those calls may not connect; text and files are unaffected. Note this is not an anonymity switch — without the relay, a direct connection still reveals your IP to the other person; it only changes who can see it.",
+  settings_publicTurn: "Call via relay",
+  settings_publicTurnHint: "Some stricter network setups can only connect calls this way.",
   settings_videoQuality: "Video call quality",
   settings_videoQualityHint:
-    "Data saver uses about 180 MB/hour, Standard about 585 MB/hour, High about 1.4 GB/hour. You can change this during a call; this sets the starting point for the next one.",
+    "Data saver uses about 180 MB/hour, Standard about 585 MB/hour, High about 1.4 GB/hour.",
   call_failed_unreachable:
     "Call couldn't connect — a restricted network (symmetric NAT / strict firewall) blocked a direct link. Try Wi-Fi or another network; text and files are unaffected.",
   call_failed_lost: "Call dropped — the connection was lost mid-call (network may be unstable). You can call again.",

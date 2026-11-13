@@ -14,8 +14,35 @@ export interface PresencePref {
 const PREFIX = "nb.presence.";
 const VALID: Status[] = ["online", "away", "busy", "offline"];
 
+// 舊版設定頁的「隱身」開關（裝置層）。ADR-0422 起隱身只在狀態選單——升級時沿用成「隱身」狀態，
+// 直到使用者手動選一次狀態（`clearLegacyInvisible`）。
+const LEGACY_INVISIBLE_KEY = "nb.invisible";
+
+function legacyInvisible(): boolean {
+  try {
+    return localStorage.getItem(LEGACY_INVISIBLE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+/** 使用者手動選了狀態：舊隱身旗標從此作廢（ADR-0422）。 */
+export function clearLegacyInvisible(): void {
+  try {
+    localStorage.removeItem(LEGACY_INVISIBLE_KEY);
+  } catch {
+    /* 不可用時忽略 */
+  }
+}
+
 /** 讀某身分的上次狀態；缺失/毀損/非法回 null（呼叫端退回後端預設）。 */
 export function loadPresence(pubkey: string): PresencePref | null {
+  const pref = loadStored(pubkey);
+  if (legacyInvisible()) return { status: "offline", statusMessage: pref?.statusMessage ?? "" };
+  return pref;
+}
+
+function loadStored(pubkey: string): PresencePref | null {
   try {
     const raw = localStorage.getItem(PREFIX + pubkey);
     if (!raw) return null;

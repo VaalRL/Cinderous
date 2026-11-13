@@ -91,8 +91,6 @@ describe("行動端通知設定（ADR-0116）", () => {
     onLocale: () => {},
     accent: null,
     onAccent: () => {},
-    invisible: false,
-    onInvisible: () => {},
     onLogout: () => {},
   };
 

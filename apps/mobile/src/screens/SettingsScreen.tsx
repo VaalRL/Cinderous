@@ -94,8 +94,6 @@ export function SettingsScreen({
   onLocale,
   accent,
   onAccent,
-  invisible,
-  onInvisible,
   status,
   onStatus,
   statusMessage,
@@ -164,9 +162,6 @@ export function SettingsScreen({
   onLocale: (l: Locale) => void;
   accent: string | null;
   onAccent: (hex: string | null) => void;
-  /** 隱身（ADR-0088）：停止一切在線廣播。 */
-  invisible: boolean;
-  onInvisible: (v: boolean) => void;
   /** 上線狀態（ADR-0114）：online/away/busy。未提供則不顯示（示範模式）。 */
   status?: Status;
   onStatus?: (s: Status) => void;
@@ -947,22 +942,6 @@ export function SettingsScreen({
           </View>
         ) : null}
 
-        {/* 隱私：隱身 */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>{t("settings_invisible")}</Text>
-          <Text style={styles.label}>{t("settings_invisibleHint")}</Text>
-          <Pressable
-            accessibilityRole="button"
-            onPress={() => onInvisible(!invisible)}
-            style={[styles.seg, { alignSelf: "flex-start", borderColor: invisible ? tk.accent : tk.border, backgroundColor: invisible ? tk.accent : tk.field }]}
-          >
-            <Text style={[styles.segText, { color: invisible ? "#ffffff" : tk.ink }]}>
-              {t("settings_invisible")}
-              {invisible ? " ✓" : ""}
-            </Text>
-          </Pressable>
-        </View>
-
         {/* 公開聯絡方式（ADR-0382）：版面與桌面同構——說明 → 常駐的「收不回」警語 → 兩個開關 */}
         {publicReach ? (
           <View style={styles.section} testID="public-reach">
@@ -1103,7 +1082,8 @@ export function SettingsScreen({
               </View>
             ))}
             {/* ADR-0297 §6 紅線：**設定頁必須如實顯示本機在哪一級**。 */}
-            {deviceKeyTier ? (
+            {/* 最高級（keystore）不顯示說明（2026-11-13 使用者要求移除）；較弱等級照常揭露。 */}
+            {deviceKeyTier && deviceKeyTier !== "keystore" ? (
               <>
                 <Text style={styles.sectionTitle}>{t("devices_tierTitle")}</Text>
                 <Text
@@ -1118,18 +1098,16 @@ export function SettingsScreen({
                       ? t("devices_tierPlaintext")
                       : deviceKeyTier === "ephemeral"
                         ? t("devices_tierEphemeral")
-                        : deviceKeyTier === "encrypted"
-                          ? t("devices_tierEncrypted")
-                          : t("devices_tierKeystore"),
+                        : t("devices_tierEncrypted"),
                   )}
                 </Text>
-                {/* ADR-0323：遷移進金鑰庫的舊金鑰曾經明文躺過——刪副本收不回已被拿走的東西。 */}
-                {deviceKeyTier === "keystore" && deviceKeyEverPlaintext ? (
-                  <Text testID="key-tier-was-plain" style={[styles.label, { color: "#c0392b" }]}>
-                    {rich(t("devices_tierWasPlain"))}
-                  </Text>
-                ) : null}
               </>
+            ) : null}
+            {/* ADR-0323：遷移進金鑰庫的舊金鑰曾經明文躺過——刪副本收不回已被拿走的東西。 */}
+            {deviceKeyTier === "keystore" && deviceKeyEverPlaintext ? (
+              <Text testID="key-tier-was-plain" style={[styles.label, { color: "#c0392b" }]}>
+                {rich(t("devices_tierWasPlain"))}
+              </Text>
             ) : null}
             {/* ADR-0322 S5：這台的代碼——在桌面（已授權的裝置）上貼上即可把這台加入清單。 */}
             {selfDevicePk ? (
@@ -1140,7 +1118,8 @@ export function SettingsScreen({
               </>
             ) : null}
             {/* ADR-0322 S2：撤銷三態。雙軌期間必須明說「移除還不會生效」。 */}
-            {revocation ? (
+            {/* 生效（active）時不另外說明（2026-11-13 使用者要求移除）。 */}
+            {revocation && revocation.state !== "active" ? (
               <Text
                 testID={`revocation-${revocation.state}`}
                 style={[styles.label, revocation.state === "dual-track" ? { color: "#c0392b" } : null]}
@@ -1148,11 +1127,9 @@ export function SettingsScreen({
                 {rich(
                   revocation.state === "unknown"
                     ? t("devices_revUnknown")
-                    : revocation.state === "dual-track"
-                      ? t("devices_revDualTrack", {
-                          ids: (revocation.devices ?? []).map((i) => i.slice(0, 8)).join("、"),
-                        })
-                      : t("devices_revActive"),
+                    : t("devices_revDualTrack", {
+                        ids: (revocation.devices ?? []).map((i) => i.slice(0, 8)).join("、"),
+                      }),
                 )}
               </Text>
             ) : null}
@@ -1166,7 +1143,6 @@ export function SettingsScreen({
         {onGroupInvite ? (
           <View style={styles.section} testID="group-invite-setting">
             <Text style={styles.sectionTitle}>{t("settings_groupInvite")}</Text>
-            <Text style={styles.label}>{t("settings_groupInviteHint")}</Text>
             <Pressable
               accessibilityRole="button"
               testID="group-invite-anyone"
@@ -1317,7 +1293,6 @@ export function SettingsScreen({
         {onRetention ? (
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>{t("settings_retention")}</Text>
-            <Text style={styles.label}>{rich(t("settings_retentionHint"))}</Text>
             <View style={[styles.rowSeg, { flexWrap: "wrap" }]}>
               {[0, 1000, 5000, 10000].map((n) => (
                 <Pressable key={n} style={seg(retention === n)} accessibilityRole="button" onPress={() => onRetention(n)}>

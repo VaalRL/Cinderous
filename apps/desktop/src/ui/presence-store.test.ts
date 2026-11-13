@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { loadPresence, savePresence } from "./presence-store.js";
+import { clearLegacyInvisible, loadPresence, savePresence } from "./presence-store.js";
 
 describe("本機記住上線狀態（ADR-0164）", () => {
   beforeEach(() => {
@@ -33,5 +33,20 @@ describe("本機記住上線狀態（ADR-0164）", () => {
     expect(loadPresence("x")).toBeNull();
     localStorage.setItem("nb.presence.y", JSON.stringify({ status: "away" }));
     expect(loadPresence("y")).toEqual({ status: "away", statusMessage: "" });
+  });
+
+  it("🔴 舊版設定頁開了隱身（nb.invisible=1）→ 升級後以「隱身」狀態上線（ADR-0422）", () => {
+    localStorage.setItem("nb.invisible", "1");
+    expect(loadPresence("fresh")).toEqual({ status: "offline", statusMessage: "" });
+    savePresence("pk", { status: "busy", statusMessage: "趕稿" });
+    expect(loadPresence("pk")).toEqual({ status: "offline", statusMessage: "趕稿" }); // 沒手動改前仍隱身
+  });
+
+  it("手動改一次狀態就清掉舊旗標（之後照選的走）", () => {
+    localStorage.setItem("nb.invisible", "1");
+    savePresence("pk", { status: "online", statusMessage: "" });
+    clearLegacyInvisible();
+    expect(loadPresence("pk")?.status).toBe("online");
+    expect(localStorage.getItem("nb.invisible")).toBeNull();
   });
 });

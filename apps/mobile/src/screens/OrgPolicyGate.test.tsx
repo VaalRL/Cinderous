@@ -79,8 +79,6 @@ describe("入群邀請閘門的設定（ADR-0317）", () => {
     onLocale: () => {},
     accent: null,
     onAccent: () => {},
-    invisible: false,
-    onInvisible: () => {},
     onLogout: () => {},
   };
 
@@ -89,14 +87,13 @@ describe("入群邀請閘門的設定（ADR-0317）", () => {
     expect(html).not.toContain('data-testid="group-invite-setting"');
   });
 
-  it("關閉時＝只有聯絡人可以把我加進群組（說明要講清楚）", () => {
+  it("關閉時未勾選；長說明已移除（2026-11-13 使用者要求）", () => {
     const html = renderToStaticMarkup(
       <SettingsScreen {...settingsBase} groupInviteFromAnyone={false} onGroupInvite={() => {}} />,
     );
     expect(html).toContain('data-testid="group-invite-setting"');
     expect(html).not.toContain("✓"); // 未勾選
-    expect(html).toContain("只有你的聯絡人"); // 說明講清楚預設行為
-    expect(html).toContain("封鎖"); // 說明講清楚封鎖優先
+    expect(html).not.toContain("只有你的聯絡人");
   });
 
   it("開啟時顯示已選取", () => {
@@ -160,8 +157,6 @@ describe("我的裝置（ADR-0321，行動端）", () => {
     onLocale: () => {},
     accent: null,
     onAccent: () => {},
-    invisible: false,
-    onInvisible: () => {},
     onLogout: () => {},
   };
   const devices = [
@@ -205,8 +200,6 @@ describe("行動端顯示自己的裝置代碼（ADR-0322 S5）", () => {
     onLocale: () => {},
     accent: null,
     onAccent: () => {},
-    invisible: false,
-    onInvisible: () => {},
     onLogout: () => {},
   };
   const devices = [{ id: "aabbccdd11223344", firstSeen: Date.now(), source: "local" }];

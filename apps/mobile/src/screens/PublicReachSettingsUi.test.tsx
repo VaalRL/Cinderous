@@ -15,8 +15,6 @@ const base = {
   onLocale: () => {},
   accent: null,
   onAccent: () => {},
-  invisible: false,
-  onInvisible: () => {},
   onLogout: () => {},
 };
 

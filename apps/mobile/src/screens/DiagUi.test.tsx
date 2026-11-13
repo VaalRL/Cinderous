@@ -21,8 +21,6 @@ const base = {
   onLocale: () => {},
   accent: null,
   onAccent: () => {},
-  invisible: false,
-  onInvisible: () => {},
   onLogout: () => {},
 };
 const render = (): string => renderToStaticMarkup(<SettingsScreen {...base} />);
