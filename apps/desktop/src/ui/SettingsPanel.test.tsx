@@ -307,6 +307,37 @@ describe("版面佈局切換（ADR-0079）", () => {
     expect(out).toContain('data-testid="layout-modern"');
     expect(out).toMatch(/aria-checked="true"[^>]*data-testid="layout-classic"/); // 預設經典選中
   });
+
+  it("選項文字叫「預設」與「三欄式」，佈局下方不再有說明", () => {
+    const out = render();
+    expect(out).toMatch(/data-testid="layout-classic"[^>]*>🪟 (<!-- -->)?預設</);
+    expect(out).toMatch(/data-testid="layout-modern"[^>]*>▤ (<!-- -->)?三欄式</);
+    expect(out).not.toContain("經典（浮動視窗）");
+    expect(out).not.toContain("可同時攤開多個對話視窗");
+  });
+
+  it("外觀分頁不再顯示主題色與輸入行為的說明文字", () => {
+    const out = render();
+    expect(out).not.toContain("即時套用、只存在本機");
+    expect(out).not.toContain("Shift+Enter 換行");
+  });
+
+  it("外觀分頁右側有即時預覽線稿，跟著目前的佈局畫", () => {
+    const classic = render();
+    expect(classic).toMatch(/data-testid="appearance-preview"[^>]*data-layout="classic"/);
+    expect(classic).toContain('data-testid="preview-float"'); // 預設佈局：浮動的對話視窗
+    (globalThis as Record<string, unknown>).localStorage = {
+      getItem: (k: string) => (k.endsWith("layout") ? "modern" : null),
+    };
+    const modern = render();
+    expect(modern).toMatch(/data-testid="appearance-preview"[^>]*data-layout="modern"/);
+    expect(modern).toContain('data-testid="preview-aux"'); // 三欄式：右側輔助欄
+    expect(modern).not.toContain('data-testid="preview-float"');
+  });
+
+  it("其他分頁沒有預覽", () => {
+    expect(render({ initialTab: "about" })).not.toContain('data-testid="appearance-preview"');
+  });
 });
 
 describe("主題色：主色＋副色（ADR-0078）", () => {

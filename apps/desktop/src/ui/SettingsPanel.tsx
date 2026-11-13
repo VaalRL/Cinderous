@@ -690,7 +690,6 @@ function ComposerSettings(): JSX.Element {
         />
         <span>{t("settings_enterToSend")}</span>
       </label>
-      <p className="hint">{t("settings_enterToSendHint")}</p>
     </section>
   );
 }
@@ -771,7 +770,6 @@ function AccentSettings(): JSX.Element {
           {t("settings_accent2Follow")}
         </button>
       </div>
-      <p className="settings__hint">{t("settings_accentHint")}</p>
     </section>
   );
 }
@@ -805,8 +803,59 @@ function LayoutSettings(): JSX.Element {
           ▤ {t("settings_layoutModern")}
         </button>
       </div>
-      <p className="settings__hint">{t("settings_layoutHint")}</p>
     </section>
+  );
+}
+
+/**
+ * 外觀分頁右側的即時預覽：一張小線稿，畫出目前佈局，顏色全走 CSS 變數
+ *（--accent／--titlebar／--bg-*／--panel…），所以主色、副色、深淺主題、高對比一改就跟著變，
+ * 不必另外接狀態。純裝飾，對輔助科技隱藏。
+ */
+function AppearancePreview(): JSX.Element {
+  const { t } = useI18n();
+  const { layout } = useLayout();
+  const lines = (n: number): JSX.Element[] =>
+    Array.from({ length: n }, (_, i) => <span key={i} className="pv__line" />);
+  const chat = (
+    <>
+      <span className="pv__bubble pv__bubble--in" />
+      <span className="pv__bubble pv__bubble--out" />
+      <span className="pv__bubble pv__bubble--in pv__bubble--short" />
+      <span className="pv__compose">
+        <span className="pv__field" />
+        <span className="pv__send" />
+      </span>
+    </>
+  );
+  return (
+    <aside className="pv" data-testid="appearance-preview" data-layout={layout} aria-hidden="true">
+      <div className="pv__label">{t("settings_preview")}</div>
+      <div className="pv__screen">
+        <div className="pv__bar" />
+        {layout === "modern" ? (
+          <div className="pv__cols">
+            <div className="pv__pane pv__pane--list">{lines(5)}</div>
+            <div className="pv__pane pv__pane--chat">{chat}</div>
+            <div className="pv__pane pv__pane--aux" data-testid="preview-aux">
+              {lines(3)}
+            </div>
+          </div>
+        ) : (
+          <div className="pv__desk">
+            <div className="pv__win pv__win--list">
+              <div className="pv__winbar" />
+              <div className="pv__me" />
+              {lines(5)}
+            </div>
+            <div className="pv__win pv__win--float" data-testid="preview-float">
+              <div className="pv__winbar" />
+              <div className="pv__winbody">{chat}</div>
+            </div>
+          </div>
+        )}
+      </div>
+    </aside>
   );
 }
 
@@ -1542,13 +1591,16 @@ export function SettingsPanel(props: SettingsPanelProps): JSX.Element {
         </div>
         <div className="settings__body">
           {tab === "appearance" ? (
-            <>
-              <LayoutSettings />
-              <AccentSettings />
-              <ComposerSettings />
-              <AccessibilitySettings />
-              {props.showTitlebarSettings ? <TitlebarSettings /> : null}
-            </>
+            <div className="appearance">
+              <div className="appearance__main">
+                <LayoutSettings />
+                <AccentSettings />
+                <ComposerSettings />
+                <AccessibilitySettings />
+                {props.showTitlebarSettings ? <TitlebarSettings /> : null}
+              </div>
+              <AppearancePreview />
+            </div>
           ) : null}
           {tab === "about" ? (
             <AboutSettings
