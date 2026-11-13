@@ -16,8 +16,6 @@ const base = {
   accent: "blue",
   onAccent: () => {},
   relayUrl: "wss://x",
-  invisible: false,
-  onInvisible: () => {},
   onLogout: () => {},
 };
 

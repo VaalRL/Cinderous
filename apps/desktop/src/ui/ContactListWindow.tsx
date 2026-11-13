@@ -22,6 +22,9 @@ const STATUS_KEY: Record<Status, MessageKey> = {
   offline: "status_offline",
 };
 
+/** 自己的狀態選單（ADR-0422）：offline 對自己而言是「隱身」——選了就是真隱身（ADR-0240）。 */
+const SELF_STATUS_KEY: Record<Status, MessageKey> = { ...STATUS_KEY, offline: "status_invisible" };
+
 /** 上線狀態的分區順序（經典即時通風：線上→離開→忙碌→離線）。 */
 const STATUS_SECTIONS: Status[] = ["online", "away", "busy", "offline"];
 
@@ -220,7 +223,7 @@ export function StatusPicker({ value, onChange }: { value: Status; onChange: (s:
         onClick={() => setOpen((o) => !o)}
       >
         <span className={`dot ${value}`} />
-        <span className="statuspick__txt">{t(STATUS_KEY[value])}</span>
+        <span className="statuspick__txt">{t(SELF_STATUS_KEY[value])}</span>
         <span className="statuspick__caret" aria-hidden="true">▾</span>
       </button>
       {open ? (
@@ -238,7 +241,7 @@ export function StatusPicker({ value, onChange }: { value: Status; onChange: (s:
               }}
             >
               <span className={`dot ${s}`} />
-              <span>{t(STATUS_KEY[s])}</span>
+              <span>{t(SELF_STATUS_KEY[s])}</span>
             </button>
           ))}
         </div>

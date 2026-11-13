@@ -263,3 +263,70 @@ describe("組織名冊管理畫面不寫死中文（ADR-0052 輪替提示 i18n�
     }
   });
 });
+
+describe("授權裝置確認框（ADR-0322 S5）", () => {
+  it("🔴 要提醒貼錯代碼＝授權了別人（2026-11-13 自說明文字移到確認框）", () => {
+    expect(translate("zh-Hant", "devices_authorizeConfirm")).toContain("貼錯就是授權了別人");
+    expect(translate("en", "devices_authorizeConfirm")).toContain("authorizes someone else");
+  });
+});
+
+describe("設定頁說明精簡（2026-11-13 使用者要求移除）", () => {
+  it("入群邀請不再有長說明", () => {
+    expect(Object.keys(catalog["zh-Hant"])).not.toContain("settings_groupInviteHint");
+    expect(Object.keys(catalog.en)).not.toContain("settings_groupInviteHint");
+  });
+
+  it("中繼站資料清除：拿掉「也可以現在就要求刪除…」那句，保留本機不受影響", () => {
+    const zh = translate("zh-Hant", "vanish_hint");
+    expect(zh).not.toContain("你也可以現在就要求它們立刻刪除");
+    expect(zh).toContain("本機的對話不受影響");
+    const en = translate("en", "vanish_hint");
+    expect(en).not.toContain("You can also ask them to delete everything now");
+    expect(en).toContain("Your local conversations are unaffected");
+  });
+
+  it("已讀回條：拿掉「關閉則不送、也不顯示對方的已讀（互惠）」", () => {
+    expect(translate("zh-Hant", "settings_readReceiptsHint")).toBe("開啟後，你讀取訊息會通知對方。");
+    expect(translate("en", "settings_readReceiptsHint")).toBe("When on, others are told when you read their messages.");
+  });
+
+  it("訊息保留上限不再有說明", () => {
+    expect(Object.keys(catalog["zh-Hant"])).not.toContain("settings_retentionHint");
+    expect(Object.keys(catalog.en)).not.toContain("settings_retentionHint");
+  });
+
+  it("視訊畫質：只留流量估計，拿掉「通話中可隨時調整…」", () => {
+    expect(translate("zh-Hant", "settings_videoQualityHint")).toBe(
+      "省流量約 180 MB/小時、標準約 585 MB/小時、高畫質約 1.4 GB/小時。",
+    );
+    expect(translate("en", "settings_videoQualityHint")).toBe(
+      "Data saver uses about 180 MB/hour, Standard about 585 MB/hour, High about 1.4 GB/hour.",
+    );
+  });
+
+  it("通話中繼：標題與說明改短", () => {
+    expect(translate("zh-Hant", "settings_publicTurn")).toBe("透過 relay 進行通話");
+    expect(translate("zh-Hant", "settings_publicTurnHint")).toBe("部分網路設定較嚴謹，要透過此方式才能進行通話。");
+    expect(translate("en", "settings_publicTurn")).toBe("Call via relay");
+  });
+});
+
+describe("隱身併進狀態選單（ADR-0422）", () => {
+  it("自己的狀態選項叫「隱身」；別人離線叫「離線」", () => {
+    expect(translate("zh-Hant", "status_invisible")).toBe("隱身");
+    expect(translate("en", "status_invisible")).toBe("Invisible");
+    expect(translate("zh-Hant", "status_offline")).toBe("離線");
+    expect(translate("en", "status_offline")).toBe("Offline");
+  });
+
+  it("公開聯絡方式：說明改短（2026-11-13 使用者要求）", () => {
+    expect(translate("zh-Hant", "publicReach_contactableHint")).toBe("公開慣用 relay 位置。");
+    expect(translate("en", "publicReach_contactableHint")).toBe("Publishes your preferred relay locations.");
+  });
+
+  it("設定頁不再有隱身說明", () => {
+    expect(Object.keys(catalog["zh-Hant"])).not.toContain("settings_invisibleHint");
+    expect(Object.keys(catalog.en)).not.toContain("settings_invisibleHint");
+  });
+});

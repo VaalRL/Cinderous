@@ -1335,7 +1335,7 @@ export class RelayChatBackend implements ChatBackend {
     // 不必連每個聯絡人的訊息片。真隱身（ADR-0240）照樣不訂（不把聯絡人集合交出去）。訊息片則不再訂心跳。
     if (this.isPresenceUrl(url)) {
       const all = this.contacts.map((c) => c.pubkey);
-      client.subscribe("all", this.invisible || all.length === 0 ? [] : [{ kinds: [KIND.HEARTBEAT], authors: all }]);
+      client.subscribe("all", this.hidden || all.length === 0 ? [] : [{ kinds: [KIND.HEARTBEAT], authors: all }]);
       return;
     }
     const authors = this.contacts
@@ -1350,10 +1350,10 @@ export class RelayChatBackend implements ChatBackend {
       // 你卻還在訂閱別人 → 中繼照樣知道你有哪些聯絡人。補上這一側，隱身才名副其實：
       // 既不報自己、也不看別人 → 對中繼真正消失。訊息收發（收件匣 `#p:自己`）不受影響。
       // 分片模式：心跳改走 presence 獨立層（見上），訊息片不再訂心跳。真隱身時本就不訂。
-      ...(this.shardingBase || this.invisible ? [] : [sub({ kinds: [KIND.HEARTBEAT], authors }, "n/a")]),
+      ...(this.shardingBase || this.hidden ? [] : [sub({ kinds: [KIND.HEARTBEAT], authors }, "n/a")]),
       // ADR-0245：FS 啟用時訂閱聯絡人的 EK 公告（kind 10040），學到他們當前 EK 好加密給他們。
       // 搭 presence 便車（同 authors:[聯絡人]、零新增隱私面）、隨真隱身同進退（隱身不訂）。
-      ...(this.fsEnabled() && !this.invisible && authors.length > 0 ? [sub({ kinds: [EK_ANNOUNCE_KIND], authors }, "n/a")] : []),
+      ...(this.fsEnabled() && !this.hidden && authors.length > 0 ? [sub({ kinds: [EK_ANNOUNCE_KIND], authors }, "n/a")] : []),
       // ADR-0120：typing/nudge 已 NIP-59 封裝 → 外層作者是**一次性臨時金鑰**，`authors: all`
       // 永遠不會命中。改為只靠 `#p`（與 Gift Wrap 收件箱同形）。
       //
@@ -2735,7 +2735,7 @@ export class RelayChatBackend implements ChatBackend {
 
   private beat(): void {
     // 隱身（ADR-0088 (d)）或離線：完全不廣播在線信標（對方靠 60s 判離線）。
-    if (this.invisible || this.self.status === "offline") return;
+    if (this.hidden) return;
     // (e) P2P 卸載：對已開資料通道的聯絡人，**完整**在線狀態（含 s/m/np）直送資料通道、不經 relay。
     // `hb` 自報節奏（ADR-0109）：閒置時每 5 分鐘一則；不帶節奏收端會用固定短窗誤判離線。
     const cadenceMs = this.beatInterval();
@@ -2771,7 +2771,7 @@ export class RelayChatBackend implements ChatBackend {
    *（僅在對方在線時——ephemeral 到不了離線的人，白費且多洩漏一則）。供「對方剛上線」的補送用。
    */
   private sendPresenceState(pubkey: PubkeyHex): void {
-    if (this.invisible || this.self.status === "offline") return;
+    if (this.hidden) return;
     const state = { s: this.self.status as PresenceState, m: this.self.statusMessage, np: this.nowPlaying, hb: this.beatInterval() };
     if (this.transfer.sendPresence(pubkey, state)) return; // P2P 直送
     if (this.presence.statusOf(pubkey, Date.now()) !== "online") return;
@@ -2785,7 +2785,7 @@ export class RelayChatBackend implements ChatBackend {
    * 這個小集合。改變稀疏 ＋ 集合小 → 封裝的發佈量遠小於「每 60 秒 × 全部聯絡人」（否則會炸穿免費層）。
    */
   private broadcastPresenceState(): void {
-    if (this.invisible || this.self.status === "offline") return;
+    if (this.hidden) return;
     const state = { s: this.self.status as PresenceState, m: this.self.statusMessage, np: this.nowPlaying, hb: this.beatInterval() };
     for (const c of this.contacts) {
       if (this.transfer.hasOpenChannel(c.pubkey)) continue; // P2P 由 beat 直送
@@ -3990,11 +3990,34 @@ export class RelayChatBackend implements ChatBackend {
   }
 
   setStatus(status: Status, message?: string): void {
+    const wasHidden = this.hidden;
     this.self.status = status;
     if (message !== undefined) this.self.statusMessage = message;
-    if (status !== "offline") {
+    // ADR-0422：狀態「隱身」（offline）就是真隱身——進出時與 setInvisible 同樣重建訂閱。
+    if (this.hidden !== wasHidden) this.applyHidden();
+    else if (!this.hidden) {
       this.beat(); // 存活信標（P2P 完整狀態 + relay 無內容信標）
       this.broadcastPresenceState(); // ADR-0129：改變的狀態封裝給在線✕無P2P 的聯絡人
+    }
+  }
+
+  /**
+   * 真隱身是否生效（ADR-0240＋ADR-0422）：設定旗標（離職接管 ADR-0180）**或**狀態選「隱身」。
+   * 生效時既不廣播自己，也不訂閱聯絡人心跳（聯絡人集合不交給中繼）。
+   */
+  private get hidden(): boolean {
+    return this.invisible || this.self.status === "offline";
+  }
+
+  /** 隱身進出的共同動作：重建訂閱；進入時清 presence 立即變灰，離開時重新廣播。 */
+  private applyHidden(): void {
+    this.resubscribe();
+    if (this.hidden) {
+      this.presence.clear();
+      this.emitContacts();
+    } else {
+      this.beat();
+      this.broadcastPresenceState(); // 復出：重新封裝送出當下狀態（ADR-0129）
     }
   }
 
@@ -4004,17 +4027,11 @@ export class RelayChatBackend implements ChatBackend {
    * 關＝立即復出（重掛心跳訂閱＋重新廣播）。
    */
   setInvisible(invisible: boolean): void {
+    const wasHidden = this.hidden;
     this.invisible = invisible;
     // 重建訂閱（ADR-0240）：隱身時移除心跳 filter（聯絡人不上中繼）、復出時加回。
-    this.resubscribe();
-    if (invisible) {
-      // 不再收心跳 → 立即讓所有聯絡人在我眼中變離線（不等 60s 逾時），清乾淨再重繪。
-      this.presence.clear();
-      this.emitContacts();
-    } else {
-      this.beat();
-      this.broadcastPresenceState(); // 復出：重新封裝送出當下狀態（ADR-0129）
-    }
+    // 不再收心跳 → 立即讓所有聯絡人在我眼中變離線（不等 60s 逾時），清乾淨再重繪。
+    if (this.hidden !== wasHidden) this.applyHidden();
   }
 
   setNowPlaying(text: string): void {

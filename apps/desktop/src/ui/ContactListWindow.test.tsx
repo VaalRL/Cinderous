@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { I18nProvider } from "../i18n.js";
 import { ThemeProvider } from "../theme.js";
 import type { Contact, Group, Self, Status } from "@cinderous/engine";
-import { ContactListWindow, groupByStatus, shortId } from "./ContactListWindow.js";
+import { ContactListWindow, StatusPicker, groupByStatus, shortId } from "./ContactListWindow.js";
 
 const self: Self = { pubkey: "aa", name: "我", status: "online", statusMessage: "" };
 const groups: Group[] = [{ id: "g1", name: "工作群", admin: "aa", members: ["aa", "bb"] }];
@@ -207,5 +207,26 @@ describe("排序切換 ＋ 可收合標頭（ADR-0215）", () => {
     } finally {
       delete (globalThis as Record<string, unknown>).localStorage;
     }
+  });
+});
+
+describe("隱身併進狀態選單（ADR-0422）", () => {
+  it("🔴 自己選了隱身：狀態鈕顯示「隱身」", () => {
+    const html = renderToStaticMarkup(
+      <I18nProvider locale="zh-Hant">
+        <StatusPicker value="offline" onChange={() => {}} />
+      </I18nProvider>,
+    );
+    expect(html).toContain("隱身");
+  });
+
+  it("別人離線就叫「離線」，不是「隱身」", () => {
+    const html = renderToStaticMarkup(
+      <I18nProvider locale="zh-Hant">
+        <StatusPicker value="online" onChange={() => {}} />
+      </I18nProvider>,
+    );
+    expect(html).not.toContain("隱身");
+    expect(groupByStatus([{ pubkey: "bb", name: "Bob", status: "offline", statusMessage: "" } as Contact]).map((s) => s.status)).toEqual(["offline"]);
   });
 });

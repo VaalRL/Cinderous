@@ -12,14 +12,16 @@ import type { Status } from "@cinderous/engine";
 import { pickAvatarImage } from "../native/avatar.js";
 
 /** 狀態鍵（與 MobileApp／SettingsScreen 同一組 i18n 鍵）。 */
-const STATUS_KEY: Record<"online" | "away" | "busy", MessageKey> = {
+const STATUS_KEY: Record<Status, MessageKey> = {
   online: "status_online",
   away: "status_away",
   busy: "status_busy",
+  // ADR-0422：自己選 offline＝真隱身（ADR-0240），設定頁不再另有開關。
+  offline: "status_invisible",
 };
 
 /** 可手動選的狀態。`offline`／隱身不在此列——前者由連線決定，後者是獨立開關（設定內）。 */
-export const PICKABLE_STATUS = ["online", "away", "busy"] as const;
+export const PICKABLE_STATUS = ["online", "away", "busy", "offline"] as const;
 
 function segStyles(tk: ThemeTokens) {
   return StyleSheet.create({

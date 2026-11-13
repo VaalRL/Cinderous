@@ -19,8 +19,6 @@ const base = {
   onLocale: () => {},
   accent: null,
   onAccent: () => {},
-  invisible: false,
-  onInvisible: () => {},
   onLogout: () => {},
 };
 
@@ -113,5 +111,11 @@ describe("行動端金鑰保護等級（ADR-0297 §6 紅線）", () => {
 
   it("原生於金鑰庫者不掛那句（沒發生過的事不要嚇人）", () => {
     expect(render({ devices, deviceKeyTier: "keystore" })).not.toContain("key-tier-was-plain");
+  });
+
+  it("金鑰庫等級不顯示等級區塊（使用者要求移除，2026-11-13）", () => {
+    const html = render({ devices, deviceKeyTier: "keystore" });
+    expect(html).not.toContain('data-testid="key-tier-keystore"');
+    expect(html).not.toContain("這台的金鑰保護等級");
   });
 });

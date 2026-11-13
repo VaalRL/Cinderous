@@ -3354,6 +3354,71 @@ describe("真隱身：隱身時也停止訂閱聯絡人心跳（ADR-0240）", ()
   });
 });
 
+describe("狀態選「隱身」就是真隱身（ADR-0422：隱身併進狀態選單）", () => {
+  const hasHb = (filters: unknown[]) =>
+    filters.some((f) => (f as { kinds?: number[] }).kinds?.includes(KIND.HEARTBEAT));
+  const spyReqs = (net: ReturnType<typeof createInMemoryRelayNetwork>, id: string, reqs: unknown[][]) =>
+    (h: RelayClientHandlers) => {
+      const c = net.connect(id, h);
+      const orig = c.subscribe.bind(c);
+      c.subscribe = (subId: string, filters: unknown[]) => {
+        reqs.push(filters);
+        orig(subId, filters as never);
+      };
+      return c;
+    };
+
+  it("🔴 setStatus(offline) → 不再送聯絡人心跳訂閱；切回線上 → 加回", () => {
+    const reqs: unknown[][] = [];
+    const net = createInMemoryRelayNetwork();
+    const a = new RelayChatBackend(new MemoryStorage(), spyReqs(net, "a", reqs), "Alice");
+    a.start(noop);
+    a.addContact(npubEncode(getPublicKey(generateSecretKey())));
+    expect(hasHb(reqs.at(-1)!)).toBe(true);
+
+    reqs.length = 0;
+    a.setStatus("offline");
+    expect(reqs.length).toBeGreaterThan(0);
+    expect(hasHb(reqs.at(-1)!)).toBe(false);
+
+    reqs.length = 0;
+    a.setStatus("busy");
+    expect(hasHb(reqs.at(-1)!)).toBe(true);
+    a.stop();
+  });
+
+  it("🔴 以隱身狀態啟動：第一次訂閱就不帶聯絡人心跳", () => {
+    const reqs: unknown[][] = [];
+    const net = createInMemoryRelayNetwork();
+    const storage = new MemoryStorage();
+    const a = new RelayChatBackend(storage, spyReqs(net, "a", reqs), "Alice", { initialStatus: "offline" });
+    a.start(noop);
+    a.addContact(npubEncode(getPublicKey(generateSecretKey())));
+    expect(reqs.length).toBeGreaterThan(0);
+    expect(reqs.some(hasHb)).toBe(false);
+    a.stop();
+  });
+
+  it("選隱身立即讓聯絡人在我眼中變離線", () => {
+    const net = createInMemoryRelayNetwork();
+    const a = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("a", h), "Alice");
+    const b = new RelayChatBackend(new MemoryStorage(), (h) => net.connect("b", h), "Bob");
+    const aSees: { pubkey: string; status: string }[][] = [];
+    a.start({ ...noop, onContacts: (cs) => aSees.push(cs.map((c) => ({ pubkey: c.pubkey, status: c.status }))) });
+    b.start(noop);
+    a.addContact(b.selfNpub);
+    b.acceptRequest(a.self.pubkey);
+    b.setStatus("online", "在忙");
+    const statusOf = (pk: string) => aSees[aSees.length - 1]?.find((c) => c.pubkey === pk)?.status;
+    expect(statusOf(b.self.pubkey)).toBe("online");
+
+    a.setStatus("offline");
+    expect(statusOf(b.self.pubkey)).toBe("offline");
+    a.stop();
+    b.stop();
+  });
+});
+
 describe("中繼分片客戶端（ADR-0241）", () => {
   const base = "wss://relay";
   // 分片模式應走 connectorFor 建自己的片；若誤用注入的 connector 就大聲失敗。

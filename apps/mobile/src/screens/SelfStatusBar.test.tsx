@@ -101,3 +101,16 @@ describe("ChatsListScreen 接上狀態列（ADR-0278）", () => {
     expect(html).not.toContain('data-testid="self-status-bar"');
   });
 });
+
+describe("隱身併進狀態選單（ADR-0422）", () => {
+  it("🔴 第四顆狀態鈕是「隱身」", () => {
+    const html = renderToStaticMarkup(<SelfStatusBar {...base} locale="zh-Hant" />);
+    expect(html).toContain('data-testid="status-offline"');
+    expect(html).toContain("隱身");
+  });
+
+  it("選了隱身：狀態點是離線灰", () => {
+    const html = renderToStaticMarkup(<SelfStatusBar {...base} status="offline" locale="zh-Hant" />);
+    expect(styleOf(html, "self-status-dot")).toContain(rnw(STATUS_COLORS.offline));
+  });
+});

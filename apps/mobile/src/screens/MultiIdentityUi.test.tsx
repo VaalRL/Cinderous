@@ -17,8 +17,6 @@ const settingsBase = {
   onLocale: () => {},
   accent: null,
   onAccent: () => {},
-  invisible: false,
-  onInvisible: () => {},
   onLogout: () => {},
 };
 

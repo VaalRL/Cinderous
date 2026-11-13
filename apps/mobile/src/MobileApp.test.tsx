@@ -38,8 +38,6 @@ describe("行動端 app 殼與畫面（ADR-0085）", () => {
         onLocale={() => {}}
         accent={null}
         onAccent={() => {}}
-        invisible={false}
-        onInvisible={() => {}}
         onLogout={() => {}}
       />,
     );
@@ -53,7 +51,7 @@ describe("行動端 app 殼與畫面（ADR-0085）", () => {
     const withQueue = renderToStaticMarkup(
       <SettingsScreen
         selfName="夜" selfNpub="npub1" selfNsec="nsec1" relayUrl="wss://r" theme="light" onTheme={() => {}}
-        locale="zh-Hant" onLocale={() => {}} accent={null} onAccent={() => {}} invisible={false} onInvisible={() => {}} onLogout={() => {}}
+        locale="zh-Hant" onLocale={() => {}} accent={null} onAccent={() => {}} onLogout={() => {}}
         slotQueue={[{ id: "s1", name: "報表.pdf", status: "failed" }]}
         onSlotRetry={() => {}}
         onSlotRemove={() => {}}

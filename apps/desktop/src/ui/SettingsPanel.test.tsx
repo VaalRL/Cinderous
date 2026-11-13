@@ -46,6 +46,7 @@ describe("無障礙設定（ADR-0253）", () => {
   it("外觀分頁有無障礙區：高對比切換（預設關）＋五檔尺寸（預設 100% 選中）", () => {
     const out = render();
     expect(out).toContain('data-testid="a11y-settings"');
+    expect(out).not.toContain("WCAG"); // 說明文字已移除（使用者要求，2026-11-13）
     const toggleAt = out.indexOf('data-testid="a11y-contrast-toggle"');
     expect(toggleAt).toBeGreaterThanOrEqual(0);
     expect(out.slice(toggleAt, toggleAt + 90)).toContain('aria-pressed="false"'); // 預設關
@@ -446,6 +447,8 @@ describe("視窗外框設定（ADR-0150）", () => {
     }
     expect(out).not.toContain('draggable="true"'); // HTML5 DnD 在 Tauri 失效，禁用
     expect(out).toContain('data-testid="titlebar-autohide"'); // 平時隱藏、滑鼠碰到才顯示
+    expect(out).toContain("自動隱藏標題列");
+    expect(out).not.toContain("平時隱藏整條標題列");
   });
 
   it("按鈕風格選擇（ADR-0167）：四種風格 chip＋預設 flat 為選中", () => {
@@ -708,13 +711,13 @@ describe("入群邀請閘門的設定（ADR-0317）", () => {
     expect(render({ initialTab: "privacy" })).not.toContain('data-testid="group-invite-anyone"');
   });
 
-  it("關閉時＝只有聯絡人可以把我加進群組，且說明講清楚封鎖優先", () => {
+  it("關閉時不勾選；長說明已移除（2026-11-13 使用者要求，只留開關文字）", () => {
     const html = render({ initialTab: "privacy", groupInviteFromAnyone: false, onToggleGroupInvite: () => {} });
     const at = html.indexOf('data-testid="group-invite-anyone"');
     expect(at).toBeGreaterThanOrEqual(0);
     expect(html.slice(at - 120, at + 120)).not.toContain("checked");
-    expect(html).toContain("只有你的聯絡人");
-    expect(html).toContain("封鎖");
+    expect(html).toContain("允許任何人把我加進群組");
+    expect(html).not.toContain("只有你的聯絡人");
   });
 
   it("開啟時勾選", () => {
@@ -739,6 +742,8 @@ describe("我的裝置（ADR-0321 E-lite）", () => {
     expect(html).toContain('data-testid="device-list"');
     expect(html).toContain("aabbccdd"); // 縮寫 id
     expect(html).toContain("這台");
+    expect(html).toContain("加入日期"); // 2026-11-13 使用者選定的字樣（取代「首次看到」）
+    expect(html).not.toContain("首次看到");
   });
 
   it("🔴 限制揭露是驗收條件：必須說出「看到只有一台不等於沒有人在讀」", () => {
@@ -792,10 +797,10 @@ describe("撤銷三態與移除入口（ADR-0322 S2／S3）", () => {
     expect(html).toContain("請稍候");
   });
 
-  it("生效時說明後果（歷史不受影響）", () => {
+  it("生效時不再另外說明（後果寫在移除確認框裡；使用者要求移除，2026-11-13）", () => {
     const html = render({ ...base, revocation: { state: "active" as const } });
-    expect(html).toContain('data-testid="revocation-active"');
-    expect(html).toContain("歷史不受影響");
+    expect(html).not.toContain('data-testid="revocation-active"');
+    expect(html).not.toContain("移除裝置後，它將無法讀取");
   });
 
   it("🔴 移除入口只給別台，不給「這台」", () => {
@@ -846,12 +851,15 @@ describe("手動授權裝置（ADR-0322 S5）", () => {
     const html = render({ ...base, selfDevicePk: pk });
     expect(html).toContain('data-testid="my-device-code"');
     expect(html).toContain(pk);
-    expect(html).toContain("比對兩邊顯示的字元");
+    expect(html).toContain("貼上這串代碼並授權。");
+    expect(html).not.toContain("代碼不是祕密");
   });
 
   it("🔴 已在清單上 → 顯示授權欄位；按鈕預設停用（代碼未填）", () => {
     const html = render({ ...base, selfDevicePk: pk, onAuthorizeDevice: () => {}, canAuthorizeDevice: true });
     expect(html).toContain('data-testid="authorize-input"');
+    expect(html).toContain("貼上新裝置顯示的裝置代碼來進行新裝置授權。");
+    expect(html).not.toContain("沒碰到你這台");
     const at = html.indexOf('data-testid="authorize-go"');
     expect(html.slice(at - 100, at + 100)).toContain("disabled");
   });
@@ -910,14 +918,15 @@ describe("金鑰保護等級的誠實揭露（ADR-0297 §6 紅線）", () => {
     expect(html).toContain("「移除裝置」擋不住他");
   });
 
-  it("🔴 就算到了最高級也不得宣稱「裝置被入侵也安全」（ADR-0297 §5 的界線）", () => {
+  it("最高級（金鑰庫）不顯示等級區塊（使用者要求移除，2026-11-13）；較弱等級照常警告", () => {
     const html = render({ ...base, deviceKeyTier: "keystore" as const });
-    expect(html).toContain('data-testid="key-tier-keystore"');
-    expect(html).toContain("不代表裝置被入侵時也安全");
-    // 🔴 而且要說對「為什麼不安全」：我們是把金鑰**取出來用**，不是請晶片代簽
-    // ——後者的說法會讓人以為金鑰不出晶片，那高估了實作（ADR-0323 §5-1 校正）。
-    expect(html).toContain("取出來用");
-    expect(html).not.toContain("請金鑰庫代簽");
+    expect(html).not.toContain('data-testid="key-tier-keystore"');
+    expect(html).not.toContain("這台的金鑰保護等級");
+    expect(html).not.toContain("存在作業系統金鑰庫");
+  });
+
+  it("較弱等級仍有標題", () => {
+    expect(render({ ...base, deviceKeyTier: "encrypted" as const })).toContain("這台的金鑰保護等級");
   });
 
   it("🔴 encrypted 不得宣稱有密碼保護——包裹金鑰是軟體保管的，沒有使用者祕密參與", () => {
