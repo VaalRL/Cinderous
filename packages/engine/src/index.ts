@@ -45,5 +45,6 @@ export * from "./storage/device-key.js";
 export * from "./storage/web-device-key.js";
 export * from "./storage/export.js";
 export * from "./storage/wipe-namespace.js"; // ADR-0202：移除身分＝刪本機資料（兩端共用）
+export * from "./diag-log.js"; // ADR-0421：本機錯誤紀錄（只存在這台裝置）
 // ── 前端擴充縫（K4 實驗性；僅註冊機制，第三方載入待 ADR）──
 export * from "./extensions.js";

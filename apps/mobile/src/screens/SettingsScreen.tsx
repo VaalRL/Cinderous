@@ -1,6 +1,6 @@
 // 行動端設定分頁（ADR-0087）：身分備份（npub/nsec）、外觀（主題/主色/語言）、中繼站、登出。
 // 主題/主色/語言由 MobileApp 掌管、經 callback 即時切換；色彩吃 @cinderous/theme。
-import { useMemo, useState } from "react";
+import { useMemo, useState, useSyncExternalStore } from "react";
 import type { CloudSyncMode, Status } from "@cinderous/engine";
 import { type Locale, type MessageKey, type TranslateParams, translate } from "@cinderous/i18n";
 import { resolveTheme, type Theme, type ThemeTokens } from "@cinderous/theme";
@@ -22,6 +22,7 @@ const SLOT_STATUS_KEY: Record<"pending" | "sending" | "done" | "failed", Message
 import { Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native-web";
 import { avatarFromUrl, pickAvatarImage } from "../native/avatar.js";
 import { copyText } from "../native/clipboard.js";
+import { diagExportText, diagLog } from "../native/diag.js";
 import { isNativeShell } from "../native/platform.js";
 import { StatusSegments } from "./SelfStatusBar.js";
 import { rich } from "./rich-text.js";
@@ -321,6 +322,9 @@ export function SettingsScreen({
   const [bkPw2, setBkPw2] = useState("");
   const [bkCode, setBkCode] = useState("");
   const [bkCopied, setBkCopied] = useState(false);
+  // 診斷紀錄（ADR-0421）：只存在這台裝置；筆數即時跟著紀錄變。
+  const diagCount = useSyncExternalStore(diagLog.subscribe, () => diagLog.list().length, () => diagLog.list().length);
+  const [diagCopied, setDiagCopied] = useState(false);
   // 正在聽（ADR-0168）：草稿本地暫存，離開輸入框（送出/失焦）才廣播——不想把打到一半的
   // 歌名一個字一個字廣播出去。狀態文字則照桌面即時（每次改動就更新，引擎自會節流心跳）。
   const [npDraft, setNpDraft] = useState(nowPlaying ?? "");
@@ -1352,6 +1356,37 @@ export function SettingsScreen({
         <View style={styles.section} testID="about-section">
           <Text style={styles.sectionTitle}>{t("settings_aboutVersion")}</Text>
           <Text style={styles.value} selectable testID="about-version">{APP_VERSION}</Text>
+        </View>
+
+        {/* 診斷紀錄（ADR-0421）：App 出錯時記在這台裝置（已遮罩金鑰與身分），按「複製」才交出去。 */}
+        <View style={styles.section} testID="diag-section">
+          <Text style={styles.sectionTitle}>{t("diag_title")}</Text>
+          <Text style={styles.label}>{t("diag_hint")}</Text>
+          <View style={styles.rowSeg}>
+            <Text style={[styles.value, { flexGrow: 1, alignSelf: "center" }]} testID="diag-count">
+              {t("diag_count", { n: diagCount })}
+            </Text>
+            <Pressable
+              accessibilityRole="button"
+              testID="diag-copy"
+              onPress={() => void diagExportText().then(copyText).then(setDiagCopied)}
+              style={styles.reveal}
+            >
+              <Text style={styles.revealText}>{diagCopied ? t("diag_copied") : t("diag_copy")}</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              testID="diag-clear"
+              disabled={diagCount === 0}
+              onPress={() => {
+                setDiagCopied(false);
+                diagLog.clear();
+              }}
+              style={[styles.reveal, diagCount === 0 ? { opacity: 0.5 } : null]}
+            >
+              <Text style={styles.revealText}>{t("diag_clear")}</Text>
+            </Pressable>
+          </View>
         </View>
 
         <Pressable style={styles.logout} accessibilityRole="button" testID="logout" onPress={onLogout}>

@@ -775,6 +775,16 @@ export interface Messages {
   settings_updateDownload: string;
   settings_updateCheck: string;
   settings_updateCheckHint: string;
+  diag_title: string;
+  diag_hint: string;
+  diag_count: string;
+  diag_copy: string;
+  diag_copied: string;
+  diag_clear: string;
+  crash_title: string;
+  crash_body: string;
+  crash_reload: string;
+  crash_copy: string;
   /** 統一自訂對話框（ADR-0139）。 */
   dialog_titleConfirm: string;
   dialog_titleAlert: string;
@@ -1843,6 +1853,16 @@ const zhHant: Messages = {
   settings_updateDownload: "前往下載",
   settings_updateCheck: "自動檢查更新",
   settings_updateCheckHint: "僅查詢版本號、不送任何資料；可關閉。",
+  diag_title: "診斷紀錄",
+  diag_hint: "只存在這台裝置，不會自動上傳。",
+  diag_count: "{n} 筆",
+  diag_copy: "複製",
+  diag_copied: "已複製",
+  diag_clear: "清除",
+  crash_title: "畫面出錯了",
+  crash_body: "錯誤已記錄在本機的診斷紀錄。",
+  crash_reload: "重新載入",
+  crash_copy: "複製錯誤資訊",
   dialog_titleConfirm: "確認",
   dialog_titleAlert: "提示",
   dialog_titlePrompt: "輸入",
@@ -2835,6 +2855,16 @@ const en: Messages = {
   settings_updateDownload: "Download",
   settings_updateCheck: "Check for updates automatically",
   settings_updateCheckHint: "Only checks the version number; sends no data. Can be disabled.",
+  diag_title: "Diagnostic log",
+  diag_hint: "Stays on this device; never uploaded automatically.",
+  diag_count: "{n} entries",
+  diag_copy: "Copy",
+  diag_copied: "Copied",
+  diag_clear: "Clear",
+  crash_title: "Something went wrong",
+  crash_body: "The error was saved to this device's diagnostic log.",
+  crash_reload: "Reload",
+  crash_copy: "Copy error details",
   dialog_titleConfirm: "Confirm",
   dialog_titleAlert: "Notice",
   dialog_titlePrompt: "Enter",

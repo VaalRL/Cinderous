@@ -1443,3 +1443,21 @@ button:disabled { opacity: .5; cursor: default; filter: none; }
 .member__fs { margin-left: auto; font-size: 11px; color: var(--muted); white-space: nowrap; }
 .member__fs--known { color: #2f9e44; }
 .member__fs--lost { color: #c0392b; font-weight: 600; }
+
+/* ADR-0421：錯誤畫面（不依賴任何 Provider；樣式只用樣式表內建變數）＋設定的診斷紀錄列 */
+.crash {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 24px;
+  text-align: center;
+  color: var(--ink);
+}
+.crash h2 { margin: 0; font-size: 18px; }
+.crash p { margin: 0; opacity: .8; }
+.crash__actions { display: flex; gap: 8px; margin-top: 8px; }
+.diag__row { display: flex; align-items: center; gap: 8px; }
+.diag__row span { margin-right: auto; }
