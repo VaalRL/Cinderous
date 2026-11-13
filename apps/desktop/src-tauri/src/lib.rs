@@ -36,3 +36,5 @@ pub mod inbox;
 pub mod aikey;
 // AI 改寫的串流回應解析（ADR-0416）：純 std＋serde_json，無 feature 閘門。
 pub mod aistream;
+// 原生端本機錯誤紀錄（ADR-0421）：panic 寫進 App 的 log 資料夾、遮罩後才落盤；純 std。
+pub mod diaglog;

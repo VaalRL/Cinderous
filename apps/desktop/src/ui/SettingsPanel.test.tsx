@@ -8,6 +8,7 @@ import { ThemeProvider } from "../theme.js";
 import { relayChangeReady, SettingsPanel, type SettingsPanelProps } from "./SettingsPanel.js";
 import { CHIME_PRESETS } from "./ringtone.js";
 import { TitlebarProvider } from "../titlebar.js";
+import { diagLog } from "../native/diag.js";
 
 describe("relayChangeReady（更換輸入驗證）", () => {
   it("ws(s):// 且與現值不同才可套用", () => {
@@ -1002,5 +1003,29 @@ describe("背景收件開關（ADR-0415 B）", () => {
     expect(out).not.toMatch(/data-testid="bg-inbox-toggle"[^>]*checked/);
     expect(out).toContain("背景也收其他身分的新訊息");
     expect(render({ initialTab: "privacy", notifications: true })).not.toContain('data-testid="bg-inbox-toggle"');
+  });
+});
+
+describe("診斷紀錄（ADR-0421：只存在本機）", () => {
+  afterEach(() => diagLog.clear());
+
+  it("關於分頁顯示筆數、複製與清除；其他分頁沒有", () => {
+    const out = render({ initialTab: "about" });
+    expect(out).toContain('data-testid="diag"');
+    expect(out).toContain("診斷紀錄");
+    expect(out).toContain("只存在這台裝置");
+    expect(out).toContain('data-testid="diag-count"');
+    expect(out).toMatch(/data-testid="diag-count"[^>]*>0 筆</);
+    expect(out).toContain('data-testid="diag-copy"');
+    expect(out).toContain('data-testid="diag-clear"');
+    expect(render({ initialTab: "appearance" })).not.toContain('data-testid="diag"');
+  });
+
+  it("有紀錄 ⇒ 筆數跟著變；沒紀錄時清除鈕停用", () => {
+    expect(render({ initialTab: "about" })).toMatch(/data-testid="diag-clear"[^>]*disabled/);
+    diagLog.record("window", new Error("x"));
+    const out = render({ initialTab: "about" });
+    expect(out).toMatch(/data-testid="diag-count"[^>]*>1 筆</);
+    expect(out).not.toMatch(/data-testid="diag-clear"[^>]*disabled/);
   });
 });

@@ -11,10 +11,16 @@
 //  - `preview.html` → `preview.tsx`：開發預覽台保留，但只在 `vite dev` 服務得到，
 //    **不列入 build 輸入**，故不會進 `dist/`、也就不會被打進 APK。
 import { createRoot } from "react-dom/client";
-import { openDeviceKey, setDeviceKeyVault, sweepInboxFiles, webDeviceKeyVault } from "@cinderous/engine";
+import { installErrorCapture, openDeviceKey, setDeviceKeyVault, sweepInboxFiles, webDeviceKeyVault } from "@cinderous/engine";
 import { DEFAULT_RELAY } from "./backend.js";
+import { readLocale } from "./device-prefs.js";
+import { diagExportText, diagLog } from "./native/diag.js";
+import { ErrorBoundary } from "./screens/ErrorBoundary.js";
 import { MobileApp } from "./MobileApp.js";
 import { androidDeviceKeyVault } from "./native/device-keystore.js";
+
+// ADR-0421：未攔到的例外／promise rejection 記進本機診斷紀錄（遮罩後只存在這台裝置）。
+installErrorCapture(window, diagLog);
 
 const el = document.getElementById("root");
 // 預設明亮（ADR-0248：所有版本**初次登入**一律明亮模式）——「初次」＝沒存過偏好。
@@ -34,6 +40,10 @@ if (el) {
   // 讓它擋住第一幀就是為了一件使用者不在乎的事延後整個 App。
   void sweepInboxFiles();
   void openDeviceKey().finally(() => {
-    createRoot(el).render(<MobileApp initialTheme="light" relayUrl={DEFAULT_RELAY} />);
+    createRoot(el).render(
+      <ErrorBoundary log={diagLog} locale={readLocale("zh-Hant")} exportText={diagExportText}>
+        <MobileApp initialTheme="light" relayUrl={DEFAULT_RELAY} />
+      </ErrorBoundary>,
+    );
   });
 }

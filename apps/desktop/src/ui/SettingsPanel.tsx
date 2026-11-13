@@ -7,7 +7,9 @@ import {
   type PolicyNotice,
   type VideoQuality,
 } from "@cinderous/core";
-import { useEffect, useState, type PointerEvent as ReactPointerEvent } from "react";
+import { useEffect, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent } from "react";
+import { diagClearAll, diagExportText, diagLog } from "../native/diag.js";
+import { copyText } from "../native/clipboard.js";
 import { ACCENT_PRESETS, ACCENT_PRESETS_CB, useAccent } from "../accent.js";
 import type { MessageKey } from "@cinderous/i18n";
 import { useContrast } from "../contrast.js";
@@ -1473,6 +1475,43 @@ function ThreatSettings({ value }: { value: NonNullable<SettingsPanelProps["thre
   );
 }
 
+/** 診斷紀錄（ADR-0421）：只存在這台裝置；使用者按「複製」才交出去（已遮罩）。 */
+function DiagSettings(): JSX.Element {
+  const { t } = useI18n();
+  const count = useSyncExternalStore(
+    diagLog.subscribe,
+    () => diagLog.list().length,
+    () => diagLog.list().length,
+  );
+  const [copied, setCopied] = useState(false);
+  const copy = async (): Promise<void> => {
+    setCopied(await copyText(await diagExportText()));
+  };
+  return (
+    <section className="settings__sec" data-testid="diag">
+      <h4>{t("diag_title")}</h4>
+      <p className="settings__hint">{t("diag_hint")}</p>
+      <div className="diag__row">
+        <span data-testid="diag-count">{t("diag_count", { n: count })}</span>
+        <button type="button" data-testid="diag-copy" onClick={() => void copy()}>
+          {copied ? t("diag_copied") : t("diag_copy")}
+        </button>
+        <button
+          type="button"
+          data-testid="diag-clear"
+          disabled={count === 0}
+          onClick={() => {
+            setCopied(false);
+            void diagClearAll();
+          }}
+        >
+          {t("diag_clear")}
+        </button>
+      </div>
+    </section>
+  );
+}
+
 /** 關於／版本區（ADR-0227 P4）：版號（build-time 注入）＋依語系顯示本版更新記錄。 */
 /** ＋更新偵測（ADR-0228 P3）：可更新徽章＋前往下載＋自動檢查 opt-in 開關。 */
 function AboutSettings(props: {
@@ -1609,6 +1648,7 @@ export function SettingsPanel(props: SettingsPanelProps): JSX.Element {
               {...(props.onToggleUpdateCheck ? { onToggleUpdateCheck: props.onToggleUpdateCheck } : {})}
             />
           ) : null}
+          {tab === "about" ? <DiagSettings /> : null}
           {tab === "relay" ? (
           <section className="settings__sec">
             <h4>{t("settings_relayUrl")}</h4>

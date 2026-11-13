@@ -20,6 +20,7 @@ use tauri::{
 /// 顯示並聚焦主視窗（系統匣點擊/選單用）。
 // 檔案安全原語（ADR-0119）：檔名白名單、原子寫入、毀損隔離。**住在 lib**，因為這個 bin
 // target 需要 `tauri-app` feature，`cargo test` 永遠編不到它——安全關鍵的東西不能沒測試。
+use cinder_desktop::diaglog; // ADR-0421：本機錯誤紀錄
 use cinder_desktop::filestream; // ADR-0355：合集送出的走訪與定位讀取
 use cinder_desktop::inbox; // ADR-0349：收檔串流落盤（邏輯在 lib，此處只留薄殼）
 use cinder_desktop::partfile::{atomic_write, quarantine, sanitize_filename, valid_part};
@@ -1707,6 +1708,20 @@ fn hide_to_tray(app: tauri::AppHandle) {
     }
 }
 
+/// 原生端本機錯誤紀錄（ADR-0421）：讀最後一段，給設定頁「複製診斷紀錄」併進匯出文字。
+#[tauri::command]
+fn diag_native_log() -> String {
+    diaglog::log_path().map(|p| diaglog::read_tail(p, diaglog::READ_MAX)).unwrap_or_default()
+}
+
+/// 清除原生端本機錯誤紀錄（ADR-0421）。
+#[tauri::command]
+fn diag_native_clear() {
+    if let Some(p) = diaglog::log_path() {
+        let _ = std::fs::remove_file(p);
+    }
+}
+
 /// 目前系統正在播放的媒體（ADR-0252）：Windows GSMTC 讀「播放中」工作階段的曲目。
 /// 純本機查詢、零網路；非 Windows／無播放／暫停中一律回 None（前端顯示偵測中）。
 #[tauri::command]
@@ -1784,6 +1799,10 @@ fn main() {
             }
         })
         .setup(|app| {
+            // ADR-0421：panic 寫進本機紀錄（App 的 log 資料夾，遮罩後落盤、不上傳）。
+            if let Ok(dir) = app.path().app_log_dir() {
+                diaglog::install_panic_hook(dir.join("native-errors.log"), env!("CARGO_PKG_VERSION"));
+            }
             // 標題列顯示版本——一眼確認執行中的 build 版本（診斷用；亦為透明）。
             if let Some(w) = app.get_webview_window("main") {
                 let _ = w.set_title(&format!("Cinderous v{}", env!("CARGO_PKG_VERSION")));
@@ -1877,7 +1896,9 @@ fn main() {
             append_slot_index,
             quit_app,
             hide_to_tray,
-            now_playing_detect
+            now_playing_detect,
+            diag_native_log,
+            diag_native_clear
         ])
         .run(tauri::generate_context!())
         .expect("執行 Tauri 應用程式時發生錯誤");
