@@ -1,5 +1,30 @@
 [
   {
+    "version": "0.0.24",
+    "date": "2026-11-13",
+    "released": true,
+    "zh": [
+      "🙈 **隱身改到狀態選單。** 狀態選單現在是「線上／離開／忙碌／隱身」，設定頁的隱身開關拿掉了。選了「隱身」就是完整隱身：不廣播自己在線，也不向中繼查詢聯絡人誰在線，中繼拿不到你的聯絡人名單；代價是隱身時看不到聯絡人的綠點，訊息收發照常。⚠ 以前選「顯示為離線」的人，現在也看不到聯絡人在線。桌面版原本在設定頁開了隱身的，升級後仍以隱身上線。別人離線時顯示「離線」。",
+      "🧯 **畫面出錯不再只剩底色。** 介面丟例外時改顯示錯誤畫面，可以重新載入或複製錯誤資訊。錯誤記在**只存在這台裝置**的診斷紀錄（設定 → 關於），寫入前會遮掉 nsec／npub、長金鑰、email 與網址參數，從不自動上傳，你按「複製」才會交出去。桌面版的原生當機也會記下來。",
+      "✨ **AI 改寫邊產生邊顯示，可以中途取消。** 產生完才出現「採用」，不會採用到半截文字。本機 Ollama 的改寫關掉模型的「思考」步驟，第一個字從約一分鐘縮短到幾秒。",
+      "🏢 **組織名冊可以設共同管理者。** 擁有者在名冊管理裡列出共同管理者（最多 16 位），他們也能加人、移除人、改政策；只有擁有者能改共同管理者名單，共同管理者也不能把彼此移出組織。成員的裝置要更新到這一版，才會接受共同管理者簽的名冊。",
+      "🔧 **修正：** 陌生人的第一則訊息不再跳通知（它會進「訊息請求」）；說明文字裡的 `**粗體**` 不再露出星號；桌面版連 `ws://` 中繼（本機或區網自架）時，連線診斷與贊助資訊不再被擋。",
+      "🔒 桌面版與網頁版的內容安全政策（CSP）不再允許行內樣式，少一條被注入樣式的途徑。",
+      "🎨 **設定頁精簡。** 佈局選項改叫「預設／三欄式」，外觀分頁右側有即時預覽；多段冗長說明拿掉或改短；「通話中繼保底」改叫「透過 relay 進行通話」。",
+      "ℹ️ 已知：Android 版是測試版（debug 簽章；開了 USB 偵錯的人讀得到它的記憶體，真正在意的對話請不要用它）；桌面版與 `cinder.mjs` 都沒有程式碼簽章（Windows SmartScreen 會警告；`cinder.mjs` 只附 sha256 校驗檔）。錯誤畫面在深色主題下的樣子、桌面原生當機紀錄尚未在實機上確認。"
+    ],
+    "en": [
+      "🙈 **Invisible moved to the status menu.** The status menu is now Online / Away / Busy / Invisible, and the Invisible switch in Settings is gone. Choosing Invisible is full invisibility: you don't broadcast that you're online and don't ask the relay which contacts are online, so the relay never gets your contact list; the trade-off is that you can't see contacts' online dots while invisible. Messaging works normally. ⚠ If you used “Appear offline” before, you now can't see contacts online either. On desktop, if you had Invisible on in Settings, you stay invisible after upgrading. Other people who are offline show as “Offline”.",
+      "🧯 **A broken screen no longer leaves you with an empty window.** When the interface throws an error, an error screen now lets you reload or copy the error details. Errors are saved to a diagnostic log that **stays on this device** (Settings → About); nsec/npub, long keys, emails and URL parameters are masked before writing, nothing is uploaded automatically, and it only leaves when you press Copy. Native crashes on desktop are logged too.",
+      "✨ **AI rewrite now shows text as it's generated, and you can cancel midway.** Use only appears once it's finished, so you can't adopt half a result. Rewrites with local Ollama turn off the model's “thinking” step, so the first word arrives in seconds instead of about a minute.",
+      "🏢 **Organization rosters can have co-admins.** In roster management the owner can list co-admins (up to 16), who can also add and remove members and change policies; only the owner can change the co-admin list, and co-admins can't remove each other from the organization. Members' devices need this version to accept a roster signed by a co-admin.",
+      "🔧 **Fixes:** a stranger's first message no longer triggers a notification (it goes to Message requests); `**bold**` in help text no longer shows the asterisks; on desktop, connection diagnostics and sponsor info for `ws://` relays (local or LAN self-hosted) are no longer blocked.",
+      "🔒 The desktop and web Content Security Policy no longer allows inline styles, closing one path for injected styling.",
+      "🎨 **Leaner Settings.** Layout options are now Default / Three-column, the Appearance tab has a live preview on the right, several long explanations were removed or shortened, and “Call relay fallback” is now “Call via relay”.",
+      "ℹ️ Known: the Android build is a test build (debug-signed; anyone with USB debugging can read its memory — don't use it for conversations you really care about); the desktop build and `cinder.mjs` are not code-signed (Windows SmartScreen will warn; `cinder.mjs` comes with a sha256 checksum file only). The error screen in dark mode and the desktop native crash log have not been confirmed on a real device yet."
+    ]
+  },
+  {
     "version": "0.0.23",
     "date": "2026-11-12",
     "released": true,
