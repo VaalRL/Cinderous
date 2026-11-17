@@ -150,22 +150,26 @@ Graded admission (ADR-0092):
 
 ## Key rotation
 
-### 🔴 The current key is due for rotation (ADR-0239 follow-up 2)
+### ✅ Rotation record (closed)
 
-`MAINTAINER_NSEC` was a GitHub Actions secret from **2026-07-03 until 2026-07-23**, and the
-public key currently pinned in clients, `6efd2603…`, was committed on **2026-07-18** — inside
-that window.
+- **Why**: the old key `6efd2603…` was a GitHub Actions secret from 2026-07-03 to 07-23, so
+  ADR-0239 treats it as exposed.
+- **2026-09-18**: replaced by the new public key `7b5cd386…` (ADR-0358), shipped from v0.0.16;
+  both keys signed every list during the overlap.
+- **2026-11-17**: the old key was retired and destroyed (ADR-0423) — the GitHub secret
+  `MAINTAINER_NSEC` and the local old key file were deleted. Clients that only trust the old key
+  (v0.0.15 and earlier) can no longer receive messages anyway (every device must run v0.0.18+),
+  so the overlap ended.
 
-ADR-0239 states that a key which entered CI in any form must be **treated as exposed and
-rotated once**. For those twenty days, any poisoned transitive dependency could have read it,
-and it is the **only** trust anchor pinned in every client: holding it means signing a relay
-list that clients adopt automatically (eclipse / metadata harvesting). There is no evidence it
-was taken, but absence of evidence is not evidence of absence.
+**There is now a single key** (`relay/maintainer.nsec`, keep an offline backup); sign once after
+each `relays.json` change. The repo's Actions secrets should hold **no** maintainer key — if
+`gh secret list` shows one, something is wrong.
 
-### Rotation procedure
+### Rotation procedure (for a future rotation)
 
 `MAINTAINER_PUBKEY` is a **compile-time constant**, so already-shipped clients will not pick up
-a new one. Order matters:
+a new one. Order matters. **Before starting, confirm the old key is still available** (you need
+it during the overlap), and **at the end, check the CI secret is gone too**:
 
 1. **Generate the new key** locally and offline:
    `pnpm --filter @cinderous/relay genkey:maintainer`

@@ -13,7 +13,7 @@ A4 更是後來被 ADR-0239 拔掉的反模式。現況：
 | 當初的待辦 | 現況 |
 | --- | --- |
 | A1 部署 2 座錨點 | ✅ `cinder-relay.cinderous1` 與 `cinder-relay.jt0856`（兩個獨立 Cloudflare 帳號） |
-| A2 產維護者金鑰 | ✅ 已產。🔴 **但曾進 CI（2026-07-03～07-23），待輪替**——見 `MAINTAINER-ACTIVATION.md` |
+| A2 產維護者金鑰 | ✅ 已產。曾進 CI（2026-07-03～07-23）→ 2026-09-18 已輪替（ADR-0358）、2026-11-17 舊金鑰與 GitHub secret 已銷毀（ADR-0423） |
 | A3 填客戶端設定 | ✅ 已填。⚠ 檔案早就搬到 `packages/engine/src/bootstrap-config.ts`（ADR-0100），舊路徑不存在 |
 | A4 設 GitHub Secret | ❌ **不要做**。ADR-0239 已把信任根移出 CI，改為本機離線簽章 |
 | A5 填初始節點清單 | ✅ `relay/bootstrap/relays.json` 已有兩座 |
