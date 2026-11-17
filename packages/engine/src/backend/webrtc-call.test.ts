@@ -229,6 +229,12 @@ describe("視訊畫質三檔（ADR-0337）", () => {
  */
 class Transceiver {
   direction = "recvonly";
+  /** 真實瀏覽器：進了 SDP（協商過）才有 mid；自己 `addTransceiver` 卻沒被 offer 採用的那條恆為 null。 */
+  mid: string | null = null;
+  /** 真實瀏覽器：`stop()` 之後方向變成 "stopped"，`addTrack` 也不會再重用它。 */
+  stop(): void {
+    this.direction = "stopped";
+  }
   receiver: { track: { kind: string } };
   constructor(
     public kind: string,
@@ -243,7 +249,10 @@ class NegoPc extends FakePc {
   senders: FakeSender[] = [];
   /** 依規格：`addTrack` 會**重用**同 kind、尚未上軌的 transceiver，不是無腦新增。 */
   override addTrack(track: FakeTrack): FakeSender {
+    // ⚠ 照 Chrome 實測（2026-11-17）：挑的是**第一條**同 kind、沒上軌的——就算它已經停了，
+    // 然後丟 InvalidAccessError「The existing transceiver is stopping」，不會跳過去找下一條。
     const reuse = this.transceivers.find((t) => t.kind === track.kind && t.sender.track === null);
+    if (reuse?.direction === "stopped") throw new Error("InvalidAccessError: The existing transceiver is stopping");
     if (reuse) {
       reuse.sender.track = track;
       return reuse.sender;
@@ -392,11 +401,12 @@ describe("通話中媒體升降級（ADR-0338）", () => {
     const pc = lastPc as unknown as NegoPc;
     // 模擬瀏覽器於 setRemoteDescription(offer) 自動建立的 recvonly transceiver。
     const auto = pc.addTransceiver("video", { direction: "recvonly" });
+    auto.mid = "0"; // 瀏覽器為 offer 的 m-line 建的：協商過，有 mid
     call.accept();
     await flush();
     // exec("set-remote", kind:"offer") 之後統一校正方向——不校正就永遠送不出視訊。
     expect(auto.direction).toBe("sendrecv");
-    expect(pc.transceivers.filter((t) => t.kind === "video").every((t) => t.direction === "sendrecv")).toBe(
+    expect(pc.transceivers.filter((t) => t.kind === "video" && t.mid !== null).every((t) => t.direction === "sendrecv")).toBe(
       true,
     );
   });
@@ -646,6 +656,67 @@ describe("切換鏡頭（ADR-0339）", () => {
     expect(stopped, "失敗時不得停掉舊軌").toBe(false);
   });
 
+  // 🔴 實機發現（2026-11-17，moto edge 20 pro）：前鏡頭開著時開後鏡頭 → NotReadableError。
+  // 多數 Android 手機不能同時開兩顆鏡頭，「先取新軌」在那些手機上**永遠**切不過去。
+  const busy = (): Error => Object.assign(new Error("Could not start video source"), { name: "NotReadableError" });
+
+  /** 只有在 `old` 停掉之後才開得了新鏡頭；`deny(sel)` 為真的選擇一律開不了。 */
+  const oneCameraAtATime = (old: FakeTrack, made: FakeTrack[], deny: (c: { video?: { facingMode?: unknown } }) => boolean): void => {
+    vi.stubGlobal("navigator", {
+      mediaDevices: {
+        getUserMedia: async (c: { video?: { facingMode?: unknown } }) => {
+          if (!old.stopped || deny(c)) throw busy();
+          const t = new FakeTrack("video");
+          made.push(t);
+          return { getTracks: () => [t], getVideoTracks: () => [t], getAudioTracks: () => [] };
+        },
+      },
+    });
+  };
+
+  it("🔴 鏡頭忙碌（不能同時開兩顆）→ 改成先停舊軌再開新軌，切得過去", async () => {
+    const c = setup();
+    await activate(c);
+    const sender = (lastPc as unknown as NegoPc).transceivers.find((t) => t.kind === "video")!.sender;
+    const old = sender.track!;
+    const made: FakeTrack[] = [];
+    oneCameraAtATime(old, made, () => false);
+    c.call.setCamera({ facingMode: "environment" });
+    await flush();
+    await flush();
+    expect(old.stopped).toBe(true);
+    expect(made).toHaveLength(1);
+    expect(sender.track).toBe(made[0]);
+  });
+
+  it("🔴 停了舊軌、新鏡頭還是開不了 → 用原本的鏡頭重開，畫面不能就此消失", async () => {
+    const c = setup();
+    await activate(c);
+    const sender = (lastPc as unknown as NegoPc).transceivers.find((t) => t.kind === "video")!.sender;
+    const old = sender.track!;
+    const made: FakeTrack[] = [];
+    oneCameraAtATime(old, made, (k) => JSON.stringify(k.video?.facingMode ?? null).includes("environment"));
+    c.call.setCamera({ facingMode: "environment" });
+    await flush();
+    await flush();
+    expect(made).toHaveLength(1); // 重開的是原本那顆
+    expect(sender.track).toBe(made[0]);
+    expect(c.call.localMedia).toBe("video");
+  });
+
+  it("連原本的鏡頭都開不了 → 正式降級成語音（通知對方），而不是送一條死掉的軌", async () => {
+    const c = setup();
+    await activate(c);
+    const sender = (lastPc as unknown as NegoPc).transceivers.find((t) => t.kind === "video")!.sender;
+    const old = sender.track!;
+    oneCameraAtATime(old, [], () => true);
+    c.call.setCamera({ facingMode: "environment" });
+    await flush();
+    await flush();
+    expect(sender.track).toBeNull();
+    expect(c.call.localMedia).toBe("audio");
+  });
+
   it("🔴 朝向以**實際取得的軌**回報，不是以我要求了什麼（facingMode 是偏好非保證）", async () => {
     const c = setup();
     await activate(c);
@@ -844,5 +915,171 @@ describe("WebRtcCall ICE 路徑判定（ADR-0344）", () => {
     lastPc!.connectionState = "connected";
     lastPc!.onconnectionstatechange!();
     expect(await call.refreshIcePath()).toBe("unknown");
+  });
+});
+
+// ── 實機發現（2026-11-17，桌面 ↔ Android 實測）────────────────────────────
+// 這三個都是 FakePc 照「我們對規格的理解」寫、所以測不出來的地方：
+//   1. 預先鋪的視訊 transceiver 沒有綁 stream ⇒ 對端 `ontrack` 的 `ev.streams` 是空的；
+//   2. 答方自己 `addTransceiver` 的那條**不會**被 offer 採用（JSEP：只有 addTrack 建的會被重用），
+//      於是答方有兩條視訊 transceiver，第一條 mid=null、沒進 SDP；
+//   3. 升級是對**同一個** localStream 加軌，畫面元件收不到「換了」的訊號。
+describe("通話視訊實機發現（2026-11-17）", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  /** 真實 MediaStream 的最小替身：建構時帶軌、`getTracks` 回傳。 */
+  class FakeStream {
+    constructor(private tracks: FakeTrack[] = []) {}
+    getTracks(): FakeTrack[] {
+      return [...this.tracks];
+    }
+    getVideoTracks(): FakeTrack[] {
+      return this.tracks.filter((t) => t.kind === "video");
+    }
+    getAudioTracks(): FakeTrack[] {
+      return this.tracks.filter((t) => t.kind === "audio");
+    }
+  }
+
+  const flush = async (): Promise<void> => {
+    for (let i = 0; i < 12; i++) await Promise.resolve();
+  };
+
+  const stubMedia = (): void => {
+    vi.stubGlobal("RTCPeerConnection", NegoPc);
+    vi.stubGlobal("MediaStream", FakeStream);
+    vi.stubGlobal("navigator", {
+      mediaDevices: {
+        getUserMedia: async (c: { video?: unknown }) =>
+          new FakeStream(c.video ? [new FakeTrack("video")] : [new FakeTrack("audio")]),
+      },
+    });
+  };
+
+  /** 被叫：收 invite → 模擬瀏覽器為 offer 的視訊 m-line 建的 transceiver（mid 已指派）→ 接聽 → 連上。 */
+  const answerer = async () => {
+    stubMedia();
+    lastPc = undefined;
+    const mySk = generateSecretKey();
+    const callerSk = generateSecretKey();
+    const locals: MediaStream[] = [];
+    const remotes: MediaStream[] = [];
+    const call = new WebRtcCall(mySk, {
+      publishCallSignal: () => {},
+      onState: () => {},
+      onLocalStream: (s) => void (s && locals.push(s)),
+      onRemoteStream: (s) => void (s && remotes.push(s)),
+      onError: () => {},
+      onFailed: () => {},
+    });
+    call.onCallSignalEvent(
+      createCallSignal({ type: "call-invite", callId: "c1", media: "audio", sdp: "remote-offer" }, callerSk, getPublicKey(mySk)),
+    );
+    await flush();
+    const pc = lastPc as unknown as NegoPc;
+    const own = pc.transceivers.find((t) => t.kind === "video")!; // ensurePc 自己鋪的（沒進 SDP）
+    const fromOffer = pc.addTransceiver("video", { direction: "recvonly" });
+    fromOffer.mid = "0";
+    call.accept();
+    await flush();
+    pc.connectionState = "connected";
+    pc.onconnectionstatechange!();
+    await flush();
+    return { call, pc, own, fromOffer, locals, remotes };
+  };
+
+  it("🔴 答方開視訊要換到**協商過**的那條 transceiver——換到自己鋪的那條，對方永遠收不到", async () => {
+    const { call, own, fromOffer } = await answerer();
+    call.setLocalMedia("video");
+    await flush();
+    expect(fromOffer.sender.track?.kind).toBe("video");
+    expect(own.sender.track).toBeNull();
+  });
+
+  it("🔴 對方的視訊軌沒有帶 stream（升級用的 transceiver）也要放進遠端串流", async () => {
+    const { pc, remotes } = await answerer();
+    const audio = new FakeTrack("audio");
+    const video = new FakeTrack("video");
+    const ontrack = pc.ontrack as (ev: { track: FakeTrack; streams: FakeStream[] }) => void;
+    ontrack({ track: video, streams: [] }); // 預先鋪的視訊：msid 是 "-"
+    ontrack({ track: audio, streams: [new FakeStream([audio])] });
+    const last = remotes[remotes.length - 1]!;
+    expect(last.getTracks().map((t) => t.kind).sort()).toEqual(["audio", "video"]);
+  });
+
+  it("🔴 開視訊後送出**新的**本地串流物件（同一個物件加軌，畫面元件不會重新接上）", async () => {
+    const { call, locals } = await answerer();
+    const before = locals[locals.length - 1]!;
+    call.setLocalMedia("video");
+    await flush();
+    const after = locals[locals.length - 1]!;
+    expect(after).not.toBe(before);
+    expect(after.getTracks().map((t) => t.kind).sort()).toEqual(["audio", "video"]);
+  });
+
+  it("🔴 一開始就是視訊通話：答方的鏡頭要放在協商過的那條（以前 addTrack 重用了自己鋪的那條，對方看不到）", async () => {
+    stubMedia();
+    vi.stubGlobal("navigator", {
+      mediaDevices: {
+        getUserMedia: async (c: { video?: unknown }) =>
+          new FakeStream(c.video ? [new FakeTrack("audio"), new FakeTrack("video")] : [new FakeTrack("audio")]),
+      },
+    });
+    lastPc = undefined;
+    const mySk = generateSecretKey();
+    const call = new WebRtcCall(mySk, {
+      publishCallSignal: () => {},
+      onState: () => {},
+      onLocalStream: () => {},
+      onRemoteStream: () => {},
+      onError: () => {},
+      onFailed: () => {},
+    });
+    call.onCallSignalEvent(
+      createCallSignal({ type: "call-invite", callId: "c2", media: "video", sdp: "remote-offer" }, generateSecretKey(), getPublicKey(mySk)),
+    );
+    await flush();
+    const pc = lastPc as unknown as NegoPc;
+    const own = pc.transceivers.find((t) => t.kind === "video")!;
+    const fromOffer = pc.addTransceiver("video", { direction: "recvonly" });
+    fromOffer.mid = "0";
+    call.accept();
+    await flush();
+    await flush();
+    expect(fromOffer.sender.track?.kind).toBe("video");
+    expect(own.sender.track).toBeNull();
+  });
+
+  it("對方的 offer 沒有視訊（舊版）→ 不顯示升級入口，而不是一顆按了沒反應的按鈕", async () => {
+    stubMedia();
+    lastPc = undefined;
+    const mySk = generateSecretKey();
+    const call = new WebRtcCall(mySk, {
+      publishCallSignal: () => {},
+      onState: () => {},
+      onLocalStream: () => {},
+      onRemoteStream: () => {},
+      onError: () => {},
+      onFailed: () => {},
+    });
+    call.onCallSignalEvent(
+      createCallSignal({ type: "call-invite", callId: "c3", media: "audio", sdp: "old-offer" }, generateSecretKey(), getPublicKey(mySk)),
+    );
+    await flush();
+    call.accept();
+    await flush();
+    expect(call.canChangeMedia()).toBe(false);
+  });
+
+  it("關視訊後本地串流只剩音訊，且也是新物件", async () => {
+    const { call, locals } = await answerer();
+    call.setLocalMedia("video");
+    await flush();
+    const withVideo = locals[locals.length - 1]!;
+    call.setLocalMedia("audio");
+    await flush();
+    const after = locals[locals.length - 1]!;
+    expect(after).not.toBe(withVideo);
+    expect(after.getTracks().map((t) => t.kind)).toEqual(["audio"]);
   });
 });

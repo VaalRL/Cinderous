@@ -765,8 +765,11 @@ button:disabled { opacity: .5; cursor: default; filter: none; }
 .callwin__avatar { width: 84px; height: 84px; border-radius: 50%; color: #fff; font-size: 34px; display: flex; align-items: center; justify-content: center; }
 .callwin__info { text-align: center; padding: 10px; }
 .callwin__status { color: var(--muted); font-size: 12px; margin-top: 2px; }
-.callwin__controls { display: flex; gap: 10px; justify-content: center; padding: 0 12px 14px; }
-.callbtn { flex: 1; max-width: 120px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--field); cursor: pointer; font-size: 13px; }
+/* 視訊時一列有靜音／關視訊／鏡頭／畫質／掛斷——不換行就把掛斷擠出框外（實機發現 2026-11-17，ADR-0424）。 */
+.callwin__controls { display: flex; flex-wrap: wrap; gap: 8px 10px; justify-content: center; align-items: flex-end; padding: 0 12px 14px; }
+.callwin__quality { display: flex; flex-direction: column; gap: 2px; font-size: 11px; color: var(--muted); max-width: 132px; min-width: 0; }
+.callwin__quality select { max-width: 100%; }
+.callbtn { flex: 1; max-width: 120px; white-space: nowrap; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--field); cursor: pointer; font-size: 13px; }
 .callbtn:hover { background: var(--hover); }
 .callbtn--accept { background: #3fae5a; color: #fff; border-color: #3fae5a; }
 .callbtn--hangup { background: #e0483d; color: #fff; border-color: #e0483d; }

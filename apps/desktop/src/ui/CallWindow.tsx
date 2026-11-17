@@ -79,9 +79,12 @@ const QUALITY_KEY = {
 /** 把 MediaStream 綁到 media 元素的 srcObject。 */
 function useStream<T extends HTMLMediaElement>(stream: MediaStream | null) {
   const ref = useRef<T>(null);
+  // 🔴 每次 render 都對一次（不設 deps）：自我預覽、對方畫面是通話中才**後掛上**的元素，
+  // 串流物件卻可能沒換——只在 stream 變動時設，新元素就一直是 null（實機發現 2026-11-17，黑框）。
   useEffect(() => {
-    if (ref.current) ref.current.srcObject = stream;
-  }, [stream]);
+    const el = ref.current;
+    if (el && el.srcObject !== stream) el.srcObject = stream;
+  });
   return ref;
 }
 

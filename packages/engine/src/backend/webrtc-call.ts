@@ -25,6 +25,12 @@ import { IcePathTracker, type IcePath } from "./ice-path.js";
  * ⚠ 不能只看 `sender.track`——預先協商的視訊 transceiver 在語音通話時 track 是 `null`，
  * 那正是我們要找的那一個。真實的 `RTCRtpTransceiver` 恆有 `receiver.track`，用它判定。
  */
+/** 鏡頭被佔用（多為另一顆鏡頭還開著）——換鏡頭時改成先停舊軌的依據（ADR-0424）。 */
+function isCameraBusy(e: unknown): boolean {
+  const name = (e as { name?: string } | null)?.name;
+  return name === "NotReadableError" || name === "TrackStartError" || name === "AbortError";
+}
+
 function isVideoTransceiver(t: RTCRtpTransceiver): boolean {
   return t.receiver?.track?.kind === "video" || t.sender?.track?.kind === "video";
 }
@@ -77,6 +83,8 @@ export class WebRtcCall {
   private peer: PubkeyHex | null = null;
   private media: CallMedia | null = null;
   private localStream: MediaStream | null = null;
+  /** 這通收到的所有遠端軌併成的串流（見 ensurePc 的 ontrack）。 */
+  private remoteStream: MediaStream | null = null;
   private hasRemote = false;
   private pendingCandidates: RTCIceCandidateInit[] = [];
   private seq = 0;
@@ -207,6 +215,7 @@ export class WebRtcCall {
 
   private ensurePc(): void {
     this.everConnected = false; // 每通新通話重置（ADR-0243）
+    this.remoteStream = null; // 上一通的遠端軌不能併進這一通
     const pc = new RTCPeerConnection(typeof this.rtcConfig === "function" ? this.rtcConfig() : this.rtcConfig);
     pc.onicecandidate = (ev) => {
       const c = ev.candidate;
@@ -221,8 +230,12 @@ export class WebRtcCall {
       };
       this.handlers.publishCallSignal(createCallSignal(sig, this.ownSk, this.peer));
     };
+    // 🔴 實機發現（2026-11-17）：預先鋪的視訊 transceiver（下方 addTransceiver）**沒有綁 stream**，
+    // 對端收到的 `ev.streams` 是空的。以前只看 `ev.streams[0]` ⇒ 視訊軌被丟掉，
+    // 「通話中才開視訊」的畫面從來沒顯示過（畫格有收、元件沒拿到）。
+    // 已出貨的對端都是這樣送的，所以在收的這一端把所有軌併成一條遠端串流。
     pc.ontrack = (ev) => {
-      const stream = ev.streams[0];
+      const stream = this.mergeRemoteTrack(ev.track, ev.streams[0]);
       if (stream) this.handlers.onRemoteStream(stream);
     };
     pc.onconnectionstatechange = () => {
@@ -279,9 +292,21 @@ export class WebRtcCall {
   private videoSender(): RTCRtpSender | null {
     const pc = this.pc;
     if (!pc) return null;
-    const tr = pc.getTransceivers?.().find(isVideoTransceiver);
+    // 🔴 實機發現（2026-11-17）：答方有**兩條**視訊 transceiver——ensurePc 自己鋪的那條
+    // **不會**被 offer 採用（JSEP：只有 addTrack 建的才會被重用），mid 恆為 null、不在 SDP 裡；
+    // offer 的視訊 m-line 另建一條。換到前者＝相機亮著、對方什麼都收不到。所以先挑協商過的。
+    const videos = pc.getTransceivers?.().filter((t) => isVideoTransceiver(t) && t.direction !== "stopped") ?? [];
+    const tr = videos.find((t) => t.mid != null) ?? videos[0];
     if (tr) return tr.sender;
     return pc.getSenders().find((s) => s.track?.kind === "video") ?? null;
+  }
+
+  /** 協商過（有 mid）、還沒上軌的視訊 sender——答方開機時放鏡頭的位置（ADR-0424）。 */
+  private unusedNegotiatedVideoSender(): RTCRtpSender | null {
+    const tr = this.pc
+      ?.getTransceivers?.()
+      .find((t) => isVideoTransceiver(t) && t.mid != null && t.direction !== "stopped" && !t.sender.track);
+    return tr?.sender ?? null;
   }
 
   /**
@@ -332,13 +357,12 @@ export class WebRtcCall {
     // （`swapCamera` 一直有做這件事，這裡先前漏了——兩處不一致。）
     try {
       await sender.replaceTrack(track);
-      this.localStream?.addTrack?.(track);
     } catch (e) {
       track.stop();
       throw e;
     }
+    this.replaceLocalTrack(track, null);
     this.applyVideoQuality();
-    if (this.localStream) this.handlers.onLocalStream(this.localStream);
     this.emitCamera();
   }
 
@@ -347,11 +371,37 @@ export class WebRtcCall {
     const sender = this.videoSender();
     const track = sender?.track ?? null;
     void sender?.replaceTrack(null);
-    if (track) {
-      track.stop();
-      this.localStream?.removeTrack?.(track);
+    if (track) track.stop();
+    this.replaceLocalTrack(null, track);
+  }
+
+  /**
+   * 換掉本地串流裡的一條軌，並送出**新的**串流物件。
+   *
+   * 🔴 實機發現（2026-11-17）：以前是對同一個 localStream `addTrack` 再送同一個物件——
+   * UI 的 `srcObject` 綁定看的是物件有沒有換，於是開視訊後自我預覽一直是黑的。
+   * 沒有 `MediaStream` 的環境（舊 WebView、node 測試）退回原地增刪。
+   */
+  private replaceLocalTrack(add: MediaStreamTrack | null, remove: MediaStreamTrack | null): void {
+    const old = this.localStream;
+    if (!old) return;
+    if (typeof MediaStream === "function") {
+      const next = old.getTracks().filter((t) => t !== remove && t !== add);
+      if (add) next.push(add);
+      this.localStream = new MediaStream(next);
+    } else {
+      if (remove) old.removeTrack?.(remove);
+      if (add) old.addTrack?.(add);
     }
-    if (this.localStream) this.handlers.onLocalStream(this.localStream);
+    this.handlers.onLocalStream(this.localStream);
+  }
+
+  /** 併入一條遠端軌，回傳**新的**遠端串流（見 ensurePc 的 ontrack 說明）。 */
+  private mergeRemoteTrack(track: MediaStreamTrack, stream: MediaStream | undefined): MediaStream | null {
+    if (typeof MediaStream !== "function") return stream ?? null;
+    const all = [...(this.remoteStream?.getTracks() ?? []), ...(stream?.getTracks() ?? []), track];
+    this.remoteStream = new MediaStream(all.filter((t, i) => all.indexOf(t) === i));
+    return this.remoteStream;
   }
 
   /**
@@ -360,8 +410,9 @@ export class WebRtcCall {
    * 沒在送視訊時只記住選擇，下次開視訊時沿用。
    */
   setCamera(sel: CameraSelection): void {
+    const prev = { ...this.camera };
     this.camera = { ...sel };
-    void this.swapCamera();
+    void this.swapCamera(prev);
   }
 
   /**
@@ -371,30 +422,59 @@ export class WebRtcCall {
    *
    * 反過來（先停舊軌）會有一段沒有畫面的空窗，而且**新軌取失敗時就回不去了**
    * ——使用者的畫面會就此消失。故失敗時舊軌原封不動。
+   *
+   * 🔴 例外（實機發現 2026-11-17，ADR-0424）：多數 Android 手機**不能同時開兩顆鏡頭**，
+   * 舊鏡頭開著時取新的會丟 `NotReadableError`——照上面的順序就**永遠**切不過去。
+   * 遇到「鏡頭忙碌」才改成先停舊軌，並備好退路：新的開不了就用原本的鏡頭重開，
+   * 連原本的都開不了才正式降級成語音（通知對方，不送一條死掉的軌）。
    */
-  private async swapCamera(): Promise<void> {
+  private async swapCamera(prev: CameraSelection): Promise<void> {
     const sender = this.videoSender();
     const old = sender?.track ?? null;
     if (!sender || !old) return; // 沒在送視訊：只記住選擇（見 setCamera）
-    let track: MediaStreamTrack | undefined;
+    let track: MediaStreamTrack;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: videoConstraints(this.videoQuality, this.camera),
-      });
-      track = stream.getVideoTracks()[0];
-      if (!track) throw new Error("取不到視訊軌");
+      track = await this.openCamera();
+    } catch (e) {
+      if (!isCameraBusy(e)) {
+        this.handlers.onError(`無法切換鏡頭：${String(e)}`);
+        return; // 舊軌原封不動
+      }
+      old.stop();
+      try {
+        track = await this.openCamera();
+      } catch (e2) {
+        this.handlers.onError(`無法切換鏡頭：${String(e2)}`);
+        this.camera = prev;
+        try {
+          track = await this.openCamera();
+        } catch {
+          await this.changeMedia("audio");
+          return;
+        }
+      }
+    }
+    try {
       await sender.replaceTrack(track);
     } catch (e) {
-      track?.stop(); // 取到了但換軌失敗：別讓它留著佔用相機
+      track.stop(); // 取到了但換軌失敗：別讓它留著佔用相機
       this.handlers.onError(`無法切換鏡頭：${String(e)}`);
-      return; // 舊軌原封不動
+      return;
     }
     old.stop();
-    this.localStream?.removeTrack?.(old);
-    this.localStream?.addTrack?.(track);
+    this.replaceLocalTrack(track, old);
     this.applyVideoQuality();
-    if (this.localStream) this.handlers.onLocalStream(this.localStream);
     this.emitCamera();
+  }
+
+  /** 以目前的畫質與鏡頭選擇開一條視訊軌。 */
+  private async openCamera(): Promise<MediaStreamTrack> {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: videoConstraints(this.videoQuality, this.camera),
+    });
+    const track = stream.getVideoTracks()[0];
+    if (!track) throw new Error("取不到視訊軌");
+    return track;
   }
 
   /**
@@ -454,8 +534,20 @@ export class WebRtcCall {
         // 自動建立的 transceiver 預設是 `recvonly`。不改成 `sendrecv` 就**永遠送不出視訊**
         // ——這是這個設計唯一容易寫錯的地方。
         if (a.kind === "offer") {
-          for (const t of pc.getTransceivers?.() ?? []) {
-            if (isVideoTransceiver(t) && t.direction === "recvonly") t.direction = "sendrecv";
+          // 🔴 ADR-0424（實機發現 2026-11-17）：ensurePc 自己鋪的那條**不會**被 offer 採用
+          // （JSEP：只有 addTrack 建的才會被重用），mid 恆為 null、不在 SDP 裡。
+          // 不能停掉它：Chrome 的 addTrack 會挑到這條已停的、直接丟例外。所以留著，
+          // 由 acquireMedia／videoSender 改挑協商過的那條。
+          // 只有 offer 根本沒有視訊（舊版）時才停——那時不會再 addTrack 視訊，
+          // 而 canChangeMedia 才會照實回 false（不顯示按了沒反應的按鈕）。
+          const videos = (pc.getTransceivers?.() ?? []).filter(isVideoTransceiver);
+          const negotiated = videos.some((t) => t.mid != null);
+          for (const t of videos) {
+            if (t.mid == null) {
+              if (!negotiated) t.stop?.();
+            } else if (t.direction === "recvonly") {
+              t.direction = "sendrecv";
+            }
           }
         }
         this.hasRemote = true;
@@ -483,7 +575,18 @@ export class WebRtcCall {
       video: media === "video" ? videoConstraints(this.videoQuality, this.camera) : false,
     });
     this.localStream = stream;
-    for (const track of stream.getTracks()) this.pc.addTrack(track, stream);
+    for (const track of stream.getTracks()) {
+      // 🔴 ADR-0424：答方（已套用 offer）有一條協商過、還沒上軌的視訊 transceiver——直接放上去。
+      // 交給 addTrack 會重用 ensurePc 自己鋪的那條（沒進 SDP）⇒ 鏡頭開了、對方看不到。
+      // setStreams 補上 msid，舊版對端的 ontrack 才拿得到 stream。主叫還沒協商，照舊 addTrack。
+      const target = track.kind === "video" ? this.unusedNegotiatedVideoSender() : null;
+      if (target) {
+        await target.replaceTrack(track);
+        target.setStreams?.(stream);
+      } else {
+        this.pc.addTrack(track, stream);
+      }
+    }
     this.applyVideoQuality();
     this.handlers.onLocalStream(stream);
   }
@@ -541,6 +644,7 @@ export class WebRtcCall {
     }
     this.pc = null;
     this.localStream = null;
+    this.remoteStream = null;
     this.hasRemote = false;
     this.pendingCandidates = [];
     this.handlers.onLocalStream(null);
