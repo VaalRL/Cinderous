@@ -1,5 +1,5 @@
 import { generateSecretKey } from "@cinderous/core";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LocalStorage } from "./local.js";
 
 /** 最小 localStorage 替身（含 `length`/`key(i)`，供 LocalStorage 掃描對話鍵）。 */
@@ -15,6 +15,10 @@ beforeEach(() => {
     setItem: (k: string, v: string) => void backing.set(k, v),
     removeItem: (k: string) => void backing.delete(k),
   };
+});
+// 有測試會固定時鐘：中途失敗也不能把假時鐘留給後面的測試
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 const msg = (id: string, at: number, outgoing = false) => ({ id, contact: "bob", outgoing, text: id, at });
@@ -82,10 +86,15 @@ describe("LocalStorage（ADR-0110：狀態常駐記憶體 + 逐鍵寫回）", ()
   it("行程保留上限（ADR-0264 §10）：清掉的過去行程也要從磁碟消失，不是只在記憶體裡不見", () => {
     const now = 1_800_000_000;
     const ev = (id: string, start: number) => ({ id, title: id, start, organizer: "bob", updatedAt: start });
+    // upsertCalendarEvent 會用**真實時鐘**順手清一次——不固定時鐘，「90 天前」那筆一過真實日期就
+    // 在寫入時先被清掉，這裡的 pruneCalendar 回 0（2026-11-16 起 CI 紅）。寫入時把鐘停在當下。
+    vi.useFakeTimers();
+    vi.setSystemTime((now - 90 * 86400) * 1000);
     const s = new LocalStorage("ns");
     s.upsertCalendarEvent(ev("old", now - 90 * 86400)); // 90 天前
     s.upsertCalendarEvent(ev("soon", now + 86400));
 
+    vi.useRealTimers();
     expect(s.pruneCalendar(now)).toBe(1);
     // 只回傳值對是不夠的——沒有 writeCalendar 的話，重新開機它會整筆復活。
     expect(new LocalStorage("ns").loadCalendar().map((e) => e.id)).toEqual(["soon"]);
