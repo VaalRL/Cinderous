@@ -80,6 +80,8 @@ export interface CallHandlers {
 export class WebRtcCall {
   private session = new CallSession();
   private pc: RTCPeerConnection | null = null;
+  /** 換鏡頭一次只做一個（連按兩次時，第二次以第一次換好的那顆為「舊的」，不會漏關一顆；ADR-0425） */
+  private cameraChain: Promise<void> = Promise.resolve();
   private peer: PubkeyHex | null = null;
   private media: CallMedia | null = null;
   private localStream: MediaStream | null = null;
@@ -331,8 +333,10 @@ export class WebRtcCall {
     const actions = this.session.setLocalMedia(media);
     if (actions.length === 0) return; // 非 active、或型態沒變
     try {
-      if (media === "video") await this.attachVideo();
-      else this.detachVideo();
+      if (media === "video") {
+        // 鏡頭開好時已經不需要了（又按了關、或通話結束）：鏡頭已關，不送「我開視訊了」
+        if (!(await this.attachVideo())) return;
+      } else this.detachVideo();
     } catch (e) {
       if (prev) this.session.setLocalMedia(prev); // 回滾，且不送任何信令
       this.handlers.onError(`無法開啟視訊：${String(e)}`);
@@ -343,8 +347,14 @@ export class WebRtcCall {
     this.emitMedia();
   }
 
-  /** 升級：取視訊軌並換到既有的視訊 sender 上（不重新協商）。 */
-  private async attachVideo(): Promise<void> {
+  /**
+   * 升級：取視訊軌並換到既有的視訊 sender 上（不重新協商）。
+   *
+   * 回 `false`＝鏡頭開好時已經不需要了（ADR-0425）：等權限／鏡頭的期間通話結束、或使用者又改回語音。
+   * 這時鏡頭已關、不要通知對方——否則相機一直亮著，對方還收到「我開視訊了」。
+   */
+  private async attachVideo(): Promise<boolean> {
+    const pc = this.pc;
     const sender = this.videoSender();
     if (!sender) throw new Error("這通沒有可用的視訊軌道");
     const stream = await navigator.mediaDevices.getUserMedia({
@@ -352,6 +362,11 @@ export class WebRtcCall {
     });
     const track = stream.getVideoTracks()[0];
     if (!track) throw new Error("取不到視訊軌");
+    const stale = (): boolean => this.pc !== pc || this.session.localMedia !== "video";
+    if (stale()) {
+      track.stop();
+      return false;
+    }
     // 🔴 取到之後的任何失敗都必須把它停掉（審查發現 #3）。
     // 不停就是**相機留著亮**，而 ADR-0340 的整個主張就是「指示燈要誠實」。
     // （`swapCamera` 一直有做這件事，這裡先前漏了——兩處不一致。）
@@ -361,16 +376,22 @@ export class WebRtcCall {
       track.stop();
       throw e;
     }
+    if (stale()) {
+      track.stop();
+      void sender.replaceTrack(null).catch(() => {});
+      return false;
+    }
     this.replaceLocalTrack(track, null);
     this.applyVideoQuality();
     this.emitCamera();
+    return true;
   }
 
   /** 降級：卸下視訊軌並**真的停掉相機**（與 ADR-0337 的關鏡頭不同，那個只送黑畫面）。 */
   private detachVideo(): void {
     const sender = this.videoSender();
     const track = sender?.track ?? null;
-    void sender?.replaceTrack(null);
+    void sender?.replaceTrack(null).catch(() => {}); // 連線已關時會 reject：不留未處理的 rejection
     if (track) track.stop();
     this.replaceLocalTrack(null, track);
   }
@@ -410,9 +431,14 @@ export class WebRtcCall {
    * 沒在送視訊時只記住選擇，下次開視訊時沿用。
    */
   setCamera(sel: CameraSelection): void {
-    const prev = { ...this.camera };
-    this.camera = { ...sel };
-    void this.swapCamera(prev);
+    // 🔴 ADR-0425：排隊。兩個 swapCamera 同時跑時都以同一顆為「舊的」，第一顆新鏡頭會被換掉但沒人關。
+    this.cameraChain = this.cameraChain
+      .then(() => {
+        const prev = { ...this.camera };
+        this.camera = { ...sel };
+        return this.swapCamera(prev);
+      })
+      .catch(() => {});
   }
 
   /**
@@ -429,13 +455,17 @@ export class WebRtcCall {
    * 連原本的都開不了才正式降級成語音（通知對方，不送一條死掉的軌）。
    */
   private async swapCamera(prev: CameraSelection): Promise<void> {
+    const pc = this.pc;
     const sender = this.videoSender();
     const old = sender?.track ?? null;
     if (!sender || !old) return; // 沒在送視訊：只記住選擇（見 setCamera）
+    // 開好時這一通已結束、或視訊已被關掉 ⇒ 這顆不要了（ADR-0425）
+    const stale = (): boolean => this.pc !== pc || this.session.localMedia !== "video";
     let track: MediaStreamTrack;
     try {
       track = await this.openCamera();
     } catch (e) {
+      if (stale()) return;
       if (!isCameraBusy(e)) {
         this.handlers.onError(`無法切換鏡頭：${String(e)}`);
         return; // 舊軌原封不動
@@ -444,15 +474,21 @@ export class WebRtcCall {
       try {
         track = await this.openCamera();
       } catch (e2) {
+        if (stale()) return;
         this.handlers.onError(`無法切換鏡頭：${String(e2)}`);
         this.camera = prev;
         try {
           track = await this.openCamera();
         } catch {
+          if (stale()) return;
           await this.changeMedia("audio");
           return;
         }
       }
+    }
+    if (stale()) {
+      track.stop();
+      return;
     }
     try {
       await sender.replaceTrack(track);
@@ -462,6 +498,11 @@ export class WebRtcCall {
       return;
     }
     old.stop();
+    if (stale()) {
+      // 換上去的期間通話結束或關了視訊：teardown／detachVideo 看到的還是舊的那顆
+      track.stop();
+      return;
+    }
     this.replaceLocalTrack(track, old);
     this.applyVideoQuality();
     this.emitCamera();
@@ -567,28 +608,50 @@ export class WebRtcCall {
   }
 
   private async acquireMedia(media: CallMedia): Promise<void> {
-    if (!this.pc) return;
+    const pc = this.pc;
+    if (!pc) return;
     const stream = await navigator.mediaDevices.getUserMedia({
       audio: true,
       // 不是裸 `true`（ADR-0337）：裸 true 拿相機預設（手機常見 720p 以上），
       // 使用者付行動數據、站方付 TURN egress，而兩邊都無從得知。
       video: media === "video" ? videoConstraints(this.videoQuality, this.camera) : false,
     });
+    // 🔴 ADR-0425：等權限的期間對方掛斷或我拒接（teardown 已跑過）⇒ 這些裝置沒人會關，現在關
+    if (this.pc !== pc) {
+      for (const t of stream.getTracks()) t.stop();
+      return;
+    }
     this.localStream = stream;
+    const dropped: MediaStreamTrack[] = [];
     for (const track of stream.getTracks()) {
       // 🔴 ADR-0424：答方（已套用 offer）有一條協商過、還沒上軌的視訊 transceiver——直接放上去。
       // 交給 addTrack 會重用 ensurePc 自己鋪的那條（沒進 SDP）⇒ 鏡頭開了、對方看不到。
       // setStreams 補上 msid，舊版對端的 ontrack 才拿得到 stream。主叫還沒協商，照舊 addTrack。
       const target = track.kind === "video" ? this.unusedNegotiatedVideoSender() : null;
       if (target) {
-        await target.replaceTrack(track);
-        target.setStreams?.(stream);
+        try {
+          await target.replaceTrack(track);
+          target.setStreams?.(stream);
+        } catch (e) {
+          // 放不上去：關掉鏡頭（指示燈要誠實），這一通先用語音
+          track.stop();
+          dropped.push(track);
+          this.handlers.onError(`無法開啟視訊：${String(e)}`);
+        }
       } else {
-        this.pc.addTrack(track, stream);
+        pc.addTrack(track, stream);
+      }
+      if (this.pc !== pc) {
+        for (const t of stream.getTracks()) t.stop();
+        return;
       }
     }
+    // 沒放上去的那條不留在本地預覽（不然自我預覽是一條已停的鏡頭）
+    if (dropped.length > 0 && typeof MediaStream === "function") {
+      this.localStream = new MediaStream(stream.getTracks().filter((t) => !dropped.includes(t)));
+    }
     this.applyVideoQuality();
-    this.handlers.onLocalStream(stream);
+    this.handlers.onLocalStream(this.localStream);
   }
 
   /**

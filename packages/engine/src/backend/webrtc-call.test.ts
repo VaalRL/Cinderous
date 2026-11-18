@@ -1083,3 +1083,165 @@ describe("通話視訊實機發現（2026-11-17）", () => {
     expect(after.getTracks().map((t) => t.kind)).toEqual(["audio"]);
   });
 });
+
+describe("程式碼審查（2026-11-18）：取麥克風／鏡頭晚回來、連按換鏡頭", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  class FakeStream {
+    constructor(private tracks: FakeTrack[] = []) {}
+    getTracks(): FakeTrack[] {
+      return [...this.tracks];
+    }
+    getVideoTracks(): FakeTrack[] {
+      return this.tracks.filter((t) => t.kind === "video");
+    }
+    getAudioTracks(): FakeTrack[] {
+      return this.tracks.filter((t) => t.kind === "audio");
+    }
+  }
+
+  const flush = async (): Promise<void> => {
+    for (let i = 0; i < 12; i++) await Promise.resolve();
+  };
+
+  /** getUserMedia 可以「卡在權限提示」：hold() 之後的呼叫要等 release() 才回來 */
+  const stubMedia = () => {
+    const made: FakeTrack[] = [];
+    let gate: Promise<void> | null = null;
+    let open: () => void = () => {};
+    vi.stubGlobal("RTCPeerConnection", NegoPc);
+    vi.stubGlobal("MediaStream", FakeStream);
+    vi.stubGlobal("navigator", {
+      mediaDevices: {
+        getUserMedia: async (c: { video?: unknown; audio?: unknown }) => {
+          if (gate) await gate;
+          const kinds = [...(c.audio ? ["audio"] : []), ...(c.video ? ["video"] : [])];
+          const list = kinds.map((k) => new FakeTrack(k));
+          made.push(...list);
+          return new FakeStream(list);
+        },
+      },
+    });
+    return {
+      made,
+      live: () => made.filter((t) => !t.stopped),
+      hold: () => {
+        gate = new Promise<void>((r) => (open = r));
+      },
+      release: () => {
+        gate = null;
+        open();
+      },
+    };
+  };
+
+  const make = () => {
+    lastPc = undefined;
+    const mySk = generateSecretKey();
+    const peerSk = generateSecretKey();
+    const errors: string[] = [];
+    const sent: Array<{ type: string; media?: string }> = [];
+    const call = new WebRtcCall(mySk, {
+      publishCallSignal: () => {},
+      onState: () => {},
+      onLocalStream: () => {},
+      onRemoteStream: () => {},
+      onError: (m) => void errors.push(m),
+      onFailed: () => {},
+    });
+    const peerSays = (signal: Record<string, unknown>) =>
+      call.onCallSignalEvent(createCallSignal(signal as never, peerSk, getPublicKey(mySk)));
+    return { call, mySk, peerSk, errors, sent, peerSays };
+  };
+
+  /** 撥出語音並讓對方接起、連上 */
+  const activeAudio = async (m: ReturnType<typeof stubMedia>) => {
+    const c = make();
+    c.call.startCall(getPublicKey(c.peerSk), "audio");
+    await flush();
+    const callId = (c.call as unknown as { session: { activeCallId: string } }).session.activeCallId;
+    c.peerSays({ type: "call-accept", callId, sdp: "a" });
+    await flush();
+    lastPc!.connectionState = "connected";
+    lastPc!.onconnectionstatechange!();
+    await flush();
+    expect(m.live().map((t) => t.kind)).toEqual(["audio"]);
+    return { ...c, callId };
+  };
+
+  it("🔴 接聽時還在等權限，對方就掛斷了：權限回來後麥克風與鏡頭都要關掉", async () => {
+    const m = stubMedia();
+    const c = make();
+    c.peerSays({ type: "call-invite", callId: "c1", media: "video", sdp: "remote-offer" });
+    await flush();
+    m.hold();
+    c.call.accept();
+    await flush();
+    c.peerSays({ type: "call-hangup", callId: "c1" });
+    await flush();
+    m.release();
+    await flush();
+    expect(m.made.length).toBeGreaterThan(0); // 真的取了（不是根本沒取）
+    expect(m.live()).toEqual([]);
+  });
+
+  it("🔴 開視訊時還在等鏡頭，又按了關：鏡頭不能留著亮", async () => {
+    const m = stubMedia();
+    const c = await activeAudio(m);
+    m.hold();
+    c.call.setLocalMedia("video");
+    await flush();
+    c.call.setLocalMedia("audio");
+    await flush();
+    m.release();
+    await flush();
+    expect(m.live().map((t) => t.kind)).toEqual(["audio"]);
+  });
+
+  it("🔴 開視訊時還在等鏡頭，對方就掛斷了：鏡頭不能留著亮", async () => {
+    const m = stubMedia();
+    const c = await activeAudio(m);
+    m.hold();
+    c.call.setLocalMedia("video");
+    await flush();
+    c.peerSays({ type: "call-hangup", callId: c.callId });
+    await flush();
+    m.release();
+    await flush();
+    expect(m.live()).toEqual([]);
+  });
+
+  it("🔴 連按兩次換鏡頭：最後只有一顆鏡頭開著，送出去的就是那一顆", async () => {
+    const m = stubMedia();
+    const c = await activeAudio(m);
+    c.call.setLocalMedia("video");
+    await flush();
+    m.hold();
+    c.call.setCamera({ facingMode: "environment" });
+    c.call.setCamera({ facingMode: "user" });
+    await flush();
+    m.release();
+    for (let i = 0; i < 5; i++) await flush();
+    const cams = m.live().filter((t) => t.kind === "video");
+    expect(cams).toHaveLength(1);
+    const pc = lastPc as unknown as NegoPc;
+    expect(pc.senders.filter((s) => s.track?.kind === "video").map((s) => s.track)).toEqual(cams);
+  });
+
+  it("答方開機放鏡頭失敗（replaceTrack 丟例外）：鏡頭關掉、回報錯誤，通話照常（語音）", async () => {
+    const m = stubMedia();
+    const c = make();
+    c.peerSays({ type: "call-invite", callId: "c1", media: "video", sdp: "remote-offer" });
+    await flush();
+    const pc = lastPc as unknown as NegoPc;
+    const fromOffer = pc.addTransceiver("video", { direction: "recvonly" });
+    fromOffer.mid = "0";
+    fromOffer.sender.replaceTrack = async () => {
+      throw new Error("InvalidStateError");
+    };
+    c.call.accept();
+    for (let i = 0; i < 3; i++) await flush();
+    expect(m.live().map((t) => t.kind)).toEqual(["audio"]);
+    expect(c.errors.some((e) => e.includes("視訊"))).toBe(true);
+  });
+});
