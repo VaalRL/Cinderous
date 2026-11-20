@@ -34,7 +34,7 @@
 | --- | --- | --- | --- |
 | A1 | 前端接真實 relay | 🌐 | ✅ **完成**：`RelayChatBackend` + `webSocketConnector` 連真 relay；`relay/src/dev-server.ts` 本機真實 WebSocket relay；以 npub 加好友。Playwright 兩 context 經真實 relay 對話已驗證。 |
 | A2 | 本機持久化（前端層） | 🌐 | ✅ **完成**：`AppStorage`(localStorage) 存身分/聯絡人/訊息；重整自動登入、身分不再每次重生、歷史保留。Playwright 重整驗證通過。（Tauri 版再換 SQLite/SQLCipher。） |
-| A3 | 聯絡人管理 UI | 🌐 | 🔧 新增（✅ A1）、**刪除／封鎖／解除封鎖**（✅ 本機持久化＋忽略被封鎖者訊息，經真實 relay 驗證，ADR-0014）；**QR 加好友**（`npub` 交換 + 雙向同意）待相機/行動端（M9／Phase D）。 |
+| A3 | 聯絡人管理 UI | 🌐 | ✅ 新增（✅ A1）、**刪除／封鎖／解除封鎖**（✅ 本機持久化＋忽略被封鎖者訊息，經真實 relay 驗證，ADR-0014）；**QR 加好友**（`npub` 交換 + 雙向同意）✅ 產生與掃描皆已實作（掃描用 WebView 的 `BarcodeDetector`，ADR-0280）。⏳ 行動端掃描待實機驗收（見 `OPERATOR-TODO` §B）。（2026-11-20 更新） |
 | A4 | 檔案傳輸 UI | 🌐 | ✅ **完成**：`WebRtcTransfer` 每聯絡人一條 P2P 連線，複用 core signaling/datachannel；附件鈕 + 拖放、傳送進度、接收下載。經真實 relay + 真實 WebRTC 兩 context E2E 驗證（50KB 檔案位元組一致，ADR-0017）。 |
 | A5 | 設定與狀態 UI | 🌐 | ✅ **完成**：設定面板（中繼站、身分備份 nsec + 警語、桌面通知）、未讀徽章、音樂狀態輸入口、**連線/重連中狀態**（`webSocketConnector` 指數退避自動重連 + 狀態回報，重連後自動重訂閱）。皆經真實 relay 驗證（ADR-0015、ADR-0016）。 |
 | A6 | 前端技術債收斂 | 🌐 | ✅ 移除孤立的 `presence-store.ts`／`relay-source.ts`（已由 `RelayChatBackend` + core `PresenceTracker` 取代）；對話視窗 `×` 關閉鈕已可用，無殘留裝飾按鈕。 |
@@ -52,7 +52,7 @@
 | # | 任務 | 說明 |
 | --- | --- | --- |
 | B1 | Tauri 二進位 | ✅ **可建可跑（Windows 實機驗證）**：`src-tauri` 殼（`main.rs`、`tauri.conf.json`、capabilities、圖示組含 `icon.ico`）＋ Tauri CLI 與 `tauri:dev`/`tauri:build` 腳本（內建 `-f tauri-app`）。`cargo build --features tauri-app` 乾淨產出 `cinder-desktop.exe`；`tauri:dev` 開原生視窗、載入前端、登入實機通過（ADR-0018）。⏳ `tauri build` 安裝檔打包＝B6。 |
-| B2 | IPC 契約 / `TauriChatBackend` | 🔧 **契約已定**：`ipc.rs` 的 serde DTO 與前端 `types.ts` 對齊並測試；近期 webview 直接跑既有前端（UI 不改）。原生服務接管時再補 `TauriChatBackend`。 |
+| B2 | IPC 契約 / `TauriChatBackend` | ✅ **定案：不做原生接管**（2026-11-20 更新）——ADR-0105 已退役原生背景連線與 SQLite 後端，桌面由 webview 直接跑共用前端，`TauriChatBackend` 不再需要。以下為原紀錄：**契約已定**：`ipc.rs` 的 serde DTO 與前端 `types.ts` 對齊並測試；近期 webview 直接跑既有前端（UI 不改）。原生服務接管時再補 `TauriChatBackend`。 |
 | B3 | Rust 背景長連線 | ✅ **核心+執行期完成**：`session::Session` 政策驅動器（訂閱集、離線佇列、退避、重連即重送訂閱，7 單元測試）＋ `net::run`（tokio + tokio-tungstenite，`net` feature）。以本機 WS 伺服器即時整合測試驗證「連上→送訂閱→收事件→外送」。視窗關閉仍在線（連線由背景 task 持有）。GUI 整合待 Tauri 環境（ADR-0019）。 |
 | B4 | 原生持久化 | ✅ **完成**：`storage::Store`（rusqlite）schema 對齊前端 `AppStorage`（身分/聯絡人/訊息/回應/收回/封鎖），`PRAGMA key` 支援 SQLCipher。`persistence`（bundled SQLite）9 測試；`sqlcipher`（bundled-sqlcipher + vendored OpenSSL）實際加密驗證，含「錯誤金鑰無法開啟」。GUI 接線待 Tauri 環境（ADR-0020）。 |
 | B5 | OS 金鑰儲存 | ✅ **完成（ADR-0053，Windows 實機驗證）**：`keyvault`（`keyring` crate）+ `key_set/get/delete` IPC；前端 KeyVault（Tauri→OS 金鑰庫、瀏覽器→localStorage 後備）+ 開機 async 載入 + 首次遷移。私鑰入 Credential Manager（`<pubkey>.app.cinder.desktop`）、明文不落 localStorage、重載自金鑰庫自動登入——皆實機確認。瀏覽器路徑零回歸（218 測試綠）。 |
@@ -71,7 +71,7 @@
 | C1 | 離線留言持久化 | ✅ **核心完成（ADR-0056）**：改用 **DO 內建 SQLite**（同步，免 D1 async 摩擦、免額外 binding）。`OfflineStore` 介面＋`SqlMessageStore`（NIP-40 過期/每收件人 cap/`#p` 索引/matchFilter，以 `node:sqlite` headless 測 6 項）＋`RelayRoom` DO 接線。⏳ 使用者 `wrangler deploy` 後驗離線收送。 |
 | C2 | NIP-40 排程 prune | ✅ **完成**：`RelayRoom` DO 每小時 `alarm()` → `store.prune()` 清過期留言並重排（DO 休眠仍被喚醒）；建構時若無 alarm 即排程。`prune` 邏輯已測（C1）；alarm 觸發為執行期，`wrangler deploy` 後生效。 |
 | C3 | NIP-42 AUTH | ✅ **完成（ADR-0057）**：`RelayCore.requireAuth`（連線挑戰、驗 kind 22242、發布/讀取閘門、`#p` 收件匣只准本人）＋ `RelayClient` 自動回應挑戰（`authSigner`）＋認證後重掛訂閱（`onAuthenticated`，解「訂閱早於認證」）＋後端接線＋**worker 啟用**。core/relay/desktop 共 14+ 測試（含 requireAuth 下兩端仍能對話）。⏳ 真線上驗（`wrangler deploy` 後）。 |
-| C4 | 部署與容量校準 | 🔧 **已部署上線**（`cinder-relay.…workers.dev`，含 C1–C3、ADR-0065 TTL 上限、ADR-0071 快照 kind；最近部署 2026-07-10）＋**WebSocket 休眠化降 duration**＋免費層量級模型（ADR-0059）。⏳ 待真實流量實測請求數校準、回填 `docs/adr/0006`。 |
+| C4 | 部署與容量校準 | ✅ **已部署上線**（2026-11-20 更新：兩座錨點 `cinder-relay.cinderous1／jt0856.workers.dev`；自 ADR-0370〔PR #9，2026-10-28〕起中繼程式住在 SDK、隨 SDK 升版部署。2026-10 的實際請求數與讀寫列數量測見 ADR-0388–0391、0409。以下為原紀錄：含 C1–C3、ADR-0065 TTL 上限、ADR-0071 快照 kind；當時最近部署 2026-07-10）＋**WebSocket 休眠化降 duration**＋免費層量級模型（ADR-0059）。⏳ 實測數字尚未回填 `docs/adr/0006` 的估算表。 |
 
 **完成定義**：公開可用的中繼站，離線留言真正持久化並自動過期。
 
@@ -83,7 +83,7 @@
 
 | # | 任務 | 說明 |
 | --- | --- | --- |
-| D1 | RN App 骨架 | 🔧 **起手完成（此環境）**：`apps/mobile`（react-native-web + 重用 `@cinderous/core`/`@cinderous/i18n`/`@cinderous/theme`/`@cinderous/engine`）；**app 殼與導覽（ADR-0085）**：登入→**聊天清單**（聯絡人＋群組合成、預設最近互動排序、LINE/Signal 風格列）→點擊開**對話**（氣泡＋輸入列），接 `ChatBackend`（示範後端）。另有 `ContactListScreen`（依上線狀態分區）＋**登入畫面**。**可在瀏覽器實跑的 web preview**：`pnpm --filter @cinderous/mobile dev`（Vite＋react-native-web，手機外框＋主題/語系/主色切換＋示範 nsec）。**接真實 relay（ADR-0086）**：`backend.ts` 以 `RelayChatBackend`＋`webSocketConnector`＋`LocalStorage`（nsecOverride 注入身分）連生產中繼站；清單「＋」加好友（npub）＋分享自己 npub；preview 可切「示範 ↔ 真實 relay」。**底部分頁（ADR-0087）**：聊天／聯絡人／設定（`BottomTabs`＋`SettingsScreen`）；對話為 push；主題/主色/語言在設定分頁即時切換＋登出；聯絡人分頁點擊開對話。**設計對齊（ADR-0080）**：色彩改吃 `@cinderous/theme` 的 `resolveTheme`，與桌面同一套主色/副色/深淺主題 SSOT。**登入（ADR-0081）**：`NsecSignInScreen`（nsec 匯入，A）＋`PairImportScreen`（配對匯入，B，沿用 D4a）——同帳號跨裝置；`auth.ts` 純邏輯＋真實配對協定整合測試綠。⏳ app 殼/導覽、RN 安全儲存（D2）、配對真實 WebRTC 傳輸（原生/EAS）、對話畫面。 |
+| D1 | RN App 骨架 | ✅ **已完成並出貨**（2026-11-20 更新：Android APK 自 v0.0.14 起隨版發行，最新 v0.0.24；以下為起手時的紀錄，末尾 ⏳ 已過期）：**起手完成（此環境）**：`apps/mobile`（react-native-web + 重用 `@cinderous/core`/`@cinderous/i18n`/`@cinderous/theme`/`@cinderous/engine`）；**app 殼與導覽（ADR-0085）**：登入→**聊天清單**（聯絡人＋群組合成、預設最近互動排序、LINE/Signal 風格列）→點擊開**對話**（氣泡＋輸入列），接 `ChatBackend`（示範後端）。另有 `ContactListScreen`（依上線狀態分區）＋**登入畫面**。**可在瀏覽器實跑的 web preview**：`pnpm --filter @cinderous/mobile dev`（Vite＋react-native-web，手機外框＋主題/語系/主色切換＋示範 nsec）。**接真實 relay（ADR-0086）**：`backend.ts` 以 `RelayChatBackend`＋`webSocketConnector`＋`LocalStorage`（nsecOverride 注入身分）連生產中繼站；清單「＋」加好友（npub）＋分享自己 npub；preview 可切「示範 ↔ 真實 relay」。**底部分頁（ADR-0087）**：聊天／聯絡人／設定（`BottomTabs`＋`SettingsScreen`）；對話為 push；主題/主色/語言在設定分頁即時切換＋登出；聯絡人分頁點擊開對話。**設計對齊（ADR-0080）**：色彩改吃 `@cinderous/theme` 的 `resolveTheme`，與桌面同一套主色/副色/深淺主題 SSOT。**登入（ADR-0081）**：`NsecSignInScreen`（nsec 匯入，A）＋`PairImportScreen`（配對匯入，B，沿用 D4a）——同帳號跨裝置；`auth.ts` 純邏輯＋真實配對協定整合測試綠。⏳ app 殼/導覽、RN 安全儲存（D2）、配對真實 WebRTC 傳輸（原生/EAS）、對話畫面。 |
 | D2 | 行動持久化 | RN SQLite + Keystore/Secure Enclave。 |
 | D3 | 無聲推播喚醒 | Worker 存 APNs/FCM 憑證，Silent Push 喚醒背景拉取（PRD §3）。 |
 | D4a | **桌面配對克隆** | ✅ **完成（ADR-0072）**：core 協定（HELLO/CHALLENGE/BUNDLE/DONE/REJECT＋SAS 四位短碼）、`roomKeyFrom` 拋棄式信令會合（kind 21003、AEAD 密封、NIP-42 以房間金鑰通過）、WebRTC 資料通道長度前綴分塊、捆包＝StorageSnapshot 全量、兩端 UI（舊機 QR/碼/倒數/SAS 確認；新機 SignIn 匯入）。載荷帶會合 relay。✅ **實機 E2E 驗證通過（2026-07-10）**：真實 Chromium×3 context＋真實 WebRTC＋生產 relay，連續三次全綠（SAS 一致、捆包直傳、新舊機狀態收斂一致）。過程抓到並修掉三個真實缺陷（NIP-42 認證競態致信令遺失、ephemeral offer 無重放致間歇失敗、設定面板蓋住 SAS 確認鈕）。 |
