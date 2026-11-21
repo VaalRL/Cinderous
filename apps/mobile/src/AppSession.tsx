@@ -47,7 +47,16 @@ import {
   webRtcPairTransport,
   webSocketConnector,
 } from "@cinderous/engine";
-import { notifier, onNotifyClick } from "./native/notify.js";
+import {
+  effectiveNotify,
+  initialNotifyWanted,
+  nativeNotifySupported,
+  notifier,
+  notifyPermission,
+  type NotifyPermission,
+  onNotifyClick,
+  shouldAskNotifyOnStart,
+} from "./native/notify.js";
 import type { BlockedContact, CalendarEventInput, ContactRequest, RsvpStatus, StoredCalendarEvent } from "@cinderous/engine";
 import type { CallMedia, CallState, VideoQuality } from "@cinderous/core";
 import { makeThumbnail, pickFile, pickFileBytes, saveFile, saveStreamedFile, takePhoto } from "./native/files.js";
@@ -266,16 +275,20 @@ export function AppSession({
   // 寫入一律經 hook（守衛會檢查簇內 setter 不得殘留在本檔）。
   const { contacts, groups, blocked, requests } = roster;
   const { convos, unread, archived, reactions, unsent, purged, activeId, typingFrom } = threads;
-  /** 通知（ADR-0116）：預設關（需使用者明確授權）。 */
+  /** 通知（ADR-0116／0426）：使用者「想不想要」。Android 殼沒選過＝要；瀏覽器預覽沒選過＝不要。 */
   // 背景保活開關（ADR-0272/0274）：Android 預設開；非原生殼恆 false（設定不顯示）。
   const [fgOn, setFgOn] = useState(foregroundEnabled);
   const [notify, setNotifyState] = useState(() => {
     try {
-      return localStorage.getItem(NOTIFY_KEY) === "1";
+      return initialNotifyWanted(localStorage.getItem(NOTIFY_KEY), nativeNotifySupported());
     } catch {
       return false;
     }
   });
+  /** 系統目前允不允許（ADR-0426）：回到前景時重查，讓開關跟系統設定同步。 */
+  const [notifyPerm, setNotifyPerm] = useState<NotifyPermission>("unknown");
+  /** 開關實際顯示、以及要不要真的送通知：想要＋系統沒關掉。 */
+  const notifyOn = effectiveNotify(notify, notifyPerm);
   /** 隱藏預覽（ADR-0076）：通知只說「有新訊息」，不把明文推到鎖定畫面。 */
   const [notifyHide, setNotifyHideState] = useState(() => {
     try {
@@ -319,8 +332,8 @@ export function AppSession({
   activeIdRef.current = activeId;
   // 通知內容需最新的聯絡人/群組/語言與子設定；onMessage 的閉包依 [backend]，故以 ref 取現值
   //（與桌面同一個坑，ADR-0076）。
-  const notifyRef = useRef(notify);
-  notifyRef.current = notify;
+  const notifyRef = useRef(notifyOn);
+  notifyRef.current = notifyOn;
   const notifyHideRef = useRef(notifyHide);
   notifyHideRef.current = notifyHide;
   const requestsRef = useRef(requests);
@@ -527,6 +540,9 @@ export function AppSession({
     if (foregroundEnabled()) {
       void startForeground(translate(localeRef.current, "fg_title"), translate(localeRef.current, "fg_text"));
     }
+    // ADR-0426：Android 殼第一次登入就問一次通知權限（本機通知、不經第三方）。
+    // 拒絕就記成「不要」，之後不再每次開機都問；使用者隨時可到設定打開。
+    void askNotifyOnStart();
     // ADR-0331：企業這一簇一次播種——歸零＋換成**這個身分**的公司精華／頭銜／託管清單。
     org.reset({
       org: orgSeed,
@@ -1303,8 +1319,10 @@ export function AppSession({
   const setNotify = async (v: boolean): Promise<void> => {
     if (v && !(await notifier.ensurePermission())) {
       setNotifyBlocked(true); // 拒絕授權 → 維持關閉，並說明去哪裡打開（ADR-0410）
+      setNotifyPerm("denied");
       return;
     }
+    if (v) setNotifyPerm("granted");
     setNotifyBlocked(false);
     setNotifyState(v);
     try {
@@ -1313,6 +1331,40 @@ export function AppSession({
       /* 忽略 */
     }
   };
+  async function askNotifyOnStart(): Promise<void> {
+    let stored: string | null = null;
+    try {
+      stored = localStorage.getItem(NOTIFY_KEY);
+    } catch {
+      return;
+    }
+    if (!shouldAskNotifyOnStart(stored, nativeNotifySupported())) return;
+    const granted = await notifier.ensurePermission();
+    setNotifyPerm(granted ? "granted" : "denied");
+    setNotifyState(granted);
+    try {
+      localStorage.setItem(NOTIFY_KEY, granted ? "1" : "0");
+    } catch {
+      /* 忽略 */
+    }
+  }
+  // ADR-0426：系統設定把通知關掉（或打開）後回到 App，開關要跟著變，不能還顯示「開」卻收不到。
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    let alive = true;
+    const sync = (): void => {
+      if (document.hidden) return;
+      void notifyPermission().then((p) => {
+        if (alive && p !== "unknown") setNotifyPerm(p);
+      });
+    };
+    sync();
+    document.addEventListener("visibilitychange", sync);
+    return () => {
+      alive = false;
+      document.removeEventListener("visibilitychange", sync);
+    };
+  }, []);
   const setNotifyHide = (v: boolean): void => {
     setNotifyHideState(v);
     try {
@@ -1974,9 +2026,10 @@ export function AppSession({
                     }
                   : {}),
                 onPairExport: () => setScreen("pairExport"),
-                notify,
+                notify: notifyOn,
                 onNotify: (v: boolean) => void setNotify(v),
-                notifyBlocked,
+                // 系統把通知關了（不是使用者在 App 裡關的）也要說明去哪裡打開（ADR-0426）
+                notifyBlocked: notifyBlocked || (notify && notifyPerm === "denied"),
                 notifyHidePreview: notifyHide,
                 onNotifyHidePreview: setNotifyHide,
                 // 背景保持連線（ADR-0272/0274）：僅原生殼提供 → 瀏覽器預覽不顯示此開關。

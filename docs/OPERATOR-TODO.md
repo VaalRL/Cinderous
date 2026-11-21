@@ -47,6 +47,8 @@ A4 更是後來被 ADR-0239 拔掉的反模式。現況：
 | 第三方安全稽核 | 外部稽核員 | F4（`docs/SECURITY.md` 已備前置） | 前置威脅模型/加密盤點已備 |
 | **前向保密（FS）外部審計＋上線** | 外部密碼學審計員 | ADR-0245（Phase 3） | **引擎已實作（Phase 0–2、全測綠、opt-in）**。輪替加密子鑰、retarget Gift Wrap、10040 PKI、多裝置 EK 同步、grace 刪除、降級偵測皆完成。🔵 **2026-08-05 校正（本列原本已過期）**：`fsUiEnabled` 隱藏閘門**已於 ADR-0306 移除**（2026-07-31）——該 ADR **明文推翻** ADR-0245「審計通過前不得產線啟用」，改為**實驗性選項、預設關、啟用時明示未經審計**。本列原本寫的「UI 預設對使用者隱藏（設 `localStorage nb.fs=1` 才顯示）」在程式碼裡已經不存在。⚠ **維持不變的硬閘只剩文案**：不進功能表／比較表／行銷文案（ADR-0306 D2.2）。⇒ 外部審計仍是待辦，但它**不再是上線閘門**，而是 `fs-review-deadline.test.ts` 釘住的複查項（2027-01-30 到期弄紅 CI） |
 | 企業 SSO / 元資料稽核 | 外部 IdP（AD/LDAP/OIDC）、自架 relay 記錄連線元資料 | G5 | 設計已定（ADR-0411，分 G5a 稽核／G5b 入職 SSO／G5c 本機解鎖閘）；缺企業試點與 IdP 環境，未動工 |
+| 🔴 **錨點額度警示的 secrets** | 兩個 Cloudflare 帳號各建一把 API token（權限只要 **Account → Account Analytics → Read**），在 GitHub repo 設 `CF_QUOTA_1_ACCOUNT`／`CF_QUOTA_1_TOKEN`（錨點 1）與 `CF_QUOTA_2_ACCOUNT`／`CF_QUOTA_2_TOKEN`（錨點 2） | ADR-0427 | 程式與 workflow（`quota-watch.yml`）已完成，並以測試帳號驗過真的 GraphQL 查詢。**secrets 設好之前這個 workflow 每次都會失敗**（刻意的：沒設＝沒在監控）。設好後到 Actions 手動跑一次，確認摘要頁兩座都有數字 |
+| **Android 通知預設開＋跟系統同步實機驗收** | 一台 Android 13 以上的手機、新版 APK | ADR-0426 | 程式與單元測試已完成；原生 `checkPermission` 要實機驗：①清資料後第一次登入跳權限對話框，允許後開關是開的 ②系統設定關掉通知→回 App 開關變關並出現說明 ③系統設定再打開→回 App 自動變開、背景收訊有通知 ④第一次登入拒絕→開關關、重開不再問 |
 
 ### §B-Call：通話視訊功能實機驗收（ADR-0337／0338／0339／0340）
 
