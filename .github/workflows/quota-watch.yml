@@ -1,0 +1,63 @@
+name: 錨點額度警示（ADR-0427）
+
+# 每 3 小時查兩座錨點的 Cloudflare 免費方案當日用量（00:00 UTC 重算），
+# 任一項到 70% 就開一張 issue（同一天只開一張，之後的檢查補留言）。
+#
+# 起因：2026-10-22 錨點 1 的 DO 讀取列數在 00–05 UTC 就用完，之後整天停擺，直到有人發現。
+#
+# 需要的 secrets（每座錨點一組，token 只要 **Account Analytics: Read**）：
+#   CF_QUOTA_1_ACCOUNT／CF_QUOTA_1_TOKEN   錨點 1
+#   CF_QUOTA_2_ACCOUNT／CF_QUOTA_2_TOKEN   錨點 2
+# 查詢失敗（token 過期、帳號錯）＝ job 變紅、GitHub 寄信——查不到不能當成沒事。
+#
+# 排程錯開整點（:41），理由同 relay-health.yml（ADR-0350）。
+on:
+  schedule:
+    - cron: "41 */3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: quota-watch
+  cancel-in-progress: true
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # 版本由 package.json 的 `packageManager` 決定（見 ci.yml）。
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          check-latest: true
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: 查當日用量
+        id: quota
+        env:
+          CF_QUOTA_1_ACCOUNT: ${{ secrets.CF_QUOTA_1_ACCOUNT }}
+          CF_QUOTA_1_TOKEN: ${{ secrets.CF_QUOTA_1_TOKEN }}
+          CF_QUOTA_2_ACCOUNT: ${{ secrets.CF_QUOTA_2_ACCOUNT }}
+          CF_QUOTA_2_TOKEN: ${{ secrets.CF_QUOTA_2_TOKEN }}
+        run: pnpm --filter @cinderous/relay quota:run --out "$RUNNER_TEMP/quota.md"
+
+      - name: 開或更新 issue
+        if: steps.quota.outputs.alert == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          title="中繼額度警示 $(date -u +%F)"
+          n=$(gh issue list --state open --search "\"$title\" in:title" --json number,title \
+                --jq "map(select(.title == \"$title\")) | .[0].number // empty")
+          if [ -n "$n" ]; then
+            gh issue comment "$n" --body-file "$RUNNER_TEMP/quota.md"
+          else
+            gh issue create --title "$title" --body-file "$RUNNER_TEMP/quota.md"
+          fi

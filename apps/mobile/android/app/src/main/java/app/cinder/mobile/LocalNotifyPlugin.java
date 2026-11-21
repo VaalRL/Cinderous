@@ -70,6 +70,12 @@ public class LocalNotifyPlugin extends Plugin {
         requestPermissionForAlias(PERM, call, "permissionResult");
     }
 
+    /** 只查、不跳對話框（ADR-0426）：App 回到前景時讓開關跟系統設定同步。 */
+    @PluginMethod
+    public void checkPermission(PluginCall call) {
+        resolveGranted(call);
+    }
+
     @PermissionCallback
     private void permissionResult(PluginCall call) {
         resolveGranted(call);

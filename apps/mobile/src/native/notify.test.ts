@@ -2,7 +2,15 @@
 // 必須改走原生 LocalNotify 外掛；其他環境（瀏覽器預覽）照舊用 Web Notification。
 // 真正跳出系統通知、點擊回到 App 只能實機驗收——這裡鎖的是選路與「不假裝授權成功」。
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { nativeNotifySupported, notifier, onNotifyClick } from "./notify.js";
+import {
+  effectiveNotify,
+  initialNotifyWanted,
+  nativeNotifySupported,
+  notifier,
+  notifyPermission,
+  onNotifyClick,
+  shouldAskNotifyOnStart,
+} from "./notify.js";
 
 type Listener = (d: { convo?: string }) => void;
 type CapShape = { isNativePlatform?: () => boolean; Plugins?: Record<string, unknown> };
@@ -14,6 +22,7 @@ function fakePlugin(granted = true) {
   const listeners: Listener[] = [];
   const plugin = {
     requestPermission: vi.fn(async () => ({ granted })),
+    checkPermission: vi.fn(async () => ({ granted })),
     notify: vi.fn(async (_o: { title: string; body: string; convo?: string }) => {}),
     addListener: vi.fn((_ev: string, cb: Listener) => {
       listeners.push(cb);
@@ -126,5 +135,58 @@ describe("onNotifyClick", () => {
     const off = onNotifyClick(() => {});
     expect(typeof off).toBe("function");
     off();
+  });
+});
+
+describe("通知預設開＋跟系統同步（ADR-0426）", () => {
+  it("🔴 Android 殼沒設定過＝預設要通知；瀏覽器預覽沒設定過＝不要（權限得在手勢裡要）", () => {
+    expect(initialNotifyWanted(null, true)).toBe(true);
+    expect(initialNotifyWanted(null, false)).toBe(false);
+  });
+  it("使用者明確選過就照他的選擇", () => {
+    expect(initialNotifyWanted("1", false)).toBe(true);
+    expect(initialNotifyWanted("0", true)).toBe(false);
+  });
+  it("只有 Android 殼、而且從沒選過，開機才主動問一次權限", () => {
+    expect(shouldAskNotifyOnStart(null, true)).toBe(true);
+    expect(shouldAskNotifyOnStart(null, false)).toBe(false);
+    expect(shouldAskNotifyOnStart("0", true)).toBe(false);
+    expect(shouldAskNotifyOnStart("1", true)).toBe(false);
+  });
+
+  it("🔴 原生殼：只查權限、不跳系統對話框", async () => {
+    const f = fakePlugin(false);
+    setCap({ isNativePlatform: () => true, Plugins: { LocalNotify: f.plugin } });
+    expect(await notifyPermission()).toBe("denied");
+    expect(f.plugin.requestPermission).not.toHaveBeenCalled();
+    f.plugin.checkPermission.mockResolvedValueOnce({ granted: true });
+    expect(await notifyPermission()).toBe("granted");
+  });
+  it("原生殼：舊版外掛沒有 checkPermission 或丟例外＝不知道（不改顯示）", async () => {
+    const f = fakePlugin();
+    const { checkPermission: _drop, ...old } = f.plugin;
+    setCap({ isNativePlatform: () => true, Plugins: { LocalNotify: old } });
+    expect(await notifyPermission()).toBe("unknown");
+    f.plugin.checkPermission.mockRejectedValueOnce(new Error("x"));
+    setCap({ isNativePlatform: () => true, Plugins: { LocalNotify: f.plugin } });
+    expect(await notifyPermission()).toBe("unknown");
+  });
+  it("瀏覽器：照 Notification.permission；沒有這個 API＝不知道", async () => {
+    expect(await notifyPermission()).toBe("unknown");
+    const g = globalThis as { Notification?: unknown };
+    g.Notification = { permission: "denied" };
+    expect(await notifyPermission()).toBe("denied");
+    g.Notification = { permission: "granted" };
+    expect(await notifyPermission()).toBe("granted");
+    g.Notification = { permission: "default" };
+    expect(await notifyPermission()).toBe("unknown");
+    delete g.Notification;
+  });
+
+  it("🔴 系統關掉通知時開關顯示關；系統再打開就自動回來（偏好本身不動）", () => {
+    expect(effectiveNotify(true, "denied")).toBe(false);
+    expect(effectiveNotify(true, "granted")).toBe(true);
+    expect(effectiveNotify(true, "unknown")).toBe(true);
+    expect(effectiveNotify(false, "granted")).toBe(false);
   });
 });
